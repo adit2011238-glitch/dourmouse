@@ -133,6 +133,13 @@ class ChatSession:
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("ask() requires a non-empty prompt")
+        # Wall-time budget is per request-tree, not per session: restart the
+        # clock at the start of every turn. Without this, a session that has
+        # been alive longer than max_wall_seconds (600s default) would reject
+        # EVERY new directive instantly with BUDGET EXHAUSTED — the web UI's
+        # single long-lived ChatSession hits this after ten minutes of uptime.
+        # Calls and cost remain session-scoped and cumulative.
+        self.cost_budget.reset_wall_clock()
         self.messages.append({"role": "user", "content": prompt})
         # v2.9 Store & Learn: before each turn, deterministically recall the
         # stored knowledge most relevant to THIS prompt and inject it into the

@@ -8,6 +8,7 @@ logic without a real API key or network (Integration Rule 7.3).
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -165,6 +166,22 @@ class TestMultiTurnMemory:
         assert "new_tool" in resumed.messages[0]["content"]
         assert "ROSTER" in resumed.messages[0]["content"]
         assert system_message(_registry()) != resumed.messages[0]["content"]
+
+    def test_long_lived_session_turn_not_budget_exhausted(self, tmp_path):
+        """A session alive past max_wall_seconds must still answer.
+
+        The web UI reuses ONE ChatSession for the whole life of the server, so
+        its BudgetTracker is born at startup. The 600s wall cap must apply per
+        request tree, not per session — otherwise every directive after ten
+        minutes of uptime dies instantly with BUDGET EXHAUSTED.
+        """
+        client = FakeClient([_FakeResponse(_FakeMessage(content="Latest headlines."))])
+        session = ChatSession(_registry(), client=client, session_file=tmp_path / "s6.jsonl")
+        session.cost_budget._started = time.monotonic() - 700.0  # 100s past the cap
+        assert "BUDGET EXHAUSTED" in session.cost_budget.check()
+        report = session.ask("send an agent to fetch the latest news")
+        assert report["final_text"] == "Latest headlines."
+        assert not any(t["type"] == "budget_exhausted" for t in report["transcript"])
 
 
 class TestFailurePaths:

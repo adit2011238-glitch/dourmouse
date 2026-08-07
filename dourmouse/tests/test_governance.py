@@ -19,6 +19,7 @@ test_dispatch.py): the fake shapes the LLM side; the governance layer is real.
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -153,6 +154,32 @@ class TestBudgetTracker:
         for t in threads:
             t.join()
         assert b.snapshot()["calls"] == 80
+
+    def test_reset_wall_clock_frees_long_lived_tracker(self):
+        """A tracker born at server startup must not brick new requests.
+
+        The web UI keeps ONE ChatSession (hence one tracker) for the whole
+        life of the server; without reset_wall_clock the 600s default cap
+        rejects every request once uptime passes it.
+        """
+        b = BudgetTracker(BudgetLimits(max_wall_seconds=1.0))
+        b._started = time.monotonic() - 700.0  # simulate 700s of server uptime
+        assert "BUDGET EXHAUSTED" in b.check()
+        b.reset_wall_clock()
+        assert b.check() is None
+
+    def test_reset_wall_clock_keeps_calls_and_cost(self):
+        """Only the wall window resets; calls/cost stay session-scoped."""
+        b = BudgetTracker()
+        b.record_call([{"role": "user", "content": "x" * 200}], "y" * 200)
+        b._started = time.monotonic() - 5.0  # age the window so elapsed is measurable
+        before = b.snapshot()
+        assert before["elapsed_seconds"] >= 5.0
+        b.reset_wall_clock()
+        after = b.snapshot()
+        assert after["calls"] == before["calls"] == 1
+        assert after["est_cost_usd"] == before["est_cost_usd"]
+        assert after["elapsed_seconds"] < 1.0
 
 
 # --------------------------------------------------------------------------- #

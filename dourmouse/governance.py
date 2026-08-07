@@ -74,6 +74,19 @@ class BudgetTracker:
             self._in_tokens += _estimate_tokens(request_messages)
             self._out_tokens += max(0, len(response_text) // 4)
 
+    def reset_wall_clock(self) -> None:
+        """Restart ONLY the wall-time window (per-request-tree semantics).
+
+        Calls and estimated cost stay cumulative across the session; the
+        wall-clock window resets so a long-lived session can never reject
+        every new request once ``max_wall_seconds`` of total uptime passes.
+        The web UI keeps ONE ChatSession (and thus one tracker) for the whole
+        life of the server, so without this the 600s default cap bricks the
+        entire interface after ten minutes of uptime.
+        """
+        with self._lock:
+            self._started = time.monotonic()
+
     def check(self) -> str | None:
         """None if within budget, else an honest plain-text reason."""
         with self._lock:

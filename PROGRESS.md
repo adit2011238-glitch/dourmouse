@@ -160,6 +160,20 @@ User request: the master spec — a private, local-first AI operating system.
   captured. Two follow-up items left for a later pass (voice/semantic
   backends already work; broker + Obsidian phases remain deliberately
   gated).
+- BUGFIX — "send an agent to fetch news" failed: the web UI reuses ONE
+  ChatSession (and one BudgetTracker) for the whole life of the server, and
+  the wall-time cap counts from TRACKER CREATION — so after 600s of server
+  uptime EVERY request died instantly with "BUDGET EXHAUSTED: NNNs elapsed"
+  (reproduced live: fresh directive killed at the budget gate before the
+  news agent ever ran, while the feed itself was healthy). Fix: wall-time is
+  per request-tree by design, so BudgetTracker.reset_wall_clock() restarts
+  only the clock at the start of each ChatSession.ask() turn; calls and cost
+  remain session-scoped and cumulative (their documented purpose).
+  Regressions: test_reset_wall_clock_frees_long_lived_tracker,
+  test_reset_wall_clock_keeps_calls_and_cost,
+  test_long_lived_session_turn_not_budget_exhausted. Suite 786. Live
+  re-verified: the same directive now plans -> news agent -> tool_use ->
+  LIVE NEWS HEADLINES with real headlines.
 
 ---
 
