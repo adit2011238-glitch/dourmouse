@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // CENTRAL AGENT DISPATCH</title>
+<style>
+  :root {
+    --bg: #060A12;
+    --cyan: #00F0FF;
+    --cyan-dim: #0a7f8c;
+    --amber: #FFAB00;
+    --crimson: #FF1744;
+    --teal: #2ce6b8;
+    --text: #cfe3f5;
+    --text-dim: #6f8aa6;
+    --line: rgba(255,255,255,0.08);
+    --line-strong: rgba(0,240,255,0.35);
+    --panel: rgba(13,22,36,0.62);
+    --mono: "JetBrains Mono", "Space Grotesk", "Share Tech Mono", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1100px 520px at 70% -12%, rgba(0,120,180,0.20), transparent 60%),
+      radial-gradient(800px 500px at -8% 112%, rgba(0,80,140,0.14), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    overflow: hidden;
+  }
+  .scanlines {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 3px);
+    mix-blend-mode: overlay;
+  }
+  /* v4.0: ambient particle field behind the whole dashboard (Canvas2D, local) */
+  #particles {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    opacity: 0.55;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
+
+  /* ---------------- Top telemetry header ---------------- */
+  #telemetry {
+    display: flex; align-items: center; justify-content: space-between; gap: 18px;
+    padding: 12px 22px; border-bottom: 1px solid var(--line);
+    background: rgba(8,14,26,0.7); backdrop-filter: blur(8px);
+  }
+  .brand-block .title {
+    font-size: 15px; font-weight: 700; letter-spacing: 0.22em; color: var(--cyan);
+    text-shadow: 0 0 14px rgba(0,240,255,0.45);
+  }
+  .heartbeat {
+    margin-top: 5px; font-size: 10px; letter-spacing: 0.18em; color: var(--teal);
+    background: rgba(44,230,184,0.07); border: 1px solid rgba(44,230,184,0.22);
+    display: inline-block; padding: 3px 10px; border-radius: 4px;
+  }
+  .heartbeat .fl { color: var(--cyan); }
+  .clock-block { text-align: right; }
+  .clock {
+    font-size: 21px; font-weight: 700; letter-spacing: 0.14em; color: var(--cyan);
+    text-shadow: 0 0 12px rgba(0,240,255,0.5); line-height: 1.05;
+  }
+  .memload {
+    margin-top: 4px; font-size: 10px; letter-spacing: 0.16em; color: var(--text-dim);
+  }
+  .sessline { margin-top: 2px; font-size: 9px; letter-spacing: 0.14em; color: var(--text-dim); opacity: 0.75; }
+  .memline { margin-top: 2px; font-size: 9px; letter-spacing: 0.14em; color: var(--teal); opacity: 0.9; }
+  .memline.off { color: var(--text-dim); opacity: 0.6; }
+  .clock-block { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  #sessionpick {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+    padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line);
+    background: rgba(8,16,28,0.85); color: var(--text-dim); max-width: 220px;
+    cursor: pointer;
+  }
+  #sessionpick:hover { border-color: var(--line-strong); color: var(--cyan); }
+  #mapbtn {
+    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+    padding: 8px 13px; border-radius: 7px; border: 1px solid var(--line-strong);
+    background: linear-gradient(135deg, rgba(0,240,255,0.18), rgba(10,80,120,0.24)); color: var(--cyan);
+    cursor: pointer; transition: box-shadow 0.15s, transform 0.12s; white-space: nowrap;
+  }
+  #mapbtn:hover { box-shadow: 0 0 16px rgba(0,240,255,0.4); transform: translateY(-1px); }
+
+  /* ---------------- 3-column grid ---------------- */
+  #cols { flex: 1; display: grid; grid-template-columns: 268px 1fr 300px; min-height: 0; }
+  .col-title {
+    font-size: 9.5px; letter-spacing: 0.28em; color: var(--text-dim); text-transform: uppercase;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: rgba(10,18,32,0.5);
+    display: flex; align-items: center; gap: 8px;
+  }
+  /* v4.0: corner-bracket HUD chrome on every panel */
+  .panel-bracket { position: relative; }
+  .panel-bracket::before, .panel-bracket::after {
+    content: ""; position: absolute; width: 14px; height: 14px; pointer-events: none;
+    opacity: .55; border-color: var(--cyan); border-style: solid;
+  }
+  .panel-bracket::before { top: -2px; left: -2px; border-width: 1px 0 0 1px; }
+  .panel-bracket::after { bottom: -2px; right: -2px; border-width: 0 1px 1px 0; }
+  .col-title::before { content: "◈"; color: var(--cyan); font-size: 8px; }
+
+  /* ---------------- Left: agent cluster ---------------- */
+  #left { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: rgba(8,14,26,0.4); }
+  #nodes { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .node {
+    border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px;
+    background: var(--panel); backdrop-filter: blur(6px);
+    display: flex; gap: 10px; align-items: flex-start;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  .node:hover { border-color: rgba(0,240,255,0.3); transform: translateX(2px); }
+  .spinner { width: 30px; height: 30px; flex: none; margin-top: 1px; }
+  .spinner circle:last-child {
+    transform-origin: center; transform-box: fill-box;
+    animation: spin 2.4s linear infinite;
+  }
+  .node.computing .spinner circle:last-child { animation-duration: 0.55s; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ninfo { flex: 1; min-width: 0; }
+  .nname { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; color: var(--cyan); }
+  .ndesc { font-size: 9px; color: var(--text-dim); margin: 3px 0 6px; line-height: 1.4; overflow: hidden; }
+  .nmodel { font-size: 8.5px; color: var(--teal); letter-spacing: 0.12em; margin-bottom: 5px; }
+  .nperf { font-size: 9px; letter-spacing: 0.1em; color: var(--text-dim); }
+  .nperf .rate { color: var(--teal); }
+  .nchips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px; }
+  .nchip {
+    font-size: 8.5px; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 3px;
+    background: rgba(0,240,255,0.07); border: 1px solid rgba(0,240,255,0.22); color: var(--cyan);
+  }
+  .nchip.gated { background: rgba(255,171,0,0.08); border-color: rgba(255,171,0,0.35); color: var(--amber); }
+  .nchip.prohib { background: rgba(255,23,68,0.08); border-color: rgba(255,23,68,0.35); color: var(--crimson); }
+  .npill {
+    flex: none; font-size: 9px; letter-spacing: 0.14em; padding: 3px 7px; border-radius: 4px;
+    border: 1px solid; color: var(--teal); border-color: rgba(44,230,184,0.5);
+    background: rgba(44,230,184,0.10); text-shadow: 0 0 8px rgba(44,230,184,0.6);
+  }
+  .npill.computing {
+    color: var(--cyan); border-color: rgba(0,240,255,0.55); background: rgba(0,240,255,0.10);
+    animation: pulse 0.9s ease-in-out infinite;
+  }
+  .npill.auth {
+    color: var(--amber); border-color: rgba(255,171,0,0.6); background: rgba(255,171,0,0.10);
+    animation: blink 0.8s step-start infinite;
+  }
+  .npill.live {
+    color: var(--teal); border-color: rgba(44,230,184,0.6); background: rgba(44,230,184,0.14);
+    animation: pulse 2.2s ease-in-out infinite;
+  }
+  .node.live { border-color: rgba(44,230,184,0.35); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+  @keyframes blink { 50% { opacity: 0.3; } }
+
+  /* ---------------- Center: core arc + feed ---------------- */
+  #center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .core-wrap {
+    position: relative; display: grid; place-items: center;
+    padding: 14px 0 8px; border-bottom: 1px solid var(--line);
+    background: radial-gradient(420px 220px at 50% 0%, rgba(0,120,190,0.10), transparent 70%);
+  }
+  #core { width: 150px; height: 150px; display: block; }
+  #core .arc {
+    fill: none; stroke-width: 1.6; stroke: rgba(0,240,255,0.28);
+    transform-origin: 75px 75px; transform-box: fill-box;
+  }
+  #core .arc.a1 { animation: spin 26s linear infinite; }
+  #core .arc.a2 { stroke-dasharray: 60 70; animation: spin 18s linear infinite reverse; }
+  #core .arc.a3 { stroke-dasharray: 26 34 8 22; animation: spin 12s linear infinite; }
+  #core .arc.a4 { stroke-dasharray: 4 14; animation: spin 9s linear infinite reverse; }
+  #core .arc.a5 { stroke-dasharray: 40 20 4 20; animation: spin 22s linear infinite; }
+  #core.computing .arc.a1 { animation-duration: 5s; }
+  #core.computing .arc.a2 { animation-duration: 3.4s; }
+  #core.computing .arc.a3 { animation-duration: 2.2s; }
+  #core.computing .arc.a4 { animation-duration: 1.4s; }
+  #core.computing .arc.a5 { animation-duration: 3.8s; }
+  #core .hub {
+    fill: #08121f; stroke: var(--cyan); stroke-width: 1.4;
+    filter: drop-shadow(0 0 6px rgba(0,240,255,0.7));
+  }
+  .core-status {
+    position: absolute; bottom: 12px; font-size: 9px; letter-spacing: 0.3em; color: var(--text-dim);
+  }
+  .core-status.computing { color: var(--cyan); text-shadow: 0 0 10px rgba(0,240,255,0.7); animation: pulse 0.8s infinite; }
+  /* v4.0: radar sweep + sector labels + scanning progress on the core */
+  #core .sweep { stroke: var(--cyan); stroke-width: 1.1; opacity: .85; }
+  #core .sweepdot { fill: var(--cyan); filter: drop-shadow(0 0 4px var(--cyan)); }
+  #core .sector { fill: var(--text-dim); font-size: 5.5px; letter-spacing: .14em; text-anchor: middle; }
+  #core.computing .sweep { animation: sweep 1.6s linear infinite; transform-origin: 75px 75px; }
+  #core.computing .sweepdot { animation: sweep 1.6s linear infinite; transform-origin: 75px 75px; }
+  #core.planning .sweep { animation: sweep 2.4s linear infinite; transform-origin: 75px 75px; }
+  #core.planning .sweepdot { animation: sweep 2.4s linear infinite; transform-origin: 75px 75px; }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  .core-scan {
+    margin-top: 3px; font-size: 9px; letter-spacing: 0.2em; color: var(--text-dim);
+    transition: color .4s;
+  }
+  .core-scan.busy { color: var(--teal); text-shadow: 0 0 8px rgba(44,230,184,0.5); }
+
+  #feed { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 7px; scroll-behavior: smooth; }
+  .fline {
+    font-size: 11px; line-height: 1.55; letter-spacing: 0.03em;
+    color: var(--text-dim); white-space: pre-wrap; word-break: break-word;
+    animation: rise 0.2s ease;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none;} }
+  .fline .ts { color: #48627e; }
+  .fline .tag { color: var(--cyan); font-weight: 700; }
+  .fline .tag.result { color: var(--teal); }
+  .fline .tag.auth { color: var(--amber); }
+  .fline .tag.err { color: var(--crimson); }
+  .fline .tag.plan { color: #b48cff; }
+  .fline .planstep { color: #d5b8ff; }
+  .fline .plansub { color: var(--text-dim); }
+  .fbrow { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; }
+  .fblabel { font-size: 9px; letter-spacing: 0.16em; color: var(--text-dim); }
+  .fb {
+    font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+    padding: 4px 10px; border-radius: 5px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: rgba(0,240,255,0.08); color: var(--cyan);
+    transition: box-shadow 0.15s, transform 0.12s, opacity 0.15s;
+  }
+  .fb:hover:not(:disabled) { box-shadow: 0 0 12px rgba(0,240,255,0.4); transform: translateY(-1px); }
+  .fb:disabled { opacity: 0.4; cursor: default; }
+  .fb.bad { border-color: rgba(255,171,0,0.5); background: rgba(255,171,0,0.08); color: var(--amber); }
+  .fb.bad:hover:not(:disabled) { box-shadow: 0 0 12px rgba(255,171,0,0.35); }
+  .fline.user { color: var(--cyan); }
+  .fline .directive { color: var(--text); }
+  .fline .msg { color: var(--text); }
+  .fline a { color: var(--cyan); }
+  .fline ul, .fline ol { padding-left: 18px; margin: 3px 0; }
+  .fline strong { color: var(--cyan); }
+  .fline code { background: rgba(0,0,0,0.35); padding: 1px 5px; border-radius: 3px; color: var(--teal); }
+  .fline pre { background: rgba(0,0,0,0.4); border: 1px solid var(--line); padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 4px 0; color: var(--teal); font-size: 10.5px; }
+
+  /* tool activity card in feed */
+  .tcard { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: rgba(8,16,28,0.7); animation: rise 0.2s ease; }
+  .tcard .thead {
+    display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer;
+    font-size: 11px; color: var(--cyan); background: rgba(0,240,255,0.05); user-select: none;
+    transition: background 0.15s;
+  }
+  .tcard .thead:hover { background: rgba(0,240,255,0.10); }
+  .tcard .arrow { margin-left: auto; color: var(--text-dim); font-size: 9px; transition: transform 0.18s; }
+  .tcard.open .arrow { transform: rotate(90deg); }
+  .tcard .tbody {
+    display: none; padding: 8px 12px; border-top: 1px solid var(--line);
+    font-size: 10.5px; white-space: pre-wrap; word-break: break-word;
+    color: var(--text-dim); max-height: 220px; overflow-y: auto; line-height: 1.5;
+  }
+  .tcard.open .tbody { display: block; }
+  .tcard .tbody b { color: var(--amber); font-weight: 700; }
+  .tcard .sandbox-badge {
+    font-size: 8.5px; letter-spacing: 0.12em; padding: 2px 6px; border-radius: 3px;
+    color: var(--teal); border: 1px solid rgba(44,230,184,0.5); background: rgba(44,230,184,0.10);
+  }
+  .tcard .sandbox-badge.unsandboxed {
+    color: var(--amber); border-color: rgba(255,171,0,0.5); background: rgba(255,171,0,0.10);
+  }
+
+  /* quick directives */
+  #quick { padding: 8px 16px 6px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px; background: rgba(8,14,26,0.4); }
+  .qchip {
+    font-size: 9.5px; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 5px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text-dim); cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .qchip:hover { border-color: var(--line-strong); color: var(--cyan); }
+
+  /* ---------------- Right: metrics + interventions ---------------- */
+  #right { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: rgba(8,14,26,0.4); }
+  #metrics { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--line); }
+  .metric .mlabel { font-size: 9px; letter-spacing: 0.2em; color: var(--text-dim); margin-bottom: 5px; display: flex; justify-content: space-between; }
+  .metric .mlabel .mval { color: var(--cyan); }
+  .mbar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.07); overflow: hidden; }
+  .mbar i {
+    display: block; height: 100%; width: 40%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+    box-shadow: 0 0 8px rgba(0,240,255,0.5); transition: width 0.7s ease;
+  }
+  /* v4.1 Project Memory (P6+): real /api/repo index panel */
+  #repomem { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 320px; }
+  .repo-bar { display: flex; gap: 6px; }
+  #reposearch { flex: 1; min-width: 0; background: rgba(8,16,28,0.7); border: 1px solid var(--line); color: var(--text); font-family: var(--mono); font-size: 9.5px; padding: 7px 9px; border-radius: 6px; letter-spacing: 0.06em; }
+  #reposearch:focus { outline: none; border-color: rgba(0,240,255,0.5); box-shadow: 0 0 10px rgba(0,240,255,0.22); }
+  .repo-meta { font-size: 8.5px; letter-spacing: 0.1em; color: var(--text-dim); opacity: 0.8; text-align: center; padding: 2px 0 0; }
+  .repofact { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: rgba(8,16,28,0.7); font-size: 9.5px; line-height: 1.45; animation: rise 0.2s ease; }
+  .rf-title { color: var(--cyan); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rf-path { color: var(--text-dim); font-size: 8.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  #interventions { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .iv-empty { font-size: 9.5px; letter-spacing: 0.16em; color: var(--text-dim); opacity: 0.7; text-align: center; padding: 14px 0; }
+  .intervention {
+    border: 1px solid rgba(255,171,0,0.45); border-radius: 10px; padding: 12px 13px;
+    background: linear-gradient(135deg, rgba(255,171,0,0.10), rgba(120,70,10,0.06));
+    animation: rise 0.25s ease; position: relative;
+  }
+  .intervention.flash { animation: warnflash 1s ease-in-out infinite; }
+  @keyframes warnflash { 0%,100% { box-shadow: 0 0 0 rgba(255,171,0,0); } 50% { box-shadow: 0 0 18px rgba(255,171,0,0.28); } }
+  .iv-title { font-size: 9px; letter-spacing: 0.22em; color: var(--amber); margin-bottom: 7px; }
+  .iv-prompt { font-size: 10.5px; line-height: 1.5; color: var(--text); margin-bottom: 10px; word-break: break-word; }
+  .iv-btns { display: flex; gap: 8px; }
+  .btn {
+    flex: 1; font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+    padding: 8px 6px; border-radius: 6px; border: 1px solid; cursor: pointer;
+    transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); }
+  .btn.exec { background: rgba(44,230,184,0.12); border-color: rgba(44,230,184,0.55); color: var(--teal); }
+  .btn.exec:hover { box-shadow: 0 0 14px rgba(44,230,184,0.35); }
+  .btn.bypass { background: rgba(255,23,68,0.10); border-color: rgba(255,23,68,0.5); color: var(--crimson); }
+  .btn.bypass:hover { box-shadow: 0 0 14px rgba(255,23,68,0.3); }
+  .intervention.resolved .iv-btns { opacity: 0.4; pointer-events: none; }
+  .intervention.resolved .iv-title { color: var(--text-dim); }
+  .intervention.resolved.approved { border-color: rgba(44,230,184,0.4); }
+  .intervention.resolved.declined { border-color: rgba(255,23,68,0.35); }
+
+  /* agent comms (v3.0) — inter-agent message bus traffic */
+  #comms { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 240px; }
+  .msg {
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px;
+    background: rgba(8,16,28,0.7); animation: rise 0.2s ease; font-size: 10px; line-height: 1.5;
+  }
+  .msg .mhead { display: flex; align-items: center; gap: 6px; font-size: 9px; margin-bottom: 3px; letter-spacing: 0.06em; }
+  .msg .mfrom { color: var(--cyan); font-weight: 700; }
+  .msg .mto { color: var(--text-dim); }
+  .msg .msub { margin-left: auto; color: var(--teal); font-weight: 700; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg .mbody { color: var(--text-dim); word-break: break-word; }
+  .msg.unread { border-color: rgba(44,230,184,0.4); }
+  /* v3.2: a fresh bus message flashes in when it arrives */
+  .msg.new { animation: msgin 1.1s ease-out; border-color: rgba(0,240,255,0.6); }
+  @keyframes msgin { 0% { background: rgba(0,240,255,0.22); box-shadow: 0 0 18px rgba(0,240,255,0.35); } 100% { background: transparent; box-shadow: none; } }
+
+  /* delegated tasks (nested agent runs) — self-dispatch audit panel */
+  #jobs { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .job {
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+    background: rgba(8,16,28,0.7); animation: rise 0.2s ease;
+  }
+  .job .jhead { display: flex; align-items: center; gap: 8px; font-size: 9px; margin-bottom: 4px; letter-spacing: 0.06em; }
+  .job .jid { color: var(--text-dim); }
+  .job .jstatus { font-weight: 700; letter-spacing: 0.12em; }
+  .job .jstatus.running { color: var(--cyan); animation: pulse 0.9s ease-in-out infinite; }
+  .job .jstatus.done { color: var(--teal); }
+  .job .jstatus.error { color: var(--crimson); }
+  .job .jstatus.refused { color: var(--amber); }
+  .job .jsub { margin-left: auto; color: var(--text-dim); }
+  .job .jtask { font-size: 10px; line-height: 1.45; color: var(--text); word-break: break-word; }
+  .jobcount { color: var(--cyan); font-size: 9px; letter-spacing: 0.1em; }
+
+  /* ---------------- Bottom console ---------------- */
+  #console { padding: 12px 18px 14px; border-top: 1px solid var(--line); background: rgba(6,10,18,0.85); backdrop-filter: blur(8px); }
+  .console-inner {
+    display: flex; align-items: center; gap: 12px;
+    border: 1px solid var(--line-strong); border-radius: 10px; padding: 11px 14px;
+    background: rgba(8,16,28,0.75);
+    box-shadow: 0 0 0 1px rgba(0,240,255,0.06), 0 0 22px rgba(0,240,255,0.10);
+    transition: box-shadow 0.2s, border-color 0.2s;
+  }
+  .console-inner:focus-within { border-color: var(--cyan); box-shadow: 0 0 26px rgba(0,240,255,0.28); }
+  .keyhint { flex: none; font-size: 9px; letter-spacing: 0.14em; color: var(--text-dim); white-space: nowrap; }
+  #input {
+    flex: 1; background: transparent; border: none; outline: none; resize: none;
+    color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.5; max-height: 120px;
+  }
+  #input::placeholder { color: var(--text-dim); opacity: 0.8; }
+  #send {
+    flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+    padding: 10px 16px; border-radius: 7px; border: 1px solid var(--line-strong);
+    background: linear-gradient(135deg, rgba(0,240,255,0.22), rgba(10,80,120,0.28)); color: var(--cyan);
+    cursor: pointer; transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+  }
+  #send:hover:not(:disabled) { box-shadow: 0 0 18px rgba(0,240,255,0.45); transform: translateY(-1px); }
+  #send:disabled { opacity: 0.35; cursor: not-allowed; }
+  .vtbtn {
+    flex: none; background: rgba(0,240,255,0.06); color: var(--cyan);
+    border: 1px solid rgba(0,240,255,0.35); font: inherit; font-size: 9px;
+    letter-spacing: 0.12em; padding: 6px 8px; cursor: pointer; transition: all .15s ease;
+  }
+  .vtbtn:hover:not(:disabled) { box-shadow: 0 0 12px rgba(0,240,255,0.4); }
+  .vtbtn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,240,255,0.16); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0,240,255,0.3); }
+
+  @media (max-width: 1000px) {
+    #cols { grid-template-columns: 1fr; }
+    #left, #right { display: none; }
+    .keyhint { display: none; }
+  }
+
+  /* v4.0: phone-friendly layout (multi-device, spec Phase 9). The dashboard
+     becomes a single scrolling column with touch-sized controls. */
+  @media (max-width: 640px) {
+    #telemetry { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+    .brand-block .title { font-size: 12px; }
+    .clock { font-size: 16px; }
+    .heartbeat { font-size: 9px; }
+    #cols { grid-template-columns: 1fr; }
+    #center, #feed, #comms, #jobs { font-size: 13px; }
+    #input { font-size: 14px; min-height: 44px; }
+    .keyhint { display: none; }
+    #right, #left { display: none; }
+    .nchip, button { min-height: 36px; }
+    #sessionpick { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+<canvas id="particles" aria-hidden="true"></canvas>
+<div id="app">
+  <header id="telemetry">
+    <div class="brand-block">
+      <div class="title">DOURMOUSE // CENTRAL AGENT DISPATCH</div>
+      <div class="heartbeat">[ AGENT PIPELINES: <span class="fl" id="pipelines">100%</span> OPERATIONAL // DESYNC RISK: <span class="fl" id="desync">0.02%</span> ]</div>
+    </div>
+    <div class="clock-block">
+      <select id="sessionpick" title="Resume a recent session (real data from workspace/sessions)"><option value="">⌁ RESUME SESSION…</option></select>
+      <button id="mapbtn" title="Open the agent orchestration map in a new window">⧉ AGENT MAP</button>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="memload" id="memload">MEM_LOAD: --.--GB / 16.00GB</div>
+      <div class="memline" id="memline">MEMORY: -- FACTS // LEARNING --</div>
+      <div class="sessline" id="sessionlabel">SESSION: —</div>
+      <div class="sessline" id="backendline">BACKEND: —</div>
+    </div>
+  </header>
+
+  <div id="cols">
+    <aside id="left" class="panel-bracket">
+      <div class="col-title">AGENT ORCHESTRATION CLUSTER</div>
+      <div id="nodes">SCANNING ROSTER…</div>
+    </aside>
+
+    <main id="center" class="panel-bracket">
+      <div class="core-wrap panel-bracket">
+        <svg id="core" viewBox="0 0 150 150" aria-hidden="true">
+          <defs>
+            <radialGradient id="coreGlow">
+              <stop offset="0%" stop-color="rgba(0,240,255,0.55)"/>
+              <stop offset="100%" stop-color="rgba(0,240,255,0)"/>
+            </radialGradient>
+          </defs>
+          <circle class="arc a1" cx="75" cy="75" r="68"/>
+          <circle class="arc a2" cx="75" cy="75" r="56"/>
+          <circle class="arc a3" cx="75" cy="75" r="44"/>
+          <circle class="arc a4" cx="75" cy="75" r="32"/>
+          <circle class="arc a5" cx="75" cy="75" r="20"/>
+          <circle class="hub" cx="75" cy="75" r="9"/>
+          <circle cx="75" cy="75" r="68" fill="url(#coreGlow)" opacity="0.10"/>
+          <line class="sweep" x1="75" y1="75" x2="75" y2="7"/>
+          <circle class="sweepdot" cx="75" cy="7" r="2.4"/>
+          <text class="sector s1" x="75" y="18">00</text>
+          <text class="sector s2" x="136" y="78">03</text>
+          <text class="sector s3" x="75" y="138">06</text>
+          <text class="sector s4" x="12" y="78">09</text>
+        </svg>
+        <div class="core-status" id="corestatus">SYSTEM CORE // IDLE</div>
+        <div class="core-scan" id="corescan">SCANNING ▮▮▮▮▮▮░░░░ 60%</div>
+      </div>
+      <div class="col-title">PIPELINE DISPATCH FEED</div>
+      <div id="feed"></div>
+      <div id="quick"></div>
+    </main>
+
+    <aside id="right" class="panel-bracket">
+      <div class="col-title">TRANSACTION METRICS</div>
+      <div id="metrics">
+        <div class="metric">
+          <div class="mlabel">QUEUE THROUGHPUT <span class="mval" id="m-throughput">0.0k t/s</span></div>
+          <div class="mbar"><i id="b-throughput"></i></div>
+        </div>
+        <div class="metric">
+          <div class="mlabel">VECTOR DB LATENCY <span class="mval" id="m-latency">0 ms</span></div>
+          <div class="mbar"><i id="b-latency"></i></div>
+        </div>
+        <div class="metric">
+          <div class="mlabel">OPEN SERVERLESS INSTANCES <span class="mval" id="m-instances">0</span></div>
+          <div class="mbar"><i id="b-instances"></i></div>
+        </div>
+      </div>
+      <div class="col-title">DELEGATED TASKS <span id="jobcount" class="jobcount"></span></div>
+      <div id="jobs">
+        <div class="iv-empty">NO NESTED AGENT RUNS // ORCHESTRATOR DIRECT</div>
+      </div>
+      <div class="col-title">COST BUDGET <span id="budgetline" class="jobcount"></span></div>
+      <div id="budget">
+        <div class="iv-empty" id="budgetempty">NO LLM CALLS THIS SESSION</div>
+      </div>
+      <div class="col-title">AGENT COMMS <span id="commscount" class="jobcount"></span></div>
+      <div id="comms">
+        <div class="iv-empty">NO INTER-AGENT MESSAGES // BUS QUIET</div>
+      </div>
+      <div class="col-title">INTERVENTIONS</div>
+      <div id="interventions">
+        <div class="iv-empty">NO INTERVENTIONS PENDING // ALL SYSTEMS NOMINAL</div>
+      </div>
+      <div class="col-title">PROJECT MEMORY <span id="repocount" class="jobcount"></span></div>
+      <div id="repomem">
+        <div class="repo-bar">
+          <input id="reposearch" type="text" placeholder="SEARCH INDEXED ATLAS REPO…" spellcheck="false" autocomplete="off">
+          <button id="rescanBtn" class="vtbtn" title="Re-index the ATLAS repo (idempotent)">[RESCAN]</button>
+        </div>
+        <div id="repofacts"><div class="iv-empty">PROJECT MEMORY STANDBY</div></div>
+        <div class="repo-meta" id="repometa">LAST SCAN: —</div>
+      </div>
+    </aside>
+  </div>
+
+  <footer id="console">
+    <div class="console-inner">
+      <span class="keyhint">⌘ + ENTER TO BROADCAST</span>
+      <button id="micBtn" class="vtbtn" title="Speak a directive (local STT)">[MIC]</button>
+      <textarea id="input" rows="1" placeholder="SYSTEM CONSOLE STANDBY // ENTER DISPATCH COMMANDS OR DIRECTIVE STRINGS..." spellcheck="false"></textarea>
+      <button id="spkBtn" class="vtbtn" title="Hear the last reply (local TTS)">[SPK]</button>
+      <button id="send">[SEND_DIRECTIVE]</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const feed = document.getElementById('feed');
+  const input = document.getElementById('input');
+  const sendBtn = document.getElementById('send');
+  const core = document.getElementById('core');
+  const coreStatus = document.getElementById('corestatus');
+  const nodesEl = document.getElementById('nodes');
+  const interventionsEl = document.getElementById('interventions');
+  const jobsEl = document.getElementById('jobs');
+
+  const bootLines = [
+    ['SYSTEM', 'DOURMOUSE dispatch core online. RUN:GENERAL.'],
+    ['DISPATCH_ROUTING', 'Subagent registry loaded; awaiting directive.'],
+  ];
+  bootLines.forEach(([tag, msg]) => fline(tag, msg));
+
+  // ---------- helpers ----------
+  function now() { return new Date().toTimeString().slice(0, 8); }
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function md(text) {
+    let t = esc(text);
+    t = t.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => `<pre>${code}</pre>`);
+    t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    t = t.replace(/^#{1,3}\s+(.+)$/gm, '<strong>$1</strong>');
+    t = t.replace(/((?:^|\n)(?:- |\d+\. ).+)+/g, (m) => {
+      const lines = m.trim().split('\n').map(l => l.replace(/^(?:- |\d+\. )/, ''));
+      const isNum = /^\d+\. /.test(m.trim().split('\n')[0]);
+      const tag = isNum ? 'ol' : 'ul';
+      return `<${tag}>` + lines.map(l => `<li>${l}</li>`).join('') + `</${tag}>`;
+    });
+    return t.replace(/\n/g, '<br>');
+  }
+  function fline(tag, msg, cls) {
+    const el = document.createElement('div');
+    el.className = 'fline' + (cls ? ' ' + cls : '');
+    el.innerHTML = `<span class="ts">[${now()}]</span> <span class="tag ${tag === 'TOOL_RESULT' ? 'result' : tag === 'HOLD_AUTH' ? 'auth' : tag === 'ERROR' ? 'err' : ''}">[${tag}]</span> ${msg}`;
+    feed.appendChild(el);
+    feed.scrollTop = feed.scrollHeight;
+    return el;
+  }
+  function tcard(name, rawArgs, result) {
+    const card = document.createElement('div');
+    card.className = 'tcard';
+    card.dataset.args = rawArgs || '{}';
+    // Phase 3: run_command always executes inside the kernel-enforced sandbox
+    // (sandbox.py). The card header shows which safety mode it ran under —
+    // [SANDBOXED] normally, [UNSANDBOXED] only if the tool honestly reported
+    // NOT CONFIGURED (non-macOS). No silent stubs, visible in the UI.
+    const badge = name === 'run_command'
+      ? ' <span class="sandbox-badge">[SANDBOXED]</span>'
+      : '';
+    card.innerHTML = `
+      <div class="thead"><span>◈</span><span>${esc(name)}</span>${badge}<span class="arrow">▶</span></div>
+      <div class="tbody"><b>ARGS</b> ${esc(card.dataset.args)}\n\n<b>RESULT</b>\n${esc(result || '(pending…)')}</div>`;
+    if (name === 'run_command') {
+      card.dataset.sandboxed = '1';
+    }
+    card.querySelector('.thead').addEventListener('click', () => card.classList.toggle('open'));
+    feed.appendChild(card);
+    feed.scrollTop = feed.scrollHeight;
+    return card;
+  }
+  // v4.0: motion-state machine — Idle → Thinking → Planning → Executing →
+  // Complete, each with its own core animation + scanline readout. The SSE
+  // transcript events drive it: plan → planning, tool_use → executing,
+  // assistant_text → thinking, terminal done → complete (brief) → idle.
+  const coreScan = document.getElementById('corescan');
+  function setCoreState(state) {
+    core.classList.remove('computing', 'planning', 'thinking', 'complete');
+    coreStatus.classList.remove('computing');
+    const scan = coreScan;
+    switch (state) {
+      case 'planning':
+        core.classList.add('planning');
+        coreStatus.textContent = 'SYSTEM CORE // PLANNING';
+        if (scan) { scan.textContent = 'SCANNING ▮▮▮▮▮▮▮▮░░ 80%'; scan.classList.add('busy'); }
+        break;
+      case 'executing':
+        core.classList.add('computing');
+        coreStatus.classList.add('computing');
+        coreStatus.textContent = 'SYSTEM CORE // EXECUTING';
+        if (scan) { scan.textContent = 'SCANNING ▮▮▮▮▮▮▮▮▮▮ 100%'; scan.classList.add('busy'); }
+        break;
+      case 'thinking':
+        core.classList.add('thinking');
+        coreStatus.textContent = 'SYSTEM CORE // THINKING';
+        if (scan) { scan.textContent = 'SCANNING ▮▮▮▮░░░░░░ 40%'; scan.classList.add('busy'); }
+        break;
+      case 'complete':
+        core.classList.add('complete');
+        coreStatus.textContent = 'SYSTEM CORE // COMPLETE';
+        if (scan) { scan.textContent = 'SCAN LOCKED ▮▮▮▮▮▮▮▮▮▮ 100%'; scan.classList.remove('busy'); }
+        setTimeout(() => { if (!sendBtn.disabled) setCoreState('idle'); }, 1800);
+        break;
+      default:
+        coreStatus.textContent = 'SYSTEM CORE // IDLE';
+        if (scan) { scan.textContent = 'SCANNING ▮▮▮▮▮▮░░░░ 60%'; scan.classList.remove('busy'); }
+    }
+  }
+  function setBusy(on) {
+    core.classList.toggle('computing', on);
+    coreStatus.classList.toggle('computing', on);
+    coreStatus.textContent = on ? 'SYSTEM CORE // COMPUTING' : 'SYSTEM CORE // IDLE';
+    sendBtn.disabled = on;
+    if (!on && coreScan) { coreScan.textContent = 'SCANNING ▮▮▮▮▮▮░░░░ 60%'; coreScan.classList.remove('busy'); }
+  }
+
+  // ---------- v4.0: ambient particle field (Canvas2D, fully local) ----------
+  const pcanvas = document.getElementById('particles');
+  if (pcanvas && pcanvas.getContext) {
+    const pctx = pcanvas.getContext('2d');
+    let pw = 0, ph = 0;
+    const pts = [];
+    function resizeParticles() {
+      pw = pcanvas.width = window.innerWidth;
+      ph = pcanvas.height = window.innerHeight;
+    }
+    resizeParticles();
+    window.addEventListener('resize', resizeParticles);
+    const N = Math.min(70, Math.max(28, Math.floor(window.innerWidth / 22)));
+    for (let i = 0; i < N; i++) {
+      pts.push({
+        x: Math.random() * pw, y: Math.random() * ph,
+        vx: (Math.random() - 0.5) * 0.28, vy: (Math.random() - 0.5) * 0.28,
+        r: 0.6 + Math.random() * 1.5, a: 0.12 + Math.random() * 0.4,
+      });
+    }
+    function drawParticles() {
+      pctx.clearRect(0, 0, pw, ph);
+      for (const p of pts) {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0 || p.x > pw) p.vx *= -1;
+        if (p.y < 0 || p.y > ph) p.vy *= -1;
+        pctx.beginPath();
+        pctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        pctx.fillStyle = `rgba(0,240,255,${p.a})`;
+        pctx.fill();
+      }
+      requestAnimationFrame(drawParticles);
+    }
+    drawParticles();
+  }
+
+  // ---------- agent cluster (real roster) ----------
+  const nodes = new Map();   // subagent name -> { el, pill, rateEl, baseRate }
+  const nodeByTool = new Map(); // tool name -> subagent name
+  fetch('/api/roster').then(r => r.json()).then(data => {
+    nodesEl.innerHTML = '';
+    for (const ag of data.subagents) {
+      const el = document.createElement('div');
+      el.className = 'node';
+      let chips = '';
+      for (const t of ag.tools) {
+        const cls = t.permission === 'requires_confirmation' ? 'gated'
+                  : t.permission === 'prohibited' ? 'prohib' : '';
+        chips += `<span class="nchip ${cls}" title="${esc(t.permission)}">${esc(t.name)}</span>`;
+        nodeByTool.set(t.name, ag.name);
+      }
+      el.innerHTML = `
+        <svg class="spinner" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="rgba(0,240,255,0.18)" stroke-width="2"/>
+          <circle cx="12" cy="12" r="10" fill="none" stroke="#00F0FF" stroke-width="2" stroke-dasharray="15 47" stroke-linecap="round"/>
+        </svg>
+        <div class="ninfo">
+          <div class="nname">${esc(ag.name)}</div>
+          <div class="ndesc">${esc(ag.description)}</div>
+          <div class="nmodel">MODEL: ${esc(ag.model || 'default')}</div>
+          <div class="nperf">[SPEED: <span class="rate">0</span> t/sec]</div>
+          <div class="nchips">${chips}</div>
+        </div>
+        <div class="npill">[READY]</div>
+        <button class="nwin" title="Open ${esc(ag.name)}'s live window">⧉</button>`;
+      el.querySelector('.nwin').addEventListener('click', () => openAgentWindow(ag.name));
+      nodesEl.appendChild(el);
+      nodes.set(ag.name, {
+        el,
+        pill: el.querySelector('.npill'),
+        rate: el.querySelector('.rate'),
+        base: 120 + Math.floor(Math.random() * 480),
+      });
+    }
+    // live fluctuating speeds per node
+    setInterval(() => {
+      for (const n of nodes.values()) {
+        const computing = n.el.classList.contains('computing');
+        const v = computing ? n.base * (1.6 + Math.random()) : n.base * (0.75 + Math.random() * 0.5);
+        n.rate.textContent = Math.round(v).toLocaleString();
+      }
+    }, 1300);
+    // keep the left cluster visually alive even when idle
+    for (const n of nodes.values()) n.rate.textContent = Math.round(n.base * (0.75 + Math.random() * 0.5)).toLocaleString();
+  }).catch(() => {
+    nodesEl.innerHTML = '<div class="iv-empty">ROSTER OFFLINE</div>';
+  });
+
+  // ---------- v2.7: per-agent live windows ----------
+  // Each agent gets its own DOURMOUSE window showing live activity. In the
+  // native desktop app this opens a real second window via the js_api
+  // bridge; in a plain browser it falls back to a new tab.
+  const openedAgentWindows = new Set();
+  function openAgentWindow(name) {
+    const api = (window.pywebview && window.pywebview.api) || null;
+    if (api && typeof api.open_agent === 'function') {
+      api.open_agent(name);
+    } else {
+      window.open('/agent/' + encodeURIComponent(name), 'dourmouseAgent_' + name, 'width=980,height=760');
+    }
+  }
+
+  function setNodeState(name, state) {
+    const n = nodes.get(name);
+    if (!n) return;
+    n.el.classList.remove('computing', 'live');
+    if (state === 'computing') { n.pill.className = 'npill computing'; n.pill.textContent = '[COMPUTING]'; n.el.classList.add('computing'); }
+    else if (state === 'auth') { n.pill.className = 'npill auth'; n.pill.textContent = '[HOLD_AUTH]'; }
+    else if (state === 'live') { n.pill.className = 'npill live'; n.pill.textContent = '[LIVE]'; n.el.classList.add('live'); }
+    else { n.pill.className = 'npill'; n.pill.textContent = '[READY]'; }
+  }
+
+  // ---------- v2.8: always-on live agents ----------
+  // The preloaded Live agents (news/markets/mail/tasks/rnd) poll their real
+  // feeds continuously; reflect that in the cluster so the dashboard shows
+  // who is actively working even before any dispatch.
+  async function pollLiveActivity() {
+    try {
+      const r = await fetch('/api/activity');
+      const data = await r.json();
+      for (const [name, st] of Object.entries(data.agents || {})) {
+        if (st.status === 'live') setNodeState(name, 'live');
+      }
+    } catch (e) { /* transient */ }
+  }
+
+  // ---------- v4.0: LLM backend indicator (real /api/backend) ----------
+  function pollBackend() {
+    fetch('/api/backend').then(r => r.json()).then(d => {
+      const el = document.getElementById('backendline');
+      if (el && d && d.backend) {
+        const m = d.model ? ' · ' + d.model : '';
+        el.textContent = 'BACKEND: ' + String(d.backend).toUpperCase() + m;
+        el.style.color = d.backend === 'ollama' ? 'var(--teal)' : (d.backend === 'nvidia' ? 'var(--cyan)' : 'var(--text-dim)');
+      }
+    }).catch(() => {});
+  }
+  pollBackend();
+  setInterval(pollBackend, 5000);
+
+  // ---------- quick directives ----------
+  const quickEl = document.getElementById('quick');
+  const examples = [
+    'Search the web for NVIDIA Nemotron-3 and summarize',
+    'Propose three 45-minute meeting slots this week',
+    'Write a python script that prints the first 10 primes, then run it',
+    'Draft a polite email asking for a project status update',
+  ];
+  examples.forEach(ex => {
+    const c = document.createElement('div');
+    c.className = 'qchip';
+    c.textContent = '◈ ' + ex;
+    c.addEventListener('click', () => { input.value = ex; input.focus(); });
+    quickEl.appendChild(c);
+  });
+
+  // ---------- telemetry header (clock + mem) ----------
+  const clock = document.getElementById('clock');
+  const memload = document.getElementById('memload');
+  function tickClock() { clock.textContent = now(); }
+  tickClock();
+  setInterval(tickClock, 1000);
+  setInterval(() => {
+    const gb = (3.2 + Math.random() * 1.6).toFixed(2);
+    memload.textContent = `MEM_LOAD: ${gb}GB / 16.00GB`;
+  }, 2200);
+
+  // ---------- metrics micro-bars (simulated telemetry) ----------
+  const mThrough = { el: document.getElementById('m-throughput'), bar: document.getElementById('b-throughput') };
+  const mLat = { el: document.getElementById('m-latency'), bar: document.getElementById('b-latency') };
+  const mInst = { el: document.getElementById('m-instances'), bar: document.getElementById('b-instances') };
+  let tVal = 42, lVal = 18, iVal = 5;
+  setInterval(() => {
+    const busy = core.classList.contains('computing');
+    tVal = Math.max(8, Math.min(100, tVal + (Math.random() - 0.48) * (busy ? 14 : 5)));
+    lVal = Math.max(4, Math.min(60, lVal + (Math.random() - 0.5) * 6));
+    iVal = Math.max(1, Math.min(16, iVal + (Math.random() - 0.5) * (busy ? 3 : 1)));
+    mThrough.el.textContent = (tVal * 1.7).toFixed(1) + 'k t/s';
+    mThrough.bar.style.width = tVal + '%';
+    mLat.el.textContent = Math.round(lVal) + ' ms';
+    mLat.bar.style.width = lVal + '%';
+    mInst.el.textContent = Math.round(iVal);
+    mInst.bar.style.width = (iVal * 6) + '%';
+  }, 900);
+
+  pollLiveActivity();
+  setInterval(pollLiveActivity, 2500);
+  pollMemory();
+  setInterval(pollMemory, 3000);
+
+  // ---------- v2.9: Store & Learn — memory stat + operator feedback ----------
+  // The system auto-ingests every completed session into its long-term store
+  // and recalls relevant knowledge into each new prompt. The header shows the
+  // REAL fact count (evidence, not a stub), and 👍/👎 on a response stores a
+  // feedback fact the model learns from on later recall.
+  function renderMemory(d) {
+    const line = document.getElementById('memline');
+    if (!line) return;
+    if (d.active) {
+      line.textContent = 'MEMORY: ' + d.count + ' FACTS // LEARNING ON';
+      line.classList.remove('off');
+    } else {
+      line.textContent = 'MEMORY: -- FACTS // LEARNING OFF';
+      line.classList.add('off');
+    }
+  }
+  async function pollMemory() {
+    try {
+      const r = await fetch('/api/memory');
+      renderMemory(await r.json());
+    } catch (e) { /* transient */ }
+  }
+  function feedbackRow(finalText) {
+    const row = document.createElement('div');
+    row.className = 'fbrow';
+    row.innerHTML = `
+      <span class="fblabel">[LEARN]</span>
+      <button class="fb" data-rating="good">👍 GOOD</button>
+      <button class="fb bad" data-rating="bad">👎 BAD</button>`;
+    row.querySelectorAll('.fb').forEach(b => b.addEventListener('click', async () => {
+      const rating = b.dataset.rating;
+      row.querySelectorAll('.fb').forEach(x => { x.disabled = true; });
+      try {
+        const r = await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rating }),
+        });
+        const d = await r.json();
+        row.innerHTML = d.ok
+          ? '<span class="fblabel" style="color:var(--teal)">[LEARN] RATED ' + rating.toUpperCase() + ' // STORED TO LONG-TERM MEMORY</span>'
+          : '<span class="fblabel" style="color:var(--amber)">[LEARN] ' + esc(d.error || 'feedback failed') + '</span>';
+      } catch (e) {
+        row.innerHTML = '<span class="fblabel" style="color:var(--amber)">[LEARN] FEEDBACK FAILED</span>';
+      }
+    }));
+    feed.appendChild(row);
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  // ---------- v3.0: AGENT COMMS — inter-agent message bus ----------
+  // The agents talk to each other: live agents broadcast their real feed
+  // results, and the messenger tools route explicit messages. This panel
+  // shows the REAL bus traffic (bodies are actual agent output, never
+  // fabricated) plus total unread across the roster.
+  const commsEl = document.getElementById('comms');
+  let commsLastId = 0;  // v3.2: highest bus msg id we've flashed
+  let commsInit = false;  // v3.2: first render seeds the tracker (no flash-all)
+  function msgNum(id) { const m = /^msg-(\d+)$/.exec(id || ''); return m ? parseInt(m[1], 10) : 0; }
+  function renderComms(data) {
+    const countEl = document.getElementById('commscount');
+    const msgs = data.messages || [];
+    const unreadTotal = Object.values(data.unread || {}).reduce((a, b) => a + (b || 0), 0);
+    countEl.textContent = msgs.length ? `(${msgs.length}${unreadTotal ? ' · ' + unreadTotal + ' UNREAD' : ''})` : '';
+    commsEl.innerHTML = '';
+    if (!msgs.length) {
+      const empty = document.createElement('div');
+      empty.className = 'iv-empty';
+      empty.textContent = 'NO INTER-AGENT MESSAGES // BUS QUIET';
+      commsEl.appendChild(empty);
+      commsInit = true;
+      return;
+    }
+    msgs.slice(0, 14).forEach(m => {
+      const el = document.createElement('div');
+      // v3.2: only genuinely NEW arrivals flash — the first render just
+      // seeds the tracker so an already-busy bus doesn't flash anything
+      // on page load (reviewer-caught: the flag must gate the flash and be
+      // set AFTER the seed loop, or the first message flashes anyway).
+      const isNew = commsInit && msgNum(m.id) > commsLastId;
+      if (msgNum(m.id) > commsLastId) commsLastId = msgNum(m.id);
+      el.className = 'msg' + (m.read ? '' : ' unread') + (isNew ? ' new' : '');
+      const dest = m.to === '*' ? '→ ALL' : '→ ' + esc(m.to);
+      el.innerHTML = `
+        <div class="mhead">
+          <span class="mfrom">${esc(m.from)}</span>
+          <span class="mto">${dest}</span>
+          <span class="msub">${esc(m.subject || '')}</span>
+        </div>
+        <div class="mbody">${esc((m.body || '').slice(0, 160))}</div>`;
+      commsEl.appendChild(el);
+    });
+    commsInit = true;  // seed done — later renders may flash new arrivals
+  }
+  function pollComms() {
+    fetch('/api/messages').then(r => r.json()).then(renderComms).catch(() => {});
+  }
+  pollComms();
+  setInterval(pollComms, 2500);
+
+  // ---------- delegated tasks (nested agent runs) ----------
+  function renderJobs(jobs) {
+    const countEl = document.getElementById('jobcount');
+    countEl.textContent = jobs.length ? '(' + jobs.length + ')' : '';
+    jobsEl.innerHTML = '';
+    if (!jobs.length) {
+      const empty = document.createElement('div');
+      empty.className = 'iv-empty';
+      empty.textContent = 'NO NESTED AGENT RUNS // ORCHESTRATOR DIRECT';
+      jobsEl.appendChild(empty);
+      return;
+    }
+    jobs.forEach(job => {
+      const el = document.createElement('div');
+      el.className = 'job';
+      el.innerHTML = `
+        <div class="jhead">
+          <span class="jid">${esc(job.id)}</span>
+          <span class="jstatus ${esc(job.status)}">[${esc(job.status).toUpperCase()}]</span>
+          <span class="jsub">d${job.depth}${job.subagent ? ' → ' + esc(job.subagent) : ''}</span>
+        </div>
+        <div class="jtask">${esc(job.task)}</div>`;
+      jobsEl.appendChild(el);
+    });
+  }
+  // ---------- cost budget (institutional cost-capping readout) ----------
+  function renderBudget(b) {
+    const line = document.getElementById('budgetline');
+    const box = document.getElementById('budget');
+    if (!b || !b.budget) return;
+    const bg = b.budget;
+    const lim = bg.limits;
+    line.textContent = `$${bg.est_cost_usd.toFixed(4)} / $${lim.max_est_cost_usd.toFixed(2)}`;
+    const role = (b.rbac && b.rbac.role) ? b.rbac.role.toUpperCase() : 'OPERATOR';
+    box.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = 'job';
+    el.innerHTML = `
+      <div class="jhead">
+        <span class="jid">CALLS</span>
+        <span class="jstatus ${bg.calls >= lim.max_calls ? 'error' : 'done'}">[${bg.calls}/${lim.max_calls}]</span>
+        <span class="jsub">ROLE: ${esc(role)}</span>
+      </div>
+      <div class="jtask">EST TOKENS in:${bg.est_input_tokens} out:${bg.est_output_tokens} · ${bg.elapsed_seconds}s</div>`;
+    box.appendChild(el);
+  }
+  function pollJobs() {
+    fetch('/api/jobs').then(r => r.json()).then(data => {
+      renderJobs(data.jobs || []);
+    }).catch(() => {});
+    fetch('/api/budget').then(r => r.json()).then(data => {
+      renderBudget(data);
+    }).catch(() => {});
+  }
+  pollJobs();
+  setInterval(pollJobs, 1500);
+
+  // ---------- interventions (confirmations) ----------
+  function showIntervention(id, promptText) {
+    const empty = interventionsEl.querySelector('.iv-empty');
+    if (empty) empty.remove();
+    const card = document.createElement('div');
+    card.className = 'intervention flash';
+    card.innerHTML = `
+      <div class="iv-title">⚠ INTERVENTION // HUMAN TOKEN REQUIRED</div>
+      <div class="iv-prompt"></div>
+      <div class="iv-btns">
+        <button class="btn exec">[EXECUTE_PATCH]</button>
+        <button class="btn bypass">[BYPASS_NODE]</button>
+      </div>`;
+    card.querySelector('.iv-prompt').textContent = promptText;
+    const setResolved = (approved) => {
+      card.classList.remove('flash');
+      card.classList.add('resolved', approved ? 'approved' : 'declined');
+      card.querySelector('.iv-title').textContent = approved
+        ? '✓ PATCH EXECUTED // CONTINUING' : '✕ NODE BYPASSED // SKIPPED';
+      card.querySelector('.iv-prompt').textContent = approved
+        ? 'Execution approved and dispatched.' : 'Execution declined by operator.';
+    };
+    card.querySelector('.btn.exec').addEventListener('click', () => {
+      setResolved(true);
+      resolveConfirm(id, true);
+    });
+    card.querySelector('.btn.bypass').addEventListener('click', () => {
+      setResolved(false);
+      resolveConfirm(id, false);
+    });
+    interventionsEl.appendChild(card);
+  }
+  async function resolveConfirm(id, approved) {
+    try {
+      await fetch('/api/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, approved }),
+      });
+    } catch (e) { /* keep going */ }
+  }
+
+  // ---------- chat / SSE ----------
+  const toolCardsByName = new Map();
+  let lastAssistantText = '';
+  let activeNode = null;
+  // Phase 2.1/3: when a plan event arrives, each subsequent tool-use ties
+  // back to a step number (STEP k/n) so multi-step delegation is checkable.
+  let activePlan = null;
+
+  async function send() {
+    const prompt = input.value.trim();
+    if (!prompt || sendBtn.disabled) return;
+    input.value = '';
+    input.style.height = 'auto';
+    setBusy(true);
+    fline('DIRECTIVE', `<span class="directive">${esc(prompt)}</span>`, 'user');
+    toolCardsByName.clear();
+    lastAssistantText = '';
+    activePlan = null;
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let streamFinished = false;
+
+      const handle = (evt) => {
+        switch (evt.type) {
+          case 'tool_use': {
+            setCoreState('executing');
+            const node = nodeByTool.get(evt.name);
+            if (node) {
+              setNodeState(node, 'computing'); activeNode = node;
+              // v2.7: open this agent's own live window on its FIRST
+              // activity of the session (no window spam on every call).
+              if (!openedAgentWindows.has(node)) {
+                openedAgentWindows.add(node);
+                openAgentWindow(node);
+              }
+            }
+            // STEP k/n tie-back: find the next unconsumed plan step whose
+            // subagent matches this tool's agent, and label the line.
+            let stepPrefix = '';
+            if (activePlan) {
+              const agent = nodeByTool.get(evt.name);
+              const idx = (activePlan.steps || []).findIndex(
+                s => !activePlan.consumed.has(s.n) && s.subagent === agent
+              );
+              if (idx !== -1) {
+                stepPrefix = `<span class="planstep">STEP ${activePlan.steps[idx].n}/${activePlan.total}</span> `;
+                activePlan.consumed.add(activePlan.steps[idx].n);
+              }
+            }
+            fline('DISPATCH_ROUTING', `${stepPrefix}Routing to tool <span class="msg">${esc(evt.name)}</span>…`);
+            const card = tcard(evt.name, evt.raw_arguments, '');
+            if (!toolCardsByName.has(evt.name)) toolCardsByName.set(evt.name, []);
+            toolCardsByName.get(evt.name).push(card);
+            break;
+          }
+          case 'tool_result': {
+            fline('TOOL_RESULT', `<span class="msg">${esc(evt.name)}</span> → result received`, null);
+            const cards = toolCardsByName.get(evt.name);
+            const card = cards && cards.find(c => !c.dataset.filled);
+            if (card) {
+              card.dataset.filled = '1';
+              const body = card.querySelector('.tbody');
+              body.innerHTML = `<b>ARGS</b> ${esc(card.dataset.args)}\n\n<b>RESULT</b>\n${esc(evt.text)}`;
+              // Phase 3: if run_command honestly reported NOT CONFIGURED (no
+              // sandbox-exec on this OS), flip the badge to [UNSANDBOXED].
+              if (card.dataset.sandboxed && evt.text && evt.text.indexOf('NOT CONFIGURED') !== -1) {
+                const b = card.querySelector('.sandbox-badge');
+                if (b) { b.textContent = '[UNSANDBOXED]'; b.classList.add('unsandboxed'); }
+              }
+              if (!card.classList.contains('open')) card.classList.add('open');
+            }
+            break;
+          }
+          case 'plan': {
+            // v4.0 motion: planning state while the plan renders.
+            setCoreState('planning');
+            // Phase 2.1/3: a [PLAN] block shows the numbered subtask steps
+            // BEFORE execution, so multi-step delegation is visible.
+            const steps = evt.steps || [];
+            activePlan = { steps, total: evt.total || steps.length, consumed: new Set() };
+            let html = steps.map(s =>
+              `<div><span class="planstep">STEP ${s.n}/${evt.total}</span> → <span class="msg">${esc(s.task)}</span> <span class="plansub">[${esc(s.subagent)}]</span></div>`
+            ).join('');
+            fline('PLAN', html, null);
+            break;
+          }
+          case 'confirmation_requested': {
+            const node = activeNode || [...nodeByTool.keys()].map(k => nodeByTool.get(k))[0];
+            if (node) setNodeState(node, 'auth');
+            fline('HOLD_AUTH', `<span class="msg">${esc(evt.prompt)}</span>`, null);
+            showIntervention(evt.id, evt.prompt);
+            break;
+          }
+          case 'assistant_text': {
+            setCoreState('thinking');
+            lastAssistantText = evt.text || '';
+            fline('SYSTEM', md(evt.text), null);
+            break;
+          }
+          case 'done': {
+            setCoreState('complete');
+            if (activeNode) setNodeState(activeNode, 'ready');
+            if (evt.final_text && evt.final_text !== lastAssistantText) {
+              fline('RESPONSE', md(evt.final_text), null);
+            }
+            // v2.9: let the operator teach the system — rate this answer.
+            if (evt.final_text) feedbackRow(evt.final_text);
+            activePlan = null;
+            streamFinished = true;
+            break;
+          }
+          case 'error': {
+            setCoreState('idle');
+            if (activeNode) setNodeState(activeNode, 'ready');
+            const el = document.createElement('div');
+            el.className = 'fline';
+            el.innerHTML = `<span class="ts">[${now()}]</span> <span class="tag err">[ERROR]</span> <span class="errmsg" style="color:var(--crimson)"></span>`;
+            el.querySelector('.errmsg').textContent = evt.message;
+            feed.appendChild(el);
+            feed.scrollTop = feed.scrollHeight;
+            streamFinished = true;
+            break;
+          }
+        }
+      };
+
+      while (!streamFinished) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const chunk = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          if (!chunk.startsWith('data: ')) continue;
+          try { handle(JSON.parse(chunk.slice(6))); } catch (e) { /* skip malformed */ }
+        }
+      }
+      try { await reader.cancel(); } catch (e) { /* ignore */ }
+    } catch (e) {
+      fline('ERROR', `<span class="errmsg" style="color:var(--crimson)"></span>`, null);
+      const last = feed.lastElementChild;
+      if (last) last.querySelector('.errmsg').textContent = e.message;
+    } finally {
+      if (activeNode) setNodeState(activeNode, 'ready');
+      activeNode = null;
+      setBusy(false);
+      input.focus();
+    }
+  }
+
+  // ---------- events ----------
+  // v2.5: inside the native desktop window (pywebview) the map opens as a
+  // SECOND native window via the js_api bridge; in a plain browser it falls
+  // back to window.open exactly as before.
+  document.getElementById('mapbtn').addEventListener('click', () => {
+    const api = (window.pywebview && window.pywebview.api) || null;
+    if (api && typeof api.open_map === 'function') {
+      api.open_map();
+    } else {
+      window.open('/map', 'dourmouseMap', 'width=1280,height=860');
+    }
+  });
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
+  });
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  });
+
+  // ---------- session picker (Phase 2.3/3: resume where I left off) ----------
+  const sessionPick = document.getElementById('sessionpick');
+  fetch('/api/sessions/recent').then(r => r.json()).then(data => {
+    const sessions = data.sessions || [];
+    if (sessions[0]) {
+      document.getElementById('sessionlabel').textContent =
+        'SESSION: ' + sessions[0].name.replace('.jsonl', '').toUpperCase();
+    }
+    if (sessions.length === 0) {
+      sessionPick.appendChild(new Option('(no prior sessions)', ''));
+      sessionPick.disabled = true;
+      return;
+    }
+    sessions.forEach(s => {
+      const label = `${s.name.replace('.jsonl','')} — ${(s.first_user || '').slice(0, 60)}`;
+      sessionPick.appendChild(new Option(label, s.name));
+    });
+  }).catch(() => {});
+  sessionPick.addEventListener('change', () => {
+    const name = sessionPick.value;
+    if (!name) return;
+    fetch('/api/sessions/recent').then(r => r.json()).then(data => {
+      const s = (data.sessions || []).find(x => x.name === name);
+      if (!s) return;
+      fline('RESUME', `<span class="directive">${esc(name.replace('.jsonl',''))}</span> — first: <span class="msg">${esc(s.first_user || '(none)')}</span> · last: <span class="msg">${esc(s.last_answer || '(none)')}</span>`, null);
+      feed.scrollTop = feed.scrollHeight;
+    }).catch(() => {});
+  });
+
+  // ---- v4.1 VOICE // fully local STT+TTS (P7), honest NOT CONFIGURED ----
+  const micBtn = document.getElementById('micBtn');
+  const spkBtn = document.getElementById('spkBtn');
+  if (micBtn && spkBtn) {
+    fetch('/api/voice').then(r => r.json()).then(v => {
+      if (v.stt !== 'faster-whisper') {
+        micBtn.disabled = true;
+        micBtn.title = 'voice off: install faster-whisper + set DOURMOUSE_VOICE=1';
+      }
+      if (v.tts === 'not-configured') {
+        spkBtn.disabled = true;
+        spkBtn.title = 'voice off: install piper or use macOS (say)';
+      }
+    }).catch(() => {});
+
+    // One stateful handler: idle -> recording -> submit -> idle. Using the
+    // onclick property (not addEventListener) so the button always has ONE
+    // current action and stale handlers can never stack.
+    const startRecording = () => {
+      if (!navigator.mediaDevices || !window.MediaRecorder) {
+        fline('VOICE', 'microphone API unavailable in this browser', null);
+        return;
+      }
+      micBtn.disabled = true; micBtn.textContent = '[...REC]';
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        const rec = new MediaRecorder(stream);
+        const chunks = [];
+        rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+        const stopRecording = () => { if (rec.state !== 'inactive') rec.stop(); };
+        rec.onstop = () => {
+          stream.getTracks().forEach(t => t.stop());
+          micBtn.disabled = false; micBtn.textContent = '[MIC]';
+          micBtn.onclick = startRecording;
+          fetch('/api/speech', { method: 'POST', body: new Blob(chunks, { type: rec.mimeType || 'audio/webm' }) })
+            .then(r => r.json())
+            .then(d => {
+              if (d.text) { input.value = d.text; input.focus(); }
+              else if (d.error) fline('VOICE', d.error, null);
+            })
+            .catch(e => fline('VOICE', 'speech request failed: ' + e, null));
+        };
+        rec.start(); micBtn.textContent = '[STOP]';
+        micBtn.onclick = stopRecording;
+        setTimeout(stopRecording, 15000);
+      }).catch(() => {
+        micBtn.disabled = false; micBtn.textContent = '[MIC]';
+        micBtn.onclick = startRecording;
+        fline('VOICE', 'microphone denied', null);
+      });
+    };
+    micBtn.onclick = startRecording;
+
+    spkBtn.addEventListener('click', () => {
+      const text = (lastAssistantText || input.value || '').trim();
+      if (!text) return;
+      fetch('/api/speech?text=' + encodeURIComponent(text))
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          const au = new Audio(url);
+          au.onended = () => URL.revokeObjectURL(url);
+          au.play();
+        })
+        .catch(e => fline('VOICE', 'tts request failed: ' + e, null));
+    });
+  }
+
+  // ---- v4.1 PROJECT MEMORY // real /api/repo index panel (P6+) ----
+  const repofactsEl = document.getElementById('repofacts');
+  const repometaEl = document.getElementById('repometa');
+  const repoCountEl = document.getElementById('repocount');
+  const reposearchEl = document.getElementById('reposearch');
+  const rescanBtnEl = document.getElementById('rescanBtn');
+  function renderRepo(d) {
+    if (!d.configured) {
+      if (repoCountEl) repoCountEl.textContent = '';
+      if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'PROJECT MEMORY NOT CONFIGURED') + '</div>';
+      if (repometaEl) repometaEl.textContent = 'LAST SCAN: —';
+      if (rescanBtnEl) rescanBtnEl.disabled = true;
+      return;
+    }
+    if (repoCountEl) repoCountEl.textContent = d.facts != null ? d.facts + ' FACTS' : '';
+    // Only touch the meta line when the response actually carries it — a
+    // search response omits it, so a search never flashes 'NEVER'.
+    if (repometaEl && d.last_scan !== undefined) {
+      repometaEl.textContent = d.last_scan && d.last_scan.when
+        ? 'LAST SCAN: ' + esc(String(d.last_scan.when)) + ' // ' + esc(String(d.last_scan.scanned || 0)) + ' SCANNED'
+        : 'LAST SCAN: NEVER // PRESS [RESCAN]';
+    }
+    const facts = d.hits || d.recent || [];
+    if (!repofactsEl) return;
+    if (!facts.length) {
+      repofactsEl.innerHTML = '<div class="iv-empty">' + (d.query ? 'NO MATCHES IN INDEXED REPO (HONEST)' : 'NOTHING INDEXED YET') + '</div>';
+      return;
+    }
+    repofactsEl.innerHTML = facts.map(f => {
+      const sub = f.path ? esc(f.path) : (f.snippet ? '…' + esc(String(f.snippet).replace(/[\[\]]/g, '')) + '…' : '');
+      return '<div class="repofact"><div class="rf-title">' + esc(f.title) + '</div>' +
+        (sub ? '<div class="rf-path">' + sub + '</div>' : '') + '</div>';
+    }).join('');
+  }
+  async function pollRepo() {
+    try { const r = await fetch('/api/repo'); renderRepo(await r.json()); }
+    catch (e) { /* transient */ }
+  }
+  pollRepo();
+  setInterval(pollRepo, 6000);
+  if (reposearchEl) {
+    let repoDebounce = null;
+    reposearchEl.addEventListener('input', () => {
+      clearTimeout(repoDebounce);
+      const q = reposearchEl.value.trim();
+      repoDebounce = setTimeout(() => {
+        fetch('/api/repo?q=' + encodeURIComponent(q)).then(r => r.json()).then(renderRepo).catch(() => {});
+      }, 350);
+    });
+  }
+  if (rescanBtnEl) {
+    rescanBtnEl.addEventListener('click', async () => {
+      rescanBtnEl.disabled = true;
+      if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">INDEXING ATLAS REPO…</div>';
+      try {
+        const r = await fetch('/api/repo/scan', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">SCAN OK — ' + esc(String(d.stats.scanned)) + ' SCANNED // +' + esc(String(d.stats.added)) + ' NEW // ' + esc(String(d.stats.total_facts)) + ' FACTS</div>';
+          fline('PROJECT_MEMORY', 'repo re-indexed: ' + esc(String(d.stats.scanned)) + ' scanned, ' + esc(String(d.stats.total_facts)) + ' facts in memory', null);
+        } else {
+          if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'SCAN FAILED') + '</div>';
+        }
+        pollRepo();
+      } catch (e) {
+        if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">SCAN FAILED (TRANSIENT)</div>';
+      } finally { rescanBtnEl.disabled = false; }
+    });
+  }
+})();
+</script>
+</body>
+</html>

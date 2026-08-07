@@ -1,0 +1,9 @@
+# Voice extra (v4.1, P7) — FULLY LOCAL speech. Optional.
+# Without these wheels the voice endpoints report NOT CONFIGURED honestly
+# (macOS still gets TTS via the built-in 'say' — zero dependencies).
+# Install with: pip install -r requirements.txt -r requirements-voice.txt
+faster-whisper>=1.0
+# >= 1.6 required: the voice module uses the 1.6 API (download_voice flat
+# layout + synthesize_wav). Older versions make the endpoint report NOT
+# CONFIGURED honestly.
+piper-tts>=1.6

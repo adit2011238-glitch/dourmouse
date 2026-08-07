@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // ACCESS GATE</title>
+<style>
+  :root {
+    --bg: #060A12;
+    --cyan: #00F0FF;
+    --text: #cfe3f5;
+    --text-dim: #6f8aa6;
+    --line: rgba(255,255,255,0.08);
+    --panel: rgba(13,22,36,0.62);
+    --crimson: #FF1744;
+    --mono: "JetBrains Mono", "Space Grotesk", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(900px 480px at 70% -10%, rgba(0,120,180,0.22), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .gate {
+    width: min(92vw, 420px);
+    border: 1px solid var(--line);
+    background: var(--panel);
+    backdrop-filter: blur(10px);
+    padding: 34px 30px;
+    position: relative;
+    box-shadow: 0 0 60px rgba(0,240,255,0.10);
+  }
+  .gate::before, .gate::after {
+    content: ""; position: absolute; width: 18px; height: 18px;
+    border: 1px solid var(--cyan); opacity: .6;
+  }
+  .gate::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+  .gate::after  { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+  h1 {
+    font-size: 13px; letter-spacing: 0.28em; color: var(--cyan);
+    text-shadow: 0 0 14px rgba(0,240,255,0.5); margin-bottom: 8px;
+  }
+  p.sub { font-size: 11px; color: var(--text-dim); margin-bottom: 26px; line-height: 1.6; }
+  label { display: block; font-size: 10px; letter-spacing: 0.2em; color: var(--text-dim); margin-bottom: 8px; }
+  input {
+    width: 100%; background: rgba(6,10,18,0.9); border: 1px solid var(--line);
+    color: var(--cyan); font-family: var(--mono); font-size: 14px;
+    padding: 12px 14px; letter-spacing: 0.08em; outline: none;
+  }
+  input:focus { border-color: rgba(0,240,255,0.5); }
+  button {
+    width: 100%; margin-top: 18px; padding: 12px; cursor: pointer;
+    background: linear-gradient(135deg, rgba(0,240,255,0.18), rgba(10,80,120,0.24));
+    border: 1px solid rgba(0,240,255,0.35); color: var(--cyan);
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.24em;
+    transition: all .2s;
+  }
+  button:hover { background: rgba(0,240,255,0.28); }
+  #msg { margin-top: 14px; font-size: 11px; min-height: 16px; color: var(--crimson); }
+  .ok { color: var(--cyan) !important; }
+</style>
+</head>
+<body>
+  <div class="gate">
+    <h1>DOURMOUSE // ACCESS GATE</h1>
+    <p class="sub">This command centre is protected. Enter the access token from
+      <span style="color:var(--text)">DOURMOUSE_ACCESS_TOKEN</span> in the server's
+      <span style="color:var(--text)">.env</span> to continue.</p>
+    <label for="tok">ACCESS TOKEN</label>
+    <input id="tok" type="password" autocomplete="current-password" autofocus spellcheck="false">
+    <button id="go">AUTHENTICATE ▸</button>
+    <div id="msg"></div>
+  </div>
+<script>
+  const msg = document.getElementById('msg');
+  const tok = document.getElementById('tok');
+  async function attempt() {
+    msg.textContent = ''; msg.className = '';
+    const token = tok.value.trim();
+    if (!token) { msg.textContent = '// TOKEN REQUIRED'; return; }
+    try {
+      const r = await fetch('/api/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ token }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok && body.ok) { location.href = '/'; return; }
+      if (body.enabled === false) { msg.className = 'ok'; msg.textContent = '// NO TOKEN CONFIGURED — PROCEED'; setTimeout(() => location.href='/', 600); return; }
+      msg.textContent = '// ACCESS DENIED — INVALID TOKEN';
+    } catch (e) { msg.textContent = '// NETWORK ERROR: ' + e; }
+  }
+  document.getElementById('go').addEventListener('click', attempt);
+  tok.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+</script>
+</body>
+</html>

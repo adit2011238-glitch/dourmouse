@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // AGENT WINDOW</title>
+<style>
+  :root {
+    --bg: #060A12;
+    --cyan: #00F0FF;
+    --cyan-dim: #0a7f8c;
+    --amber: #FFAB00;
+    --crimson: #FF1744;
+    --teal: #2ce6b8;
+    --text: #cfe3f5;
+    --text-dim: #6f8aa6;
+    --line: rgba(255,255,255,0.08);
+    --line-strong: rgba(0,240,255,0.35);
+    --panel: rgba(13,22,36,0.62);
+    --mono: "JetBrains Mono", "Space Grotesk", "Share Tech Mono", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(900px 480px at 75% -10%, rgba(0,120,180,0.22), transparent 60%),
+      radial-gradient(700px 460px at -6% 110%, rgba(0,80,140,0.16), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    overflow: hidden;
+  }
+  .scanlines {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 3px);
+    mix-blend-mode: overlay;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
+
+  /* ---------------- header ---------------- */
+  #hdr {
+    display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+    border-bottom: 1px solid var(--line); background: rgba(8,14,26,0.7);
+    backdrop-filter: blur(8px);
+  }
+  #hdr .title { font-size: 14px; font-weight: 700; letter-spacing: 0.2em; color: var(--cyan); text-shadow: 0 0 14px rgba(0,240,255,0.45); white-space: nowrap; }
+  #hdr .sub { font-size: 9px; letter-spacing: 0.18em; color: var(--text-dim); }
+  #hdr .spacer { flex: 1; }
+  #hdr a { color: var(--text-dim); text-decoration: none; font-size: 11px; letter-spacing: 0.12em; border: 1px solid var(--line); padding: 7px 12px; border-radius: 8px; transition: color .2s, border-color .2s; }
+  #hdr a:hover { color: var(--cyan); border-color: var(--line-strong); }
+  #agentname { color: var(--cyan); font-size: 15px; font-weight: 700; letter-spacing: 0.14em; text-shadow: 0 0 16px rgba(0,240,255,0.5); }
+  #agentdomain { color: var(--text-dim); font-size: 9.5px; letter-spacing: 0.2em; }
+  #pill { padding: 6px 12px; border-radius: 999px; font-size: 10px; letter-spacing: 0.16em; border: 1px solid var(--line); color: var(--text-dim); }
+  #pill.computing { color: var(--cyan); border-color: var(--line-strong); box-shadow: 0 0 16px rgba(0,240,255,0.35); animation: pulse 1s ease-in-out infinite; }
+  #pill.auth { color: var(--amber); border-color: rgba(255,171,0,0.5); animation: blink 0.8s steps(2, start) infinite; }
+  #pill.live { color: var(--teal); border-color: rgba(44,230,184,0.55); box-shadow: 0 0 16px rgba(44,230,184,0.30); animation: pulse 2.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+  @keyframes blink { 50% { opacity: 0.3; } }
+
+  /* ---------------- body ---------------- */
+  #body { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; }
+  #desc { color: var(--text-dim); font-size: 11.5px; line-height: 1.6; border-left: 2px solid var(--line-strong); padding-left: 12px; }
+  #model { color: var(--teal); font-size: 10px; letter-spacing: 0.14em; margin-top: 8px; padding-left: 14px; }
+
+  .sec { font-size: 9px; letter-spacing: 0.28em; color: var(--cyan-dim); margin: 2px 0 8px; }
+
+  /* ---------------- toolkit ---------------- */
+  #tools { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tchip { padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line); background: rgba(8,16,28,0.7); color: var(--text); font-family: var(--mono); font-size: 10.5px; }
+  .tchip.gated { border-color: rgba(255,171,0,0.45); color: var(--amber); }
+  .tchip.prohib { border-color: rgba(255,23,68,0.45); color: var(--crimson); }
+
+  /* ---------------- dispatch ---------------- */
+  #dispatch { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 14px; }
+  #dinput {
+    width: 100%; padding: 10px 12px; border-radius: 8px; resize: none;
+    border: 1px solid var(--line-strong); background: rgba(8,16,28,0.8);
+    color: var(--text); font-family: var(--mono); font-size: 12px; outline: none;
+  }
+  #dinput:focus { border-color: var(--cyan); box-shadow: 0 0 18px rgba(0,240,255,0.22); }
+  #drow { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+  #dsend { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line-strong); background: rgba(0,240,255,0.08); color: var(--cyan); font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; cursor: pointer; transition: background .2s, box-shadow .2s; }
+  #dsend:hover:not(:disabled) { background: rgba(0,240,255,0.18); box-shadow: 0 0 20px rgba(0,240,255,0.3); }
+  #dsend:disabled { opacity: 0.45; cursor: default; }
+  #dstatusline { color: var(--text-dim); font-size: 10.5px; }
+
+  /* ---------------- live feed ---------------- */
+  #feedwrap { flex: 1; min-height: 160px; border: 1px solid var(--line); border-radius: 10px; background: rgba(6,12,22,0.55); overflow: hidden; display: flex; flex-direction: column; }
+  #feed { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
+  .fe { font-size: 11px; line-height: 1.5; word-break: break-word; }
+  .fe .ts { color: var(--text-dim); font-size: 9.5px; }
+  .fe .tag { font-size: 9px; letter-spacing: 0.16em; padding: 1px 6px; border-radius: 4px; margin: 0 6px 0 4px; }
+  .fe.tool_use .tag { color: var(--cyan); border: 1px solid rgba(0,240,255,0.4); }
+  .fe.tool_result .tag { color: var(--teal); border: 1px solid rgba(44,230,184,0.4); }
+  .fe.auth .tag { color: var(--amber); border: 1px solid rgba(255,171,0,0.4); }
+  .fe.live .tag { color: var(--teal); border: 1px solid rgba(44,230,184,0.45); }
+  .fe.live { border-left: 2px solid rgba(44,230,184,0.4); }
+  .fe.msg .tag { color: var(--teal); border: 1px solid rgba(44,230,184,0.5); }
+  .fe.msg { border-left: 2px solid rgba(44,230,184,0.45); background: rgba(44,230,184,0.04); }
+  #inboxwrap { flex: 1; min-height: 120px; border: 1px solid var(--line); border-radius: 10px; background: rgba(6,12,22,0.55); overflow: hidden; display: flex; flex-direction: column; }
+  /* v3.2: flash the inbox when a NEW inter-agent message arrives */
+  #inboxwrap.flash { animation: inboxflash 1.2s ease-out; border-color: rgba(44,230,184,0.6); }
+  @keyframes inboxflash { 0% { box-shadow: 0 0 18px rgba(44,230,184,0.45); } 100% { box-shadow: none; } }
+  #inbox { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
+  #inboxempty { color: var(--text-dim); font-size: 11px; }
+  .fe .tool { color: var(--text); font-weight: 700; }
+  .fe .args { color: var(--text-dim); }
+  #empty { color: var(--text-dim); font-size: 11px; }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,240,255,0.25); border-radius: 4px; }
+  /* v4.0: phone-friendly layout — single column, touch-sized controls. */
+  @media (max-width: 640px) {
+    #body { padding: 12px; }
+    #drow { flex-wrap: wrap; }
+    #directive { font-size: 14px; min-height: 44px; }
+    .nchip { min-height: 34px; }
+    .keyhint { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+<div id="app">
+  <div id="hdr">
+    <span class="title">◈ DOURMOUSE</span>
+    <span class="sub">// AGENT LIVE WINDOW</span>
+    <div class="spacer"></div>
+    <span id="agentname">…</span>
+    <span id="agentdomain">…</span>
+    <span id="pill">[IDLE]</span>
+    <a href="/" id="tomain">⧉ DASHBOARD</a>
+    <a href="/map" id="tomap">⧉ MAP</a>
+  </div>
+  <div id="body">
+    <div id="desc">loading…</div>
+    <div id="model">MODEL: …</div>
+    <div class="sec">TOOLKIT</div>
+    <div id="tools"></div>
+    <div class="sec">DISPATCH DIRECTIVE</div>
+    <div id="dispatch">
+      <textarea id="dinput" rows="2" placeholder="Send a task to this agent…"></textarea>
+      <div id="drow">
+        <button id="dsend">[SEND_DIRECTIVE]</button>
+        <div id="dstatusline"></div>
+      </div>
+    </div>
+    <div class="sec">LIVE ACTIVITY FEED</div>
+    <div id="feedwrap"><div id="feed"><div class="fe" id="empty">awaiting first activity…</div></div></div>
+    <div class="sec">INBOX // INTER-AGENT COMMS <span id="inboxcount" style="color:var(--teal)"></span></div>
+    <div id="inboxwrap"><div id="inbox"><div class="fe" id="inboxempty">no messages yet</div></div></div>
+  </div>
+</div>
+<script>
+'use strict';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// Agent name comes from the URL: /agent/<name>
+const agentName = decodeURIComponent(location.pathname.replace(/^\/agent\//, '').replace(/\/$/, ''));
+let statuses = { status: 'idle', last: null, feed: [], inbox: [], unread: 0 };
+let lastSnap = null;
+
+const nameEl = document.getElementById('agentname');
+const domainEl = document.getElementById('agentdomain');
+const pillEl = document.getElementById('pill');
+const descEl = document.getElementById('desc');
+const toolsEl = document.getElementById('tools');
+const feedEl = document.getElementById('feed');
+
+function pillText(s) {
+  if (s === 'computing') return '[COMPUTING]';
+  if (s === 'auth') return '[HOLD_AUTH]';
+  if (s === 'live') return '[LIVE]';
+  return '[IDLE]';
+}
+
+function renderFeed() {
+  const st = statuses;
+  pillEl.textContent = pillText(st.status);
+  pillEl.className = st.status === 'computing' ? 'computing' : st.status === 'auth' ? 'auth' : st.status === 'live' ? 'live' : '';
+  const items = (st.feed || []).slice().reverse();
+  if (!items.length) {
+    feedEl.innerHTML = '<div class="fe" id="empty">awaiting first activity…</div>';
+  } else {
+    feedEl.innerHTML = items.map(f => {
+      if (f.type === 'tool_use') return `<div class="fe tool_use"><span class="ts">[${esc(f.at ? f.at.slice(11) : '')}]</span><span class="tag">TOOL</span><span class="tool">${esc(f.tool)}</span> <span class="args">${esc(f.args || '')}</span></div>`;
+      if (f.type === 'tool_result') return `<div class="fe tool_result"><span class="ts">[${esc(f.at ? f.at.slice(11) : '')}]</span><span class="tag">RESULT</span>${esc((f.text || '').slice(0, 240))}</div>`;
+      if (f.type === 'auth') return `<div class="fe auth"><span class="ts">[${esc(f.at ? f.at.slice(11) : '')}]</span><span class="tag">HOLD_AUTH</span>${esc((f.prompt || '').slice(0, 240))}</div>`;
+      if (f.type === 'live') return `<div class="fe live"><span class="ts">[${esc(f.at ? f.at.slice(11) : '')}]</span><span class="tag">LIVE</span><span class="tool">${esc(f.tool)}</span> <span class="args">${esc((f.text || '').slice(0, 240))}</span></div>`;
+      return '';
+    }).join('');
+  }
+  feedEl.scrollTop = feedEl.scrollHeight;
+  renderInbox(st);
+}
+
+// v3.0: this agent's inter-agent inbox (direct + broadcast), newest first.
+let inboxSeenIds = new Set();  // v3.2: ids already displayed, for arrival flash
+let inboxInit = false;         // v3.2: first render seeds the tracker (no flash-all)
+function renderInbox(st) {
+  const boxEl = document.getElementById('inbox');
+  const countEl = document.getElementById('inboxcount');
+  const rows = (st.inbox || []);
+  // v3.2: if a message id appears that we haven't shown before, flash the
+  // inbox frame so new comms are visible even when the tab isn't focused.
+  // The FIRST render only seeds the tracker — an inbox that already has
+  // messages shouldn't flash everything on window open (reviewer-caught:
+  // the flag must gate the flash and be set AFTER the seed loop).
+  if (rows.length) {
+    const fresh = inboxInit && rows.some(m => !inboxSeenIds.has(m.id));
+    rows.forEach(m => inboxSeenIds.add(m.id));
+    if (inboxSeenIds.size > 300) inboxSeenIds = new Set(rows.slice(0, 50).map(m => m.id));
+    inboxInit = true;
+    if (fresh) {
+      const w = document.getElementById('inboxwrap');
+      w.classList.remove('flash');
+      void w.offsetWidth;  // restart the animation
+      w.classList.add('flash');
+    }
+  }
+  countEl.textContent = rows.length ? `(${rows.length}${st.unread ? ' · ' + st.unread + ' UNREAD' : ''})` : '';
+  if (!rows.length) {
+    boxEl.innerHTML = '<div class="fe" id="inboxempty">no messages yet</div>';
+    return;
+  }
+  boxEl.innerHTML = rows.map(m => {
+    const dest = m.to === '*' ? 'ALL' : esc(m.to);
+    const tag = m.read ? 'read  ' : 'UNREAD';
+    return `<div class="fe msg"><span class="ts">[${esc(m.at ? m.at.slice(11) : '')}]</span><span class="tag">${tag}</span><span class="tool">${esc(m.from)}</span> → ${dest} <span class="args">${esc(m.subject || '')}</span><br><span class="args">${esc((m.body || '').slice(0, 200))}</span></div>`;
+  }).join('');
+  boxEl.scrollTop = boxEl.scrollHeight;
+}
+
+async function loadAgent() {
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(agentName));
+    if (!res.ok) {
+      descEl.textContent = '✕ unknown agent: ' + agentName;
+      nameEl.textContent = agentName.toUpperCase();
+      return;
+    }
+    const data = await res.json();
+    const ag = data.agent;
+    nameEl.textContent = ag.name.toUpperCase();
+    domainEl.textContent = ag.domain.toUpperCase();
+    descEl.textContent = ag.description;
+    // v3.1: this agent's NVIDIA model (its own, when DOURMOUSE_MODEL_<AGENT> is set).
+    const modelEl = document.getElementById('model');
+    if (modelEl) modelEl.textContent = 'MODEL: ' + (ag.model || 'default');
+    toolsEl.innerHTML = ag.tools.map(t => {
+      const cls = t.permission === 'requires_confirmation' ? 'gated' : t.permission === 'prohibited' ? 'prohib' : '';
+      return `<span class="tchip ${cls}" title="${esc(t.permission)}">${esc(t.name)}</span>`;
+    }).join('') || '<span class="tchip">—</span>';
+    statuses = data;
+    lastSnap = JSON.stringify(data);
+    renderFeed();
+  } catch (e) {
+    descEl.textContent = '✕ error: ' + e.message;
+  }
+}
+
+async function poll() {
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(agentName));
+    if (!res.ok) return;
+    const data = await res.json();
+    const snap = JSON.stringify(data);
+    if (snap === lastSnap) return; // dirty-check: no rebuild when unchanged
+    lastSnap = snap;
+    statuses = data;
+    renderFeed();
+  } catch (e) { /* transient poll errors ignored */ }
+}
+
+// dispatch to this agent via focus_agent
+async function dispatchToAgent() {
+  const input = document.getElementById('dinput');
+  const prompt = input.value.trim();
+  if (!prompt) return;
+  const btn = document.getElementById('dsend');
+  const line = document.getElementById('dstatusline');
+  btn.disabled = true;
+  line.textContent = 'dispatching…';
+  input.value = '';
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, focus_agent: agentName }),
+    });
+    if (!res.ok || !res.body) { line.textContent = 'HTTP ' + res.status; return; }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', finished = false;
+    const handle = evt => {
+      if (evt.type === 'done') { line.textContent = '✓ completed'; finished = true; }
+      else if (evt.type === 'error') { line.textContent = '✕ ' + evt.message; finished = true; }
+    };
+    while (!finished) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) !== -1) {
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        if (!chunk.startsWith('data: ')) continue;
+        try { handle(JSON.parse(chunk.slice(6))); } catch (e) { /* skip */ }
+      }
+    }
+    try { await reader.cancel(); } catch (e) { /* ignore */ }
+  } catch (e) {
+    line.textContent = '✕ ' + e.message;
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { if (line.textContent.includes('completed')) line.textContent = ''; }, 4000);
+  }
+}
+
+document.getElementById('dsend').addEventListener('click', dispatchToAgent);
+document.getElementById('dinput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dispatchToAgent(); }
+});
+
+loadAgent();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+# ── Secrets ──────────────────────────────────────────────────────────────
+.env
+.env.*
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ── Tool caches ──────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Runtime state (sessions, memory db, pids) ────────────────────────────
+workspace/
+*.log
+nohup.out
+.dourmouse-ui.pid
+.jarvis-ui.pid
+
+# ── Rebuildable artifacts ────────────────────────────────────────────────
+dourmouse.app/
+dist/
+build/
+*.zip
+
+# ── Downloaded models / caches (fetched on demand) ───────────────────────
+voice_models/
+whisper_models/
+*.onnx
+
+# ── OS junk ──────────────────────────────────────────────────────────────
+.DS_Store

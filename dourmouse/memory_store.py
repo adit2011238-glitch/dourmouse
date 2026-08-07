@@ -1,0 +1,369 @@
+"""Long-term memory store (Phase A1) — SQLite FTS5 full-text retrieval.
+
+Upgrades the ``memory`` subagent from filesystem grep to a real retrieval
+layer: a SQLite database with an FTS5 full-text index over remembered facts
+and ingested knowledge (session ledgers + Obsidian notes). Deterministic,
+stdlib-only (``sqlite3``), zero new dependencies.
+
+- ``remember(source, title, body)`` — upsert a fact/note by (source, title).
+- ``search(query, limit)`` — FTS5-ranked full-text search returning
+  {source, title, snippet, score}.
+- ``ingest_session_file(path)`` / ``ingest_vault(root)`` — bulk-index what
+  the system already knows so agents can recall it.
+
+Honest degradation (Rule 2.2): if FTS5 is unavailable on the running
+Python's sqlite3 build, opening the store raises ``MemoryStoreUnavailable``
+and the tools report NOT CONFIGURED — never a silent grep-fallback pretending
+to be search.
+
+Design: an external-content FTS5 table keeps ranking/search in SQLite while
+a plain ``facts`` table owns the data (UNIQUE(source, title) upserts), with
+the standard FTS5 rowid sync pattern. Thread-safe via a lock + per-thread
+connection access guarded by ``check_same_thread=False``.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+import threading
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+_DEFAULT_DIR_NAME = "memory"
+_DEFAULT_DB_NAME = "atlas_memory.db"
+
+
+class MemoryStoreUnavailable(RuntimeError):
+    """Raised when SQLite FTS5 is not available — honest NOT CONFIGURED."""
+
+
+class MemoryStore:
+    """SQLite + FTS5 long-term memory store (deterministic, stdlib-only)."""
+
+    def __init__(self, db_path: Path | str) -> None:
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(
+            str(self.db_path), check_same_thread=False
+        )
+        self._conn.row_factory = sqlite3.Row
+        try:
+            self._init_schema()
+        except sqlite3.OperationalError as exc:
+            self._conn.close()
+            raise MemoryStoreUnavailable(
+                f"SQLite FTS5 is not available on this build ({exc}) — "
+                "long-term memory is NOT CONFIGURED. No search performed."
+            ) from exc
+
+    # -- schema ------------------------------------------------------------ #
+
+    def _init_schema(self) -> None:
+        with self._lock:
+            cur = self._conn.cursor()
+            # Probe FTS5 availability first so a missing build fails loudly.
+            cur.execute("CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(probe)")
+            cur.execute("DROP TABLE IF EXISTS _fts_probe")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(source, title)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
+                    source, title, body,
+                    content='facts',
+                    content_rowid='id'
+                )
+                """
+            )
+            # v4.1 (P6): optional semantic-recall layer. Cached embeddings for
+            # fact bodies (one row per fact, json vector). Empty by design —
+            # the layer is populated lazily only when DOURMOUSE_EMBED is on.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fact_embeddings (
+                    fact_id INTEGER PRIMARY KEY,
+                    model TEXT NOT NULL,
+                    vector TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            # Keep the FTS index in sync with the facts table.
+            cur.executescript(
+                """
+                CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
+                    INSERT INTO facts_fts(rowid, source, title, body)
+                    VALUES (new.id, new.source, new.title, new.body);
+                END;
+                CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
+                    INSERT INTO facts_fts(facts_fts, rowid, source, title, body)
+                    VALUES ('delete', old.id, old.source, old.title, old.body);
+                END;
+                CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
+                    INSERT INTO facts_fts(facts_fts, rowid, source, title, body)
+                    VALUES ('delete', old.id, old.source, old.title, old.body);
+                    INSERT INTO facts_fts(rowid, source, title, body)
+                    VALUES (new.id, new.source, new.title, new.body);
+                END;
+                """
+            )
+            self._conn.commit()
+
+    # -- write ------------------------------------------------------------- #
+
+    def remember(self, source: str, title: str, body: str) -> str:
+        """Upsert one fact/note; returns a plain confirmation."""
+        source = (source or "agent").strip()[:200]
+        title = (title or "").strip()[:500]
+        body = (body or "").strip()
+        if not title or not body:
+            raise ValueError("remember requires a non-empty title and body")
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO facts(source, title, body, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(source, title) DO UPDATE SET
+                    body = excluded.body,
+                    updated_at = excluded.updated_at
+                """,
+                (source, title, body, now, now),
+            )
+            # v4.1 (P6): an updated fact body invalidates its cached embedding
+            # so semantic recall never scores against a stale vector (the
+            # next semantic_search re-embeds it lazily).
+            cur.execute(
+                "DELETE FROM fact_embeddings WHERE fact_id = "
+                "(SELECT id FROM facts WHERE source = ? AND title = ?)",
+                (source, title),
+            )
+            self._conn.commit()
+        return f"MEMORY STORED: [{source}] {title}"
+
+    def delete(self, source: str, title: str) -> bool:
+        """Delete one fact by (source, title); returns whether it existed."""
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "DELETE FROM facts WHERE source = ? AND title = ?",
+                (source, title),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    # -- read -------------------------------------------------------------- #
+
+    def search(
+        self, query: str, limit: int = 10, source: str | None = None
+    ) -> list[dict[str, Any]]:
+        """FTS5-ranked full-text search; returns real matches only.
+
+        ``source`` restricts matches to EXACTLY one fact source (e.g. ``repo``
+        or a scoped ``repo:myproj``) via an equality predicate on the facts
+        table — NOT an FTS5 column filter. FTS5 column-filter matching is
+        token-based, so a filter like ``source:"repo"`` also matches
+        ``repo:myproj`` (both tokenize to contain the token "repo") and
+        would leak every project into the default scope. Scoping must be
+        exact, so it happens on the joined row, after FTS rank.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        limit = max(1, min(int(limit), 50))
+        match_expr = _fts_query(query)
+        if not match_expr:
+            return []
+        src = str(source).strip() if source else None
+        sql = """
+            SELECT f.source AS source,
+                   f.title AS title,
+                   snippet(facts_fts, 2, '[', ']', '…', 8) AS snippet,
+                   bm25(facts_fts) AS score
+            FROM facts_fts
+            JOIN facts f ON f.id = facts_fts.rowid
+            WHERE facts_fts MATCH ?
+              AND (? IS NULL OR f.source = ?)
+            ORDER BY score
+            LIMIT ?
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                sql, (match_expr, src, src, limit)
+            ).fetchall()
+        return [
+            {
+                "source": r["source"],
+                "title": r["title"],
+                "snippet": r["snippet"],
+                "score": round(r["score"], 4),
+            }
+            for r in rows
+        ]
+
+    def count(self, source: str | None = None) -> int:
+        """Total facts, or facts for one source (used by the repo index)."""
+        with self._lock:
+            if source is None:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) AS n FROM facts"
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) AS n FROM facts WHERE source = ?", (source,)
+                ).fetchone()
+            return int(row["n"])
+
+    def get(self, source: str, title: str) -> dict[str, Any] | None:
+        """One fact by (source, title), or None. Used for idempotent scans."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, source, title, body, created_at, updated_at "
+                "FROM facts WHERE source = ? AND title = ?",
+                (source, title),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "source": row["source"],
+            "title": row["title"],
+            "body": row["body"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def all_facts(self) -> list[dict[str, Any]]:
+        """Every fact (id/source/title/body) — the semantic layer's corpus."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, source, title, body FROM facts ORDER BY id"
+            ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "source": r["source"],
+                "title": r["title"],
+                "body": r["body"],
+            }
+            for r in rows
+        ]
+
+    # -- semantic-layer embeddings (v4.1, P6) --------------------------- #
+
+    def save_embedding(self, fact_id: int, model: str, vector: list[float]) -> None:
+        """Cache one fact's embedding vector (upsert by fact_id)."""
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO fact_embeddings(fact_id, model, vector, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(fact_id) DO UPDATE SET
+                    model = excluded.model,
+                    vector = excluded.vector,
+                    updated_at = excluded.updated_at
+                """,
+                (fact_id, model, json.dumps(vector), datetime.now().isoformat(timespec="seconds")),
+            )
+            self._conn.commit()
+
+    def get_embeddings(self) -> dict[int, list[float]]:
+        """fact_id -> vector for every cached embedding."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT fact_id, vector FROM fact_embeddings"
+            ).fetchall()
+        out: dict[int, list[float]] = {}
+        for r in rows:
+            try:
+                vec = json.loads(r["vector"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(vec, list):
+                out[int(r["fact_id"])] = [float(x) for x in vec]
+        return out
+
+    # -- ingestion --------------------------------------------------------- #
+
+    def ingest_session_file(self, path: Path | str) -> int:
+        """Index every turn of a session JSONL as a fact. Returns ingested."""
+        path = Path(path)
+        added = 0
+        try:
+            lines = path.read_text(errors="replace").splitlines()
+        except OSError:
+            return 0
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            user = (rec.get("user") or "").strip()
+            answer = (rec.get("final_text") or "").strip()
+            if not user and not answer:
+                continue
+            body = f"USER: {user}\nANSWER: {answer}"
+            title = f"turn {rec.get('turn', '?')}"
+            try:
+                self.remember(f"session:{path.stem}", title, body)
+                added += 1
+            except ValueError:
+                continue
+        return added
+
+    def ingest_vault(self, root: Path | str) -> int:
+        """Index every .md note in a vault. Returns ingested."""
+        root = Path(root)
+        added = 0
+        if not root.is_dir():
+            return 0
+        for p in sorted(root.rglob("*.md")):
+            try:
+                body = p.read_text(errors="replace").strip()
+            except OSError:
+                continue
+            if not body:
+                continue
+            try:
+                self.remember("vault", str(p.relative_to(root)), body)
+                added += 1
+            except ValueError:
+                continue
+        return added
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+
+def _fts_query(query: str) -> str:
+    """Build a safe FTS5 MATCH expression: AND of double-quoted terms.
+
+    User input is never interpolated raw into FTS5 syntax (a bare MATCH
+    string with special chars like `" OR "` would inject query syntax). Terms
+    are tokenized on non-alphanumerics and each one double-quoted with
+    embedded quotes doubled — the safe, standard form.
+    """
+    terms = [t for t in re.split(r"[^A-Za-z0-9_]+", query) if t]
+    if not terms:
+        return ""
+    quoted = ["\"" + t.replace('"', '""') + "\"" for t in terms]
+    return " AND ".join(quoted)

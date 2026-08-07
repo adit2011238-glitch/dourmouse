@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // AGENT ORCHESTRATION MAP</title>
+<style>
+  :root {
+    --bg: #060A12;
+    --cyan: #00F0FF;
+    --cyan-dim: #0a7f8c;
+    --amber: #FFAB00;
+    --crimson: #FF1744;
+    --teal: #2ce6b8;
+    --text: #cfe3f5;
+    --text-dim: #6f8aa6;
+    --line: rgba(255,255,255,0.08);
+    --line-strong: rgba(0,240,255,0.35);
+    --panel: rgba(13,22,36,0.62);
+    --mono: "JetBrains Mono", "Space Grotesk", "Share Tech Mono", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1100px 520px at 70% -12%, rgba(0,120,180,0.20), transparent 60%),
+      radial-gradient(800px 500px at -8% 112%, rgba(0,80,140,0.14), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    overflow: hidden;
+  }
+  .scanlines {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 3px);
+    mix-blend-mode: overlay;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
+
+  /* ---------------- header ---------------- */
+  #hdr {
+    display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+    border-bottom: 1px solid var(--line); background: rgba(8,14,26,0.7);
+    backdrop-filter: blur(8px);
+  }
+  #hdr .title { font-size: 14px; font-weight: 700; letter-spacing: 0.2em; color: var(--cyan); text-shadow: 0 0 14px rgba(0,240,255,0.45); white-space: nowrap; }
+  #hdr .sub { font-size: 9px; letter-spacing: 0.18em; color: var(--text-dim); }
+  #searchwrap { position: relative; flex: 1; max-width: 560px; }
+  #search {
+    width: 100%; padding: 10px 14px; border-radius: 9px;
+    border: 1px solid var(--line-strong); background: rgba(8,16,28,0.8);
+    color: var(--text); font-family: var(--mono); font-size: 12.5px; outline: none;
+    box-shadow: 0 0 0 1px rgba(0,240,255,0.06);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  #search:focus { border-color: var(--cyan); box-shadow: 0 0 22px rgba(0,240,255,0.25); }
+  #search::placeholder { color: var(--text-dim); opacity: 0.8; }
+  #results {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20;
+    border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden;
+    background: rgba(10,18,32,0.97); backdrop-filter: blur(8px); display: none;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+  }
+  #results.open { display: block; }
+  .res-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer;
+    border-bottom: 1px solid var(--line); transition: background 0.12s;
+  }
+  .res-row:last-child { border-bottom: none; }
+  .res-row:hover { background: rgba(0,240,255,0.08); }
+  .res-row .rn { color: var(--cyan); font-weight: 700; font-size: 12px; letter-spacing: 0.1em; }
+  .res-row .rt { font-size: 9px; color: var(--text-dim); margin-left: auto; white-space: nowrap; }
+  .res-row .rt .sc { color: var(--teal); }
+  #hdr .open-dash {
+    margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+    padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line-strong);
+    background: linear-gradient(135deg, rgba(0,240,255,0.18), rgba(10,80,120,0.24));
+    color: var(--cyan); cursor: pointer; text-decoration: none; white-space: nowrap;
+    transition: box-shadow 0.15s, transform 0.12s;
+  }
+  #hdr .open-dash:hover { box-shadow: 0 0 16px rgba(0,240,255,0.4); transform: translateY(-1px); }
+
+  /* ---------------- body: map + detail ---------------- */
+  #body { flex: 1; display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+
+  #map {
+    position: relative; overflow-y: auto; padding: 26px;
+    background:
+      linear-gradient(rgba(0,240,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,240,255,0.035) 1px, transparent 1px);
+    background-size: 34px 34px;
+  }
+  #maptitle { font-size: 10px; letter-spacing: 0.28em; color: var(--text-dim); margin-bottom: 18px; }
+  #nodes {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;
+  }
+  .node {
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px;
+    background: var(--panel); backdrop-filter: blur(6px); cursor: pointer;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+    position: relative; overflow: hidden;
+  }
+  .node:hover { border-color: rgba(0,240,255,0.35); transform: translateY(-2px); }
+  .node.selected { border-color: var(--cyan); box-shadow: 0 0 22px rgba(0,240,255,0.25); }
+  .node .ring { position: absolute; inset: 0; pointer-events: none; border-radius: 12px; }
+  .node.computing .ring { animation: ringpulse 1.1s ease-in-out infinite; }
+  @keyframes ringpulse { 0%,100% { box-shadow: inset 0 0 0 0 rgba(0,240,255,0); } 50% { box-shadow: inset 0 0 0 2px rgba(0,240,255,0.55); } }
+  .node.auth { border-color: rgba(255,171,0,0.55); }
+  .nhead { display: flex; align-items: center; gap: 10px; }
+  .spinner { width: 30px; height: 30px; flex: none; }
+  .spinner circle:last-child { transform-origin: center; transform-box: fill-box; animation: spin 2.4s linear infinite; }
+  .node.computing .spinner circle:last-child { animation-duration: 0.55s; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .nname { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; color: var(--cyan); }
+  .ndomain { font-size: 8.5px; letter-spacing: 0.16em; color: var(--text-dim); }
+  .npill {
+    margin-left: auto; flex: none; font-size: 8.5px; letter-spacing: 0.12em; padding: 3px 7px;
+    border-radius: 4px; border: 1px solid; color: var(--teal); border-color: rgba(44,230,184,0.5);
+    background: rgba(44,230,184,0.10); text-shadow: 0 0 8px rgba(44,230,184,0.5);
+  }
+  .npill.computing { color: var(--cyan); border-color: rgba(0,240,255,0.55); background: rgba(0,240,255,0.10); animation: pulse 0.9s infinite; }
+  .npill.auth { color: var(--amber); border-color: rgba(255,171,0,0.6); background: rgba(255,171,0,0.10); animation: blink 0.8s step-start infinite; }
+  .npill.live { color: var(--teal); border-color: rgba(44,230,184,0.6); background: rgba(44,230,184,0.14); animation: pulse 2.2s infinite; }
+  .node.live { border-color: rgba(44,230,184,0.35); }
+  .nunread {
+    position: absolute; top: 10px; right: 10px; font-size: 8.5px; letter-spacing: 0.1em;
+    padding: 2px 6px; border-radius: 999px; color: var(--teal);
+    border: 1px solid rgba(44,230,184,0.55); background: rgba(44,230,184,0.12);
+    animation: pulse 2s infinite;
+  }
+  .fe.msg { border-color: rgba(44,230,184,0.4); background: rgba(44,230,184,0.05); }
+  .fe.msg .tag { color: var(--teal); font-weight: 700; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+  @keyframes blink { 50% { opacity: 0.3; } }
+  .ndesc { font-size: 9.5px; color: var(--text-dim); margin: 9px 0 8px; line-height: 1.45; }
+  .nlast { font-size: 9px; color: var(--text-dim); letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nlast b { color: var(--teal); font-weight: 700; }
+
+  /* ---------------- detail panel ---------------- */
+  #detail {
+    border-left: 1px solid var(--line); background: rgba(8,14,26,0.5);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .dtitle { font-size: 9.5px; letter-spacing: 0.28em; color: var(--text-dim); padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  #dbody { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .dempty { color: var(--text-dim); font-size: 10px; letter-spacing: 0.14em; line-height: 1.8; text-align: center; padding: 30px 10px; }
+  #dname { font-size: 15px; font-weight: 700; letter-spacing: 0.14em; color: var(--cyan); }
+  #dstatus { display: inline-block; margin-left: 8px; font-size: 9px; letter-spacing: 0.14em; padding: 3px 8px; border-radius: 4px; border: 1px solid; color: var(--teal); border-color: rgba(44,230,184,0.5); background: rgba(44,230,184,0.10); vertical-align: middle; }
+  #dstatus.computing { color: var(--cyan); border-color: rgba(0,240,255,0.55); background: rgba(0,240,255,0.10); animation: pulse 0.9s infinite; }
+  #dstatus.auth { color: var(--amber); border-color: rgba(255,171,0,0.6); background: rgba(255,171,0,0.10); animation: blink 0.8s infinite; }
+  #dstatus.live { color: var(--teal); border-color: rgba(44,230,184,0.55); background: rgba(44,230,184,0.12); animation: pulse 2.2s infinite; }
+  #ddesc { font-size: 10.5px; color: var(--text-dim); line-height: 1.55; }
+  #dmodel { font-size: 9.5px; color: var(--teal); letter-spacing: 0.14em; margin-top: 7px; }
+  .dtools { display: flex; flex-wrap: wrap; gap: 5px; }
+  .dchip { font-size: 9px; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 4px; background: rgba(0,240,255,0.07); border: 1px solid rgba(0,240,255,0.22); color: var(--cyan); }
+  .dchip.gated { background: rgba(255,171,0,0.08); border-color: rgba(255,171,0,0.35); color: var(--amber); }
+  .dchip.prohib { background: rgba(255,23,68,0.08); border-color: rgba(255,23,68,0.35); color: var(--crimson); }
+  .sec { font-size: 9px; letter-spacing: 0.24em; color: var(--text-dim); margin: 4px 0 8px; }
+  #dispatchbox { border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px; background: rgba(8,16,28,0.7); }
+  #dispatchbox:focus-within { border-color: var(--cyan); box-shadow: 0 0 16px rgba(0,240,255,0.2); }
+  #dinput { width: 100%; background: transparent; border: none; outline: none; resize: none; color: var(--text); font-family: var(--mono); font-size: 11.5px; line-height: 1.5; }
+  #dinput::placeholder { color: var(--text-dim); opacity: 0.8; }
+  .drow { display: flex; gap: 8px; margin-top: 8px; }
+  #dsend {
+    flex: 1; font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em;
+    padding: 9px 10px; border-radius: 7px; border: 1px solid var(--line-strong);
+    background: linear-gradient(135deg, rgba(0,240,255,0.22), rgba(10,80,120,0.28)); color: var(--cyan);
+    cursor: pointer; transition: box-shadow 0.12s, transform 0.12s;
+  }
+  #dsend:hover:not(:disabled) { box-shadow: 0 0 14px rgba(0,240,255,0.4); transform: translateY(-1px); }
+  #dsend:disabled { opacity: 0.4; cursor: not-allowed; }
+  #dstatusline { font-size: 9.5px; color: var(--text-dim); letter-spacing: 0.08em; }
+  #dfeed { display: flex; flex-direction: column; gap: 6px; }
+  .fe {
+    font-size: 10px; line-height: 1.5; padding: 7px 10px; border-radius: 7px;
+    border: 1px solid var(--line); background: rgba(8,16,28,0.6); white-space: pre-wrap; word-break: break-word;
+  }
+  .fe .ts { color: #48627e; }
+  .fe.tool_use { border-color: rgba(0,240,255,0.25); }
+  .fe.tool_use .tag { color: var(--cyan); font-weight: 700; }
+  .fe.tool_result { border-color: rgba(44,230,184,0.25); }
+  .fe.tool_result .tag { color: var(--teal); font-weight: 700; }
+  .fe.auth { border-color: rgba(255,171,0,0.4); }
+  .fe.auth .tag { color: var(--amber); font-weight: 700; }
+  .fe.live { border-color: rgba(44,230,184,0.35); }
+  .fe.live .tag { color: var(--teal); font-weight: 700; }
+
+  /* ---------------- neural link graph view ---------------- */
+  #viewtoggle { display: flex; gap: 6px; }
+  .vt {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
+    padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line-strong);
+    background: transparent; color: var(--text-dim); cursor: pointer;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  .vt:hover { color: var(--text); }
+  .vt.active { color: var(--cyan); background: rgba(0,240,255,0.12); box-shadow: 0 0 12px rgba(0,240,255,0.25); }
+  #graph { position: relative; width: 100%; height: 100%; min-height: 540px; }
+  #graph svg { width: 100%; height: 100%; display: block; }
+  .g-link { stroke-width: 1; opacity: 0.26; transition: opacity 0.2s; }
+  .g-link.delegate { stroke: var(--cyan); stroke-dasharray: 4 5; }
+  .g-link.memory { stroke: var(--teal); }
+  .g-link.peer { stroke: #48627e; }
+  .g-link.active { opacity: 1; animation: linkpulse 1.1s ease-in-out infinite; }
+  @keyframes linkpulse { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
+  .g-node { cursor: pointer; transition: transform 0.15s; }
+  .g-node:hover { transform: scale(1.07); }
+  .g-node circle { transition: filter 0.2s, stroke 0.2s; }
+  .g-node.selected circle { filter: drop-shadow(0 0 9px rgba(0,240,255,0.9)); stroke: var(--cyan); stroke-width: 3; }
+  .g-node text { fill: var(--text); font-size: 9.5px; font-family: var(--mono); letter-spacing: 0.08em; pointer-events: none; }
+  .g-node .glabel { font-size: 8px; fill: var(--text-dim); letter-spacing: 0.12em; }
+  .g-node.active circle { animation: gpulse 1s ease-in-out infinite; }
+  @keyframes gpulse { 0%,100% { stroke-width: 2; } 50% { stroke-width: 6; } }
+
+  /* ---------------- v3.2: live bus communication visualization ---------------- */
+  .pulse-trail { pointer-events: none; }
+  .pulse-dot { pointer-events: none; }
+  .node.flash { animation: nodeflash 0.7s ease-out; }
+  @keyframes nodeflash { 0% { box-shadow: 0 0 0 0 rgba(0,240,255,0.7); } 100% { box-shadow: 0 0 0 20px rgba(0,240,255,0); } }
+  #stream {
+    position: fixed; left: 20px; bottom: 18px; z-index: 40;
+    display: flex; flex-direction: column-reverse; gap: 6px; max-width: 540px;
+    pointer-events: none;
+  }
+  .tic {
+    font-size: 9.5px; line-height: 1.5; padding: 8px 12px; border-radius: 8px;
+    background: rgba(8,16,28,0.94); border: 1px solid rgba(0,240,255,0.35);
+    box-shadow: 0 0 14px rgba(0,240,255,0.18); color: var(--text);
+    animation: ticin 0.28s ease-out; transition: opacity 0.6s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tic b { color: var(--cyan); font-weight: 700; }
+  .tic .tto { color: var(--teal); }
+  .tic .tclose { color: #48627e; }
+  @keyframes ticin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,240,255,0.16); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0,240,255,0.3); }
+
+  @media (max-width: 900px) {
+    #body { grid-template-columns: 1fr; }
+    #detail { border-left: none; border-top: 1px solid var(--line); }
+    #hdr .sub { display: none; }
+  }
+  /* v4.0: phone-friendly layout — map becomes a single column with the
+     detail panel below the graph. */
+  @media (max-width: 760px) {
+    #body { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    #detail { max-height: 42vh; }
+    .toolbar { flex-wrap: wrap; }
+    .keyhint { display: none; }
+    #search { font-size: 14px; min-height: 40px; }
+  }
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+<div id="app">
+  <header id="hdr">
+    <div>
+      <div class="title">◈ AGENT ORCHESTRATION MAP</div>
+      <div class="sub">DISPATCH NETWORK // LIVE</div>
+    </div>
+    <div id="searchwrap">
+      <input id="search" type="text" placeholder="FIND THE AGENT FOR A TASK — e.g. 'search the web', 'delete a file', 'draft an email'…" autocomplete="off" spellcheck="false">
+      <div id="results"></div>
+    </div>
+    <div id="viewtoggle">
+      <button class="vt active" data-view="grid">[GRID]</button>
+      <button class="vt" data-view="neural">[NEURAL_LINK]</button>
+    </div>
+    <a class="open-dash" href="/">OPEN DASHBOARD</a>
+  </header>
+
+  <div id="body">
+    <div id="map">
+      <div id="maptitle">SUPERVISED SUBAGENT NETWORK // CLICK A NODE TO INSPECT</div>
+      <div id="nodes">SCANNING ROSTER…</div>
+      <div id="graph" style="display:none"></div>
+      <div id="stream"></div>
+    </div>
+
+    <aside id="detail">
+      <div class="dtitle">AGENT DETAIL // LIVE TELEMETRY</div>
+      <div id="dbody">
+        <div class="dempty">Select an agent from the map to see what it's doing,<br>its tools, and dispatch a task directly to it.</div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  const nodesEl = document.getElementById('nodes');
+  const searchEl = document.getElementById('search');
+  const resultsEl = document.getElementById('results');
+  const dbody = document.getElementById('dbody');
+
+  let roster = [];            // [{name, domain, description, tools:[{name,permission,description}]}]
+  let selected = null;        // selected agent name
+  let statuses = {};          // name -> {status, last, feed}
+  let nodeEls = {};           // name -> DOM element
+  let inboxes = {};           // name -> {inbox, unread} (v3.0 bus data)
+  let lastRenderedSnap = null; // JSON of the selected agent's state we last rendered
+  let graphPos = {};           // name -> {x,y} neural-view node positions (v3.2)
+  let lastMsgId = 0;           // highest bus msg id already animated (v3.2)
+
+  // ---------- helpers ----------
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  function now() { return new Date().toTimeString().slice(0, 8); }
+
+  function renderNodes() {
+    nodesEl.innerHTML = '';
+    nodeEls = {};
+    for (const ag of roster) {
+      const el = document.createElement('div');
+      el.className = 'node';
+      el.dataset.name = ag.name;
+      el.innerHTML = `
+        <div class="ring"></div>
+        <div class="nhead">
+          <svg class="spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="rgba(0,240,255,0.18)" stroke-width="2"/><circle cx="12" cy="12" r="10" fill="none" stroke="#00F0FF" stroke-width="2" stroke-dasharray="15 47" stroke-linecap="round"/></svg>
+          <div><div class="nname">${esc(ag.name)}</div><div class="ndomain">${esc(ag.domain)}</div></div>
+          <div class="npill">[IDLE]</div>
+        </div>
+        <div class="ndesc">${esc(ag.description)}</div>
+        <div class="nlast"><b>LAST</b>: awaiting first dispatch</div>`;
+      el.addEventListener('click', () => selectAgent(ag.name));
+      applyInboxBadge(ag.name);
+      nodesEl.appendChild(el);
+      nodeEls[ag.name] = el;
+    }
+  }
+
+  function pillText(status) {
+    return status === 'computing' ? '[COMPUTING]' : status === 'auth' ? '[HOLD_AUTH]' : status === 'live' ? '[LIVE]' : '[IDLE]';
+  }
+
+  // v3.0: unread message badge on each node card + inbox in the detail feed.
+  function applyInboxBadge(name) {
+    const el = nodeEls[name];
+    if (!el) return;
+    const unread = (inboxes[name] && inboxes[name].unread) || 0;
+    let b = el.querySelector('.nunread');
+    if (unread > 0) {
+      if (!b) {
+        b = document.createElement('div');
+        b.className = 'nunread';
+        b.textContent = unread + ' MSG';
+        el.appendChild(b);
+      } else {
+        b.textContent = unread + ' MSG';
+      }
+    } else if (b) {
+      b.remove();
+    }
+  }
+
+  function applyStatuses() {
+    for (const [name, st] of Object.entries(statuses)) {
+      const el = nodeEls[name];
+      if (!el) continue;
+      el.classList.toggle('computing', st.status === 'computing');
+      el.classList.toggle('auth', st.status === 'auth');
+      el.classList.toggle('live', st.status === 'live');
+      const pill = el.querySelector('.npill');
+      pill.className = 'npill' + (st.status === 'computing' ? ' computing' : st.status === 'auth' ? ' auth' : st.status === 'live' ? ' live' : '');
+      pill.textContent = pillText(st.status);
+      const last = el.querySelector('.nlast');
+      if (st.last && st.last.tool) {
+        last.innerHTML = `<b>LAST</b>: ${esc(st.last.tool)}${st.last.result ? ' → done' : st.status !== 'idle' ? ' … running' : ' → done'}`;
+      } else {
+        last.innerHTML = `<b>LAST</b>: awaiting first dispatch`;
+      }
+      applyInboxBadge(name);
+      if (name === selected) {
+        // Only re-render the detail panel when the agent's data ACTUALLY
+        // changed — otherwise the 1s poll would rebuild the dispatch
+        // textarea every tick and wipe in-progress typed input.
+        const snap = JSON.stringify(st) + JSON.stringify(inboxes[name] || {});
+        if (snap !== lastRenderedSnap) { lastRenderedSnap = snap; renderDetail(); }
+      }
+    }
+  }
+
+  // ---------- detail panel ----------
+  function selectAgent(name) {
+    selected = name;
+    lastRenderedSnap = null;  // force a fresh render on click
+    for (const [n, el] of Object.entries(nodeEls)) el.classList.toggle('selected', n === name);
+    renderDetail();
+    if (searchEl.value) { searchEl.value = ''; resultsEl.classList.remove('open'); }
+  }
+
+  function renderDetail() {
+    const ag = roster.find(a => a.name === selected);
+    if (!ag) return;
+    const st = statuses[selected] || { status: 'idle', last: null, feed: [] };
+    let chips = '';
+    for (const t of ag.tools) {
+      const cls = t.permission === 'requires_confirmation' ? 'gated' : t.permission === 'prohibited' ? 'prohib' : '';
+      chips += `<span class="dchip ${cls}" title="${esc(t.permission)}">${esc(t.name)}</span>`;
+    }
+    const feedHtml = (st.feed || []).slice().reverse().map(f => {
+      if (f.type === 'tool_use') return `<div class="fe tool_use"><span class="ts">[${f.at ? f.at.slice(11) : ''}]</span> <span class="tag">TOOL</span> ${esc(f.tool)} ${esc(f.args || '')}</div>`;
+      if (f.type === 'tool_result') return `<div class="fe tool_result"><span class="ts">[${f.at ? f.at.slice(11) : ''}]</span> <span class="tag">RESULT</span> ${esc((f.text || '').slice(0, 160))}</div>`;
+      if (f.type === 'auth') return `<div class="fe auth"><span class="ts">[${f.at ? f.at.slice(11) : ''}]</span> <span class="tag">HOLD_AUTH</span> ${esc((f.prompt || '').slice(0, 160))}</div>`;
+      if (f.type === 'live') return `<div class="fe live"><span class="ts">[${f.at ? f.at.slice(11) : ''}]</span> <span class="tag">LIVE</span> ${esc(f.tool)} — ${esc((f.text || '').slice(0, 160))}</div>`;
+      return '';
+    }).join('') || '<div class="fe"><span class="ts">[—]</span> no activity yet</div>';
+    // v3.0: real inter-agent inbox for this agent (direct + broadcast).
+    const box = inboxes[selected] || { inbox: [], unread: 0 };
+    const unread = box.unread || 0;
+    const inboxRows = (box.inbox || []).map(m => {
+      const dest = m.to === '*' ? 'ALL' : esc(m.to);
+      const tag = m.read ? 'read  ' : 'UNREAD';
+      return `<div class="fe msg"><span class="ts">[${m.at ? m.at.slice(11) : ''}]</span> <span class="tag">${tag}</span> <b style="color:var(--cyan)">${esc(m.from)}</b> → ${dest} <b style="color:var(--teal)">${esc(m.subject || '')}</b><br>${esc((m.body || '').slice(0, 160))}</div>`;
+    }).join('') || '<div class="fe"><span class="ts">[—]</span> no messages yet</div>';
+    const inboxHtml = inboxRows;
+
+    dbody.innerHTML = `
+      <div><span id="dname">${esc(ag.name)}</span><span id="dstatus" class="${st.status === 'computing' ? 'computing' : st.status === 'auth' ? 'auth' : st.status === 'live' ? 'live' : ''}">${pillText(st.status)}</span></div>
+      <div id="ddesc">${esc(ag.description)}</div>
+      <div id="dmodel">MODEL: ${esc(ag.model || 'default')}</div>
+      <div class="sec">TOOLKIT</div>
+      <div class="dtools">${chips}</div>
+      <div class="sec">DISPATCH DIRECTIVE</div>
+      <div id="dispatchbox">
+        <textarea id="dinput" rows="2" placeholder="Send a task to ${esc(ag.name)}…"></textarea>
+        <div class="drow">
+          <button id="dsend">[SEND_DIRECTIVE]</button>
+          <button id="dopenwin" title="Open ${esc(ag.name)}'s own live window">[LIVE WINDOW]</button>
+          <div id="dstatusline"></div>
+        </div>
+      </div>
+      <div class="sec">LIVE ACTIVITY FEED</div>
+      <div id="dfeed">${feedHtml}</div>
+      <div class="sec">INBOX // INTER-AGENT COMMS${unread ? ' <span style="color:var(--teal)">(' + unread + ' UNREAD)</span>' : ''}</div>
+      <div id="dinbox">${inboxHtml}</div>`;
+
+    document.getElementById('dsend').addEventListener('click', () => dispatchToAgent(ag.name));
+    document.getElementById('dopenwin').addEventListener('click', () => {
+      const api = (window.pywebview && window.pywebview.api) || null;
+      if (api && typeof api.open_agent === 'function') { api.open_agent(ag.name); }
+      else { window.open('/agent/' + encodeURIComponent(ag.name), 'dourmouseAgent_' + ag.name, 'width=980,height=760'); }
+    });
+    const di = document.getElementById('dinput');
+    di.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dispatchToAgent(ag.name); } });
+    di.focus();
+  }
+
+  async function dispatchToAgent(name) {
+    const prompt = document.getElementById('dinput').value.trim();
+    if (!prompt) return;
+    // v2.7: dispatching to an agent also opens its own live window, so you
+    // can watch it work from every entry point (dashboard + map + window).
+    const api = (window.pywebview && window.pywebview.api) || null;
+    if (api && typeof api.open_agent === 'function') { api.open_agent(name); }
+    else { window.open('/agent/' + encodeURIComponent(name), 'dourmouseAgent_' + name, 'width=980,height=760'); }
+    const btn = document.getElementById('dsend');
+    const line = document.getElementById('dstatusline');
+    btn.disabled = true;
+    line.textContent = 'dispatching…';
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, focus_agent: name }),
+      });
+      if (!res.ok || !res.body) { line.textContent = 'HTTP ' + res.status; return; }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '', finished = false;
+      const handle = evt => {
+        if (evt.type === 'done') { line.textContent = '✓ completed'; finished = true; }
+        else if (evt.type === 'error') { line.textContent = '✕ ' + evt.message; finished = true; }
+      };
+      while (!finished) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          if (!chunk.startsWith('data: ')) continue;
+          try { handle(JSON.parse(chunk.slice(6))); } catch (e) { /* skip */ }
+        }
+      }
+      try { await reader.cancel(); } catch (e) { /* ignore */ }
+    } catch (e) {
+      line.textContent = '✕ ' + e.message;
+    } finally {
+      btn.disabled = false;
+      setTimeout(() => { if (line.textContent.includes('completed')) line.textContent = ''; }, 4000);
+    }
+  }
+
+  // ---------- task search ----------
+  let searchTimer = null;
+  searchEl.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => runSearch(searchEl.value.trim()), 180);
+  });
+  searchEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && resultsEl.querySelector('.res-row')) {
+      resultsEl.querySelector('.res-row').click();
+    }
+    if (e.key === 'Escape') resultsEl.classList.remove('open');
+  });
+
+  async function runSearch(q) {
+    if (!q) { resultsEl.classList.remove('open'); return; }
+    try {
+      const r = await fetch('/api/find_agent?q=' + encodeURIComponent(q));
+      const data = await r.json();
+      resultsEl.innerHTML = '';
+      if (!data.matches || !data.matches.length) {
+        resultsEl.innerHTML = '<div class="res-row"><span class="rn" style="color:var(--text-dim)">no matching agent</span></div>';
+      } else {
+        for (const m of data.matches) {
+          const row = document.createElement('div');
+          row.className = 'res-row';
+          row.innerHTML = `<span class="rn">${esc(m.name)}</span><span class="rt"><span class="sc">score ${m.score}</span> · ${esc(m.tools.join(', '))}</span>`;
+          row.addEventListener('click', () => { selectAgent(m.name); });
+          resultsEl.appendChild(row);
+        }
+      }
+      resultsEl.classList.add('open');
+    } catch (e) { /* keep quiet */ }
+  }
+
+  // ---------- polling ----------
+  async function pollActivity() {
+    try {
+      const r = await fetch('/api/activity');
+      const data = await r.json();
+      statuses = data.agents || {};
+      applyStatuses();
+      pulseGraph();
+    } catch (e) { /* transient */ }
+  }
+
+  // v3.0/v3.2: poll the inter-agent bus. Since= fetches ONLY messages newer
+  // than the last one we animated, so every fresh message triggers a live
+  // pulse on the map (neural view) / flash on the cards (grid view) + a
+  // COMMS STREAM ticker row. Unread counts stay absolute (whole-bus, from
+  // the same response); inbox ROWS still come from refreshSelectedInbox so
+  // this poll never wipes the detail panel's inbox.
+  function msgNum(id) { const m = /^msg-(\d+)$/.exec(id || ''); return m ? parseInt(m[1], 10) : 0; }
+
+  function pushStream(msg) {
+    const stream = document.getElementById('stream');
+    if (!stream) return;
+    const dest = msg.to === '*' ? 'ALL' : msg.to;
+    const row = document.createElement('div');
+    row.className = 'tic';
+    row.innerHTML = `<span class="tclose">[${(msg.at || '').slice(11)}]</span> <b>${esc(msg.from)}</b> <span class="tto">→ ${esc(dest)}</span> ${esc((msg.subject || '').slice(0, 70))}`;
+    stream.appendChild(row);
+    while (stream.children.length > 5) stream.removeChild(stream.firstChild);
+    setTimeout(() => {
+      row.style.opacity = '0';
+      setTimeout(() => row.remove(), 650);
+    }, 5200);
+  }
+
+  function flashNode(name) {
+    const el = nodeEls[name];
+    if (!el) return;
+    el.classList.remove('flash');
+    void el.offsetWidth;  // restart the animation
+    el.classList.add('flash');
+  }
+
+  function pulseTo(sx, sy, tx, ty) {
+    const svg = graphEl.querySelector('svg');
+    if (!svg) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const trail = document.createElementNS(NS, 'line');
+    trail.setAttribute('class', 'pulse-trail');
+    trail.setAttribute('x1', sx); trail.setAttribute('y1', sy);
+    trail.setAttribute('x2', tx); trail.setAttribute('y2', ty);
+    trail.setAttribute('stroke', '#00F0FF'); trail.setAttribute('stroke-width', '2');
+    trail.setAttribute('opacity', '0.9');
+    svg.appendChild(trail);
+    const dot = document.createElementNS(NS, 'circle');
+    dot.setAttribute('class', 'pulse-dot');
+    dot.setAttribute('r', '5');
+    dot.setAttribute('fill', '#00F0FF');
+    dot.setAttribute('filter', 'drop-shadow(0 0 6px #00F0FF)');
+    svg.appendChild(dot);
+    const t0 = performance.now(), dur = 650;
+    function step(t) {
+      const p = Math.min((t - t0) / dur, 1);
+      const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      const x = sx + (tx - sx) * ease, y = sy + (ty - sy) * ease;
+      dot.setAttribute('cx', x); dot.setAttribute('cy', y);
+      trail.setAttribute('opacity', (0.9 * (1 - p)).toFixed(2));
+      if (p < 1) requestAnimationFrame(step);
+      else { dot.remove(); trail.remove(); }
+    }
+    requestAnimationFrame(step);
+  }
+
+  function animateBusMessage(msg) {
+    // grid view: flash the cards involved (sender + recipients). Broadcasts
+    // fan out — cap the flash like the pulses so a live agent's broadcast
+    // doesn't strobe the whole grid (reviewer-caught).
+    const allNames = roster.map(a => a.name);
+    const recips = msg.to === '*' ? allNames.filter(n => n !== msg.from) : [msg.to];
+    flashNode(msg.from);
+    recips.slice(0, 12).forEach(flashNode);
+    // neural view: a glowing pulse from sender to every recipient.
+    if (graphView && graphPos[msg.from]) {
+      const targets = recips.map(n => graphPos[n]).filter(Boolean);
+      targets.slice(0, 12).forEach(t => pulseTo(graphPos[msg.from].x, graphPos[msg.from].y, t.x, t.y));
+    }
+    pushStream(msg);
+  }
+
+  async function pollBus() {
+    try {
+      const r = await fetch('/api/messages?since=msg-' + lastMsgId);
+      const data = await r.json();
+      // Update unread badges (absolute counts from the same response).
+      const unreadAll = data.unread || {};
+      for (const ag of roster) {
+        const prev = inboxes[ag.name] || { inbox: [], unread: 0 };
+        inboxes[ag.name] = { inbox: prev.inbox, unread: unreadAll[ag.name] || 0 };
+      }
+      applyStatuses();
+      // Animate each NEW message (newest-first -> reverse for arrival order).
+      (data.messages || []).slice().reverse().forEach(m => {
+        const n = msgNum(m.id);
+        if (n > lastMsgId) lastMsgId = n;
+        animateBusMessage(m);
+      });
+    } catch (e) { /* transient */ }
+  }
+  function refreshSelectedInbox() {
+    if (!selected) return;
+    fetch('/api/agent/' + encodeURIComponent(selected)).then(r => r.json()).then(d => {
+      inboxes[selected] = { inbox: d.inbox || [], unread: d.unread || 0 };
+      applyInboxBadge(selected);
+      const snap = JSON.stringify(statuses[selected] || {}) + JSON.stringify(inboxes[selected] || {});
+      if (snap !== lastRenderedSnap) { lastRenderedSnap = snap; renderDetail(); }
+    }).catch(() => {});
+  }
+
+  // ---------- neural link graph ----------
+  let graphData = { nodes: [], edges: [] };
+  let graphView = false;
+  const graphEl = document.getElementById('graph');
+  const nodesWrap = document.getElementById('nodes');
+
+  document.querySelectorAll('.vt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      graphView = btn.dataset.view === 'neural';
+      document.querySelectorAll('.vt').forEach(b => b.classList.toggle('active', b === btn));
+      nodesWrap.style.display = graphView ? 'none' : '';
+      graphEl.style.display = graphView ? '' : 'none';
+      if (graphView) renderGraph();
+    });
+  });
+
+  function renderGraph() {
+    if (!graphData.nodes.length) {
+      graphEl.innerHTML = '<div class="dempty">no link topology — is /api/links up?</div>';
+      return;
+    }
+    const W = graphEl.clientWidth || 900;
+    const H = Math.max(graphEl.clientHeight || 560, 520);
+    const cx = W / 2, cy = H / 2;
+    const R = Math.min(W, H) / 2 - 90;
+
+    // Position: orchestrator at center; memory as inner hub; others on a
+    // ring grouped by domain sectors (deterministic, no force sim).
+    const pos = {};
+    pos['orchestrator'] = { x: cx, y: cy, r: 26 };
+    const mem = graphData.nodes.find(n => n.name === 'memory');
+    if (mem) pos['memory'] = { x: cx, y: cy + 42, r: 20 };
+
+    const ring = graphData.nodes.filter(n => n.name !== 'orchestrator' && n.name !== 'memory');
+    const byDomain = {};
+    ring.forEach(n => { (byDomain[n.domain] = byDomain[n.domain] || []).push(n); });
+    const domains = Object.keys(byDomain);
+    const total = ring.length || 1;
+    let start = -Math.PI / 2;
+    const SECTOR_GAP = 0.14;
+    domains.forEach((dom, di) => {
+      const frac = byDomain[dom].length / total;
+      const span = frac * Math.PI * 2 - SECTOR_GAP;
+      const step = span / Math.max(byDomain[dom].length, 1);
+      byDomain[dom].forEach((n, i) => {
+        const a = start + (i + 0.5) * step;
+        pos[n.name] = { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), r: 22 };
+      });
+      start += frac * Math.PI * 2;
+    });
+
+    // v3.2: remember node positions so bus pulses can travel between agents.
+    graphPos = {};
+    for (const k of Object.keys(pos)) graphPos[k] = { x: pos[k].x, y: pos[k].y };
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}">`;
+    const kindColor = { delegate: '#00F0FF', memory: '#2ce6b8', peer: '#48627e' };
+    for (const e of graphData.edges) {
+      const s = pos[e.source], t = pos[e.target];
+      if (!s || !t) continue;
+      svg += `<line class="g-link ${e.kind}" data-src="${esc(e.source)}" data-tgt="${esc(e.target)}"
+        x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}"
+        stroke="${kindColor[e.kind] || '#48627e'}" stroke-width="1" stroke-dasharray="${e.kind === 'delegate' ? '4 5' : ''}"/>`;
+    }
+    for (const n of graphData.nodes) {
+      const p = pos[n.name];
+      if (!p) continue;
+      svg += `<g class="g-node" data-name="${esc(n.name)}" transform="translate(${p.x},${p.y})">
+        <circle r="${p.r}" fill="rgba(13,22,36,0.9)" stroke="rgba(0,240,255,0.55)" stroke-width="2"/>
+        <text y="-8" text-anchor="middle" class="glabel">${esc(n.domain)}</text>
+        <text y="7" text-anchor="middle">${esc(n.name)}</text>
+        <text y="${p.r + 15}" text-anchor="middle" class="glabel">${n.tool_count} tools</text>
+      </g>`;
+    }
+    svg += '</svg>';
+    graphEl.innerHTML = svg;
+
+    graphEl.querySelectorAll('.g-node').forEach(g => {
+      g.addEventListener('click', () => selectAgent(g.dataset.name));
+    });
+    pulseGraph();
+  }
+
+  function pulseGraph() {
+    if (!graphView) return;
+    const activeNames = new Set(
+      Object.entries(statuses).filter(([, st]) => st.status === 'computing').map(([n]) => n)
+    );
+    graphEl.querySelectorAll('.g-link').forEach(l => {
+      l.classList.toggle('active', activeNames.has(l.dataset.src) || activeNames.has(l.dataset.tgt));
+    });
+    graphEl.querySelectorAll('.g-node').forEach(g => {
+      g.classList.toggle('active', activeNames.has(g.dataset.name));
+      g.classList.toggle('selected', g.dataset.name === selected);
+    });
+  }
+
+  // ---------- boot ----------
+  fetch('/api/roster').then(r => r.json()).then(data => {
+    roster = data.subagents;
+    renderNodes();
+    pollActivity();
+    pollBus();
+    setInterval(pollActivity, 1000);
+    setInterval(pollBus, 1000);
+    setInterval(refreshSelectedInbox, 2500);
+  }).catch(() => { nodesEl.innerHTML = '<div class="dempty">ROSTER OFFLINE — is the server running?</div>'; });
+
+  fetch('/api/links').then(r => r.json()).then(data => {
+    graphData = data;
+    if (graphView) renderGraph();
+  }).catch(() => { /* graph stays empty; grid still works */ });
+})();
+</script>
+</body>
+</html>
