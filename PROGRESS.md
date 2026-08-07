@@ -132,6 +132,34 @@ User request: the master spec — a private, local-first AI operating system.
   test_multi_device (12), test_ui_local (11), test_self_improve (7),
   test_memory_embed (18), test_repo_index (27), test_voice (34),
   test_repo_panel (18). Total 783.
+- JARVIS COMPLETION PASS (user: "stay as true to the original JARVIS design
+  from the first three Iron Man movies; execute your plan to complete").
+  (a) ROLLBACK PATH — the folder was NOT a git repo: git init + .gitignore
+  (.env, .venv, workspace/, caches excluded) + baseline commit `4dbc003`.
+  (b) LOCAL BRAIN PINNED — .env: DOURMOUSE_LLM_BACKEND=ollama +
+  OLLAMA_MODEL=qwen3:8b; config resolves live (OllamaConfig, qwen3:8b,
+  http://127.0.0.1:11434/v1, ollama_available()=True). The model zoo is
+  already rich (qwen3:8b, qwen2.5-coder:14b, gemma4:12b, gpt-oss:120b,
+  embeddings) — nothing to download.
+  (c) JARVIS DESIGN PASS (index.html, login.html, map.html): holo ice-blue
+  palette shift (--cyan #8FD0FF, --cyan-bright #eaf7ff, --bg #04070E,
+  rgba bulk re-tint) across all three pages; Stark-lab blueprint-grid
+  backdrop; helmet-HUD targeting frame (edge tick strips + corner
+  brackets, #hudframe); full-screen BOOT SEQUENCE overlay — arc-reactor
+  ring ignition SVG, D.O.U.R.M.O.U.S.E. wordmark in holo light sans,
+  sequential typed boot lines, auto-fold after ~3s; the centre core SVG
+  redesigned as an ARC REACTOR — six triangular palisade segments + five
+  coil rings + white-hot centre hub (radar sweep + sector labels and all
+  `.arc/.sweep/.sector/.hub` classes preserved for the state machine);
+  login/map wordmarks restyled to the JARVIS holo treatment. All UI-test
+  contracts preserved (particles, sweep, sectors, setCoreState, backendline,
+  @media, zero external resources). Verified: 783 passed (50.7s), 11/11 UI
+  contracts, live boot at 127.0.0.1:8765 — /api/backend shows
+  OLLAMA · qwen3:8b, no console errors, computed styles confirm the holo
+  palette + 6-segment reactor, headless-Chrome screenshots of boot + HUD
+  captured. Two follow-up items left for a later pass (voice/semantic
+  backends already work; broker + Obsidian phases remain deliberately
+  gated).
 
 ---
 
