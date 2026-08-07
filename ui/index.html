@@ -943,11 +943,14 @@
   // bridge; in a plain browser it falls back to a new tab.
   const openedAgentWindows = new Set();
   function openAgentWindow(name) {
+    // Auto-open only when a real desktop bridge exists. The SSE callback that
+    // reaches here is NOT a user gesture, so in a plain browser the popup is
+    // silently blocked (and in strict automation it can hijack the tab and
+    // kill the HUD stream). Agent windows stay reachable from the map and
+    // per-agent links.
     const api = (window.pywebview && window.pywebview.api) || null;
     if (api && typeof api.open_agent === 'function') {
       api.open_agent(name);
-    } else {
-      window.open('/agent/' + encodeURIComponent(name), 'dourmouseAgent_' + name, 'width=980,height=760');
     }
   }
 
