@@ -6,33 +6,42 @@
 <title>DOURMOUSE // AGENT WINDOW</title>
 <style>
   :root {
-    --bg: #060A12;
-    --cyan: #00F0FF;
-    --cyan-dim: #0a7f8c;
-    --amber: #FFAB00;
-    --crimson: #FF1744;
-    --teal: #2ce6b8;
-    --text: #cfe3f5;
-    --text-dim: #6f8aa6;
-    --line: rgba(255,255,255,0.08);
-    --line-strong: rgba(0,240,255,0.35);
-    --panel: rgba(13,22,36,0.62);
-    --mono: "JetBrains Mono", "Space Grotesk", "Share Tech Mono", "SF Mono", Consolas, monospace;
+    /* ---- JARVIS Scene Archive & Design System · palette ---- */
+    --ground: #0B0E14;
+    --surface: #12151E;
+    --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
+    --amber: #F5A623; --amber-rgb: 245,166,35;
+    --red:   #EF5350; --red-rgb:   239,83,80;
+    --gold:  #FFD232; --gold-rgb:  255,210,50;
+    --dead:  #8A929E; --dead-rgb:  138,146,158;
+    --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22;
+    --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
+    /* ---- type ---- */
+    --font-display:  "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
+    --font-mono:     "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --font-prose:    "Inter",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
+    /* ---- semantic aliases ---- */
+    --text: rgba(var(--cyan-rgb), var(--a85));
+    --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    --line: rgba(var(--cyan-rgb), var(--a10));
+    --line-strong: rgba(var(--cyan-rgb), var(--a30));
+    --panel: rgba(18,21,30,0.72);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
     background:
-      radial-gradient(900px 480px at 75% -10%, rgba(0,120,180,0.22), transparent 60%),
-      radial-gradient(700px 460px at -6% 110%, rgba(0,80,140,0.16), transparent 55%),
-      var(--bg);
+      radial-gradient(900px 480px at 75% -10%, rgba(var(--cyan-rgb), 0.12), transparent 60%),
+      radial-gradient(700px 460px at -6% 110%, rgba(var(--cyan-rgb), 0.10), transparent 55%),
+      var(--ground);
     color: var(--text);
-    font-family: var(--mono);
+    font-family: var(--font-mono);
     overflow: hidden;
   }
   .scanlines {
     position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background: repeating-linear-gradient(0deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 3px);
+    background: repeating-linear-gradient(0deg, rgba(var(--cyan-rgb), 0.014) 0 1px, transparent 1px 3px);
     mix-blend-mode: overlay;
   }
   #app { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
@@ -40,81 +49,93 @@
   /* ---------------- header ---------------- */
   #hdr {
     display: flex; align-items: center; gap: 16px; padding: 12px 20px;
-    border-bottom: 1px solid var(--line); background: rgba(8,14,26,0.7);
+    border-bottom: 1px solid var(--line); background: rgba(18,21,30,0.72);
     backdrop-filter: blur(8px);
   }
-  #hdr .title { font-size: 14px; font-weight: 700; letter-spacing: 0.2em; color: var(--cyan); text-shadow: 0 0 14px rgba(0,240,255,0.45); white-space: nowrap; }
-  #hdr .sub { font-size: 9px; letter-spacing: 0.18em; color: var(--text-dim); }
+  #hdr .title {
+    font-family: var(--font-display); font-weight: 100;
+    font-size: 15px; letter-spacing: 0.22em; color: var(--text);
+    text-shadow: 0 0 14px rgba(var(--cyan-rgb), var(--a30)); white-space: nowrap;
+  }
+  #hdr .sub { font-size: 8px; letter-spacing: 0.10em; font-weight: 300; color: var(--text-dim); }
   #hdr .spacer { flex: 1; }
-  #hdr a { color: var(--text-dim); text-decoration: none; font-size: 11px; letter-spacing: 0.12em; border: 1px solid var(--line); padding: 7px 12px; border-radius: 8px; transition: color .2s, border-color .2s; }
-  #hdr a:hover { color: var(--cyan); border-color: var(--line-strong); }
-  #agentname { color: var(--cyan); font-size: 15px; font-weight: 700; letter-spacing: 0.14em; text-shadow: 0 0 16px rgba(0,240,255,0.5); }
-  #agentdomain { color: var(--text-dim); font-size: 9.5px; letter-spacing: 0.2em; }
-  #pill { padding: 6px 12px; border-radius: 999px; font-size: 10px; letter-spacing: 0.16em; border: 1px solid var(--line); color: var(--text-dim); }
-  #pill.computing { color: var(--cyan); border-color: var(--line-strong); box-shadow: 0 0 16px rgba(0,240,255,0.35); animation: pulse 1s ease-in-out infinite; }
-  #pill.auth { color: var(--amber); border-color: rgba(255,171,0,0.5); animation: blink 0.8s steps(2, start) infinite; }
-  #pill.live { color: var(--teal); border-color: rgba(44,230,184,0.55); box-shadow: 0 0 16px rgba(44,230,184,0.30); animation: pulse 2.2s ease-in-out infinite; }
+  #hdr a { color: var(--text-dim); text-decoration: none; font-size: 10px; letter-spacing: 0.06em; border: 1px solid var(--line); padding: 7px 12px; transition: color 200ms, border-color 200ms; }
+  #hdr a:hover { color: var(--text); border-color: var(--line-strong); }
+  #agentname { color: var(--text); font-size: 14px; font-weight: 600; letter-spacing: 0.06em; text-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a30)); }
+  #agentdomain { color: var(--text-dim); font-size: 8px; letter-spacing: 0.10em; font-weight: 300; }
+  #pill { padding: 6px 12px; font-size: 9px; letter-spacing: 0.06em; font-weight: 400; border: 1px solid var(--line); color: var(--text-dim); }
+  #pill.computing { color: var(--text); border-color: var(--line-strong); box-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a22)); animation: pulse 1s ease-in-out infinite; }
+  #pill.auth { color: var(--amber); border-color: rgba(var(--amber-rgb), var(--a45)); animation: blink 0.8s steps(2, start) infinite; }
+  #pill.live { color: var(--text); border-color: rgba(var(--cyan-rgb), var(--a45)); box-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a16)); animation: pulse 2.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
   @keyframes blink { 50% { opacity: 0.3; } }
 
   /* ---------------- body ---------------- */
   #body { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; }
-  #desc { color: var(--text-dim); font-size: 11.5px; line-height: 1.6; border-left: 2px solid var(--line-strong); padding-left: 12px; }
-  #model { color: var(--teal); font-size: 10px; letter-spacing: 0.14em; margin-top: 8px; padding-left: 14px; }
+  #desc { color: var(--text-dim); font-size: 11px; font-weight: 300; line-height: 1.6; border-left: 2px solid var(--line-strong); padding-left: 12px; }
+  #model { color: var(--text-dim); font-size: 9px; font-weight: 300; letter-spacing: 0.06em; margin-top: 8px; padding-left: 14px; }
 
-  .sec { font-size: 9px; letter-spacing: 0.28em; color: var(--cyan-dim); margin: 2px 0 8px; }
+  .sec { font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); margin: 2px 0 8px; }
 
   /* ---------------- toolkit ---------------- */
   #tools { display: flex; flex-wrap: wrap; gap: 8px; }
-  .tchip { padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line); background: rgba(8,16,28,0.7); color: var(--text); font-family: var(--mono); font-size: 10.5px; }
-  .tchip.gated { border-color: rgba(255,171,0,0.45); color: var(--amber); }
-  .tchip.prohib { border-color: rgba(255,23,68,0.45); color: var(--crimson); }
+  .tchip { padding: 5px 10px; border: 1px solid var(--line); background: rgba(18,21,30,0.7); color: var(--text); font-family: var(--font-mono); font-size: 10px; font-weight: 300; }
+  .tchip.gated { border-color: rgba(var(--amber-rgb), var(--a45)); color: var(--amber); }
+  .tchip.prohib { border-color: rgba(var(--red-rgb), var(--a45)); color: var(--red); }
 
   /* ---------------- dispatch ---------------- */
-  #dispatch { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 14px; }
+  #dispatch { border: 1px solid var(--line); background: var(--panel); padding: 14px; }
   #dinput {
-    width: 100%; padding: 10px 12px; border-radius: 8px; resize: none;
-    border: 1px solid var(--line-strong); background: rgba(8,16,28,0.8);
-    color: var(--text); font-family: var(--mono); font-size: 12px; outline: none;
+    width: 100%; padding: 10px 12px; resize: none;
+    border: 1px solid var(--line-strong); background: rgba(18,21,30,0.8);
+    color: var(--text); font-family: var(--font-mono); font-size: 12px; font-weight: 300; outline: none;
   }
-  #dinput:focus { border-color: var(--cyan); box-shadow: 0 0 18px rgba(0,240,255,0.22); }
+  #dinput:focus { border-color: var(--cyan); box-shadow: 0 0 18px rgba(var(--cyan-rgb), var(--a16)); }
   #drow { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
-  #dsend { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line-strong); background: rgba(0,240,255,0.08); color: var(--cyan); font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; cursor: pointer; transition: background .2s, box-shadow .2s; }
-  #dsend:hover:not(:disabled) { background: rgba(0,240,255,0.18); box-shadow: 0 0 20px rgba(0,240,255,0.3); }
+  #dsend { padding: 8px 16px; border: 1px solid var(--line-strong); background: rgba(var(--cyan-rgb), var(--a06)); color: var(--text); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; font-weight: 600; cursor: pointer; transition: background 200ms, box-shadow 200ms; }
+  #dsend:hover:not(:disabled) { background: rgba(var(--cyan-rgb), var(--a10)); box-shadow: 0 0 20px rgba(var(--cyan-rgb), var(--a22)); }
   #dsend:disabled { opacity: 0.45; cursor: default; }
-  #dstatusline { color: var(--text-dim); font-size: 10.5px; }
+  #dstatusline { color: var(--text-dim); font-size: 10px; font-weight: 300; }
 
   /* ---------------- live feed ---------------- */
-  #feedwrap { flex: 1; min-height: 160px; border: 1px solid var(--line); border-radius: 10px; background: rgba(6,12,22,0.55); overflow: hidden; display: flex; flex-direction: column; }
+  #feedwrap { flex: 1; min-height: 160px; border: 1px solid var(--line); background: rgba(18,21,30,0.55); overflow: hidden; display: flex; flex-direction: column; }
   #feed { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
-  .fe { font-size: 11px; line-height: 1.5; word-break: break-word; }
-  .fe .ts { color: var(--text-dim); font-size: 9.5px; }
-  .fe .tag { font-size: 9px; letter-spacing: 0.16em; padding: 1px 6px; border-radius: 4px; margin: 0 6px 0 4px; }
-  .fe.tool_use .tag { color: var(--cyan); border: 1px solid rgba(0,240,255,0.4); }
-  .fe.tool_result .tag { color: var(--teal); border: 1px solid rgba(44,230,184,0.4); }
-  .fe.auth .tag { color: var(--amber); border: 1px solid rgba(255,171,0,0.4); }
-  .fe.live .tag { color: var(--teal); border: 1px solid rgba(44,230,184,0.45); }
-  .fe.live { border-left: 2px solid rgba(44,230,184,0.4); }
-  .fe.msg .tag { color: var(--teal); border: 1px solid rgba(44,230,184,0.5); }
-  .fe.msg { border-left: 2px solid rgba(44,230,184,0.45); background: rgba(44,230,184,0.04); }
-  #inboxwrap { flex: 1; min-height: 120px; border: 1px solid var(--line); border-radius: 10px; background: rgba(6,12,22,0.55); overflow: hidden; display: flex; flex-direction: column; }
-  /* v3.2: flash the inbox when a NEW inter-agent message arrives */
-  #inboxwrap.flash { animation: inboxflash 1.2s ease-out; border-color: rgba(44,230,184,0.6); }
-  @keyframes inboxflash { 0% { box-shadow: 0 0 18px rgba(44,230,184,0.45); } 100% { box-shadow: none; } }
+  .fe { font-size: 10px; font-weight: 300; line-height: 1.5; word-break: break-word; }
+  .fe .ts { color: var(--text-dim); font-size: 9px; }
+  .fe .tag { font-size: 8px; letter-spacing: 0.06em; font-weight: 600; padding: 1px 6px; margin: 0 6px 0 4px; }
+  .fe.tool_use .tag { color: var(--text); border: 1px solid rgba(var(--cyan-rgb), var(--a30)); }
+  .fe.tool_result .tag { color: var(--text); border: 1px solid rgba(var(--cyan-rgb), var(--a30)); }
+  .fe.auth .tag { color: var(--amber); border: 1px solid rgba(var(--amber-rgb), var(--a30)); }
+  .fe.live .tag { color: var(--text); border: 1px solid rgba(var(--cyan-rgb), var(--a30)); }
+  .fe.live { border-left: 2px solid rgba(var(--cyan-rgb), var(--a30)); }
+  .fe.msg .tag { color: var(--text); border: 1px solid rgba(var(--cyan-rgb), var(--a30)); }
+  .fe.msg { border-left: 2px solid rgba(var(--cyan-rgb), var(--a30)); background: rgba(var(--cyan-rgb), var(--a06)); }
+  #inboxwrap { flex: 1; min-height: 120px; border: 1px solid var(--line); background: rgba(18,21,30,0.55); overflow: hidden; display: flex; flex-direction: column; }
+  #inboxwrap.flash { animation: inboxflash 1.2s ease-out; border-color: rgba(var(--cyan-rgb), var(--a60)); }
+  @keyframes inboxflash { 0% { box-shadow: 0 0 18px rgba(var(--cyan-rgb), var(--a30)); } 100% { box-shadow: none; } }
   #inbox { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
-  #inboxempty { color: var(--text-dim); font-size: 11px; }
-  .fe .tool { color: var(--text); font-weight: 700; }
+  #inboxempty { color: var(--text-dim); font-size: 10px; font-weight: 300; }
+  .fe .tool { color: var(--text); font-weight: 600; }
   .fe .args { color: var(--text-dim); }
-  #empty { color: var(--text-dim); font-size: 11px; }
+  #empty { color: var(--text-dim); font-size: 10px; font-weight: 300; }
   ::-webkit-scrollbar { width: 8px; }
-  ::-webkit-scrollbar-thumb { background: rgba(0,240,255,0.25); border-radius: 4px; }
-  /* v4.0: phone-friendly layout — single column, touch-sized controls. */
+  ::-webkit-scrollbar-thumb { background: rgba(var(--cyan-rgb), var(--a16)); }
+  /* phone-friendly layout — single column, touch-sized controls. */
   @media (max-width: 640px) {
     #body { padding: 12px; }
     #drow { flex-wrap: wrap; }
     #directive { font-size: 14px; min-height: 44px; }
     .nchip { min-height: 34px; }
     .keyhint { display: none; }
+  }
+
+  /* reduced motion — freeze rotation and pulse, keep alpha states and glyphs */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001s !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001s !important;
+    }
   }
 </style>
 </head>
@@ -146,7 +167,7 @@
     </div>
     <div class="sec">LIVE ACTIVITY FEED</div>
     <div id="feedwrap"><div id="feed"><div class="fe" id="empty">awaiting first activity…</div></div></div>
-    <div class="sec">INBOX // INTER-AGENT COMMS <span id="inboxcount" style="color:var(--teal)"></span></div>
+    <div class="sec">INBOX // INTER-AGENT COMMS <span id="inboxcount" style="color:var(--text)"></span></div>
     <div id="inboxwrap"><div id="inbox"><div class="fe" id="inboxempty">no messages yet</div></div></div>
   </div>
 </div>

@@ -1570,6 +1570,32 @@ Notes:
 Status: not started
 Notes: Server exists at ~/.claude/obsidian_mcp_server.py. Response-timeout bug to debug.
 
+### v4.0 UI — Full JARVIS Scene Archive & Design System Redesign (Aug 2026)
+Status: done — 791 tests pass, live-verified at 127.0.0.1:8765
+Notes:
+- Rebuilt all four pages (index/map/agent/login) on the official design-system
+  spec: ground #0B0E14, surface #12151E, cyan #4FC3F7, amber #F5A623, red
+  #EF5350, gold #FFD232, dead #8A929E. No tints — depth only via the 8-step
+  alpha scale (0.06/0.10/0.16/0.22/0.30/0.45/0.60/0.85).
+- Type: Exo 2 (display, weight-100 logotype), JetBrains Mono (data, tabular),
+  Inter (prose), Orbitron (wordmark only). Local-first stacks, zero CDN.
+- Core reticle rebuilt to spec: R1 closed · R2/R3 broken arcs · R4 dashed tick
+  ring · 0.08S crosshair stubs (static anchor) · pulsing core dot. Adjacent
+  rings counter-rotate (Rule 04); arcs breathe.
+- Corner-bracket rank system (Rule 05): XL focal on the core, L on the side
+  panels, M on tiles — alpha-only focus, never scale.
+- Rule 09: gold SYSTEM INTEGRITY self-portrait — real number from telemetry
+  (damage-based: idle is healthy, severed nodes drop it) + live-agent sub-count.
+- Rule 10: backend identity = hue + cadence. OLLAMA = cyan; hosted swaps the
+  whole accent to amber and quickens the sweep (verified live). Geometry static.
+- Rule 12: missing values render "— —", never 0 and never blank.
+- Particles: DPI-aware canvas, 60-80 desktop, radii 1.2-2.0, 8-step alphas,
+  sine wander + linkage lines (0.09*(1-d/60)) — the interface idling.
+- Boot retimed to the spec's 2400ms staged assembly (core dot → R1 → R2 →
+  crosshair → tick ring), wordmark in Orbitron 0.3em.
+- prefers-reduced-motion freezes rotation/pulse, keeps alpha states + glyphs.
+- Committed 8f9af02; zip rebuilt (1.17MB / 87 files, no leaks).
+
 ### Phase 3 — Monitoring Agent + Conversational Front End
 Status: not started
 Notes: Alpaca read-only polling + Slack. Needs Alpaca paper creds.
