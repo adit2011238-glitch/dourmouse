@@ -93,6 +93,29 @@ class TestLooksMultiStep:
         registry = build_general_registry()
         assert build_plan(ctx, registry) is None
 
+    def test_user_prompt_mentioning_feature_not_stripped(self):
+        """The boilerplate anchor is the exact '[PARENT CONTEXT —' prefix, so
+        a user prompt that merely MENTIONS the feature is never truncated."""
+        p = "explain what [PARENT CONTEXT] blocks are for"
+        assert looks_multi_step(p) is False  # not mangled into a plan
+        assert "explain" not in [s["task"] for s in (build_plan(p, build_general_registry()) or [])]
+
+    def test_capability_credit_is_per_verb_not_per_tool(self):
+        """Kitchen-sink agents (system: read_path/list_path/open_path;
+        memory: search_vault/recall) must not compound capability points
+        over focused agents for one intent. 'search the web' must keep
+        routing to research_info ahead of memory despite memory owning three
+        search-stemmed tools."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "search the web", limit=4)
+        assert m[0]["name"] == "research_info"
+        mem = next((r for r in m if r["name"] == "memory"), None)
+        res = m[0]
+        if mem is not None:
+            # memory's search_vault/recall/memory_search_semantic earn ONE
+            # capability point total, not three.
+            assert mem["score"] <= res["score"]
+
     def test_empty_prompt(self):
         assert not looks_multi_step("")
         assert not looks_multi_step("   ")

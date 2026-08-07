@@ -1170,7 +1170,11 @@ def _run_dispatch_loop(
             if plan:
                 missing = _missing_plan_steps()
                 if missing:
-                    text += "\n\n[DOURMOUSE: plan step(s) not executed — " + "; ".join(
+                    # Soft wording: "not executed via tools" — a knowledge
+                    # step answered without a tool (e.g. "tell me the file
+                    # path") is still flagged, but reads as an honest note
+                    # rather than a failure verdict.
+                    text += "\n\n[DOURMOUSE: plan step(s) not executed via tools — " + "; ".join(
                         f"STEP {s['n']}/{len(plan)} ({s['subagent']}): {s['task']}"
                         for s in missing
                     ) + "]"

@@ -942,13 +942,16 @@
   // native desktop app this opens a real second window via the js_api
   // bridge; in a plain browser it falls back to a new tab.
   const openedAgentWindows = new Set();
+  function hasDesktopBridge() {
+    const api = (window.pywebview && window.pywebview.api) || null;
+    return !!(api && typeof api.open_agent === 'function');
+  }
   function openAgentWindow(name) {
     // User-initiated path (roster ⧉, map LIVE WINDOW): native window via the
     // desktop bridge when present, otherwise a plain-browser tab. This runs
     // from a real user gesture, so the popup is never silently blocked.
-    const api = (window.pywebview && window.pywebview.api) || null;
-    if (api && typeof api.open_agent === 'function') {
-      api.open_agent(name);
+    if (hasDesktopBridge()) {
+      window.pywebview.api.open_agent(name);
       return;
     }
     window.open('/agent/' + encodeURIComponent(name), 'dourmouseAgent_' + name, 'width=980,height=760');
@@ -958,8 +961,7 @@
     // bridge exists. A plain-browser popup from here would be silently
     // blocked (and in strict automation it can hijack the tab and kill the
     // HUD stream). Agent windows stay reachable from the roster and map.
-    const api = (window.pywebview && window.pywebview.api) || null;
-    if (api && typeof api.open_agent === 'function') openAgentWindow(name);
+    if (hasDesktopBridge()) openAgentWindow(name);
   }
 
   function setNodeState(name, state) {

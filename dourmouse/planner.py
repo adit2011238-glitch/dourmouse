@@ -100,7 +100,10 @@ def _task_only(prompt: str) -> str:
     got a 3-step garbage plan and an extra LLM call). Background context is
     not the task, so planning must never see it.
     """
-    return re.split(r"\[PARENT CONTEXT", prompt)[0]
+    # Anchor on the exact boilerplate prefix ("[PARENT CONTEXT — read this;
+    # ...]") so a user prompt that merely MENTIONS the feature is not
+    # truncated.
+    return re.split(r"\[PARENT CONTEXT \u2014", prompt)[0]
 
 
 def looks_multi_step(prompt: str) -> bool:
@@ -163,18 +166,23 @@ def find_agents_for_query(
         name_hits = sum(1 for t in tokens if t in sub.name)
         hay_hits = sum(1 for t in tokens if t in haystack)
         tool_hits = sum(1 for t in sub.tools if t.name in mentions)
-        cap_hits = 0
-        if verb_stems:
-            for _tool in sub.tools:
-                stems = set(re.split(r"[^a-z0-9]+", _tool.name.lower()))
-                if stems & verb_stems:
-                    cap_hits += 1
-        # The capability bonus is deliberately +1 per tool (a tie-breaker,
-        # not a dominator): it must resolve a write-intent step toward the
-        # agent that OWNS write_* tools without ever outscoring an explicit
-        # tool mention (+5) or a real name hit (+3) for other verbs — e.g.
-        # memory's search_vault/recall must not steal a web-search step
-        # from research_info.
+        # Capability credit: +1 per DISTINCT intent verb the agent's tools
+        # satisfy, never per matching tool — a kitchen-sink agent (system's
+        # read_path/list_path/open_path; memory's search_vault/recall) must
+        # not compound points over a focused agent for the same single
+        # intent. Pure tie-breaker: it resolves a write-intent step toward
+        # the agent that OWNS write_* tools without ever outscoring an
+        # explicit tool mention (+5) or a real name hit (+3).
+        tool_stems = {
+            stem
+            for _tool in sub.tools
+            for stem in re.split(r"[^a-z0-9]+", _tool.name.lower())
+        }
+        cap_hits = sum(
+            1
+            for _t in tokens
+            if _t in _VERB_CAPABILITY and tool_stems & _VERB_CAPABILITY[_t]
+        )
         score = name_hits * 3 + tool_hits * 5 + hay_hits + cap_hits
         if score > 0:
             scored.append(
