@@ -11,11 +11,14 @@ monkeypatched, and no network is ever touched (Rules 2.1 / 2.8).
 from __future__ import annotations
 
 import http.client
+import json
 import threading
 import time
 from typing import Any
 
 import pytest
+
+import dourmouse.dispatch as dispatch_module
 
 from dourmouse import config as config_module
 from dourmouse.config import (
@@ -266,48 +269,37 @@ class TestDispatchDefaultBackend:
 class TestLiveCaughtRegressions:
     """Both bugs were caught LIVE against real Ollama, then pinned here."""
 
-    def test_keyless_backend_never_sends_empty_key(self):
-        """The OpenAI SDK rejects api_key='' — keyless Ollama configs must
-        substitute a sentinel or the local brain crashes (Missing credentials)."""
-        from dourmouse.dispatch import _build_client
-
-        cfg = OllamaConfig()
-        assert cfg.api_key == ""  # the contract: keyless by design
-        client = _build_client(cfg)
-        assert client.api_key != ""
-
-    def test_thinking_models_get_enable_thinking_false(self):
-        """qwen3 burns its token budget on reasoning and returns EMPTY content;
-        keyless (Ollama) calls must send enable_thinking=False. NVIDIA calls
-        must NOT get the extra_body (it is ignored at best)."""
-        from dourmouse.dispatch import _call_with_retry
+    def test_ollama_uses_native_client_with_speed_fixes(self):
+        """The local path must NOT use the OpenAI-compat endpoint (this Ollama
+        build ignores think/enable_thinking there — measured live: 57-73s
+        thinking traces per answer). It uses the native adapter instead, which
+        disables thinking, keeps the model warm, and raises the context
+        window past the 4096 truncation default."""
         from dourmouse.config import NvidiaConfig
+        from dourmouse.dispatch import OllamaNativeClient, _build_client
+
+        # NVIDIA keeps the OpenAI SDK, with the keyless sentinel.
+        nvidia = NvidiaConfig(api_key="nvapi-x", base_url="http://x", model="m")
+        assert isinstance(_build_client(nvidia), dispatch_module.OpenAI)
+
+        # Ollama gets the native adapter — no API key at all.
+        ollama = OllamaConfig()
+        assert ollama.api_key == ""  # the contract: keyless by design
+        client = _build_client(ollama)
+        assert isinstance(client, OllamaNativeClient)
 
         captured: dict = {}
 
-        class _Spy:
-            def __init__(self, cfg: object) -> None:
-                self._cfg = cfg
+        def fake_post(payload):
+            captured.update(payload)
+            return json.dumps({"message": {"role": "assistant", "content": "ok"}, "done": True})
 
-            # dispatch calls client.chat.completions.create(...) — an attribute
-            # chain, so chat/completions must be properties, not methods.
-            @property
-            def chat(self):
-                return self
-
-            @property
-            def completions(self):
-                return self
-
-            def create(self, **kwargs):
-                captured.update(kwargs)
-                return None
-
-        nvidia = NvidiaConfig(api_key="nvapi-x", base_url="http://x", model="m")
-        _call_with_retry(_Spy(nvidia), model="m", messages=[], tools=[], config=nvidia)
-        assert captured.get("extra_body") is None
-
-        ollama = OllamaConfig()
-        captured.clear()
-        _call_with_retry(_Spy(ollama), model="m", messages=[], tools=[], config=ollama)
-        assert captured.get("extra_body") == {"enable_thinking": False}
+        native = OllamaNativeClient(ollama, _post=fake_post)
+        native.chat.completions.create(
+            model="qwen3:8b", messages=[{"role": "user", "content": "hi"}], stream=False
+        )
+        assert captured["think"] is False
+        assert captured["enable_thinking"] is False
+        assert captured["keep_alive"] == dispatch_module._OLLAMA_KEEP_ALIVE
+        assert captured["options"]["num_ctx"] == dispatch_module._OLLAMA_NUM_CTX
+        assert captured["options"]["num_predict"] == dispatch_module._DEFAULT_MAX_TOKENS

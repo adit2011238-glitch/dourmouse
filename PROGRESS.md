@@ -174,6 +174,32 @@ User request: the master spec — a private, local-first AI operating system.
   test_long_lived_session_turn_not_budget_exhausted. Suite 786. Live
   re-verified: the same directive now plans -> news agent -> tool_use ->
   LIVE NEWS HEADLINES with real headlines.
+- SPEED + RESPONSE QUALITY PASS (user: "it's slow and laggy, I want a clear
+  response, an experience to rival Claude"). Measured before/after live:
+  (a) ROOT CAUSE 1 — qwen3 emitted LONG THINKING TRACES before every
+  answer: this Ollama build's OpenAI-compat endpoint IGNORES
+  enable_thinking (measured 57-73s of hidden reasoning per answer) while
+  the NATIVE /api/chat honors think=False (2+2 in 3.2s/9 tokens vs
+  39.6s/188). The Ollama path now uses a native adapter (OllamaNativeClient
+  in dispatch.py) — OpenAI-shaped responses and stream chunks, think=False
+  + enable_thinking=False + keep_alive=30m + num_ctx=8192 (was the
+  4096-truncation default); tool-call history is translated to Ollama's
+  native format (OpenAI string-args/type/id made the native decoder 400
+  "can't find closing }" on tool round-trips).
+  (b) ROOT CAUSE 2 — every request shipped ALL 60 tool schemas: measured
+  5,457 tokens of cold prefill @ 67 t/s = 81s before the first token.
+  Tools are now SCOPED to the plan's agents (+ orchestrator delegate) via
+  _scoped_tool_specs; plain questions send no tools.
+  (c) REAL STREAMING — the loop emits assistant_delta events via a native
+  incremental NDJSON reader; the HUD renders tokens word-by-word in a live
+  answer block (flushed on assistant_text/done).
+  (d) RESPONSE STYLE — system prompt rule 8: answer first, headers/bullets,
+  summarize tool output, no preamble/emoji.
+  MEASURED: plain chat first token 87s -> 6.1s (14x); agentic news
+  round-trip 33.6s end-to-end with live streaming; answers structured and
+  direct. New tests: stream delta/tool-call accumulation, native client
+  body + message shape + history translation, scoping contract (plain chat
+  = no tools, planned agent's specs passed). Suite 791.
 
 ---
 

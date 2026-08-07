@@ -23,6 +23,183 @@ from dourmouse.dispatch import (
 )
 
 
+# --- streaming fakes (v4.1) --------------------------------------------- #
+
+class _FakeStreamDelta:
+    def __init__(self, content=None, tool_calls=None):
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _FakeStreamChoice:
+    def __init__(self, delta):
+        self.delta = delta
+
+
+class _FakeStreamChunk:
+    def __init__(self, delta):
+        self.choices = [_FakeStreamChoice(delta)]
+
+
+class _FakeStreamFn:
+    def __init__(self, name=None, arguments=None):
+        self.name = name
+        self.arguments = arguments
+
+
+class _FakeStreamToolCallDelta:
+    def __init__(self, index=0, tc_id=None, name=None, arguments=None):
+        self.index = index
+        self.id = tc_id
+        self.function = _FakeStreamFn(name, arguments)
+
+
+class _FakeStreamingCompletions:
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return iter(self._chunks)
+
+
+class _FakeStreamingClient:
+    def __init__(self, chunks):
+        self.chat = type("C", (), {"completions": _FakeStreamingCompletions(chunks)})()
+
+
+# --------------------------------------------------------------------------- #
+# v4.1 streaming — token deltas to the UI, tool calls accumulated from chunks
+# --------------------------------------------------------------------------- #
+
+class TestStreaming:
+    def test_stream_completion_emits_deltas_and_assembles_text(self):
+        client = _FakeStreamingClient(
+            [
+                _FakeStreamChunk(_FakeStreamDelta(content="Hel")),
+                _FakeStreamChunk(_FakeStreamDelta(content="lo, ")),
+                _FakeStreamChunk(_FakeStreamDelta(content="world.")),
+            ]
+        )
+        deltas: list[str] = []
+        resp = dispatch_module._stream_completion(
+            client, "qwen3:8b", [{"role": "user", "content": "hi"}], [], None, deltas.append
+        )
+        assert "".join(deltas) == "Hello, world."
+        assert resp.choices[0].message.content == "Hello, world."
+        assert resp.choices[0].message.tool_calls is None
+
+    def test_stream_completion_accumulates_tool_calls(self):
+        client = _FakeStreamingClient(
+            [
+                _FakeStreamChunk(_FakeStreamDelta(tool_calls=[_FakeStreamToolCallDelta(0, "call_9", "news_headlines", '{"max_')])),
+                _FakeStreamChunk(_FakeStreamDelta(tool_calls=[_FakeStreamToolCallDelta(0, None, None, 'results": 3}')])),
+            ]
+        )
+        resp = dispatch_module._stream_completion(
+            client, "qwen3:8b", [{"role": "user", "content": "hi"}], [], None, lambda t: None
+        )
+        msg = resp.choices[0].message
+        assert msg.content == ""
+        assert msg.tool_calls is not None and len(msg.tool_calls) == 1
+        tc = msg.tool_calls[0]
+        assert tc.id == "call_9"
+        assert tc.function.name == "news_headlines"
+        assert tc.function.arguments == '{"max_results": 3}'
+
+
+class TestOllamaNativeClient:
+    """The native /api/chat adapter — fast, streamed, thinking disabled."""
+
+    def _client(self, post, cfg=None):
+        from dourmouse.config import OllamaConfig
+
+        return dispatch_module.OllamaNativeClient(cfg or OllamaConfig(), _post=post)
+
+    def test_complete_returns_openai_shaped_message(self):
+        captured: dict = {}
+
+        def fake_post(payload):
+            captured.update(payload)
+            return json.dumps({
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello there.",
+                    "tool_calls": [{
+                        "function": {"name": "news_headlines", "arguments": {"max_results": 3}},
+                    }],
+                },
+                "done": True,
+            })
+
+        client = self._client(fake_post)
+        resp = client.chat.completions.create(
+            model="qwen3:8b", messages=[{"role": "user", "content": "hi"}],
+            tools=[{"type": "function"}], stream=False,
+        )
+        msg = resp.choices[0].message
+        assert msg.content == "Hello there."
+        assert msg.tool_calls is not None and len(msg.tool_calls) == 1
+        assert msg.tool_calls[0].function.name == "news_headlines"
+        # native arguments arrive as a dict; the adapter stringifies them
+        assert json.loads(msg.tool_calls[0].function.arguments) == {"max_results": 3}
+        # the body carries the speed fixes
+        assert captured["think"] is False
+        assert captured["keep_alive"] == dispatch_module._OLLAMA_KEEP_ALIVE
+        assert captured["options"]["num_ctx"] == dispatch_module._OLLAMA_NUM_CTX
+        assert captured["options"]["num_predict"] == dispatch_module._DEFAULT_MAX_TOKENS
+
+    def test_stream_yields_delta_chunks(self):
+        lines = "\n".join(
+            json.dumps({"message": {"role": "assistant", "content": c}}) for c in ("Hel", "lo", " world")
+        )
+
+        def fake_post(payload):
+            assert payload["stream"] is True
+            return lines
+
+        client = self._client(fake_post)
+        chunks = list(client.chat.completions.create(
+            model="qwen3:8b", messages=[{"role": "user", "content": "hi"}], stream=True,
+        ))
+        text = "".join(c.choices[0].delta.content for c in chunks)
+        assert text == "Hello world"
+
+    def test_history_translated_to_native_format(self):
+        """OpenAI-format tool_calls in history must become Ollama-native
+        (arguments as an object, no id/type) or the native decoder 400s."""
+        captured: dict = {}
+
+        def fake_post(payload):
+            captured["payload"] = payload
+            return json.dumps({"message": {"role": "assistant", "content": "ok"}, "done": True})
+
+        client = self._client(fake_post)
+        client.chat.completions.create(
+            model="qwen3:8b",
+            messages=[
+                {"role": "user", "content": "news"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_1", "type": "function",
+                        "function": {"name": "news_headlines", "arguments": '{"max_results": 3}'},
+                    }],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "LIVE NEWS"},
+            ],
+            stream=False,
+        )
+        sent = captured["payload"]["messages"]
+        ass = sent[1]
+        assert "id" not in ass["tool_calls"][0]
+        assert "type" not in ass["tool_calls"][0]
+        assert ass["tool_calls"][0]["function"]["arguments"] == {"max_results": 3}
+        assert sent[2] == {"role": "tool", "content": "LIVE NEWS"}
+
+
 # --- shared fake client (same shape as test_orchestrator.py) ---
 
 class _FakeFunction:
@@ -169,8 +346,17 @@ class TestLoop:
         assert report["final_text"] == "It said hi."
 
     def test_tool_specs_are_passed_to_the_model(self):
+        """v4.1 scoping: plain chat sends NO tool schemas — the 80s-prefill
+        fix (all 60 schemas cost ~5,457 tokens of cold prefill)."""
         client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
         run_dispatch("hi", _test_registry(), client=client)
+        assert client.chat.completions.calls[0]["tools"] == []
+
+    def test_planned_agents_tool_specs_are_passed(self):
+        """An agentic prompt scopes the schemas to the plan's agents, so the
+        model still sees exactly the tools it needs to execute."""
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("echo hello and then echo goodbye", _test_registry(), client=client)
         tools = client.chat.completions.calls[0]["tools"]
         names = {t["function"]["name"] for t in tools}
         assert names == {"echo"}

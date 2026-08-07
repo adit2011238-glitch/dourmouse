@@ -1133,6 +1133,23 @@
   // Phase 2.1/3: when a plan event arrives, each subsequent tool-use ties
   // back to a step number (STEP k/n) so multi-step delegation is checkable.
   let activePlan = null;
+  // v4.1: live token streaming — assistant_delta events render into one
+  // growing answer block so the reply appears word-by-word (Claude feel).
+  let liveAnswer = null;
+  let liveBuffer = '';
+  let liveRenderPending = false;
+  function resetLiveAnswer() {
+    liveAnswer = null;
+    liveBuffer = '';
+    liveRenderPending = false;
+  }
+  function renderLiveAnswer() {
+    if (liveAnswer) {
+      liveAnswer.innerHTML = md(liveBuffer);
+      feed.scrollTop = feed.scrollHeight;
+    }
+    liveRenderPending = false;
+  }
 
   async function send() {
     const prompt = input.value.trim();
@@ -1144,6 +1161,7 @@
     toolCardsByName.clear();
     lastAssistantText = '';
     activePlan = null;
+    resetLiveAnswer();
 
     try {
       const res = await fetch('/api/chat', {
@@ -1229,16 +1247,45 @@
             showIntervention(evt.id, evt.prompt);
             break;
           }
+          case 'assistant_delta': {
+            // v4.1: live token streaming — grow the answer block in place.
+            setCoreState('thinking');
+            liveBuffer += evt.text || '';
+            if (!liveAnswer) {
+              liveAnswer = document.createElement('div');
+              liveAnswer.className = 'fline answer streaming';
+              feed.appendChild(liveAnswer);
+              feed.scrollTop = feed.scrollHeight;
+            }
+            if (!liveRenderPending) {
+              liveRenderPending = true;
+              requestAnimationFrame(renderLiveAnswer);
+            }
+            break;
+          }
           case 'assistant_text': {
             setCoreState('thinking');
             lastAssistantText = evt.text || '';
-            fline('SYSTEM', md(evt.text), null);
+            if (liveAnswer) {
+              // Final full text landed: render it once, cleanly.
+              liveAnswer.innerHTML = md(evt.text);
+              liveAnswer.classList.add('final');
+              liveAnswer = null;
+              liveBuffer = '';
+            } else {
+              fline('SYSTEM', md(evt.text), null);
+            }
+            feed.scrollTop = feed.scrollHeight;
             break;
           }
           case 'done': {
             setCoreState('complete');
             if (activeNode) setNodeState(activeNode, 'ready');
-            if (evt.final_text && evt.final_text !== lastAssistantText) {
+            if (liveAnswer) {
+              // Stream ended without an assistant_text flush (belt + braces).
+              if (evt.final_text) { liveAnswer.innerHTML = md(evt.final_text); liveAnswer.classList.add('final'); }
+              liveAnswer = null; liveBuffer = '';
+            } else if (evt.final_text && evt.final_text !== lastAssistantText) {
               fline('RESPONSE', md(evt.final_text), null);
             }
             // v2.9: let the operator teach the system — rate this answer.

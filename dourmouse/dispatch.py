@@ -70,6 +70,12 @@ def _is_transient_error(exc: Exception) -> bool:
     return False
 
 
+# Hard cap on a single LLM response. qwen3 without a cap can ramble for
+# hundreds of tokens at local speeds; 1400 tokens covers any answer and any
+# tool-call JSON with room to spare.
+_DEFAULT_MAX_TOKENS = 1400
+
+
 def _call_with_retry(
     client: Any,
     *,
@@ -78,6 +84,7 @@ def _call_with_retry(
     tools: list[dict[str, Any]],
     config: NvidiaConfig | None,
     call_log: list[dict[str, Any]] | None = None,
+    on_delta: Callable[[str], None] | None = None,
 ) -> Any:
     """LLM call with bounded retry + backoff, and optional model fallback.
 
@@ -90,22 +97,29 @@ def _call_with_retry(
     retries = max(0, int(config.max_retries)) if config else 0
     backoff = float(config.retry_backoff) if config else 0.5
     fallback = (config.fallback_model or "").strip() if config else ""
-    # v4.0 (reviewer-caught live): thinking-tuned local models (qwen3, deepseek
-    # r1) emit reasoning tokens BEFORE content and hit max_tokens empty. Ollama
-    # honours enable_thinking=False for a direct answer; NVIDIA ignores it.
-    extra_body = {"enable_thinking": False} if isinstance(config, OllamaConfig) else None
+    # v4.1: the Ollama path uses the native client, which disables thinking
+    # (think=False — the compat endpoint ignores it), pins keep_alive, and
+    # raises num_ctx past the 4096 truncation default. NVIDIA needs no extra
+    # body. (v4.0 history: thinking-tuned models emit reasoning tokens before
+    # content and hit max_tokens empty.)
+    extra_body = None
 
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
             if call_log is not None:
                 call_log.append({"model": model, "attempt": attempt + 1})
+            if on_delta is not None:
+                return _stream_completion(
+                    client, model, messages, tools, extra_body, on_delta
+                )
             return client.chat.completions.create(
                 model=model,
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
                 extra_body=extra_body,
+                max_tokens=_DEFAULT_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001 - inspect then decide
             last_exc = exc
@@ -122,9 +136,67 @@ def _call_with_retry(
             tools=tools,
             tool_choice="auto",
             extra_body=extra_body,
+            max_tokens=_DEFAULT_MAX_TOKENS,
         )
     assert last_exc is not None
     raise last_exc
+
+
+def _stream_completion(
+    client: Any,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    extra_body: dict[str, Any] | None,
+    on_delta: Callable[[str], None],
+) -> _OllamaResponse:
+    """Stream one completion, emitting text deltas to ``on_delta`` as they arrive.
+
+    Tool calls are accumulated from the OpenAI-format ``delta.tool_calls``
+    stream chunks (id + name + concatenated argument fragments). Returns an
+    OpenAI-shaped response (``choices[0].message``) so the dispatch loop is
+    unchanged. This is what gives the UI a Claude-like feel: the first tokens
+    appear in ~1s instead of the whole answer landing at once.
+    """
+    stream = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        tools=tools,
+        tool_choice="auto",
+        extra_body=extra_body,
+        max_tokens=_DEFAULT_MAX_TOKENS,
+        stream=True,
+    )
+    content_parts: list[str] = []
+    tool_acc: dict[int, dict[str, str]] = {}
+    for chunk in stream:
+        if not getattr(chunk, "choices", None):
+            continue
+        delta = chunk.choices[0].delta
+        if delta is None:
+            continue
+        text = getattr(delta, "content", None)
+        if text:
+            content_parts.append(text)
+            on_delta(text)
+        for tc in getattr(delta, "tool_calls", None) or []:
+            idx = tc.index if getattr(tc, "index", None) is not None else 0
+            acc = tool_acc.setdefault(idx, {"id": "", "name": "", "args": ""})
+            if getattr(tc, "id", None):
+                acc["id"] = tc.id
+            fn = getattr(tc, "function", None)
+            if fn is not None:
+                if getattr(fn, "name", None):
+                    acc["name"] = fn.name
+                if getattr(fn, "arguments", None):
+                    acc["args"] += fn.arguments
+    if tool_acc:
+        tool_calls = [
+            _OllamaTc(a["id"], a["name"], a["args"])
+            for _, a in sorted(tool_acc.items())
+        ]
+        return _OllamaResponse(_OllamaMessage("".join(content_parts), tool_calls))
+    return _OllamaResponse(_OllamaMessage("".join(content_parts), None))
 
 
 class Permission(str, Enum):
@@ -245,6 +317,27 @@ class DispatchRegistry:
         return "\n".join(lines) if lines else "(empty roster)"
 
 
+def _scoped_tool_specs(
+    registry: DispatchRegistry, agent_names: set[str]
+) -> list[dict[str, Any]]:
+    """Full tool schemas ONLY for the named agents (plus the orchestrator's
+    delegate tool, so mid-task delegation stays possible).
+
+    The roster description in the system message still names every agent and
+    tool, so planning is unaffected — this only shrinks the schema payload.
+    Sending all 60 schemas costs ~80s of cold prefill (measured live: 5,457
+    tokens @ 67 t/s = 81s before the first token) and dwarfs the actual
+    conversation; scoped, a plain question prefills in ~18s cold / ~1s warm.
+    """
+    names = set(agent_names)
+    names.add("orchestrator")
+    out: list[dict[str, Any]] = []
+    for sub in registry.all_subagents():
+        if sub.name in names:
+            out.extend(t.openai_spec() for t in sub.tools)
+    return out
+
+
 _SYSTEM_PROMPT = (
     "You are the Dourmouse Lead Orchestrator, operating the general "
     "dispatch roster. You interpret requests and delegate to subagent tools "
@@ -269,15 +362,258 @@ _SYSTEM_PROMPT = (
     "with delegate_task (the orchestrator's own tool) — a fresh sub-dispatch "
     "against the same roster, depth-bounded and audit-logged as a job. Only "
     "delegate when the sub-task is genuinely self-contained; otherwise use "
-    "the roster tools directly."
+    "the roster tools directly.\n"
+    "8. RESPONSE STYLE (always): answer the question FIRST — one or two clear "
+    "sentences for the headline, then detail. Use short paragraphs, headers "
+    "and bullet lists for anything multi-part. Summarize tool results in "
+    "plain language with the key facts; never dump raw tool output or JSON. "
+    "No preamble, no meta-commentary, no emojis unless asked. Be warm, "
+    "direct, and concise."
 )
 
 
-def _build_client(config: NvidiaConfig) -> OpenAI:
-    # Ollama (and other keyless local backends) carry an EMPTY api_key by
-    # design, but the OpenAI SDK rejects empty strings. Ollama ignores the
-    # key value, so substitute a non-empty sentinel for keyless configs
-    # (reviewer-caught: the live local path crashed with Missing credentials).
+# Native Ollama adapter (v4.1). The OpenAI-compat endpoint on this Ollama
+# build IGNORES think/enable_thinking (measured live: 57-73s thinking traces
+# per answer, content empty at any token cap), while the native /api/chat
+# honors think=False (measured: 2+2 in 3.2s/9 tokens vs 39.6s/188). So the
+# local path talks to the native API directly: real streaming, a warm model,
+# and a proper context window instead of the 4096-token truncation default.
+_OLLAMA_NUM_CTX = 8192
+_OLLAMA_KEEP_ALIVE = "30m"
+
+
+class _OllamaTcFunction:
+    def __init__(self, name: str, arguments: str) -> None:
+        self.name = name
+        self.arguments = arguments
+
+
+class _OllamaTc:
+    def __init__(self, tc_id: str, name: str, arguments: str) -> None:
+        self.id = tc_id
+        self.function = _OllamaTcFunction(name, arguments)
+
+
+class _OllamaMessage:
+    def __init__(self, content: str, tool_calls: list[_OllamaTc] | None) -> None:
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _OllamaResponse:
+    def __init__(self, message: _OllamaMessage) -> None:
+        self.choices = [type("_Choice", (), {"message": message})()]
+
+
+class _OllamaDelta:
+    def __init__(self, content: str | None = None, tool_calls: list | None = None) -> None:
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _OllamaChunk:
+    def __init__(self, delta: _OllamaDelta) -> None:
+        self.choices = [type("_Choice", (), {"delta": delta})()]
+
+
+class _OllamaCompletions:
+    """OpenAI-shaped ``chat.completions`` surface over the native API."""
+
+    def __init__(self, client: "OllamaNativeClient") -> None:
+        self._client = client
+
+    def create(
+        self,
+        *,
+        model: str | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+        extra_body: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        stream: bool = False,
+    ) -> Any:
+        return self._client._create(
+            model=model, messages=messages, tools=tools or [],
+            max_tokens=max_tokens, stream=stream,
+        )
+
+
+class OllamaNativeClient:
+    """Keyless local client that calls Ollama's native /api/chat.
+
+    Exposes the same call surface the dispatch loop already uses
+    (``chat.completions.create``) and returns OpenAI-shaped messages and
+    stream chunks, so nothing else in the engine changes. ``_post`` is
+    injectable for hermetic tests.
+    """
+
+    def __init__(
+        self,
+        config: OllamaConfig,
+        model: str | None = None,
+        _post: Callable[[dict[str, Any]], str] | None = None,
+    ) -> None:
+        base = (config.base_url or "http://127.0.0.1:11434/v1").strip()
+        self._root = base[:-3] if base.endswith("/v1") else base
+        self._model = model or config.model
+        self._post = _post or self._default_post
+        self.chat = type("_Chat", (), {"completions": _OllamaCompletions(self)})()
+
+    def _default_post(self, payload: dict[str, Any]) -> str:
+        import urllib.request as _urllib
+
+        req = _urllib.Request(
+            self._root + "/api/chat",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with _urllib.urlopen(req, timeout=300) as resp:
+            return resp.read().decode()
+
+    def _default_post_lines(self, payload: dict[str, Any]):
+        """Incremental NDJSON reader — this is what makes streaming real.
+
+        A buffered ``read()`` would only "stream" after the whole answer
+        finished; reading the response line by line forwards each token the
+        moment Ollama emits it.
+        """
+        import urllib.request as _urllib
+
+        req = _urllib.Request(
+            self._root + "/api/chat",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with _urllib.urlopen(req, timeout=300) as resp:
+            for raw_line in resp:
+                yield raw_line.decode()
+
+    def _translate_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Rewrite OpenAI-format history into Ollama's native shape.
+
+        The dispatch loop stores assistant tool_calls in OpenAI format
+        (stringified arguments + id/type); Ollama's native decoder REJECTS
+        that (measured: "Value looks like object, but can't find closing '}'
+        symbol" — it wants arguments as a parsed object, no id/type). Tool
+        result messages keep just role+content.
+        """
+        out: list[dict[str, Any]] = []
+        for msg in messages:
+            m = dict(msg)
+            tcs = m.get("tool_calls")
+            if tcs:
+                native_tcs = []
+                for tc in tcs:
+                    fn = tc.get("function") or {}
+                    args = fn.get("arguments")
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    native_tcs.append(
+                        {"function": {"name": fn.get("name", ""), "arguments": args}}
+                    )
+                m["tool_calls"] = native_tcs
+            if m.get("role") == "tool":
+                m.pop("tool_call_id", None)
+            out.append(m)
+        return out
+
+    def _create(
+        self,
+        *,
+        model: str | None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int | None,
+        stream: bool,
+    ) -> Any:
+        payload: dict[str, Any] = {
+            "model": model or self._model,
+            "messages": self._translate_messages(messages),
+            "stream": bool(stream),
+            "think": False,
+            "enable_thinking": False,
+            "keep_alive": _OLLAMA_KEEP_ALIVE,
+            "options": {
+                "num_predict": int(max_tokens or _DEFAULT_MAX_TOKENS),
+                "num_ctx": _OLLAMA_NUM_CTX,
+            },
+        }
+        if tools:
+            payload["tools"] = tools
+        if stream:
+            return self._stream(payload)
+        return self._complete(payload)
+
+    def _complete(self, payload: dict[str, Any]) -> _OllamaResponse:
+        data = json.loads(self._post(payload))
+        msg = data.get("message") or {}
+        tool_calls = self._native_tool_calls(msg.get("tool_calls") or [])
+        return _OllamaResponse(_OllamaMessage(msg.get("content") or "", tool_calls))
+
+    def _stream(self, payload: dict[str, Any]):
+        if self._post is self._default_post:
+            lines = self._default_post_lines(payload)
+        else:
+            lines = iter((self._post(payload) or "").splitlines())
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg = chunk.get("message") or {}
+            content = msg.get("content") or None
+            delta_tcs = None
+            tcs = msg.get("tool_calls") or []
+            if tcs:
+                delta_tcs = []
+                for i, tc in enumerate(tcs):
+                    fn = tc.get("function") or {}
+                    args = fn.get("arguments")
+                    delta_tcs.append(
+                        type("_T", (), {
+                            "index": i,
+                            "id": tc.get("id"),
+                            "function": type("_F", (), {
+                                "name": fn.get("name"),
+                                "arguments": None if args is None else json.dumps(args),
+                            })(),
+                        })()
+                    )
+            if content is None and not delta_tcs:
+                continue
+            yield _OllamaChunk(_OllamaDelta(content=content, tool_calls=delta_tcs))
+
+    @staticmethod
+    def _native_tool_calls(tcs: list[dict[str, Any]]) -> list[_OllamaTc] | None:
+        if not tcs:
+            return None
+        out: list[_OllamaTc] = []
+        for i, tc in enumerate(tcs):
+            fn = tc.get("function") or {}
+            args = fn.get("arguments")
+            out.append(
+                _OllamaTc(
+                    tc.get("id") or f"call_{i}",
+                    fn.get("name") or "",
+                    "" if args is None else (args if isinstance(args, str) else json.dumps(args)),
+                )
+            )
+        return out
+
+
+def _build_client(config: NvidiaConfig) -> Any:
+    # Ollama: talk to the native API (fast, streaming, think disabled).
+    # NVIDIA: the OpenAI SDK, with a non-empty sentinel key (Ollama ignores
+    # key values, but the SDK rejects empty strings — reviewer-caught).
+    if isinstance(config, OllamaConfig):
+        return OllamaNativeClient(config)
     key = config.api_key or "local-keyless"
     return OpenAI(api_key=key, base_url=config.base_url)
 
@@ -664,6 +1000,11 @@ def _run_dispatch_loop(
         plan_entry: dict[str, Any] = {"type": "plan", "steps": plan, "total": len(plan)}
         transcript.append(plan_entry)
         _emit_event(event_sink, plan_entry)
+    # v4.1: scope the tool schemas to the plan's agents instead of shipping
+    # all 60. Plain questions send no tools at all — the biggest single
+    # latency lever (see _scoped_tool_specs).
+    plan_agents = {step["subagent"] for step in (plan or [])}
+    scoped_tools = _scoped_tool_specs(registry, plan_agents) if plan_agents else []
 
     for _ in range(max_turns):
         # Deterministic cost cap BEFORE each LLM call (spec: prevent runaway
@@ -677,12 +1018,25 @@ def _run_dispatch_loop(
                 messages.append({"role": "assistant", "content": ""})
                 return {"final_text": "", "transcript": transcript, "messages": messages}
 
+        # v4.1: stream text tokens to the UI as they arrive (first token in
+        # ~1s instead of the whole answer landing at once). Only for the real
+        # OpenAI client at the top of the tree: engine-test fakes keep the
+        # non-streaming path, and nested delegate runs render via their own
+        # assistant_text events rather than hijacking the parent's stream.
+        on_delta = None
+        if ctx.depth == 0 and ctx.event_sink is not None and isinstance(
+            client, (OpenAI, OllamaNativeClient)
+        ):
+            def on_delta(text: str) -> None:
+                _emit_event(ctx.event_sink, {"type": "assistant_delta", "text": text})
+
         response = _call_with_retry(
             client,
             model=model,
             messages=messages,
-            tools=registry.tool_specs(),
+            tools=scoped_tools,
             config=ctx.config,
+            on_delta=on_delta,
         )
         message = response.choices[0].message
 
