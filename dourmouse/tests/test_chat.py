@@ -180,7 +180,10 @@ class TestMultiTurnMemory:
         session.cost_budget._started = time.monotonic() - 700.0  # 100s past the cap
         assert "BUDGET EXHAUSTED" in session.cost_budget.check()
         report = session.ask("send an agent to fetch the latest news")
-        assert report["final_text"] == "Latest headlines."
+        # The answer comes through (no BUDGET EXHAUSTED); the plan-step
+        # caveat is expected because the model answered without calling the
+        # fetch tool — that is the honesty contract, not a budget failure.
+        assert report["final_text"].startswith("Latest headlines.")
         assert not any(t["type"] == "budget_exhausted" for t in report["transcript"])
 
 

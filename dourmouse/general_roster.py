@@ -78,14 +78,33 @@ def _workspace_root() -> Path:
 
 
 def _safe_resolve(base: Path, rel: str) -> Path:
-    """Resolve rel under base, refusing to escape it (path-traversal guard)."""
+    """Resolve rel under base, refusing to escape it (path-traversal guard).
+
+    The refusal names the ACTUAL allowed root so an agent that guesses an
+    absolute path can recover: it needs a path RELATIVE to that root.
+    """
     target = (base / rel).resolve()
     base_resolved = base.resolve()
     try:
         target.relative_to(base_resolved)
     except ValueError:
-        raise ValueError(f"path escapes the allowed root: {rel!r}")
+        raise ValueError(
+            f"path escapes the allowed root: {rel!r}. The allowed root is "
+            f"{base_resolved} — pass 'path' RELATIVE to it (e.g. "
+            f"'notes/x.txt'), never an absolute path."
+        )
     return target
+
+
+def _sandbox_path_note() -> str:
+    """Guidance appended to workspace file-tool descriptions at registry
+    build time: agents learn the EXACT sandbox root up front, so they pass
+    relative paths instead of guessing absolute ones and getting REFUSED.
+    """
+    return (
+        " 'path' is RELATIVE to the workspace root "
+        f"{_workspace_root()} — never pass an absolute path."
+    )
 
 
 def _vault_root() -> Path:
@@ -1399,6 +1418,7 @@ def build_general_registry() -> DispatchRegistry:
     spawn NESTED dispatch runs (self-dispatch, depth/budget bounded).
     """
     registry = DispatchRegistry()
+    path_note = _sandbox_path_note()
 
     registry.register_subagent(
         _subagent(
@@ -1577,7 +1597,7 @@ def build_general_registry() -> DispatchRegistry:
                 ),
                 ToolSpec(
                     name="read_file",
-                    description="Read a text file from the workspace sandbox.",
+                    description="Read a text file from the workspace sandbox." + path_note,
                     parameters={
                         "type": "object",
                         "properties": {"path": {"type": "string"}},
@@ -1590,7 +1610,7 @@ def build_general_registry() -> DispatchRegistry:
                     description=(
                         "Write a text file inside the workspace sandbox. When the "
                         "file already exists, the result includes a unified diff "
-                        "of exactly what changed."
+                        "of exactly what changed." + path_note
                     ),
                     parameters={
                         "type": "object",
@@ -1607,7 +1627,7 @@ def build_general_registry() -> DispatchRegistry:
                     description=(
                         "grep-style content search across the workspace sandbox "
                         "(file:line:match). Use to find where something is "
-                        "defined, referenced, or mentioned before editing."
+                        "defined, referenced, or mentioned before editing." + path_note
                     ),
                     parameters={
                         "type": "object",
@@ -1625,7 +1645,7 @@ def build_general_registry() -> DispatchRegistry:
                     description=(
                         "Show a unified diff of a PROPOSED write against the "
                         "current file, WITHOUT writing anything. Use before "
-                        "overwriting an existing file."
+                        "overwriting an existing file." + path_note
                     ),
                     parameters={
                         "type": "object",
@@ -1643,7 +1663,7 @@ def build_general_registry() -> DispatchRegistry:
                         "Targeted str-replace edit inside one workspace file. "
                         "old_str must occur EXACTLY once; ambiguous or missing "
                         "matches are refused (no silent multi-match edits). "
-                        "Returns the resulting unified diff."
+                        "Returns the resulting unified diff." + path_note
                     ),
                     parameters={
                         "type": "object",
@@ -1694,7 +1714,7 @@ def build_general_registry() -> DispatchRegistry:
                     confirm_prompt=lambda a: f"Deploy to {a.get('target', '(unspecified)')}?",
                 ),
             ],
-        )
+)
     )
 
     registry.register_subagent(
@@ -1705,7 +1725,7 @@ def build_general_registry() -> DispatchRegistry:
             [
                 ToolSpec(
                     name="list_files",
-                    description="List files/dirs in the workspace sandbox (read-only).",
+                    description="List files/dirs in the workspace sandbox (read-only)." + path_note,
                     parameters={
                         "type": "object",
                         "properties": {"path": {"type": "string", "default": "."}},
@@ -1716,7 +1736,7 @@ def build_general_registry() -> DispatchRegistry:
                     name="delete_file",
                     description=(
                         "Delete ONE file inside the workspace sandbox. "
-                        "REQUIRES per-item human confirmation before it runs."
+                        "REQUIRES per-item human confirmation before it runs." + path_note
                     ),
                     parameters={
                         "type": "object",

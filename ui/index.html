@@ -943,15 +943,23 @@
   // bridge; in a plain browser it falls back to a new tab.
   const openedAgentWindows = new Set();
   function openAgentWindow(name) {
-    // Auto-open only when a real desktop bridge exists. The SSE callback that
-    // reaches here is NOT a user gesture, so in a plain browser the popup is
-    // silently blocked (and in strict automation it can hijack the tab and
-    // kill the HUD stream). Agent windows stay reachable from the map and
-    // per-agent links.
+    // User-initiated path (roster ⧉, map LIVE WINDOW): native window via the
+    // desktop bridge when present, otherwise a plain-browser tab. This runs
+    // from a real user gesture, so the popup is never silently blocked.
     const api = (window.pywebview && window.pywebview.api) || null;
     if (api && typeof api.open_agent === 'function') {
       api.open_agent(name);
+      return;
     }
+    window.open('/agent/' + encodeURIComponent(name), 'dourmouseAgent_' + name, 'width=980,height=760');
+  }
+  function tryAutoOpenAgentWindow(name) {
+    // SSE-callback path is NOT a user gesture: only open when a real desktop
+    // bridge exists. A plain-browser popup from here would be silently
+    // blocked (and in strict automation it can hijack the tab and kill the
+    // HUD stream). Agent windows stay reachable from the roster and map.
+    const api = (window.pywebview && window.pywebview.api) || null;
+    if (api && typeof api.open_agent === 'function') openAgentWindow(name);
   }
 
   function setNodeState(name, state) {
@@ -1327,7 +1335,7 @@
               // activity of the session (no window spam on every call).
               if (!openedAgentWindows.has(node)) {
                 openedAgentWindows.add(node);
-                openAgentWindow(node);
+                tryAutoOpenAgentWindow(node);
               }
             }
             // STEP k/n tie-back: find the next unconsumed plan step whose
@@ -1365,6 +1373,13 @@
               }
               if (!card.classList.contains('open')) card.classList.add('open');
             }
+            break;
+          }
+          case 'plan_reminder': {
+            // v4.2: the dispatch loop caught the model fixating on one plan
+            // step and re-pointed it at the unexecuted steps.
+            const nums = (evt.steps || []).join(', ');
+            fline('PLAN', `checkpoint — step(s) not yet executed: <span class="planstep">${esc(nums)}</span> — continuing`, null);
             break;
           }
           case 'plan': {

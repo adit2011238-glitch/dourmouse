@@ -967,6 +967,19 @@ def _build_parent_context(
     return "\n".join(parts[-limit:])
 
 
+# A short text-only model message immediately after a tool result, while the
+# plan still has unexecuted steps, is usually a transitional note ("let me try
+# a more targeted search") rather than a final answer. The loop nudges the
+# model to keep going a bounded number of times before ending honestly.
+_MAX_TEXT_ONLY_NUDGES = 2
+_MAX_TEXT_ONLY_NUDGE_CHARS = 240
+# If the model spends a plan's worth of tool calls without touching every
+# step (e.g. it fixates on re-searching), inject ONE deterministic checkpoint
+# reminder listing the unexecuted steps, so multi-step chains cannot silently
+# end half-finished.
+_MAX_PLAN_REMINDERS = 1
+
+
 def _run_dispatch_loop(
     messages: list[dict[str, Any]],
     registry: DispatchRegistry,
@@ -982,6 +995,15 @@ def _run_dispatch_loop(
     cost_budget = ctx.cost_budget
     dlp = ctx.dlp
     rbac = ctx.rbac
+    nudges = 0
+    plan_reminders = 0
+    # Deterministic tool->owner map: plans name SUBAGENTS but the model calls
+    # TOOLS, so the loop ties them together to tell when a plan step has
+    # actually been executed.
+    tool_owner: dict[str, str] = {}
+    for _sub in registry.all_subagents():
+        for _t in _sub.tools:
+            tool_owner[_t.name] = _sub.name
 
     def _budget_entry(reason: str) -> dict[str, Any]:
         return {"type": "budget_exhausted", "reason": reason}
@@ -1017,6 +1039,47 @@ def _run_dispatch_loop(
                 _emit_event(event_sink, entry)
                 messages.append({"role": "assistant", "content": ""})
                 return {"final_text": "", "transcript": transcript, "messages": messages}
+
+        # v4.2 plan checkpoint: if the model has used a plan's worth of tool
+        # calls but some plan step's agent has never run, it is fixating (e.g.
+        # re-searching instead of moving to the write step). Inject ONE
+        # deterministic reminder listing the unexecuted steps so the run does
+        # not end half-finished. Bounded: at most _MAX_PLAN_REMINDERS per run.
+        def _missing_plan_steps() -> list[dict[str, Any]]:
+            used_tools = {e["name"] for e in transcript if e.get("type") == "tool_use"}
+            touched_steps = {
+                s["n"]
+                for s in plan
+                if any(tool_owner.get(u) == s["subagent"] for u in used_tools)
+            }
+            return [s for s in plan if s["n"] not in touched_steps]
+
+        def _inject_plan_reminder(missing: list[dict[str, Any]]) -> None:
+            nonlocal plan_reminders
+            reminder = (
+                "[PLAN CHECKPOINT] The following plan step(s) have not been "
+                "executed yet: "
+                + "; ".join(
+                    f"STEP {s['n']}/{len(plan)} ({s['subagent']}): {s['task']}"
+                    for s in missing
+                )
+                + ". Execute them now with the appropriate tools. If a step "
+                "is genuinely impossible, say so explicitly and finish."
+            )
+            messages.append({"role": "system", "content": reminder})
+            entry = {"type": "plan_reminder", "steps": [s["n"] for s in missing]}
+            transcript.append(entry)
+            _emit_event(event_sink, entry)
+            plan_reminders += 1
+
+        if plan and plan_reminders < _MAX_PLAN_REMINDERS:
+            tool_use_count = sum(1 for e in transcript if e.get("type") == "tool_use")
+            missing = _missing_plan_steps()
+            # Fixation case: the model spends a plan's worth of tool calls
+            # without touching every step (e.g. re-searching instead of
+            # writing). Fire the reminder BEFORE the next LLM call.
+            if missing and tool_use_count >= len(plan):
+                _inject_plan_reminder(missing)
 
         # v4.1: stream text tokens to the UI as they arrive (first token in
         # ~1s instead of the whole answer landing at once). Only for the real
@@ -1061,6 +1124,60 @@ def _run_dispatch_loop(
             transcript.append(entry)
             _emit_event(event_sink, entry)
             messages.append({"role": "assistant", "content": text})
+            # Orchestration robustness: a text-only message right after a
+            # tool result while the plan still has unexecuted steps is often
+            # the model thinking aloud ("let me try a more targeted search")
+            # instead of actually calling the next tool. Treat it as context
+            # and keep the loop going a bounded number of times, so multi-
+            # step chains don't silently die mid-plan. Ends honestly after
+            # the nudge budget, exactly as before.
+            tools_used = sum(1 for e in transcript if e.get("type") == "tool_use")
+            # "Steps pending" means plan steps whose agent has NOT run, not
+            # merely fewer raw tool calls than plan steps: the model may burn
+            # its whole budget re-running ONE step's tools (live: three
+            # atlas_* calls for step 1 while steps 2-3 never ran) and still
+            # emit a transitional note.
+            steps_pending = plan is not None and (
+                tools_used < len(plan) or bool(_missing_plan_steps())
+            )
+            prev_was_tool_result = any(
+                e.get("type") == "tool_result" for e in transcript[-3:]
+            )
+            if (
+                steps_pending
+                and prev_was_tool_result
+                and len(text) <= _MAX_TEXT_ONLY_NUDGE_CHARS
+                and nudges < _MAX_TEXT_ONLY_NUDGES
+            ):
+                nudges += 1
+                continue
+            # Fabrication case (exit path): a text-only message ends the run
+            # even when the plan still has unexecuted steps. The most common
+            # failure is the model CLAIMING a step is done without ever
+            # calling its tool (live: "saved to .../outlook_brief.txt" with
+            # zero write_file calls). Fire the same bounded checkpoint here
+            # so a long "final" answer cannot silently skip plan steps.
+            if plan and plan_reminders < _MAX_PLAN_REMINDERS:
+                missing = _missing_plan_steps()
+                if missing:
+                    _inject_plan_reminder(missing)
+                    continue
+            # Reminder budget spent and steps STILL unexecuted: the model has
+            # ignored the checkpoint. Never let a claimed completion of those
+            # steps pass silently — append an honest caveat to the final text
+            # AND the already-emitted transcript entry + persisted message
+            # (Rule 2.2: no fabricated success).
+            if plan:
+                missing = _missing_plan_steps()
+                if missing:
+                    text += "\n\n[DOURMOUSE: plan step(s) not executed — " + "; ".join(
+                        f"STEP {s['n']}/{len(plan)} ({s['subagent']}): {s['task']}"
+                        for s in missing
+                    ) + "]"
+                    if transcript and transcript[-1].get("type") == "assistant_text":
+                        transcript[-1]["text"] = text
+                    if messages and messages[-1].get("role") == "assistant":
+                        messages[-1]["content"] = text
             return {"final_text": text, "transcript": transcript, "messages": messages}
 
         assistant_msg: dict[str, Any] = {

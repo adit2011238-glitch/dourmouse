@@ -654,3 +654,209 @@ class TestEndToEndThroughGeneralRoster:
         assert "CONFIRMATION REQUIRED" in result["text"]
         assert "NOT executed" in result["text"]
         assert "NOT CONFIGURED" not in result["text"]  # gating fires before backend
+
+
+
+class TestTextOnlyNudge:
+    """Regression: a short text-only model message right after a tool result,
+    while the plan still has unexecuted steps, is a transitional note — the
+    loop must keep going (bounded) instead of ending the run mid-plan.
+
+    Live failure: after two web_searches, qwen3 emitted "let me try a more
+    targeted search" with no tool call, and the loop returned it as the final
+    answer, silently dropping the remaining write_file step."""
+
+    def _tool(self, text: str) -> _FakeResponse:
+        tc = _FakeToolCall("call_" + text, "echo", json.dumps({"text": text}))
+        return _FakeResponse(_FakeMessage(content=None, tool_calls=[tc]))
+
+    def test_note_mid_plan_continues_and_completes(self):
+        # tool -> short note -> tool -> final. The note must NOT end the run.
+        client = FakeClient([
+            self._tool("hello"),
+            _FakeResponse(_FakeMessage(content="let me try the second part")),
+            self._tool("goodbye"),
+            _FakeResponse(_FakeMessage(content="done: hello then goodbye")),
+        ])
+        report = run_dispatch("echo hello then echo goodbye", _test_registry(), client=client)
+        uses = [t for t in report["transcript"] if t["type"] == "tool_use"]
+        assert len(uses) == 2, f"second step dropped; transcript={report['transcript']}"
+        assert report["final_text"] == "done: hello then goodbye"
+
+    def test_nudge_budget_is_bounded_and_ends_honestly(self):
+        # The model keeps talking instead of calling the next tool: after the
+        # bounded nudges, the last note IS the final answer (honest end).
+        client = FakeClient([
+            self._tool("hello"),
+            _FakeResponse(_FakeMessage(content="note one")),
+            _FakeResponse(_FakeMessage(content="note two")),
+            _FakeResponse(_FakeMessage(content="note three")),
+        ])
+        report = run_dispatch("echo hello then echo goodbye", _test_registry(), client=client)
+        uses = [t for t in report["transcript"] if t["type"] == "tool_use"]
+        assert len(uses) == 1
+        assert report["final_text"] == "note three"
+        # All notes are preserved in the transcript as assistant context.
+        notes = [t for t in report["transcript"] if t["type"] == "assistant_text"]
+        assert [n["text"] for n in notes] == ["note one", "note two", "note three"]
+
+    def test_long_text_after_tool_result_is_final_not_nudged(self):
+        # A real (long) answer after a tool result ends the run immediately.
+        client = FakeClient([
+            self._tool("hello"),
+            _FakeResponse(_FakeMessage(content="Here is the complete answer. " * 40)),
+        ])
+        report = run_dispatch("echo hello then echo goodbye", _test_registry(), client=client)
+        assert report["final_text"].startswith("Here is the complete answer.")
+
+    def _tool_named(self, name: str, text: str) -> _FakeResponse:
+        tc = _FakeToolCall("call_" + name, name, json.dumps({"text": text}))
+        return _FakeResponse(_FakeMessage(content=None, tool_calls=[tc]))
+
+    def test_note_after_budget_burned_on_one_step_is_nudged(self):
+        """Live bug: the model burned all its tool budget re-running step 1's
+        tools (three atlas_* calls) while steps 2-3 never ran, then emitted a
+        short transitional note ("Let me pull the latest economic news…").
+        The nudge counted RAW tool calls (3 < 3 = False) and ended the run;
+        it must count UNTOUCHED plan steps instead, so the note keeps the
+        loop alive and the chain can still complete."""
+        r = DispatchRegistry()
+        r.register_subagent(Subagent(name="agent_a", domain="Test", description="owns ping_a", tools=(_echo_tool(name="ping_a"),)))
+        r.register_subagent(Subagent(name="agent_b", domain="Test", description="owns ping_b", tools=(_echo_tool(name="ping_b"),)))
+        client = FakeClient([
+            self._tool_named("ping_a", "x"),
+            self._tool_named("ping_a", "y"),
+            _FakeResponse(_FakeMessage(content="let me handle the second part now")),
+            self._tool_named("ping_b", "w"),
+            _FakeResponse(_FakeMessage(content="both parts done")),
+        ])
+        report = run_dispatch("ping_a now then ping_b later", r, client=client)
+        uses = [t for t in report["transcript"] if t["type"] == "tool_use"]
+        assert [u["name"] for u in uses] == ["ping_a", "ping_a", "ping_b"], f"got {uses}"
+        assert report["final_text"] == "both parts done"
+
+
+
+class TestPlanCheckpoint:
+    """Regression: when the model fixates on one plan step (re-searching) and
+    spends a plan's worth of tool calls without touching every step, the loop
+    injects ONE deterministic checkpoint reminder naming the unexecuted steps.
+    Without it, multi-step chains silently end half-finished (live failure:
+    six web_searches, never the write_file step)."""
+
+    def _two_agent_registry(self) -> DispatchRegistry:
+        r = DispatchRegistry()
+        r.register_subagent(
+            Subagent(
+                name="agent_a",
+                domain="Test",
+                description="owns ping_a",
+                tools=(_echo_tool(name="ping_a"),),
+            )
+        )
+        r.register_subagent(
+            Subagent(
+                name="agent_b",
+                domain="Test",
+                description="owns ping_b",
+                tools=(_echo_tool(name="ping_b"),),
+            )
+        )
+        return r
+
+    def _tool(self, name: str, text: str) -> _FakeResponse:
+        tc = _FakeToolCall("call_" + name, name, json.dumps({"text": text}))
+        return _FakeResponse(_FakeMessage(content=None, tool_calls=[tc]))
+
+    def test_fixation_on_one_step_triggers_reminder_and_recovers(self):
+        # Model re-runs agent_a's tool three times, never touching step 2.
+        # After the checkpoint reminder it must execute ping_b and finish.
+        client = FakeClient([
+            self._tool("ping_a", "x"),
+            self._tool("ping_a", "y"),
+            self._tool("ping_a", "z"),
+            self._tool("ping_b", "w"),
+            _FakeResponse(_FakeMessage(content="both done")),
+        ])
+        report = run_dispatch("ping_a now then ping_b later", self._two_agent_registry(), client=client)
+        reminders = [e for e in report["transcript"] if e["type"] == "plan_reminder"]
+        assert reminders, "expected a plan_reminder"
+        assert reminders[0]["steps"] == [2]
+        uses = {t["name"] for t in report["transcript"] if t["type"] == "tool_use"}
+        assert uses == {"ping_a", "ping_b"}, f"step 2 never executed: {uses}"
+        assert report["final_text"] == "both done"
+
+    def test_reminder_is_bounded_and_ends_honestly(self):
+        # Model keeps fixating; after the single reminder it still gives a
+        # final answer — the run ends honestly with the reminder recorded
+        # AND a caveat naming the unexecuted step.
+        client = FakeClient([
+            self._tool("ping_a", "x"),
+            self._tool("ping_a", "y"),
+            _FakeResponse(_FakeMessage(content="giving up now")),
+        ])
+        report = run_dispatch("ping_a now then ping_b later", self._two_agent_registry(), client=client)
+        reminders = [e for e in report["transcript"] if e["type"] == "plan_reminder"]
+        assert len(reminders) == 1
+        assert "giving up now" in report["final_text"]
+        assert "not executed" in report["final_text"].lower()
+        assert "STEP 2/2" in report["final_text"]
+
+    def test_ignored_checkpoint_caveats_claimed_success(self):
+        """Live bug: the model CLAIMED "saved to outlook_brief.txt" with zero
+        tool calls, ignored the one checkpoint reminder, and the false claim
+        became the final answer. With the reminder budget spent and steps
+        still unexecuted, the final text MUST carry an honest caveat — a
+        fabricated completion can never pass silently."""
+        r = self._two_agent_registry()
+        client = FakeClient([
+            # Long text-only "done" claiming success, no tools.
+            _FakeResponse(_FakeMessage(content="Saved to outlook_brief.txt. " * 8)),
+            # After the reminder it STILL answers without touching ping_b.
+            _FakeResponse(_FakeMessage(content="Saved to outlook_brief.txt. " * 8)),
+        ])
+        report = run_dispatch(
+            "ping_a now then ping_b later", r, client=client
+        )
+        reminders = [e for e in report["transcript"] if e["type"] == "plan_reminder"]
+        assert len(reminders) == 1
+        final = report["final_text"]
+        assert "not executed" in final.lower()
+        assert "STEP 2/2" in final
+        # The transcript's final assistant_text entry carries the same caveat
+        # (UI feed honest), not just the returned final_text.
+        texts = [e for e in report["transcript"] if e["type"] == "assistant_text"]
+        assert "not executed" in texts[-1]["text"].lower()
+
+    def test_completed_plan_gets_no_reminder(self):
+        client = FakeClient([
+            self._tool("ping_a", "x"),
+            self._tool("ping_b", "w"),
+            _FakeResponse(_FakeMessage(content="all steps done")),
+        ])
+        report = run_dispatch("ping_a now then ping_b later", self._two_agent_registry(), client=client)
+        reminders = [e for e in report["transcript"] if e["type"] == "plan_reminder"]
+        assert reminders == []
+
+    def test_zero_tool_fabricated_completion_gets_checkpoint_not_final(self):
+        """Live bug (end-to-end): the model answered "saved to
+        .../outlook_brief.txt" with NO tool calls, and the run accepted it
+        as the final answer — the file was never written. A long text-only
+        message with unexecuted plan steps must fire the exit-path
+        checkpoint (bounded), then let the model actually do the work."""
+        client = FakeClient([
+            # Long fabricated "done" — the exact live failure mode.
+            _FakeResponse(_FakeMessage(content="Saved to /Users/me/outlook_brief.txt." * 6)),
+            self._tool("ping_b", "w"),  # model complies after the reminder
+            # Long real report (over the nudge threshold -> final, not nudged).
+            _FakeResponse(_FakeMessage(content="The file is written and verified. " * 15)),
+        ])
+        report = run_dispatch(
+            "ping_a now then ping_b later", self._two_agent_registry(), client=client
+        )
+        reminders = [e for e in report["transcript"] if e["type"] == "plan_reminder"]
+        assert len(reminders) == 1, f"expected one reminder; transcript={report['transcript']}"
+        uses = {t["name"] for t in report["transcript"] if t["type"] == "tool_use"}
+        assert uses == {"ping_b"}, f"fabrication not corrected: {uses}"
+        assert "Saved to /Users/me" not in report["final_text"]
+        assert report["final_text"].startswith("The file is written and verified.")

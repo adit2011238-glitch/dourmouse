@@ -80,6 +80,19 @@ class TestLooksMultiStep:
         assert not looks_multi_step("hello")
         assert not looks_multi_step("draft an email to the team")
 
+    def test_parent_context_boilerplate_does_not_trip_heuristic(self):
+        """Nested delegate prompts append '[PARENT CONTEXT — read this; ...]'
+        background. The word 'read' and the semicolons must not turn a
+        one-word task into a multi-step plan (live: task 'B' got a 3-step
+        garbage plan and an extra LLM call)."""
+        ctx = (
+            "B\n\n[PARENT CONTEXT — read this; it is what the parent "
+            "conversation already established]\nuser: A\nuser: go"
+        )
+        assert not looks_multi_step(ctx)
+        registry = build_general_registry()
+        assert build_plan(ctx, registry) is None
+
     def test_empty_prompt(self):
         assert not looks_multi_step("")
         assert not looks_multi_step("   ")
@@ -154,8 +167,12 @@ class TestFindAgentsQueryStillWorks:
 
 class TestPlanEventInTranscript:
     def test_multi_step_prompt_emits_plan_event_first(self):
+        # A text-only answer without touching either planned step fires ONE
+        # plan checkpoint (fabrication guard) and asks the model again; the
+        # second response ends the run. Two responses keep the fake honest.
         client = FakeClient(
             [
+                _FakeResponse(_FakeMessage(content="Final answer.")),
                 _FakeResponse(_FakeMessage(content="Final answer.")),
             ]
         )
@@ -168,6 +185,11 @@ class TestPlanEventInTranscript:
         assert report["transcript"][0]["type"] == "plan"
         assert report["transcript"][0]["total"] >= 2
         assert report["transcript"][0]["steps"][0]["subagent"] == "research_info"
+        # The second text-only answer is accepted as final, but with the
+        # honesty caveat naming the unexecuted steps (Rule 2.2).
+        assert report["final_text"].startswith("Final answer.")
+        assert "not executed" in report["final_text"].lower()
+        assert "STEP 1/2" in report["final_text"]
 
     def test_single_step_prompt_has_no_plan_event(self):
         client = FakeClient(
@@ -190,9 +212,14 @@ class TestPlanEventInTranscript:
         from dourmouse.chat import ChatSession
 
         monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        # Two responses: the first fires the plan checkpoint (text-only with
+        # unexecuted steps), the second is accepted as the final answer.
         session = ChatSession(
             build_general_registry(),
-            client=FakeClient([_FakeResponse(_FakeMessage(content="Done."))]),
+            client=FakeClient([
+                _FakeResponse(_FakeMessage(content="Done.")),
+                _FakeResponse(_FakeMessage(content="Done.")),
+            ]),
         )
         session.ask("Search the web, then draft an email about it", max_turns=2)
         records = [
@@ -204,3 +231,94 @@ class TestPlanEventInTranscript:
 
     def test_system_message_unaffected_by_planner(self):
         assert "ROSTER:" in system_message(build_general_registry())
+
+
+class TestFindAgentsForQueryRegression:
+    """Regression: the planner must route steps to the agent that OWNS the
+    named tool, and must not be derailed by file-path junk in the query.
+
+    Live bug (surfaced end-to-end): "use write_file to save ... to
+    /tmp/dm_orch_test.txt" routed STEP to admin_ops (which has NO write_file
+    tool), so tool scoping never offered write_file and the chain silently
+    degraded. The 2-char path fragment 'dm' was substring-matching the name
+    'admin_ops' as a 3x name hit."""
+
+    def test_tool_mention_wins_over_description_overlap(self):
+        registry = build_general_registry()
+        matches = find_agents_for_query(
+            registry, "use write_file to save a one-line summary to /tmp/dm_orch_test.txt", limit=6
+        )
+        assert matches, "expected at least one match"
+        assert matches[0]["name"] == "dev_coding", (
+            f"write_file must route to its owner; got {matches}"
+        )
+        assert "write_file" in matches[0]["tools"]
+
+    def test_path_fragment_cannot_name_admin_ops(self):
+        registry = build_general_registry()
+        # The old scorer counted 'dm' (from /tmp/dm_orch_test.txt) as a name
+        # hit inside 'admin_ops' and as a hay hit. With path stripping it
+        # must not even be a token, and admin_ops must score lower than any
+        # agent that actually matches 'write'.
+        matches = find_agents_for_query(
+            registry, "save the results to /tmp/dm_orch_test.txt", limit=6
+        )
+        names = [m["name"] for m in matches]
+        assert "admin_ops" not in names[:2]
+
+    def test_agent_name_intent_still_routes(self):
+        registry = build_general_registry()
+        # 'research' inside research_info is a real name hit and must win.
+        m = find_agents_for_query(registry, "research this topic", limit=1)
+        assert m and m[0]["name"] == "research_info"
+
+    def test_path_tokens_never_name_admin_ops(self):
+        registry = build_general_registry()
+        # The 'dm' fragment used to name-hit 'admin_ops'. A bare path-less
+        # query like this must not route to admin_ops at all.
+        m = find_agents_for_query(registry, "save the results to /tmp/dm_orch_test.txt", limit=6)
+        assert m, "expected matches"
+        assert "admin_ops" not in [r["name"] for r in m[:2]]
+
+    def test_write_intent_routes_to_write_capable_agent(self):
+        """Live bug (end-to-end): "save it to a file named outlook_brief.txt"
+        routed to admin_ops — which owns NO write tool — by alphabet tie-
+        break, so the model could never write and instead fabricated a saved
+        path. A write-intent verb must bonus agents owning write-stemmed
+        tools, and dev_coding (owns write_file) must win the step."""
+        registry = build_general_registry()
+        matches = find_agents_for_query(
+            registry, "save it to a file named outlook_brief.txt in your workspace", limit=6
+        )
+        assert matches, "expected matches"
+        assert matches[0]["name"] == "dev_coding", f"got {matches}"
+        assert "write_file" in matches[0]["tools"]
+        # admin_ops may still score on its "file" description, but it must
+        # never WIN the step: it owns no write tool at all.
+        assert matches[0]["score"] > matches[1]["score"], f"tie not broken: {matches}"
+
+    def test_write_intent_in_plan_routes_to_dev_coding(self):
+        """The full planner path for the live scenario: the "save it to a
+        file" step must be planned at dev_coding, not admin_ops."""
+        registry = build_general_registry()
+        plan = build_plan(
+            "Summarize the economic outlook, then save it to a file named "
+            "outlook_brief.txt in your workspace",
+            registry,
+        )
+        assert plan is not None and len(plan) >= 2
+        write_step = plan[1]
+        assert write_step["subagent"] == "dev_coding", f"got {plan}"
+
+    def test_create_intent_routes_to_write_capable_agent(self):
+        registry = build_general_registry()
+        matches = find_agents_for_query(
+            registry, "create a file called hello.txt inside the workspace", limit=6
+        )
+        assert matches
+        assert matches[0]["name"] == "dev_coding", f"got {matches}"
+
+    def test_deterministic_with_paths(self):
+        registry = build_general_registry()
+        prompt = "search X then write_file to /tmp/a/b.txt"
+        assert build_plan(prompt, registry) == build_plan(prompt, registry)

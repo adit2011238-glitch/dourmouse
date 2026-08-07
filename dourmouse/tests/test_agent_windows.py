@@ -180,12 +180,26 @@ class TestUiWiring:
 
         return (Path(__file__).resolve().parents[2] / rel).read_text()
 
-    def test_index_auto_opens_agent_window_on_first_tool_use(self):
+    def test_index_agent_windows_gesture_opens_tab_auto_open_is_bridge_gated(self):
         html = self._read("ui/index.html")
+        # The per-agent live window is user-gesture driven: roster ⧉ / map
+        # button open the native window via the desktop bridge, falling back
+        # to a plain-browser tab (a real click, so the popup is allowed).
         assert "openedAgentWindows" in html
-        assert "openAgentWindow(node)" in html
+        assert "openAgentWindow(ag.name)" in html
+        assert "tryAutoOpenAgentWindow(node)" in html
         assert "api.open_agent" in html
         assert "window.open('/agent/" in html
+        # The SSE tool_use callback is NOT a user gesture — it must only
+        # auto-open when a real desktop bridge exists, never via window.open
+        # (silently blocked in browsers, tab-hijacking in strict automation).
+        assert "tryAutoOpenAgentWindow" in html
+        assert "function tryAutoOpenAgentWindow(name)" in html
+        # The SSE handler routes through the gated helper, not the raw opener:
+        # the auto-open call site appears only where the gated helper is used.
+        idx_auto = html.index("tryAutoOpenAgentWindow(node)")
+        idx_raw = html.index("function tryAutoOpenAgentWindow")
+        assert idx_auto > idx_raw
 
     def test_index_roster_has_window_button(self):
         html = self._read("ui/index.html")
