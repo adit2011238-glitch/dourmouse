@@ -3,6 +3,41 @@
 ## Current Phase: V4.0 — SELF-HOSTED PERSONAL AI OPERATING SYSTEM (2026-08-06)
 ## Last updated: 2026-08-07
 
+### Orchestration hardening — planner capability routing, plan checkpoints, honest caveats (cfc5d9d)
+
+Live end-to-end testing of multi-agent chains surfaced three real defects;
+all fixed with regression tests (809 pass).
+
+1. **Planner routed write-intent steps to admin_ops** (owns NO write tool)
+   by alphabet tie-break, so tool scoping never offered write_file and the
+   chain silently degraded to a hallucinated "saved". Added verb→capability
+   matching: write-intent verbs bonus agents owning write_* tools
+   (dev_coding/system/memory), so "save it to a file" plans at dev_coding.
+   The bonus is +1/tool — a tie-breaker, not a dominator — so memory's
+   search_vault/recall can't steal web-search steps from research_info.
+   Also: delegated-run "[PARENT CONTEXT ...]" boilerplate is stripped
+   before the multi-step heuristic (its 'read' + semicolons tripped a
+   garbage plan for one-word tasks, adding an LLM call per nested run).
+2. **The loop ended runs mid-plan**: a text-only "final" message with
+   unexecuted steps passed silently (live: "saved to outlook_brief.txt"
+   with zero write_file calls). The plan checkpoint now fires on the EXIT
+   path too (bounded to one reminder, shared with the fixation case), and
+   the nudge counts untouched plan steps rather than raw tool calls, so a
+   note after the budget was burned on one step keeps the loop alive.
+3. **When the model ignores the checkpoint and still claims completion,
+   the final text now carries an honest caveat** naming the unexecuted
+   steps (Rule 2.2 — no fabricated success), propagated to the transcript
+   entry and persisted message so the UI feed is honest too.
+
+Also: per-agent window auto-open is now bridge-gated for SSE callbacks
+(not a user gesture — silent popup block / tab-hijack in plain browsers)
+while the roster/map buttons keep the plain-browser tab fallback, and the
+sandbox refusal now names the actual allowed root so the model can recover
+instead of guessing paths. Verified live through the directive box: the
+write step routes to dev_coding, the checkpoint fires, and a fabricated
+"saved to ..." answer now carries "[DOURMOUSE: plan step(s) not executed —
+STEP 1/3 (atlas) ...; STEP 2/3 (dev_coding): save it to a file ...]".
+
 ### Rebrand — renamed from JARVIS to DOURMOUSE
 
 - Package `atlas_jarvis` → `dourmouse`; env vars `JARVIS_*` → `DOURMOUSE_*`
