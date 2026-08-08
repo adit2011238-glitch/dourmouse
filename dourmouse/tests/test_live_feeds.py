@@ -15,7 +15,6 @@ from dourmouse import live_feeds
 from dourmouse.general_roster import build_general_registry
 from dourmouse.webui import build_link_topology
 
-
 # --------------------------------------------------------------------------- #
 # Fixtures — canned HTTP payloads
 # --------------------------------------------------------------------------- #
@@ -170,11 +169,60 @@ class TestMarkets:
 
 class TestMail:
     def test_read_inbox_not_configured_without_env(self, monkeypatch):
+        """v5.2: with neither IMAP env vars NOR Gmail config present, the
+        tool honestly reports NOT CONFIGURED. The google_services fallback is
+        pinned to empty so a user's real local_secrets.py can't leak into
+        this hermetic test."""
         monkeypatch.delenv("DOURMOUSE_IMAP_HOST", raising=False)
         monkeypatch.delenv("DOURMOUSE_IMAP_USER", raising=False)
         monkeypatch.delenv("DOURMOUSE_IMAP_PASS", raising=False)
+        from dourmouse import google_services as gs
+
+        monkeypatch.setattr(gs, "_local_secrets", dict)
         with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
             live_feeds.read_inbox()
+
+    def test_read_inbox_falls_back_to_gmail_config(self, monkeypatch):
+        """v5.2: Gmail configured via local_secrets powers read_inbox too —
+        one App Password drives every mail tool (no duplicate setup)."""
+        from dourmouse import google_services as gs
+
+        monkeypatch.delenv("DOURMOUSE_IMAP_HOST", raising=False)
+        monkeypatch.delenv("DOURMOUSE_IMAP_USER", raising=False)
+        monkeypatch.delenv("DOURMOUSE_IMAP_PASS", raising=False)
+        monkeypatch.setattr(
+            gs, "_local_secrets", lambda: {"user": "a@gmail.com", "password": "1234567890abcdef"}
+        )
+        captured: dict = {}
+        import imaplib as _imaplib
+
+        class _FakeConn:
+            def __init__(self, *a, **k):
+                captured["host"] = a[0] if a else k.get("host")
+
+            def login(self, u, p):
+                captured["user"] = u
+                captured["pass"] = p
+                return ("OK", [b""])
+
+            def select(self, *a, **k):
+                return ("OK", [])
+
+            def search(self, *a, **k):
+                return ("OK", [b""])
+
+            def fetch(self, *a, **k):
+                return ("OK", [])
+
+            def logout(self):
+                pass
+
+        monkeypatch.setattr(_imaplib, "IMAP4_SSL", _FakeConn)
+        out = live_feeds.read_inbox(3)
+        assert captured["host"] == "imap.gmail.com"
+        assert captured["user"] == "a@gmail.com"
+        assert captured["pass"] == "1234567890abcdef"
+        assert out == []  # fake server returned no messages — no crash
 
 
 # --------------------------------------------------------------------------- #
@@ -245,7 +293,8 @@ class TestPreloadedAgents:
     def test_mail_agent_tool(self):
         registry = build_general_registry()
         tools = {t.name for t in registry.get_subagent("mail").tools}
-        assert tools == {"read_inbox"}
+        # v5.0: the mail agent grew Gmail search/read/send alongside IMAP.
+        assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send"} == tools
 
     def test_tasks_agent_tools(self):
         registry = build_general_registry()

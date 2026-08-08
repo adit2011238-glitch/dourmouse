@@ -22,7 +22,6 @@ from dourmouse.dispatch import (
     run_dispatch,
 )
 
-
 # --- streaming fakes (v4.1) --------------------------------------------- #
 
 class _FakeStreamDelta:
@@ -361,6 +360,30 @@ class TestLoop:
         names = {t["function"]["name"] for t in tools}
         assert names == {"echo"}
 
+    def test_single_step_directive_scopes_target_agent_tools(self):
+        """v5.2: a SINGLE-step agentic directive (no plan) must still scope
+        the best-matching agent's tools — otherwise the model answers blind
+        and can never actually check the inbox / fetch a quote."""
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", registry, client=client)
+        tools = client.chat.completions.calls[0]["tools"]
+        names = {t["function"]["name"] for t in tools}
+        assert "read_inbox" in names, f"mail tools not scoped for inbox request: {names}"
+
+    def test_pure_chat_still_sends_no_tools(self):
+        """v5.2: a single-step prompt with NO agent match stays a pure chat
+        question — zero schemas, the fastest path (no regression of the
+        prefill fix)."""
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="42."))])
+        run_dispatch("what is 2+2", registry, client=client)
+        assert client.chat.completions.calls[0]["tools"] == []
+
     def test_unknown_tool_reports_error_not_crash(self):
         tool_call = _FakeToolCall("call_1", "not_a_tool", "{}")
         first = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))
@@ -599,6 +622,7 @@ class TestEndToEndThroughGeneralRoster:
             "code_ollama",  # v4.0: local Ollama coding backend
             "code_nvidia",
             "code_deepseek",
+            "code_codex",  # v5.0: OpenAI Codex API backend
             "code_claude",
             "messenger",  # v3.0: inter-agent messaging
             "atlas",  # v4.0: ATLAS command-centre telemetry
@@ -860,3 +884,140 @@ class TestPlanCheckpoint:
         assert uses == {"ping_b"}, f"fabrication not corrected: {uses}"
         assert "Saved to /Users/me" not in report["final_text"]
         assert report["final_text"].startswith("The file is written and verified.")
+
+
+# --------------------------------------------------------------------------- #
+# v4.2 LLM context bounding — bounded rolling window at the API boundary
+# --------------------------------------------------------------------------- #
+
+class TestBoundedContext:
+    """_bounded_context keeps system + in-flight exchange, drops old history
+    at clean user boundaries, and truncates OLD tool results only."""
+
+    def _long_history(self, n_turns: int) -> list[dict]:
+        msgs = [{"role": "system", "content": "SYSTEM" * 20}]
+        for i in range(n_turns):
+            msgs.append({"role": "user", "content": f"turn {i}: " + "x" * 250})
+            msgs.append({"role": "assistant", "content": "y" * 150})
+        return msgs
+
+    def test_keeps_system_and_inflight_exchange(self):
+        msgs = self._long_history(100)
+        msgs.append({"role": "user", "content": "LATEST DIRECTIVE"})
+        msgs.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        msgs.append({"role": "tool", "tool_call_id": "c1", "content": "R" * 10000})
+        out = dispatch_module._bounded_context(msgs)
+        assert out[0]["role"] == "system"
+        assert out[-1]["content"] == "R" * 10000  # in-flight result kept in full
+        assert out[-2]["role"] == "assistant" and out[-2]["tool_calls"]
+        assert out[-3]["content"] == "LATEST DIRECTIVE"
+        assert len(out) < len(msgs)  # old turns dropped, not the exchange
+
+    def test_drops_history_at_clean_user_boundary(self):
+        msgs = self._long_history(100)
+        msgs.append({"role": "user", "content": "final question"})
+        out = dispatch_module._bounded_context(msgs)
+        assert out[0]["role"] == "system"
+        assert out[-1]["content"] == "final question"
+        assert out[1]["role"] == "user"  # window starts at a user boundary
+        assert len(out) < len(msgs)
+        total = sum(dispatch_module._est_tokens(m) for m in out)
+        assert total <= dispatch_module._MAX_LLM_TOKENS + 200
+
+    def test_truncates_old_tool_results_only(self):
+        msgs = [
+            {"role": "system", "content": "SYSTEM"},
+            {"role": "user", "content": "first"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "OLD" * 5000},
+            {"role": "user", "content": "latest"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c2",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c2", "content": "NEW" * 5000},
+        ]
+        out = dispatch_module._bounded_context(msgs, max_tokens=100000)
+        old_tool = out[3]
+        assert old_tool["role"] == "tool"
+        assert old_tool["content"].endswith("...[truncated]")
+        assert len(old_tool["content"]) < len(msgs[3]["content"])
+        assert out[-1]["content"] == msgs[-1]["content"]  # in-flight kept full
+
+
+class TestLoopBounding:
+    """The dispatch loop sends a bounded copy to the LLM, never the whole
+    conversation (v4.2 speed: unbounded re-prefill made long sessions crawl
+    on the local GPU)."""
+
+    def test_loop_sends_bounded_history_to_client(self):
+        full = [{"role": "system", "content": "SYSTEM" * 20}]
+        for i in range(100):
+            full.append({"role": "user", "content": f"old turn {i}: " + "x" * 250})
+            full.append({"role": "assistant", "content": "y" * 150})
+        full.append({"role": "user", "content": "hello"})
+        full_len = len(full)
+        client = FakeClient([_FakeResponse(_FakeMessage(content="Done."))])
+        dispatch_module.run_dispatch_messages(full, _test_registry(), client=client)
+        sent = client.chat.completions.calls[0]["messages"]
+        assert sent[0]["role"] == "system"
+        assert sent[-1]["role"] == "user" and sent[-1]["content"] == "hello"
+        assert len(sent) < full_len
+        total = sum(dispatch_module._est_tokens(m) for m in sent)
+        assert total <= dispatch_module._MAX_LLM_TOKENS + 200
+
+    def test_loop_bounds_every_llm_call_in_a_tool_chain(self):
+        """Mid-chain, after a tool result, the NEXT call is bounded too."""
+        full = [{"role": "system", "content": "SYSTEM" * 20}]
+        for i in range(100):
+            full.append({"role": "user", "content": f"old turn {i}: " + "x" * 250})
+            full.append({"role": "assistant", "content": "y" * 150})
+        full.append({"role": "user", "content": "first"})
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(
+                        tool_calls=[
+                            _FakeToolCall("c1", "echo", '{"text": "hi"}')
+                        ]
+                    )
+                ),
+                _FakeResponse(_FakeMessage(content="Final answer.")),
+            ]
+        )
+        dispatch_module.run_dispatch_messages(full, _test_registry(), client=client)
+        assert len(client.chat.completions.calls) == 2
+        for call in client.chat.completions.calls:
+            sent = call["messages"]
+            total = sum(dispatch_module._est_tokens(m) for m in sent)
+            assert total <= dispatch_module._MAX_LLM_TOKENS + 200
+            assert sent[0]["role"] == "system"

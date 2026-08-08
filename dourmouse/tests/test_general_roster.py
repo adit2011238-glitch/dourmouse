@@ -81,6 +81,7 @@ class TestRosterShape:
             "code_ollama",  # v4.0: local Ollama coding backend
             "code_nvidia",
             "code_deepseek",
+            "code_codex",  # v5.0: OpenAI Codex API backend
             "code_claude",
             "messenger",  # v3.0: inter-agent messaging
             "atlas",  # v4.0: ATLAS command-centre telemetry
@@ -100,6 +101,7 @@ class TestRosterShape:
             "delete_file",
             "delete_path",
             "run_privileged_command",
+            "gmail_send",  # v5.0: sending email always requires a human
         }
 
     def test_internet_tools_registered(self):

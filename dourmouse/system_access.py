@@ -417,6 +417,60 @@ def _clipboard_set_tool(arguments: dict[str, Any]) -> str:
     return "CLIPBOARD SET OK."
 
 
+def _uploads_root() -> Path:
+    """The HUD uploads sandbox (<workspace>/uploads), created on demand."""
+    import os
+
+    raw = os.environ.get("DOURMOUSE_WORKSPACE")
+    root = Path(raw).expanduser() if raw else _PROJECT_ROOT / "workspace"
+    up = root / "uploads"
+    up.mkdir(parents=True, exist_ok=True)
+    return up
+
+
+def _check_connections_tool(arguments: dict[str, Any]) -> str:
+    """v5.3: deterministic per-account connection status (read-only)."""
+    from dourmouse.connections import format_connections
+
+    return format_connections()
+
+
+def _read_upload_tool(arguments: dict[str, Any]) -> str:
+    """v5.0: read a file the user uploaded through the HUD (/uploads/<name>).
+
+    The uploads sandbox is the only allowed root — a name that escapes it is
+    refused, never silently resolved elsewhere (Rule 2.6). Returns the file's
+    text (or a binary/oversize hint) for the model to use.
+    """
+    name = (arguments.get("name") or "").strip()
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return "ERROR: read_upload needs a plain filename (no paths), e.g. report.pdf."
+    target = (_uploads_root() / name).resolve()
+    try:
+        target.relative_to(_uploads_root().resolve())
+    except ValueError:
+        return f"REFUSED: {name!r} escapes the uploads sandbox."
+    if not target.is_file():
+        return f"ERROR: no such upload: {name} (upload it in the HUD first)."
+    try:
+        size = target.stat().st_size
+        if size > 200_000:
+            data = target.read_bytes()[:200_000]
+            note = f"\n[NOTE: file is {size} bytes; showing first 200k of binary data]"
+        else:
+            data = target.read_bytes()
+            note = ""
+        text = data.decode("utf-8", errors="replace")
+        if not text.strip() or "\x00" in text[:512]:
+            return (
+                f"UPLOAD {name} ({size} bytes): binary file — not readable as "
+                f"text. Use write_path/run_command to process it if needed."
+            )
+        return f"UPLOAD {name} ({size} bytes):\n" + text[:200_000] + note
+    except OSError as exc:
+        return f"ERROR: could not read upload {name}: {exc}"
+
+
 # --------------------------------------------------------------------------- #
 # Subagent builder
 # --------------------------------------------------------------------------- #
@@ -444,6 +498,20 @@ def build_system_subagent() -> Subagent:
                     "required": ["path"],
                 },
                 handler=_read_path_tool,
+            ),
+            ToolSpec(
+                name="read_upload",
+                description=(
+                    "Read a file the user uploaded in the HUD, by its plain "
+                    "filename only (no paths). Only reads the uploads "
+                    "sandbox."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                    "required": ["name"],
+                },
+                handler=_read_upload_tool,
             ),
             ToolSpec(
                 name="list_path",
@@ -559,6 +627,19 @@ def build_system_subagent() -> Subagent:
                     "required": ["content"],
                 },
                 handler=_clipboard_set_tool,
+            ),
+            ToolSpec(
+                name="check_connections",
+                description=(
+                    "Report which external accounts/services Dourmouse can "
+                    "reach right now: ollama, nvidia, claude (Claude Code "
+                    "CLI), codex (Codex CLI + login), gmail, freebuff "
+                    "app/API, slack, alpaca, atlas repo. Read-only and "
+                    "honest — a missing credential is reported as not "
+                    "configured, never assumed."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_check_connections_tool,
             ),
         ),
     )

@@ -234,7 +234,8 @@ def _atlas_report_tool(arguments: dict[str, Any]) -> str:
 def build_atlas_tool_specs() -> list[Any]:
     """ToolSpecs for the ``atlas`` subagent (defined here to keep
     general_roster.py focused on assembly; imports ToolSpec lazily to avoid
-    import cycles). v4.1 (P6): appends the repo-knowledge index tools."""
+    import cycles). v4.1 (P6): appends the repo-knowledge index tools;
+    v5.4: appends the real CLI-bridge tools (fx-research/fx-daily/...)."""
     from dourmouse.dispatch import ToolSpec
 
     def _spec(name: str, description: str, handler, props: dict[str, Any]) -> Any:
@@ -278,7 +279,14 @@ def build_atlas_tool_specs() -> list[Any]:
             _atlas_report_tool,
             {},
         ),
-    ] + _repo_specs()
+    ] + _cli_specs() + _repo_specs()
+
+
+def _cli_specs() -> list[Any]:
+    """The v5.4 CLI-bridge tools (real atlas commands via the ATLAS venv)."""
+    from dourmouse.atlas_cli import build_atlas_cli_specs
+
+    return build_atlas_cli_specs()
 
 
 def _repo_specs() -> list[Any]:

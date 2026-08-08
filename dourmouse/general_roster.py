@@ -145,6 +145,55 @@ def _find_claude_cli() -> str | None:
     return shutil.which("claude")
 
 
+def _run_cli_delegate(
+    *,
+    cli: str,
+    argv: list[str],
+    cli_name: str,
+    tool_label: str,
+    display_name: str,
+    cwd: str,
+    timeout: int,
+    output_cap_attr: str,
+) -> str:
+    """Run a headless coding CLI and format its REAL output (v5.3 — the
+    shared engine behind the claude_code / codex_code tools). Never
+    fabricates a result: a non-zero exit, a timeout, or an exec failure is
+    reported honestly. The output cap is read from the module global at CALL
+    time so tests can shrink it deterministically."""
+    output_cap = globals().get(output_cap_attr, 20_000)  # type: ignore[no-any-return]
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,  # both CLIs wait on stdin otherwise
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,  # non-zero exits are surfaced, never raised
+        )
+    except subprocess.TimeoutExpired:
+        return f"ERROR: {tool_label} timed out after {timeout}s (task still running)."
+    except OSError as exc:
+        return f"ERROR: could not run the {cli_name} CLI: {exc}"
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    parts = [f"EXIT CODE: {proc.returncode}"]
+    if out:
+        truncated = out[-output_cap:]
+        parts.append(
+            "STDOUT:\n" + truncated
+            + ("\n[output truncated]" if len(out) > output_cap else "")
+        )
+    if err:
+        parts.append("STDERR:\n" + err[-output_cap:])
+    if proc.returncode != 0 and not out:
+        parts.append(
+            f"({display_name} exited non-zero; see STDERR for the real error.)"
+        )
+    return "\n".join(parts)
+
+
 def _claude_code_tool(arguments: dict[str, Any]) -> str:
     """Run a coding task through the user's real Claude Code CLI.
 
@@ -168,34 +217,78 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         return "ERROR: timeout_seconds must be an integer."
     cwd = (arguments.get("cwd") or str(_PROJECT_ROOT)).strip()
-    cmd = [cli, "-p", task]
+    return _run_cli_delegate(
+        cli=cli,
+        argv=[cli, "-p", task],
+        cli_name="claude",
+        tool_label="claude_code",
+        display_name="Claude Code",
+        cwd=cwd,
+        timeout=timeout,
+        output_cap_attr="_CLAUDE_OUTPUT_CAP",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Codex — delegate coding work to the user's real Codex CLI (v5.3)
+# --------------------------------------------------------------------------- #
+
+_CODEX_OUTPUT_CAP = 20_000
+
+
+def _find_codex_cli() -> str | None:
+    """Locate the Codex CLI: CODEX_CLI env override, else PATH.
+
+    Returns an absolute path, or None if unavailable (the tool then reports
+    NOT CONFIGURED honestly — no silent stub, Rule 2.2). The CLI uses the
+    ChatGPT login already in ~/.codex/auth.json, so no API key is needed.
+    """
+    raw = os.environ.get("CODEX_CLI")
+    if raw:
+        candidate = Path(raw).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+        resolved = shutil.which(raw)
+        if resolved:
+            return resolved
+        return None
+    return shutil.which("codex")
+
+
+def _codex_code_tool(arguments: dict[str, Any]) -> str:
+    """Run a coding task through the user's real Codex CLI (headless).
+
+    Uses `codex exec <task> --skip-git-repo-check` so the task runs in the
+    chosen cwd and its REAL stdout/stderr are returned. Never fabricates a
+    result: a missing CLI, a non-zero exit, a timeout, or a usage-limit
+    error is reported honestly.
+    """
+    task = (arguments.get("task") or "").strip()
+    if not task:
+        return "ERROR: codex_code requires a non-empty 'task'."
+    cli = _find_codex_cli()
+    if cli is None:
+        return (
+            "NOT CONFIGURED: the Codex CLI ('codex') was not found on PATH. "
+            "Install it (npm i -g @openai/codex) or set CODEX_CLI=/absolute/"
+            "path/to/codex in .env. Nothing was run and no result was "
+            "fabricated."
+        )
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        return f"ERROR: claude_code timed out after {timeout}s (task still running)."
-    except OSError as exc:
-        return f"ERROR: could not run the claude CLI: {exc}"
-    out = (proc.stdout or "").strip()
-    err = (proc.stderr or "").strip()
-    parts = [f"EXIT CODE: {proc.returncode}"]
-    if out:
-        truncated = out[-_CLAUDE_OUTPUT_CAP:]
-        parts.append(
-            "STDOUT:\n" + truncated
-            + ("\n[output truncated]" if len(out) > _CLAUDE_OUTPUT_CAP else "")
-        )
-    if err:
-        parts.append("STDERR:\n" + err[-_CLAUDE_OUTPUT_CAP:])
-    if proc.returncode != 0 and not out:
-        parts.append("(Claude Code exited non-zero; see STDERR for the real error.)")
-    return "\n".join(parts)
+        timeout = max(1, min(int(arguments.get("timeout_seconds", 300)), 600))
+    except (TypeError, ValueError):
+        return "ERROR: timeout_seconds must be an integer."
+    cwd = (arguments.get("cwd") or str(_PROJECT_ROOT)).strip()
+    return _run_cli_delegate(
+        cli=cli,
+        argv=[cli, "exec", task, "--skip-git-repo-check"],
+        cli_name="codex",
+        tool_label="codex_code",
+        display_name="Codex",
+        cwd=cwd,
+        timeout=timeout,
+        output_cap_attr="_CODEX_OUTPUT_CAP",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1087,7 +1180,8 @@ def _build_memory_subagent(registry: DispatchRegistry) -> Subagent:
 _BACKEND_LABELS = {
     "ollama": "local Ollama",
     "nvidia": "NVIDIA NIM",
-    "deepseek": "Freebuff free DeepSeek",
+    "deepseek": "DeepSeek (Freebuff key or NVIDIA NIM)",
+    "codex": "OpenAI Codex API",
     "claude": "Claude Code CLI",
 }
 
@@ -1700,6 +1794,32 @@ def build_general_registry() -> DispatchRegistry:
                     handler=_claude_code_tool,
                 ),
                 ToolSpec(
+                    name="codex_code",
+                    description=(
+                        "Delegate a coding task to the user's REAL Codex CLI "
+                        "(headless `codex exec` mode, using the ChatGPT login "
+                        "already in ~/.codex/auth.json — no API key needed) "
+                        "and return its real output. Use for complex code work "
+                        "that benefits from Codex. Requires the 'codex' CLI on "
+                        "PATH or CODEX_CLI set — honestly NOT CONFIGURED if "
+                        "not found. Usage limits surface honestly at run "
+                        "time. Note: `codex exec` runs with the CLI's "
+                        "configured sandbox permissions (~/.codex/config.toml) "
+                        "— file writes follow that policy, so permission-gated "
+                        "edits may be declined."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "task": {"type": "string"},
+                            "cwd": {"type": "string", "default": str(_PROJECT_ROOT)},
+                            "timeout_seconds": {"type": "integer", "default": 300},
+                        },
+                        "required": ["task"],
+                    },
+                    handler=_codex_code_tool,
+                ),
+                ToolSpec(
                     name="deploy",
                     description=(
                         "Deploy or publish code. REQUIRES confirmation; "
@@ -1782,6 +1902,14 @@ def build_general_registry() -> DispatchRegistry:
             "Coding",
             "Coding via the Freebuff free DeepSeek backend (OpenAI-compatible).",
             [_make_code_tool("deepseek")],
+        )
+    )
+    registry.register_subagent(
+        _subagent(
+            "code_codex",
+            "Coding",
+            "Coding via the OpenAI Codex API (OpenAI-compatible).",
+            [_make_code_tool("codex")],
         )
     )
     registry.register_subagent(
@@ -1957,11 +2085,46 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    def _gmail_search_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import gmail_search
+
+        try:
+            return gmail_search(arguments.get("query", ""), arguments.get("max_results", 10))
+        except RuntimeError as exc:
+            return f"GMAIL SEARCH (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network/IMAP failures, readable
+            return f"GMAIL SEARCH FAILED: {type(exc).__name__}: {exc}"
+
+    def _gmail_read_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import gmail_read
+
+        try:
+            return gmail_read(arguments.get("message_id", ""))
+        except RuntimeError as exc:
+            return f"GMAIL READ (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network/IMAP failures, readable
+            return f"GMAIL READ FAILED: {type(exc).__name__}: {exc}"
+
+    def _gmail_send_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import gmail_send
+
+        try:
+            return gmail_send(
+                arguments.get("to", ""),
+                arguments.get("subject", ""),
+                arguments.get("body", ""),
+            )
+        except RuntimeError as exc:
+            return f"GMAIL SEND (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network/SMTP failures, readable
+            return f"GMAIL SEND FAILED: {type(exc).__name__}: {exc}"
+
     registry.register_subagent(
         _subagent(
             "mail",
             "Live",
-            "Read-only inbox — IMAP when configured, honestly NOT CONFIGURED otherwise.",
+            "Inbox + Gmail — IMAP read_inbox, and Gmail search/read/send via your "
+            "Google account (App Password). Sending always requires confirmation.",
             [
                 ToolSpec(
                     name="read_inbox",
@@ -1978,6 +2141,63 @@ def build_general_registry() -> DispatchRegistry:
                         },
                     },
                     handler=_read_inbox_tool,
+                ),
+                ToolSpec(
+                    name="gmail_search",
+                    description=(
+                        "Search Gmail (your Google account) for messages by "
+                        "subject/from/body words. Needs GOOGLE_GMAIL_USER + "
+                        "GOOGLE_GMAIL_APP_PASSWORD in .env; otherwise reports "
+                        "NOT CONFIGURED honestly."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "max_results": {"type": "integer", "default": 10},
+                        },
+                        "required": ["query"],
+                    },
+                    handler=_gmail_search_h,
+                ),
+                ToolSpec(
+                    name="gmail_read",
+                    description=(
+                        "Read ONE Gmail message by its uid (from gmail_search). "
+                        "Read-only; needs the same Gmail env vars."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "message_id": {"type": "string", "description": "numeric uid from gmail_search"},
+                        },
+                        "required": ["message_id"],
+                    },
+                    handler=_gmail_read_h,
+                ),
+                ToolSpec(
+                    name="gmail_send",
+                    description=(
+                        "Send an email FROM your Gmail account. ALWAYS requires "
+                        "human confirmation of recipient + subject before any "
+                        "message leaves."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "to": {"type": "string"},
+                            "subject": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                        "required": ["to", "subject", "body"],
+                    },
+                    handler=_gmail_send_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Send Gmail to {a.get('to', '?')!r} with subject "
+                        f"{a.get('subject', '')!r}? (body: "
+                        f"{(a.get('body') or '')[:140]}...)"
+                    ),
                 ),
             ],
         )

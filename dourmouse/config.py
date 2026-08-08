@@ -171,6 +171,17 @@ _OLLAMA_DEFAULT_MODEL = "qwen3:8b"
 OLLAMA_DEFAULT_BASE_URL = _OLLAMA_DEFAULT_BASE_URL
 OLLAMA_DEFAULT_MODEL = _OLLAMA_DEFAULT_MODEL
 
+# v5.0 fast dispatch: on the local backend the orchestrator (the looping
+# dispatch brain — every turn pays its cost) defaults to a SMALLER, faster
+# model, while heavy agents (research/coding) stay on the big default.
+# Env DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR overrides it; set to the default
+# model name to restore 8b everywhere.
+# v5.2: qwen3:4b measured at 9-30 tok/s AND ignored think=False (its
+# answers arrived as "Hmm, the user asked..." thinking-narration, burning
+# the whole token budget before answering). qwen2.5:7b answers DIRECTLY
+# (~20 tok/s, no reasoning preamble) — measured live on this machine.
+_OLLAMA_FAST_DISPATCH = {"ORCHESTRATOR": "qwen2.5:7b"}
+
 # One shared interface: dispatch/orchestrator/webui call ``model_for_agent``
 # and read ``api_key``/``base_url``/``model`` on either backend config. A
 # ``BackendConfig`` Protocol keeps type checkers honest without a base class.
@@ -200,6 +211,8 @@ class OllamaConfig:
         key = (agent or "").strip().upper()
         if key and key in self.agent_models:
             return self.agent_models[key]
+        if key and key in _OLLAMA_FAST_DISPATCH:
+            return _OLLAMA_FAST_DISPATCH[key]
         return self.model
 
 

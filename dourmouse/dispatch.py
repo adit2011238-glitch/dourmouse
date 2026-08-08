@@ -75,6 +75,94 @@ def _is_transient_error(exc: Exception) -> bool:
 # tool-call JSON with room to spare.
 _DEFAULT_MAX_TOKENS = 1400
 
+# ---- LLM context bounding (v4.2 speed) ------------------------------- #
+# Measured on the user's M3 Air: prefill runs ~46 tok/s under sustained
+# load, so every token re-sent to the model costs ~20ms. Sessions used to
+# grow unbounded — every turn re-prefilled the ENTIRE conversation, so later
+# turns took minutes. The LLM now sees a bounded rolling window: the system
+# message + the full in-flight exchange + as many complete older exchanges
+# as fit the budget. The authoritative ``messages`` list is untouched (still
+# persisted, resumable, and returned to callers) — only the API boundary is
+# bounded.
+# 4600 + max_tokens(1400) = 6000, leaving ~2.2k hard headroom under the
+# 8192 num_ctx even when the chars/4 estimate underestimates real tokens.
+_MAX_LLM_TOKENS = 4600
+_MAX_TOOL_RESULT_CHARS = 800  # OLD tool results re-read by the model get cut
+
+
+def _est_tokens(message: dict[str, Any]) -> int:
+    """Rough per-message token estimate (repo convention ~4 chars/token)."""
+    content = message.get("content") or ""
+    if message.get("role") == "tool":
+        return len(content) // 4
+    cost = 4 + len(content) // 4
+    if message.get("tool_calls"):
+        for tc in message["tool_calls"]:
+            fn = tc.get("function") or {}
+            cost += len(fn.get("arguments") or "") // 4
+    return cost
+
+
+def _bounded_context(
+    messages: list[dict[str, Any]],
+    max_tokens: int = _MAX_LLM_TOKENS,
+    max_tool_chars: int = _MAX_TOOL_RESULT_CHARS,
+) -> list[dict[str, Any]]:
+    """Bounded copy of ``messages`` for the LLM API boundary.
+
+    Always keeps the system prompt (messages[0]) and the ENTIRE in-flight
+    exchange — everything from the most recent ``user`` message onward — so
+    the current directive and its tool trail are never truncated. Older
+    complete exchanges are added most-recent-first while the token budget
+    allows; anything beyond the budget is dropped at a clean ``user``
+    boundary (never mid-exchange, which some backends reject). Tool-result
+    messages OLDER than the in-flight exchange are truncated to
+    ``max_tool_chars`` in the copy: they were already seen in full when
+    produced, so later turns only need the gist.
+    """
+    if not messages:
+        return []
+    system = messages[0] if messages[0].get("role") == "system" else None
+    user_idx = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+    tail_start = user_idx[-1] if user_idx else (0 if system is None else 1)
+    # Walk backward from the in-flight tail while the budget allows.
+    keep_from = tail_start
+    budget = max_tokens
+    i = tail_start
+    while i > 0 and budget > 0:
+        cost = _est_tokens(messages[i - 1])
+        if cost <= budget:
+            budget -= cost
+            i -= 1
+            keep_from = i
+        else:
+            break
+    # Roll forward to a clean user boundary so the window never starts
+    # mid-exchange (a dangling tool/assistant-tool_calls message would be
+    # rejected by OpenAI-compatible backends).
+    j = keep_from
+    while j < len(messages) and messages[j].get("role") != "user":
+        j += 1
+    keep_from = j
+    out: list[dict[str, Any]] = []
+    for i, m in enumerate(messages):
+        # The system prompt is ALWAYS kept, even when the boundary roll
+        # below lands past it (a bounded window without the system prompt is
+        # a different conversation to the model).
+        if i == 0 and m.get("role") == "system":
+            out.append(m)
+            continue
+        if i < keep_from:
+            continue
+        if (
+            m.get("role") == "tool"
+            and i < tail_start
+            and len(m.get("content") or "") > max_tool_chars
+        ):
+            m = {**m, "content": m["content"][:max_tool_chars] + "\n...[truncated]"}
+        out.append(m)
+    return out
+
 
 def _call_with_retry(
     client: Any,
@@ -368,7 +456,12 @@ _SYSTEM_PROMPT = (
     "and bullet lists for anything multi-part. Summarize tool results in "
     "plain language with the key facts; never dump raw tool output or JSON. "
     "No preamble, no meta-commentary, no emojis unless asked. Be warm, "
-    "direct, and concise."
+    "direct, and concise.\n"
+    "9. NEVER narrate your own reasoning. Never start with 'Okay,', 'Hmm,', "
+    "'Let me', 'I think', or meta-talk about the conversation ('the user "
+    "asked', 'as I said before'). Do not restate the question. Just deliver "
+    "the answer. If you do not know, say so in one sentence and offer the "
+    "nearest tool that could find out."
 )
 
 
@@ -896,7 +989,14 @@ def run_dispatch_messages(
     if client is None:
         config = config or load_llm_config()
         client = _build_client(config)
-        model = model or config.model
+        # v5.0 fast dispatch: the orchestrator (looping dispatch brain)
+        # defaults to its per-agent model (qwen3:4b on the local backend) so
+        # every turn is fast; explicit ``model`` overrides still win.
+        model = model or (
+            config.model_for_agent("orchestrator")
+            if hasattr(config, "model_for_agent")
+            else config.model
+        )
     else:
         model = model or (config.model if config is not None else "test-model")
 
@@ -1026,6 +1126,19 @@ def _run_dispatch_loop(
     # all 60. Plain questions send no tools at all — the biggest single
     # latency lever (see _scoped_tool_specs).
     plan_agents = {step["subagent"] for step in (plan or [])}
+    # v5.2: a SINGLE-step directive ("how much is BTC worth", "check my
+    # inbox", "draft an email") has no plan, but it is still an AGENTIC
+    # request — the model must see the target agent's tools or it answers
+    # blind. When no plan exists, scope the tools of the best-matching
+    # subagent(s) instead of sending zero schemas, so real directives can
+    # actually execute. Pure chat (no agent match) still sends nothing.
+    if not plan_agents:
+        from dourmouse.planner import find_agents_for_query
+
+        matches = find_agents_for_query(registry, last_user, limit=2)
+        plan_agents = {
+            m["name"] for m in matches if m["score"] >= 3
+        }
     scoped_tools = _scoped_tool_specs(registry, plan_agents) if plan_agents else []
 
     for _ in range(max_turns):
@@ -1093,10 +1206,14 @@ def _run_dispatch_loop(
             def on_delta(text: str) -> None:
                 _emit_event(ctx.event_sink, {"type": "assistant_delta", "text": text})
 
+        # v4.2 speed: the LLM sees a bounded rolling window (system +
+        # in-flight exchange + recent history), never the unbounded
+        # conversation. The full list stays authoritative for persistence.
+        bounded = _bounded_context(messages, _MAX_LLM_TOKENS)
         response = _call_with_retry(
             client,
             model=model,
-            messages=messages,
+            messages=bounded,
             tools=scoped_tools,
             config=ctx.config,
             on_delta=on_delta,
@@ -1104,14 +1221,16 @@ def _run_dispatch_loop(
         message = response.choices[0].message
 
         # Record the call against the budget AFTER it succeeded, using real
-        # request + response sizes (token estimate ~4 chars/token).
+        # request + response sizes (token estimate ~4 chars/token). The
+        # model saw the BOUNDED copy, so account against that — the full
+        # list would over-count in long sessions.
         if cost_budget is not None:
             resp_text = message.content or ""
             if getattr(message, "tool_calls", None):
                 resp_text += json.dumps(
                     [tc.function.arguments for tc in message.tool_calls], default=str
                 )
-            cost_budget.record_call(messages, resp_text)
+            cost_budget.record_call(bounded, resp_text)
 
         tool_calls = getattr(message, "tool_calls", None)
         if not tool_calls:

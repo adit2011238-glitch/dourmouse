@@ -1,7 +1,99 @@
 # Dourmouse — Progress
 
-## Current Phase: V4.0 — SELF-HOSTED PERSONAL AI OPERATING SYSTEM (2026-08-06)
-## Last updated: 2026-08-07
+## Current Phase: V5.2 — SPEED + QUALITY OVERHAUL (2026-08-08)
+## Last updated: 2026-08-08
+
+### v5.2 shipped — latency 28s→0.7s, agentic routing fixed, UI polish
+
+1. **GPU unthrottled** — Low Power Mode was ON (M3 throttled ~8x: 9 tok/s).
+   Turned off via approved elevation: qwen3:4b now runs ~30 tok/s, prefill
+   77→309 tok/s. The single biggest speed fix.
+2. **Orchestrator model swapped to qwen2.5:7b** — qwen3:4b IGNORES
+   think=False on this Ollama build and answers as "Hmm, the user asked…"
+   thinking-narration, burning the whole token budget before answering.
+   qwen2.5:7b answers DIRECTLY (~20 tok/s, no preamble), pulled + defaulted
+   in config.py and .env. Heavy agents stay qwen3:8b (measured direct).
+3. **Single-step tool scoping (the big quality fix)** — single directives
+   like "check my inbox" used to scope ZERO tools, so the model answered
+   BLIND. The dispatch loop now scopes the best-matching agent's tools for
+   single-step prompts (mail/markets/news/…). Live-verified: "check my
+   inbox" now actually calls read_inbox and reads real Gmail.
+4. **Domain routing fixed** — planner misroutes corrected: inbox/email→mail
+   (was admin_ops tie-break), "new emails"→mail (was news via 'new'),
+   draft→comms, btc/price→markets, weather/web→research_info. Deterministic
+   (set-of-targets, no iteration order). +8 domain boost per matched word.
+5. **read_inbox now uses the Gmail config** — one App Password in
+   local_secrets.py powers gmail_* AND read_inbox (no duplicate IMAP setup).
+6. **Answer styling** — final answers render as a distinct block (larger
+   text, left cyan accent), richer markdown (h1/h2/h3, blockquote, em,
+   nested lists), anti-narration system-prompt rule 9.
+7. **Map UX** — neural-graph hover strip explains each node, per-agent
+   suggested-task chips (one-click dispatch), node tooltips.
+8. **HUD** — quick-directive chips now SEND on click, friendlier placeholder.
+
+Measured live: warm "what is 2+2" first token 0.74s (was 28.1s).
+Agentic "check my inbox" calls read_inbox and answers from real Gmail.
+Tests: 850 pass (up from 841; +9 in planner/dispatch/live_feeds).
+
+---
+
+## V5.0 — MASTER UPGRADE (2026-08-07)
+
+### Phase A shipped — everything except NN/ML (UPGRADE_PLAN_02.md)
+
+1. **Neural link verified working end-to-end** — map grid view + neural graph
+   (19 nodes, 67 links) + HUD comms pulses; all live, zero console errors.
+2. **File upload** — POST /api/upload (sandboxed to workspace/uploads), GET
+   /api/files, GET /uploads/<name>, read_upload tool on the system agent,
+   HUD [SETUP] panel. Oversize/path-escape rejected.
+3. **Voice ENABLED and verified** — DOURMOUSE_VOICE=1 + whisper tiny + piper
+   in .env; full TTS->STT round trip passes live (mic/SPK buttons active).
+4. **Fast dispatch model** — orchestrator runs qwen3:4b (pulled), heavy
+   agents stay qwen3:8b; DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR overrides.
+5. **Codex backend** — code_codex agent (OpenAI-compatible, CODEX_API_KEY /
+   OPENAI_API_KEY, CODEX_MODEL); Claude CLI already present on this machine.
+6. **Gmail via stdlib IMAP/SMTP** — google_services.py (App Password), tools
+   gmail_search/gmail_read/gmail_send (send confirmation-gated), --check CLI.
+7. **Setup panel** — GET /api/setup capability checklist, [SETUP] button in
+   the HUD renders configured/not + exact fix per capability.
+8. **Packaging** — build_dist.sh (self-contained folder, macOS + Linux),
+   start.sh launcher, INSTALL.md in the dist, UPGRADE_PLAN_02.md.
+
+Tests: 833 pass (17 new in test_v50_features.py), ruff baseline unchanged.
+Still to do on the user's machine: add CODEX_API_KEY / DEEPSEEK_API_KEY /
+GOOGLE_GMAIL_USER+APP_PASSWORD to .env to light up those integrations.
+
+**NEXT: Phase B (real NN/ML) is planned with math in UPGRADE_PLAN_02.md —
+needs the user's explicit go-ahead before building.**
+
+### Speed: LLM context bounding + KV-cache stability (v4.2)
+
+Measured the real cost drivers on the M3 Air: generation ~4 t/s, prefill
+~46 t/s (both models; Low Power Mode is on — see PROGRESS note at the
+bottom), so every token re-sent to the model costs ~20ms and sessions that
+kept the FULL conversation re-prefilled minutes of history every turn.
+
+Fixed in code (816 tests pass, zero new ruff findings):
+
+1. **`_bounded_context` in dispatch.py** — the LLM now sees a bounded
+   rolling window (system + the full in-flight exchange + as many complete
+   older exchanges as fit a 5120-token budget), never the unbounded
+   conversation. The authoritative history is untouched (still persisted
+   and resumable) — only the API boundary is bounded. Old tool results are
+   truncated to 800 chars in the copy; the just-produced result stays in
+   full so the immediate next step never loses fidelity.
+2. **KV-cache stability in chat.py** — recalled memory is injected as its
+   own trailing system message instead of rewriting `messages[0]`, so the
+   stable prefix (system + history) is reused between turns instead of
+   re-prefilling from scratch whenever learning fires.
+3. Tests: TestBoundedContext + TestLoopBounding in test_dispatch.py; recall
+   contract updated in test_learn.py.
+
+**BIGGEST REMAINING LEVER (not code): the Mac is in Low Power Mode, even on
+AC** (`pmset -g` → `lowpowermode 1` on AC Power). That caps the M3 GPU and
+is the reason generation is ~4 t/s instead of ~30-50. Fix: System Settings
+→ Battery → Low Power Mode (off when plugged in), or `sudo pmset -c
+lowpowermode 0`. Expect 5-10x on inference once applied.
 
 ### Orchestration hardening — planner capability routing, plan checkpoints, honest caveats (cfc5d9d)
 
@@ -1646,3 +1738,61 @@ Notes: Requires `AUTHORIZE LIVE CAPITAL — <amount>`.
 ### Phase 6 — CSMOM / BAB Resolution
 Status: not started
 Notes: Independent. Rename hypothesis vs. extend CrossSectionalRanker short leg — user decision pending.
+
+### v5.1 — Single-key DeepSeek + source-tree Gmail (user request)
+Status: DONE (2026-08-08) · 841 passed · ruff clean on new lines · mypy clean on new lines
+- DeepSeek coding backend now falls back to the user's NVIDIA_API_KEY (NVIDIA
+  NIM hosts DeepSeek: DEEPSEEK_NVIDIA_MODEL, default deepseek-ai/deepseek-v4-flash-0731,
+  verified live on the real key). Explicit DeepSeek keys still win.
+- Gmail login can now live IN the source tree: dourmouse/local_secrets.py
+  (GITIGNORED) with GMAIL_USER / GMAIL_APP_PASSWORD. Env vars win over it;
+  build_dist.sh excludes it from the dist zip; setup panel + --check report
+  the source. Loaded via importlib so fresh checkouts never break.
+- .env.example is now versioned (gitignore negation) with the new vars.
+Notes: Codex has no NVIDIA equivalent — stays honestly NOT CONFIGURED without
+an OpenAI key. User still needs to fill in local_secrets.py with a real
+Google App Password (or set the env vars) for Gmail to go live.
+
+### v5.3 — Connections matrix, Codex CLI bridge, coding-capability proof
+Status: DONE (2026-08-08) · 881 passed · ruff clean on new lines
+- dourmouse/connections.py: deterministic per-account status
+  (ollama/nvidia/claude/codex/gmail/freebuff/slack/alpaca/atlas) + GET
+  /api/connections + check_connections tool on system + SETUP rows.
+- codex_code tool on dev_coding: real `codex exec` delegation via the
+  ChatGPT login in ~/.codex/auth.json (no API key needed). Claude Code CLI
+  verified live (AUTH_OK); Codex at OpenAI usage limit until ~Aug 22.
+- Freebuff: app reachable (UI:51819/API:51820); API needs FREEBUFF_API_TOKEN
+  from the app — hooks in .env.example, flips on when pasted.
+- Live coding-capability proof: engine wrote fib.py via write_file and ran
+  it via run_python (fib(10)=55). Backends live: claude 4s, ollama 54s,
+  deepseek 5.4s (via NVIDIA NIM).
+- Model-brain fix (measured live): qwen2.5-coder:14b does NOT call tools as
+  a dispatch brain; qwen2.5:7b / qwen3:8b do. Removed the dev_coding
+  override and documented the trap in .env.example.
+Notes: Freebuff API token + Slack/Alpaca/ATLAS keys are the remaining
+"paste to enable" items in the SETUP checklist.
+
+### v5.4 — ATLAS quant-engine bridge (the real integration)
+Status: DONE (2026-08-08)
+- dourmouse/atlas_cli.py: the REAL bridge to the current ATLAS CLI. Per
+  Integration Rule 7.1 it never reimplements ATLAS logic — it subprocess-
+  invokes `python -m atlas.ops.cli` in the real repo/venv (ATLAS_REPO_PATH +
+  ATLAS_VENV_PATH) and returns the genuine output, honestly reporting
+  NOT CONFIGURED / non-zero exits / timeouts (Rule 2.2).
+- New tools on the `atlas` subagent: atlas_version, atlas_health,
+  atlas_fx_universe, atlas_fx_verify, atlas_fx_refresh, atlas_fx_research
+  (walk-forward sweep, defaults to --all-strategies), atlas_fx_daily (the
+  permanent-connection loop), atlas_fx_backfill, and atlas_read_report
+  (reads the newest/dated deliverables/fx/*.md report).
+- GET /api/atlas — live panel payload (repo status, FX archive pair-days,
+  newest report snippet, last managed run). POST /api/atlas/run — single-
+  flight launcher for fx-daily/fx-refresh/fx-verify/fx-universe/health/
+  version (fx-backfill and fx-research stay tool-only: backfill is a
+  long bootstrap, research needs per-run params).
+- HUD: new ATLAS QUANT ENGINE panel with [FX-DAILY] button + 6s poll.
+- SETUP checklist: new `atlas` row from the connections matrix.
+- Tests: tests/test_atlas_cli.py (28 new) — fake repo + fake venv python,
+  argv verification, honest failures, manager single-flight, panel payload.
+Notes: ATLAS_REPO_PATH/ATLAS_VENV_PATH already set in .env pointing at the
+real repo + its own .venv — the bridge is live. Old research_agent
+(Atlas().research) still imports fine and is untouched.

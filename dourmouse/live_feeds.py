@@ -60,7 +60,7 @@ def _http_get(url: str, *, timeout: int = _TIMEOUT, headers: dict[str, str] | No
         hdrs.update(headers)
     req = urllib.request.Request(url, headers=hdrs)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https/known hosts)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"HTTP {exc.code} from {url}") from exc
@@ -202,19 +202,38 @@ def read_inbox(max_items: int = 10) -> list[dict[str, str]]:
     NOT CONFIGURED message. Returns {from_, subject, date, snippet} per
     message. Never sends or deletes anything (Rule 2.9: read-only).
     """
-    import os
-
-    import imaplib
     import email as email_mod
+    import imaplib
+    import os
     from email.header import decode_header
 
     host = os.environ.get(_IMAP_HOST, "").strip()
     user = os.environ.get(_IMAP_USER, "").strip()
     password = os.environ.get(_IMAP_PASS, "")
+    # v5.2: fall back to the Gmail module's config (env vars or the
+    # gitignored dourmouse/local_secrets.py) so one Google App Password
+    # powers BOTH gmail_* tools and read_inbox — no duplicate setup.
+    if not (host and user and password) and not host:
+        # v5.2: fall back to the Gmail module's config ONLY when the IMAP
+        # env vars are entirely absent — never mix a custom IMAP_HOST with
+        # Gmail credentials (reviewer-caught: logging into a non-Gmail host
+        # with a Gmail app password would fail confusingly).
+        try:
+            from dourmouse.google_services import _app_password, _user
+
+            fallback_user = _user()
+            fallback_pass = _app_password()
+        except Exception:  # noqa: BLE001 - a broken gmail module must not crash feeds
+            fallback_user, fallback_pass = "", ""
+        if fallback_user and fallback_pass:
+            host = "imap.gmail.com"
+            user = fallback_user
+            password = fallback_pass
     if not host or not user or not password:
         raise RuntimeError(
             "NOT CONFIGURED: set DOURMOUSE_IMAP_HOST / DOURMOUSE_IMAP_USER / "
-            "DOURMOUSE_IMAP_PASS to enable read-only inbox access."
+            "DOURMOUSE_IMAP_PASS (or configure Gmail in local_secrets.py) to "
+            "enable read-only inbox access."
         )
     max_items = max(1, min(int(max_items), 50))
     conn = imaplib.IMAP4_SSL(host)
@@ -266,7 +285,7 @@ def read_inbox(max_items: int = 10) -> list[dict[str, str]]:
     finally:
         try:
             conn.logout()
-        except Exception:
+        except Exception:  # noqa: BLE001,S110 - logout must never mask results
             pass
 
 

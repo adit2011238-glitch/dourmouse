@@ -179,6 +179,14 @@
   .dchip.prohib { background: rgba(var(--red-rgb), var(--a06)); border-color: rgba(var(--red-rgb), var(--a30)); color: var(--red); }
   #dispatchbox { border: 1px solid var(--line-strong); padding: 10px; background: rgba(18,21,30,0.7); }
   #dispatchbox:focus-within { border-color: var(--cyan); box-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a16)); }
+  /* v5.2: one-click suggested tasks in the dispatch box */
+  .sugg {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.05em;
+    color: var(--text-dim); border: 1px solid var(--line); background: rgba(18,21,30,0.6);
+    padding: 4px 9px; cursor: pointer; transition: color 140ms, border-color 140ms, box-shadow 140ms;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sugg:hover { color: var(--text); border-color: var(--line-strong); box-shadow: 0 0 10px rgba(var(--cyan-rgb), var(--a16)); }
   #dinput { width: 100%; background: transparent; border: none; outline: none; resize: none; color: var(--text); font-family: var(--font-mono); font-size: 11px; font-weight: 300; line-height: 1.5; }
   #dinput::placeholder { color: var(--text-dim); opacity: 0.8; }
   .drow { display: flex; gap: 8px; margin-top: 8px; }
@@ -210,6 +218,12 @@
   /* ---------------- neural link graph view ---------------- */
   #graph { position: relative; width: 100%; height: 100%; min-height: 540px; }
   #graph svg { width: 100%; height: 100%; display: block; }
+  /* v5.2: hover strip — explains the hovered node inside the graph view. */
+  #graphstrip {
+    height: 26px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    font-size: 10px; letter-spacing: 0.05em; color: var(--text-dim);
+    padding: 6px 4px 0; opacity: 0; transition: opacity 140ms ease;
+  }
   .g-link { stroke-width: 1; opacity: 0.26; transition: opacity 0.2s; }
   .g-link.delegate { stroke: var(--cyan); stroke-dasharray: 4 5; }
   .g-link.memory { stroke: var(--cyan); }
@@ -300,6 +314,7 @@
       <div id="maptitle">SUPERVISED SUBAGENT NETWORK // CLICK A NODE TO INSPECT</div>
       <div id="nodes">SCANNING ROSTER…</div>
       <div id="graph" style="display:none"></div>
+      <div id="graphstrip"></div>
       <div id="stream"></div>
     </div>
 
@@ -441,6 +456,15 @@
     }).join('') || '<div class="fe"><span class="ts">[—]</span> no messages yet</div>';
     const inboxHtml = inboxRows;
 
+    // v5.2: per-agent suggested directives — click to fill+send, so the
+    // dispatch box is usable, not a blank prompt. Built from the agent's
+    // actual tool names (deterministic, no LLM).
+    const suggestions = suggestFor(ag);
+    const suggHtml = suggestions.length
+      ? `<div class="drow" style="flex-wrap:wrap;margin-bottom:8px">${suggestions.map(s =>
+          `<button class="sugg" data-task="${esc(s)}">${esc(s)}</button>`).join('')}</div>`
+      : '';
+
     dbody.innerHTML = `
       <div><span id="dname">${esc(ag.name)}</span><span id="dstatus" class="${st.status === 'computing' ? 'computing' : st.status === 'auth' ? 'auth' : st.status === 'live' ? 'live' : ''}">${pillText(st.status)}</span></div>
       <div id="ddesc">${esc(ag.description)}</div>
@@ -449,6 +473,7 @@
       <div class="dtools">${chips}</div>
       <div class="sec">DISPATCH DIRECTIVE</div>
       <div id="dispatchbox">
+        ${suggHtml}
         <textarea id="dinput" rows="2" placeholder="Send a task to ${esc(ag.name)}…"></textarea>
         <div class="drow">
           <button id="dsend">[SEND_DIRECTIVE]</button>
@@ -461,6 +486,14 @@
       <div class="sec">INBOX // INTER-AGENT COMMS${unread ? ' <span style="color:var(--text)">(' + unread + ' UNREAD)</span>' : ''}</div>
       <div id="dinbox">${inboxHtml}</div>`;
 
+    document.querySelectorAll('#dispatchbox .sugg').forEach(b => {
+      b.addEventListener('click', () => {
+        const task = b.dataset.task;
+        const di = document.getElementById('dinput');
+        di.value = task;
+        dispatchToAgent(ag.name);
+      });
+    });
     document.getElementById('dsend').addEventListener('click', () => dispatchToAgent(ag.name));
     document.getElementById('dopenwin').addEventListener('click', () => {
       const api = (window.pywebview && window.pywebview.api) || null;
@@ -516,6 +549,40 @@
       btn.disabled = false;
       setTimeout(() => { if (line.textContent.includes('completed')) line.textContent = ''; }, 4000);
     }
+  }
+
+  // v5.2: deterministic suggested tasks per agent, built from its tool
+  // names so every suggestion is something the agent can actually do.
+  const TOOL_PROMPTS = {
+    'read_inbox': 'Check my inbox for new messages',
+    'gmail_search': 'Search my Gmail for recent emails',
+    'gmail_send': 'Draft and send a Gmail message (you will confirm)',
+    'news_headlines': 'Fetch today\u2019s top news headlines',
+    'web_search': 'Search the web for something and summarize',
+    'get_quote': 'Get a live market quote',
+    'run_command': 'Run a shell command',
+    'read_path': 'Read a file from disk',
+    'write_file': 'Write a file',
+    'list_files': 'List files in a directory',
+    'search_vault': 'Search my long-term memory notes',
+    'recall': 'Recall what I asked about before',
+    'remember': 'Remember something important for later',
+    'list_tasks': 'List my tasks',
+    'add_task': 'Add a task',
+    'complete_task': 'Mark a task done',
+    'send_message': 'Send a message to another agent',
+    'get_calendar': 'Show my calendar / proposed times',
+    'atlas_status': 'Give me an ATLAS status update',
+    'repo_search': 'Search the indexed ATLAS repo',
+  };
+  function suggestFor(ag) {
+    const out = [];
+    for (const t of (ag.tools || [])) {
+      const p = TOOL_PROMPTS[t.name];
+      if (p && out.length < 3) out.push(p);
+    }
+    if (!out.length && ag.name === 'orchestrator') out.push('Give me a status overview of all agents');
+    return out.slice(0, 3);
   }
 
   // ---------- task search ----------
@@ -736,7 +803,11 @@
     for (const n of graphData.nodes) {
       const p = pos[n.name];
       if (!p) continue;
+      // v5.2: node tooltip carries the agent's real description (the graph
+      // view hides it — hovering shows what the agent actually does).
+      const tip = esc((n.description || '').slice(0, 140));
       svg += `<g class="g-node" data-name="${esc(n.name)}" transform="translate(${p.x},${p.y})">
+        <title>${tip}</title>
         <circle r="${p.r}" fill="rgba(18,21,30,0.9)" stroke="rgba(79,195,247,0.45)" stroke-width="2"/>
         <text y="-8" text-anchor="middle" class="glabel">${esc(n.domain)}</text>
         <text y="7" text-anchor="middle">${esc(n.name)}</text>
@@ -746,8 +817,22 @@
     svg += '</svg>';
     graphEl.innerHTML = svg;
 
+    // v5.2: a live description strip under the graph follows the hovered
+    // node, so the neural view is self-explaining without the detail panel.
     graphEl.querySelectorAll('.g-node').forEach(g => {
       g.addEventListener('click', () => selectAgent(g.dataset.name));
+      g.addEventListener('mouseenter', () => {
+        const ag = graphData.nodes.find(n => n.name === g.dataset.name);
+        const strip = document.getElementById('graphstrip');
+        if (strip && ag) {
+          strip.textContent = ag.name + ' — ' + ag.description;
+          strip.style.opacity = '1';
+        }
+      });
+      g.addEventListener('mouseleave', () => {
+        const strip = document.getElementById('graphstrip');
+        if (strip) strip.style.opacity = '0';
+      });
     });
     pulseGraph();
   }

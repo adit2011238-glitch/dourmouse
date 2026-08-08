@@ -10,7 +10,10 @@ backend:
 - ``deepseek`` — DeepSeek (OpenAI-compatible). Prefers the Freebuff free
   tier env (``FREEBUFF_DEEPSEEK_API_KEY`` / ``_BASE_URL`` / ``_MODEL``) and
   falls back to plain ``DEEPSEEK_API_KEY`` / ``DEEPSEEK_BASE_URL`` /
-  ``DEEPSEEK_MODEL``. Honestly NOT CONFIGURED when no key is set.
+  ``DEEPSEEK_MODEL``. With neither set, falls back to the user's
+  ``NVIDIA_API_KEY`` (NVIDIA NIM hosts DeepSeek models — the user runs
+  solo with only an NVIDIA key). Honestly NOT CONFIGURED only when no
+  key of any kind is set.
 - ``claude`` — the user's real Claude Code CLI (``claude -p``), the same
   honest subprocess pattern as the dev_coding ``claude_code`` tool.
 
@@ -27,10 +30,18 @@ import os
 import subprocess
 from typing import Any
 
-from dourmouse.config import load_nvidia_config, load_ollama_config
+from dourmouse.config import (
+    NVIDIA_DEFAULT_BASE_URL,
+    load_nvidia_config,
+    load_ollama_config,
+)
 
 _DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 _DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
+# v5.1: the NVIDIA NIM DeepSeek model used when the user has an NVIDIA key
+# but no DeepSeek key. Overridable via DEEPSEEK_NVIDIA_MODEL. Verified live
+# on the user's key (integrate.api.nvidia.com/v1/models).
+_DEEPSEEK_NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash-0731"
 _OUTPUT_CAP = 6_000
 
 _CODING_SYSTEM = (
@@ -66,15 +77,45 @@ def load_backend(backend: str) -> tuple[str, str, str]:
             base = base or os.environ.get("DEEPSEEK_BASE_URL", "").strip()
             model = model or os.environ.get("DEEPSEEK_MODEL", "").strip()
         if not key:
+            # v5.1: no DeepSeek-specific key, but the user DOES have an
+            # NVIDIA key (NVIDIA NIM hosts DeepSeek models). Route the
+            # deepseek backend through NVIDIA with a DeepSeek model id —
+            # DEEPSEEK_NVIDIA_MODEL overrides the default.
+            nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip()
+            if nvidia_key:
+                return (
+                    os.environ.get("NVIDIA_BASE_URL", "").strip()
+                    or NVIDIA_DEFAULT_BASE_URL,
+                    nvidia_key,
+                    os.environ.get("DEEPSEEK_NVIDIA_MODEL", "").strip()
+                    or _DEEPSEEK_NVIDIA_MODEL,
+                )
             raise RuntimeError(
                 "NOT CONFIGURED: the DeepSeek coding backend needs "
-                "FREEBUFF_DEEPSEEK_API_KEY (Freebuff free tier) or "
-                "DEEPSEEK_API_KEY in .env. Nothing was run."
+                "FREEBUFF_DEEPSEEK_API_KEY (Freebuff free tier), "
+                "DEEPSEEK_API_KEY, or NVIDIA_API_KEY (NVIDIA NIM hosts "
+                "DeepSeek models) in .env. Nothing was run."
             )
         return base or _DEEPSEEK_DEFAULT_BASE_URL, key, model or _DEEPSEEK_DEFAULT_MODEL
+    if name in ("codex", "openai_codex"):
+        # v5.0: OpenAI Codex — OpenAI-compatible endpoint. Key from
+        # CODEX_API_KEY (preferred) or OPENAI_API_KEY; model env-overridable.
+        key = os.environ.get("CODEX_API_KEY", "").strip()
+        if not key:
+            key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not key:
+            raise RuntimeError(
+                "NOT CONFIGURED: the Codex coding backend needs CODEX_API_KEY "
+                "(or OPENAI_API_KEY) in .env. Nothing was run."
+            )
+        base = os.environ.get(
+            "CODEX_BASE_URL", "https://api.openai.com/v1"
+        ).strip()
+        model = os.environ.get("CODEX_MODEL", "gpt-5-codex").strip()
+        return base, key, model
     raise RuntimeError(
         f"ERROR: unknown code backend {backend!r} — use 'ollama', 'nvidia', "
-        "'deepseek' or 'claude'."
+        "'deepseek', 'codex' or 'claude'."
     )
 
 

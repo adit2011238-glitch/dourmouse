@@ -1,6 +1,10 @@
 # ── Secrets ──────────────────────────────────────────────────────────────
 .env
 .env.*
+# The TEMPLATE is versioned (the negation wins over .env.*).
+!.env.example
+# Single-user source-tree secrets (see dourmouse/local_secrets.py).
+dourmouse/local_secrets.py
 
 # ── Python ───────────────────────────────────────────────────────────────
 __pycache__/

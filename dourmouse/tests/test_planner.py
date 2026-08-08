@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from dourmouse.dispatch import run_dispatch, system_message
 from dourmouse.general_roster import build_general_registry
 from dourmouse.planner import build_plan, find_agents_for_query, looks_multi_step
@@ -231,7 +229,6 @@ class TestPlanEventInTranscript:
     def test_plan_persisted_with_session_jsonl(self, tmp_path, monkeypatch):
         """The plan event rides the transcript, so chat.py persists it to the
         session JSONL — audit trails for arbitrary sessions (Phase 2.1)."""
-        import dourmouse.chat as chat_module
         from dourmouse.chat import ChatSession
 
         monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
@@ -340,6 +337,72 @@ class TestFindAgentsForQueryRegression:
         )
         assert matches
         assert matches[0]["name"] == "dev_coding", f"got {matches}"
+
+    def test_domain_route_mail_for_inbox(self):
+        """v5.2: 'check my inbox' must route to mail, never to admin_ops or
+        news by token-overlap tie-break (live misroute)."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "check my inbox", limit=1)
+        assert m and m[0]["name"] == "mail", f"got {m}"
+
+    def test_domain_route_mail_beats_news_for_emails(self):
+        """v5.2: 'summarize new emails' must route to mail — 'new' inside
+        'news' was stealing the step (live misroute)."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "summarize new emails", limit=1)
+        assert m and m[0]["name"] == "mail", f"got {m}"
+
+    def test_domain_route_comms_for_draft(self):
+        """v5.2: 'draft an email' routes to comms (the drafting agent), even
+        though 'email' boosts mail — drafting is comms' job."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "draft an email to my boss", limit=1)
+        assert m and m[0]["name"] == "comms", f"got {m}"
+
+    def test_domain_route_markets_for_price(self):
+        """v5.2: a price/quote question must reach the markets agent."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "how much is BTC worth", limit=1)
+        assert m and m[0]["name"] == "markets", f"got {m}"
+
+    def test_domain_route_research_for_weather(self):
+        """v5.2: a weather question routes to research_info (web search)."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "weather in london", limit=1)
+        assert m and m[0]["name"] == "research_info", f"got {m}"
+
+    def test_domain_routing_is_deterministic_across_runs(self):
+        """v5.2: domain boosts are collected as a SET of targets (no
+        iteration-order dependence), so repeated runs give the same winner."""
+        registry = build_general_registry()
+        first = find_agents_for_query(registry, "draft an email to my boss", limit=1)
+        for _ in range(10):
+            again = find_agents_for_query(registry, "draft an email to my boss", limit=1)
+            assert again[0]["name"] == first[0]["name"] == "comms"
+
+    def test_web_is_not_a_domain_word(self):
+        """v5.2 (reviewer-caught): 'web' must NOT be a strong domain word —
+        "build a web app" is a CODING request and would be stolen to
+        research_info by a +8 'web' boost. The 'search the web' intent still
+        routes via the search verb + web_search tool stem."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "build a web app in python", limit=1)
+        assert m and m[0]["name"] != "research_info", f"got {m}"
+
+    def test_tool_mention_beats_domain_word(self):
+        """v5.2 (reviewer-caught): an explicit tool mention (+5) must beat a
+        domain-word boost (+4), so 'use gmail_search' routes to mail even
+        when the query also mentions the news domain."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "use gmail_search to check the news", limit=1)
+        assert m and m[0]["name"] == "mail", f"got {m}"
+
+    def test_build_verb_capability_routes_to_write_agents(self):
+        """v5.2 (reviewer-caught): 'build'/'make' are write-intent verbs, so
+        a coding request reaches the write-capable agent, not a browser tool."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "write a python script that prints primes", limit=1)
+        assert m and m[0]["name"] == "dev_coding", f"got {m}"
 
     def test_deterministic_with_paths(self):
         registry = build_general_registry()

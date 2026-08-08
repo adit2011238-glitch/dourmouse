@@ -81,6 +81,8 @@ _VERB_CAPABILITY: dict[str, set[str]] = {
     "open": {"open", "read", "view"},
     "send": {"send", "message", "draft", "notify"},
     "draft": {"draft", "write", "compose", "message"},
+    "build": {"write", "create", "build", "make", "code", "implement"},
+    "make": {"write", "create", "build", "make", "code", "implement"},
     "summarize": {"summarize", "digest", "report", "brief"},
     "check": {"check", "status", "list", "inspect", "monitor"},
     "fetch": {"fetch", "get", "download", "search"},
@@ -88,6 +90,47 @@ _VERB_CAPABILITY: dict[str, set[str]] = {
     "remember": {"remember", "store", "save", "memorize", "note"},
     "recall": {"recall", "search", "find", "lookup", "query"},
 }
+
+# High-confidence domain words that must route to ONE specific agent, stronger
+# than any description overlap. These are the live misroutes the generic
+# scorer got wrong ("check my inbox" -> admin_ops/atlas tie-break; "summarize
+# new emails" -> news because 'new' matches 'news'). The boost is applied as a
+# flat score addition to the owning agent (Rule 2.8: deterministic, no LLM).
+_DOMAIN_ROUTE: dict[str, str] = {
+    "inbox": "mail",
+    "email": "mail",
+    "emails": "mail",
+    "gmail": "mail",
+    "mail": "mail",
+    "draft": "comms",  # drafting is comms; sending/reading is mail
+    "news": "news",
+    "headline": "news",
+    "headlines": "news",
+    "weather": "research_info",
+    "btc": "markets",
+    "bitcoin": "markets",
+    "stock": "markets",
+    "stocks": "markets",
+    "quote": "markets",
+    "quotes": "markets",
+    "price": "markets",
+    "prices": "markets",
+    "forex": "markets",
+    "task": "tasks",
+    "tasks": "tasks",
+    "todo": "tasks",
+    "calendar": "scheduling",
+    "schedule": "scheduling",
+    "meeting": "scheduling",
+    # NOT here: "web" — too broad. "build a web app" would steal a coding
+    # request to research_info; "search the web" already routes via the
+    # search verb + research_info's web_search tool stem (reviewer-caught).
+    "wikipedia": "research_info",
+}
+
+# Stop words that are ALSO strong domain words must not be stripped — the
+# generic stop-word filter would delete them before _DOMAIN_ROUTE sees them.
+_DOMAIN_WORDS = set(_DOMAIN_ROUTE)
 
 
 
@@ -143,7 +186,9 @@ def find_agents_for_query(
     # 1) Strip path fragments first — a file path is not intent.
     cleaned = re.sub(r"\S*/\S+", " ", query.lower())
     tokens = {
-        t for t in re.findall(r"[a-z0-9]{2,}", cleaned) if t not in _STOP_WORDS
+        t
+        for t in re.findall(r"[a-z0-9]{2,}", cleaned)
+        if t not in _STOP_WORDS or t in _DOMAIN_WORDS
     }
     if not tokens:
         return []
@@ -157,6 +202,13 @@ def find_agents_for_query(
     for _t in tokens:
         if _t in _VERB_CAPABILITY:
             verb_stems |= _VERB_CAPABILITY[_t]
+    # 3) High-confidence domain words (inbox/email/news/weather/btc/…) — a
+    # flat strong boost for EVERY agent owning a matched domain word, so
+    # "check my inbox" can never tie-break to admin_ops and "new emails"
+    # never routes to news. Multiple domain words boost multiple agents
+    # ("draft an email" boosts comms AND mail); normal scoring then decides
+    # the winner. Deterministic: no iteration-order dependence.
+    domain_targets = {_DOMAIN_ROUTE[w] for w in tokens if w in _DOMAIN_ROUTE}
     scored = []
     for sub in registry.all_subagents():
         haystack = " ".join(
@@ -184,6 +236,12 @@ def find_agents_for_query(
             if _t in _VERB_CAPABILITY and tool_stems & _VERB_CAPABILITY[_t]
         )
         score = name_hits * 3 + tool_hits * 5 + hay_hits + cap_hits
+        # High-confidence domain boost: the owning agent gets a flat +4 —
+        # enough to beat hay overlap (+1) and name hits (+3), never an
+        # explicit tool mention (+5), so "use gmail_search" can't be stolen
+        # by a domain word (reviewer-caught).
+        if sub.name in domain_targets:
+            score += 4
         if score > 0:
             scored.append(
                 {

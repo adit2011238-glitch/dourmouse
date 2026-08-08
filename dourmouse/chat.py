@@ -148,10 +148,15 @@ class ChatSession:
         # is (never a stale recall block from a previous turn).
         if self.memory is not None and learn_enabled():
             block = recall_block(self.memory, prompt)
-            self.messages[0] = {
-                "role": "system",
-                "content": self._base_system + block,
-            }
+            if block:
+                # KV-cache stability (v4.2 speed): messages[0] stays the
+                # immutable base prompt, so the stable prefix (system +
+                # history) is reused between turns instead of re-prefilling
+                # from scratch whenever recall fires. The recalled context is
+                # injected as its OWN trailing system message, just before
+                # the new directive — the model reads it as context, and the
+                # bounded window in dispatch.py always keeps it.
+                self.messages.insert(-1, {"role": "system", "content": block})
         started = time.monotonic()
         report: dict[str, Any] = {"final_text": "", "transcript": []}
         try:
@@ -250,6 +255,19 @@ class ChatSession:
             # Keep _base_system in sync so recall rebuilds from the CURRENT
             # roster, never from a recalled snapshot.
             self._base_system = loaded[0]["content"]
+        # v4.2: drop stale recall blocks persisted by OLDER turns — recall is
+        # re-injected fresh (as its own trailing system message) on the next
+        # ask(), so a resumed session must not carry recalled facts from
+        # turns ago. messages[0] is the freshly re-injected base above and is
+        # never a recall block, so this only removes the trailing ones.
+        loaded = [
+            m
+            for m in loaded
+            if not (
+                m.get("role") == "system"
+                and "REMEMBERED CONTEXT" in (m.get("content") or "")
+            )
+        ]
         self.messages = loaded
         self._turn_count = sum(1 for m in self.messages if m["role"] == "user")
 

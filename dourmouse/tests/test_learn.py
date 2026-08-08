@@ -189,10 +189,14 @@ class TestChatLearning:
         session.ask("tell me about project nebula")
 
         sent = client.chat.completions.calls[1]["messages"]
-        system = sent[0]["content"]
-        assert "REMEMBERED CONTEXT" in system
-        assert "nebula" in system
-        assert "argon" in system
+        # v4.2: recall is injected as its OWN trailing system message so the
+        # base prompt stays immutable (KV-cache stability) — search ALL
+        # system messages, not just messages[0].
+        system_msgs = [m.get("content", "") for m in sent if m.get("role") == "system"]
+        assert any("REMEMBERED CONTEXT" in s for s in system_msgs)
+        assert any("nebula" in s for s in system_msgs)
+        assert any("argon" in s for s in system_msgs)
+        assert sent[0]["content"] == system_message(_registry())
 
     def test_no_match_leaves_system_message_unchanged(self, tmp_path, store):
         client = FakeClient(
@@ -273,7 +277,19 @@ class TestChatLearning:
         resumed = ChatSession(_registry(), client=client, session_file=session_file, memory=store)
         client.chat.completions._responses = [_FakeResponse(_FakeMessage(content="R."))]
         resumed.ask("tell me about project nebula")
-        assert "REMEMBERED CONTEXT" in resumed.messages[0]["content"]
+        # v4.2: recall is injected as its OWN trailing system message so the
+        # base prompt stays immutable (KV-cache stability). The base itself
+        # no longer carries the block — it is a separate message in history.
+        assert resumed.messages[0]["content"] == system_message(_registry())
+        # Exactly ONE recall block: stale blocks from earlier turns are
+        # stripped at resume, and this ask injects the fresh one.
+        recall_blocks = [
+            m
+            for m in resumed.messages
+            if m.get("role") == "system" and "REMEMBERED CONTEXT" in m.get("content", "")
+        ]
+        assert len(recall_blocks) == 1
+        assert "nebula" in recall_blocks[0]["content"]
 
 
 # --------------------------------------------------------------------------- #

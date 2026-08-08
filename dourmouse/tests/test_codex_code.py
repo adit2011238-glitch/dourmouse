@@ -1,0 +1,153 @@
+"""Codex CLI bridge tests (v5.3) — general_roster.py codex_code tool.
+
+The dev_coding subagent can delegate coding work to the user's REAL Codex
+CLI in headless mode (`codex exec <task> --skip-git-repo-check`). All
+real-execution tests point CODEX_CLI at tiny FAKE scripts so no live Codex /
+OpenAI credits are consumed; the missing-CLI path proves the honest
+NOT CONFIGURED behavior (Rule 2.2 — no silent stub, no fabricated result).
+"""
+
+from __future__ import annotations
+
+import textwrap
+
+import pytest
+
+from dourmouse.general_roster import (
+    _codex_code_tool as run_tool,
+    _find_codex_cli as find_cli,
+    build_general_registry,
+)
+
+
+@pytest.fixture
+def registry():
+    return build_general_registry()
+
+
+def _write_fake_cli(tmp_path, script: str) -> str:
+    """Write an executable fake codex CLI; return its path."""
+    path = tmp_path / "fake-codex"
+    path.write_text(textwrap.dedent(script))
+    path.chmod(0o755)
+    return str(path)
+
+
+class TestToolRegistration:
+    def test_codex_code_registered_on_dev_coding(self, registry):
+        sub = registry.get_subagent("dev_coding")
+        assert sub is not None
+        names = [t.name for t in sub.tools]
+        assert "codex_code" in names
+
+    def test_codex_code_is_regular_tier(self, registry):
+        sub = registry.get_subagent("dev_coding")
+        tool = next(t for t in sub.tools if t.name == "codex_code")
+        assert tool.permission.value == "regular"
+
+    def test_codex_code_in_roster_payload(self, registry):
+        from dourmouse.webui import build_roster_payload
+
+        payload = build_roster_payload(registry)
+        dev = next(a for a in payload["subagents"] if a["name"] == "dev_coding")
+        assert "codex_code" in [t["name"] for t in dev["tools"]]
+
+
+class TestCliDiscovery:
+    def test_env_override_wins(self, tmp_path, monkeypatch):
+        fake = _write_fake_cli(tmp_path, "#!/bin/sh\necho 'ok'\n")
+        monkeypatch.setenv("CODEX_CLI", fake)
+        monkeypatch.delenv("PATH", raising=False)
+        assert find_cli() == fake
+
+    def test_bare_name_resolves_via_path(self, monkeypatch):
+        monkeypatch.delenv("CODEX_CLI", raising=False)
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/true" if name == "codex" else None)
+        assert find_cli() == "/usr/bin/true"
+
+    def test_not_found_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CODEX_CLI", str(tmp_path / "does-not-exist"))
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        assert find_cli() is None
+
+
+class TestToolBehavior:
+    def test_missing_cli_is_honest_not_configured(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CODEX_CLI", str(tmp_path / "nope"))
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        result = run_tool({"task": "refactor this"})
+        assert result.startswith("NOT CONFIGURED")
+        assert "codex" in result.lower()
+        assert "Nothing was run" in result
+
+    def test_empty_task_errors(self):
+        result = run_tool({"task": "   "})
+        assert result.startswith("ERROR")
+        assert "non-empty" in result
+
+    def test_real_subprocess_roundtrip_fake_cli(self, tmp_path, monkeypatch):
+        fake = _write_fake_cli(
+            tmp_path,
+            """#!/bin/sh
+            echo "ARGV: $*"
+            echo "CWD: $(pwd)"
+            """,
+        )
+        monkeypatch.setenv("CODEX_CLI", fake)
+        result = run_tool({"task": "explain this bug", "cwd": str(tmp_path)})
+        assert "EXIT CODE: 0" in result
+        assert "ARGV: exec explain this bug --skip-git-repo-check" in result
+        assert f"CWD: {tmp_path}" in result
+
+    def test_nonzero_exit_surfaces_stderr(self, tmp_path, monkeypatch):
+        fake = _write_fake_cli(
+            tmp_path,
+            """#!/bin/sh
+            echo "boom" >&2
+            exit 3
+            """,
+        )
+        monkeypatch.setenv("CODEX_CLI", fake)
+        result = run_tool({"task": "do the thing"})
+        assert "EXIT CODE: 3" in result
+        assert "boom" in result
+        assert "non-zero" in result
+
+    def test_timeout_reports_honestly(self, tmp_path, monkeypatch):
+        fake = _write_fake_cli(
+            tmp_path,
+            """#!/bin/sh
+            sleep 5
+            """,
+        )
+        monkeypatch.setenv("CODEX_CLI", fake)
+        result = run_tool({"task": "slow task", "timeout_seconds": 1})
+        assert "timed out" in result
+        assert "1s" in result
+
+    def test_timeout_capped_at_600(self, tmp_path, monkeypatch):
+        fake = _write_fake_cli(tmp_path, "#!/bin/sh\necho ok\n")
+        monkeypatch.setenv("CODEX_CLI", fake)
+        result = run_tool({"task": "x", "timeout_seconds": 9999})
+        assert "EXIT CODE: 0" in result
+
+    def test_non_integer_timeout_errors(self, tmp_path, monkeypatch):
+        fake = _write_fake_cli(tmp_path, "#!/bin/sh\necho ok\n")
+        monkeypatch.setenv("CODEX_CLI", fake)
+        result = run_tool({"task": "x", "timeout_seconds": "soon"})
+        assert result.startswith("ERROR")
+        assert "integer" in result
+
+    def test_oserror_reported(self, tmp_path, monkeypatch):
+        fake = tmp_path / "broken-codex"
+        fake.write_text("#!/nonexistent/interpreter\n")
+        fake.chmod(0o755)
+        monkeypatch.setenv("CODEX_CLI", str(fake))
+        result = run_tool({"task": "x"})
+        assert "ERROR" in result

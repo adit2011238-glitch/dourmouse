@@ -79,6 +79,9 @@ class TestLoadBackend:
     def test_deepseek_not_configured_without_key(self, monkeypatch):
         monkeypatch.delenv("FREEBUFF_DEEPSEEK_API_KEY", raising=False)
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        # v5.1: NVIDIA_API_KEY also powers deepseek (NIM hosts DeepSeek) —
+        # clear it so the no-key path is actually tested.
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
             code_backends.load_backend("deepseek")
 
@@ -89,6 +92,33 @@ class TestLoadBackend:
         _b, key, model = code_backends.load_backend("deepseek")
         assert key == "fb-key"
         assert model == "freebuff/model"
+
+    def test_deepseek_falls_back_to_nvidia_key(self, monkeypatch):
+        """v5.1: no DeepSeek key, but the user's NVIDIA key powers DeepSeek
+        models hosted on NVIDIA NIM (the single-key setup the user has)."""
+        monkeypatch.delenv("FREEBUFF_DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-nvidia-key")
+        base, key, model = code_backends.load_backend("deepseek")
+        assert key == "nvapi-nvidia-key"
+        assert base == "https://integrate.api.nvidia.com/v1"
+        assert model == "deepseek-ai/deepseek-v4-flash-0731"
+
+    def test_deepseek_nvidia_model_override(self, monkeypatch):
+        monkeypatch.delenv("FREEBUFF_DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-nvidia-key")
+        monkeypatch.setenv("DEEPSEEK_NVIDIA_MODEL", "deepseek-ai/deepseek-r1")
+        _b, _k, model = code_backends.load_backend("deepseek")
+        assert model == "deepseek-ai/deepseek-r1"
+
+    def test_deepseek_explicit_key_wins_over_nvidia(self, monkeypatch):
+        """A real DeepSeek key always beats the NVIDIA fallback."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-real-key")
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-nvidia-key")
+        _b, key, model = code_backends.load_backend("deepseek")
+        assert key == "ds-real-key"
+        assert model == "deepseek-chat"
 
     def test_deepseek_falls_back_to_plain_env(self, monkeypatch):
         monkeypatch.delenv("FREEBUFF_DEEPSEEK_API_KEY", raising=False)
@@ -139,6 +169,17 @@ class TestRunCodeTask:
         out = code_backends.run_code_task("deepseek", "write an add function", timeout=30)
         assert "def add" in out
         assert completions.last_kwargs["model"] == "deepseek-chat"
+
+    def test_deepseek_via_nvidia_happy_path(self, monkeypatch):
+        """v5.1: deepseek backend through the user's NVIDIA key hits the
+        NVIDIA DeepSeek model id end-to-end (fake client, no network)."""
+        monkeypatch.delenv("FREEBUFF_DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-nvidia-key")
+        completions = _install_fake_openai(monkeypatch)
+        out = code_backends.run_code_task("deepseek", "write an add function", timeout=30)
+        assert "def add" in out
+        assert completions.last_kwargs["model"] == "deepseek-ai/deepseek-v4-flash-0731"
 
     def test_api_failure_is_honest(self, monkeypatch):
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-key")

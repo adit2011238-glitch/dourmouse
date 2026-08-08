@@ -10,6 +10,10 @@ HUD front end (ui/index.html) and exposes:
                              newest facts; with ?q= an FTS5 search scoped to
                              source='repo' (v4.1 P6+)
 - POST /api/repo/scan     -> idempotent re-index of the ATLAS repo (v4.1 P6+)
+- GET  /api/atlas         -> ATLAS quant-engine panel: real repo status, FX
+                             bootstrap progress, newest report, last run (v5.4)
+- POST /api/atlas/run     -> start one managed ATLAS command (fx-daily, ...)
+                             single-flight (v5.4)
 - GET  /api/sessions      -> list session audit files under workspace/sessions
 - POST /api/chat          -> SSE stream: runs ChatSession.ask() and streams
                              transcript events live (tool_use, tool_result,
@@ -66,6 +70,22 @@ _UI_DIR = _PROJECT_ROOT / "ui"
 _DEFAULT_PORT = int(__import__("os").environ.get("DOURMOUSE_UI_PORT", "8765"))
 
 _MAX_AUDIO_BYTES = 50_000_000  # POST /api/speech body cap (50 MB, P7)
+
+# v5.0 file upload: raw-body POST /api/upload?name=<file>, capped size,
+# sandboxed under <workspace>/uploads/. Served back at /uploads/<name>.
+_MAX_UPLOAD_BYTES = 50_000_000
+_UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
+
+
+def _uploads_root() -> Path:
+    """<workspace>/uploads, created on demand (deterministic, Rule 2.8)."""
+    import os
+
+    raw = os.environ.get("DOURMOUSE_WORKSPACE")
+    root = Path(raw).expanduser() if raw else _PROJECT_ROOT / "workspace"
+    up = root / "uploads"
+    up.mkdir(parents=True, exist_ok=True)
+    return up
 
 # Time a human has to approve/decline a gated action before it auto-declines.
 _CONFIRM_TIMEOUT_SECONDS = 300.0
@@ -415,6 +435,137 @@ def build_link_topology(registry: DispatchRegistry) -> dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
+def build_setup_status(server) -> dict[str, Any]:
+    """v5.0: honest capability checklist for the SETUP panel (Rule 2.2).
+
+    Every entry reports configured True/False + a one-line fix. Never
+    fabricates a capability: a missing key/CLI/model is NOT CONFIGURED.
+    """
+    import os
+
+    items: dict[str, dict[str, Any]] = {}
+    cfg = getattr(server, "config", None)
+    items["llm_backend"] = {
+        "configured": cfg is not None,
+        "detail": (
+            f"{_backend_label(cfg)} · {cfg.model}"
+            if cfg is not None
+            else "no backend config"
+        ),
+        "hint": "DOURMOUSE_LLM_BACKEND=ollama|nvidia in .env",
+    }
+    try:
+        from dourmouse.voice import voice_status
+
+        vs = voice_status()
+        items["voice"] = {
+            "configured": bool(vs.get("enabled")),
+            "detail": vs.get("stt", "") + " / " + vs.get("tts", ""),
+            "hint": "DOURMOUSE_VOICE=1 (+ whisper/piper models)",
+        }
+    except Exception:  # noqa: BLE001 -- a broken voice import never blocks setup
+        items["voice"] = {"configured": False, "detail": "voice module error", "hint": ""}
+    items["codex"] = {
+        "configured": bool(os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY")),
+        "detail": "key " + ("present" if os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY") else "MISSING"),
+        "hint": "CODEX_API_KEY in .env",
+    }
+    items["deepseek"] = {
+        "configured": bool(
+            os.environ.get("FREEBUFF_DEEPSEEK_API_KEY")
+            or os.environ.get("DEEPSEEK_API_KEY")
+            # v5.1: no DeepSeek key needed — NVIDIA NIM hosts DeepSeek
+            # models, so the user's NVIDIA_API_KEY powers this backend too.
+            or os.environ.get("NVIDIA_API_KEY")
+        ),
+        "detail": "key " + (
+            "present"
+            if os.environ.get("FREEBUFF_DEEPSEEK_API_KEY")
+            or os.environ.get("DEEPSEEK_API_KEY")
+            or os.environ.get("NVIDIA_API_KEY")
+            else "MISSING"
+        ),
+        "hint": "DEEPSEEK_API_KEY / FREEBUFF_DEEPSEEK_API_KEY, or reuse NVIDIA_API_KEY",
+    }
+    try:
+        from dourmouse.general_roster import _find_claude_cli
+
+        cli = _find_claude_cli()
+        items["claude"] = {
+            "configured": cli is not None,
+            "detail": f"CLI: {cli}" if cli else "claude CLI not on PATH",
+            "hint": "npm i -g @anthropic-ai/claude-code",
+        }
+    except Exception:  # noqa: BLE001
+        items["claude"] = {"configured": False, "detail": "check error", "hint": ""}
+    try:
+        # v5.3: the Codex CLI (ChatGPT login) and Freebuff Desktop status.
+        from dourmouse.connections import check_connections
+
+        conn = check_connections()
+        items["codex_cli"] = {
+            "configured": conn["codex"]["ok"],
+            "detail": conn["codex"]["detail"],
+            "hint": conn["codex"]["hint"],
+        }
+        items["freebuff"] = {
+            "configured": conn["freebuff"]["ok"],
+            "detail": conn["freebuff"]["detail"],
+            "hint": conn["freebuff"]["hint"],
+        }
+        # v5.4: the ATLAS bridge row (repo + venv present and usable).
+        items["atlas"] = {
+            "configured": conn["atlas"]["ok"],
+            "detail": conn["atlas"]["detail"],
+            "hint": conn["atlas"]["hint"],
+        }
+    except Exception:  # noqa: BLE001 -- a broken probe never kills setup
+        items["codex_cli"] = {"configured": False, "detail": "check error", "hint": ""}
+        items["freebuff"] = {"configured": False, "detail": "check error", "hint": ""}
+        items["atlas"] = {"configured": False, "detail": "check error", "hint": ""}
+    try:
+        from dourmouse.google_services import gmail_configured
+        from dourmouse.google_services import status as gmail_status
+
+        items["gmail"] = {
+            "configured": gmail_configured(),
+            "detail": gmail_status()["detail"],
+            "hint": gmail_status()["hint"],
+        }
+    except Exception:  # noqa: BLE001
+        items["gmail"] = {"configured": False, "detail": "google module error", "hint": ""}
+    items["upload"] = {
+        "configured": True,
+        "detail": str(_uploads_root()),
+        "hint": "drop files in the HUD",
+    }
+    mem = getattr(server, "memory", None)
+    mem_ok = mem is not None and learn_enabled()
+    mem_count = 0
+    if mem_ok:
+        try:
+            mem_count = mem.count()
+        except Exception:  # noqa: BLE001 -- a broken store must not kill setup
+            mem_count = 0
+    items["memory"] = {
+        "configured": mem_ok,
+        "detail": f"{mem_count} facts" if mem_ok else "off",
+        "hint": "DOURMOUSE_LEARN=1 + FTS5 store",
+    }
+    if cfg is not None and hasattr(cfg, "model_for_agent"):
+        items["orchestrator_model"] = {
+            "configured": True,
+            "detail": cfg.model_for_agent("orchestrator"),
+            "hint": "ollama pull <that model> on a fresh device",
+        }
+    items["live"] = {
+        "configured": getattr(server, "live_runtime", None) is not None,
+        "detail": "poll loops running" if getattr(server, "live_runtime", None) else "off",
+        "hint": "DOURMOUSE_LIVE=1",
+    }
+    return {"items": items}
+
+
 def _safe_asset_path(rel: str) -> Path | None:
     target = (_UI_DIR / rel).resolve()
     try:
@@ -580,6 +731,62 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.voice import voice_status
 
             self._send_json(voice_status())
+        elif path == "/api/setup":
+            # v5.0: capability checklist for the SETUP panel (honest, Rule 2.2).
+            self._send_json(build_setup_status(self.server))
+        elif path == "/api/connections":
+            # v5.3: deterministic per-account connection status (honest).
+            from dourmouse.connections import check_connections
+
+            self._send_json(check_connections())
+        elif path == "/api/atlas":
+            # v5.4: ATLAS quant-engine panel — real telemetry + last run.
+            from dourmouse.atlas_cli import atlas_panel_snapshot
+
+            self._send_json(atlas_panel_snapshot())
+        elif path == "/api/files":
+            # v5.0: list uploaded files (name, size, age) newest first.
+            try:
+                files = []
+                for f in sorted(_uploads_root().glob("*")):
+                    if f.is_file():
+                        files.append(
+                            {
+                                "name": f.name,
+                                "size": f.stat().st_size,
+                                "modified": datetime.fromtimestamp(
+                                    f.stat().st_mtime
+                                ).isoformat(timespec="seconds"),
+                            }
+                        )
+                self._send_json({"files": files})
+            except OSError as exc:
+                self._send_json({"files": [], "error": str(exc)}, status=500)
+        elif path.startswith("/uploads/"):
+            # v5.0: serve an uploaded file back (sandboxed to the uploads root).
+            rel = urllib.parse.unquote(path[len("/uploads/"):])
+            if not _UPLOAD_NAME_RE.match(rel):
+                self.send_error(400, "bad upload name")
+                return
+            target = (_uploads_root() / rel).resolve()
+            try:
+                target.relative_to(_uploads_root().resolve())
+            except ValueError:
+                self.send_error(400, "bad upload name")
+                return
+            if not target.is_file():
+                self.send_error(404, "no such upload")
+                return
+            body = target.read_bytes()
+            self.send_response(200)
+            self.send_header(
+                "Content-Type",
+                "application/octet-stream",
+            )
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/api/speech":
             # v4.1 (P7): GET = local TTS, returns audio/wav bytes.
             qs = urllib.parse.parse_qs(parsed.query)
@@ -632,6 +839,12 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/repo/scan":
             # v4.1 (P6+): re-index the ATLAS repo (idempotent) + persist meta.
             self._handle_repo_scan()
+        elif parsed.path == "/api/upload":
+            # v5.0: raw-body file upload into the sandboxed uploads root.
+            self._handle_upload()
+        elif parsed.path == "/api/atlas/run":
+            # v5.4: start one managed ATLAS command (single-flight).
+            self._handle_atlas_run()
         else:
             self.send_error(404, "not found")
 
@@ -683,6 +896,57 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
         self._send_json({"configured": True, "text": text})
+
+    def _handle_upload(self) -> None:
+        """v5.0: POST /api/upload?name=<file> — raw file bytes into uploads.
+
+        Sandboxed to <workspace>/uploads/ with a strict name whitelist and a
+        hard size cap; reports REAL errors (Rule 2.2). Returns the file name
+        and its absolute path so the model can read it via ``read_upload``.
+        """
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        name = (qs.get("name") or [""])[0].strip()
+        if not _UPLOAD_NAME_RE.match(name):
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": (
+                        "filename must be 1-120 chars of letters/digits/"
+                        "dot/underscore/dash (no paths)"
+                    ),
+                },
+                status=400,
+            )
+            return
+        raw_len = self.headers.get("Content-Length", "0") or "0"
+        try:
+            length = int(raw_len)
+        except (TypeError, ValueError):
+            self._send_json({"ok": False, "error": "invalid Content-Length"}, status=400)
+            return
+        if length < 0 or length > _MAX_UPLOAD_BYTES:
+            self._send_json(
+                {"ok": False, "error": f"upload too large (max {_MAX_UPLOAD_BYTES} bytes)"},
+                status=400,
+            )
+            return
+        data = self.rfile.read(length) if length else b""
+        if not data:
+            self._send_json({"ok": False, "error": "empty upload body"}, status=400)
+            return
+        try:
+            root = _uploads_root()
+            target = (root / name).resolve()
+            target.relative_to(root.resolve())  # sandbox re-check
+            with open(target, "wb") as fh:
+                fh.write(data)
+        except OSError as exc:
+            self._send_json({"ok": False, "error": f"upload failed: {exc}"}, status=500)
+            return
+        self._send_json(
+            {"ok": True, "name": name, "size": len(data), "path": str(target)}
+        )
 
     def _handle_agent_api(self, name: str) -> None:
         """v2.7: focused live snapshot for ONE agent window.
@@ -995,6 +1259,35 @@ class _Handler(BaseHTTPRequestHandler):
             )
         except Exception as exc:  # noqa: BLE001 -- honest 500, never crash the connection
             self._send_json({"configured": True, "error": str(exc)}, status=500)
+
+    def _handle_atlas_run(self) -> None:
+        """v5.4: POST /api/atlas/run — start one managed ATLAS command.
+
+        Body: {"command": "fx-daily" | "fx-refresh" | "fx-verify" |
+        "fx-universe" | "health" | "version" | "fx-daily-no-refresh"}.
+        Single-flight: a run already in progress is honestly refused (409),
+        never queued. The command's real progress/result is polled via
+        GET /api/atlas (last_run). Unknown commands are rejected 400.
+        """
+        from dourmouse.atlas_cli import atlas_run_manager
+
+        body = self._read_json_body()
+        command = (body.get("command") or "").strip()
+        try:
+            started = atlas_run_manager.launch(command)
+        except ValueError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+            return
+        if not started:
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": "an ATLAS command is already running (single-flight) — wait or poll /api/atlas",
+                },
+                status=409,
+            )
+            return
+        self._send_json({"ok": True, "command": command, "running": True})
 
     def _handle_repo_scan(self) -> None:
         """v4.1 (P6+): POST /api/repo/scan — idempotent re-index of ATLAS.

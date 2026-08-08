@@ -346,6 +346,22 @@
   .fline code { background: rgba(0,0,0,0.35); padding: 1px 5px; color: var(--text); }
   .fline pre { background: rgba(0,0,0,0.4); border: 1px solid var(--line); padding: 8px 10px; overflow-x: auto; margin: 4px 0; color: var(--text); font-size: 10px; }
 
+  /* v5.2: the assistant's answer is the deliverable — make it stand out
+     from the telemetry noise: brighter text, wider leading, a soft left
+     accent so a streamed answer reads as ONE reply block. */
+  .fline.answer { font-size: 12px; line-height: 1.7; color: var(--text); margin: 6px 0 10px; }
+  .fline.answer.final { border-left: 2px solid rgba(var(--cyan-rgb), var(--a60)); padding: 8px 0 8px 14px; background: linear-gradient(90deg, rgba(var(--cyan-rgb), 0.05), transparent 70%); }
+  .fline.answer .ts { color: rgba(var(--cyan-rgb), var(--a60)); }
+  .fline.answer strong { color: var(--text); }
+  .fline.answer ul, .fline.answer ol { padding-left: 20px; margin: 6px 0; }
+  .fline.answer li { margin: 3px 0; }
+  .fline.answer pre { background: rgba(0,0,0,0.5); border: 1px solid var(--line-strong); font-size: 11px; }
+  /* v5.2: markdown headings inside answers get a real hierarchy. */
+  .md-h1 { font-weight: 700; color: var(--text); letter-spacing: 0.12em; font-size: 13px; margin: 10px 0 4px; }
+  .md-h2 { font-weight: 600; color: var(--text); margin: 8px 0 3px; }
+  .md-h3 { font-weight: 600; color: var(--text-dim); margin: 6px 0 2px; font-size: 11px; }
+  .fline.answer blockquote { border-left: 2px solid rgba(var(--amber-rgb), var(--a45)); padding-left: 10px; margin: 6px 0; color: var(--text-dim); font-style: italic; }
+
   /* tool activity card in feed */
   .tcard { border: 1px solid var(--line); overflow: hidden; background: rgba(18,21,30,0.7); animation: enter 300ms cubic-bezier(.34,1.56,.64,1); }
   .tcard .thead {
@@ -407,6 +423,7 @@
     transition: width 800ms cubic-bezier(.25,.46,.45,.94);
   }
   #repomem { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 320px; }
+  #atlaspanel { overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 340px; }
   .repo-bar { display: flex; gap: 6px; }
   #reposearch { flex: 1; min-width: 0; background: rgba(18,21,30,0.7); border: 1px solid var(--line); color: var(--text); font-family: var(--font-mono); font-size: 9px; padding: 7px 9px; letter-spacing: 0.06em; }
   #reposearch:focus { outline: none; border-color: rgba(var(--cyan-rgb), var(--a45)); box-shadow: 0 0 10px rgba(var(--cyan-rgb), var(--a16)); }
@@ -573,6 +590,7 @@
     <div class="clock-block">
       <select id="sessionpick" title="Resume a recent session (real data from workspace/sessions)"><option value="">⌁ RESUME SESSION…</option></select>
       <button id="mapbtn" title="Open the agent orchestration map in a new window">⧉ AGENT MAP</button>
+      <button id="setupbtn" title="Capability checklist — what's configured and how to fix the rest">[SETUP]</button>
       <div class="clock" id="clock">--:--:--</div>
       <div class="memload" id="memload">MEM_LOAD: — — GB / 16.00GB</div>
       <div class="memline" id="memline">MEMORY: -- FACTS // LEARNING --</div>
@@ -645,6 +663,16 @@
           <div class="mbar"><i id="b-instances"></i></div>
         </div>
       </div>
+      <!-- v5.4 — the real ATLAS quant engine: telemetry + one-button
+           access to the permanent-connection loop (fx-daily). -->
+      <div class="col-title">ATLAS QUANT ENGINE <span id="atlasbadge" class="jobcount"></span></div>
+      <div id="atlaspanel">
+        <div class="repo-bar">
+          <button id="atlasDailyBtn" class="vtbtn" title="Run the permanent-connection loop: refresh the FX archive + write today's research report (atlas fx-daily)">[FX-DAILY]</button>
+          <button id="atlasCheckBtn" class="vtbtn" title="Re-check ATLAS status now">[CHECK]</button>
+        </div>
+        <div id="atlasbody"><div class="iv-empty">ATLAS STANDBY</div></div>
+      </div>
       <div class="col-title">DELEGATED TASKS <span id="jobcount" class="jobcount"></span></div>
       <div id="jobs">
         <div class="iv-empty">NO NESTED AGENT RUNS // ORCHESTRATOR DIRECT</div>
@@ -677,7 +705,7 @@
     <div class="console-inner">
       <span class="keyhint">⌘ + ENTER TO BROADCAST</span>
       <button id="micBtn" class="vtbtn" title="Speak a directive (local STT)">[MIC]</button>
-      <textarea id="input" rows="1" placeholder="SYSTEM CONSOLE STANDBY // ENTER DISPATCH COMMANDS OR DIRECTIVE STRINGS..." spellcheck="false"></textarea>
+      <textarea id="input" rows="1" placeholder="Ask anything — e.g. check my inbox, what is BTC worth, search the web for X…" spellcheck="false"></textarea>
       <button id="spkBtn" class="vtbtn" title="Hear the last reply (local TTS)">[SPK]</button>
       <button id="send">[SEND_DIRECTIVE]</button>
     </div>
@@ -728,20 +756,43 @@
   // ---------- helpers ----------
   function now() { return new Date().toTimeString().slice(0, 8); }
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  // v5.2: richer markdown — headings with a visible hierarchy (not bold
+  // clones), bold/italic/code/inline links, and proper list rendering that
+  // survives the <br> pass. Everything is escaped first; all output is
+  // our own tags (no user HTML ever reaches innerHTML unescaped).
   function md(text) {
     let t = esc(text);
     t = t.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => `<pre>${code}</pre>`);
     t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
     t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    t = t.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-    t = t.replace(/^#{1,3}\s+(.+)$/gm, '<strong>$1</strong>');
-    t = t.replace(/((?:^|\n)(?:- |\d+\. ).+)+/g, (m) => {
-      const lines = m.trim().split('\n').map(l => l.replace(/^(?:- |\d+\. )/, ''));
-      const isNum = /^\d+\. /.test(m.trim().split('\n')[0]);
-      const tag = isNum ? 'ol' : 'ul';
-      return `<${tag}>` + lines.map(l => `<li>${l}</li>`).join('') + `</${tag}>`;
+    t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    // v5.2 hardening: esc() escapes & < > but NOT quotes, so the href URL
+    // is quote-escaped separately — a URL containing " or ' can never break
+    // out of the href attribute (reviewer-caught XSS surface). & is already
+    // &amp; from esc(), so only quotes need escaping here.
+    t = t.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, (m, label, url) => {
+      const safe = url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      return `<a href="${safe}" target="_blank" rel="noopener">${label}</a>`;
     });
-    return t.replace(/\n/g, '<br>');
+    // Headings: # -> small-caps title, ## -> strong line, ### -> dimmed.
+    t = t.replace(/^###\s+(.+)$/gm, '<div class="md-h3">$1</div>');
+    t = t.replace(/^##\s+(.+)$/gm, '<div class="md-h2">$1</div>');
+    t = t.replace(/^#\s+(.+)$/gm, '<div class="md-h1">$1</div>');
+    // Lists: block of consecutive lines, each starting with - / * / digit.
+    // Escaped "*" already became &amp;* — the bold pass above ran first, so
+    // a lone * bullet is untouched here only if it never matched bold/em.
+    t = t.replace(/((?:^|\n)(?:- |\* |\d+\. ).+)+/g, (m) => {
+      const lines = m.trim().split('\n');
+      const isNum = /^\d+\. /.test(lines[0]);
+      const tag = isNum ? 'ol' : 'ul';
+      return `<${tag}>` + lines.map(l => {
+        const item = l.replace(/^(?:- |\* |\d+\. )/, '');
+        return `<li>${item}</li>`;
+      }).join('') + `</${tag}>`;
+    });
+    t = t.replace(/^>\s?(.+)$/gm, '<blockquote>$1</blockquote>');
+    t = t.replace(/\n/g, '<br>');
+    return t;
   }
   function fline(tag, msg, cls) {
     const el = document.createElement('div');
@@ -1035,11 +1086,17 @@
     'Write a python script that prints the first 10 primes, then run it',
     'Draft a polite email asking for a project status update',
   ];
+  // v5.2: one-click — a chip both fills the box AND sends it, so the
+  // examples are usable, not just suggestions.
   examples.forEach(ex => {
     const c = document.createElement('div');
     c.className = 'qchip';
     c.textContent = '◈ ' + ex;
-    c.addEventListener('click', () => { input.value = ex; input.focus(); });
+    c.addEventListener('click', () => {
+      if (sendBtn.disabled) { input.value = ex; input.focus(); return; }
+      input.value = ex;
+      send();
+    });
     quickEl.appendChild(c);
   });
 
@@ -1171,6 +1228,35 @@
     });
     commsInit = true;  // seed done — later renders may flash new arrivals
   }
+  // ---------- v5.0: SETUP panel — capability checklist ----------
+  // Honest one-glance view of what's configured and the exact fix for what
+  // isn't (the /api/setup endpoint reports the truth, Rule 2.2).
+  const setupBtn = document.getElementById('setupbtn');
+  let setupPanel = null;
+  function closeSetup() { if (setupPanel) { setupPanel.remove(); setupPanel = null; } }
+  setupBtn.addEventListener('click', () => {
+    if (setupPanel) { closeSetup(); return; }
+    setupPanel = document.createElement('div');
+    setupPanel.id = 'setuppanel';
+    setupPanel.style.cssText = 'position:fixed;top:52px;right:14px;z-index:90;width:360px;max-height:70vh;overflow:auto;background:#0b1622;border:1px solid #4aa0b5;border-radius:8px;padding:12px;font:12px/1.5 monospace;color:#cfe8f5;box-shadow:0 8px 30px rgba(0,0,0,.6)';
+    setupPanel.innerHTML = '<div style="color:#79c0de;font-weight:bold;margin-bottom:8px">CAPABILITY CHECKLIST</div><div id="setupbody">LOADING…</div>';
+    document.body.appendChild(setupPanel);
+    fetch('/api/setup').then(r => r.json()).then(d => {
+      const body = setupPanel.querySelector('#setupbody');
+      const items = d.items || {};
+      body.innerHTML = Object.keys(items).map(k => {
+        const it = items[k];
+        const ok = it.configured;
+        return `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px dashed rgba(74,160,181,.25)">
+          <span style="color:${ok ? '#3fb950' : '#f85149'}">${ok ? '●' : '○'}</span>
+          <span style="min-width:70px;color:#79c0de">${k.toUpperCase()}</span>
+          <span>${esc(it.detail || '')}</span></div>
+          <div style="padding:0 0 4px 24px;color:rgba(207,232,245,.55)">${esc(it.hint || '')}</div>`;
+      }).join('') || '<div>no capabilities reported</div>';
+    }).catch(() => { const b = setupPanel.querySelector('#setupbody'); if (b) b.textContent = 'SETUP UNREACHABLE'; });
+  });
+  document.addEventListener('click', (ev) => { if (setupPanel && !setupPanel.contains(ev.target) && ev.target !== setupBtn) closeSetup(); });
+
   function pollComms() {
     fetch('/api/messages').then(r => r.json()).then(renderComms).catch(() => {});
   }
@@ -1608,6 +1694,60 @@
         .catch(e => fline('VOICE', 'tts request failed: ' + e, null));
     });
   }
+
+  // ---- v5.4 ATLAS QUANT ENGINE // real /api/atlas panel ----
+  const atlasBodyEl = document.getElementById('atlasbody');
+  const atlasBadgeEl = document.getElementById('atlasbadge');
+  const atlasDailyBtn = document.getElementById('atlasDailyBtn');
+  const atlasCheckBtn = document.getElementById('atlasCheckBtn');
+  function renderAtlas(d) {
+    if (!d.configured) {
+      if (atlasBadgeEl) atlasBadgeEl.textContent = '';
+      if (atlasBodyEl) atlasBodyEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'ATLAS NOT CONFIGURED') + '</div>';
+      if (atlasDailyBtn) atlasDailyBtn.disabled = true;
+      return;
+    }
+    const lr = d.last_run || {};
+    const running = !!(lr.running);
+    if (atlasBadgeEl) atlasBadgeEl.textContent = running ? 'RUNNING' : (d.version ? 'v' + esc(String(d.version)) : '');
+    if (atlasDailyBtn) atlasDailyBtn.disabled = running;
+    const s = d.status || {};
+    const b = d.bootstrap || {};
+    // Coalesce numerics: a failed section degrades to 0, never "undefined".
+    const n = v => String(Number(v) || 0);
+    const pairDays = Object.keys(b.pair_days || {}).map(p => p + ' ' + b.pair_days[p] + 'd').join(' · ');
+    const rows = [];
+    rows.push('<div class="repofact"><div class="rf-title">REPO // ' + esc(s.branch || '?') + ' · ' + esc(s.last_commit || '—') + ' · ' + n(s.dirty_files) + ' DIRTY</div>' +
+      '<div class="rf-path">' + n(s.source_files) + ' SOURCES · ' + n(s.test_files) + ' TESTS · ' + n(s.deliverable_files) + ' DELIVERABLES</div></div>');
+    rows.push('<div class="repofact"><div class="rf-title">FX ARCHIVE // ' + n(b.total_pair_days) + ' PAIR-DAYS' + (b.done_marker ? ' · BOOTSTRAP DONE' : '') + '</div>' +
+      (pairDays ? '<div class="rf-path">' + esc(pairDays) + '</div>' : '<div class="rf-path">NO ARCHIVED BID-DAYS YET</div>') + '</div>');
+    if (d.latest_report) {
+      rows.push('<div class="repofact"><div class="rf-title">LATEST REPORT // ' + esc(d.latest_report.name) + ' · ' + esc(d.latest_report.modified) + '</div>' +
+        '<div class="rf-path" style="white-space:pre-wrap">' + esc(d.latest_report.snippet) + '</div></div>');
+    }
+    if (lr.command) {
+      rows.push('<div class="repofact"><div class="rf-title">LAST RUN // ' + esc(lr.command) + (running ? ' · RUNNING' : ' · EXIT ' + esc(String(lr.exit_code))) + '</div>' +
+        (lr.tail ? '<div class="rf-path" style="white-space:pre-wrap">' + esc(String(lr.tail).slice(-1200)) + '</div>' : '') + '</div>');
+    }
+    if (atlasBodyEl) atlasBodyEl.innerHTML = rows.join('');
+  }
+  async function pollAtlas() {
+    try { const r = await fetch('/api/atlas'); renderAtlas(await r.json()); }
+    catch (e) { /* transient */ }
+  }
+  pollAtlas();
+  setInterval(pollAtlas, 6000);
+  if (atlasDailyBtn) {
+    atlasDailyBtn.addEventListener('click', async () => {
+      atlasDailyBtn.disabled = true;
+      if (atlasBodyEl) atlasBodyEl.innerHTML = '<div class="iv-empty">LAUNCHING ATLAS FX-DAILY…</div>';
+      try {
+        await fetch('/api/atlas/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: 'fx-daily' }) });
+      } catch (e) { /* transient */ }
+      setTimeout(pollAtlas, 600);
+    });
+  }
+  if (atlasCheckBtn) atlasCheckBtn.addEventListener('click', pollAtlas);
 
   // ---- v4.1 PROJECT MEMORY // real /api/repo index panel (P6+) ----
   const repofactsEl = document.getElementById('repofacts');
