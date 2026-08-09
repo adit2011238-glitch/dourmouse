@@ -1,3 +1,6 @@
+import os
+import subprocess
+
 import streamlit as st
 import plotly.graph_objects as go
 
@@ -73,6 +76,50 @@ def render_command_center():
         # portfolio health = core terminal multiple capped at 10x
         term = core.get("terminal") or 100.0
         gauge("Portfolio Health", min(100.0, term / 10.0), "green", max_v=100)
+
+    st.divider()
+
+    st.markdown("##### Locked Standard (five-stage validation suite)")
+    std = L.get("standard", {})
+    if std.get("numbers"):
+        nums = std["numbers"]
+        core = nums.get("portfolio_core") or {}
+        boot = nums.get("bootstrap") or {}
+        st.markdown(
+            f"**Generated {std.get('generated_utc', '?')}** · in-sample "
+            f"{std['protocol']['in_sample'][0]} → {std['protocol']['in_sample'][1]} · "
+            f"OOS from {std['protocol']['oos_start']} · config T={std['config']['T']}, "
+            f"min_n={std['config']['min_n']}"
+        )
+        render_kpi_row([
+            {"label": "Permutation p", "value": f"{nums.get('permutation_p', '—'):.4f}",
+             "sub": "bar < 0.01", "tone": "green" if (nums.get('permutation_p') or 1) < 0.01 else "red"},
+            {"label": "Core Terminal", "value": f"${core.get('terminal', '—'):.2f}", "tone": "green"},
+            {"label": "Core Sharpe", "value": f"{core.get('sharpe', '—'):.2f}", "tone": "green"},
+            {"label": "P(losing money)", "value": f"{boot.get('p_loss_pct', '—')}%", "tone": "green"},
+        ])
+        st.caption("Standard legs: HE_8, HE_4, ZC_12 — the walk-forward killed "
+                   "gasoline, cattle, hogs-Oct and hogs-Feb. This is the standard "
+                   "every number in this terminal cites.")
+    else:
+        st.markdown("_Standard file missing — re-run the suite below to generate it._")
+
+    if st.button("Re-run five-stage validation suite", type="primary"):
+        root = L["pipeline"].get("root", "")
+        with st.spinner("Running the full suite (~1-2 min)..."):
+            try:
+                proc = subprocess.run(
+                    ["python", "scripts/seasonal_validation.py"],
+                    cwd=root, capture_output=True, text=True, timeout=600,
+                )
+                tail = "\n".join((proc.stdout or "").splitlines()[-12:])
+                if proc.returncode != 0:
+                    tail += "\n[exit %d] " % proc.returncode + (proc.stderr or "")[-300:]
+                st.code(tail or "(no output)", language="text")
+                st.success("Suite finished — standard refreshed." if proc.returncode == 0
+                           else f"Suite failed (exit {proc.returncode}) — see output.")
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                st.error(f"Could not run suite: {exc}")
 
     st.divider()
 

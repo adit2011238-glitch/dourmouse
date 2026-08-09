@@ -1966,6 +1966,21 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    # -- v8.1 ATLAS Command Center ------------------------------------- #
+    # RUN the real research pipeline from here: validation suite, walk-
+    # forward, backtest, paper log, calendar, events refresh. Also owns
+    # the locked STANDARD (reports/validation_standard.json).
+    from dourmouse.atlas_command import build_atlas_cmd_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "atlas_cmd",
+            "Projects",
+            "ATLAS Command Center — run the research pipeline (validation suite, backtest, paper log, calendar) and read the locked standard.",
+            build_atlas_cmd_tool_specs(),
+        )
+    )
+
     # -- v2.3 preloaded live-intelligence agents ----------------------- #
     registry.register_subagent(
         _subagent(

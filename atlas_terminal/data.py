@@ -15,6 +15,7 @@ modules render an honest NOT CONFIGURED state instead of mock numbers.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -230,6 +231,22 @@ def ibkr() -> dict[str, Any]:
     return forex_ibkr()
 
 
+def standard() -> dict[str, Any]:
+    """The LOCKED standard from reports/validation_standard.json (generated
+    by the five-stage suite). Empty dict when unavailable."""
+    try:
+        root = get_forex_data_path()
+    except ForexNotConfiguredError:
+        return {}
+    path = root / "reports" / "validation_standard.json"
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
 def live() -> dict[str, Any]:
     """One consolidated real snapshot for the terminal."""
     p = pipeline()
@@ -237,6 +254,7 @@ def live() -> dict[str, Any]:
     return {
         "pipeline": p,
         "validation": v,
+        "standard": standard(),
         "calendar": strategy_calendar(),
         "events": events(10),
         "paper": paper(),

@@ -97,6 +97,26 @@ mock data to the real pipeline:
 Run it: `./start_atlas_ui.sh` → http://127.0.0.1:8501 (needs
 `requirements-atlas-ui.txt` installed, done by the launcher on first run).
 
+## ATLAS Command Center (v8.1) — run everything from here
+
+The `atlas_cmd` roster agent (`dourmouse/atlas_command.py`) turns Dourmouse
+into the single control surface for the research pipeline. Its tools EXECUTE
+the real scripts (subprocess, cwd=FOREX_DATA_PATH, honest failures):
+
+- **`atlas_standard`** — the LOCKED standard: `reports/validation_standard.json`,
+  emitted by the five-stage suite (protocol dates, config T=2.5/min_n=6,
+  permutation p, core legs HE_8/HE_4/ZC_12, portfolio + bootstrap numbers).
+  This is the standard every agent, the UI and the morning report cite.
+- **`atlas_run_validation`** — runs the full five-stage suite and refreshes
+  the standard. **`atlas_run_walkforward` / `atlas_run_backtest`** — the
+  strict OOS tests. **`atlas_calendar` / `atlas_refresh_events`** — live
+  calendar and event-archive refresh. **`atlas_paper_open/close/status`** —
+  the paper-trading log. **`atlas_full_status`** — everything in one block.
+
+The ATLAS Terminal Command Center shows the locked standard and a
+"Re-run five-stage validation suite" button that executes the real suite
+and refreshes the standard in place.
+
 ## Design rules honoured
 
 - **No fabrication (2.2):** every tool reads real files or reports an

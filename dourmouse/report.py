@@ -32,6 +32,7 @@ _SECTIONS: list[tuple[str, str, dict[str, Any], int]] = [
     ("FOREX — VALIDATED STRATEGY", "forex_strategy", {}, 900),
     ("FOREX — UPCOMING EVENTS", "forex_events", {"hours_ahead": 48, "limit": 8}, 900),
     ("FOREX — PAPER LOG", "forex_paper", {}, 500),
+    ("ATLAS — VALIDATION STANDARD", "atlas_standard", {}, 900),
 ]
 
 # System-health section is built locally (no roster tool dependency).
