@@ -1936,6 +1936,36 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    # -- v6.0 forex-data pipeline agent -------------------------------- #
+    # Real telemetry from the forex research pipeline (FOREX_DATA_PATH):
+    # data inventory, the validated commodity-seasonal strategy + live
+    # paper calendar, upcoming economic events, the paper log, and IBKR
+    # gateway reachability. Deterministic (Rule 2.8), honest NOT
+    # CONFIGURED when FOREX_DATA_PATH is unset (Rule 2.2).
+    from dourmouse.forex_ops import build_forex_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "forex",
+            "Projects",
+            "forex-data pipeline telemetry — inventory, seasonal strategy, events, paper log, IBKR gateway.",
+            build_forex_tool_specs(),
+        )
+    )
+
+    # -- v8.0 ATLAS Terminal agent ------------------------------------ #
+    # What the ATLAS Terminal (streamlit, atlas_terminal/) shows right now.
+    from dourmouse.atlas_ui_ops import build_atlas_ui_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "atlas_ui",
+            "Projects",
+            "ATLAS Terminal status — what the streamlit terminal would show now (validation, next trade, events, paper, IBKR).",
+            build_atlas_ui_tool_specs(),
+        )
+    )
+
     # -- v2.3 preloaded live-intelligence agents ----------------------- #
     registry.register_subagent(
         _subagent(

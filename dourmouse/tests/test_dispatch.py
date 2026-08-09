@@ -601,7 +601,7 @@ class TestEndToEndThroughGeneralRoster:
     """Proves the REAL general roster works through the loop with a fake
     LLM side, including the extension case (trading subagent added later)."""
 
-    def test_general_roster_registers_nineteen_subagents(self):
+    def test_general_roster_registers_twenty_one_subagents(self):
         from dourmouse.general_roster import build_general_registry
 
         registry = build_general_registry()
@@ -626,6 +626,8 @@ class TestEndToEndThroughGeneralRoster:
             "code_claude",
             "messenger",  # v3.0: inter-agent messaging
             "atlas",  # v4.0: ATLAS command-centre telemetry
+            "forex",  # v6.0: forex-data pipeline telemetry
+            "atlas_ui",  # v8.0: ATLAS Terminal status
         }
 
     def test_trading_subagent_added_later_dispatchable(self):

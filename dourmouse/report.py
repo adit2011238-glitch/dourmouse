@@ -29,6 +29,9 @@ _SECTIONS: list[tuple[str, str, dict[str, Any], int]] = [
     ("MARKET MOVERS — LOSERS", "market_movers", {"direction": "losers", "count": 5}, 600),
     ("LIVE NEWS HEADLINES", "news_headlines", {"max_results": 5}, 800),
     ("TASKS", "list_tasks", {"include_done": False}, 600),
+    ("FOREX — VALIDATED STRATEGY", "forex_strategy", {}, 900),
+    ("FOREX — UPCOMING EVENTS", "forex_events", {"hours_ahead": 48, "limit": 8}, 900),
+    ("FOREX — PAPER LOG", "forex_paper", {}, 500),
 ]
 
 # System-health section is built locally (no roster tool dependency).
