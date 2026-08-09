@@ -5,10 +5,18 @@ the user confirmed for Phase 0. Real secrets/keys live in a .env file the
 user populates; this module only reads risk NUMBERS, never credentials.
 
 v4.0: the LLM backend is no longer NVIDIA-only. ``DOURMOUSE_LLM_BACKEND``
-selects ``ollama`` (local, keyless, default) / ``nvidia`` / ``auto``, and
-``load_llm_config()`` returns the active backend config behind one interface
-(``api_key``, ``base_url``, ``model``, ``model_for_agent``) so dispatch /
-orchestrator / webui treat both identically.
+selects ``ollama`` (local, keyless) / ``omniroute`` (free-tier gateway) /
+``nvidia`` / ``auto``, and ``load_llm_config()`` returns the active backend
+config behind one interface (``api_key``, ``base_url``, ``model``,
+``model_for_agent``) so dispatch / orchestrator / webui treat them
+identically.
+
+v5.10: ``auto`` prefers the local Ollama server, then (only when the user
+opts in via ``DOURMOUSE_OMNIROUTE_AUTO=1``) the OmniRoute free-tier gateway,
+then NVIDIA. The opt-in keeps the local-first privacy guarantee (Rule 2.6):
+prompts never leave the machine for a third-party free provider without an
+explicit choice — the explicit ``omniroute`` backend is always available
+for users who want it.
 """
 
 from __future__ import annotations
@@ -257,6 +265,108 @@ def ollama_available(timeout: float = 1.0) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# v5.10 — OmniRoute free-tier gateway (keyless, OpenAI-compatible).
+# --------------------------------------------------------------------------- #
+
+_OMNIROUTE_DEFAULT_BASE_URL = "http://127.0.0.1:20128/v1"
+# "auto" lets OmniRoute pick a working free backend (zero-config, no key).
+_OMNIROUTE_DEFAULT_MODEL = "auto"
+
+# Public aliases (same convention as the NVIDIA/Ollama defaults above).
+OMNIROUTE_DEFAULT_BASE_URL = _OMNIROUTE_DEFAULT_BASE_URL
+OMNIROUTE_DEFAULT_MODEL = _OMNIROUTE_DEFAULT_MODEL
+
+
+@dataclass(frozen=True)
+class OmniRouteConfig:
+    """OmniRoute free-tier gateway backend (v5.10).
+
+    OmniRoute (MIT, self-hosted on localhost:20128) pools free-tier LLM
+    providers behind one OpenAI-compatible endpoint. Keyless by design — the
+    ``auto`` model routes to a working free backend with no credentials
+    (Rule 2.6: nothing secret required). ``api_key`` is an empty string and
+    the OpenAI client accepts it; OmniRoute ignores it. Per-agent overrides
+    come from ``DOURMOUSE_OMNIROUTE_MODEL_<AGENT>`` (mirroring the NVIDIA/
+    Ollama conventions), resolved deterministically (Rule 2.8).
+
+    Honesty (Rule 2.2): the gateway is a routing layer — free providers are
+    rate-limited and can change; failures surface as real errors, never a
+    fabricated success.
+    """
+
+    api_key: str = ""
+    base_url: str = _OMNIROUTE_DEFAULT_BASE_URL
+    model: str = _OMNIROUTE_DEFAULT_MODEL
+    max_retries: int = 2
+    retry_backoff: float = 0.5
+    fallback_model: str = ""
+    agent_models: dict[str, str] = field(default_factory=dict)
+
+    def model_for_agent(self, agent: str | None) -> str:
+        """The OmniRoute model a specific subagent runs on (deterministic).
+
+        Unlike Ollama there is no baked-in fast-dispatch override — the
+        gateway's ``auto`` model already routes to a working provider per
+        request, so per-agent speed tuning is done with
+        ``DOURMOUSE_OMNIROUTE_MODEL_<AGENT>`` (e.g.
+        ``DOURMOUSE_OMNIROUTE_MODEL_ORCHESTRATOR=auto/best-coding`` for the
+        looping brain).
+        """
+        key = (agent or "").strip().upper()
+        if key and key in self.agent_models:
+            return self.agent_models[key]
+        return self.model
+
+
+def load_omniroute_config() -> OmniRouteConfig:
+    """Build the OmniRoute backend config from env (defaults when unset)."""
+    base_url = os.environ.get(
+        "OMNIROUTE_BASE_URL", _OMNIROUTE_DEFAULT_BASE_URL
+    ).strip() or _OMNIROUTE_DEFAULT_BASE_URL
+    model = os.environ.get(
+        "OMNIROUTE_MODEL", _OMNIROUTE_DEFAULT_MODEL
+    ).strip() or _OMNIROUTE_DEFAULT_MODEL
+    max_retries = int(os.environ.get("OMNIROUTE_MAX_RETRIES", "2"))
+    retry_backoff = float(os.environ.get("OMNIROUTE_RETRY_BACKOFF", "0.5"))
+    fallback_model = os.environ.get("OMNIROUTE_FALLBACK_MODEL", "").strip()
+    agent_models = {}
+    prefix = "DOURMOUSE_OMNIROUTE_MODEL_"
+    for env_name, value in os.environ.items():
+        if env_name.startswith(prefix) and value.strip():
+            agent_name = env_name[len(prefix):].strip().upper()
+            if agent_name:
+                agent_models[agent_name] = value.strip()
+    return OmniRouteConfig(
+        api_key="",
+        base_url=base_url,
+        model=model,
+        max_retries=max_retries,
+        retry_backoff=retry_backoff,
+        fallback_model=fallback_model,
+        agent_models=agent_models,
+    )
+
+
+def omniroute_available(timeout: float = 1.0) -> bool:
+    """Probe the local OmniRoute gateway (deterministic, Rule 2.8).
+
+    Honors ``OMNIROUTE_BASE_URL`` (same env the loader reads) so tests and
+    alternate installs probe the right host. Returns True when
+    ``/v1/models`` answers; any failure (connection refused, timeout,
+    garbage response) is honestly False. Never raises — the probe is the
+    auto-backend detection seam and must not take down config loading.
+    """
+    base = os.environ.get("OMNIROUTE_BASE_URL", _OMNIROUTE_DEFAULT_BASE_URL).strip() \
+        or _OMNIROUTE_DEFAULT_BASE_URL
+    probe = base.rstrip("/") + "/models"
+    try:
+        with urllib.request.urlopen(probe, timeout=timeout) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return False
+
+
+# --------------------------------------------------------------------------- #
 # v4.0 — Multi-device access (spec Phase 9)
 # --------------------------------------------------------------------------- #
 
@@ -281,30 +391,52 @@ def bind_host() -> str:
 
 
 def llm_backend() -> str:
-    """The active backend name from DOURMOUSE_LLM_BACKEND (ollama|nvidia|auto)."""
+    """The active backend name from DOURMOUSE_LLM_BACKEND
+    (ollama|omniroute|nvidia|auto)."""
     raw = os.environ.get("DOURMOUSE_LLM_BACKEND", "auto").strip().lower()
-    if raw not in ("ollama", "nvidia", "auto"):
+    if raw not in ("ollama", "omniroute", "nvidia", "auto"):
         raise ValueError(
-            f"DOURMOUSE_LLM_BACKEND must be 'ollama', 'nvidia' or 'auto', got {raw!r}"
+            f"DOURMOUSE_LLM_BACKEND must be 'ollama', 'omniroute', 'nvidia' "
+            f"or 'auto', got {raw!r}"
         )
     return raw
 
 
-def load_llm_config() -> NvidiaConfig | OllamaConfig:
+def load_llm_config() -> NvidiaConfig | OllamaConfig | OmniRouteConfig:
     """Resolve the ACTIVE LLM backend config (v4.0, deterministic, Rule 2.8).
 
     - ``ollama`` → OllamaConfig (no key required).
+    - ``omniroute`` → OmniRouteConfig (keyless, free-tier gateway).
     - ``nvidia`` → NvidiaConfig (raises ValueError without NVIDIA_API_KEY,
       exactly as before).
-    - ``auto`` (default) → Ollama when the local server answers, else NVIDIA.
+    - ``auto`` (default) → Ollama when the local server answers; else
+      OmniRoute when ``DOURMOUSE_OMNIROUTE_AUTO=1`` AND the free gateway is
+      running; else NVIDIA.
 
-    The ``auto`` probe makes the DEFAULT deployment fully local whenever
-    Ollama is running, with an automatic, honest fallback to NVIDIA — zero
-    config change required to go local-first.
+    The OmniRoute step is gated behind ``DOURMOUSE_OMNIROUTE_AUTO=1`` (an
+    explicit opt-in, v5.10 reviewer fix): ``auto`` must not silently send
+    prompts to third-party free providers when Ollama hiccups — this system
+    holds credentials and personal data (Rule 2.6 local-first). The explicit
+    ``omniroute`` backend below needs no gate. Falling back to NVIDIA keeps
+    the legacy keyed behavior.
     """
     backend = llm_backend()
     if backend == "auto":
-        backend = "ollama" if ollama_available() else "nvidia"
+        if ollama_available():
+            return load_ollama_config()
+        if (
+            os.environ.get("DOURMOUSE_OMNIROUTE_AUTO", "").strip() == "1"
+            and omniroute_available()
+        ):
+            print(  # loud, visible in the server log (Rule 2.2 honesty)
+                "[CONFIG] auto: Ollama down, opting into the OmniRoute "
+                "free-tier gateway (DOURMOUSE_OMNIROUTE_AUTO=1). Prompts "
+                "will be sent to third-party free providers."
+            )
+            return load_omniroute_config()
+        backend = "nvidia"
     if backend == "ollama":
         return load_ollama_config()
+    if backend == "omniroute":
+        return load_omniroute_config()
     return load_nvidia_config()

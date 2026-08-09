@@ -22,7 +22,12 @@ from typing import Any, Callable
 
 from openai import OpenAI
 
-from dourmouse.config import NvidiaConfig, OllamaConfig, load_llm_config
+from dourmouse.config import (
+    NvidiaConfig,
+    OllamaConfig,
+    OmniRouteConfig,
+    load_llm_config,
+)
 from dourmouse.research_agent import RESEARCH_TOOL_SPEC, call_research_tool
 
 _SYSTEM_PROMPT = (
@@ -41,8 +46,10 @@ _TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
 }
 
 
-def _build_client(config: NvidiaConfig) -> OpenAI:
-    return OpenAI(api_key=config.api_key, base_url=config.base_url)
+def _build_client(config: NvidiaConfig | OllamaConfig | OmniRouteConfig) -> OpenAI:
+    # Keyless backends (Ollama/OmniRoute) need a non-empty sentinel — the
+    # SDK rejects empty api_key strings; both ignore the value.
+    return OpenAI(api_key=config.api_key or "local-keyless", base_url=config.base_url)
 
 
 def dispatch(

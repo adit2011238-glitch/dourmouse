@@ -279,12 +279,22 @@ class TestCodingSubagents:
         assert {t.name for t in registry.get_subagent("code_claude").tools} == {"code_claude"}
 
     def test_tool_names_globally_unique_across_roster(self):
+        """A tool NAME maps to exactly ONE spec object across the roster.
+
+        v5.8 extend_subagent deliberately shares the SAME spec object across
+        report-producing agents (publish_artifact); that is not a collision.
+        A DIFFERENT object claiming the same name would be — and the
+        registry rejects it. This checks the post-construction invariant:
+        each name owns a single object.
+        """
         registry = build_general_registry()
-        seen: set[str] = set()
+        owners: dict[str, int] = {}
         for agent in registry.all_subagents():
             for tool in agent.tools:
-                assert tool.name not in seen, f"collision: {tool.name}"
-                seen.add(tool.name)
+                key = id(tool)
+                prev = owners.get(tool.name)
+                assert prev is None or prev == key, f"collision: {tool.name}"
+                owners[tool.name] = key
 
     def test_make_code_tool_empty_task_errors(self):
         tool = _make_code_tool("nvidia")

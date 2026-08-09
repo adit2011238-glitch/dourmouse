@@ -18,11 +18,13 @@ Endpoints used (all GET, all loopback, all read-only):
 - ``/api/project/recents``    — recent project paths
 
 Honesty (Rule 2.2): when the app is not running or an endpoint fails, tools
-report NOT CONFIGURED / the real error — never a fabricated status. NO
-writes are ever issued through this bridge: it reads the app's state, it
-does not mutate it (Rule 2.10 — nothing is sent, changed, or deleted).
-Secrets are never returned — only the account email/name the app itself
-exposes, and never tokens/keys.
+report NOT CONFIGURED / the real error — never a fabricated status. Reads
+are read-only (Rule 2.10 — nothing sent, changed, or deleted). The ONE
+write surface (v5.11) is ``freebuff_dispatch``: it creates a NEW thread in
+a project the user chose and posts ONE prompt to it — the explicit
+"dispatch work into Freebuff" action, never an edit/delete of existing
+state. Secrets are never returned — only the account email/name the app
+itself exposes, and never tokens/keys.
 
 The token-gated bridge on 51820 (``Authorization: Bearer <per-launch UUID>``)
 is the app's internal debugger/preview API and is NOT needed for these
@@ -98,6 +100,215 @@ def _get(path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Account / reachability
 # --------------------------------------------------------------------------- #
+
+def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """POST one JSON endpoint; raises FreebuffNotAvailable on any failure.
+
+    Same determinism contract as _get: a dead app, a timeout, a non-JSON
+    body, or a non-2xx status all raise the SAME typed error with a useful
+    reason — the caller renders it honestly. Never returns fabricated data.
+    """
+    url = _FREEBUFF_BASE + path
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": "dourmouse/0.1"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
+            body = resp.read(64_000_000).decode("utf-8", errors="replace")
+            status = getattr(resp, "status", 200)
+    except urllib.error.HTTPError as exc:  # app answered but rejected the write
+        raise FreebuffNotAvailable(
+            f"Freebuff API {path} returned HTTP {exc.code} (app-side rejection)"
+        ) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise FreebuffNotAvailable(
+            f"Freebuff app not reachable at {_FREEBUFF_BASE}: {exc}"
+        ) from exc
+    if not (200 <= status < 300):
+        raise FreebuffNotAvailable(f"Freebuff API {path} returned HTTP {status}")
+    try:
+        payload_out = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise FreebuffNotAvailable(f"Freebuff API {path} returned non-JSON") from exc
+    if not isinstance(payload_out, dict):
+        raise FreebuffNotAvailable(f"Freebuff API {path} returned an unexpected shape")
+    return payload_out
+
+
+# --------------------------------------------------------------------------- #
+# v5.11 — Dispatch (write) bridge
+# --------------------------------------------------------------------------- #
+
+# The app enforces MAX_USER_PROMPT_CHARS = 200_000 server-side; we cap the
+# tool input far lower so a runaway model can never flood a thread (the
+# bounded-window guard already protects the model's own context, this
+# protects the app + the user's thread list).
+_MAX_DISPATCH_CHARS = 8_000
+_MAX_TITLE_CHARS = 120
+
+
+class FreebuffDispatchError(RuntimeError):
+    """A write failed (validation, app error, or app unreachable)."""
+
+
+# Thread ids from the app are UUID-ish; anything path-like is refused so a
+# dispatch can never target an arbitrary path (same guard as reads).
+def _validate_thread_id(thread_id: str) -> str:
+    tid = (thread_id or "").strip()
+    if not tid or not _THREAD_ID_RE.match(tid):
+        raise FreebuffDispatchError(
+            f"Freebuff thread 'id' must be an id from freebuff_threads "
+            f"(got {thread_id!r}) — refusing a path-like id (honest)."
+        )
+    return tid
+
+
+def _validate_project_path(project_path: str) -> str:
+    p = (project_path or "").strip()
+    if not p.startswith("/"):
+        raise FreebuffDispatchError(
+            f"Freebuff 'project_path' must be an absolute path from "
+            f"freebuff_projects (got {project_path!r})."
+        )
+    return p
+
+
+def freebuff_create_thread(
+    project_path: str,
+    title: str = "",
+) -> dict[str, Any]:
+    """Create ONE thread in a project via POST /api/threads (v5.11).
+
+    Returns the real thread object the app returns (id, status, turnState,
+    ...). ``project_path`` must be an absolute path the app already knows
+    (from freebuff_projects / freebuff_threads) — the app opens it. A
+    relative path is refused. No message is posted here — call
+    freebuff_post_message next, or use freebuff_dispatch for the two-step
+    in one call.
+    """
+    p = _validate_project_path(project_path)
+    payload = {"projectPath": p}
+    if title and title.strip():
+        payload["title"] = (title or "").strip()[:_MAX_TITLE_CHARS]
+    try:
+        return _post("/api/threads", payload)
+    except FreebuffNotAvailable as exc:
+        raise FreebuffDispatchError(str(exc)) from exc
+
+
+def freebuff_post_message(
+    thread_id: str,
+    text: str,
+    project_path: str,
+) -> dict[str, Any]:
+    """Post + run ONE prompt in a thread via POST /api/thread/:id/message.
+
+    Returns the real app response ({ok: true, ...}). ``text`` is capped at
+    _MAX_DISPATCH_CHARS; the thread id must come from freebuff_threads.
+    """
+    tid = _validate_thread_id(thread_id)
+    text = (text or "").strip()
+    if not text:
+        raise FreebuffDispatchError("freebuff dispatch requires a non-empty 'prompt'.")
+    if len(text) > _MAX_DISPATCH_CHARS:
+        raise FreebuffDispatchError(
+            f"freebuff prompt too long ({len(text)} chars; max {_MAX_DISPATCH_CHARS}). "
+            "Shorten the task before dispatching — honest, nothing was sent."
+        )
+    payload: dict[str, Any] = {
+        "text": text,
+        "projectPath": _validate_project_path(project_path),
+    }
+    try:
+        return _post(f"/api/thread/{tid}/message", payload)
+    except FreebuffNotAvailable as exc:
+        raise FreebuffDispatchError(str(exc)) from exc
+
+
+def freebuff_dispatch(
+    prompt: str,
+    project_path: str,
+    title: str = "",
+) -> dict[str, Any]:
+    """Dispatch ONE task into a REAL Freebuff thread (create + post, v5.11).
+
+    Creates a new thread in ``project_path`` with the prompt as its first
+    message, so a real Freebuff agent picks it up and runs it (the app's
+    own harness — the same one the user's threads run on). Returns the
+    thread object + the message post result:
+
+    ``{thread: {...}, posted: {...}}``
+
+    The caller can then poll ``freebuff_read_thread`` for the answer, and
+    the live events watcher surfaces the thread's turn transitions in the
+    HUD feed. Honest error (FreebuffDispatchError) on any failure — a
+    dead app, a bad path, or an app-side rejection is reported, never
+    fabricated as success (Rule 2.2).
+
+    No-orphan guarantee (reviewer fix): the prompt is validated (non-empty,
+    within the cap) BEFORE the thread is created, so a predictably-bad
+    prompt never leaves an empty thread behind. If the post fails AFTER
+    creation, the error carries the created thread id so the caller can
+    report it honestly ("thread X created, prompt failed").
+    """
+    prompt = (prompt or "").strip()
+    if not prompt:
+        raise FreebuffDispatchError("freebuff dispatch requires a non-empty 'prompt'.")
+    if len(prompt) > _MAX_DISPATCH_CHARS:
+        raise FreebuffDispatchError(
+            f"freebuff prompt too long ({len(prompt)} chars; max {_MAX_DISPATCH_CHARS}). "
+            "Shorten the task before dispatching — honest, nothing was sent."
+        )
+    title = (title or "").strip().replace("\n", " ")
+    thread = freebuff_create_thread(project_path, title or prompt[:_MAX_TITLE_CHARS])
+    tid = str(thread.get("id", "")).strip()
+    if not tid or not _THREAD_ID_RE.match(tid):
+        raise FreebuffDispatchError(
+            "Freebuff created a thread without a usable id (honest)."
+        )
+    try:
+        posted = freebuff_post_message(tid, prompt, project_path)
+    except FreebuffDispatchError as exc:
+        raise FreebuffDispatchError(
+            f"thread {tid} was created but the prompt failed to post: {exc}"
+        ) from exc
+    return {"thread": thread, "posted": posted}
+
+
+def _freebuff_dispatch_tool(arguments: dict[str, Any]) -> str:
+    """Tool handler: dispatch a task into a real Freebuff thread."""
+    prompt = (arguments.get("prompt") or "").strip()
+    project_path = (arguments.get("project_path") or "").strip()
+    title = (arguments.get("title") or "").strip()
+    if not prompt:
+        return "ERROR: freebuff_dispatch requires a non-empty 'prompt'."
+    if not project_path:
+        return (
+            "ERROR: freebuff_dispatch requires 'project_path' (an absolute "
+            "path from freebuff_projects / freebuff_threads)."
+        )
+    try:
+        out = freebuff_dispatch(prompt, project_path, title)
+    except FreebuffDispatchError as exc:
+        return f"FREEBUFF DISPATCH (reported honestly): FAILED — {exc}"
+    thread = out["thread"]
+    posted = out["posted"]
+    tid = str(thread.get("id", ""))
+    status = thread.get("status", "")
+    turn = thread.get("turnState", "")
+    ok = bool(posted.get("ok"))
+    title_t = (thread.get("title") or "").replace("\n", " ")[:100]
+    return (
+        f"FREEBUFF DISPATCH (live): thread {tid} created in "
+        f"{thread.get('projectPath', project_path)} ({title_t}). "
+        f"Prompt posted: {'accepted (running)' if ok else 'FAILED to post — ' + str(posted)}. "
+        f"Thread state: {status}/{turn}. Use freebuff_read_thread with "
+        f"thread_id={tid} to fetch the agent's answer when the turn finishes."
+    )
+
 
 def freebuff_account() -> dict[str, Any] | None:
     """The user's Freebuff account identity, or None honestly when the app
@@ -381,8 +592,42 @@ def _spec(name: str, description: str, handler: Any, props: dict[str, Any], requ
 
 
 def build_freebuff_tool_specs() -> list[Any]:
-    """The v5.5 Freebuff read ToolSpecs for the ``freebuff`` subagent."""
+    """The v5.5 read + v5.11 dispatch ToolSpecs for the ``freebuff`` subagent.
+
+    Read tools are read-only by design (Rule 2.10 — nothing sent, changed,
+    or deleted). The single write tool, ``freebuff_dispatch``, creates ONE
+    thread in the user's chosen project and posts ONE prompt to it — the
+    explicit dispatch action the user asked for (v5.11). It never deletes
+    or edits existing threads, and every write is reported honestly.
+    """
     return [
+        _spec(
+            "freebuff_dispatch",
+            "Dispatch a task into a REAL Freebuff thread (v5.11 write): "
+            "creates a new thread in the given project and posts the prompt "
+            "as its first message, so a real Freebuff agent runs it there. "
+            "Requires 'prompt' and 'project_path' (an absolute path from "
+            "freebuff_projects/freebuff_threads). Returns the new thread id "
+            "+ post status; fetch the agent's answer later with "
+            "freebuff_read_thread. Use this when the user wants work done "
+            "inside Freebuff (their AI workspace), not just read.",
+            _freebuff_dispatch_tool,
+            {
+                "prompt": {
+                    "type": "string",
+                    "description": "the task/prompt to dispatch to a Freebuff agent (max 8000 chars)",
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "absolute project path from freebuff_projects/freebuff_threads",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "optional thread title (defaults to a prefix of the prompt)",
+                },
+            },
+            ["prompt", "project_path"],
+        ),
         _spec(
             "freebuff_status",
             "Freebuff Desktop account status: authed account name/email and "

@@ -61,8 +61,9 @@ class TestRosterShape:
         """The general roster: the original eight (incl. orchestrator + self-
         dispatch), the v2.3 live-intelligence agents (news, markets, rnd,
         mail, tasks), the v2.4 coding agents (code_nvidia, code_deepseek,
-        code_claude), the v3.0 messenger (inter-agent messaging), and the
-        v4.0 local code_ollama (keyless local coding backend)."""
+        code_claude), the v3.0 messenger (inter-agent messaging), the
+        v4.0 local code_ollama (keyless local coding backend), and the
+        v5.12 worldmonitor (real-time global intelligence)."""
         registry = build_general_registry()
         assert registry.subagent_names == {
             "orchestrator",
@@ -87,6 +88,7 @@ class TestRosterShape:
             "atlas",  # v4.0: ATLAS command-centre telemetry
             "freebuff",  # v5.5: Freebuff Desktop reads
             "music",  # v5.7: Spotify playback + discovery
+            "worldmonitor",  # v5.12: global intelligence (markets/risk/conflict)
         }
 
     def test_orchestrator_exposes_delegate_task(self):

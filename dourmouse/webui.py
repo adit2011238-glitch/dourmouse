@@ -41,7 +41,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from dourmouse.chat import ChatSession
-from dourmouse.config import NvidiaConfig, OllamaConfig, load_llm_config
+from dourmouse.config import (
+    NvidiaConfig,
+    OllamaConfig,
+    OmniRouteConfig,
+    load_llm_config,
+)
 from dourmouse.dispatch import DispatchRegistry, JobTracker
 from dourmouse.governance import RbacPolicy
 from dourmouse.learn import learn_enabled, open_default_store, record_feedback
@@ -319,7 +324,40 @@ class _SSEStream:
                 pass  # client went away; loop continues harmlessly
 
 
-def _resolve_server_config(config: NvidiaConfig | None) -> NvidiaConfig | None:
+class _SSEBroadcast:
+    """Fan-out hub for server-push events (v5.9 Freebuff live activity).
+
+    The HUD keeps a long-lived GET /api/events connection; anything the
+    watcher (or other background sources) emit is written to EVERY
+    connected stream. Register/unregister are cheap and thread-safe, and a
+    dead client is dropped on its next failed write.
+    """
+
+    def __init__(self) -> None:
+        self._clients: list[_SSEStream] = []
+        self._lock = threading.Lock()
+
+    def register(self, stream: _SSEStream) -> None:
+        with self._lock:
+            self._clients.append(stream)
+
+    def unregister(self, stream: _SSEStream) -> None:
+        with self._lock:
+            try:
+                self._clients.remove(stream)
+            except ValueError:
+                pass
+
+    def broadcast(self, payload: dict[str, Any]) -> None:
+        with self._lock:
+            clients = list(self._clients)
+        # emit() swallows write errors internally; clients that went away
+        # are dropped when their handler's finally unregisters them.
+        for c in clients:
+            c.emit(payload)
+
+
+def _resolve_server_config(config: Any | None) -> Any | None:
     """v3.1: the real serving paths (serve_forever, desktop.launch) call
     run_server with config=None, which would leave server.config None and
     silently disable per-agent models (DOURMOUSE_MODEL_<AGENT>) for focus_agent
@@ -337,16 +375,19 @@ def _resolve_server_config(config: NvidiaConfig | None) -> NvidiaConfig | None:
 
 
 def _backend_label(config: Any | None) -> str:
-    """The active backend name for the UI (v4.0): 'ollama' | 'nvidia'.
+    """The active backend name for the UI (v4.0): 'ollama' | 'omniroute' |
+    'nvidia'.
 
-    Deterministic (Rule 2.8): Ollama config objects carry a keyless marker
-    (empty api_key + localhost base) — resolved by type, never a guess.
-    Returns 'default' honestly when no config is attached (tests).
+    Deterministic (Rule 2.8): Ollama/OmniRoute config objects carry keyless
+    markers (empty api_key + localhost base) — resolved by type, never a
+    guess. Returns 'default' honestly when no config is attached (tests).
     """
     if config is None:
         return "default"
     if isinstance(config, OllamaConfig):
         return "ollama"
+    if isinstance(config, OmniRouteConfig):
+        return "omniroute"
     return "nvidia"
 
 
@@ -452,7 +493,7 @@ def build_setup_status(server) -> dict[str, Any]:
             if cfg is not None
             else "no backend config"
         ),
-        "hint": "DOURMOUSE_LLM_BACKEND=ollama|nvidia in .env",
+        "hint": "DOURMOUSE_LLM_BACKEND=ollama|omniroute|nvidia in .env",
     }
     try:
         from dourmouse.voice import voice_status
@@ -601,6 +642,55 @@ def _safe_asset_path(rel: str) -> Path | None:
     return target if target.is_file() else None
 
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"})
+# Host-header validation before any value is rendered into the pairing page:
+# hostname / IPv4 / bracketed IPv6 only — rejects header-injection outright.
+_SAFE_HOST_RE = re.compile(r"^(?:[A-Za-z0-9._-]+|\[[0-9A-Fa-f:]+\])$")
+
+#: Abandoned Google OAuth flows (user started login, never completed consent)
+#: are pruned after this long — one dict entry per attempt, never a leak.
+_OAUTH_PENDING_TTL_SECONDS = 600.0
+
+
+def _pending_created_ts(pending: dict[str, Any] | None) -> float | None:
+    """Unix timestamp of an OAuth pending entry's creation, or None when
+    absent/unparseable (treated as stale by the pruner)."""
+    raw = (pending or {}).get("created")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw).timestamp()
+    except ValueError:
+        return None
+
+
+def _phone_url_host(hostname: str) -> str:
+    """A safe non-loopback host from the Host header, or '' to skip it."""
+    host = (hostname or "").strip()
+    if not host or host in _LOOPBACK_HOSTS:
+        return ""
+    if not _SAFE_HOST_RE.match(host):
+        return ""
+    return host
+
+
+def _qr_svg(url: str) -> str:
+    """A real scannable QR for ``url`` as an inline SVG, or '' honestly.
+
+    Uses segno (pure-Python, zero native deps) when installed; without it
+    returns an empty string and the pairing page shows the URL text only —
+    never a fake/unscannable QR (Rule 2.2)."""
+    try:
+        import segno
+    except ImportError:
+        return ""
+    try:
+        qr = segno.make(url, error="m")
+        return qr.svg_data_uri(scale=4, dark="#4FC3F7", light="rgba(0,0,0,0)")
+    except Exception:  # noqa: BLE001 -- a broken QR must never break the page
+        return ""
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "AtlasDourmouseWebUI/0.1"
 
@@ -619,6 +709,9 @@ class _Handler(BaseHTTPRequestHandler):
         - Otherwise: Bearer header OR dourmouse_session cookie must match the
           configured token. Constant-time comparison (no timing side
           channel), Rule 2.6 (token from env, never logged).
+        - v5.15: a valid Google user session (dourmouse_user_session cookie)
+          also authorizes — anyone who signed in with their own Google
+          account gets this server's access on the same terms.
         """
         import hmac
 
@@ -636,7 +729,21 @@ class _Handler(BaseHTTPRequestHandler):
             name, _, value = part.strip().partition("=")
             if name == "dourmouse_session" and hmac.compare_digest(value, token):
                 return True
+            if name == "dourmouse_user_session" and self._session_user() is not None:
+                return True
         return False
+
+    def _session_user(self) -> str | None:
+        """The logged-in Google user (email) for this request, or None."""
+        store = getattr(self.server, "auth", None)
+        if store is None:
+            return None
+        cookie = self.headers.get("Cookie", "")
+        for part in cookie.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "dourmouse_user_session":
+                return store.session_email(value.strip())
+        return None
 
     def _send_unauthorized(self) -> None:
         """401 for APIs, a redirect to /login for page navigations."""
@@ -676,6 +783,32 @@ class _Handler(BaseHTTPRequestHandler):
             # v4.0: the token-login page is reachable WITHOUT auth.
             self._serve_static("login.html")
             return
+        if path == "/mobile":
+            # v5.13: the phone-pairing page is reachable WITHOUT auth (a
+            # fresh phone must be able to land on it before it has the
+            # token). Renders the real connection status + scannable QR
+            # codes server-side.
+            self._handle_mobile_page()
+            return
+        if path == "/api/auth/status":
+            # v5.15: Google login status — pre-auth so the login page can
+            # decide whether to show the sign-in button (honest, Rule 2.2).
+            self._handle_auth_status()
+            return
+        if path == "/api/auth/google/start":
+            # v5.15: kick off the Google OAuth dance (redirect to Google).
+            self._handle_google_start()
+            return
+        if path == "/api/auth/google/callback":
+            # v5.15: Google redirects here with ?code&state after consent.
+            self._handle_google_callback()
+            return
+        if path == "/api/auth/me":
+            # v5.15: who am I (null when not signed in with Google). Placed
+            # PRE-gate (reviewer-caught): it only reveals the request's own
+            # identity — a signed-out client must get {"me": null}, not 401.
+            self._handle_auth_me()
+            return
         if not self._authorized():
             self._send_unauthorized()
             return
@@ -703,6 +836,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(build_link_topology(self.server.registry))
         elif path == "/api/activity":
             self._send_json(self.server.tracker.snapshot())
+        elif path == "/api/events":
+            # v5.9: server-push fan-out — the HUD's long-lived SSE connection
+            # for live Freebuff thread activity. Anything broadcast (watcher
+            # events, etc.) is written to every connected client; the stream
+            # stays open until the client disconnects.
+            self._handle_events()
         elif path == "/api/selfimprove":
             # v4.0 Phase 13: honest self-review digest over real bus traffic.
             from dourmouse.self_improve import build_daily_digest
@@ -793,6 +932,48 @@ class _Handler(BaseHTTPRequestHandler):
                 except Exception:  # noqa: BLE001 - honest panel, never crash
                     payload["now_playing"] = "SPOTIFY: playback read failed."
             self._send_json(payload)
+        elif path == "/api/artifacts":
+            # v5.8: published artifacts (markdown / table / series) for the
+            # renderer panel. Optional ?id= returns one record; /clear (POST)
+            # wipes the session store. Real store data, never fabricated.
+            qs = urllib.parse.parse_qs(parsed.query)
+            aid = (qs.get("id") or [""])[0].strip()
+            store = getattr(self.server, "artifacts", None)
+            if store is None:
+                from dourmouse.artifacts import default_store
+
+                store = default_store()
+            if aid:
+                record = store.get(aid)
+                if record is None:
+                    self._send_json({"error": f"no such artifact: {aid}"}, status=404)
+                else:
+                    self._send_json({"artifact": record})
+                return
+            self._send_json({"artifacts": store.list()})
+        elif path == "/api/state":
+            # v5.14 Phase R0: the cross-device state snapshot — watchlist,
+            # alerts inbox, prefs, recent activity, per-device workspaces.
+            # One server, one source of truth, every device reads it.
+            # v5.17: scoped to THIS request's owner — a signed-in Google user
+            # sees only their own data (+ shared/system alerts); signed-out
+            # clients see the shared bucket. The browser's session cookie
+            # rides along on the same-origin fetch automatically.
+            store = getattr(self.server, "state", None)
+            if store is None:
+                from dourmouse.state_store import StateStore
+
+                store = StateStore()
+            from dourmouse.state_store import SHARED_OWNER
+
+            me = self._session_user()
+            self._send_json({**store.snapshot(me or SHARED_OWNER), "me": me})
+        elif path == "/api/palette":
+            # v5.14 Phase R0: the command-centre index — destinations,
+            # agents, and commands. Same data powers the desktop ⌘K overlay
+            # and the mobile ⚡ sheet; natural-language queries can later
+            # search the same index.
+            self._send_json(self._build_palette())
         elif path == "/api/files":
             # v5.0: list uploaded files (name, size, age) newest first.
             try:
@@ -871,6 +1052,11 @@ class _Handler(BaseHTTPRequestHandler):
             # v4.0: token exchange — sets the dourmouse_session cookie.
             self._handle_login()
             return
+        if parsed.path == "/api/auth/logout":
+            # v5.15: end the Google user session (pre-auth so a signed-out
+            # client can always clear its cookie).
+            self._handle_auth_logout()
+            return
         if not self._authorized():
             self._send_unauthorized()
             return
@@ -903,6 +1089,29 @@ class _Handler(BaseHTTPRequestHandler):
 
             message = spotify_login(background=True)
             self._send_json({"ok": True, "message": message})
+        elif parsed.path == "/api/artifacts/clear":
+            # v5.8: wipe the session artifact store (a fresh renderer slate).
+            store = getattr(self.server, "artifacts", None)
+            if store is None:
+                from dourmouse.artifacts import default_store
+
+                store = default_store()
+            cleared = store.clear()
+            self._send_json({"ok": True, "cleared": cleared})
+        elif parsed.path == "/api/state/watchlist":
+            # v5.14 Phase R0: star/unstar a symbol. Writes the ONE store and
+            # broadcasts a state_change over SSE so every connected device
+            # (desktop, phone, tablet) updates live.
+            self._handle_state_watchlist()
+        elif parsed.path == "/api/state/alerts":
+            # v5.14 Phase R0: dismiss / mute / unmute / prioritize alerts.
+            self._handle_state_alerts()
+        elif parsed.path == "/api/state/prefs":
+            # v5.14 Phase R0: set one preference (last-write-wins).
+            self._handle_state_prefs()
+        elif parsed.path == "/api/state/workspace":
+            # v5.14 Phase R0: record where THIS device left off (resume).
+            self._handle_state_workspace()
         else:
             self.send_error(404, "not found")
 
@@ -1068,11 +1277,20 @@ class _Handler(BaseHTTPRequestHandler):
         if target is None:
             self.send_error(404, "not found")
             return
-        ctype = "text/html" if rel.endswith(".html") else (
-            "text/css" if rel.endswith(".css") else (
-                "application/javascript" if rel.endswith(".js") else "application/octet-stream"
-            )
-        )
+        # v5.13: web-app manifests and app icons need REAL content types or
+        # install-to-home-screen silently degrades (manifest ignored, icon
+        # unused) even though the bytes are served.
+        ctype = {
+            ".html": "text/html",
+            ".css": "text/css",
+            ".js": "application/javascript",
+            ".webmanifest": "application/manifest+json",
+            ".json": "application/json",
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+            ".ico": "image/x-icon",
+            ".wav": "audio/wav",
+        }.get(Path(rel).suffix, "application/octet-stream")
         body = target.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", ctype)
@@ -1082,6 +1300,24 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_chat(self) -> None:
+        # v5.15: bind the logged-in Google user to THIS request thread so the
+        # agent tools (gmail_search/read/send, calendar) act on the signed-in
+        # user's account. ThreadingHTTPServer is one thread per request, so the
+        # thread-local dies with the request — no cross-user leakage.
+        from dourmouse import google_auth
+
+        google_auth.set_current_user(self._session_user())
+        # Reviewer-caught: the thread-local MUST be cleared even on the early
+        # returns below — one future refactor to a shared-thread server and
+        # a leaked user would route user A's chat into user B's account.
+        try:
+            return self._handle_chat_authed()
+        finally:
+            google_auth.set_current_user(None)
+
+    def _handle_chat_authed(self) -> None:
+        """The authorized half of /api/chat (user bound; thread-local cleared
+        by the caller's finally)."""
         body = self._read_json_body()
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
@@ -1126,6 +1362,12 @@ class _Handler(BaseHTTPRequestHandler):
         previous_gate = session.confirmation_gate
         report: dict[str, Any] | None = None
         error_msg: str | None = None
+        # v5.8: during THIS request the artifact store streams live
+        # "artifact" SSE events into the same stream as everything else, so
+        # publish_artifact calls render in the HUD the instant they happen.
+        artifacts_store = getattr(self.server, "artifacts", None)
+        if artifacts_store is not None:
+            artifacts_store.set_sink(stream.emit)
         with self.server.session_lock:
             gate.set_emit(stream.emit)
             session.confirmation_gate = gate
@@ -1140,6 +1382,8 @@ class _Handler(BaseHTTPRequestHandler):
                 session.confirmation_gate = previous_gate
                 self.server.confirm_resolver = None
                 gate.set_emit(lambda _e: None)
+                if artifacts_store is not None:
+                    artifacts_store.set_sink(None)
 
         # Emit the terminal event AFTER the lock is released so a queued
         # second request can immediately start its own run. It rides the
@@ -1160,6 +1404,52 @@ class _Handler(BaseHTTPRequestHandler):
         # Terminate the SSE response after done/error so the client gets EOF
         # instead of hanging on keep-alive.
         self.close_connection = True
+
+    def _handle_events(self) -> None:
+        """v5.9: long-lived server-push SSE for the HUD feed.
+
+        Registers this response's stream on the server's broadcast hub, then
+        blocks reading the request body until the client disconnects (the
+        loop ends on EOF/ConnectionReset; ``finally`` unregisters the
+        stream). The broadcast hub pushes watcher events from its own
+        thread while this handler simply holds the connection open.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        stream = _SSEStream(self.wfile)
+        hub = getattr(self.server, "events_broadcast", None)
+        if hub is None:
+            # No hub (tests / unusual server) — emit nothing, close cleanly.
+            self.close_connection = True
+            return
+        hub.register(stream)
+        # Late subscriber honesty: the watcher emitted its "online/offline"
+        # event at CONNECT time, before this browser attached — replay the
+        # current status so the HUD always knows the watch state.
+        watcher = getattr(self.server, "freebuff_watcher", None)
+        if watcher is not None:
+            state = "online" if watcher.online else "offline"
+            stream.emit(
+                {
+                    "type": "freebuff_watch",
+                    "state": state,
+                    "detail": "" if watcher.online else "app unreachable",
+                }
+            )
+        try:
+            while True:
+                try:
+                    chunk = self.rfile.read(1024)
+                except (ConnectionResetError, OSError):
+                    break
+                if not chunk:
+                    break
+        finally:
+            hub.unregister(stream)
+            self.close_connection = True
 
     def _handle_confirm(self) -> None:
         body = self._read_json_body()
@@ -1202,6 +1492,289 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(b'{"ok": true}')))
         self.end_headers()
         self.wfile.write(b'{"ok": true}')
+
+    # -- v5.15: Google OAuth login (per-user identity) -------------------- #
+
+    def _google_redirect_uri(self) -> str:
+        """The callback URL for THIS request's Host header.
+
+        Loopback (http://127.0.0.1:<port>/api/auth/google/callback) works as-is
+        with Google OAuth. Non-loopback deployments must either serve https or
+        register the exact http redirect in Google Cloud Console — the Host
+        header is sanitized (hostname / IPv4 / bracketed IPv6 only) so it can
+        never inject a path or header (same guard as the pairing page).
+
+        The Host header's PORT is honored when present and sane (reviewer-
+        caught: behind a proxy the external port differs from server_port, and
+        sending the wrong port makes Google reject with redirect_uri_mismatch).
+        """
+        host_header = self.headers.get("Host", "") or ""
+        host, port = host_header, None
+        # "host:port" splits on the LAST colon; bracketed IPv6 "[::1]:8765"
+        # is safe because the brackets group the colons.
+        if ":" in host_header and not host_header.startswith("["):
+            host, _, port = host_header.rpartition(":")
+        elif host_header.startswith("[") and "]:" in host_header:
+            host, _, port = host_header.rpartition(":")
+        if not _SAFE_HOST_RE.match(host or "") or "/" in host:
+            host, port = "127.0.0.1", None
+        if port is None or not port.isdigit() or not (1 <= int(port) <= 65535):
+            port = str(self.server.server_port)
+        return f"http://{host}:{port}/api/auth/google/callback"
+
+    def _handle_auth_status(self) -> None:
+        """GET /api/auth/status — honest Google-login readiness + who I am."""
+        from dourmouse.google_auth import status as google_status
+
+        payload = google_status()
+        payload["me"] = self._session_user()
+        payload["token_gate"] = bool(getattr(self.server, "access_token", ""))
+        self._send_json(payload)
+
+    def _prune_oauth_pending(self) -> None:
+        """Drop abandoned OAuth flows older than the TTL (reviewer-caught:
+        a user who never completes consent would otherwise leak one dict
+        entry per attempt forever). Entries without a parseable ``created``
+        (legacy/planted) are treated as stale too. Caller holds oauth_lock."""
+        cutoff = datetime.now().timestamp() - _OAUTH_PENDING_TTL_SECONDS
+        stale = [
+            state
+            for state, pending in self.server.oauth_pending.items()
+            if _pending_created_ts(pending) is None
+            or _pending_created_ts(pending) < cutoff
+        ]
+        for state in stale:
+            self.server.oauth_pending.pop(state, None)
+
+    def _handle_google_start(self) -> None:
+        """GET /api/auth/google/start — 302 to Google consent (PKCE)."""
+        import secrets
+
+        from dourmouse import google_auth
+
+        if not google_auth.google_configured():
+            self._send_json(
+                {"ok": False, "error": "Google OAuth NOT CONFIGURED — see /api/auth/status"},
+                status=400,
+            )
+            return
+        state = secrets.token_urlsafe(24)
+        verifier, challenge = google_auth.new_pkce()
+        redirect_uri = self._google_redirect_uri()
+        with self.server.oauth_lock:
+            self._prune_oauth_pending()
+            self.server.oauth_pending[state] = {
+                "verifier": verifier,
+                "redirect_uri": redirect_uri,
+                "redirect_to": "/",
+                "created": datetime.now().isoformat(),
+            }
+        url = google_auth.authorization_url(redirect_uri, state, challenge)
+        self.send_response(302)
+        self.send_header("Location", url)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _handle_google_callback(self) -> None:
+        """GET /api/auth/google/callback?code=..&state=.. — exchange, verify,
+        create a user session, redirect to /."""
+        from dourmouse import google_auth
+
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        code = (qs.get("code") or [""])[0].strip()
+        state = (qs.get("state") or [""])[0].strip()
+        with self.server.oauth_lock:
+            self._prune_oauth_pending()
+            pending = self.server.oauth_pending.pop(state, None)
+        if pending is None:
+            self._send_json(
+                {"ok": False, "error": "OAuth state missing/expired — start the login again"},
+                status=400,
+            )
+            return
+        error = (qs.get("error") or [""])[0].strip()
+        if error:
+            # Google refused consent (access_denied / server error) — the
+            # state is consumed (single-use); send the user home with a
+            # friendly reason instead of a raw Google 502.
+            self.send_response(302)
+            self.send_header("Location", "/login?reason=denied")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        try:
+            tokens = google_auth.exchange_code(
+                code, pending["redirect_uri"], pending["verifier"]
+            )
+            identity = google_auth.verify_id_token(str(tokens.get("id_token") or ""))
+        except RuntimeError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=502)
+            return
+        email = identity["email"]
+        store = self.server.auth
+        store.upsert_user(
+            email,
+            tokens,
+            name=identity.get("name", ""),
+            picture=identity.get("picture", ""),
+            sub=identity.get("sub", ""),
+        )
+        sid = store.create_session(email, identity.get("name", ""), identity.get("picture", ""))
+        self.send_response(302)
+        self.send_header("Location", pending.get("redirect_to") or "/")
+        # Secure is intentionally omitted: the server is plain HTTP on
+        # loopback/LAN (browsers ignore Secure from http:// anyway). If
+        # DourMouse is ever served over HTTPS, add Secure here AND on the
+        # logout cookie below — HttpOnly + SameSite=Strict already apply.
+        self.send_header(
+            "Set-Cookie",
+            f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000",
+        )
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _handle_auth_me(self) -> None:
+        """GET /api/auth/me — the signed-in identity, or null."""
+        email = self._session_user()
+        if email is None:
+            self._send_json({"me": None})
+            return
+        profile = self.server.auth.user_profile(email)
+        self._send_json({"me": profile})
+
+    def _handle_auth_logout(self) -> None:
+        """POST /api/auth/logout — end the user session + clear the cookie.
+
+        Also best-effort REVOKES the user's Google refresh token so a stolen
+        token cannot outlive the logout (reviewer-caught dead code: the
+        revoke helper now has a caller). Failures never block logout.
+        """
+        from dourmouse import google_auth
+
+        store = getattr(self.server, "auth", None)
+        email = self._session_user()
+        if store is not None and email is not None:
+            try:
+                refresh = store.user_tokens(email).get("refresh_token")
+                if refresh:
+                    google_auth.revoke_token(str(refresh))
+            except Exception:  # noqa: BLE001,S110 - best-effort, logout must not fail
+                pass
+        cookie = self.headers.get("Cookie", "")
+        for part in cookie.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "dourmouse_user_session" and store is not None:
+                store.delete_session(value.strip())
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        # Same caveat as the login cookie: Secure belongs here too once the
+        # server can be served over HTTPS (plain-HTTP loopback today).
+        self.send_header(
+            "Set-Cookie",
+            "dourmouse_user_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
+        )
+        self.send_header("Content-Length", str(len(b'{"ok": true}')))
+        self.end_headers()
+        self.wfile.write(b'{"ok": true}')
+
+    def _handle_mobile_page(self) -> None:
+        """v5.13: GET /mobile — phone-pairing page with real QR codes.
+
+        Server-rendered from ui/mobile.html: fills the connection status
+        (access token configured + non-loopback binding?), the phone-
+        reachable URLs (LAN + Tailscale via mobile_link.detect_addresses)
+        each with a REAL scannable QR (segno svg_data_uri — honest: if
+        segno is missing the QR block is omitted, never faked), and the
+        steps. Reached without auth so a fresh phone can land on it.
+        """
+        from dourmouse import mobile_link
+
+        token = getattr(self.server, "access_token", "") or ""
+        addrs = mobile_link.detect_addresses()
+        # The port the phone is actually hitting comes from the Host header
+        # (or the default). QR encodes the LOGIN page — the token entry the
+        # phone needs first.
+        host_header = (self.headers.get("Host") or "").strip()
+        port = _DEFAULT_PORT
+        hostname = host_header
+        if ":" in host_header:
+            maybe_host, maybe_port = host_header.rsplit(":", 1)
+            if maybe_port.isdigit():
+                port = int(maybe_port)
+                hostname = maybe_host
+        # The URL the phone actually used (Host header), validated, so the QR
+        # always points back at itself — works for Tailscale DNS names, LAN
+        # IPs, and router hostnames alike, not just the detected addresses.
+        self_host = _phone_url_host(hostname)
+
+        if token:
+            status = (
+                "<span class='ok'>REMOTE ACCESS: CONFIGURED</span><br>"
+                "Token gate active — non-loopback clients must present the "
+                "token (constant-time check, cookie session)."
+            )
+        else:
+            status = (
+                "<span class='warn'>REMOTE ACCESS: NOT CONFIGURED</span><br>"
+                "No DOURMOUSE_ACCESS_TOKEN on the server — the phone cannot "
+                "authenticate. On your Mac run:<br>"
+                "<div class='cmd'>python -m dourmouse.mobile_link</div>"
+            )
+
+        qr_urls: list[str] = []
+        for ip in addrs["lan"]:
+            qr_urls.append(
+                f"<div class='urlrow'>"
+                f"<div class='qr'>{_qr_svg(mobile_link.pairing_url(ip, port))}</div>"
+                f"<div class='meta'><div class='label'>LAN // SAME WI-FI</div>"
+                f"<div class='url'>{mobile_link.pairing_url(ip, port)}</div>"
+                f"<div class='note'>open in Safari — or scan with the Camera app</div>"
+                f"</div></div>"
+            )
+        for ip in addrs["tailscale"]:
+            qr_urls.append(
+                f"<div class='urlrow'>"
+                f"<div class='qr'>{_qr_svg(mobile_link.pairing_url(ip, port))}</div>"
+                f"<div class='meta'><div class='label'>TAILSCALE // ANYWHERE</div>"
+                f"<div class='url'>{mobile_link.pairing_url(ip, port)}</div>"
+                f"<div class='note'>phone needs the Tailscale app on the same tailnet</div>"
+                f"</div></div>"
+            )
+        primary: list[str] = []
+        if self_host and self_host not in addrs["lan"] and self_host not in addrs["tailscale"]:
+            # A phone that reached /mobile via a host the machine's own
+            # detection did not list (Tailscale DNS name, router hostname):
+            # lead with the URL it is ALREADY on, so the QR is self-consistent.
+            self_url = f"http://{self_host}:{port}/login"
+            primary.append(
+                f"<div class='urlrow'>"
+                f"<div class='qr'>{_qr_svg(self_url)}</div>"
+                f"<div class='meta'><div class='label'>THIS DEVICE // the URL you opened</div>"
+                f"<div class='url'>{self_url}</div>"
+                f"<div class='note'>scan to go straight to the access gate</div>"
+                f"</div></div>"
+            )
+        urls_html = "".join(primary + qr_urls) if (primary or qr_urls) else (
+            "<span class='bad'>NO PHONE-REACHABLE ADDRESS FOUND</span><br>"
+            "This Mac has no private IPv4 (Wi-Fi/Ethernet) and no Tailscale "
+            "interface. On the Mac: join Wi-Fi or run 'tailscale up'."
+        )
+
+        template = (_UI_DIR / "mobile.html").read_text(encoding="utf-8")
+        body = (
+            template.replace("{{STATUS}}", status)
+            .replace("{{URLS}}", urls_html)
+        )
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(body.encode("utf-8"))))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body.encode("utf-8"))
 
     def _handle_memory_api(self) -> None:
         """v2.9: honest Store & Learn stats for the dashboard.
@@ -1379,7 +1952,184 @@ class _Handler(BaseHTTPRequestHandler):
                 status=409,
             )
             return
+        # v5.14 Phase R0: a started ATLAS run is a SYSTEM alert in the
+        # DOURMOUSE ALERTS inbox, fanned out live over the SSE hub.
+        store = getattr(self.server, "state", None)
+        if store is not None:
+            try:
+                store.add_alert(
+                    kind="system",
+                    title=f"ATLAS run started: {command}",
+                    detail="managed run · progress via #/atlas",
+                    link="#/atlas",
+                )
+                # owner '*' — a system alert, visible to everyone; the
+                # broadcast marks it shared so every client refreshes.
+                from dourmouse.state_store import SHARED_OWNER as _SHARED
+
+                self._state_changed("alerts", owner=_SHARED)
+            except Exception:  # noqa: BLE001 - an alert must never fail the run launch
+                pass
         self._send_json({"ok": True, "command": command, "running": True})
+
+    # -- v5.14 Phase R0: cross-device state (one store, SSE fan-out) ------ #
+
+    def _state(self) -> Any:
+        store = getattr(self.server, "state", None)
+        if store is None:
+            from dourmouse.state_store import StateStore
+
+            store = StateStore()
+        return store
+
+    def _state_owner(self) -> str:
+        """The data scope for THIS request (v5.17): the signed-in Google
+        user's email, or the shared bucket when nobody is signed in. Every
+        state read/write passes this so two signed-in people on one server
+        never see each other's watchlist / alerts / prefs / workspace."""
+        from dourmouse.state_store import SHARED_OWNER
+
+        return self._session_user() or SHARED_OWNER
+
+    def _state_changed(self, section: str, owner: str, **payload: Any) -> None:
+        """Broadcast a state_change over the SSE hub so every connected
+        device (desktop / phone / tablet) refreshes the affected section
+        live — the cheapest reliable realtime there is (spec §9).
+
+        v5.17: the broadcast carries the ACTING OWNER so clients can ignore
+        other users' events (the metadata must not cross the wire to another
+        signed-in person — reviewer-caught). The refetch itself is always
+        scoped by each client's own session cookie."""
+        hub = getattr(self.server, "events_broadcast", None)
+        if hub is not None:
+            hub.broadcast(
+                {"type": "state_change", "section": section,
+                 "owner": owner, **payload}
+            )
+
+    def _handle_state_watchlist(self) -> None:
+        """POST /api/state/watchlist — body: {action: add|remove, symbol, name?}."""
+        body = self._read_json_body()
+        action = (body.get("action") or "").strip().lower()
+        symbol = (body.get("symbol") or "").strip()
+        owner = self._state_owner()
+        store = self._state()
+        removed = False
+        try:
+            if action == "add":
+                store.add_watch(symbol, name=body.get("name") or "",
+                                source=body.get("source") or "desktop",
+                                owner=owner)
+            elif action == "remove":
+                removed = store.remove_watch(symbol, owner=owner)
+            else:
+                self._send_json(
+                    {"ok": False, "error": f"unknown action {action!r} (add|remove)"},
+                    status=400,
+                )
+                return
+        except ValueError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+            return
+        self._state_changed("watchlist", owner=owner, symbol=symbol, action=action)
+        self._send_json({"ok": True, "removed": removed,
+                         "watchlist": store.watchlist(owner)})
+
+    def _handle_state_alerts(self) -> None:
+        """POST /api/state/alerts — actions: dismiss {id}, mute {kind},
+        unmute {kind}, priority {id, priority}."""
+        body = self._read_json_body()
+        action = (body.get("action") or "").strip().lower()
+        owner = self._state_owner()
+        store = self._state()
+        # Honest result (Rule 2.2): a dismiss/priority of an unknown id is
+        # NOT silently reported as success — the caller sees the bool.
+        # v5.17: dismissing/reprioritizing ANOTHER user's alert is refused
+        # (ownership-guarded UPDATE in the store).
+        changed = True
+        try:
+            if action == "dismiss":
+                changed = store.dismiss_alert(int(body.get("id") or 0), owner=owner)
+            elif action == "mute":
+                store.mute(body.get("kind") or "", owner=owner)
+            elif action == "unmute":
+                store.unmute(body.get("kind") or "", owner=owner)
+            elif action == "priority":
+                changed = store.set_priority(int(body.get("id") or 0),
+                                             int(body.get("priority") or 0),
+                                             owner=owner)
+            else:
+                self._send_json(
+                    {"ok": False,
+                     "error": f"unknown action {action!r} (dismiss|mute|unmute|priority)"},
+                    status=400,
+                )
+                return
+        except (ValueError, TypeError) as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+            return
+        self._state_changed("alerts", owner=owner, action=action)
+        self._send_json({"ok": changed, "alerts": store.alerts(owner),
+                         "muted": store.muted_sources(owner)})
+
+    def _handle_state_prefs(self) -> None:
+        """POST /api/state/prefs — body: {key, value} (last-write-wins),
+        scoped to the request's owner (v5.17)."""
+        body = self._read_json_body()
+        owner = self._state_owner()
+        store = self._state()
+        try:
+            store.set_pref(body.get("key") or "", body.get("value"), owner=owner)
+        except ValueError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+            return
+        self._state_changed("prefs", owner=owner, key=body.get("key") or "")
+        self._send_json({"ok": True, "prefs": store.prefs(owner)})
+
+    def _handle_state_workspace(self) -> None:
+        """POST /api/state/workspace — body: {device, workspace}: where THIS
+        device left off, for the optional resume banner (spec §8), scoped to
+        the request's owner (v5.17 — resume is personal, not cross-user)."""
+        body = self._read_json_body()
+        owner = self._state_owner()
+        store = self._state()
+        try:
+            record = store.set_workspace(body.get("device") or "",
+                                         body.get("workspace") or "",
+                                         owner=owner)
+        except ValueError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+            return
+        self._state_changed("workspace", owner=owner, device=record["device"])
+        self._send_json({"ok": True, "workspaces": store.workspaces(owner)})
+
+    def _build_palette(self) -> dict[str, Any]:
+        """The command-centre index (spec §16): every destination, every
+        agent, and the common commands — one source for ⌘K and the mobile ⚡
+        sheet. Deterministic; never fabricated (Rule 2.8)."""
+        destinations = [
+            {"id": "home", "label": "Home", "href": "#/"},
+            {"id": "atlas", "label": "Open ATLAS", "href": "#/atlas"},
+            {"id": "world", "label": "Open World Monitor", "href": "#/world"},
+            {"id": "portfolio", "label": "Show portfolio", "href": "#/portfolio"},
+            {"id": "markets", "label": "Open Markets", "href": "#/markets"},
+            {"id": "intelligence", "label": "Open Intelligence", "href": "#/intelligence"},
+            {"id": "alerts", "label": "Show my alerts", "href": "#/alerts"},
+            {"id": "settings", "label": "Open Settings", "href": "#/settings"},
+        ]
+        agents = []
+        try:
+            for name in sorted(self.server.registry.subagent_names):
+                agents.append({"name": name, "label": f"Find agent: {name}",
+                               "href": f"/agent/{name}"})
+        except Exception:  # noqa: BLE001 - a broken roster never kills the palette
+            agents = []
+        commands = [
+            {"id": "fx-daily", "label": "Run fx-daily", "action": "run-fx-daily"},
+            {"id": "fx-refresh", "label": "Run fx-refresh", "action": "run-fx-refresh"},
+        ]
+        return {"destinations": destinations, "agents": agents,
+                "commands": commands}
 
     def _handle_repo_scan(self) -> None:
         """v4.1 (P6+): POST /api/repo/scan — idempotent re-index of ATLAS.
@@ -1513,6 +2263,10 @@ def run_server(
     bus: MessageBus | None = None,
     reporting: bool = False,
     neuro: bool = False,
+    artifacts=None,
+    freebuff_events: bool = False,
+    state=None,
+    auth=None,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns the running ThreadingHTTPServer.
 
@@ -1534,6 +2288,12 @@ def run_server(
     ``reporting`` (v4.0): when True (and DOURMOUSE_REPORT is not disabled), a
     DailyReporter thread posts the morning briefing to the bus + tracker at
     DOURMOUSE_REPORT_TIME (default 08:30). Tests keep it False (default).
+
+    ``freebuff_events`` (v5.9): when True, a background watcher consumes the
+    Freebuff app's /api/events SSE stream and broadcasts live thread
+    activity (turn started/finished, created, status change) to every HUD
+    connected via GET /api/events. Tests keep it False (default) so the
+    suite never touches the Freebuff app.
     """
 
     def _list_sessions() -> dict[str, Any]:
@@ -1656,6 +2416,37 @@ def run_server(
         server.bus.on_post(_mirror_to_memory)
     server.list_sessions = _list_sessions
     server.list_recent_sessions = _list_recent_sessions
+    # v5.8: the artifact renderer store. Defaults to the process singleton
+    # (tools publish into the same store the HUD reads); tests pass a fresh
+    # one for isolation, exactly like bus/memory.
+    if artifacts is None:
+        from dourmouse.artifacts import default_store
+
+        artifacts = default_store()
+    server.artifacts = artifacts
+    # v5.14 Phase R0: the cross-device state store (watchlists, alerts,
+    # prefs, recent activity, per-device last workspace). The server is the
+    # single source of truth — every device reads and writes this one store.
+    # Tests pass a fresh store (in-memory) for isolation, like bus/artifacts.
+    if state is None:
+        from dourmouse.state_store import default_store as default_state_store
+
+        state = default_state_store()
+    server.state = state
+    # v5.15: Google OAuth login — per-user identity + sessions. Tests pass a
+    # fresh in-memory AuthStore; the serving path persists under workspace/auth.
+    if auth is None:
+        from dourmouse.google_auth import default_auth_store
+
+        auth = default_auth_store()
+    server.auth = auth
+    # v5.15: bind the store so the agent tools resolve per-user tokens from
+    # the REAL mounted store (not a throwaway).
+    from dourmouse.google_auth import bind_auth_store
+
+    bind_auth_store(auth)
+    server.oauth_pending: dict[str, dict[str, Any]] = {}
+    server.oauth_lock = threading.Lock()
     server.confirm_resolver = None  # set per-chat via gate resolver closure
     server.session = ChatSession(
         registry,
@@ -1683,6 +2474,20 @@ def run_server(
     # from session history in the background (never blocks startup). Tests
     # keep neuro=False so the suite stays hermetic.
     server.neuro = neuro
+    # v5.9: Freebuff live-activity fan-out. The hub is ALWAYS present (so
+    # GET /api/events works everywhere); the watcher that feeds it only runs
+    # when freebuff_events=True — tests keep it off so nothing touches the
+    # Freebuff app. The watcher emits into the hub, the hub pushes to every
+    # connected HUD stream.
+    server.events_broadcast = _SSEBroadcast()
+    server.freebuff_watcher = None
+    if freebuff_events:
+        from dourmouse.freebuff_events import FreebuffEventWatcher
+
+        server.freebuff_watcher = FreebuffEventWatcher(
+            server.events_broadcast.broadcast
+        )
+        server.freebuff_watcher.start()
     if neuro:
         try:
             from dourmouse.orch_net import orch_enabled
@@ -1745,6 +2550,8 @@ def serve_forever(
         reporting=reporting,
         # v5.6: the real serving path learns — bootstrap from session history.
         neuro=True,
+        # v5.9: the real serving path surfaces live Freebuff thread activity.
+        freebuff_events=True,
     )
     print(f"Dourmouse UI running at http://{host}:{port}")
     print(f"Registry: {', '.join(sorted(registry.subagent_names))}")
@@ -1774,6 +2581,8 @@ def serve_forever(
             server.live_runtime.stop()
         if server.daily_reporter is not None:
             server.daily_reporter.stop()
+        if server.freebuff_watcher is not None:
+            server.freebuff_watcher.stop()
         if server.memory is not None:
             server.memory.close()
         server.server_close()

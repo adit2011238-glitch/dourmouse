@@ -268,6 +268,15 @@ def _echo_tool(name: str = "echo", permission: Permission = Permission.REGULAR) 
     )
 
 
+def _unique_tool(name: str) -> ToolSpec:
+    return ToolSpec(
+        name=name,
+        description=f"{name} tool",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=lambda a: "ok",
+    )
+
+
 def _test_registry() -> DispatchRegistry:
     r = DispatchRegistry()
     r.register_subagent(
@@ -308,6 +317,62 @@ class TestRegistry:
             r.register_subagent(
                 Subagent(name="echo_agent", domain="Test", description="x", tools=())
             )
+
+    def test_extend_subagent_shares_same_tool_object(self):
+        """v5.8: the SAME ToolSpec can ride multiple agents (one registry
+        slot), and the schema is emitted once per name in the scoped set."""
+        r = DispatchRegistry()
+        tool = ToolSpec(
+            name="shared_tool",
+            description="shared across agents",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda a: "ok",
+        )
+        for name in ("one", "two", "three"):
+            r.register_subagent(
+                Subagent(name=name, domain="Test", description="x", tools=(tool,))
+            )
+        assert r.lookup("shared_tool") is tool
+        assert len(r.tool_specs()) == 1
+        # A DIFFERENT object claiming the name still raises (anti-shadowing).
+        other = ToolSpec(
+            name="shared_tool",
+            description="different",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda a: "nope",
+        )
+        with pytest.raises(ValueError, match="collision"):
+            r.register_subagent(
+                Subagent(name="four", domain="Test", description="x", tools=(other,))
+            )
+
+    def test_extend_subagent_attaches_to_existing(self):
+        r = _test_registry()
+        r.register_subagent(
+            Subagent(name="other", domain="Test", description="x", tools=())
+        )
+        tool = _unique_tool("new_tool")
+        r.extend_subagent("other", tool)
+        sub = r.get_subagent("other")
+        assert sub is not None and tool in sub.tools
+        # Idempotent — a repeat call does not duplicate the tool.
+        r.extend_subagent("other", tool)
+        assert sum(1 for t in sub.tools if t is tool) == 1
+
+    def test_extend_subagent_rejects_different_object_same_name(self):
+        """extending with a DIFFERENT object claiming an existing name still
+        raises — the anti-shadowing invariant survives extend_subagent."""
+        r = DispatchRegistry()
+        r.register_subagent(
+            Subagent(name="echo_agent", domain="Test", description="x", tools=(_echo_tool(),))
+        )
+        with pytest.raises(ValueError, match="collision"):
+            r.extend_subagent("echo_agent", _unique_tool("echo"))
+
+    def test_extend_subagent_unknown_agent_raises(self):
+        r = _test_registry()
+        with pytest.raises(ValueError, match="no subagent"):
+            r.extend_subagent("nope", _unique_tool("brand_new"))
 
     def test_open_ended_extension_registers_any_new_subagent(self):
         """The registry is the single extension point: adding a future
@@ -628,6 +693,7 @@ class TestEndToEndThroughGeneralRoster:
             "atlas",  # v4.0: ATLAS command-centre telemetry
             "freebuff",  # v5.5: Freebuff Desktop reads
             "music",  # v5.7: Spotify playback + discovery
+            "worldmonitor",  # v5.12: global intelligence
         }
 
     def test_trading_subagent_added_later_dispatchable(self):

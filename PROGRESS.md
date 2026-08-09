@@ -1,7 +1,187 @@
 # Dourmouse — Progress
 
-## Current Phase: V5.6 — NEURAL ORCHESTRATOR (2026-08-09)
+## Current Phase: V5.18 - GOOGLE DRIVE (read-only) (2026-08-09)
 ## Last updated: 2026-08-09
+
+### v5.18 shipped - 'anything linked to that account' now includes Drive
+
+Google Drive joins Gmail + Calendar on the per-user OAuth path:
+
+- **drive.readonly scope** added to the sign-in consent (gmail.readonly /
+  gmail.send / calendar.readonly / drive.readonly — all four listed).
+- **`drive_search`** — files.list on the SIGNED-IN user's own account:
+  name/fullText contains query, newest first, trashed excluded, real rows
+  (name, mime, size, modified, id).
+- **`drive_read`** — one file's text content: Google-native Docs/Sheets/
+  Slides go through the export endpoint (text/plain); everything else via
+  alt=media with a 2 MB size cap and a 6000-char text cap with an honest
+  TRUNCATED marker. Oversized binaries are refused honestly — never a
+  truncated lie or a fabricated read.
+- Same per-user guarantee as Gmail: signed-in user with no valid token gets
+  "sign in again at /login"; no user signed in reports NOT CONFIGURED
+  (Drive has no legacy shared path to leak into).
+- Both tools registered on the mail subagent (the account-linked surface),
+  and the stale "needs App-Password env vars" descriptions on the gmail
+  tools were corrected to describe the OAuth-first reality.
+
+Review-hardened: the 2 MB cap is now enforced on the READ ITSELF (chunked
+bounded fetch aborts past the cap) — Drive metadata's ``size`` field is not
+always present, and trusting it alone would let a huge file bypass the
+check. Apps Script added to the exportable mimes. q-syntax single-quote
+escaping proven by test (O'Brien -> O''Brien), plus a no-size-metadata test
+and a monkeypatched-cap enforcement test.
+
+71/71 tests green (9 new: scope URL, search, Docs export, binary alt=media,
+metadata-size refusal, q-quote escaping, missing-size read, fetch-cap
+enforcement, reauth guard + NOT CONFIGURED).
+
+
+### v5.17 shipped - each Google account gets its own state
+
+The cross-device StateStore is now **per-owner**: every row carries an owner
+— the signed-in Google user's email, or the "*" shared bucket when nobody is
+signed in. Two signed-in people on one server never see each other's
+watchlist, alerts, prefs, activity, or resume workspace.
+
+- **Strictly per-owner:** watchlist, prefs (incl. per-kind alert mutes),
+  recent activity, and per-device resume workspaces. Same symbol can be
+  starred by two owners independently.
+- **Alerts are the one cross-cutting surface:** shared/system alerts
+  (owner '*', e.g. the ATLAS-run SYSTEM alert posted from a background
+  thread) appear for everyone; user-targeted alerts only for their owner;
+  dismissing/reprioritizing ANOTHER user's alert is refused. A shared
+  alert is one row, so dismissing it hides it for all — deliberate.
+- **Zero frontend changes for isolation** — the session cookie rides the
+  same-origin fetches, so the SSE fan-out's refetch is scoped per client.
+  The SSE broadcast now carries the acting owner and clients skip other
+  users' events (reviewer-caught metadata leak). Settings gained a DATA
+  SCOPE card: "SIGNED IN AS <you>" vs "SHARED SCOPE".
+- **Legacy migration:** Phase-R0 databases rebuild their watchlist/prefs/
+  workspace tables (their old single-column PKs would collide across
+  owners), backfilling existing rows into the shared bucket; alerts/recent
+  get a plain ALTER. Live-verified: the existing NVDA star survived the
+  migration and still serves.
+
+62/62 tests green (8 new: per-owner watchlist/prefs/workspace/recent
+isolation, global-alert visibility + dismiss guard, per-owner mutes,
+legacy-schema migration, and HTTP-level per-user isolation over a real
+server with two sessions).
+
+
+### v5.16 shipped - review pass on the Google login
+
+Security/correctness fixes from a critical code review of v5.15:
+
+- **Cross-account leak closed (the big one).** A signed-in user whose OAuth
+token expired or was lost used to silently fall back to the server owner's
+shared App-Password Gmail/SMTP account — user A would read the OWNER's
+inbox. Now the legacy fallback applies ONLY when no user is signed in; a
+signed-in user with no valid token gets an honest "sign in again at /login"
+message on every surface (search/read/send/calendar). Never another
+account.
+- **Logout revokes the refresh token.** The dead-code `revoke_token` now
+has a caller: signing out best-effort revokes the user's Google token so a
+stolen token cannot outlive the session.
+- **Abandoned login flows are pruned.** `oauth_pending` entries older than
+10 minutes are dropped on every start/callback — the dict can't leak one
+entry per never-completed consent.
+- **Consent-denial handled.** Google's `?error=access_denied` now 302s to
+`/login?reason=denied` with the state consumed, instead of a raw 502.
+- **Proxy-safe redirect URI.** The redirect URI sent to Google carries the
+Host header's port when sane (proxies otherwise hit redirect_uri_mismatch).
+- **Chat thread-local is finally-cleared** — a future shared-thread refactor
+can never leak user A's identity into user B's request.
+- **`/api/auth/me` moved pre-gate** — signed-out clients get `{"me": null}`
+(200) instead of 401; it only reveals the caller's own identity.
+- **id_token audience checked** — a valid Google token minted for ANOTHER
+client can no longer verify (tokeninfo doesn't bind aud; we do).
+
+A second review pass found the leak extended OUTSIDE google_services:
+``live_feeds.read_inbox`` (the mail agent's tool + the LiveRuntime mail
+poll) also fell back to the owner's shared App-Password mailbox. Now a
+signed-in user's inbox read goes through the SAME per-user guarantee —
+Gmail API for their own mailbox when a token exists, honest re-sign-in
+error when it doesn't, and the IMAP owner path only when NO user is signed
+in (the owner's own poll is unchanged).
+
+54/54 tests green (11 new: revoke-on-logout, denial redirect, host-port,
+pending prune, aud mismatch, the cross-account guards on search/send/
+calendar/inbox, the read_inbox OAuth path, the no-user legacy path, and a
+regression test that POSTs /api/chat through the split handler).
+
+
+### v5.15 shipped - sign in with any Google account
+
+Anyone can now log in with their OWN Google account (OAuth2 Authorization
+Code + PKCE, stdlib only) and DourMouse works on THAT account's linked
+services - Gmail and Calendar - never a shared inbox.
+
+1. **`dourmouse/google_auth.py`** - OAuth client config (GOOGLE_CLIENT_ID /
+   GOOGLE_CLIENT_SECRET from env, honest NOT CONFIGURED otherwise), PKCE
+   authorization URL, token exchange + refresh, server-side id_token
+   verification via Google's tokeninfo endpoint (email_verified must be
+   true), and a SQLite AuthStore of users + 30-day sessions.
+2. **Login page** - ui/login.html shows a SIGN IN WITH GOOGLE button when
+   the server is configured (one-click consent), a "signed in as X / sign
+   out" state when a session exists, and the exact fix-it steps when it is
+   not - the shared-token field remains as the fallback gate.
+3. **API** - GET /api/auth/status (readiness + me), /api/auth/google/start
+   (302 to Google consent with state+PKCE), /api/auth/google/callback
+   (exchange -> verify -> session cookie), /api/auth/me, POST
+   /api/auth/logout. A valid Google session authorizes non-loopback access
+   alongside the existing token.
+4. **Per-user Gmail/Calendar** - the agent tools (gmail_search/read/send,
+   list_calendar_events) resolve the LOGGED-IN user's token (bound per
+   /api/chat request thread) and call the Gmail/Calendar REST APIs directly
+   (stdlib urllib, transparent refresh). The legacy single-account
+   App-Password IMAP/SMTP path remains as the fallback.
+5. **Tests** - +19 (43 total): AuthStore lifecycle/persistence, PKCE,
+   authorization URL shape, faked token exchange + tokeninfo verification
+   (rejects unverified email, surfaces real Google errors), per-user Gmail
+   search/read/calendar over a fake REST endpoint, honest NOT CONFIGURED
+   fallbacks, and the full HTTP flow (start -> 302, callback -> session
+   cookie -> /api/auth/me, logout).
+
+Setup (one time): Google Cloud Console -> Credentials -> OAuth client (Web)
+-> register http://127.0.0.1:8765/api/auth/google/callback (plus your
+LAN/Tailscale host, https required for non-loopback) -> put the client id +
+secret in .env. Scopes: identity + gmail.readonly + gmail.send +
+calendar.readonly.
+
+---
+
+## Previous: V5.14 - ONE DOURMOUSE, PHASE R0 (cross-device foundation) (2026-08-09)
+## Last updated: 2026-08-09
+
+### v5.14 shipped - ONE DOURMOUSE, Phase R0 (approved design, executed)
+
+The first slice of the approved Cross-Device Redesign Portfolio
+(DOURMOUSE_CROSS_DEVICE_REDESIGN.md + visual mockups):
+
+1. **`dourmouse/state_store.py`** - the cross-device state store (SQLite WAL,
+   in-memory for tests): watchlist (idempotent star), DOURMOUSE ALERTS inbox
+   (typed atlas/world/market/system, dismiss/mute per kind/prioritize,
+   deep-link), prefs (last-write-wins), recent activity, and per-device
+   "last workspace". One store = one source of truth for every device.
+2. **API** - `GET /api/state` (full snapshot), `GET /api/palette` (command
+   centre index: destinations + agents + commands), and `POST`
+   `/api/state/{watchlist,alerts,prefs,workspace}`. Every write broadcasts a
+   `state_change` over the existing `/api/events` SSE hub so ALL devices
+   refresh live (spec 9). A started ATLAS run now posts a SYSTEM alert.
+3. **Shell** - the HUD is HOME; a routed shell adds the same eight
+   destinations as deep links (#/atlas, #/world, #/portfolio, #/alerts,
+   #/settings, ...) with three chromes from ONE shared nav definition:
+   desktop sidebar, tablet rail (900-1279), mobile bottom tab bar + More
+   sheet (<900). Command palette (desktop Cmd-K, mobile floating button)
+   over the palette index. Portfolio watchlist stars sync everywhere;
+   resume banner shows "continue where you left off" from another device.
+4. **Tests** - new `tests/` suite (23 tests): StateStore unit tests and
+   hermetic HTTP tests against a real `run_server` on an ephemeral port
+   (in-memory store, no external integrations).
+
+Still roadmap (R1-R4): mobile-first ATLAS/World screens with full data,
+map/feed, unified alerts push, PWA service worker + offline stamps, and
+pair->revoke device sessions.
 
 ### v5.6 shipped — a real neural network that learns orchestration
 

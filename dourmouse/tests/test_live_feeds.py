@@ -302,12 +302,16 @@ class TestPreloadedAgents:
         assert {"list_tasks", "add_task", "complete_task"} <= tools
 
     def test_no_global_tool_name_collisions(self):
+        """Each tool NAME maps to exactly ONE spec object (v5.8 sharing of
+        the identical publish_artifact object is fine; distinct objects with
+        the same name are the collisions the registry rejects)."""
         registry = build_general_registry()
-        seen: set[str] = set()
+        owners: dict[str, int] = {}
         for agent in registry.all_subagents():
             for tool in agent.tools:
-                assert tool.name not in seen, f"collision: {tool.name}"
-                seen.add(tool.name)
+                prev = owners.get(tool.name)
+                assert prev is None or prev == id(tool), f"collision: {tool.name}"
+                owners[tool.name] = id(tool)
 
 
 # --------------------------------------------------------------------------- #

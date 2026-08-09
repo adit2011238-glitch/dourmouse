@@ -323,6 +323,8 @@
   .fline .tag.auth { color: var(--amber); }
   .fline .tag.err { color: var(--red); }
   .fline .tag.plan { color: var(--amber); }
+  .fline .tag.fb { color: var(--cyan); }
+  .fline.fb-offline .tag.fb { color: var(--dead); }
   .fline .planstep { color: var(--text); }
   .fline .plansub { color: var(--text-dim); }
   .fbrow { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; }
@@ -523,6 +525,50 @@
   .vtbtn:hover:not(:disabled) { box-shadow: 0 0 12px rgba(var(--cyan-rgb), var(--a30)); }
   .vtbtn:disabled { opacity: 0.35; cursor: not-allowed; }
 
+  /* v5.8 — artifact renderer panel: live tables, equity curves, markdown
+     reports beside the chat. Same design language: alpha-scale fills,
+     bracket rank, monospace telemetry. */
+  #artifactpanel { overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 420px; }
+  .artifact { border: 1px solid var(--line); background: rgba(18,21,30,0.72); animation: enter 300ms cubic-bezier(.34,1.56,.64,1); }
+  .artifact .art-head {
+    display: flex; align-items: center; gap: 8px; padding: 7px 11px;
+    font-size: 9px; letter-spacing: 0.06em; color: var(--text);
+    background: rgba(var(--cyan-rgb), var(--a06)); border-bottom: 1px solid var(--line);
+  }
+  .artifact .art-kind {
+    flex: none; font-size: 8px; letter-spacing: 0.13em; color: var(--amber);
+    border: 1px solid rgba(var(--amber-rgb), var(--a30)); padding: 1px 6px;
+  }
+  .artifact .art-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .artifact .art-time { margin-left: auto; color: var(--text-dim); font-size: 8px; }
+  .artifact .art-body { padding: 9px 11px; font-size: 10px; line-height: 1.55; color: var(--text-dim); word-break: break-word; }
+  .artifact .art-body.markdown { font-family: var(--font-prose); color: var(--text); }
+  .artifact .art-body.markdown h1, .artifact .art-body.markdown h2, .artifact .art-body.markdown h3 {
+    font-family: var(--font-display); color: var(--text); margin: 8px 0 4px; font-weight: 600;
+  }
+  .artifact .art-body.markdown h1 { font-size: 13px; letter-spacing: 0.10em; }
+  .artifact .art-body.markdown h2 { font-size: 12px; }
+  .artifact .art-body.markdown h3 { font-size: 11px; color: var(--text-dim); }
+  .artifact .art-body.markdown p { margin: 4px 0; }
+  .artifact .art-body.markdown ul, .artifact .art-body.markdown ol { padding-left: 18px; margin: 4px 0; }
+  .artifact .art-body.markdown code { background: rgba(0,0,0,0.4); padding: 1px 5px; font-family: var(--font-mono); font-size: 9px; color: var(--text); }
+  .artifact .art-body.markdown pre { background: rgba(0,0,0,0.45); border: 1px solid var(--line); padding: 8px 10px; overflow-x: auto; margin: 6px 0; font-family: var(--font-mono); font-size: 9px; color: var(--text); }
+  .artifact .art-body.markdown blockquote { border-left: 2px solid rgba(var(--amber-rgb), var(--a45)); padding-left: 10px; margin: 6px 0; color: var(--text-dim); }
+  .artifact .art-body.markdown a { color: var(--text); }
+  .artifact .art-body.markdown table { border-collapse: collapse; margin: 6px 0; width: 100%; }
+  .artifact .art-body.markdown th, .artifact .art-body.markdown td { border: 1px solid var(--line); padding: 4px 7px; font-size: 9px; text-align: left; }
+  .artifact .art-body.markdown th { background: rgba(var(--cyan-rgb), var(--a10)); color: var(--text); letter-spacing: 0.05em; }
+  .artifact table.art-table { border-collapse: collapse; width: 100%; }
+  .artifact table.art-table th, .artifact table.art-table td { border: 1px solid var(--line); padding: 5px 8px; font-size: 9px; text-align: left; font-family: var(--font-mono); }
+  .artifact table.art-table th { background: rgba(var(--cyan-rgb), var(--a10)); color: var(--text); letter-spacing: 0.06em; position: sticky; top: 0; }
+  .artifact table.art-table td { color: var(--text-dim); }
+  .artifact table.art-table tr:nth-child(even) td { background: rgba(var(--cyan-rgb), var(--a06)); }
+  .artifact table.art-table tr:hover td { background: rgba(var(--cyan-rgb), var(--a10)); color: var(--text); }
+  .artifact .art-chart-wrap { padding: 6px 4px 2px; }
+  .artifact .art-chart { width: 100%; height: auto; display: block; }
+  .artifact .art-stat { font-size: 9px; color: var(--text-dim); display: flex; gap: 12px; padding: 4px 8px 8px; }
+  .artifact .art-stat b { color: var(--text); font-weight: 600; }
+
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(var(--cyan-rgb), var(--a16)); }
   ::-webkit-scrollbar-thumb:hover { background: rgba(var(--cyan-rgb), var(--a30)); }
@@ -556,6 +602,192 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.001s !important;
     }
+  }
+
+  /* ================= v5.14 Phase R0 — cross-device shell =================
+     One IA × three chromes: sidebar (desktop) · rail (tablet) · bottom tabs
+     (mobile). The existing HUD is HOME; these are the sibling workspaces. */
+  #dmside { position: fixed; left: 0; top: 0; bottom: 0; width: 172px; z-index: 60;
+    display: flex; flex-direction: column;
+    background: rgba(10,13,19,.92); border-right: 1px solid var(--line-strong);
+    padding: 16px 10px 14px; backdrop-filter: blur(12px); }
+  .dms-logo { font-family: var(--font-wordmark); font-size: 10px; letter-spacing: .22em;
+    color: #fff; margin: 0 6px 18px; text-shadow: 0 0 12px rgba(var(--cyan-rgb), var(--a45)); }
+  .dms-item { display: flex; align-items: center; gap: 10px; position: relative;
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .12em;
+    color: var(--text-dim); text-decoration: none; padding: 9px 10px; margin-bottom: 3px;
+    border: 1px solid transparent; transition: all .15s; }
+  .dms-item:hover { color: var(--text); border-color: var(--line); }
+  .dms-item.act { color: var(--text); border-color: var(--line-strong);
+    background: rgba(var(--cyan-rgb), var(--a10)); }
+  .dms-item .g { width: 15px; text-align: center; }
+  .dms-badge { margin-left: auto; min-width: 17px; height: 15px; border-radius: 8px;
+    background: var(--red); color: #fff; font-size: 8px; line-height: 15px;
+    text-align: center; padding: 0 4px; display: none; }
+  .dms-badge.show { display: inline-block; }
+  .dms-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 12px; }
+  .dms-btn { width: 100%; text-align: left; font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: .12em; color: var(--text); cursor: pointer;
+    background: rgba(var(--cyan-rgb), var(--a10)); border: 1px solid var(--line-strong);
+    padding: 9px 10px; }
+  .dms-btn:hover { background: rgba(var(--cyan-rgb), var(--a16)); }
+
+  #dmviews { margin-left: 172px; padding: 18px 22px 40px; min-height: 100vh; display: none; }
+  #app { margin-left: 172px; }
+  body.dm-view #dmviews { display: block; }
+  body.dm-view #app { display: none; }
+  .dmview { max-width: 1080px; margin: 0 auto; }
+  .dmv-head { margin-bottom: 14px; }
+  .dmv-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 19px;
+    letter-spacing: .14em; color: #fff; margin: 0 0 3px; }
+  .dmv-head .dmv-sub { font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: .18em; color: var(--text-dim); }
+  .dm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 12px; margin-bottom: 12px; }
+  .dm-card { border: 1px solid var(--line); background: var(--panel);
+    backdrop-filter: blur(8px); padding: 14px; position: relative; }
+  .dm-card::before, .dm-card::after { content: ""; position: absolute; width: 9px; height: 9px;
+    border: 1px solid var(--cyan); opacity: .45; }
+  .dm-card::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+  .dm-card::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+  .dm-card .dm-k { font-family: var(--font-mono); font-size: 8px; letter-spacing: .18em;
+    color: var(--text-dim); margin-bottom: 8px; display: flex; justify-content: space-between;
+    align-items: center; }
+  .dm-card .dm-k b { color: var(--text); font-weight: 600; }
+  .dm-row { display: flex; align-items: center; gap: 10px; padding: 8px 0;
+    border-top: 1px solid var(--line); font-family: var(--font-mono);
+    font-size: 10px; color: var(--text); }
+  .dm-row:first-of-type { border-top: none; }
+  .dm-row .grow { flex: 1; min-width: 0; }
+  .dm-row .n { font-size: 11px; color: #fff; }
+  .dm-row .d { font-size: 8.5px; color: var(--text-dim); margin-top: 2px; letter-spacing: .06em; }
+  .dm-btn { font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em;
+    color: var(--text); border: 1px solid rgba(var(--cyan-rgb), var(--a30));
+    background: rgba(var(--cyan-rgb), var(--a14)); padding: 9px 13px; cursor: pointer;
+    transition: all .15s; }
+  .dm-btn:hover { background: rgba(var(--cyan-rgb), var(--a22)); }
+  .dm-btn.ghost { background: transparent; border-color: var(--line); }
+  .dm-chip { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .1em;
+    color: var(--text-dim); border: 1px solid var(--line); background: transparent;
+    padding: 6px 11px; cursor: pointer; }
+  .dm-chip.on { color: var(--text); border-color: var(--line-strong);
+    background: rgba(var(--cyan-rgb), var(--a10)); }
+  .dm-tag { font-family: var(--font-mono); font-size: 8px; letter-spacing: .12em;
+    padding: 2px 7px; border: 1px solid var(--line-strong); }
+  .dm-tag.atlas { color: var(--red); border-color: rgba(var(--red-rgb), var(--a45)); }
+  .dm-tag.world { color: var(--amber); border-color: rgba(var(--amber-rgb), var(--a45)); }
+  .dm-tag.market { color: var(--text); border-color: rgba(var(--cyan-rgb), var(--a45)); }
+  .dm-tag.system { color: var(--dead); }
+  .dm-empty { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .14em;
+    color: var(--text-dim); border: 1px dashed var(--line-strong); padding: 22px;
+    text-align: center; line-height: 1.8; }
+  .dm-alert { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line);
+    align-items: flex-start; }
+  .dm-alert:first-of-type { border-top: none; }
+  .dm-alert .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 4px; flex: 0 0 auto; }
+  .dm-alert .t { font-size: 11.5px; color: var(--text); line-height: 1.45; }
+  .dm-alert .m { font-family: var(--font-mono); font-size: 8px; color: var(--text-dim);
+    margin-top: 3px; letter-spacing: .06em; }
+  .dm-alert .acts { display: flex; gap: 6px; margin-left: auto; }
+  .dm-alert .acts button { background: transparent; border: 1px solid var(--line);
+    color: var(--text-dim); font-family: var(--font-mono); font-size: 8px;
+    padding: 4px 7px; cursor: pointer; }
+  .dm-alert .acts button:hover { color: var(--text); border-color: var(--line-strong); }
+  .dm-star { cursor: pointer; font-size: 15px; background: none; border: none;
+    color: var(--text-dim); padding: 2px 6px; }
+  .dm-star.on { color: var(--gold); }
+  .dm-progress { height: 5px; border-radius: 3px; background: rgba(var(--cyan-rgb), var(--a10));
+    overflow: hidden; }
+  .dm-progress i { display: block; height: 100%; background: var(--cyan); border-radius: 3px; }
+  .dm-set { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 9px 0; border-top: 1px solid var(--line); font-family: var(--font-mono);
+    font-size: 10px; color: var(--text); }
+  .dm-set:first-of-type { border-top: none; }
+  .dm-toggle { position: relative; width: 38px; height: 20px; border-radius: 10px;
+    border: 1px solid var(--line-strong); background: rgba(11,14,20,.8); cursor: pointer; }
+  .dm-toggle i { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--dead); transition: all .15s; }
+  .dm-toggle.on i { left: 20px; background: var(--cyan); }
+  .dm-toggle.on { border-color: rgba(var(--cyan-rgb), var(--a45)); }
+
+  #dmtabbar { position: fixed; left: 0; right: 0; bottom: 0; height: 54px; z-index: 70;
+    display: none; border-top: 1px solid var(--line-strong);
+    background: rgba(10,13,19,.94); backdrop-filter: blur(12px); }
+  .dmt-tab { flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 2px; font-family: var(--font-mono); font-size: 8px;
+    letter-spacing: .1em; color: var(--text-dim); text-decoration: none; }
+  .dmt-tab span { font-size: 15px; }
+  .dmt-tab.act { color: var(--text); }
+  .dmt-tab.act span { filter: drop-shadow(0 0 6px rgba(var(--cyan-rgb), var(--a60))); }
+  .dmt-tab.act .bar { width: 14px; height: 3px; background: var(--cyan); border-radius: 2px; }
+  .dmt-fab { position: fixed; right: 16px; bottom: 64px; z-index: 71; width: 42px; height: 42px;
+    border-radius: 21px; display: none; background: rgba(var(--cyan-rgb), var(--a16));
+    border: 1px solid rgba(var(--cyan-rgb), var(--a45)); color: var(--text); font-size: 17px;
+    align-items: center; justify-content: center; cursor: pointer;
+    box-shadow: 0 0 18px rgba(var(--cyan-rgb), var(--a22)); }
+
+  #dmpalette { position: fixed; inset: 0; z-index: 90; display: none;
+    align-items: flex-start; justify-content: center; padding-top: 16vh;
+    background: rgba(4,6,10,.66); backdrop-filter: blur(4px); }
+  #dmpalette.open { display: flex; }
+  .dmp-box { width: min(92vw, 540px); border: 1px solid var(--line-strong);
+    background: var(--surface); box-shadow: 0 0 80px rgba(var(--cyan-rgb), var(--a22)); }
+  .dmp-head { display: flex; align-items: center; gap: 10px; padding: 13px 15px;
+    border-bottom: 1px solid var(--line); }
+  .dmp-head input { flex: 1; background: transparent; border: none; outline: none;
+    color: #fff; font-family: var(--font-prose); font-size: 14px; }
+  .dmp-head input::placeholder { color: var(--text-dim); }
+  .dmp-k { font-family: var(--font-mono); font-size: 8px; color: var(--text-dim);
+    border: 1px solid var(--line-strong); padding: 3px 7px; }
+  .dmp-list { padding: 7px; max-height: 52vh; overflow-y: auto; }
+  .dmp-item { display: flex; align-items: center; gap: 11px; padding: 9px 11px;
+    font-size: 13px; color: var(--text); border: 1px solid transparent; cursor: pointer; }
+  .dmp-item .ic { width: 21px; height: 21px; border-radius: 5px;
+    background: rgba(var(--cyan-rgb), var(--a10)); border: 1px solid var(--line-strong);
+    display: flex; align-items: center; justify-content: center; font-size: 11px; }
+  .dmp-item .sc { font-family: var(--font-mono); font-size: 8px; color: var(--text-dim);
+    letter-spacing: .1em; }
+  .dmp-item:hover, .dmp-item.act { background: rgba(var(--cyan-rgb), var(--a10));
+    border-color: var(--line-strong); }
+
+  #dmtoast { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%) translateY(8px);
+    z-index: 95; font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em;
+    color: var(--text); border: 1px solid var(--line-strong); background: rgba(10,13,19,.95);
+    padding: 10px 16px; opacity: 0; pointer-events: none; transition: all .2s;
+    box-shadow: 0 0 24px rgba(var(--cyan-rgb), var(--a22)); }
+  #dmtoast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #dmresume { position: fixed; top: 0; left: 0; right: 0; z-index: 75; display: none; }
+  #dmresume.show { display: block; }
+  .dmresume-inner { display: flex; align-items: center; gap: 12px; margin: 10px 12px 0;
+    padding: 11px 14px; border: 1px solid rgba(var(--amber-rgb), var(--a45));
+    background: rgba(16,13,8,.94); backdrop-filter: blur(10px); }
+  .dmresume-inner .t { flex: 1; font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: .08em; color: var(--text); line-height: 1.5; }
+  .dmresume-inner .t b { color: var(--amber); font-weight: 400; }
+  .dmresume-inner button { font-family: var(--font-mono); font-size: 8.5px;
+    letter-spacing: .12em; color: var(--text); border: 1px solid var(--line-strong);
+    background: rgba(var(--amber-rgb), var(--a14)); padding: 7px 12px; cursor: pointer; }
+
+  /* full sidebar only at true desktop (>=1440, per the design tokens);
+     900-1439 uses the icon rail so the HUD's 3-column grid keeps room */
+  @media (min-width: 900px) and (max-width: 1439px) {
+    #dmside { width: 58px; padding: 14px 0; align-items: center; }
+    .dms-logo { font-size: 7px; letter-spacing: .08em; margin: 0 0 16px; text-align: center; }
+    .dms-item { justify-content: center; padding: 10px 0; font-size: 0; gap: 0; }
+    .dms-item .g { font-size: 14px; }
+    .dms-badge { position: absolute; margin-left: 24px; margin-top: -16px; }
+    .dms-foot { width: 100%; padding: 12px 8px 0; }
+    .dms-btn { text-align: center; font-size: 0; padding: 10px 0; }
+    #dmviews { margin-left: 58px; }
+    #app { margin-left: 58px; }
+  }
+  @media (max-width: 899px) {
+    #dmside { display: none; }
+    #dmtabbar { display: flex; }
+    .dmt-fab { display: flex; }
+    #dmviews { margin-left: 0; padding: 14px 14px 74px; }
+    #app { margin-left: 0 !important; padding-bottom: 54px; }
+    .dm-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -699,6 +931,16 @@
         </div>
         <div id="spotifybody"><div class="iv-empty">SPOTIFY STANDBY</div></div>
       </div>
+      <!-- v5.8 — Artifact renderer: live tables, equity curves, markdown
+           reports published by agents during a run, rendered beside the
+           chat (the biggest 'next level' gap vs Claude Cowork). -->
+      <div class="col-title">ARTIFACTS <span id="artbadge" class="jobcount"></span></div>
+      <div id="artifactpanel">
+        <div class="repo-bar">
+          <button id="artClearBtn" class="vtbtn" title="Clear the session artifact store">[CLEAR]</button>
+        </div>
+        <div id="artifactbody"><div class="iv-empty">NO ARTIFACTS YET — ASK A RESEARCH/CODING AGENT FOR A TABLE, CHART, OR REPORT</div></div>
+      </div>
       <div class="col-title">DELEGATED TASKS <span id="jobcount" class="jobcount"></span></div>
       <div id="jobs">
         <div class="iv-empty">NO NESTED AGENT RUNS // ORCHESTRATOR DIRECT</div>
@@ -823,7 +1065,8 @@
   function fline(tag, msg, cls) {
     const el = document.createElement('div');
     el.className = 'fline' + (cls ? ' ' + cls : '');
-    el.innerHTML = `<span class="ts">[${now()}]</span> <span class="tag ${tag === 'TOOL_RESULT' ? 'result' : tag === 'HOLD_AUTH' ? 'auth' : tag === 'ERROR' ? 'err' : ''}">[${tag}]</span> ${msg}`;
+    const tagCls = tag === 'TOOL_RESULT' ? 'result' : tag === 'HOLD_AUTH' ? 'auth' : tag === 'ERROR' ? 'err' : tag === 'FREEBUFF' ? 'fb' : '';
+    el.innerHTML = `<span class="ts">[${now()}]</span> <span class="tag ${tagCls}">[${tag}]</span> ${msg}`;
     feed.appendChild(el);
     feed.scrollTop = feed.scrollHeight;
     return el;
@@ -1103,6 +1346,40 @@
   }
   pollBackend();
   setInterval(pollBackend, 5000);
+
+  // ---------- v5.9: live Freebuff activity (server-push SSE) ----------
+  // The HUD keeps one long-lived GET /api/events connection. The server's
+  // Freebuff watcher broadcasts real thread activity (turn started/
+  // finished, thread created, status change) the moment it happens; watch
+  // status events show honestly when the app is offline. Auto-reconnects
+  // via EventSource's built-in retry.
+  (function wireFreebuffEvents() {
+    if (typeof EventSource === 'undefined') return;
+    const es = new EventSource('/api/events');
+    es.onmessage = (e) => {
+      let evt;
+      try { evt = JSON.parse(e.data); } catch (_) { return; }
+      if (evt.type === 'freebuff_activity') {
+        const a = evt.activity || {};
+        const title = (a.title || '(untitled)');
+        const proj = a.project ? ' <span class="fblabel">' + esc(a.project) + '</span>' : '';
+        const state = a.turnState === 'running' ? 'running' : a.status;
+        let label = title;
+        if (a.kind === 'turn_started') label = '◈ ' + title + ' — turn started [' + state + ']';
+        else if (a.kind === 'turn_finished') label = '◈ ' + title + ' — turn finished [' + state + ']';
+        else if (a.kind === 'thread_created') label = '◈ NEW THREAD — ' + title + ' [' + state + ']';
+        else if (a.kind === 'status_changed') label = '◈ ' + title + ' — status ' + state;
+        fline('FREEBUFF', `<span class="msg">${esc(label)}</span>${proj}`, null);
+      } else if (evt.type === 'freebuff_watch') {
+        if (evt.state === 'online') {
+          fline('FREEBUFF', '<span class="msg">Freebuff watch online — live thread activity streaming</span>', null);
+        } else {
+          fline('FREEBUFF', '<span class="msg">Freebuff watch offline — ' + esc(String(evt.detail || 'app unreachable')) + '</span>', 'fb-offline');
+        }
+      }
+    };
+    es.onerror = () => { /* EventSource retries automatically */ };
+  })();
 
   // ---------- quick directives ----------
   const quickEl = document.getElementById('quick');
@@ -1496,6 +1773,12 @@
               }
               if (!card.classList.contains('open')) card.classList.add('open');
             }
+            break;
+          }
+          case 'artifact': {
+            // v5.8: an agent published a structured artifact mid-run —
+            // render it in the ARTIFACTS panel immediately (no polling).
+            if (evt.artifact) { renderArtifacts([evt.artifact]); }
             break;
           }
           case 'plan_reminder': {
@@ -1963,6 +2246,709 @@
       } finally { rescanBtnEl.disabled = false; }
     });
   }
+
+  // ---- v5.8 ARTIFACT RENDERER // live tables, equity curves, markdown ----
+  // Agents publish structured artifacts (publish_artifact) mid-run; the
+  // chat SSE streams an 'artifact' event and this renders it beside the
+  // conversation. A poll covers reloads and pre-existing artifacts. All
+  // text is escaped (esc) and all structure is our own tags — no user HTML
+  // ever reaches innerHTML unescaped (same rule as md()).
+  const artifactBodyEl = document.getElementById('artifactbody');
+  const artifactBadgeEl = document.getElementById('artbadge');
+  const artClearBtn = document.getElementById('artClearBtn');
+
+  function artifactTime(secs) {
+    if (!secs) return '';
+    return new Date(secs * 1000).toTimeString().slice(0, 5);
+  }
+
+  // series -> inline SVG line chart (area fill + min/max + gridlines).
+  function renderArtifactSeries(content) {
+    const labels = (content && content.labels) || [];
+    const values = (content && content.values) || [];
+    if (!values.length) return '<div class="iv-empty">EMPTY SERIES</div>';
+    const W = 300, H = 110, P = { l: 6, r: 6, t: 8, b: 18 };
+    const lo = Math.min.apply(null, values), hi = Math.max.apply(null, values);
+    const span = (hi - lo) || 1;
+    const n = values.length;
+    const x = i => P.l + (i * (W - P.l - P.r)) / Math.max(1, n - 1);
+    const y = v => P.t + (1 - (v - lo) / span) * (H - P.t - P.b);
+    let line = '', area = `M ${x(0)} ${y(values[0])}`;
+    for (let i = 0; i < n; i++) {
+      line += (i ? ' L ' : '') + x(i).toFixed(1) + ' ' + y(values[i]).toFixed(1);
+    }
+    area += ' L ' + x(n - 1).toFixed(1) + ' ' + (H - P.b) + ' L ' + x(0).toFixed(1) + ' ' + (H - P.b) + ' Z';
+    const grid = [0, 1, 2, 3].map(g => {
+      const gy = P.t + (g / 3) * (H - P.t - P.b);
+      const gv = hi - (g / 3) * span;
+      return `<line x1="${P.l}" y1="${gy.toFixed(1)}" x2="${W - P.r}" y2="${gy.toFixed(1)}" stroke="rgba(var(--cyan-rgb), var(--a10))" stroke-width="0.6"/><text x="${P.l + 2}" y="${(gy - 2).toFixed(1)}" fill="rgba(var(--cyan-rgb), var(--a30))" font-size="6">${esc(String(gv.toFixed(2)))}</text>`;
+    }).join('');
+    const ticks = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i)
+      .map(i => `<text x="${x(i).toFixed(1)}" y="${H - 4}" fill="rgba(var(--cyan-rgb), var(--a30))" font-size="6" text-anchor="middle">${esc(String(labels[i] != null ? labels[i] : i))}</text>`).join('');
+    const last = values[n - 1];
+    const pct = span ? (((last - values[0]) / (Math.abs(values[0]) || 1)) * 100) : 0;
+    const up = last >= values[0];
+    return (
+      `<div class="art-chart-wrap">` +
+      `<svg class="art-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+      grid +
+      `<path d="${area}" fill="rgba(var(--cyan-rgb), var(--a16))"/>` +
+      `<path d="${line}" fill="none" stroke="rgba(var(--cyan-rgb), var(--a85))" stroke-width="1.4"/>` +
+      `<circle cx="${x(n - 1).toFixed(1)}" cy="${y(last).toFixed(1)}" r="2.4" fill="rgba(var(--cyan-rgb), var(--a85))"/>` +
+      ticks +
+      `</svg></div>` +
+      `<div class="art-stat"><span>START <b>${esc(String(values[0]))}</b></span>` +
+      `<span>END <b>${esc(String(last))}</b></span>` +
+      `<span>CHG <b style="color:${up ? 'var(--text)' : 'var(--red)'}">${up ? '+' : ''}${pct.toFixed(2)}%</b></span></div>`
+    );
+  }
+
+  function renderArtifactTable(content) {
+    const cols = (content && content.columns) || [];
+    const rows = (content && content.rows) || [];
+    if (!cols.length) return '<div class="iv-empty">EMPTY TABLE</div>';
+    const head = '<tr>' + cols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+    const body = rows.map(r => {
+      const cells = cols.map((_, ci) => `<td>${esc(r[ci] != null ? r[ci] : '')}</td>`).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+    return `<table class="art-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  }
+
+  function renderArtifactRecord(a) {
+    const kind = a.kind || 'markdown';
+    const bodyEl = kind === 'markdown'
+      ? `<div class="art-body markdown">${md(String(a.content || ''))}</div>`
+      : kind === 'table'
+        ? `<div class="art-body">${renderArtifactTable(a.content)}</div>`
+        : `<div class="art-body">${renderArtifactSeries(a.content)}</div>`;
+    return (
+      `<div class="artifact">` +
+      `<div class="art-head"><span class="art-kind">${esc(kind.toUpperCase())}</span>` +
+      `<span class="art-title">${esc(a.title || 'Untitled')}</span>` +
+      `<span class="art-time">${artifactTime(a.created)}</span></div>` +
+      bodyEl +
+      `</div>`
+    );
+  }
+
+  function renderArtifacts(items) {
+    if (!artifactBodyEl) return;
+    if (!items || !items.length) {
+      if (artifactBadgeEl) artifactBadgeEl.textContent = '';
+      artifactBodyEl.innerHTML = '<div class="iv-empty">NO ARTIFACTS YET — ASK A RESEARCH/CODING AGENT FOR A TABLE, CHART, OR REPORT</div>';
+      return;
+    }
+    if (artifactBadgeEl) artifactBadgeEl.textContent = items.length + ' RENDERED';
+    artifactBodyEl.innerHTML = items.map(renderArtifactRecord).join('');
+  }
+
+  async function pollArtifacts() {
+    try {
+      const r = await fetch('/api/artifacts');
+      const d = await r.json();
+      renderArtifacts(d.artifacts || []);
+    } catch (e) { /* transient — next poll retries */ }
+  }
+
+  if (artClearBtn) artClearBtn.addEventListener('click', async () => {
+    try { await fetch('/api/artifacts/clear', { method: 'POST' }); } catch (e) { /* noop */ }
+    pollArtifacts();
+  });
+  pollArtifacts();
+  setInterval(pollArtifacts, 5000);
+})();
+</script>
+
+<!-- ================= v5.14 Phase R0 — cross-device shell =================
+     One IA × three chromes. The HUD above is HOME; the workspaces below are
+     sibling views reached by deep links (#/atlas, #/world, #/portfolio,
+     #/alerts, #/settings, ...). The sidebar (desktop) / rail (tablet) /
+     bottom tabs (mobile) all drive the SAME eight destinations.
+     ===================================================================== -->
+<nav id="dmside" aria-label="DOURMOUSE navigation">
+  <div class="dms-logo">D.O.U.R.M.O.U.S.E.</div>
+  <a class="dms-item" data-route="/" href="#/"><span class="g">▤</span>HOME</a>
+  <a class="dms-item" data-route="/atlas" href="#/atlas"><span class="g">◈</span>ATLAS</a>
+  <a class="dms-item" data-route="/world" href="#/world"><span class="g">◎</span>WORLD MONITOR</a>
+  <a class="dms-item" data-route="/portfolio" href="#/portfolio"><span class="g">▣</span>PORTFOLIO</a>
+  <a class="dms-item" data-route="/markets" href="#/markets"><span class="g">▥</span>MARKETS</a>
+  <a class="dms-item" data-route="/intelligence" href="#/intelligence"><span class="g">✦</span>INTELLIGENCE</a>
+  <a class="dms-item" data-route="/alerts" href="#/alerts"><span class="g">◉</span>ALERTS<span class="dms-badge" id="dmsAlertBadge"></span></a>
+  <a class="dms-item" data-route="/settings" href="#/settings"><span class="g">⚙</span>SETTINGS</a>
+  <div class="dms-foot"><button class="dms-btn" id="dmsPaletteBtn">⌘K COMMAND</button></div>
+</nav>
+
+<div id="dmviews">
+  <!-- ATLAS -->
+  <section class="dmview" id="view-atlas">
+    <div class="dmv-head"><h2>ATLAS</h2><div class="dmv-sub">QUANT RESEARCH CORE · REAL TELEMETRY · #/atlas</div></div>
+    <div class="dm-grid">
+      <div class="dm-card"><div class="dm-k">ENGINE</div><div id="atlasStatus" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card"><div class="dm-k">FX BOOTSTRAP</div><div id="atlasBootstrap" class="dm-empty">LOADING…</div></div>
+    </div>
+    <div class="dm-grid">
+      <div class="dm-card"><div class="dm-k">LATEST REPORT</div><div id="atlasLatest" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card">
+        <div class="dm-k">MANAGED RUN <b id="atlasRunState">—</b></div>
+        <div id="atlasRun" class="dm-empty">LOADING…</div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="dm-btn" id="atlasRunFxDaily">RUN FX-DAILY</button>
+          <button class="dm-btn ghost" id="atlasRefreshBtn">REFRESH</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WORLD MONITOR -->
+  <section class="dmview" id="view-world">
+    <div class="dmv-head"><h2>WORLD MONITOR</h2><div class="dmv-sub">GLOBAL INTELLIGENCE BRIDGE · #/world</div></div>
+    <div class="dm-grid">
+      <div class="dm-card"><div class="dm-k">BRIDGE STATUS</div><div id="worldStatus" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card"><div class="dm-k">CONNECTIONS</div><div id="worldConnections" class="dm-empty">LOADING…</div></div>
+    </div>
+    <div class="dm-card"><div class="dm-k">MAP · EVENTS · FEED</div><div class="dm-empty">The map → events → intelligence experience lands in Phase R1. What is real today: the World Monitor bridge below reports its API status and which data tools are configured — never a fabricated feed (Rule 2.2).</div></div>
+  </section>
+
+  <!-- PORTFOLIO -->
+  <section class="dmview" id="view-portfolio">
+    <div class="dmv-head"><h2>PORTFOLIO</h2><div class="dmv-sub">WATCHLIST · SYNCED TO EVERY DEVICE · #/portfolio</div></div>
+    <div class="dm-grid">
+      <div class="dm-card"><div class="dm-k">WATCHLIST <b id="watchCount"></b></div><div id="watchList" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card"><div class="dm-k">ATLAS SUMMARY</div><div id="portfolioAtlas" class="dm-empty">LOADING…</div></div>
+    </div>
+    <div class="dm-card"><div class="dm-k">CROSS-DEVICE</div><div class="dm-empty">Star a symbol here, open the same URL on your phone → the star is there. One store, one server, every device reads it (spec §7).</div></div>
+  </section>
+
+  <!-- MARKETS / INTELLIGENCE — honest scaffolds, feeds land in Phase R1 -->
+  <section class="dmview" id="view-markets">
+    <div class="dmv-head"><h2>MARKETS</h2><div class="dmv-sub">#/markets</div></div>
+    <div class="dm-card"><div class="dm-empty">MARKET FEEDS LAND IN PHASE R1. Today the live quant verdicts live under <a href="#/atlas" style="color:var(--text)">ATLAS →</a></div></div>
+  </section>
+  <section class="dmview" id="view-intelligence">
+    <div class="dmv-head"><h2>INTELLIGENCE</h2><div class="dmv-sub">#/intelligence</div></div>
+    <div class="dm-card"><div class="dm-empty">THE INTELLIGENCE DIGEST LANDS IN PHASE R1. Today the global briefs live under <a href="#/world" style="color:var(--text)">WORLD MONITOR →</a></div></div>
+  </section>
+
+  <!-- ALERTS -->
+  <section class="dmview" id="view-alerts">
+    <div class="dmv-head"><h2>DOURMOUSE ALERTS</h2><div class="dmv-sub">ONE INBOX · FILTER · MUTE · PRIORITIZE · DISMISS · DEEP-LINK · #/alerts</div></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="alertFilters">
+      <button class="dm-chip on" data-f="all">ALL</button>
+      <button class="dm-chip" data-f="atlas">🔴 ATLAS</button>
+      <button class="dm-chip" data-f="world">🟡 WORLD</button>
+      <button class="dm-chip" data-f="market">🔵 MARKET</button>
+      <button class="dm-chip" data-f="system">⚪ SYSTEM</button>
+    </div>
+    <div class="dm-card"><div class="dm-k">INBOX <b id="alertCount"></b></div><div id="alertList" class="dm-empty">NO ACTIVE ALERTS</div></div>
+    <div class="dm-card" style="margin-top:12px"><div class="dm-k">MUTED SOURCES</div><div id="mutedRow" class="dm-empty">NONE</div></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="dmview" id="view-settings">
+    <div class="dmv-head"><h2>SETTINGS</h2><div class="dmv-sub">PREFS · CAPABILITIES · CONNECTIONS · DEVICES · #/settings</div></div>
+    <div class="dm-grid">
+      <div class="dm-card"><div class="dm-k">PREFERENCES</div>
+        <div class="dm-set"><span>COMPACT DENSITY</span><span class="dm-toggle" id="prefDensity"><i></i></span></div>
+        <div class="dm-set"><span>ALERTS AUTO-EXPAND</span><span class="dm-toggle" id="prefAlerts"><i></i></span></div>
+      </div>
+      <div class="dm-card"><div class="dm-k">DATA SCOPE</div><div id="settingsScope" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card"><div class="dm-k">DEVICES</div><div class="dm-empty">Device sessions (pair → revoke → biometrics) ship in Phase R4. Every device reads this one store — pair a phone with <b>python -m dourmouse.mobile_link</b>, open /mobile, and the watchlist / alerts / prefs follow YOUR Google account; signed-out devices share the shared bucket.</div></div>
+    </div>
+    <div class="dm-grid">
+      <div class="dm-card"><div class="dm-k">CAPABILITY CHECKLIST</div><div id="settingsSetup" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card"><div class="dm-k">CONNECTIONS</div><div id="settingsConnections" class="dm-empty">LOADING…</div></div>
+    </div>
+  </section>
+
+  <!-- MORE (mobile overflow — same eight destinations) -->
+  <section class="dmview" id="view-more">
+    <div class="dmv-head"><h2>MORE</h2><div class="dmv-sub">EVERY DESTINATION · SAME IA AS THE SIDEBAR · #/more</div></div>
+    <div class="dm-card" id="moreList"></div>
+  </section>
+</div>
+
+<!-- resume banner (mobile, optional, never annoying — spec §8) -->
+<div id="dmresume"></div>
+
+<!-- mobile bottom tab bar + command button -->
+<nav id="dmtabbar" aria-label="Mobile navigation">
+  <a class="dmt-tab" data-route="/" href="#/"><span>▤</span>HOME<span class="bar"></span></a>
+  <a class="dmt-tab" data-route="/atlas" href="#/atlas"><span>◈</span>ATLAS<span class="bar"></span></a>
+  <a class="dmt-tab" data-route="/world" href="#/world"><span>◎</span>WORLD<span class="bar"></span></a>
+  <a class="dmt-tab" data-route="/portfolio" href="#/portfolio"><span>▣</span>PORTFOLIO<span class="bar"></span></a>
+  <a class="dmt-tab" data-route="/more" href="#/more"><span>☰</span>MORE<span class="bar"></span></a>
+</nav>
+<button class="dmt-fab" id="dmtFab" title="Command palette">⚡</button>
+
+<!-- command palette (⌘K desktop · ⚡ mobile) -->
+<div id="dmpalette" role="dialog" aria-label="Command palette">
+  <div class="dmp-box">
+    <div class="dmp-head"><span class="dmp-k">⌘K</span><input id="dmpInput" placeholder="Type a command — e.g. open atlas" autocomplete="off" spellcheck="false"><span class="dmp-k">ESC</span></div>
+    <div class="dmp-list" id="dmpList"></div>
+  </div>
+</div>
+<div id="dmtoast"></div>
+
+<script>
+/* ================= v5.14 Phase R0 — cross-device shell JS =================
+   Router, three chromes, command palette, state client, SSE fan-out. Self-
+   contained IIFE — does not touch the HUD IIFE above. All data is REAL
+   (fetch /api/state, /api/palette, /api/atlas, /api/connections, /api/setup)
+   — never fabricated (Rule 2.2). */
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const GLYPH = { home:'▤', atlas:'◈', world:'◎', portfolio:'▣', markets:'▥', intelligence:'✦', alerts:'◉', settings:'⚙' };
+
+  // ---- device identity (local, per browser — drives the resume banner) --
+  let DEVICE = localStorage.getItem('dm_device');
+  if (!DEVICE) {
+    DEVICE = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('dev-' + Math.random().toString(36).slice(2));
+    localStorage.setItem('dm_device', DEVICE);
+  }
+
+  // ---- routing: deep links map onto the same eight destinations ---------
+  const ROUTES = { '':'home','/':'home','/home':'home','/atlas':'atlas','/atlas/portfolio':'atlas',
+    '/atlas/research':'atlas','/atlas/risk':'atlas','/world':'world','/world/events':'world',
+    '/portfolio':'portfolio','/markets':'markets','/intelligence':'intelligence',
+    '/alerts':'alerts','/settings':'settings','/more':'more' };
+  const VIEWS = ['atlas','world','portfolio','markets','intelligence','alerts','settings','more'];
+  const isMobile = () => window.innerWidth < 900;
+
+  let state = { watchlist: [], alerts: [], muted: [], prefs: {}, recent: [], workspaces: [] };
+  let palette = null;
+  let alertFilter = 'all';
+  let currentRoute = 'home';
+
+  function toast(msg, ms) {
+    const t = $('dmtoast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('show'), ms || 2600);
+  }
+
+  function hashRoute() {
+    const h = (location.hash || '').replace(/^#/, '') || '/';
+    if (ROUTES[h] !== undefined) return ROUTES[h];
+    if (h.startsWith('/atlas')) return 'atlas';
+    if (h.startsWith('/world')) return 'world';
+    return 'home';
+  }
+
+  function persistWorkspace(ws) {
+    if (!navigator.onLine) return;
+    fetch('/api/state/workspace', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ device: DEVICE, workspace: ws }) }).catch(() => {});
+  }
+
+  function route() {
+    const key = hashRoute();
+    currentRoute = key;
+    document.body.classList.toggle('dm-view', key !== 'home');
+    VIEWS.forEach(v => { const el = $('view-' + v); if (el) el.style.display = (v === key) ? 'block' : 'none'; });
+    document.title = 'DOURMOUSE // ' + key.toUpperCase();
+    document.querySelectorAll('.dms-item, .dmt-tab').forEach(a => {
+      const r = a.dataset.route || '';
+      a.classList.toggle('act', (key === 'home' && r === '/') || ('/' + key) === r);
+    });
+    if (key !== 'home') persistWorkspace('/' + key);
+    renderResume();
+  }
+
+  // ---- state client -----------------------------------------------------
+  // v5.17: /api/state is scoped to THIS session — a signed-in Google user
+  // sees only their own watchlist / alerts / prefs / resume (plus shared
+  // system alerts); signed-out clients see the shared bucket. The session
+  // cookie rides along on the same-origin fetch automatically.
+  async function fetchState() {
+    try {
+      const r = await fetch('/api/state');
+      if (!r.ok) return;
+      state = await r.json();
+      renderBadges(); renderAlerts(); renderWatchlist(); renderMuted(); renderPrefs(); renderScope(); renderResume();
+    } catch (e) { /* server restarting — next tick retries */ }
+  }
+
+  function renderScope() {
+    const el = $('settingsScope');
+    if (!el) return;
+    el.className = '';
+    el.innerHTML = state.me
+      ? `SIGNED IN AS <b>${esc(state.me)}</b> — watchlist, alerts, prefs and resume are YOURS alone. Another Google account on this server sees its own data; shared/system alerts appear for everyone.`
+      : `SHARED SCOPE — nobody is signed in, so every device shares one watchlist / alerts / prefs. <a href="/login" style="color:var(--amber)">SIGN IN WITH GOOGLE</a> to get your own.`;
+  }
+
+  function renderBadges() {
+    const n = (state.alerts || []).length;
+    const b = $('dmsAlertBadge');
+    if (b) { b.textContent = n > 0 ? n : ''; b.classList.toggle('show', n > 0); }
+  }
+
+  const KIND_COLOR = { atlas: 'var(--red)', world: 'var(--amber)', market: 'var(--cyan)', system: 'var(--dead)' };
+
+  function renderAlerts() {
+    const list = $('alertList'), count = $('alertCount');
+    if (!list) return;
+    const items = (state.alerts || []).filter(a => alertFilter === 'all' || a.kind === alertFilter);
+    if (count) count.textContent = items.length ? items.length + ' ACTIVE' : '';
+    if (!items.length) { list.className = 'dm-empty'; list.innerHTML = 'NO ACTIVE ALERTS'; return; }
+    list.className = '';
+    list.innerHTML = items.map(a =>
+      `<div class="dm-alert"><span class="dot" style="background:${KIND_COLOR[a.kind]||'var(--dead)'}"></span>` +
+      `<div class="grow"><div class="t">${esc(a.title)}</div>` +
+      `<div class="m">${esc(a.kind.toUpperCase())} · SEV ${esc(a.severity.toUpperCase())} · ${esc(a.created)}` +
+      (a.link ? ` · <a href="${esc(a.link)}" style="color:var(--text)">open →</a>` : '') + `</div></div>` +
+      `<div class="acts"><button data-act="priority" data-id="${a.id}" title="Prioritize">▲</button>` +
+      `<button data-act="dismiss" data-id="${a.id}" title="Dismiss">✕</button></div></div>`
+    ).join('');
+  }
+
+  function renderMuted() {
+    const row = $('mutedRow');
+    if (!row) return;
+    const muted = state.muted || [];
+    if (!muted.length) { row.className = 'dm-empty'; row.innerHTML = 'NONE — ALL SOURCES ACTIVE'; return; }
+    row.className = '';
+    row.innerHTML = muted.map(k =>
+      `<span class="dm-row" style="border:none;padding:4px 0"><span class="dm-tag ${esc(k)}">${esc(k.toUpperCase())}</span>` +
+      `<button class="dm-btn ghost" style="padding:5px 9px" data-act="unmute" data-kind="${esc(k)}">UNMUTE</button></span>`
+    ).join('');
+  }
+
+  function renderWatchlist() {
+    const list = $('watchList'), count = $('watchCount');
+    if (!list) return;
+    const items = state.watchlist || [];
+    if (count) count.textContent = items.length ? items.length + ' STARRED' : '';
+    const have = new Set(items.map(w => w.symbol));
+    const suggestions = ['NVDA', 'EURUSD', 'GBPUSD', 'SPY', 'TSLA'].filter(s => !have.has(s));
+    const rows = items.map(w =>
+      `<div class="dm-row"><button class="dm-star on" data-sym="${esc(w.symbol)}" title="Unstar">★</button>` +
+      `<div class="grow"><div class="n">${esc(w.symbol)}${w.name ? ' — ' + esc(w.name) : ''}</div>` +
+      `<div class="d">via ${esc(w.source)} · ${esc(w.created)}</div></div></div>`
+    ).join('') +
+    (suggestions.length ? suggestions.map(s =>
+      `<div class="dm-row"><button class="dm-star" data-sym="${s}" title="Star ${s}">☆</button>` +
+      `<div class="grow"><div class="n">${s}</div><div class="d">suggested — star to watch</div></div></div>`
+    ).join('') : '');
+    if (!items.length && !suggestions.length) { list.className = 'dm-empty'; list.innerHTML = 'NOTHING WATCHED — STAR A SYMBOL BELOW'; return; }
+    list.className = '';
+    list.innerHTML = rows;
+  }
+
+  function renderPrefs() {
+    const density = $('prefDensity'), alertsPref = $('prefAlerts');
+    if (density) density.classList.toggle('on', (state.prefs || {}).density === 'compact');
+    if (alertsPref) alertsPref.classList.toggle('on', (state.prefs || {}).alerts_expand === true);
+  }
+
+  function renderResume() {
+    const box = $('dmresume');
+    if (!box) return;
+    const show = isMobile() && currentRoute === 'home';
+    if (!show) { box.classList.remove('show'); box.innerHTML = ''; return; }
+    const suppressed = localStorage.getItem('dm_resume_suppress');
+    if (suppressed && Date.now() - Number(suppressed) < 86400000) { box.classList.remove('show'); box.innerHTML = ''; return; }
+    const other = (state.workspaces || []).filter(w => w.device !== DEVICE);
+    if (!other.length) { box.classList.remove('show'); box.innerHTML = ''; return; }
+    const last = other[0];
+    box.classList.add('show');
+    box.innerHTML = `<div class="dmresume-inner"><div class="t">CONTINUE WHERE YOU LEFT OFF — <b>${esc(last.device)}</b> was at <b>${esc(last.workspace)}</b></div>` +
+      `<button id="dmResumeGo">CONTINUE</button><button id="dmResumeNo">DISMISS</button></div>`;
+    const go = $('dmResumeGo'), no = $('dmResumeNo');
+    if (go) go.addEventListener('click', () => { location.hash = last.workspace.startsWith('#') ? last.workspace.slice(1) : last.workspace; });
+    if (no) no.addEventListener('click', () => { localStorage.setItem('dm_resume_suppress', String(Date.now())); box.classList.remove('show'); box.innerHTML = ''; });
+  }
+
+  // ---- actions ----------------------------------------------------------
+  async function postJSON(url, body) {
+    const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    return r.json().catch(() => ({}));
+  }
+
+  async function toggleWatch(symbol, on) {
+    const res = await postJSON('/api/state/watchlist', { action: on ? 'add' : 'remove', symbol });
+    if (res.ok) { toast(on ? '★ ' + symbol + ' starred — synced to every device' : '☆ ' + symbol + ' removed'); fetchState(); }
+    else if (res.error) toast('✕ ' + res.error);
+  }
+
+  function wireActions() {
+    document.addEventListener('click', async (ev) => {
+      const star = ev.target.closest('.dm-star');
+      if (star) { const on = star.classList.contains('on'); toggleWatch(star.dataset.sym, !on); return; }
+      const act = ev.target.closest('[data-act]');
+      if (!act) return;
+      const action = act.dataset.act, id = act.dataset.id, kind = act.dataset.kind;
+      if (action === 'dismiss') { await postJSON('/api/state/alerts', { action: 'dismiss', id: Number(id) }); fetchState(); }
+      else if (action === 'priority') { await postJSON('/api/state/alerts', { action: 'priority', id: Number(id), priority: 1 }); fetchState(); }
+      else if (action === 'unmute') { await postJSON('/api/state/alerts', { action: 'unmute', kind }); toast('🔔 ' + kind.toUpperCase() + ' unmuted'); fetchState(); }
+    });
+    const filters = $('alertFilters');
+    if (filters) filters.addEventListener('click', (ev) => {
+      const chip = ev.target.closest('.dm-chip'); if (!chip) return;
+      filters.querySelectorAll('.dm-chip').forEach(c => c.classList.remove('on'));
+      chip.classList.add('on'); alertFilter = chip.dataset.f; renderAlerts();
+    });
+    const runBtn = $('atlasRunFxDaily');
+    if (runBtn) runBtn.addEventListener('click', async () => {
+      runBtn.disabled = true; runBtn.textContent = 'STARTING…';
+      const res = await postJSON('/api/atlas/run', { command: 'fx-daily' });
+      runBtn.disabled = false; runBtn.textContent = 'RUN FX-DAILY';
+      if (res.ok) toast('fx-daily started — a SYSTEM alert was created');
+      else toast('✕ ' + (res.error || 'could not start'));
+      renderAtlas(); fetchState();
+    });
+    const refreshBtn = $('atlasRefreshBtn');
+    if (refreshBtn) refreshBtn.addEventListener('click', () => renderAtlas());
+    const density = $('prefDensity');
+    if (density) density.addEventListener('click', async () => {
+      const on = !density.classList.contains('on');
+      await postJSON('/api/state/prefs', { key: 'density', value: on ? 'compact' : 'normal' });
+      density.classList.toggle('on', on);
+      toast(on ? 'compact density on (this device layout adapts)' : 'density normal');
+      fetchState();
+    });
+    const alertsPref = $('prefAlerts');
+    if (alertsPref) alertsPref.addEventListener('click', async () => {
+      const on = !alertsPref.classList.contains('on');
+      await postJSON('/api/state/prefs', { key: 'alerts_expand', value: on });
+      alertsPref.classList.toggle('on', on);
+      fetchState();
+    });
+  }
+
+  // ---- ATLAS view -------------------------------------------------------
+  async function renderAtlas() {
+    const statusEl = $('atlasStatus'), bootEl = $('atlasBootstrap'),
+          latestEl = $('atlasLatest'), runEl = $('atlasRun'), runState = $('atlasRunState'),
+          portEl = $('portfolioAtlas');
+    try {
+      const r = await fetch('/api/atlas');
+      const d = await r.json();
+      if (!d.configured) {
+        const msg = 'ATLAS NOT CONFIGURED — ' + esc(d.error || '');
+        if (statusEl) statusEl.className = 'dm-empty'; statusEl && (statusEl.innerHTML = msg);
+        if (portEl) { portEl.className = 'dm-empty'; portEl.innerHTML = msg; }
+        return;
+      }
+      const st = d.status || {};
+      if (statusEl) { statusEl.className = '';
+        statusEl.innerHTML =
+          `<div class="dm-row"><div class="grow"><div class="n">REPO</div><div class="d">${esc(d.repo || '')}</div></div></div>` +
+          `<div class="dm-row"><div class="grow"><div class="n">VERSION</div><div class="d">${esc(d.version || '')}</div></div></div>` +
+          `<div class="dm-row"><div class="grow"><div class="n">BRANCH</div><div class="d">${esc(st.branch || '—')} · last: ${esc(st.last_commit || '—')}</div></div></div>` +
+          `<div class="dm-row"><div class="grow"><div class="n">FILES</div><div class="d">${esc(String(st.source_files ?? '—'))} src · ${esc(String(st.test_files ?? '—'))} tests · ${esc(String(st.dirty_files ?? '—'))} dirty</div></div></div>`;
+      }
+      const bs = d.bootstrap || {};
+      if (bootEl) { bootEl.className = '';
+        const days = bs.total_pair_days;
+        bootEl.innerHTML =
+          `<div class="dm-row"><div class="grow"><div class="n">FX ARCHIVE DEPTH</div><div class="d">${esc(String(days ?? '—'))} pair-days total ${bs.done_marker ? '· DONE ✓' : ''}</div></div></div>` +
+          (days ? `<div class="dm-progress" style="margin:4px 0"><i style="width:${Math.min(100, Math.round(100 * days / 7000))}%"></i></div>` : '') +
+          `<div class="dm-row"><div class="grow"><div class="n">PER PAIR</div><div class="d">${esc(JSON.stringify(bs.pair_days || {}))}</div></div></div>`;
+      }
+      const rep = d.latest_report;
+      if (latestEl) { latestEl.className = '';
+        latestEl.innerHTML = rep && rep.date
+          ? `<div class="dm-row"><div class="grow"><div class="n">FX DAILY · ${esc(rep.date)}</div><div class="d">${esc((rep.summary || rep.headline || '').slice(0, 220)) || 'report written'}</div></div></div>`
+          : `<div class="dm-empty" style="border:none;padding:8px">NO REPORT YET — RUN FX-DAILY</div>`;
+      }
+      const run = d.last_run || {};
+      if (runEl) { runEl.className = '';
+        runEl.innerHTML = Object.keys(run).length
+          ? `<div class="dm-row"><div class="grow"><div class="n">${esc(run.command || 'last run')}</div><div class="d">${esc(JSON.stringify(run).slice(0, 160))}</div></div></div>`
+          : `<div class="dm-empty" style="border:none;padding:8px">NO MANAGED RUN THIS SESSION</div>`;
+      }
+      if (runState) runState.textContent = run.running ? 'RUNNING' : '';
+      if (portEl) { portEl.className = '';
+        portEl.innerHTML =
+          `<div class="dm-row"><div class="grow"><div class="n">${esc(st.branch || 'ATLAS')} · ${esc(st.last_commit || '')}</div><div class="d">${esc(String(d.version || ''))}</div></div></div>`;
+      }
+    } catch (e) {
+      if (statusEl) { statusEl.className = 'dm-empty'; statusEl.innerHTML = 'ATLAS UNREACHABLE — RETRY'; }
+    }
+  }
+
+  // ---- World + Settings renderers ---------------------------------------
+  async function renderWorld() {
+    const statusEl = $('worldStatus'), connEl = $('worldConnections');
+    try {
+      const r = await fetch('/api/connections');
+      const d = await r.json();
+      const wm = d.worldmonitor || {};
+      if (statusEl) { statusEl.className = '';
+        statusEl.innerHTML =
+          `<div class="dm-row"><div class="grow"><div class="n">WORLD MONITOR BRIDGE ${wm.ok ? '— LIVE' : '— NOT CONFIGURED'}</div><div class="d">${esc(wm.detail || '')}</div></div></div>` +
+          `<div class="dm-row"><div class="grow"><div class="n">FIX-IT</div><div class="d">${esc(wm.hint || '')}</div></div></div>`;
+      }
+      if (connEl) { connEl.className = '';
+        const rows = Object.entries(d).map(([name, v]) =>
+          `<div class="dm-row"><div class="grow"><div class="n">${esc(name.toUpperCase())} ${v && v.ok ? '✓' : '—'}</div><div class="d">${esc((v && (v.detail || v.hint)) || '')}</div></div></div>`
+        ).join('');
+        connEl.innerHTML = rows || '<div class="dm-empty" style="border:none;padding:8px">NO CONNECTIONS REPORTED</div>';
+      }
+    } catch (e) {
+      if (statusEl) { statusEl.className = 'dm-empty'; statusEl.innerHTML = 'CONNECTIONS UNREACHABLE'; }
+    }
+  }
+
+  async function renderSettings() {
+    const setupEl = $('settingsSetup'), connEl = $('settingsConnections');
+    try {
+      const r = await fetch('/api/setup');
+      const d = await r.json();
+      if (setupEl) { setupEl.className = '';
+        const items = Object.entries(d.items || {});
+        setupEl.innerHTML = items.map(([name, v]) =>
+          `<div class="dm-row"><span class="dm-tag ${v && v.configured ? 'market' : 'system'}">${v && v.configured ? 'OK' : 'OFF'}</span>` +
+          `<div class="grow"><div class="n">${esc(name.toUpperCase())}</div><div class="d">${esc((v && (v.detail || v.hint)) || '')}</div></div></div>`
+        ).join('');
+      }
+    } catch (e) { /* quiet */ }
+    try {
+      const r = await fetch('/api/connections');
+      const d = await r.json();
+      if (connEl) { connEl.className = '';
+        connEl.innerHTML = Object.entries(d).map(([name, v]) =>
+          `<div class="dm-row"><div class="grow"><div class="n">${esc(name.toUpperCase())} ${v && v.ok ? '✓' : '—'}</div><div class="d">${esc((v && v.detail) || '')}</div></div></div>`
+        ).join('');
+      }
+    } catch (e) { /* quiet */ }
+  }
+
+  // ---- More view (mobile overflow — same eight destinations) ------------
+  function renderMore() {
+    const list = $('moreList');
+    if (!list) return;
+    list.innerHTML = ['markets', 'intelligence', 'alerts', 'settings'].map(v =>
+      `<a class="dm-row" href="#/${v}" style="text-decoration:none"><span class="g" style="font-size:14px">${GLYPH[v]}</span>` +
+      `<div class="grow"><div class="n">${v.toUpperCase()}</div><div class="d">open ${v}</div></div><span style="color:var(--text-dim)">→</span></a>`
+    ).join('') +
+    `<button class="dm-btn" style="width:100%;margin-top:12px" id="morePaletteBtn">⚡ COMMAND CENTRE</button>`;
+    const pb = $('morePaletteBtn');
+    if (pb) pb.addEventListener('click', openPalette);
+  }
+
+  // ---- command palette (⌘K / ⚡) -----------------------------------------
+  async function loadPalette() {
+    try {
+      const r = await fetch('/api/palette');
+      const d = await r.json();
+      palette = [
+        ...(d.destinations || []).map(x => ({ label: x.label, sub: x.href, href: x.href, ic: GLYPH[x.id] || '▸' })),
+        ...(d.agents || []).map(x => ({ label: x.label, sub: 'agent window', href: x.href, ic: '◈' })),
+        ...(d.commands || []).map(x => ({ label: x.label, sub: 'command', action: x.action, ic: '⚡' })),
+      ];
+    } catch (e) { palette = []; }
+  }
+
+  function openPalette() {
+    const pal = $('dmpalette');
+    if (!pal) return;
+    pal.classList.add('open');
+    const input = $('dmpInput');
+    input.value = ''; renderPalette('');
+    setTimeout(() => input.focus(), 30);
+  }
+  function closePalette() { const pal = $('dmpalette'); if (pal) pal.classList.remove('open'); }
+
+  function renderPalette(q) {
+    const list = $('dmpList');
+    if (!list) return;
+    const t = (q || '').toLowerCase();
+    // Carry the ORIGINAL palette index through the filter: data-i must index
+    // the unfiltered array so click/Enter select the right command.
+    const indexed = (palette || []).map((p, i) => ({ p, i }))
+      .filter(({ p }) => !t || (p.label + ' ' + p.sub).toLowerCase().includes(t));
+    if (!indexed.length) { list.innerHTML = '<div class="dm-empty" style="border:none">NO MATCH</div>'; return; }
+    list.innerHTML = indexed.map(({ p, i }, k) =>
+      `<div class="dmp-item${k === 0 ? ' act' : ''}" data-i="${i}"><span class="ic">${p.ic}</span>` +
+      `<div>${esc(p.label)}<div class="sc">${esc(p.sub || '')}</div></div></div>`
+    ).join('');
+  }
+
+  async function execPalette(item) {
+    if (item.href) {
+      closePalette();
+      if (item.href.startsWith('#')) { location.hash = item.href.slice(1); }
+      else { window.location.href = item.href; }
+      return;
+    }
+    if (item.action === 'run-fx-daily') {
+      closePalette();
+      const res = await postJSON('/api/atlas/run', { command: 'fx-daily' });
+      toast(res.ok ? 'fx-daily started — alert created' : '✕ ' + (res.error || 'failed'));
+      renderAtlas(); fetchState();
+    }
+    if (item.action === 'run-fx-refresh') {
+      closePalette();
+      const res = await postJSON('/api/atlas/run', { command: 'fx-refresh' });
+      toast(res.ok ? 'fx-refresh started' : '✕ ' + (res.error || 'failed'));
+      fetchState();
+    }
+  }
+
+  function wirePalette() {
+    const pal = $('dmpalette'), input = $('dmpInput');
+    window.addEventListener('keydown', (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 'k') {
+        ev.preventDefault();
+        pal.classList.contains('open') ? closePalette() : openPalette();
+      }
+      if (ev.key === 'Escape' && pal.classList.contains('open')) closePalette();
+    });
+    if (input) input.addEventListener('input', () => renderPalette(input.value));
+    if (pal) pal.addEventListener('click', (ev) => {
+      if (ev.target === pal) closePalette();
+      const itemEl = ev.target.closest('.dmp-item');
+      if (itemEl && palette) execPalette(palette[Number(itemEl.dataset.i)]);
+    });
+    if (input) input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        const first = pal.querySelector('.dmp-item.act');
+        const idx = first ? Number(first.dataset.i) : 0;
+        if (palette && palette[idx]) execPalette(palette[idx]);
+      }
+    });
+    const sb = $('dmsPaletteBtn');
+    if (sb) sb.addEventListener('click', openPalette);
+    const fab = $('dmtFab');
+    if (fab) fab.addEventListener('click', openPalette);
+  }
+
+  // ---- SSE fan-out: a state_change on ANY device refreshes this one -----
+  function wireSSE() {
+    try {
+      const es = new EventSource('/api/events');
+      es.onmessage = (ev) => {
+        try {
+          const d = JSON.parse(ev.data);
+          if (d && d.type === 'state_change') {
+            // v5.17 per-user: ignore events acted by ANOTHER signed-in user
+            // (their metadata must not reach this client; the refetch is
+            // scoped by this session's cookie anyway). Shared/system events
+            // (owner '*') always apply, as do events while signed out.
+            if (d.owner && d.owner !== '*' && state.me && d.owner !== state.me) return;
+            // The acting device already toasted via its own POST response;
+            // here we only refresh so EVERY device (including this one) has
+            // the latest snapshot.
+            fetchState();
+          }
+        } catch (e) { /* ignore malformed */ }
+      };
+      es.onerror = () => { /* EventSource auto-reconnects */ };
+    } catch (e) { /* SSE unsupported — polling fallback below still runs */ }
+    setInterval(fetchState, 15000); // honest fallback + freshness
+  }
+
+  // ---- boot --------------------------------------------------------------
+  window.addEventListener('hashchange', route);
+  window.addEventListener('resize', () => { renderResume(); });
+  wireActions(); wirePalette(); renderMore();
+  loadPalette();
+  route();
+  fetchState(); renderAtlas(); renderWorld(); renderSettings();
+  wireSSE();
 })();
 </script>
 </body>

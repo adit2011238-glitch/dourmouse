@@ -194,14 +194,64 @@ def market_movers(direction: str = "gainers", count: int = 10) -> list[dict[str,
 # Mail — read-only IMAP, env-gated (never sends)
 # --------------------------------------------------------------------------- #
 
-def read_inbox(max_items: int = 10) -> list[dict[str, str]]:
-    """Read the most recent N messages from IMAP INBOX (read-only).
-
-    Activated only when DOURMOUSE_IMAP_HOST / DOURMOUSE_IMAP_USER /
-    DOURMOUSE_IMAP_PASS are set. Otherwise raises RuntimeError with a clear
-    NOT CONFIGURED message. Returns {from_, subject, date, snippet} per
-    message. Never sends or deletes anything (Rule 2.9: read-only).
+def _read_inbox_oauth(token: str, max_items: int) -> list[dict[str, str]]:
+    """Read recent messages as {from_, subject, date, snippet} via the Gmail
+    API for the SIGNED-IN user's own mailbox (v5.16). One request per
+    message with format=full (headers + snippet); never the shared inbox.
     """
+    import urllib.parse
+
+    from dourmouse.google_services import _GMAIL_API, _http_json
+
+    params = urllib.parse.urlencode(
+        {"maxResults": max(1, min(int(max_items), 50))}
+    )
+    listing = _http_json("GET", f"{_GMAIL_API}/messages?{params}", token)
+    rows: list[dict[str, str]] = []
+    for item in (listing.get("messages") or [])[:50]:
+        mid = str(item.get("id") or "")
+        meta = _http_json(
+            "GET",
+            f"{_GMAIL_API}/messages/{urllib.parse.quote(mid)}?format=full",
+            token,
+        )
+        headers = {}
+        for h in meta.get("payload", {}).get("headers", []):
+            headers[str(h.get("name", "")).lower()] = str(h.get("value", ""))
+        rows.append(
+            {
+                "from_": headers.get("from", "")[:120],
+                "subject": headers.get("subject", "")[:160],
+                "date": headers.get("date", "")[:40],
+                "snippet": str(meta.get("snippet") or "")[:200],
+            }
+        )
+    return rows
+
+
+def read_inbox(max_items: int = 10) -> list[dict[str, str]]:
+    """Read the most recent N messages from the INBOX (read-only).
+
+    v5.16 per-user: a LOGGED-IN Google user reads THEIR own mailbox via the
+    Gmail API (OAuth). The IMAP path (owner App-Password / DOURMOUSE_IMAP_*)
+    applies ONLY when no user is signed in — a signed-in user whose token is
+    missing/expired gets an honest re-sign-in error instead of the server
+    owner's shared inbox (reviewer-caught cross-account leak).
+
+    Returns {from_, subject, date, snippet} per message. Never sends or
+    deletes anything (Rule 2.9: read-only).
+    """
+    from dourmouse.google_services import (
+        _oauth_access_token,
+        _oauth_user_needs_reauth,
+    )
+
+    token = _oauth_access_token()
+    if token:
+        return _read_inbox_oauth(token, max_items)
+    reauth = _oauth_user_needs_reauth("INBOX")
+    if reauth:
+        raise RuntimeError(reauth)
     import email as email_mod
     import imaplib
     import os

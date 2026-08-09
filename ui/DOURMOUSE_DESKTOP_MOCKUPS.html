@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE DESKTOP — DESIGN PORTFOLIO</title>
+<style>
+:root{
+  --bg:#07090d; --bg2:#0b0f16; --panel:#0e141d; --panel2:#111927;
+  --line:#1c2634; --line2:#2a3a52;
+  --text:#d7e3f0; --dim:#7e8ea3; --faint:#4a5a70;
+  --cyan:#4FC3F7; --amber:#ffc46b; --red:#ff6b6b; --gold:#e8c46a; --dead:#5b6b7e;
+  --green:#6fe3a1; --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px;line-height:1.45;padding:0 0 80px}
+a{color:var(--cyan);text-decoration:none}
+.wrap{max-width:1180px;margin:0 auto;padding:0 22px}
+/* header */
+header{position:sticky;top:0;z-index:50;background:rgba(7,9,13,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.htop{display:flex;align-items:center;gap:14px;padding:12px 0}
+.logo{color:var(--cyan);letter-spacing:.14em;font-size:13px}
+.logo b{color:var(--text);font-weight:400}
+.htop .tag{margin-left:auto;color:var(--amber);font-size:10px;letter-spacing:.12em}
+nav{display:flex;gap:2px;flex-wrap:wrap;padding-bottom:10px}
+nav button{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--dim);background:transparent;border:1px solid transparent;padding:5px 10px;cursor:pointer;border-radius:4px}
+nav button:hover{color:var(--text);border-color:var(--line)}
+nav button.on{color:var(--cyan);border-color:var(--line2);background:var(--panel)}
+/* sections */
+section{display:none;padding-top:26px}
+section.on{display:block}
+h1{font-size:20px;font-weight:400;letter-spacing:.06em;margin:8px 0 4px}
+h1 b{color:var(--cyan);font-weight:400}
+.sub{color:var(--dim);font-size:11px;margin-bottom:22px}
+h3{font-size:11px;letter-spacing:.16em;color:var(--amber);margin:26px 0 12px;font-weight:400}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+.card .k{font-size:9px;letter-spacing:.18em;color:var(--cyan);margin-bottom:8px}
+.card .d{color:var(--dim);font-size:11px}
+.note{background:var(--panel2);border:1px solid var(--line2);border-left:3px solid var(--amber);padding:10px 12px;border-radius:6px;color:var(--dim);font-size:11px;margin:14px 0}
+.note b{color:var(--amber);font-weight:400}
+table{width:100%;border-collapse:collapse;font-size:10.5px;margin:8px 0}
+th{color:var(--cyan);text-align:left;font-weight:400;letter-spacing:.08em;padding:7px 8px;border-bottom:1px solid var(--line2)}
+td{padding:7px 8px;border-bottom:1px solid var(--line);color:var(--dim);vertical-align:top}
+td b{color:var(--text);font-weight:400}
+.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
+/* window frame */
+.fw{background:var(--bg2);border:1px solid var(--line2);border-radius:10px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.fw .tb{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.dots{display:flex;gap:6px}
+.dots i{width:10px;height:10px;border-radius:50%;display:block}
+.dots i:nth-child(1){background:#ff5f57}.dots i:nth-child(2){background:#febc2e}.dots i:nth-child(3){background:#28c840}
+.fw .tt{margin-left:8px;color:var(--dim);font-size:10px;letter-spacing:.1em}
+.fw .tt b{color:var(--text);font-weight:400}
+.fw .tb .st{margin-left:auto;color:var(--green);font-size:9px;letter-spacing:.12em}
+/* shell mock */
+.shell{display:grid;grid-template-columns:150px 1fr;min-height:400px;background:var(--bg2)}
+.rail{background:var(--panel);border-right:1px solid var(--line);padding:10px 8px;display:flex;flex-direction:column;gap:2px}
+.rail .item{font-size:9.5px;letter-spacing:.1em;color:var(--dim);padding:6px 8px;border-radius:4px;cursor:default}
+.rail .item.on{color:var(--cyan);background:var(--panel2);box-shadow:inset 2px 0 0 var(--cyan)}
+.rail .item:hover{color:var(--text)}
+.rail .sp{flex:1}
+.rail .cmd{margin-top:auto;color:var(--gold);font-size:9px;padding:8px;border-top:1px solid var(--line)}
+.work{background:var(--bg2);padding:14px}
+.whead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.whead h4{font-size:11px;letter-spacing:.16em;color:var(--text);font-weight:400}
+.whead h4 span{color:var(--cyan)}
+.whead .crumb{margin-left:auto;color:var(--faint);font-size:9px;letter-spacing:.08em}
+/* panels */
+.pgrid{display:grid;gap:10px}
+.p{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px}
+.p .pk{font-size:8.5px;letter-spacing:.16em;color:var(--faint);margin-bottom:8px}
+.row{display:flex;align-items:center;gap:8px;padding:5px 6px;border-bottom:1px solid var(--line);font-size:10px}
+.row:last-child{border-bottom:none}
+.row .n{color:var(--text)}
+.row .v{margin-left:auto;color:var(--dim)}
+.row .up{color:var(--green)}.row .dn{color:var(--red)}
+.tnum{font-size:15px;color:var(--cyan);letter-spacing:.04em}
+.bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;background:var(--cyan);border-radius:3px}
+/* charts */
+.chart{position:relative;height:110px;margin:8px 0;background:linear-gradient(180deg,transparent 49%,var(--line) 49%,transparent 50%,transparent 74%,var(--line) 75%,transparent 75%,transparent 99%,var(--line) 100%)}
+.chart svg{position:absolute;inset:0;width:100%;height:100%}
+/* tags */
+.tag{font-size:8px;letter-spacing:.1em;padding:2px 6px;border-radius:3px;border:1px solid var(--line2)}
+.tag.atlas{color:var(--red);border-color:var(--red)}.tag.world{color:var(--amber);border-color:var(--amber)}
+.tag.market{color:var(--cyan);border-color:var(--cyan)}.tag.sys{color:var(--dead)}
+.tag.ok{color:var(--green);border-color:var(--green)}.tag.stale{color:var(--amber);border-color:var(--amber)}
+/* palette */
+.pal{position:relative}
+.pal .box{background:#0c1220;border:1px solid var(--line2);border-radius:10px;padding:10px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+.pal .pin{display:flex;gap:8px;align-items:center;border:1px solid var(--line2);background:var(--panel2);border-radius:6px;padding:8px 10px;margin-bottom:8px}
+.pal .pin span{color:var(--faint)}
+.pal .it{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:5px;color:var(--dim);font-size:10px}
+.pal .it.on{background:var(--panel2);color:var(--text);box-shadow:inset 2px 0 0 var(--cyan)}
+.pal .it .g{color:var(--cyan);width:16px}
+.pal .it .s{margin-left:auto;color:var(--faint);font-size:8.5px}
+.pal .foot{display:flex;gap:14px;padding:8px 10px 2px;color:var(--faint);font-size:8.5px;border-top:1px solid var(--line);margin-top:6px}
+/* tray */
+.traybar{display:flex;align-items:center;gap:12px;background:rgba(20,24,32,.9);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:9.5px;color:var(--dim)}
+.traybar .dm{margin-left:auto;display:flex;align-items:center;gap:8px}
+.traybar .ico{width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,var(--cyan),#1a5f86);display:flex;align-items:center;justify-content:center;font-size:9px;color:#04121c}
+.tmenu{background:#0c1220;border:1px solid var(--line2);border-radius:8px;padding:6px;width:230px;margin-top:6px;margin-left:auto;box-shadow:0 20px 50px rgba(0,0,0,.6)}
+.tmenu .ti{display:flex;gap:9px;align-items:center;padding:6px 9px;border-radius:4px;color:var(--dim);font-size:10px}
+.tmenu .ti:hover{background:var(--panel2);color:var(--text)}
+.tmenu .ti.sep{border-top:1px solid var(--line);margin:4px 0;padding:0}
+.tmenu .ti .k{margin-left:auto;color:var(--faint);font-size:8.5px}
+.tmenu .ti.warn{color:var(--red)}
+/* notifications */
+.notif{display:flex;flex-direction:column;gap:10px}
+.ncard{display:flex;gap:10px;background:#0c1220;border:1px solid var(--line2);border-left:3px solid var(--amber);border-radius:8px;padding:10px 12px;box-shadow:0 14px 34px rgba(0,0,0,.5)}
+.ncard .ic{font-size:14px}
+.ncard .t{font-size:10px;color:var(--text)}
+.ncard .d{font-size:9px;color:var(--dim);margin-top:2px}
+.ncard .lnk{margin-left:auto;align-self:center;font-size:8.5px;color:var(--cyan)}
+/* phone */
+.phone{width:250px;margin:0 auto;background:#0a0e15;border:8px solid #1a2230;border-radius:26px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+.phone .notch{height:18px;display:flex;align-items:center;justify-content:center}
+.phone .notch i{width:70px;height:5px;background:#1a2230;border-radius:3px}
+.phone .pbody{padding:10px}
+.mtab{display:flex;border-top:1px solid var(--line);margin-top:10px;padding-top:6px}
+.mtab span{flex:1;text-align:center;color:var(--dim);font-size:9px;padding:4px 0}
+.mtab span.on{color:var(--cyan)}
+.mrow{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid var(--line);font-size:9.5px}
+.mrow .n{color:var(--text)}
+.mrow .v{margin-left:auto;color:var(--dim)}
+.stale{color:var(--amber)!important}
+/* flow */
+.flow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.flow .arrow{color:var(--faint);font-size:16px}
+.flow .node{background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:10px 14px;font-size:9.5px;color:var(--dim)}
+.flow .node b{color:var(--text);font-weight:400;display:block;letter-spacing:.08em;margin-bottom:2px}
+.flow .node.on{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan)}
+/* architecture */
+.arch{display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 0}
+.abox{background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:10px 22px;text-align:center;font-size:10px;letter-spacing:.1em;color:var(--text)}
+.abox small{display:block;color:var(--faint);font-size:8.5px;letter-spacing:.06em;margin-top:3px;font-weight:400}
+.abox.cy{border-color:var(--cyan);color:var(--cyan)}
+.abox.am{border-color:var(--amber)}
+.alink{color:var(--faint);font-size:10px}
+.afan{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+/* roadmap */
+.ph{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.ph .n{width:30px;color:var(--amber);font-size:10px;flex-shrink:0}
+.ph .t{font-size:10.5px;color:var(--text)}
+.ph .t small{display:block;color:var(--dim);font-size:9px;margin-top:2px}
+.badge{display:inline-block;font-size:8px;letter-spacing:.1em;padding:1px 6px;border-radius:3px;border:1px solid var(--green);color:var(--green);margin-right:6px}
+.badge.tbd{border-color:var(--faint);color:var(--faint)}
+.badge.plan{border-color:var(--amber);color:var(--amber)}
+@media(max-width:900px){.g2,.g3{grid-template-columns:1fr}.shell{grid-template-columns:120px 1fr}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="htop">
+    <div class="logo">◈ DOURMOUSE <b>// DESKTOP DESIGN PORTFOLIO</b></div>
+    <div class="tag">DESIGN ONLY — NO PRODUCTION CODE CHANGED</div>
+  </div>
+  <nav id="nav"></nav>
+</div></header>
+
+<div class="wrap">
+
+<!-- ============ 1. LAUNCH ============ -->
+<section id="s-launch">
+  <h1>1 · <b>APPLICATION LAUNCH</b></h1>
+  <div class="sub">Double-click dourmouse.app → standalone native window, no Terminal, no browser. Server boots in-process; window visible in &lt;1.5 s.</div>
+  <div class="grid g2">
+    <div class="fw">
+      <div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>FINDER</b> — double-click dourmouse.app</div></div>
+      <div style="padding:16px;display:flex;gap:14px;align-items:center">
+        <div style="width:64px;height:64px;border-radius:14px;background:linear-gradient(135deg,var(--cyan),#14506e);display:flex;align-items:center;justify-content:center;font-size:28px;color:#04121c">◈</div>
+        <div>
+          <div style="font-size:13px">dourmouse.app</div>
+          <div style="color:var(--faint);font-size:9px;margin-top:3px">Application · 48 MB · signed build</div>
+          <div style="color:var(--green);font-size:9px;margin-top:6px">● codesigned · notarized (when Developer ID present)</div>
+        </div>
+      </div>
+    </div>
+    <div class="fw">
+      <div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>DOURMOUSE</b> · CENTRAL AGENT DISPATCH</div><div class="st">● ONLINE</div></div>
+      <div style="padding:18px;text-align:center">
+        <div style="font-size:22px;color:var(--cyan)">◈ DOURMOUSE</div>
+        <div style="color:var(--faint);font-size:9px;letter-spacing:.16em;margin:4px 0 14px">ONE WINDOW · ONE SERVER · ONE ACCOUNT</div>
+        <div style="display:flex;justify-content:center;gap:8px;margin-bottom:14px">
+          <span class="tag ok">CORE ONLINE</span><span class="tag ok">STATE OK</span><span class="tag atlas">ATLAS BRIDGE</span><span class="tag world">WORLD BRIDGE</span>
+        </div>
+        <div class="bar"><i style="width:100%"></i></div>
+        <div style="color:var(--dim);font-size:9px;margin-top:6px">restoring workspace · ATLAS → PORTFOLIO → NVDA …</div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>HONEST DEGRADATION (existing behavior kept):</b> if the native window cannot start (headless/SSH), the app says so and opens the same UI in the default browser — the server keeps serving. Browser mode remains a supported platform, not a fallback.</div>
+</section>
+
+<!-- ============ 2. HOME ============ -->
+<section id="s-home">
+  <h1>2 · <b>DOURMOUSE HOME</b></h1>
+  <div class="sub">One window, eight destinations, live status, per-account identity. The routed shell from v5.14 becomes the app frame.</div>
+  <div class="fw"><div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>DOURMOUSE</b></div><div class="st">● ONLINE · a@x.com</div></div>
+  <div class="shell">
+    <div class="rail">
+      <div class="item on">◈ HOME</div><div class="item">◈ ATLAS</div><div class="item">◎ WORLD</div>
+      <div class="item">▣ PORTFOLIO</div><div class="item">▥ MARKETS</div><div class="item">✦ INTEL</div>
+      <div class="item">◉ ALERTS <span class="tag sys" style="margin-left:6px">3</span></div><div class="item">⚙ SETTINGS</div>
+      <div class="sp"></div>
+      <div class="cmd">⚡ ⌘K — COMMAND CENTRE</div>
+    </div>
+    <div class="work">
+      <div class="whead"><h4><span>HOME</span> — COMMAND OVERVIEW</h4><div class="crumb">#/ · 2026-08-09</div></div>
+      <div class="pgrid g3">
+        <div class="p"><div class="pk">QUICK STATUS</div>
+          <div class="row"><span class="n">CORE</span><span class="v up">● RUNNING</span></div>
+          <div class="row"><span class="n">AI BACKEND</span><span class="v">ollama · qwen3:8b</span></div>
+          <div class="row"><span class="n">ATLAS FX BOOTSTRAP</span><span class="v">7 pairs</span></div>
+          <div class="row"><span class="n">WORLD MONITOR</span><span class="v up">LIVE</span></div>
+        </div>
+        <div class="p"><div class="pk">WATCHLIST (yours)</div>
+          <div class="row"><span class="n">NVDA</span><span class="v up">▲ 0.8%</span></div>
+          <div class="row"><span class="n">TSLA</span><span class="v dn">▼ 1.2%</span></div>
+          <div class="row"><span class="n">EURUSD</span><span class="v up">▲ 0.04%</span></div>
+          <div class="row"><span class="n">GC=F</span><span class="v up">▲ 0.3%</span></div>
+        </div>
+        <div class="p"><div class="pk">RECENT ACTIVITY</div>
+          <div class="row"><span class="n">★ NVDA starred</span><span class="v">12m</span></div>
+          <div class="row"><span class="n">ATLAS run: fx-daily</span><span class="v">1h</span></div>
+          <div class="row"><span class="n">Drive: Q3 report read</span><span class="v">2h</span></div>
+          <div class="row"><span class="n">Alert dismissed: market</span><span class="v">3h</span></div>
+        </div>
+      </div>
+      <div class="note" style="margin-top:12px"><b>DATA SCOPE (v5.17):</b> signed in as <b>a@x.com</b> — watchlist, alerts, prefs and resume are yours alone; shared/system alerts appear for everyone.</div>
+    </div>
+  </div></div>
+</section>
+
+<!-- ============ 3. ATLAS ============ -->
+<section id="s-atlas">
+  <h1>3 · <b>ATLAS — NATIVE WORKSPACE</b></h1>
+  <div class="sub">ATLAS lives INSIDE the DourMouse window: telemetry, managed runs, research, risk. Never another window or tab.</div>
+  <div class="fw"><div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>DOURMOUSE</b> — ATLAS</div><div class="st">● ONLINE</div></div>
+  <div class="shell">
+    <div class="rail"><div class="item">◈ HOME</div><div class="item on">◈ ATLAS</div><div class="item">◎ WORLD</div><div class="item">▣ PORTFOLIO</div><div class="item">▥ MARKETS</div><div class="item">✦ INTEL</div><div class="item">◉ ALERTS</div><div class="item">⚙ SETTINGS</div><div class="sp"></div><div class="cmd">⚡ ⌘K</div></div>
+    <div class="work">
+      <div class="whead"><h4><span>ATLAS</span> — QUANT RESEARCH CORE</h4><div class="crumb">#/atlas · fx-research · repo@main</div></div>
+      <div class="pgrid g3">
+        <div class="p"><div class="pk">REPOSITORY</div>
+          <div class="row"><span class="n">PATH</span><span class="v">~/atlas</span></div>
+          <div class="row"><span class="n">VERSION</span><span class="v">v13.18</span></div>
+          <div class="row"><span class="n">BRANCH</span><span class="v up">main</span></div>
+        </div>
+        <div class="p"><div class="pk">FX BOOTSTRAP DEPTH</div>
+          <div class="row"><span class="n">EURUSD</span><span class="v up">DONE</span></div>
+          <div class="row"><span class="n">GBPUSD</span><span class="v up">DONE</span></div>
+          <div class="row"><span class="n">USDJPY</span><span class="v up">DONE</span></div>
+          <div class="row"><span class="n">AUDUSD</span><span class="v" style="color:var(--amber)">SEEDING…</span></div>
+        </div>
+        <div class="p"><div class="pk">MANAGED RUNS</div>
+          <div class="row"><span class="n">fx-daily</span><span class="v tag sys">SYSTEM ALERT</span></div>
+          <div class="row"><span class="n">LAST REPORT</span><span class="v">2026-08-08</span></div>
+          <div class="row"><span class="n">RUN STATUS</span><span class="v up">IDLE</span></div>
+          <div class="row" style="border:none;padding-top:8px"><button style="font-family:var(--mono);font-size:9px;background:var(--panel2);color:var(--cyan);border:1px solid var(--line2);border-radius:5px;padding:6px 12px;cursor:pointer">▶ RUN fx-daily</button></div>
+        </div>
+      </div>
+      <div class="note"><b>PHASE 4 (portfolio):</b> ATLAS gains the Research workspace — signals + chart + World feed + notes in one resizable layout (§8/§23). The bridge, single-flight runner and per-user run alerts are unchanged.</div>
+    </div>
+  </div></div>
+</section>
+
+<!-- ============ 4. WORLD ============ -->
+<section id="s-world">
+  <h1>4 · <b>WORLD MONITOR — NATIVE WORKSPACE</b></h1>
+  <div class="sub">Global intelligence inside the shell: bridge status today, digest + events + map in Phase R1. External browser only when the user explicitly clicks a link.</div>
+  <div class="fw"><div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>DOURMOUSE</b> — WORLD MONITOR</div><div class="st">● LIVE</div></div>
+  <div class="shell">
+    <div class="rail"><div class="item">◈ HOME</div><div class="item">◈ ATLAS</div><div class="item on">◎ WORLD</div><div class="item">▣ PORTFOLIO</div><div class="item">▥ MARKETS</div><div class="item">✦ INTEL</div><div class="item">◉ ALERTS</div><div class="item">⚙ SETTINGS</div><div class="sp"></div><div class="cmd">⚡ ⌘K</div></div>
+    <div class="work">
+      <div class="whead"><h4><span>WORLD MONITOR</span> — GLOBAL INTELLIGENCE BRIDGE</h4><div class="crumb">#/world · worldmonitor.app</div></div>
+      <div class="pgrid g2">
+        <div class="p"><div class="pk">BRIDGE STATUS (keyless)</div>
+          <div class="row"><span class="n">PUBLIC HEALTH</span><span class="v up">WARNING · 1,284 signals · 12 critical</span></div>
+          <div class="row"><span class="n">TOOL CATALOG</span><span class="v">59 MCP tools</span></div>
+          <div class="row"><span class="n">DATA KEY</span><span class="v warn">NOT CONFIGURED</span></div>
+        </div>
+        <div class="p"><div class="pk">EVENTS FEED (Phase R1)</div>
+          <div class="row"><span class="n">◉ geopolitical · strait tension</span><span class="v">2m</span></div>
+          <div class="row"><span class="n">◉ energy · chokepoint status</span><span class="v">11m</span></div>
+          <div class="row"><span class="n">◉ market · G10 vol spike</span><span class="v">26m</span></div>
+          <div class="row"><span class="n">◉ cyber · infra advisory</span><span class="v">1h</span></div>
+        </div>
+      </div>
+      <div class="note"><b>HONEST (Rule 2.2):</b> the data tools report NOT CONFIGURED until <b>WORLDMONITOR_API_KEY</b> is set — never fabricated quotes, briefs or risk scores. The allow-list guard stays.</div>
+    </div>
+  </div></div>
+</section>
+
+<!-- ============ 5. PORTFOLIO ============ -->
+<section id="s-portfolio">
+  <h1>5 · <b>PORTFOLIO</b></h1>
+  <div class="sub">Per-user watchlist (v5.17) with desktop density: quote rows, change, sparkline. Same data on mobile and web.</div>
+  <div class="fw"><div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>DOURMOUSE</b> — PORTFOLIO</div><div class="st">● a@x.com</div></div>
+  <div class="shell">
+    <div class="rail"><div class="item">◈ HOME</div><div class="item">◈ ATLAS</div><div class="item">◎ WORLD</div><div class="item on">▣ PORTFOLIO</div><div class="item">▥ MARKETS</div><div class="item">✦ INTEL</div><div class="item">◉ ALERTS</div><div class="item">⚙ SETTINGS</div><div class="sp"></div><div class="cmd">⚡ ⌘K</div></div>
+    <div class="work">
+      <div class="whead"><h4><span>PORTFOLIO</span> — WATCHLIST</h4><div class="crumb">#/portfolio · 5 symbols</div></div>
+      <div class="p" style="padding:6px 10px">
+        <div class="row" style="font-size:8.5px;color:var(--faint);letter-spacing:.1em"><span>SYMBOL</span><span style="margin-left:auto">LAST / CHG</span><span style="width:70px;text-align:right">24H</span></div>
+        <div class="row"><span class="n">★ NVDA</span><span class="v">126.40 <span class="up">▲ 0.8%</span></span><span style="width:70px"><div class="bar"><i style="width:62%"></i></div></span></div>
+        <div class="row"><span class="n">★ TSLA</span><span class="v">248.10 <span class="dn">▼ 1.2%</span></span><span style="width:70px"><div class="bar"><i style="width:38%;background:var(--red)"></i></div></span></div>
+        <div class="row"><span class="n">★ EURUSD</span><span class="v">1.0842 <span class="up">▲ 0.04%</span></span><span style="width:70px"><div class="bar"><i style="width:52%"></i></div></span></div>
+        <div class="row"><span class="n">★ GC=F</span><span class="v">2,418 <span class="up">▲ 0.3%</span></span><span style="width:70px"><div class="bar"><i style="width:58%"></i></div></span></div>
+        <div class="row"><span class="n">★ BTC</span><span class="v">61,900 <span class="dn">▼ 0.4%</span></span><span style="width:70px"><div class="bar"><i style="width:46%;background:var(--red)"></i></div></span></div>
+      </div>
+      <div class="note"><b>OFFLINE (Phase 5):</b> cached snapshot renders with <b class="stale">STALE</b> markers — cached quotes are never presented as live.</div>
+    </div>
+  </div></div>
+</section>
+
+<!-- ============ 6. RESEARCH ============ -->
+<section id="s-research">
+  <h1>6 · <b>RESEARCH WORKSPACE — MULTI-PANEL</b></h1>
+  <div class="sub">Dockable, resizable panels per workspace; layouts saved per-user. Chart + ATLAS signals + World feed + notes.</div>
+  <div class="fw"><div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>DOURMOUSE</b> — ATLAS → RESEARCH · LAYOUT: RESEARCH</div><div class="st">● saved</div></div>
+  <div class="shell">
+    <div class="rail"><div class="item">◈ HOME</div><div class="item on">◈ ATLAS</div><div class="item">◎ WORLD</div><div class="item">▣ PORTFOLIO</div><div class="item">▥ MARKETS</div><div class="item">✦ INTEL</div><div class="item">◉ ALERTS</div><div class="item">⚙ SETTINGS</div><div class="sp"></div><div class="cmd">⚡ ⌘K</div></div>
+    <div class="work">
+      <div class="whead"><h4><span>RESEARCH</span> — EURUSD · FX SIGNALS</h4><div class="crumb">#/atlas/research · layout persisted per-user</div></div>
+      <div class="pgrid" style="grid-template-columns:1.6fr 1fr">
+        <div>
+          <div class="p"><div class="pk">CHART — EURUSD 4H</div>
+            <div class="chart"><svg viewBox="0 0 600 110" preserveAspectRatio="none">
+              <polyline points="0,80 40,74 80,78 120,62 160,66 200,50 240,54 280,38 320,44 360,30 400,34 440,22 480,26 520,14 560,18 600,8" fill="none" stroke="#4FC3F7" stroke-width="1.5"/>
+              <polyline points="0,84 40,80 80,82 120,70 160,72 200,58 240,60 280,46 320,50 360,38 400,42 440,30 480,34 520,22 560,26 600,14" fill="none" stroke="#2a3a52" stroke-width="1"/>
+            </svg></div>
+            <div style="display:flex;gap:8px;color:var(--faint);font-size:8.5px"><span>EMA 21</span><span>EMA 55</span><span class="up">▲ LONG BIAS</span></div>
+          </div>
+          <div class="pgrid g2" style="margin-top:10px">
+            <div class="p"><div class="pk">ATLAS SIGNALS</div>
+              <div class="row"><span class="n">mean_reversion</span><span class="v up">+0.31</span></div>
+              <div class="row"><span class="n">trend_follow</span><span class="v dn">−0.08</span></div>
+              <div class="row"><span class="n">ic_screen (train only)</span><span class="v up">OK</span></div>
+            </div>
+            <div class="p"><div class="pk">WORLD FEED</div>
+              <div class="row"><span class="n">◉ EUR risk brief</span><span class="v">4m</span></div>
+              <div class="row"><span class="n">◉ ECB calendar</span><span class="v">2h</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="p"><div class="pk">RESEARCH NOTES</div>
+          <div style="color:var(--dim);font-size:9.5px;line-height:1.6">
+            · IC screen passed on train prefix<br>
+            · ensemble equal_weight &gt; best constituent<br>
+            · N-W t-stat 2.9 at 5-bar horizon<br>
+            · next: extend window, re-run gate<br><br>
+            <span style="color:var(--faint)">────────<br>⌨ drafting…</span>
+          </div>
+        </div>
+      </div>
+      <div class="note"><b>§8 rule:</b> preset layouts only (DEFAULT · RESEARCH · TRADING), opt-in customization, one-click reset. Not a trading terminal.</div>
+    </div>
+  </div></div>
+</section>
+
+<!-- ============ 7. COMMAND CENTER ============ -->
+<section id="s-cmd">
+  <h1>7 · <b>COMMAND CENTER — ⌘K</b></h1>
+  <div class="sub">Already shipped on the palette index (`/api/palette`). Desktop adds native entry points: ⌘K in-app, tray → Quick Command, dourmouse://command?q=…</div>
+  <div class="pal fw"><div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>DOURMOUSE</b> — COMMAND CENTRE</div><div class="st">⌘K</div></div>
+  <div style="padding:22px 60px">
+    <div class="box">
+      <div class="pin"><span>⌘</span><span style="color:var(--text)">atlas</span></div>
+      <div class="it"><span class="g">▸</span>OPEN ATLAS<span class="s">#/atlas</span></div>
+      <div class="it on"><span class="g">◈</span>OPEN ATLAS RESEARCH<span class="s">#/atlas/research</span></div>
+      <div class="it"><span class="g">◎</span>OPEN WORLD MONITOR<span class="s">#/world</span></div>
+      <div class="it"><span class="g">▣</span>OPEN PORTFOLIO<span class="s">#/portfolio</span></div>
+      <div class="it"><span class="g">◉</span>SHOW TODAY'S ALERTS<span class="s">#/alerts</span></div>
+      <div class="it"><span class="g">⚡</span>RUN fx-daily<span class="s">command</span></div>
+      <div class="foot"><span>↑↓ NAVIGATE</span><span>↵ OPEN</span><span>ESC CLOSE</span></div>
+    </div>
+  </div>
+  </div>
+  <div class="note"><b>Architecture for future NL:</b> the palette is server-side JSON — a natural-language resolver later maps a typed phrase to the same index (open atlas → destination). No UI change needed.</div>
+</section>
+
+<!-- ============ 8. NOTIFICATIONS ============ -->
+<section id="s-notif">
+  <h1>8 · <b>NATIVE NOTIFICATIONS</b></h1>
+  <div class="sub">StateStore alerts fan out to native notifications; clicking deep-links into the right workspace (allow-list parsed).</div>
+  <div class="grid g2">
+    <div class="fw"><div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>macOS</b> — Notification Center</div></div>
+      <div style="padding:14px" class="notif">
+        <div class="ncard"><div class="ic">◈</div><div><div class="t">ATLAS — New opportunity detected</div><div class="d">fx-daily: EURUSD signal passed the IC screen</div></div><div class="lnk">OPEN ATLAS →</div></div>
+        <div class="ncard" style="border-left-color:var(--amber)"><div class="ic">◎</div><div><div class="t">WORLD — Major geopolitical event</div><div class="d">strait tension · escalation watch</div></div><div class="lnk">WORLD → EVENT</div></div>
+        <div class="ncard" style="border-left-color:var(--red)"><div class="ic">▣</div><div><div class="t">PORTFOLIO — TSLA −1.2%</div><div class="d">below 24h range midpoint</div></div><div class="lnk">PORTFOLIO →</div></div>
+        <div class="ncard" style="border-left-color:var(--dead)"><div class="ic">✦</div><div><div class="t">SYSTEM — Research task completed</div><div class="d">backtest batch done · 14 cells</div></div><div class="lnk">RESEARCH →</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="card"><div class="k">DEEP-LINK ROUTING (allow-list)</div>
+        <div style="font-size:10px;color:var(--dim);line-height:1.8">
+          <span class="ok">✓</span> dourmouse://world?event=ev_123<br>
+          <span class="ok">✓</span> dourmouse://atlas/research<br>
+          <span class="bad">✗</span> dourmouse://open?cmd=rm -rf / <span style="color:var(--faint)">→ dropped (no exec, ever)</span>
+        </div>
+      </div>
+      <div class="card" style="margin-top:12px"><div class="k">POLICY</div>
+        <div class="d">Notifications only for user-relevant StateStore alerts (per-user inbox, v5.17). Clicking routes through the strict parser; no remote content, no shell. Mutes and priorities are per-account.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 9. TRAY ============ -->
+<section id="s-tray">
+  <h1>9 · <b>SYSTEM TRAY / MENU-BAR</b></h1>
+  <div class="sub">Background presence is OPT-IN and off by default — no unnecessary always-running process (§12).</div>
+  <div class="grid g2">
+    <div>
+      <div class="traybar"><span>◈ Finder</span><span>File</span><span>Edit</span><span>View</span><span class="dm"><span>◉ 3</span><span class="ico">◈</span><span>●</span><span>⌘</span></span></div>
+      <div class="tmenu">
+        <div class="ti">◈ OPEN DOURMOUSE<span class="k">⌘1</span></div>
+        <div class="ti">◉ VIEW ALERTS<span class="k">3</span></div>
+        <div class="ti">◈ OPEN ATLAS</div>
+        <div class="ti">◎ OPEN WORLD MONITOR</div>
+        <div class="ti">▣ OPEN PORTFOLIO</div>
+        <div class="ti">⚡ QUICK COMMAND<span class="k">⌘K</span></div>
+        <div class="ti sep"></div>
+        <div class="ti warn">✕ QUIT</div>
+      </div>
+    </div>
+    <div>
+      <div class="card"><div class="k">TRAY MODE POLICY</div>
+        <div class="d" style="line-height:1.7">· <b>Off by default</b> — closing the window quits (the honest default for a personal tool).<br>
+        · <b>Opt-in</b> setting: "close to menu bar" keeps the core running (server + SSE + alert fan-out) with the window hidden.<br>
+        · The tray icon shows the live alert count from the SSE hub.<br>
+        · Low-CPU by design: the only background work is the existing env-gated live polls; no timers invented for the tray.</div>
+      </div>
+      <div class="note"><b>Battery honesty:</b> tray mode is for users who want alerts while closed. It is never created silently.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 10. SETTINGS ============ -->
+<section id="s-settings">
+  <h1>10 · <b>SETTINGS</b></h1>
+  <div class="sub">Capabilities, connections, data scope (v5.17), updates (Phase 6) — all honest, all per-user where it matters.</div>
+  <div class="fw"><div class="tb"><div class="dots"><i></i><i></i><i></i></div><div class="tt"><b>DOURMOUSE</b> — SETTINGS</div><div class="st">● a@x.com</div></div>
+  <div class="shell">
+    <div class="rail"><div class="item">◈ HOME</div><div class="item">◈ ATLAS</div><div class="item">◎ WORLD</div><div class="item">▣ PORTFOLIO</div><div class="item">▥ MARKETS</div><div class="item">✦ INTEL</div><div class="item">◉ ALERTS</div><div class="item on">⚙ SETTINGS</div><div class="sp"></div><div class="cmd">⚡ ⌘K</div></div>
+    <div class="work">
+      <div class="pgrid g2">
+        <div class="p"><div class="pk">ACCOUNT / DATA SCOPE</div>
+          <div class="row"><span class="n">SIGNED IN AS</span><span class="v">a@x.com</span></div>
+          <div class="row"><span class="n">SCOPES</span><span class="v">gmail · calendar · drive (RO)</span></div>
+          <div class="row"><span class="n">WATCHLIST / PREFS</span><span class="v up">YOURS ALONE</span></div>
+        </div>
+        <div class="p"><div class="pk">CAPABILITY CHECKLIST</div>
+          <div class="row"><span class="n"><span class="tag ok">OK</span> LLM BACKEND</span><span class="v">ollama · qwen3:8b</span></div>
+          <div class="row"><span class="n"><span class="tag ok">OK</span> ATLAS BRIDGE</span><span class="v">~/atlas</span></div>
+          <div class="row"><span class="n"><span class="tag warn">OFF</span> WORLD KEY</span><span class="v">WORLDMONITOR_API_KEY</span></div>
+          <div class="row"><span class="n"><span class="tag ok">OK</span> GOOGLE LOGIN</span><span class="v">OAuth web client</span></div>
+        </div>
+      </div>
+      <div class="pgrid g2" style="margin-top:10px">
+        <div class="p"><div class="pk">APPLICATION</div>
+          <div class="row"><span class="n">VERSION</span><span class="v">v5.18 (desktop series 0.5.18)</span></div>
+          <div class="row"><span class="n">LATEST</span><span class="v up">v0.5.18 — UP TO DATE</span></div>
+          <div class="row"><span class="n">CHANNEL</span><span class="v">stable</span></div>
+        </div>
+        <div class="p"><div class="pk">WINDOW</div>
+          <div class="row"><span class="n">REMEMBER SIZE / POS</span><span class="v up">ON</span></div>
+          <div class="row"><span class="n">RESTORE LAST WORKSPACE</span><span class="v up">ON</span></div>
+          <div class="row"><span class="n">CLOSE TO MENU BAR</span><span class="v">off (opt-in)</span></div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+</section>
+
+<!-- ============ 11. MOBILE ============ -->
+<section id="s-mobile">
+  <h1>11 · <b>MOBILE — SAME ACCOUNT, SAME DATA</b></h1>
+  <div class="sub">The phone is a supported client of the SAME server (pairing, PWA, bottom tabs). Identity and state follow the account (v5.17).</div>
+  <div class="grid g3" style="align-items:start">
+    <div class="phone">
+      <div class="notch"><i></i></div>
+      <div class="pbody">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:11px;letter-spacing:.1em;color:var(--cyan)">DOURMOUSE</span><span style="margin-left:auto;font-size:9px;color:var(--dim)">a@x.com</span></div>
+        <div class="p" style="padding:8px"><div class="pk">HOME</div>
+          <div class="mrow"><span class="n">★ NVDA</span><span class="v up">▲ 0.8%</span></div>
+          <div class="mrow"><span class="n">★ EURUSD</span><span class="v up">▲ 0.04%</span></div>
+          <div class="mrow"><span class="n">◉ 3 alerts</span><span class="v">tap</span></div>
+        </div>
+        <div class="mtab"><span>◈</span><span class="on">◈</span><span>◎</span><span>▣</span><span>⚡</span></div>
+      </div>
+    </div>
+    <div class="card"><div class="k">PAIRING (v5.13)</div>
+      <div class="d">python -m dourmouse.mobile_link → scannable QR → the phone reaches the same server (token-gated). Watchlist, alerts, prefs, resume — the per-user StateStore is the same everywhere.</div>
+    </div>
+    <div class="card"><div class="k">PWA (v5.13 + Phase 5)</div>
+      <div class="d">Manifest + icons already shipped. Phase 5 adds the service worker so the phone also gets offline shell + STALE-marked snapshots. No separate mobile app — one product.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 12. CROSS-DEVICE ============ -->
+<section id="s-cross">
+  <h1>12 · <b>CROSS-DEVICE WORKFLOW — ONE DOURMOUSE</b></h1>
+  <div class="sub">Desktop → phone → tablet → desktop: the device changes, the data and account follow. One server, one store, per-user scoping.</div>
+  <div class="flow">
+    <div class="node on"><b>◈ DESKTOP</b>ATLAS → research EURUSD</div>
+    <div class="arrow">→</div>
+    <div class="node"><b>◈ PHONE</b>resume banner: continue in #/atlas/research</div>
+    <div class="arrow">→</div>
+    <div class="node"><b>◈ TABLET</b>World Monitor · same alerts</div>
+    <div class="arrow">→</div>
+    <div class="node"><b>◈ DESKTOP</b>watchlist star → everywhere · window restored</div>
+  </div>
+  <div class="grid g3" style="margin-top:16px">
+    <div class="card"><div class="k">IDENTITY</div><div class="d">One Google sign-in; sessions + per-user state scoped by account (v5.15–v5.18).</div></div>
+    <div class="card"><div class="k">STATE</div><div class="d">Watchlist, alerts, prefs, resume: the per-user StateStore is the single source of truth; SSE fans changes to every connected client.</div></div>
+    <div class="card"><div class="k">UI</div><div class="d">One design language; three chrome layouts adapt (sidebar / rail / bottom tabs). The language of the product never changes.</div></div>
+  </div>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section id="s-arch">
+  <h1><b>ARCHITECTURE</b> — CURRENT → DESKTOP</h1>
+  <div class="sub">Additive: the native shell wraps the existing core; nothing is replaced except the Terminal-applet packaging.</div>
+  <div class="arch">
+    <div class="abox cy">DOURMOUSE DESKTOP SHELL <small>pywebview window · tray · notifications · deep links · window state · auto-update</small></div>
+    <div class="alink">▼ HTTP + SSE (127.0.0.1) · JS bridge (typed, minimal)</div>
+    <div class="abox">DOURMOUSE CORE (UNCHANGED) <small>ThreadingHTTPServer · per-user StateStore · AuthStore · Dispatch (26 agents) · ATLAS / World / Freebuff bridges</small></div>
+    <div class="afan">
+      <div class="abox am">ATLAS <small>research core</small></div>
+      <div class="abox am">WORLD MONITOR <small>intel bridge</small></div>
+      <div class="abox am">OLLAMA / NVIDIA <small>LLM backends</small></div>
+      <div class="abox am">SQLITE (WAL) <small>state · auth · memory</small></div>
+    </div>
+    <div class="alink">▼ same clients, same account</div>
+    <div class="afan">
+      <div class="abox">MOBILE <small>pair · PWA</small></div>
+      <div class="abox">WEB <small>browser mode</small></div>
+      <div class="abox">TABLET <small>PWA</small></div>
+    </div>
+  </div>
+  <div class="note"><b>No fork.</b> The desktop app is a client of the same server the browser and phone use. If the shell ever moved to Electron (documented fallback), the core is 100% portable — the migration cost is bounded to the shell.</div>
+</section>
+
+<!-- ============ TECH ============ -->
+<section id="s-tech">
+  <h1><b>TECHNOLOGY</b> — EVIDENCE-BASED CHOICE</h1>
+  <div class="sub">Recommendation: Option A — keep and harden the PyWebView native shell. See DESKTOP_DESIGN_PORTFOLIO.md §3 for the full reasoning.</div>
+  <table>
+    <tr><th>CRITERION</th><th><b style="color:var(--green)">PYWEBVIEW (A) — RECOMMENDED</b></th><th>ELECTRON (B)</th><th>TAURI (C)</th></tr>
+    <tr><td>Reuse of existing stack</td><td class="ok">100% — server, UI, 71 tests unchanged</td><td>Server via child process; UI same</td><td>Python server becomes a Rust sidecar</td></tr>
+    <tr><td>Runtime weight</td><td class="ok">~60–120 MB (venv + WebKit)</td><td class="bad">~300–500 MB baseline</td><td class="ok">~10–30 MB + sidecar</td></tr>
+    <tr><td>Startup</td><td class="ok">&lt;2 s (in-process server)</td><td>2–4 s</td><td>1–2 s + sidecar spawn</td></tr>
+    <tr><td>Tray / notifications</td><td>Native (pyobjc/pywebview); thinner ecosystem</td><td class="ok">Mature</td><td>Plugins</td></tr>
+    <tr><td>Auto-update</td><td class="warn">DIY (signed zip + hash + rollback)</td><td class="ok">electron-updater</td><td>tauri-updater (signed)</td></tr>
+    <tr><td>Toolchains</td><td class="ok">Python + pytest only (already in use)</td><td>Node added</td><td>Rust added</td></tr>
+    <tr><td>Security surface</td><td class="ok">Loopback-only; no Node; tiny typed bridge</td><td>Mitigable (Node risks)</td><td>Capability system (good)</td></tr>
+    <tr><td>Packaging</td><td>py2app/PyInstaller + codesign</td><td class="ok">electron-builder</td><td class="ok">tauri-bundler</td></tr>
+  </table>
+  <div class="note"><b>Decisive fact:</b> every subsystem is Python + plain HTML/JS already speaking 127.0.0.1:8765, and all tests are pytest. Porting the shell discards working, tested code for zero user-visible gain. Electron remains the documented fallback if update/packaging quality ever becomes the blocker — the core is portable.</div>
+</section>
+
+<!-- ============ ROADMAP ============ -->
+<section id="s-road">
+  <h1><b>ROADMAP</b> — 12 PHASES</h1>
+  <div class="sub">Each phase additive and reversible; browser mode and all APIs stay green throughout (DESKTOP_DESIGN_PORTFOLIO.md §14–§16).</div>
+  <div class="card">
+    <div class="ph"><div class="n">0</div><div class="t"><span class="badge">PLAN</span>CHECKPOINT <small>commit v5.13–v5.18 to a baseline branch + tag v5.18 before any Phase 1 code</small></div></div>
+    <div class="ph"><div class="n">1</div><div class="t"><span class="badge plan">PLAN</span>NATIVE SHELL v2 <small>standalone .app (no Terminal) · Info.plist URL scheme · window-state memory · menus</small></div></div>
+    <div class="ph"><div class="n">2</div><div class="t"><span class="badge plan">PLAN</span>TRAY + NOTIFICATIONS <small>menu-bar extra (opt-in) · native alerts → deep-link</small></div></div>
+    <div class="ph"><div class="n">3</div><div class="t"><span class="badge plan">PLAN</span>DEEP LINKS + SHORTCUTS <small>dourmouse:// allow-list parser · ⌘1–⌘4 / ⌘, / Esc bridge</small></div></div>
+    <div class="ph"><div class="n">4</div><div class="t"><span class="badge plan">PLAN</span>WORKSPACES + PANELS <small>Research workspace · resizable layouts · persisted per-user</small></div></div>
+    <div class="ph"><div class="n">5</div><div class="t"><span class="badge plan">PLAN</span>OFFLINE <small>service worker + STALE markers · cached snapshots</small></div></div>
+    <div class="ph"><div class="n">6</div><div class="t"><span class="badge plan">PLAN</span>UPDATES <small>latest.json + signed artifact + hash verify + rollback · Settings UI</small></div></div>
+    <div class="ph"><div class="n">7</div><div class="t"><span class="badge plan">PLAN</span>PERFORMANCE <small>startup &lt;1.5 s · lazy loads · list virtualization where needed</small></div></div>
+    <div class="ph"><div class="n">8</div><div class="t"><span class="badge plan">PLAN</span>SECURITY AUDIT <small>deep-link fuzz · IPC review · webview posture · signed-build check</small></div></div>
+    <div class="ph"><div class="n">9</div><div class="t"><span class="badge plan">PLAN</span>CROSS-PLATFORM PACKAGING <small>Windows WebView2 installer/portable · Linux AppImage · codesign</small></div></div>
+    <div class="ph"><div class="n">10</div><div class="t"><span class="badge plan">PLAN</span>TESTING <small>desktop test seam · deep-link parser · layout persistence · update simulator · cross-device matrix</small></div></div>
+    <div class="ph"><div class="n">11</div><div class="t"><span class="badge tbd">TBD</span>RELEASE INFRA <small>CI: lint · pytest · build · sign · publish latest.json · stable/beta channels</small></div></div>
+  </div>
+  <div class="note" style="margin-top:14px"><b>DO-NOT-DESTROY CONTRACT (§16):</b> nothing deleted without a replacement and a green test · ATLAS, World Monitor, auth, per-user state and the 71 tests stay green · every phase reversible.</div>
+</section>
+
+</div>
+
+<script>
+const SCREENS = [
+  ['launch','1 · LAUNCH'],['home','2 · HOME'],['atlas','3 · ATLAS'],['world','4 · WORLD'],
+  ['portfolio','5 · PORTFOLIO'],['research','6 · RESEARCH'],['cmd','7 · ⌘K'],['notif','8 · NOTIFICATIONS'],
+  ['tray','9 · TRAY'],['settings','10 · SETTINGS'],['mobile','11 · MOBILE'],['cross','12 · CROSS-DEVICE'],
+  ['arch','ARCH'],['tech','TECH'],['road','ROADMAP'],
+];
+const nav = document.getElementById('nav');
+SCREENS.forEach(([id,label]) => {
+  const b = document.createElement('button');
+  b.textContent = label; b.dataset.id = id;
+  b.onclick = () => show(id);
+  nav.appendChild(b);
+});
+function show(id){
+  document.querySelectorAll('section').forEach(s => s.classList.remove('on'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.id === id));
+  const el = document.getElementById('s-' + id);
+  if (el) el.classList.add('on');
+  window.scrollTo({top:0});
+}
+show('launch');
+</script>
+</body>
+</html>

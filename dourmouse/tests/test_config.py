@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from dourmouse.config import load_guardrail_config, load_nvidia_config
+from dourmouse.config import (
+    NvidiaConfig,
+    OllamaConfig,
+    OmniRouteConfig,
+    llm_backend,
+    load_guardrail_config,
+    load_llm_config,
+    load_nvidia_config,
+    load_omniroute_config,
+    omniroute_available,
+)
 
 
 class TestConfigLoading:
@@ -89,3 +99,110 @@ class TestNvidiaConfigLoading:
         cfg = load_nvidia_config()
         assert cfg.agent_models == {}
         assert cfg.model_for_agent("markets") == "nvidia/one-model"
+
+
+# --------------------------------------------------------------------------- #
+# v5.10 — OmniRoute free-tier gateway backend
+# --------------------------------------------------------------------------- #
+class TestOmniRouteConfig:
+    def test_defaults_are_keyless_and_local(self, monkeypatch):
+        monkeypatch.delenv("OMNIROUTE_BASE_URL", raising=False)
+        monkeypatch.delenv("OMNIROUTE_MODEL", raising=False)
+        cfg = load_omniroute_config()
+        assert cfg.api_key == ""
+        assert cfg.base_url == "http://127.0.0.1:20128/v1"
+        assert cfg.model == "auto"
+        assert cfg.model_for_agent("orchestrator") == "auto"
+
+    def test_env_overrides(self, monkeypatch):
+        monkeypatch.setenv("OMNIROUTE_BASE_URL", "http://127.0.0.1:9999/v1")
+        monkeypatch.setenv("OMNIROUTE_MODEL", "auto/best-fast")
+        cfg = load_omniroute_config()
+        assert cfg.base_url == "http://127.0.0.1:9999/v1"
+        assert cfg.model == "auto/best-fast"
+
+    def test_per_agent_model_env(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_OMNIROUTE_MODEL_DEV_CODING", "auto/coding:free")
+        cfg = load_omniroute_config()
+        assert cfg.model_for_agent("dev_coding") == "auto/coding:free"
+        assert cfg.model_for_agent("markets") == "auto"  # no override
+
+    def test_omniroute_available_probes_gateway(self, monkeypatch):
+        # Point the probe at a dead port so the test is hermetic regardless
+        # of whether the real gateway is running on this machine.
+        monkeypatch.setenv("OMNIROUTE_BASE_URL", "http://127.0.0.1:1/v1")
+        assert omniroute_available(timeout=0.3) is False
+
+    def test_llm_backend_accepts_omniroute(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "omniroute")
+        assert llm_backend() == "omniroute"
+
+    def test_llm_backend_rejects_unknown(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "mystery")
+        with pytest.raises(ValueError, match="DOURMOUSE_LLM_BACKEND"):
+            llm_backend()
+
+    def test_load_llm_config_returns_omniroute_config(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "omniroute")
+        cfg = load_llm_config()
+        assert isinstance(cfg, OmniRouteConfig)
+        assert cfg.api_key == ""
+
+    def test_load_llm_config_explicit_ollama_wins_over_auto(self, monkeypatch):
+        """Explicit backend selection is honored even when another probe
+        would answer — deterministic (Rule 2.8)."""
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        cfg = load_llm_config()
+        assert isinstance(cfg, OllamaConfig)
+
+    def test_load_llm_config_auto_ollama_first(self, monkeypatch):
+        """auto: local Ollama wins when it answers; never a network guess."""
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "auto")
+        monkeypatch.setattr(
+            "dourmouse.config.ollama_available", lambda **_: True
+        )
+        cfg = load_llm_config()
+        assert isinstance(cfg, OllamaConfig)
+
+    def test_load_llm_config_auto_omniroute_second(self, monkeypatch):
+        """auto: no Ollama -> free OmniRoute gateway when it answers AND the
+        user opted in (DOURMOUSE_OMNIROUTE_AUTO=1, v5.10 privacy gate)."""
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "auto")
+        monkeypatch.setenv("DOURMOUSE_OMNIROUTE_AUTO", "1")
+        monkeypatch.setattr(
+            "dourmouse.config.ollama_available", lambda **_: False
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.omniroute_available", lambda **_: True
+        )
+        cfg = load_llm_config()
+        assert isinstance(cfg, OmniRouteConfig)
+
+    def test_load_llm_config_auto_skips_omniroute_without_optin(self, monkeypatch):
+        """auto: the third-party gateway is NEVER chosen implicitly — even
+        when it answers, without DOURMOUSE_OMNIROUTE_AUTO=1 the chain goes
+        Ollama -> NVIDIA (Rule 2.6 local-first privacy)."""
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "auto")
+        monkeypatch.delenv("DOURMOUSE_OMNIROUTE_AUTO", raising=False)
+        monkeypatch.setattr(
+            "dourmouse.config.ollama_available", lambda **_: False
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.omniroute_available", lambda **_: True
+        )
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
+        cfg = load_llm_config()
+        assert isinstance(cfg, NvidiaConfig)
+
+    def test_load_llm_config_auto_falls_back_to_nvidia(self, monkeypatch):
+        """auto: neither local backend -> NVIDIA (needs its key, honestly)."""
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "auto")
+        monkeypatch.setattr(
+            "dourmouse.config.ollama_available", lambda **_: False
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.omniroute_available", lambda **_: False
+        )
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
+        cfg = load_llm_config()
+        assert isinstance(cfg, NvidiaConfig)

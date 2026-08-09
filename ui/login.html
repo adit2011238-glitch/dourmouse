@@ -77,15 +77,36 @@
   button:hover { background: rgba(var(--cyan-rgb), var(--a22)); }
   #msg { margin-top: 14px; font-size: 10px; min-height: 16px; color: var(--red); }
   .ok { color: var(--text) !important; }
+  /* v5.15 — Google sign-in */
+  .ggoogle { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .ggoogle .glabel { font-size: 9px; letter-spacing: 0.13em; color: var(--text-dim); margin-bottom: 10px; }
+  .ggoogle a.gbtn, .ggoogle button.gbtn {
+    display: block; width: 100%; text-align: center; padding: 12px; cursor: pointer;
+    background: #fff; color: #202124; font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-decoration: none;
+    border: 1px solid rgba(255,255,255,0.35); transition: all .2s;
+  }
+  .ggoogle a.gbtn:hover, .ggoogle button.gbtn:hover { background: #e8eaed; }
+  .ggoogle .gmsg { margin-top: 10px; font-size: 9.5px; line-height: 1.7; color: var(--text-dim); }
+  .ggoogle .gmsg a { color: var(--text); }
 </style>
 </head>
 <body>
   <div class="gate">
     <h1>DOURMOUSE // ACCESS GATE</h1>
-    <p class="sub">This command centre is protected. Enter the access token from
-      <span style="color:var(--text)">DOURMOUSE_ACCESS_TOKEN</span> in the server's
-      <span style="color:var(--text)">.env</span> to continue.</p>
-    <label for="tok">ACCESS TOKEN</label>
+    <p class="sub">One DourMouse, every device. Sign in with Google to unlock
+      your account and everything linked to it (Gmail · Calendar), or use the
+      access token from the server's <span style="color:var(--text)">.env</span>.</p>
+
+    <!-- v5.15 — Google sign-in (button appears only when the server has an
+         OAuth client configured; honest NOT CONFIGURED otherwise) -->
+    <div class="ggoogle" id="ggoogle">
+      <div class="glabel">// SIGN IN WITH GOOGLE</div>
+      <a class="gbtn" id="ggoogleBtn" href="/api/auth/google/start">SIGN IN WITH GOOGLE ▸</a>
+      <div class="gmsg" id="ggoogleMsg">Checking server configuration…</div>
+    </div>
+
+    <label for="tok" style="margin-top:20px">ACCESS TOKEN</label>
     <input id="tok" type="password" autocomplete="current-password" autofocus spellcheck="false">
     <button id="go">AUTHENTICATE ▸</button>
     <div id="msg"></div>
@@ -111,6 +132,41 @@
   }
   document.getElementById('go').addEventListener('click', attempt);
   tok.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+
+  // v5.15 — Google login readiness (honest, Rule 2.2): the button is shown
+  // only when the server has an OAuth client; if already signed in we say so.
+  (async () => {
+    const box = document.getElementById('ggoogle');
+    const msg = document.getElementById('ggoogleMsg');
+    const btn = document.getElementById('ggoogleBtn');
+    try {
+      const r = await fetch('/api/auth/status');
+      const d = await r.json();
+      if (d.me) {
+        btn.style.display = 'none';
+        msg.innerHTML = 'Signed in as <b style="color:var(--text)">' +
+          String(d.me.email || 'you').replace(/&/g,'&amp;').replace(/</g,'&lt;') +
+          '</b> — <a href="/">open the command centre →</a><br>' +
+          '<button class="gbtn" id="glogout" style="margin-top:8px;background:transparent;color:var(--amber);border-color:rgba(245,166,35,0.4)">SIGN OUT</button>';
+        const lo = document.getElementById('glogout');
+        if (lo) lo.addEventListener('click', async () => {
+          await fetch('/api/auth/logout', { method: 'POST' });
+          window.location.reload();
+        });
+      } else if (d.configured) {
+        btn.style.display = 'block';
+        msg.textContent = 'One click — your account, your Gmail and Calendar.';
+      } else {
+        btn.style.display = 'none';
+        msg.textContent = 'Google login NOT CONFIGURED — set GOOGLE_CLIENT_ID + ' +
+          'GOOGLE_CLIENT_SECRET in .env (Google Cloud Console → OAuth client). ' +
+          'The access token above still works.';
+      }
+    } catch (e) {
+      btn.style.display = 'none';
+      msg.textContent = 'Server unreachable — the access token above still works.';
+    }
+  })();
 </script>
 </body>
 </html>

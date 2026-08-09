@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // PHONE LINK</title>
+<style>
+  :root {
+    /* ---- JARVIS Scene Archive & Design System · palette ---- */
+    --ground: #0B0E14;
+    --surface: #12151E;
+    --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
+    --amber: #F5A623; --amber-rgb: 245,166,35;
+    --red:   #EF5350; --red-rgb:   239,83,80;
+    --gold:  #FFD232; --gold-rgb:  255,210,50;
+    --dead:  #8A929E; --dead-rgb:  138,146,158;
+    --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22;
+    --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
+    --font-display:  "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
+    --font-mono:     "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
+    --text: rgba(var(--cyan-rgb), var(--a85));
+    --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    --line: rgba(var(--cyan-rgb), var(--a10));
+    --line-strong: rgba(var(--cyan-rgb), var(--a30));
+    --panel: rgba(18,21,30,0.72);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background:
+      radial-gradient(900px 480px at 70% -10%, rgba(var(--cyan-rgb), 0.14), transparent 60%),
+      linear-gradient(rgba(var(--cyan-rgb), var(--a06)) 1px, transparent 1px) 0 0 / 34px 34px,
+      var(--ground);
+    color: var(--text);
+    font-family: var(--font-mono);
+    padding: 28px 0 60px;
+    min-height: 100vh;
+  }
+  .wrap { width: min(92vw, 460px); margin: 0 auto; }
+  h1 {
+    font-family: var(--font-wordmark); font-weight: 400;
+    font-size: 15px; letter-spacing: 0.30em; color: var(--text);
+    text-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a45)), 0 0 50px rgba(var(--cyan-rgb), var(--a22));
+    margin-bottom: 8px;
+  }
+  p.sub { font-size: 10px; font-weight: 300; color: var(--text-dim); margin-bottom: 22px; line-height: 1.6; }
+  .card {
+    border: 1px solid var(--line); background: var(--panel);
+    backdrop-filter: blur(10px); padding: 20px; margin-bottom: 16px;
+    position: relative;
+  }
+  .card h2 { font-size: 10px; letter-spacing: 0.16em; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+  .status { font-size: 11px; letter-spacing: 0.05em; line-height: 1.7; }
+  .ok  { color: var(--text); }
+  .bad { color: var(--red); }
+  .warn{ color: var(--amber); }
+  .urlrow { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .urlrow:first-of-type { border-top: none; }
+  .urlrow .qr { flex: 0 0 auto; }
+  .urlrow .qr svg { display: block; width: 92px; height: 92px; }
+  .urlrow .meta { flex: 1; min-width: 0; }
+  .urlrow .label { font-size: 9px; letter-spacing: 0.13em; color: var(--text-dim); margin-bottom: 4px; }
+  .urlrow .url { font-size: 11px; color: var(--text); word-break: break-all; line-height: 1.4; }
+  .urlrow .note { font-size: 9px; color: var(--text-dim); margin-top: 3px; }
+  label { display: block; font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); margin-bottom: 8px; }
+  input {
+    width: 100%; background: rgba(11,14,20,0.9); border: 1px solid var(--line);
+    color: var(--text); font-family: var(--font-mono); font-size: 13px; font-weight: 300;
+    padding: 12px 14px; letter-spacing: 0.06em; outline: none;
+  }
+  input:focus { border-color: rgba(var(--cyan-rgb), var(--a45)); }
+  button {
+    width: 100%; margin-top: 14px; padding: 12px; cursor: pointer;
+    background: rgba(var(--cyan-rgb), var(--a16));
+    border: 1px solid rgba(var(--cyan-rgb), var(--a30)); color: var(--text);
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.13em;
+    transition: all .2s;
+  }
+  button:hover { background: rgba(var(--cyan-rgb), var(--a22)); }
+  #msg { margin-top: 12px; font-size: 10px; min-height: 16px; color: var(--red); }
+  #msg.ok { color: var(--text); }
+  ol.steps { padding-left: 18px; font-size: 10px; color: var(--text-dim); line-height: 1.9; }
+  .cmd {
+    background: rgba(11,14,20,0.9); border: 1px solid var(--line);
+    padding: 10px 12px; font-size: 10px; color: var(--gold);
+    word-break: break-all; margin: 6px 0 2px; letter-spacing: 0.03em;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>D.O.U.R.M.O.U.S.E.</h1>
+  <p class="sub">PHONE LINK // PAIR THIS DEVICE WITH YOUR COMMAND CENTRE</p>
+
+  <div class="card">
+    <h2>// CONNECTION STATUS</h2>
+    <div class="status" id="status">{{STATUS}}</div>
+  </div>
+
+  <div class="card">
+    <h2>// OPEN ON THIS PHONE</h2>
+    <div class="status" id="urls">{{URLS}}</div>
+  </div>
+
+  <div class="card">
+    <h2>// ACCESS TOKEN</h2>
+    <label for="tok">Paste the token shown by <b>python -m dourmouse.mobile_link</b> on your Mac:</label>
+    <input id="tok" type="password" autocomplete="off" placeholder="TOKEN">
+    <button id="go">UNLOCK</button>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>// STEPS</h2>
+    <ol class="steps">
+      <li>On your Mac run <div class="cmd">python -m dourmouse.mobile_link</div> (it prints the token + QR).</li>
+      <li>Same Wi-Fi: open the LAN URL above — or scan its QR from the Camera app.</li>
+      <li>Anywhere: install <b>Tailscale</b> on the phone, sign in to the same account as the Mac, open the TAILSCALE URL.</li>
+      <li>Paste the token here to unlock — the session cookie sticks until you quit the browser.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+  const tok = document.getElementById('tok');
+  const msg = document.getElementById('msg');
+  document.getElementById('go').addEventListener('click', async () => {
+    const token = tok.value.trim();
+    if (!token) { msg.textContent = '// TOKEN REQUIRED'; msg.className = ''; return; }
+    try {
+      const r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      const body = await r.json();
+      if (r.ok && body.ok) {
+        msg.textContent = '// UNLOCKED — opening the command centre…';
+        msg.className = 'ok';
+        setTimeout(() => { window.location.href = '/'; }, 500);
+      } else if (body.enabled === false) {
+        msg.textContent = '// NO TOKEN CONFIGURED ON THE SERVER — run python -m dourmouse.mobile_link on the Mac';
+      } else {
+        msg.textContent = '// INVALID TOKEN — check the token on your Mac and retry';
+      }
+    } catch (e) {
+      msg.textContent = '// UNREACHABLE — is the Mac on and the server running?';
+    }
+  });
+  tok.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('go').click(); });
+</script>
+</body>
+</html>

@@ -504,11 +504,11 @@ def _propose_time_slots_tool(arguments: dict[str, Any]) -> str:
 
 
 def _list_calendar_events_tool(arguments: dict[str, Any]) -> str:
-    return (
-        "NOT CONFIGURED: no calendar backend wired yet (read-only design — "
-        "booking would require confirmation once it exists). No events "
-        "fabricated."
-    )
+    """v5.15: real per-user calendar reads via Google sign-in; honest
+    NOT CONFIGURED without an OAuth user (Rule 2.2)."""
+    from dourmouse.google_services import calendar_events
+
+    return calendar_events(arguments.get("max_results", 5))
 
 
 # --------------------------------------------------------------------------- #
@@ -1937,18 +1937,36 @@ def build_general_registry() -> DispatchRegistry:
     )
 
     # -- v5.5 Freebuff read agent -------------------------------------- #
-    # Real read-only access to the user's Freebuff Desktop app (loopback
-    # API): account, projects, thread conversations, notes, skills, git
-    # changes. Honest NOT CONFIGURED when the app is not running/authed
-    # (Rule 2.2). Read-only by design — nothing is ever sent or mutated.
+    # Real access to the user's Freebuff Desktop app (loopback API):
+    # read tools (account, projects, thread conversations, notes, skills,
+    # git changes) + the v5.11 write tool freebuff_dispatch (create ONE
+    # new thread + post ONE prompt so a real Freebuff agent runs the task
+    # there). Honest NOT CONFIGURED when the app is not running/authed
+    # (Rule 2.2).
     from dourmouse.freebuff_bridge import build_freebuff_tool_specs
 
     registry.register_subagent(
         _subagent(
             "freebuff",
             "Projects",
-            "Freebuff Desktop reads — account, projects, thread conversations, notes, skills.",
+            "Freebuff Desktop — read threads/projects/notes/skills AND dispatch tasks into new Freebuff threads.",
             build_freebuff_tool_specs(),
+        )
+    )
+
+    # v5.12 World Monitor — real-time global intelligence (worldmonitor.app):
+    # market data, country risk/briefs, conflict events, news intelligence,
+    # natural disasters, cyber threats, sanctions, forecasts, supply-chain.
+    # Keyless: status + tool catalog. Keyed: generic call_tool to all 59 MCP
+    # tools. Honest NOT CONFIGURED without WORLDMONITOR_API_KEY (Rule 2.2).
+    from dourmouse.worldmonitor import build_worldmonitor_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "worldmonitor",
+            "Intelligence",
+            "World Monitor — real-time global intelligence: markets, country risk, conflicts, disasters, cyber, sanctions, forecasts.",
+            build_worldmonitor_tool_specs(),
         )
     )
 
@@ -2336,12 +2354,33 @@ def build_general_registry() -> DispatchRegistry:
         except Exception as exc:  # noqa: BLE001 - network/SMTP failures, readable
             return f"GMAIL SEND FAILED: {type(exc).__name__}: {exc}"
 
+    def _drive_search_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import drive_search
+
+        try:
+            return drive_search(arguments.get("query", ""), arguments.get("max_results", 10))
+        except RuntimeError as exc:
+            return f"DRIVE SEARCH (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DRIVE SEARCH FAILED: {type(exc).__name__}: {exc}"
+
+    def _drive_read_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import drive_read
+
+        try:
+            return drive_read(arguments.get("file_id", ""))
+        except RuntimeError as exc:
+            return f"DRIVE READ (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DRIVE READ FAILED: {type(exc).__name__}: {exc}"
+
     registry.register_subagent(
         _subagent(
             "mail",
             "Live",
-            "Inbox + Gmail — IMAP read_inbox, and Gmail search/read/send via your "
-            "Google account (App Password). Sending always requires confirmation.",
+            "Inbox + Gmail + Drive — IMAP read_inbox, Gmail search/read/send, and "
+            "Drive search/read, all on the signed-in Google account. Sending "
+            "always requires confirmation.",
             [
                 ToolSpec(
                     name="read_inbox",
@@ -2362,10 +2401,11 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="gmail_search",
                     description=(
-                        "Search Gmail (your Google account) for messages by "
-                        "subject/from/body words. Needs GOOGLE_GMAIL_USER + "
-                        "GOOGLE_GMAIL_APP_PASSWORD in .env; otherwise reports "
-                        "NOT CONFIGURED honestly."
+                        "Search the signed-in Google user's Gmail for messages "
+                        "by subject/from/body words. Works with the Google "
+                        "sign-in (gmail.readonly scope); otherwise uses the "
+                        "shared App-Password setup or reports NOT CONFIGURED "
+                        "honestly."
                     ),
                     parameters={
                         "type": "object",
@@ -2380,8 +2420,9 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="gmail_read",
                     description=(
-                        "Read ONE Gmail message by its uid (from gmail_search). "
-                        "Read-only; needs the same Gmail env vars."
+                        "Read ONE Gmail message by its id/uid (from "
+                        "gmail_search). Read-only; works on the signed-in "
+                        "Google account or the shared App-Password setup."
                     ),
                     parameters={
                         "type": "object",
@@ -2391,6 +2432,42 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["message_id"],
                     },
                     handler=_gmail_read_h,
+                ),
+                ToolSpec(
+                    name="drive_search",
+                    description=(
+                        "Search the signed-in Google user's Drive (read-only) "
+                        "by name/content words — newest first. Needs the user's "
+                        "Google sign-in (drive.readonly scope); otherwise "
+                        "reports NOT CONFIGURED honestly. Never deletes."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string",
+                                       "description": "name/content words, e.g. 'q3 report' (empty = browse recent files)"},
+                            "max_results": {"type": "integer", "default": 10},
+                        },
+                    },
+                    handler=_drive_search_h,
+                ),
+                ToolSpec(
+                    name="drive_read",
+                    description=(
+                        "Read ONE file's text content from the signed-in "
+                        "Google user's Drive by its id (from drive_search). "
+                        "Docs/Sheets are exported as text; oversized binaries "
+                        "are refused honestly. Read-only."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "file_id": {"type": "string",
+                                          "description": "file id from drive_search"},
+                        },
+                        "required": ["file_id"],
+                    },
+                    handler=_drive_read_h,
                 ),
                 ToolSpec(
                     name="gmail_send",
@@ -2467,5 +2544,19 @@ def build_general_registry() -> DispatchRegistry:
             ],
         )
     )
+
+    # -- v5.8 artifact renderer ---------------------------------------- #
+    # Every research/coding/report agent can publish a structured artifact
+    # (markdown / table / series) rendered beside the chat — the biggest
+    # 'next level' gap vs Claude Cowork (live tables, equity curves,
+    # formatted reports instead of raw text). The tool writes into the
+    # shared ArtifactStore; the web UI renders it live via /api/artifacts.
+    # The orchestrator deliberately stays single-tool (delegate_task) —
+    # publish_artifact rides the agents that actually produce output.
+    from dourmouse.artifacts import build_artifact_tool_spec
+
+    _artifact_spec = build_artifact_tool_spec()
+    for _name in ("research_info", "dev_coding", "rnd", "atlas"):
+        registry.extend_subagent(_name, _artifact_spec)
 
     return registry

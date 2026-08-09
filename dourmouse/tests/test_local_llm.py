@@ -139,15 +139,54 @@ class TestLlmBackendResolver:
         cfg = load_llm_config()
         assert isinstance(cfg, OllamaConfig)
 
-    def test_auto_falls_back_to_nvidia_when_no_ollama(self, monkeypatch):
+    def test_auto_falls_back_to_nvidia_when_no_local_backend(self, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "auto")
         monkeypatch.setattr(config_module, "ollama_available", lambda: False)
+        # v5.10: the auto chain is Ollama -> OmniRoute -> NVIDIA. The probe
+        # is mocked so the test stays hermetic (Rule 2.8 — no network).
+        monkeypatch.setattr(config_module, "omniroute_available", lambda: False)
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
         from dourmouse.config import NvidiaConfig
 
         cfg = load_llm_config()
         assert isinstance(cfg, NvidiaConfig)
         assert cfg.api_key == "nvapi-test"
+
+    def test_auto_prefers_omniroute_when_no_ollama(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "auto")
+        # v5.10 privacy gate: the third-party gateway needs the explicit
+        # opt-in even in auto mode (Rule 2.6 local-first).
+        monkeypatch.setenv("DOURMOUSE_OMNIROUTE_AUTO", "1")
+        monkeypatch.setattr(config_module, "ollama_available", lambda: False)
+        monkeypatch.setattr(config_module, "omniroute_available", lambda: True)
+        from dourmouse.config import OmniRouteConfig
+
+        cfg = load_llm_config()
+        assert isinstance(cfg, OmniRouteConfig)
+        assert cfg.api_key == ""  # keyless — the free-tier guarantee
+
+    def test_auto_never_uses_omniroute_without_optin(self, monkeypatch):
+        """auto with the gateway up but NO opt-in must fall through to
+        NVIDIA — prompts never leave for a third-party implicitly."""
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "auto")
+        monkeypatch.delenv("DOURMOUSE_OMNIROUTE_AUTO", raising=False)
+        monkeypatch.setattr(config_module, "ollama_available", lambda: False)
+        monkeypatch.setattr(config_module, "omniroute_available", lambda: True)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        from dourmouse.config import NvidiaConfig
+
+        cfg = load_llm_config()
+        assert isinstance(cfg, NvidiaConfig)
+
+    def test_explicit_omniroute_returns_omniroute_config(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "omniroute")
+        monkeypatch.setenv("OMNIROUTE_BASE_URL", "http://127.0.0.1:20128/v1")
+        cfg = load_llm_config()
+        from dourmouse.config import OmniRouteConfig
+
+        assert isinstance(cfg, OmniRouteConfig)
+        assert cfg.base_url == "http://127.0.0.1:20128/v1"
+        assert cfg.model == "auto"
 
     def test_default_is_auto(self, monkeypatch):
         monkeypatch.delenv("DOURMOUSE_LLM_BACKEND", raising=False)

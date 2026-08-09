@@ -217,6 +217,34 @@ def check_connections() -> dict[str, dict[str, Any]]:
         "detail": spotify["detail"],
         "hint": "SPOTIFY_CLIENT_ID in .env/local_secrets + run spotify_login (music agent)",
     }
+
+    # v5.12: World Monitor — global intelligence API. The data tools need a
+    # key, so "ok" = key present AND the API answers. To honor this module's
+    # "no remote network calls on HUD polls" contract, the remote health
+    # probe runs ONLY when a key is configured — a keyless user learns the
+    # same thing (missing key) from env alone, with zero network cost.
+    wm_key = _env_present("WORLDMONITOR_API_KEY", "WM_API_KEY")
+    try:
+        from dourmouse import worldmonitor as wm
+
+        if wm_key:
+            wm_st = wm.worldmonitor_status()
+            wm_ok = bool(wm_st.get("ok"))
+            wm_detail = wm_st.get("detail", "") + " · key present"
+        else:
+            wm_ok = False
+            wm_detail = "no WORLDMONITOR_API_KEY (status probe skipped — keyless poll)"
+        out["worldmonitor"] = {
+            "ok": wm_ok,
+            "detail": wm_detail,
+            "hint": "WORLDMONITOR_API_KEY in .env (worldmonitor.app/pro) for data tools",
+        }
+    except Exception:  # noqa: BLE001 -- a broken probe never kills the report
+        out["worldmonitor"] = {
+            "ok": False,
+            "detail": "worldmonitor module unavailable",
+            "hint": "pip install worldmonitor-sdk",
+        }
     return out
 
 

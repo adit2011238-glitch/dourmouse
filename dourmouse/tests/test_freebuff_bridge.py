@@ -1,13 +1,18 @@
-"""v5.5 Freebuff Desktop read-bridge tests (freebuff_bridge.py + wiring).
+"""v5.5 Freebuff Desktop read-bridge + v5.11 dispatch tests
+(freebuff_bridge.py + wiring).
 
 Every test is hermetic (Rule 2.1): a tiny stdlib HTTP server under a free
-port serves canned Freebuff-shaped JSON, and FREEBUFF_API_URL points the
-bridge at it — no real Freebuff app, no network beyond loopback. Verifies:
+port serves canned Freebuff-shaped JSON (GET + POST), and FREEBUFF_API_URL
+points the bridge at it — no real Freebuff app, no network beyond loopback.
+Verifies:
 
 - freebuff_status / freebuff_account honest authed/unauthed/off states
 - freebuff_projects / threads / thread messages / notes / skills / changes
   parse the REAL shapes the app serves (payloads captured live)
 - path-like thread ids are refused (path-traversal guard)
+- v5.11 dispatch: create thread + post message (real request bodies),
+  honest NOT CONFIGURED when the app is unreachable, prompt/path guards,
+  oversized-prompt cap
 - honest NOT CONFIGURED when the app is unreachable (Rule 2.2)
 - the freebuff subagent actually carries the new tools
 - the panel payload (freebuff_panel_snapshot) and the SETUP row
@@ -84,14 +89,24 @@ CHANGES = {
 }
 RECENTS = {"paths": ["/Users/adit/Documents/atlas"]}
 
+# v5.11 dispatch responses (shapes captured live from the real app).
+CREATE_THREAD = {
+    "id": "9c1b2a3e-4d5f-6789-abcd-ef0123456789",
+    "projectPath": "/Users/adit/Documents/atlas",
+    "title": "test dispatch",
+    "status": "open",
+    "turnState": "idle",
+}
+POSTED = {"ok": True, "queued": False}
+
 
 class _FakeHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # quieter
         pass
 
-    def _send(self, payload: Any) -> None:
+    def _send(self, payload: Any, status: int = 200) -> None:
         body = json.dumps(payload).encode()
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -116,6 +131,66 @@ class _FakeHandler(BaseHTTPRequestHandler):
         else:
             self._send({"error": "not found"})
 
+    def do_POST(self):
+        # Record every request so tests can assert the exact bodies the
+        # bridge sent and their order (deterministic, Rule 2.8).
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length).decode("utf-8") if length else ""
+        body = json.loads(raw) if raw else {}
+        entry = {"path": self.path, "body": body}
+        _FakeHandler.last_post = entry
+        _FakeHandler.last_posts.append(entry)
+        if self.path == "/api/threads":
+            self._send(CREATE_THREAD)
+        elif self.path.startswith("/api/thread/") and self.path.endswith("/message"):
+            self._send(POSTED)
+        else:
+            self._send({"error": "not found"}, status=404)
+
+
+# Per-test recording slots (the handler is shared across tests via the
+# module-scoped fixture, so tests read the LAST recorded request).
+_FakeHandler.last_post = None  # type: ignore[attr-defined]
+_FakeHandler.last_posts = []  # type: ignore[attr-defined]
+
+
+class _FailHandler(BaseHTTPRequestHandler):
+    """Answers every POST with HTTP 500 so the honest-failure path is tested
+    against a LIVE server, not just a dead port."""
+
+    def log_message(self, fmt, *args):  # quieter
+        pass
+
+    def do_POST(self):
+        body = b'{"error": "boom"}'
+        self.send_response(500)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class _PostFailHandler(BaseHTTPRequestHandler):
+    """Create succeeds, but every /message post fails — the orphan-thread
+    path (thread created, prompt rejected)."""
+
+    def log_message(self, fmt, *args):  # quieter
+        pass
+
+    def _send(self, payload: Any, status: int = 200) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.path == "/api/threads":
+            self._send(CREATE_THREAD)
+        else:
+            self._send({"error": "boom"}, status=500)
+
 
 @pytest.fixture(scope="module")
 def fake_freebuff():
@@ -132,6 +207,40 @@ def fake_freebuff():
 def fb_url(fake_freebuff, monkeypatch):
     monkeypatch.setattr(fb, "_FREEBUFF_BASE", fake_freebuff)
     return fake_freebuff
+
+
+@pytest.fixture(scope="module")
+def fail_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FailHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    yield f"http://127.0.0.1:{port}"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture
+def fail_url(fail_server, monkeypatch):
+    monkeypatch.setattr(fb, "_FREEBUFF_BASE", fail_server)
+    return fail_server
+
+
+@pytest.fixture(scope="module")
+def post_fail_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _PostFailHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    yield f"http://127.0.0.1:{port}"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture
+def post_fail_url(post_fail_server, monkeypatch):
+    monkeypatch.setattr(fb, "_FREEBUFF_BASE", post_fail_server)
+    return post_fail_server
 
 
 class TestAccount:
@@ -210,6 +319,121 @@ class TestTools:
         assert "modified" in text
 
 
+class TestDispatch:
+    """v5.11 write bridge — create thread + post message against the fake."""
+
+    def test_create_thread_builds_correct_request(self, fb_url):
+        thread = fb.freebuff_create_thread(
+            "/Users/adit/Documents/atlas", title="test dispatch"
+        )
+        assert thread["id"] == CREATE_THREAD["id"]
+        req = _FakeHandler.last_post
+        assert req["path"] == "/api/threads"
+        assert req["body"] == {
+            "projectPath": "/Users/adit/Documents/atlas",
+            "title": "test dispatch",
+        }
+
+    def test_create_thread_refuses_relative_path(self, fb_url):
+        with pytest.raises(fb.FreebuffDispatchError):
+            fb.freebuff_create_thread("relative/path")
+
+    def test_post_message_builds_correct_request(self, fb_url):
+        posted = fb.freebuff_post_message(
+            CREATE_THREAD["id"], "do the thing", "/Users/adit/Documents/atlas"
+        )
+        assert posted == POSTED
+        req = _FakeHandler.last_post
+        assert req["path"] == f"/api/thread/{CREATE_THREAD['id']}/message"
+        assert req["body"]["text"] == "do the thing"
+        assert req["body"]["projectPath"] == "/Users/adit/Documents/atlas"
+
+    def test_post_message_requires_prompt(self, fb_url):
+        with pytest.raises(fb.FreebuffDispatchError):
+            fb.freebuff_post_message(CREATE_THREAD["id"], "  ", "/Users/adit/Documents/atlas")
+
+    def test_post_message_caps_oversized_prompt(self, fb_url):
+        with pytest.raises(fb.FreebuffDispatchError, match="too long"):
+            fb.freebuff_post_message(
+                CREATE_THREAD["id"], "x" * (fb._MAX_DISPATCH_CHARS + 1),
+                "/Users/adit/Documents/atlas",
+            )
+
+    def test_post_message_refuses_path_like_thread_id(self, fb_url):
+        with pytest.raises(fb.FreebuffDispatchError):
+            fb.freebuff_post_message("../../etc/passwd", "hi", "/Users/adit/Documents/atlas")
+
+    def test_dispatch_creates_then_posts(self, fb_url):
+        _FakeHandler.last_posts.clear()  # shared module-scoped server
+        out = fb.freebuff_dispatch(
+            "do the thing", "/Users/adit/Documents/atlas", title="test dispatch"
+        )
+        assert out["thread"]["id"] == CREATE_THREAD["id"]
+        assert out["posted"]["ok"] is True
+        posts = [r for r in getattr(_FakeHandler, "last_posts", [])]
+        # create + message each happened exactly once, in order
+        assert len(posts) == 2
+        assert posts[0]["path"] == "/api/threads"
+        assert posts[1]["path"].endswith("/message")
+
+    def test_dispatch_tool_ok(self, fb_url):
+        text = fb._freebuff_dispatch_tool(
+            {
+                "prompt": "do the thing",
+                "project_path": "/Users/adit/Documents/atlas",
+                "title": "test dispatch",
+            }
+        )
+        assert CREATE_THREAD["id"] in text
+        assert "accepted (running)" in text
+        assert "freebuff_read_thread" in text
+
+    def test_dispatch_tool_requires_prompt_and_path(self, fb_url):
+        assert "non-empty 'prompt'" in fb._freebuff_dispatch_tool({})
+        assert "project_path" in fb._freebuff_dispatch_tool({"prompt": "hi"})
+
+    def test_dispatch_tool_honest_app_error(self, fail_url):
+        text = fb._freebuff_dispatch_tool(
+            {"prompt": "hi", "project_path": "/Users/adit/Documents/atlas"}
+        )
+        assert "FAILED" in text and "HTTP 500" in text
+
+    def test_dispatch_tool_honest_app_down(self, monkeypatch):
+        monkeypatch.setattr(fb, "_FREEBUFF_BASE", "http://127.0.0.1:1")
+        text = fb._freebuff_dispatch_tool(
+            {"prompt": "hi", "project_path": "/Users/adit/Documents/atlas"}
+        )
+        assert "FAILED" in text and "not reachable" in text
+
+    def test_dispatch_validates_prompt_before_creating(self, fb_url):
+        """An oversized/empty prompt must fail WITHOUT ever hitting
+        /api/threads — no orphan thread for a predictably-bad prompt."""
+        _FakeHandler.last_posts.clear()
+        with pytest.raises(fb.FreebuffDispatchError, match="too long"):
+            fb.freebuff_dispatch(
+                "x" * (fb._MAX_DISPATCH_CHARS + 1),
+                "/Users/adit/Documents/atlas",
+            )
+        assert _FakeHandler.last_posts == []
+
+    def test_dispatch_post_failure_names_created_thread(self, post_fail_url):
+        """Create succeeds, post 500s -> the error must carry the created
+        thread id so the caller can honestly report the orphan."""
+        with pytest.raises(fb.FreebuffDispatchError) as exc_info:
+            fb.freebuff_dispatch("do the thing", "/Users/adit/Documents/atlas")
+        msg = str(exc_info.value)
+        assert CREATE_THREAD["id"] in msg
+        assert "was created but the prompt failed to post" in msg
+
+    def test_dispatch_tool_post_failure_names_created_thread(self, post_fail_url):
+        text = fb._freebuff_dispatch_tool(
+            {"prompt": "do the thing", "project_path": "/Users/adit/Documents/atlas"}
+        )
+        assert "FAILED" in text
+        assert CREATE_THREAD["id"] in text
+        assert "was created but the prompt failed to post" in text
+
+
 class TestRosterAndPanel:
     def test_freebuff_subagent_registered(self):
         registry = build_general_registry()
@@ -224,6 +448,7 @@ class TestRosterAndPanel:
             "freebuff_notes",
             "freebuff_skills",
             "freebuff_changes",
+            "freebuff_dispatch",
         } <= names
 
     def test_panel_snapshot_not_configured(self, monkeypatch):

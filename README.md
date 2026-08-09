@@ -28,10 +28,18 @@ alternative. No Node, no build step, no cloud account.
 - **Morning report (Phase 11)** — at `DOURMOUSE_REPORT_TIME` (default 08:30) a
   deterministic daily report — news, markets, tasks, ATLAS status, system
   health — is posted to the bus. No LLM in the path, honest failures.
-- **Multi-device (Phase 9)** — optional `DOURMOUSE_ACCESS_TOKEN` + `DOURMOUSE_HOST`
-  let you reach the dashboard from your phone/laptop over a Tailscale mesh
-  (see `docs/tailscale.md`). Loopback stays token-free; a login page appears
-  for non-local clients. All pages are responsive.
+- **Multi-device (Phase 9, v5.13)** — optional `DOURMOUSE_ACCESS_TOKEN` +
+  `DOURMOUSE_HOST` let you reach the dashboard from your phone/laptop over a
+  Tailscale mesh (see `docs/tailscale.md`). Loopback stays token-free; a login
+  page appears for non-local clients. All pages are responsive.
+- **Phone link (v5.13)** — `python -m dourmouse.mobile_link` does the whole
+  setup in one command: generates (or reuses) the token, writes
+  `DOURMOUSE_HOST=0.0.0.0` + the token into `.env` idempotently, detects your
+  LAN and Tailscale IPs, and prints a scannable QR per URL. `--rotate` mints a
+  fresh token; `--no-write` dry-runs. The unauthenticated `/mobile` pairing
+  page renders the same QR codes in the browser (server-side segno SVG),
+  always pointing back at the URL the phone actually used, while every
+  `/api/*` stays token-gated from non-loopback clients.
 - **Premium HUD (Phases 7–8)** — radar sweep core, ambient particle field,
   corner-bracket panels, and a real 5-state motion model
   (idle → thinking → planning → executing → complete) driven by live events.

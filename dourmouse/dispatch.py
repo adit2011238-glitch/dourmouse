@@ -42,7 +42,12 @@ from typing import Any, Callable
 
 from openai import OpenAI
 
-from dourmouse.config import NvidiaConfig, OllamaConfig, load_llm_config
+from dourmouse.config import (
+    NvidiaConfig,
+    OllamaConfig,
+    OmniRouteConfig,
+    load_llm_config,
+)
 from dourmouse.governance import (
     BudgetTracker,
     DlpFilter,
@@ -361,7 +366,7 @@ class DispatchRegistry:
         if subagent.name in self._subagents:
             raise ValueError(f"subagent already registered: {subagent.name}")
         for tool in subagent.tools:
-            if tool.name in self._tools:
+            if tool.name in self._tools and self._tools[tool.name] is not tool:
                 raise ValueError(
                     f"tool name collision across registry: {tool.name!r} "
                     f"(from {subagent.name})"
@@ -369,6 +374,36 @@ class DispatchRegistry:
         for tool in subagent.tools:
             self._tools[tool.name] = tool
         self._subagents[subagent.name] = subagent
+
+    def extend_subagent(self, name: str, tool: ToolSpec) -> None:
+        """Attach an existing tool to an already-registered subagent.
+
+        The single extension point for cross-agent capabilities (v5.8
+        artifacts): a tool like publish_artifact belongs on every agent that
+        produces reports, but tool names must stay globally unique so a
+        later addition can never silently shadow an existing tool. Sharing
+        the SAME ToolSpec object (``is``-identity) satisfies both: the
+        registry keeps one slot under that name, every subagent carries the
+        same handler, and a DIFFERENT object claiming the name still raises.
+        """
+        sub = self._subagents.get(name)
+        if sub is None:
+            raise ValueError(f"no subagent registered: {name}")
+        if any(t is tool for t in sub.tools):
+            return  # idempotent — already shared with this agent
+        if tool.name not in self._tools:
+            self._tools[tool.name] = tool
+        elif self._tools[tool.name] is not tool:
+            raise ValueError(
+                f"tool name collision across registry: {tool.name!r} "
+                f"(from {name})"
+            )
+        self._subagents[name] = Subagent(
+            name=sub.name,
+            domain=sub.domain,
+            description=sub.description,
+            tools=sub.tools + (tool,),
+        )
 
     def lookup(self, name: str) -> ToolSpec | None:
         return self._tools.get(name)
@@ -420,9 +455,17 @@ def _scoped_tool_specs(
     names = set(agent_names)
     names.add("orchestrator")
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for sub in registry.all_subagents():
-        if sub.name in names:
-            out.extend(t.openai_spec() for t in sub.tools)
+        if sub.name not in names:
+            continue
+        for t in sub.tools:
+            # Shared tools (extend_subagent) appear on several agents — emit
+            # the schema once so the model never sees duplicate names.
+            if t.name in seen:
+                continue
+            seen.add(t.name)
+            out.append(t.openai_spec())
     return out
 
 
@@ -701,10 +744,11 @@ class OllamaNativeClient:
         return out
 
 
-def _build_client(config: NvidiaConfig) -> Any:
+def _build_client(config: NvidiaConfig | OllamaConfig | OmniRouteConfig) -> Any:
     # Ollama: talk to the native API (fast, streaming, think disabled).
-    # NVIDIA: the OpenAI SDK, with a non-empty sentinel key (Ollama ignores
-    # key values, but the SDK rejects empty strings — reviewer-caught).
+    # NVIDIA / OmniRoute: the OpenAI SDK, with a non-empty sentinel key
+    # (Ollama/OmniRoute ignore key values, but the SDK rejects empty strings
+    # — reviewer-caught). OmniRoute is OpenAI-compatible and keyless.
     if isinstance(config, OllamaConfig):
         return OllamaNativeClient(config)
     key = config.api_key or "local-keyless"
