@@ -15,6 +15,12 @@ HUD front end (ui/index.html) and exposes:
 - POST /api/atlas/run     -> start one managed ATLAS command (fx-daily, ...)
                              single-flight (v5.4)
 - GET  /api/sessions      -> list session audit files under workspace/sessions
+- GET  /api/deeplink      -> allow-listed workspace navigation from a
+                             dourmouse:// deep link (v5.19, token-gated
+                             off-loopback; 302 to the validated SPA route)
+- GET  /api/version       -> secure self-update surface: current version +
+                             latest from the signed latest.json feed, hash-
+                             verified artifact (v5.19; honest configured:false)
 - POST /api/chat          -> SSE stream: runs ChatSession.ask() and streams
                              transcript events live (tool_use, tool_result,
                              assistant_text, confirmation_requested, done)
@@ -974,6 +980,23 @@ class _Handler(BaseHTTPRequestHandler):
             # and the mobile ⚡ sheet; natural-language queries can later
             # search the same index.
             self._send_json(self._build_palette())
+        elif path == "/api/deeplink":
+            # v5.19: deep-link navigation (dourmouse://atlas/research/...).
+            # The strict allow-list parser lives SERVER-side so every
+            # platform shares one gate; the response is a 302 to the
+            # validated SPA hash route (or JSON with ?format=json for
+            # programmatic clients). Sits AFTER the auth gate above, so it
+            # is token-gated off-loopback exactly like every other API.
+            self._handle_deeplink(parsed)
+        elif path == "/api/version":
+            # v5.19: secure self-update surface — the current version plus
+            # the latest release from the signed feed (hash-verified
+            # artifact). Cached server-side (6h TTL), so the HUD never
+            # blocks on the network repeatedly; unset feed honestly reports
+            # configured:false and never fabricates a version.
+            from dourmouse.updates import check_for_updates
+
+            self._send_json(check_for_updates().as_dict())
         elif path == "/api/files":
             # v5.0: list uploaded files (name, size, age) newest first.
             try:
@@ -2130,6 +2153,38 @@ class _Handler(BaseHTTPRequestHandler):
         ]
         return {"destinations": destinations, "agents": agents,
                 "commands": commands}
+
+    def _handle_deeplink(self, parsed) -> None:
+        """v5.19: GET /api/deeplink?to=<target>[&format=json] — allow-listed
+        navigation. ``to`` accepts ``dourmouse://atlas/research/example``,
+        ``atlas``, or ``atlas/research``. The parser drops anything off the
+        allow-list with an honest reason (never executed — no shell, no
+        paths, no arbitrary URLs). Returns a 302 to the validated SPA hash
+        route so a browser or webview click lands in the workspace;
+        ``format=json`` returns the parsed target for programmatic clients
+        (the desktop shell uses it to drive its own router).
+        """
+        from dourmouse.deeplink import parse_deeplink
+
+        qs = urllib.parse.parse_qs(parsed.query)
+        target = (qs.get("to") or [""])[0].strip()
+        parsed_target = parse_deeplink(target)
+        if not parsed_target["ok"]:
+            self._send_json(
+                {"ok": False, "error": parsed_target["reason"]}, status=400
+            )
+            return
+        if (qs.get("format") or [""])[0].strip() == "json":
+            self._send_json({"ok": True, **parsed_target})
+            return
+        # Location MUST resolve to the SPA root, not back onto /api/deeplink
+        # (a fragment-only Location resolves against the REQUEST uri and would
+        # loop forever). "/" + the hash lands on index.html where the hash
+        # router takes over.
+        self.send_response(302)
+        self.send_header("Location", "/" + parsed_target["href"])
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _handle_repo_scan(self) -> None:
         """v4.1 (P6+): POST /api/repo/scan — idempotent re-index of ATLAS.

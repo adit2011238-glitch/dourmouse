@@ -27,9 +27,15 @@ Run it:
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import shutil
+import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from typing import Any, Callable
 
@@ -69,13 +75,35 @@ class DesktopBridge:
       the GUI thread), so this is safe on the macOS/WKWebView backend.
       Windows are tracked by agent name and REUSED (brought to front) rather
       than duplicated; a closed window is recreated.
+
+    v5.19 (desktop conversion) — the typed IPC surface, kept tiny and typed
+    (window-state / deep-link only; NO shell, no paths, no exec):
+    - ``window_state()`` / ``set_window_state()``: window geometry through
+      the existing per-user prefs API (machine scope, owner '*'), so the app
+      reopens where you left it.
+    - ``navigate(href)``: point the main window at a validated SPA hash
+      route. The href must come from ``deeplink.parse_deeplink`` (the
+      allow-list gate) — only ``[A-Za-z0-9_/-#]`` ever reaches
+      ``location.hash``; nothing else is ever executed.
     """
 
-    def __init__(self, map_window: Any, webview: Any, base_url: str) -> None:
+    #: Persisted-geometry sanity clamp (width/height never smaller).
+    _MIN_DIMENSION = 200
+    _WINDOW_PREFS_KEY = "desktop.window"
+
+    def __init__(self, map_window: Any, webview: Any, base_url: str,
+                 state: Any | None = None) -> None:
         self._map_window = map_window
         self._webview = webview
         self._base_url = base_url
+        self._state = state  # the server's StateStore (in-process)
+        self._main_window: Any | None = None
         self._agent_windows: dict[str, Any] = {}
+
+    def attach_main_window(self, window: Any) -> None:
+        """The shell's main window — created after the bridge, so attached
+        once available (navigate() and close-persistence need it)."""
+        self._main_window = window
 
     def open_map(self) -> None:
         self._map_window.show()
@@ -108,6 +136,183 @@ class DesktopBridge:
         for name in sorted(names or []):
             self.open_agent(name)
 
+    # -- v5.19: typed window-state IPC (Phase 1 native shell) ------------- #
+
+    def window_state(self) -> dict[str, Any]:
+        """The persisted window geometry (via the existing prefs store), or
+        {} honestly when nothing is saved or the store is absent. Only
+        validated ints (width/height >= _MIN_DIMENSION, x/y ints) and a
+        bool maximized flag are returned — garbage prefs are never replayed."""
+        if self._state is None:
+            return {}
+        raw = self._state.get_pref(self._WINDOW_PREFS_KEY, {}, owner="*")
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[str, Any] = {}
+        for key in ("width", "height", "x", "y"):
+            value = raw.get(key)
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if key in ("width", "height") and value < self._MIN_DIMENSION:
+                continue
+            out[key] = value
+        if isinstance(raw.get("maximized"), bool):
+            out["maximized"] = raw["maximized"]
+        return out
+
+    def set_window_state(self, *, width=None, height=None, x=None, y=None,
+                         maximized=None) -> bool:
+        """Persist window geometry through the existing per-user prefs API
+        (machine scope — the window belongs to this machine). Returns False
+        honestly when nothing valid was provided or the store is absent."""
+        if self._state is None:
+            return False
+        state: dict[str, Any] = {}
+        for key, value in (("width", width), ("height", height),
+                           ("x", x), ("y", y)):
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if key in ("width", "height") and value < self._MIN_DIMENSION:
+                continue
+            state[key] = value
+        if isinstance(maximized, bool):
+            state["maximized"] = maximized
+        if not state:
+            return False
+        self._state.set_pref(self._WINDOW_PREFS_KEY, state, owner="*")
+        return True
+
+    # -- v5.19: validated navigation (deep links) ------------------------- #
+
+    def navigate(self, href: str | None) -> bool:
+        """Navigate the main window to a validated SPA hash route.
+
+        Only ``[A-Za-z0-9_/-#]`` characters are ever accepted (the deep-link
+        allow-list output), assigned to ``location.hash`` — never executed.
+        Returns False honestly when the href is invalid or no window is
+        attached (e.g. browser-fallback mode)."""
+        href = (href or "").strip()
+        if not re.fullmatch(r"^#[A-Za-z0-9_/-]{1,200}$", href):
+            return False
+        win = self._main_window
+        if win is None or not hasattr(win, "evaluate_js"):
+            return False
+        try:
+            win.evaluate_js(f"location.hash = {json.dumps(href)}")
+            return True
+        except Exception:  # noqa: BLE001 -- a failing navigate never crashes the shell
+            return False
+
+
+class DesktopNotifier:
+    """Maps DOURMOUSE alert broadcasts to native notifications (v5.19).
+
+    The desktop process subscribes to the server's OWN SSE fan-out hub (the
+    same one the HUD uses — no extra endpoint) and, on a ``state_change``
+    for the alerts section, diffs the alert inbox against the last seen ids
+    and notifies on NEW alerts. The first refresh only seeds the seen set
+    (late-subscriber honesty, like the SSE watcher's status replay) so a
+    launch never spams every pre-existing alert.
+
+    Honest (Rule 2.2): the default notifier uses macOS ``osascript``
+    ``display notification``; when that fails or is unavailable (headless,
+    non-macOS, missing binary) the alert is printed to the app console —
+    never silently dropped, never faked. ``notifier`` is the test seam.
+    """
+
+    _MAX_SEEN = 200
+
+    def __init__(self, base_url: str,
+                 notifier: Callable[[str, str], None] | None = None) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._notifier = notifier or self._default_notify
+        self._seen: set[int] = set()
+        self._primed = False
+        self._refreshing = False
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _default_notify(title: str, body: str) -> None:
+        """macOS native notification via osascript; honest stderr fallback."""
+        if shutil.which("osascript"):
+            script = "display notification {} with title {}".format(
+                json.dumps((body or "")[:120]),
+                json.dumps((title or "DOURMOUSE alert")[:80]),
+            )
+            try:
+                subprocess.run(["osascript", "-e", script], check=False,
+                               capture_output=True, timeout=10)
+                return
+            except Exception:  # noqa: BLE001 -- fall through to the console
+                pass
+        print(f"[NOTIFY] {title}: {body}")
+
+    def on_event(self, payload: dict[str, Any] | None) -> None:
+        """Hub sink: react to alerts state_change broadcasts only.
+
+        The refresh runs on a DAEMON THREAD — the SSE hub calls each sink's
+        emit() sequentially on its own broadcast thread, and a synchronous
+        /api/state fetch inside it (up to the 5s timeout) would stall the
+        live fan-out to every connected HUD client (reviewer-caught). The
+        notifier must never be the slowest client in the hub.
+        """
+        payload = payload or {}
+        if payload.get("type") != "state_change":
+            return
+        if payload.get("section") != "alerts":
+            return
+        with self._lock:
+            if self._refreshing:
+                return  # a refresh is already in flight; it will see the new alert
+            self._refreshing = True
+        threading.Thread(target=self._refresh_worker, daemon=True).start()
+
+    def _refresh_worker(self) -> None:
+        try:
+            self.refresh()
+        finally:
+            with self._lock:
+                self._refreshing = False
+
+    def refresh(self) -> None:
+        """Fetch /api/state (the desktop shell is signed out, so this reads
+        the shared bucket + system alerts — the owner's machine scope) and
+        notify on alerts we have not seen before."""
+        try:
+            with urllib.request.urlopen(  # noqa: S310 -- the loopback server
+                f"{self._base_url}/api/state", timeout=5
+            ) as resp:
+                state = json.loads(resp.read().decode("utf-8"))
+        except (OSError, ValueError, urllib.error.URLError):
+            return
+        new: list[dict[str, Any]] = []
+        with self._lock:
+            for alert in state.get("alerts") or []:
+                try:
+                    aid = int(alert.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if not self._primed:
+                    self._seen.add(aid)
+                    continue
+                if aid in self._seen:
+                    continue
+                self._seen.add(aid)
+                new.append(alert)
+            self._primed = True
+            # Bound the seen set so a long-lived shell never leaks memory.
+            if len(self._seen) > self._MAX_SEEN:
+                self._seen = set(sorted(self._seen)[-self._MAX_SEEN:])
+        for alert in new:
+            self._notifier(
+                (alert.get("title") or "DOURMOUSE alert").strip(),
+                (alert.get("detail") or "").strip(),
+            )
+
 
 def _wait_forever() -> None:
     """Keep the server alive in browser-fallback mode until Ctrl+C."""
@@ -137,6 +342,7 @@ def launch(
     webview_loader: Callable[[], Any] | None = None,
     live_polling: bool = True,
     open_all_windows: bool = True,
+    deep_link: str | None = None,
 ) -> int:
     """Launch the DOURMOUSE desktop app. Returns a process exit code.
 
@@ -176,6 +382,16 @@ def launch(
     )
     actual_port = server.server_address[1]
     url = f"http://{host}:{actual_port}"
+    # v5.19: an OS deep link at launch (dourmouse://...) loads the main
+    # window at its validated SPA route — the allow-list parser decides,
+    # never raw argv.
+    initial_href = ""
+    if deep_link:
+        from dourmouse.deeplink import parse_deeplink
+
+        parsed = parse_deeplink(deep_link)
+        if parsed["ok"]:
+            initial_href = parsed["href"]
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="dourmouse-webui")
     thread.start()
     print(f"[DESKTOP] Dourmouse core online at {url}")
@@ -184,6 +400,12 @@ def launch(
             f"[DESKTOP] {server.live_runtime.poll_count} always-on live agent poll loop(s) running"
         )
 
+    # The notification sink and its hub are initialized OUTSIDE the try so
+    # the finally block can always reference them — a loader failure that
+    # returns via the browser-fallback must not trip a NameError on cleanup
+    # (reviewer-guard: the pre-existing fallback test catches this).
+    notifier_sink = None
+    events_hub = getattr(server, "events_broadcast", None)
     try:
         loader = webview_loader or _import_webview
         try:
@@ -198,20 +420,57 @@ def launch(
             height=860,
             hidden=True,
         )
-        bridge = DesktopBridge(map_window, webview, url)
+        bridge = DesktopBridge(map_window, webview, url, state=server.state)
         # v2.8: every agent gets its own live window at startup — created
         # BEFORE webview.start() (the documented thread-safe pattern), so
         # the whole roster is working and visible from the first frame.
         if open_all_windows:
             bridge.open_all_agents(registry.subagent_names)
-        webview.create_window(
+        # v5.19: window-geometry memory (Phase 1) — restore the last size/
+        # position from the prefs store before the window is made.
+        geometry = bridge.window_state()
+        main_window = webview.create_window(
             "DOURMOUSE // CENTRAL AGENT DISPATCH",
-            url,
-            width=width,
-            height=height,
+            f"{url}{initial_href}",
+            width=int(geometry.get("width", width)),
+            height=int(geometry.get("height", height)),
             min_size=(1024, 680),
             js_api=bridge,
         )
+        bridge.attach_main_window(main_window)
+        # Persist geometry on close so the next launch reopens where the
+        # user left it. Guarded: a webview without window.events (old
+        # backend / test fake) must never break the shell.
+        try:
+
+            def _persist_geometry() -> None:
+                bridge.set_window_state(
+                    width=getattr(main_window, "width", None),
+                    height=getattr(main_window, "height", None),
+                    x=getattr(main_window, "x", None),
+                    y=getattr(main_window, "y", None),
+                    maximized=getattr(main_window, "maximized", None),
+                )
+
+            main_window.events.closed += _persist_geometry
+        except Exception:  # noqa: BLE001 -- window-state memory is best-effort
+            pass
+        # v5.19: native alert notifications — the desktop process subscribes
+        # to the server's OWN SSE fan-out (same hub the HUD uses, no extra
+        # endpoint) and maps new alerts to native notifications. Env-gated:
+        # DOURMOUSE_DESKTOP_NOTIFICATIONS=0 disables.
+        if os.environ.get("DOURMOUSE_DESKTOP_NOTIFICATIONS", "1") != "0" \
+                and events_hub is not None:
+            notifier = DesktopNotifier(url)
+
+            class _HubSink:
+                """Minimal SSE-stream-shaped sink for the broadcast hub."""
+
+                def emit(self, payload: dict[str, Any]) -> None:  # noqa: N802 -- SSE API
+                    notifier.on_event(payload)
+
+            notifier_sink = _HubSink()
+            events_hub.register(notifier_sink)
         # Blocks until every window is closed; Ctrl+C also returns. If the
         # GUI backend fails at start() (headless/SSH session, missing pyobjc),
         # degrade to the browser with a clear message — the server stays up.
@@ -223,6 +482,11 @@ def launch(
             return _fallback_to_browser(url, f"Native window could not start: {exc}")
         return 0
     finally:
+        if notifier_sink is not None and events_hub is not None:
+            try:
+                events_hub.unregister(notifier_sink)
+            except Exception:  # noqa: BLE001 -- cleanup is best-effort
+                pass
         if server.live_runtime is not None:
             server.live_runtime.stop()
         if memory is not None:
@@ -234,6 +498,8 @@ def launch(
 if __name__ == "__main__":
     import sys
 
+    from dourmouse.deeplink import deep_link_from_argv
+
     pid_file = ".dourmouse-ui.pid"
     try:
         with open(pid_file, "w") as fh:
@@ -241,7 +507,10 @@ if __name__ == "__main__":
     except OSError:
         pass
     try:
-        sys.exit(launch())
+        # v5.19: macOS/Windows re-launch the app with a dourmouse:// URL in
+        # argv when the scheme is registered — only the validated parse of
+        # it is ever used.
+        sys.exit(launch(deep_link=deep_link_from_argv(sys.argv)))
     finally:
         try:
             os.remove(pid_file)

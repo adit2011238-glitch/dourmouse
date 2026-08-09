@@ -1,7 +1,65 @@
 # Dourmouse — Progress
 
-## Current Phase: V5.18 - GOOGLE DRIVE (read-only) (2026-08-09)
+## Current Phase: V5.19 - DESKTOP CONVERSION BACKEND (Phase 1) (2026-08-09)
 ## Last updated: 2026-08-09
+
+### v5.19 shipped - desktop backend foundation: deep links, updates, window memory
+
+The first backend slice of the DOURMOUSE DESKTOP conversion (the portfolio's
+Phase 1/3/6 work) — everything additive, nothing on the existing 71-test
+surface changed:
+
+- **Deep links** (`dourmouse/deeplink.py`): a STRICT allow-list parser
+  (home/atlas/world/portfolio/markets/intelligence/alerts/settings/command
+  + bounded [A-Za-z0-9_-] id segments only). Malicious input — path
+  escapes, schemes, injection — is dropped with an honest reason, never
+  executed. The parser is server-side and pytest-tested so macOS/Windows/
+  Linux share one gate. `deep_link_from_argv` is the OS-launcher helper
+  (macOS registers the scheme via Info.plist CFBundleURLTypes). Transport:
+  `GET /api/deeplink?to=...` — 302 to the validated SPA hash route
+  (`?format=json` for programmatic clients), token-gated off-loopback like
+  every other API.
+- **Secure self-update feed** (`dourmouse/updates.py`): `GET /api/version`
+  reports current + latest from a signed `latest.json` (channel allow-list,
+  https-only artifact url, 64-hex sha256 — malformed feeds are honest
+  errors, never guesses). Artifacts are SHA-256 verified BEFORE staging;
+  a mismatch is refused and deleted. The previous staged release is kept
+  under `updates/previous/` for rollback. Cached 6h per feed URL; unset
+  feed honestly reports configured:false. `__version__` bumped to 5.19.0.
+- **Desktop shell IPC** (`desktop.py`): typed bridge surface —
+  `window_state()`/`set_window_state()` (geometry through the EXISTING
+  per-user prefs API, machine scope) with restore-on-launch and
+  persist-on-close; `navigate(href)` only ever accepts allow-list hash
+  routes. `launch(deep_link=...)` loads the main window at a validated
+  route. NO shell access, no paths, no exec — the bridge stays tiny and
+  typed.
+- **Native alert notifications** (`DesktopNotifier`): the desktop process
+  subscribes to the server's OWN SSE fan-out (no new endpoint) and maps
+  NEW alerts to macOS `display notification` via osascript (honest stderr
+  fallback when unavailable). First refresh seeds the seen set so a launch
+  never spams pre-existing alerts; env-gated
+  `DOURMOUSE_DESKTOP_NOTIFICATIONS=0`.
+
+Review-hardened (second pass): the notifier's /api/state refresh now runs on
+a daemon thread — a synchronous fetch inside the SSE hub's broadcast thread
+would stall the live fan-out to every connected HUD client; a valid-JSON-
+but-not-an-object feed is now an honest "must be a JSON object" error
+instead of a raw AttributeError; failed feed checks are negative-cached so
+a dead feed cannot re-block /api/version for the full timeout on every
+call; artifact downloads stream to disk with a 512 MB mid-stream cap and an
+O(1)-memory sha256 instead of slurping the whole release into RAM.
+
+Live-verified against the running server: /api/version (honest
+configured:false without a feed), the deeplink 302 chain landing on the SPA
+root + hash (reviewer-style self-check caught a redirect loop — a
+fragment-only Location resolves against /api/deeplink and loops forever, so
+it redirects to "/" + hash instead), and hostile input refused 400.
+
+New hermetic tests: tests/test_deeplink.py (parser + argv + HTTP route),
+tests/test_updates.py (feed validation, sha256 gate, staging + rollback,
+not-configured), tests/test_desktop.py (fake webview seam: window-state
+roundtrip, launch with restore, notifier diff/dedupe).
+
 
 ### v5.18 shipped - 'anything linked to that account' now includes Drive
 
