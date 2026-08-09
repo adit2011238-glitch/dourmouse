@@ -23,13 +23,18 @@ class TestFullyLocal:
     def _pages(self) -> list[Path]:
         return sorted(self.UI_DIR.glob("*.html"))
 
+    def _read_utf8(self, path: Path) -> str:
+        """HTML is UTF-8 (declared in <meta charset>); the locale default
+        (cp1252 on Windows) chokes on non-ASCII — read explicitly."""
+        return path.read_text(encoding="utf-8")
+
     def test_pages_exist(self):
         names = {p.name for p in self._pages()}
         assert {"index.html", "map.html", "agent.html", "login.html"} <= names
 
     def test_no_external_resources_any_page(self):
         for page in self._pages():
-            html = page.read_text()
+            html = self._read_utf8(page)
             # Strip the markdown-link renderer line, which is code, not a resource ref.
             code = html.split("<script>")[-1] if "<script>" in html else ""
             stripped = html.replace(code, "")
@@ -42,7 +47,7 @@ class TestFullyLocal:
 
     def test_no_cdn_script_tags(self):
         for page in self._pages():
-            html = page.read_text()
+            html = self._read_utf8(page)
             assert "cdn." not in html and "unpkg" not in html and "jsdelivr" not in html
             assert "fonts.googleapis" not in html and "googleapis" not in html
 
@@ -56,7 +61,9 @@ class TestPremiumHud:
     """The v4.0 visual language — pinned so it cannot silently regress."""
 
     def _read(self, rel: str) -> str:
-        return (Path(__file__).resolve().parents[2] / rel).read_text()
+        return (Path(__file__).resolve().parents[2] / rel).read_text(
+            encoding="utf-8"
+        )
 
     def test_particle_field(self):
         html = self._read("ui/index.html")

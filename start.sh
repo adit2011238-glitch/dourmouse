@@ -12,12 +12,33 @@ if [ -f tools/sync_dourmouse.py ]; then
    python3 tools/sync_dourmouse.py || true) 2>/dev/null || true
 fi
 
+# v8.2: continuous upstream-push watcher (single-instance, self-healing).
+# If one is already running the tick exits 0 immediately; if it died this
+# starts a fresh one. Logs to workspace/watch_dourmouse.log + push_events.log.
+if [ -f tools/watch_dourmouse.py ]; then
+  (./.venv/bin/python tools/watch_dourmouse.py --interval 10 --single-instance \
+   >> workspace/watch_dourmouse.log 2>&1 || \
+   python3 tools/watch_dourmouse.py --interval 10 --single-instance \
+   >> workspace/watch_dourmouse.log 2>&1 || true) & disown
+fi
+
 # Load .env if present (DOURMOUSE_* and provider keys).
 if [ -f .env ]; then
   set -a
   # shellcheck disable=SC1091
   . ./.env
   set +a
+fi
+
+# v8.4: standalone TradingView webhook listener (port 8766) + cloudflared
+# tunnel. The listener serves ONLY the webhook — never expose the full HUD.
+# Cloudflared quick tunnels need no account; the URL changes each start, so
+# update TV_PUBLIC_URL in .env after starting.
+if [ -x "$DOURMOUSE_CLOUDFLARED" ] && [ -n "${TV_WEBHOOK_SECRET:-}" ]; then
+  (./.venv/bin/python -m dourmouse.tv_webhook_server --port 8766 \
+   >> workspace/tv_webhook.log 2>&1 || true) & disown
+  ("$DOURMOUSE_CLOUDFLARED" tunnel --url http://127.0.0.1:8766 --no-autoupdate \
+   >> workspace/cloudflared.log 2>&1 || true) & disown
 fi
 
 if [ ! -d .venv ]; then

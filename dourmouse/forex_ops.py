@@ -388,7 +388,10 @@ def _forex_ibkr_tool(arguments: dict[str, Any]) -> str:
     except Exception as exc:  # defensive: probe must never crash the roster
         return f"FOREX IBKR (reported honestly): probe failed — {exc}"
     if s["reachable"]:
-        return f"FOREX IBKR GATEWAY: REACHABLE ({s['host']}:{s['port']})"
+        return (f"FOREX IBKR GATEWAY: REACHABLE ({s['host']}:{s['port']}) — "
+                f"futures execution ready (ibkr_connector.py --futures-list "
+                f"resolves the 26-symbol seasonal universe; --paper-order is "
+                f"paper-first and refuses the live port)")
     return (f"FOREX IBKR GATEWAY: UNREACHABLE ({s['host']}:{s['port']}) — "
             f"{s.get('error', 'no route')}. Start IB Gateway with socket "
             f"clients enabled and retry.")

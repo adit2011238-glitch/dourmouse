@@ -50,9 +50,15 @@ def get_atlas_venv_python() -> Path:
             "before the Research Agent can call its real entry points. Set "
             "ATLAS_VENV_PATH in .env once that venv exists."
         )
-    py = Path(raw).expanduser() / "bin" / "python"
-    if not py.is_file():
-        raise AtlasNotConfiguredError(f"No python interpreter found at {py}")
+    # Windows venvs put the interpreter in Scripts/, POSIX in bin/. Try
+    # both layouts so a venv created on either platform resolves.
+    root = Path(raw).expanduser()
+    candidates = [root / "Scripts" / "python.exe", root / "bin" / "python"]
+    if os.name != "nt":
+        candidates.reverse()
+    py = next((c for c in candidates if c.is_file()), None)
+    if py is None:
+        raise AtlasNotConfiguredError(f"No python interpreter found under {root}")
     return py
 
 

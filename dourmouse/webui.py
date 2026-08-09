@@ -32,6 +32,7 @@ Binds to 127.0.0.1 only. Secrets stay in .env; nothing is logged in full.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import urllib.parse
@@ -744,6 +745,18 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.atlas_cli import atlas_panel_snapshot
 
             self._send_json(atlas_panel_snapshot())
+        elif path == "/api/mt5":
+            # v8.3: MT5 paper-broker panel — subprocess-bounded snapshot so
+            # the HUD poll can never hang on the terminal.
+            from dourmouse.mt5_ops import mt5_panel_snapshot
+
+            self._send_json(mt5_panel_snapshot())
+        elif path == "/api/tv":
+            # v8.4: TradingView bridge panel — legs, webhook URL, recent
+            # signals (honest: reports configured=False without a secret).
+            from dourmouse.tradingview_ops import tv_panel_snapshot
+
+            self._send_json(tv_panel_snapshot())
         elif path == "/api/files":
             # v5.0: list uploaded files (name, size, age) newest first.
             try:
@@ -842,6 +855,18 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/upload":
             # v5.0: raw-body file upload into the sandboxed uploads root.
             self._handle_upload()
+        elif parsed.path == "/api/push-notify":
+            # v8.2: external watchers (tools/watch_dourmouse.py) surface a
+            # real event into the AGENT COMMS bus — e.g. an upstream push
+            # to the dourmouse repo. Loopback-facing; the watcher runs on
+            # 127.0.0.1. Real event, never fabricated (Rule 2.1).
+            self._handle_push_notify()
+        elif parsed.path == "/api/tv-webhook":
+            # v8.4: TradingView alert webhook — TradingView POSTs alert
+            # messages here (form-encoded payload= OR raw JSON). Parses,
+            # validates the TV_WEBHOOK_SECRET when configured, persists to
+            # workspace/tv_signals.jsonl and broadcasts to the COMMS bus.
+            self._handle_tv_webhook()
         elif parsed.path == "/api/atlas/run":
             # v5.4: start one managed ATLAS command (single-flight).
             self._handle_atlas_run()
@@ -948,6 +973,56 @@ class _Handler(BaseHTTPRequestHandler):
             {"ok": True, "name": name, "size": len(data), "path": str(target)}
         )
 
+    def _handle_push_notify(self) -> None:
+        """v8.2: POST /api/push-notify — external event into the COMMS bus.
+
+        Body: {"from", "subject", "body"}. Posts a REAL broadcast message
+        to the inter-agent bus so the HUD's AGENT COMMS panel shows it
+        immediately. Used by tools/watch_dourmouse.py to surface upstream
+        pushes. Sender name is sanitized; body is capped by the bus itself.
+        Never fabricated — the watcher only sends events it actually saw.
+        """
+        try:
+            body = self._read_json_body()
+        except Exception as exc:  # noqa: BLE001 -- honest malformed-body failure
+            self._send_json({"ok": False, "error": f"bad body: {exc}"}, status=400)
+            return
+        sender = str(body.get("from") or "watchdog").strip()[:40] or "watchdog"
+        subject = str(body.get("subject") or "EXTERNAL EVENT").strip()[:200]
+        text = str(body.get("body") or "").strip()
+        if not text:
+            self._send_json({"ok": False, "error": "body is required"}, status=400)
+            return
+        bus = getattr(self.server, "bus", None) or get_message_bus()
+        bus.post(sender, "BROADCAST", subject, text)
+        self._send_json({"ok": True, "from": sender, "subject": subject})
+
+    def _handle_tv_webhook(self) -> None:
+        """v8.4: POST /api/tv-webhook — TradingView alert webhook.
+
+        Reads the RAW body (TradingView sends form-encoded ``payload=`` by
+        default, or raw JSON), hands it to tradingview_ops.handle_tv_webhook
+        for parse/validate/persist/broadcast, and answers 200 to stop
+        TradingView retrying. Caps the body at 256 KB."""
+        from dourmouse.tradingview_ops import handle_tv_webhook
+
+        raw_len = self.headers.get("Content-Length", "0") or "0"
+        try:
+            length = int(raw_len)
+        except (TypeError, ValueError):
+            self._send_json({"ok": False, "error": "invalid Content-Length"},
+                            status=400)
+            return
+        if length < 0 or length > 256 * 1024:
+            self._send_json({"ok": False, "error": "webhook body too large"},
+                            status=400)
+            return
+        body = self.rfile.read(length) if length else b""
+        ctype = self.headers.get("Content-Type", "") or ""
+        bus = getattr(self.server, "bus", None) or get_message_bus()
+        result = handle_tv_webhook(body, ctype, bus=bus)
+        self._send_json(result, status=200 if result.get("ok") else 400)
+
     def _handle_agent_api(self, name: str) -> None:
         """v2.7: focused live snapshot for ONE agent window.
 
@@ -1016,6 +1091,20 @@ class _Handler(BaseHTTPRequestHandler):
             )
         )
         body = target.read_bytes()
+        # v8.2 — the [ATLAS TERMINAL] button opens the streamlit terminal;
+        # its port is configurable via DOURMOUSE_ATLAS_TERMINAL_PORT (default
+        # 8511, the start_atlas_ui.sh default). Injected at serve time so the
+        # button never hardcodes a stale port.
+        if rel == "index.html":
+            port = os.environ.get("DOURMOUSE_ATLAS_TERMINAL_PORT", "8511").strip() or "8511"
+            marker = b"<script>"
+            inject = (
+                b"<script>window.__ATLAS_TERMINAL_PORT__='"
+                + port.encode()
+                + b"';</script>\n<script>"
+            )
+            if marker in body:
+                body = body.replace(marker, inject, 1)
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))

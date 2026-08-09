@@ -163,6 +163,22 @@ class TestIbkr:
         out = forex_ibkr()
         assert out["reachable"] is True
 
+    def test_ibkr_tool_reachable_mentions_futures(self, monkeypatch):
+        # The tool wrapper (roster-facing) advertises the futures capability
+        # when the gateway is up — the honest execution-venue story.
+        class _Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(socket, "create_connection", lambda *a, **k: _Conn())
+        out = forex_ops._forex_ibkr_tool({})
+        assert "REACHABLE" in out
+        assert "futures" in out
+        assert "paper-order" in out
+
     def test_unreachable_reports_error(self, monkeypatch):
         def _boom(*a, **k):
             raise OSError("connection refused")

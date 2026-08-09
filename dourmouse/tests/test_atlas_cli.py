@@ -20,6 +20,7 @@ import os
 import subprocess
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -281,6 +282,95 @@ class TestRunManager:
         snap = mgr.snapshot()
         assert snap["exit_code"] == -1
         assert "repo exploded" in snap["tail"]
+
+
+class TestSpewrate:
+    """v8.2 — real measured ATLAS spewrate (candidates/sec)."""
+
+    def test_idle_before_any_run(self):
+        mgr = atlas_cli.AtlasRunManager()
+        out = mgr.spewrate()
+        assert out["state"] == "idle"
+        assert out["rate"] is None
+        assert out["unit"] == "candidates/s"
+
+    def test_parses_evaluated_from_real_output_shape(self):
+        tail = (
+            '{\n  "report_path": "deliverables/fx/2026-08-09.md",\n'
+            '  "pairs": 7,\n  "evaluated": 63,\n  "accepted": 4,\n'
+            '  "failed": false\n}\n'
+            "fx-daily: report written to deliverables/fx/2026-08-09.md\n"
+        )
+        assert atlas_cli._evaluated_from_tail(tail) == 63
+
+    def test_no_evaluated_returns_none(self):
+        assert atlas_cli._evaluated_from_tail("boom on stderr") is None
+
+    def test_done_run_computes_rate(self):
+        mgr = atlas_cli.AtlasRunManager()
+        started = datetime.now(timezone.utc) - timedelta(seconds=30)
+        mgr._state.update(
+            {
+                "command": "fx-daily",
+                "running": False,
+                "started_at": started.isoformat(timespec="seconds"),
+                "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "exit_code": 0,
+                "tail": '{"evaluated": 63, "accepted": 4}',
+            }
+        )
+        out = mgr.spewrate()
+        assert out["state"] == "done"
+        assert out["work"] == 63
+        assert out["elapsed_s"] is not None
+        assert out["rate"] is not None
+        # 63 candidates in ~30s ≈ 2.1/s — the roundtrip must stay sane.
+        assert 1.0 <= out["rate"] <= 5.0
+
+    def test_done_without_work_count_is_honest(self):
+        mgr = atlas_cli.AtlasRunManager()
+        started = datetime.now(timezone.utc) - timedelta(seconds=10)
+        mgr._state.update(
+            {
+                "command": "health",
+                "running": False,
+                "started_at": started.isoformat(timespec="seconds"),
+                "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "exit_code": 0,
+                "tail": "health: all providers nominal",
+            }
+        )
+        out = mgr.spewrate()
+        assert out["state"] == "done"
+        assert out["rate"] is None
+        assert "no parseable evaluated count" in out["note"]
+
+    def test_running_state_has_no_rate(self):
+        mgr = atlas_cli.AtlasRunManager()
+        mgr._state.update(
+            {
+                "command": "fx-daily",
+                "running": True,
+                "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "finished_at": None,
+                "exit_code": None,
+                "tail": "",
+            }
+        )
+        out = mgr.spewrate()
+        assert out["state"] == "running"
+        assert out["rate"] is None
+        assert out["elapsed_s"] is not None
+
+    def test_panel_payload_carries_spewrate(self, tmp_path, monkeypatch):
+        repo = _fake_atlas(tmp_path, monkeypatch)
+        monkeypatch.setattr(atlas_cli, "_version_cache", {"at": 0.0, "value": None})
+        monkeypatch.setattr(atlas_cli, "atlas_run_manager", atlas_cli.AtlasRunManager())
+        payload = atlas_cli.atlas_panel_snapshot()
+        assert payload["configured"] is True
+        assert payload["repo"] == str(repo)
+        assert payload["spewrate"]["state"] == "idle"
+        assert payload["spewrate"]["unit"] == "candidates/s"
 
 
 class TestPanelSnapshot:

@@ -1953,6 +1953,41 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    # -- v8.2 Trading 212 broker agent -------------------------------- #
+    # Real account + order access via the official T212 Public API
+    # (demo/live, X-Api-Token). Paper-first: t212_order refuses without an
+    # explicit paper_confirm=true, and live is double-gated. Honest NOT
+    # CONFIGURED without T212_API_KEY (Rule 2.2). Equity/ISA scope only —
+    # the API does not expose CFDs, so the seasonal CFD legs stay manual
+    # or via IBKR.
+    from dourmouse.trading212_ops import build_t212_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "t212",
+            "Projects",
+            "Trading 212 broker — real account summary, open positions, portfolio, and paper-first order placement (demo/live, double-gated).",
+            build_t212_tool_specs(),
+        )
+    )
+
+    # -- v8.3 MetaTrader 5 paper broker agent ------------------------- #
+    # Low-friction paper venue: free MT5 demo accounts come with real-time
+    # quotes and simulated fills (no data subscriptions, no futures margin
+    # floors), and MT5 brokers commonly list the ag CFDs the seasonal
+    # strategy trades. Paper-first: mt5_order refuses without
+    # paper_confirm=true; live accounts are double-gated.
+    from dourmouse.mt5_ops import build_mt5_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "mt5",
+            "Projects",
+            "MetaTrader 5 paper broker — status, seasonal-universe symbol availability, live quotes, and paper-first orders on a free demo account (no subscriptions, no margin floors).",
+            build_mt5_tool_specs(),
+        )
+    )
+
     # -- v8.0 ATLAS Terminal agent ------------------------------------ #
     # What the ATLAS Terminal (streamlit, atlas_terminal/) shows right now.
     from dourmouse.atlas_ui_ops import build_atlas_ui_tool_specs
