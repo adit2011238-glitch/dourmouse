@@ -133,8 +133,37 @@ if ! grep -qE '^NVIDIA_API_KEY=.+' .env 2>/dev/null; then
 fi
 
 # --- 4. start the desktop app -----------------------------------------------
+# v5.20: a dourmouse:// deep link may arrive with the launch (the applet's
+# `on open location` sets DOURMOUSE_DEEP_LINK). The raw URL is ONLY ever
+# forwarded — the allow-list parser in dourmouse/deeplink.py decides what
+# it means. First gate here: only dourmouse:// ever reaches the server.
+if [ -n "${DOURMOUSE_DEEP_LINK:-}" ]; then
+  case "$DOURMOUSE_DEEP_LINK" in
+    dourmouse://*) : ;;
+    *) echo "  ⚠ ignoring non-dourmouse:// deep link"; DOURMOUSE_DEEP_LINK="" ;;
+  esac
+fi
 if curl -s -o /dev/null --max-time 2 "$URL/api/roster" 2>/dev/null; then
   echo ""
+  if [ -n "${DOURMOUSE_DEEP_LINK:-}" ]; then
+    echo "  → forwarding deep link to the running app: $DOURMOUSE_DEEP_LINK"
+    # The running window's SSE hub gets a validated `navigate` event and
+    # routes itself — no browser involved, nothing executed. The body is
+    # JSON-encoded by python (exact even if the URL contained quotes or
+    # backslashes — never hand-spliced into the request).
+    printf '%s' "$DOURMOUSE_DEEP_LINK" | ".venv/bin/python" -c '
+import json, sys, urllib.request
+url = sys.argv[1]
+payload = json.dumps({"to": sys.stdin.read().strip()}).encode()
+try:
+    req = urllib.request.Request(
+        url + "/api/deeplink", data=payload,
+        headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=3)
+except Exception:
+    pass
+' "$URL" >/dev/null 2>&1 || true
+  fi
   echo "  ✓ DOURMOUSE is ALREADY running at $URL — check its window."
   exit 0
 fi
@@ -142,7 +171,12 @@ fi
 mkdir -p workspace
 echo ""
 echo "  booting dispatch core ... (log → .dourmouse-ui.log)"
-nohup ".venv/bin/python" -m dourmouse.desktop > .dourmouse-ui.log 2>&1 &
+DEEP_LINK_ARGS=()
+if [ -n "${DOURMOUSE_DEEP_LINK:-}" ]; then
+  DEEP_LINK_ARGS=(-- "$DOURMOUSE_DEEP_LINK")
+  echo "  cold start with deep link: $DOURMOUSE_DEEP_LINK"
+fi
+nohup ".venv/bin/python" -m dourmouse.desktop "${DEEP_LINK_ARGS[@]}" > .dourmouse-ui.log 2>&1 &
 echo $! > .dourmouse-ui.pid
 
 UP=0

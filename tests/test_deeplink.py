@@ -22,8 +22,9 @@ from dourmouse.state_store import StateStore
 from dourmouse.webui import run_server
 
 
-@pytest.fixture()
-def server():
+def _make_server():
+    """One hermetic run_server (fresh in-memory state + auth, no external
+    integrations) — the shared fixture body."""
     registry = DispatchRegistry()
     srv = run_server(
         registry,
@@ -44,9 +45,35 @@ def server():
     port = srv.server_address[1]
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{port}"
+    return f"http://127.0.0.1:{port}", srv
+
+
+@pytest.fixture()
+def server():
+    base, srv = _make_server()
+    yield base
     srv.shutdown()
     srv.server_close()
+
+
+@pytest.fixture()
+def server_with_hub():
+    """The same hermetic server, but exposing it so tests can attach a
+    fake SSE sink to the broadcast hub (for the navigate fan-out)."""
+    base, srv = _make_server()
+    yield base, srv
+    srv.shutdown()
+    srv.server_close()
+
+
+class _Sink:
+    """Minimal SSE-stream-shaped test sink for the broadcast hub."""
+
+    def __init__(self):
+        self.events = []
+
+    def emit(self, payload):
+        self.events.append(payload)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -166,3 +193,76 @@ def test_route_rejects_bad_segment(server):
     assert exc.value.code == 400
     body = json.loads(exc.value.read().decode())
     assert body["ok"] is False
+
+
+# -- v5.20: POST broadcast (already-running desktop path) ----------------- #
+
+
+def test_post_deeplink_broadcasts_navigate(server_with_hub):
+    base, srv = server_with_hub
+    sink = _Sink()
+    srv.events_broadcast.register(sink)
+    try:
+        req = urllib.request.Request(
+            base + "/api/deeplink",
+            data=json.dumps({"to": "dourmouse://atlas/research"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            body = json.loads(resp.read().decode())
+        assert body == {"ok": True, "href": "#/atlas/research"}
+        assert {"type": "navigate", "href": "#/atlas/research"} in sink.events
+    finally:
+        srv.events_broadcast.unregister(sink)
+
+
+def test_post_deeplink_rejects_hostile_without_broadcast(server_with_hub):
+    base, srv = server_with_hub
+    sink = _Sink()
+    srv.events_broadcast.register(sink)
+    try:
+        req = urllib.request.Request(
+            base + "/api/deeplink",
+            data=json.dumps({"to": "shell/rm -rf"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req)
+        assert exc.value.code == 400
+        assert sink.events == []  # nothing hostile is ever broadcast
+    finally:
+        srv.events_broadcast.unregister(sink)
+
+
+# -- v5.20: offline shell (service worker + scope header) ------------------ #
+
+
+def test_sw_served_with_js_content_type(server):
+    with urllib.request.urlopen(server + "/sw.js") as resp:
+        assert resp.headers.get("Content-Type") == "application/javascript"
+        body = resp.read().decode()
+    assert "dourmouse-shell-v1" in body
+    assert "X-Dourmouse-Stale" in body
+    assert "X-Dourmouse-Scope" in body
+
+
+def test_state_scope_header_is_shared_when_signed_out(server):
+    with urllib.request.urlopen(server + "/api/state") as resp:
+        assert resp.headers.get("X-Dourmouse-Scope") == "shared"
+        json.loads(resp.read().decode())
+
+
+def test_state_scope_header_is_personal_for_signed_in_user(server_with_hub):
+    """The SW only caches SHARED-scope snapshots — this asserts the other
+    half of that contract: a signed-in user's /api/state is stamped
+    'personal' so it can never enter the offline cache."""
+    base, srv = server_with_hub
+    sid = srv.auth.create_session("alice@example.com")
+    request = urllib.request.Request(base + "/api/state")
+    request.add_header("Cookie", f"dourmouse_user_session={sid}")
+    with urllib.request.urlopen(request) as resp:
+        assert resp.headers.get("X-Dourmouse-Scope") == "personal"
+        body = json.loads(resp.read().decode())
+    assert body["me"] == "alice@example.com"

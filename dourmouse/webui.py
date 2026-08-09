@@ -763,12 +763,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- plumbing --------------------------------------------------------- #
 
-    def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
+    def _send_json(self, payload: dict[str, Any], status: int = 200,
+                   headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -834,6 +837,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_agent_api(agent_name)
         elif path.startswith("/assets/"):
             self._serve_static(path[len("/assets/"):])
+        elif path == "/sw.js":
+            # v5.20: the offline-shell service worker (desktop portfolio
+            # Phase 5). Real JS content type; no-store keeps the SW script
+            # re-validating per the browser's own update rules.
+            self._serve_static("sw.js")
         elif path == "/api/roster":
             self._send_json(
                 build_roster_payload(self.server.registry, self.server.config)
@@ -973,7 +981,14 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.state_store import SHARED_OWNER
 
             me = self._session_user()
-            self._send_json({**store.snapshot(me or SHARED_OWNER), "me": me})
+            # v5.20: the offline service worker caches ONLY shared-scope
+            # snapshots (X-Dourmouse-Scope: shared) — a signed-in user's
+            # personal data must never be persisted in the SW cache, where
+            # every client of this origin could replay it offline.
+            self._send_json(
+                {**store.snapshot(me or SHARED_OWNER), "me": me},
+                headers={"X-Dourmouse-Scope": "shared" if me is None else "personal"},
+            )
         elif path == "/api/palette":
             # v5.14 Phase R0: the command-centre index — destinations,
             # agents, and commands. Same data powers the desktop ⌘K overlay
@@ -1083,7 +1098,13 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_unauthorized()
             return
-        if parsed.path == "/api/chat":
+        if parsed.path == "/api/deeplink":
+            # v5.20: programmatic deep-link navigation (the desktop shell's
+            # already-running path): allow-list parsed server-side, then a
+            # validated `navigate` SSE broadcast so the open window routes
+            # without a browser. Never executes anything.
+            self._handle_deeplink_post()
+        elif parsed.path == "/api/chat":
             self._handle_chat()
         elif parsed.path == "/api/confirm":
             self._handle_confirm()
@@ -2153,6 +2174,34 @@ class _Handler(BaseHTTPRequestHandler):
         ]
         return {"destinations": destinations, "agents": agents,
                 "commands": commands}
+
+    def _handle_deeplink_post(self) -> None:
+        """v5.20: POST /api/deeplink — body {to: <target>}. Same allow-list
+        gate as the GET route, but instead of a 302 it broadcasts a
+        validated ``navigate`` SSE event over the hub so EVERY open window
+        (the desktop shell's webview, a phone on /mobile, another browser
+        tab) routes to the workspace live — the already-running-app path for
+        ``dourmouse://`` deep links. Only allow-list hrefs are ever
+        broadcast; a hostile ``to`` is a plain 400, never executed.
+        """
+        from dourmouse.deeplink import parse_deeplink
+
+        body = self._read_json_body()
+        parsed_target = parse_deeplink((body.get("to") or "").strip())
+        if not parsed_target["ok"]:
+            self._send_json({"ok": False, "error": parsed_target["reason"]},
+                            status=400)
+            return
+        self._state_changed_navigate(parsed_target["href"])
+        self._send_json({"ok": True, "href": parsed_target["href"]})
+
+    def _state_changed_navigate(self, href: str) -> None:
+        """Broadcast a validated navigation to every connected window. The
+        href comes from the allow-list parser, so only [A-Za-z0-9_/-#] ever
+        reaches the clients' location.hash (never executed)."""
+        hub = getattr(self.server, "events_broadcast", None)
+        if hub is not None:
+            hub.broadcast({"type": "navigate", "href": href})
 
     def _handle_deeplink(self, parsed) -> None:
         """v5.19: GET /api/deeplink?to=<target>[&format=json] — allow-listed

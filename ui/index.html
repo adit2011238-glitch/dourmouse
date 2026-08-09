@@ -789,6 +789,23 @@
     #app { margin-left: 0 !important; padding-bottom: 54px; }
     .dm-grid { grid-template-columns: 1fr; }
   }
+  /* v5.20 — offline / stale-data banner (desktop portfolio Phase 5). */
+  #offlinebanner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    display: none; align-items: center; justify-content: center; gap: 8px;
+    padding: 6px 12px;
+    font: 600 9px/1 var(--font-mono); letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--amber);
+    background: rgba(var(--amber-rgb), var(--a10));
+    border-bottom: 1px solid rgba(var(--amber-rgb), var(--a45));
+    backdrop-filter: blur(6px);
+  }
+  #offlinebanner.show { display: flex; }
+  #offlinebanner .live-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex: none;
+    background: var(--amber); box-shadow: 0 0 6px rgba(var(--amber-rgb), 0.8);
+  }
 </style>
 </head>
 <body>
@@ -813,6 +830,8 @@
     <div id="bootlines"></div>
   </div>
 </div>
+<!-- v5.20: honest offline/stale marker — cached data is never shown as live -->
+<div id="offlinebanner" aria-live="polite"><span class="live-dot"></span>OFFLINE · SHOWING CACHED DATA — MARKED STALE · RECONNECT TO REFRESH</div>
 <div id="app">
   <header id="telemetry">
     <div class="brand-block">
@@ -2564,9 +2583,12 @@
     try {
       const r = await fetch('/api/state');
       if (!r.ok) return;
+      // v5.20: the service worker stamps the offline fallback with
+      // X-Dourmouse-Stale — cached data is NEVER presented as live.
+      setOffline(r.headers.get('X-Dourmouse-Stale') === '1' || !navigator.onLine);
       state = await r.json();
       renderBadges(); renderAlerts(); renderWatchlist(); renderMuted(); renderPrefs(); renderScope(); renderResume();
-    } catch (e) { /* server restarting — next tick retries */ }
+    } catch (e) { setOffline(true); /* server unreachable — banner + next tick retries */ }
   }
 
   function renderScope() {
@@ -2923,6 +2945,12 @@
       es.onmessage = (ev) => {
         try {
           const d = JSON.parse(ev.data);
+          // v5.20: a validated deep-link navigation (allow-list parsed
+          // server-side — only safe hash routes ever arrive here).
+          if (d && d.type === 'navigate' && d.href && /^#[A-Za-z0-9_\/-]{1,200}$/.test(d.href)) {
+            location.hash = d.href;
+            return;
+          }
           if (d && d.type === 'state_change') {
             // v5.17 per-user: ignore events acted by ANOTHER signed-in user
             // (their metadata must not reach this client; the refetch is
@@ -2942,6 +2970,17 @@
   }
 
   // ---- boot --------------------------------------------------------------
+  // v5.20: offline shell — register the service worker (desktop portfolio
+  // Phase 5) and keep the STALE banner honest across connectivity changes.
+  function setOffline(stale) {
+    const b = $('offlinebanner');
+    if (b) b.classList.toggle('show', !!stale);
+  }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => { /* SW unsupported — browser fallback only */ });
+  }
+  window.addEventListener('offline', () => setOffline(true));
+  window.addEventListener('online', () => { setOffline(false); fetchState(); });
   window.addEventListener('hashchange', route);
   window.addEventListener('resize', () => { renderResume(); });
   wireActions(); wirePalette(); renderMore();

@@ -1,7 +1,47 @@
 # Dourmouse — Progress
 
-## Current Phase: V5.19 - DESKTOP CONVERSION BACKEND (Phase 1) (2026-08-09)
+## Current Phase: V5.20 - OFFLINE SHELL + DEEP-LINK RUNTIME (Phases 5/3) (2026-08-09)
 ## Last updated: 2026-08-09
+
+### v5.20 shipped - the app works offline, and dourmouse:// links work live
+
+- **Offline shell (Phase 5)** — `ui/sw.js` service worker: the shell
+  (/, /login, /map, /assets/*) is stale-while-revalidated so the UI opens
+  instantly with no network; `/api/state` is network-first with an offline
+  fallback served with an explicit `X-Dourmouse-Stale: 1` header the UI
+  turns into a visible amber STALE banner — cached data is NEVER presented
+  as live. Cross-user honesty: the SW only caches SHARED-scope snapshots
+  (the server now sends `X-Dourmouse-Scope` on /api/state) — a signed-in
+  user's personal data never enters the SW cache, so it can never be
+  replayed to another client of the origin. All other APIs (chat, SSE,
+  uploads, agent views) stay network-only.
+- **Deep links now work at RUNTIME (Phase 3)** — `POST /api/deeplink`
+  allow-list parses the target and broadcasts a validated `navigate` SSE
+  event; the frontend's SSE handler sets `location.hash` from it (only
+  `[A-Za-z0-9_/-#]` hash routes ever arrive). The macOS scheme is
+  registered in `build_app.command` (`on open location` applet handler +
+  Info.plist CFBundleURLTypes via PlistBuddy): a `dourmouse://atlas` click
+  on a cold start boots the app at `/#/atlas` (argv path, v5.19); when the
+  app is already running, `start.command` POSTs the link and the open
+  window routes itself. Raw URLs are only ever forwarded as env/argv —
+  start.command gates `dourmouse://*` first, the allow-list parser is the
+  final word.
+- **Cache-Control review (backend):** unchanged `no-store` everywhere is
+  CORRECT — the SW owns offline (versioned, explicit); no HTTP cache can
+  serve stale-as-live data independently of it. Documented, no change.
+
+New tests: POST-broadcast + hostile-refusal, /sw.js served with real JS
+content type, shared-scope header when signed out.
+
+Honest verification note: the Freebuff preview pane's sandbox stubs
+service-worker INSTALLS (register() resolves, the install reaches
+"installing", then the registration is dropped) — the SW script itself is
+syntax-valid, served with the right content type, and fetchable from the
+page, and the server-side contract (stale header, scope header, /sw.js
+route, navigate broadcast) is live-verified. The offline-shell behavior
+itself (caching + offline fallback) must be confirmed in a REAL browser /
+the desktop WKWebView window on first run.
+
 
 ### v5.19 shipped - desktop backend foundation: deep links, updates, window memory
 
