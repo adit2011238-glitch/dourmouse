@@ -601,7 +601,7 @@ class TestEndToEndThroughGeneralRoster:
     """Proves the REAL general roster works through the loop with a fake
     LLM side, including the extension case (trading subagent added later)."""
 
-    def test_general_roster_registers_nineteen_subagents(self):
+    def test_general_roster_registers_all_subagents(self):
         from dourmouse.general_roster import build_general_registry
 
         registry = build_general_registry()
@@ -626,6 +626,8 @@ class TestEndToEndThroughGeneralRoster:
             "code_claude",
             "messenger",  # v3.0: inter-agent messaging
             "atlas",  # v4.0: ATLAS command-centre telemetry
+            "freebuff",  # v5.5: Freebuff Desktop reads
+            "music",  # v5.7: Spotify playback + discovery
         }
 
     def test_trading_subagent_added_later_dispatchable(self):
@@ -1021,3 +1023,42 @@ class TestLoopBounding:
             total = sum(dispatch_module._est_tokens(m) for m in sent)
             assert total <= dispatch_module._MAX_LLM_TOKENS + 200
             assert sent[0]["role"] == "system"
+
+
+class TestBrainEscalation:
+    """v5.5: multi-step prompts escalate to the full default brain; simple
+    chat stays on the fast orchestrator brain. Deterministic (Rule 2.8)."""
+
+    def test_simple_prompt_stays_fast(self):
+        model, escalated = dispatch_module._resolve_brain_model(
+            fast="fast-model", default="full-model", prompt="what is 2+2", explicit=None
+        )
+        assert model == "fast-model"
+        assert escalated is False
+
+    def test_multi_step_prompt_escalates(self):
+        model, escalated = dispatch_module._resolve_brain_model(
+            fast="fast-model",
+            default="full-model",
+            prompt="write a script then run it and report the output",
+            explicit=None,
+        )
+        assert model == "full-model"
+        assert escalated is True
+
+    def test_explicit_override_wins(self):
+        model, escalated = dispatch_module._resolve_brain_model(
+            fast="fast-model",
+            default="full-model",
+            prompt="write a script then run it and report the output",
+            explicit="focus-agent-model",
+        )
+        assert model == "focus-agent-model"
+        assert escalated is False
+
+    def test_same_model_no_false_escalation_flag(self):
+        model, escalated = dispatch_module._resolve_brain_model(
+            fast="full-model", default="full-model", prompt="do a then b", explicit=None
+        )
+        assert model == "full-model"
+        assert escalated is False

@@ -673,6 +673,32 @@
         </div>
         <div id="atlasbody"><div class="iv-empty">ATLAS STANDBY</div></div>
       </div>
+      <!-- v5.5 — Freebuff Desktop reads: account, projects, threads. -->
+      <div class="col-title">FREEBBUFF DESKTOP <span id="fbuffbadge" class="jobcount"></span></div>
+      <div id="fbuffpanel">
+        <div class="repo-bar">
+          <button id="fbuffCheckBtn" class="vtbtn" title="Re-check Freebuff Desktop now">[CHECK]</button>
+        </div>
+        <div id="fbuffbody"><div class="iv-empty">FREEBBUFF STANDBY</div></div>
+      </div>
+      <!-- v5.6 — Neural Orchestrator: learns orchestration from outcomes. -->
+      <div class="col-title">NEURAL ORCHESTRATOR <span id="neurobadge" class="jobcount"></span></div>
+      <div id="neuropanel">
+        <div class="repo-bar">
+          <button id="neuroCheckBtn" class="vtbtn" title="Re-check the neural orchestrator now">[CHECK]</button>
+          <button id="neuroTrainBtn" class="vtbtn" title="Force a background retrain now">[TRAIN]</button>
+        </div>
+        <div id="neurobody"><div class="iv-empty">NEURAL ORCHESTRATOR STANDBY</div></div>
+      </div>
+      <!-- v5.7 — Spotify: linked account, now playing, login button. -->
+      <div class="col-title">SPOTIFY <span id="spotifybadge" class="jobcount"></span></div>
+      <div id="spotifypanel">
+        <div class="repo-bar">
+          <button id="spotifyCheckBtn" class="vtbtn" title="Re-check Spotify now">[CHECK]</button>
+          <button id="spotifyLoginBtn" class="vtbtn" title="Link the Spotify account (opens browser)">[LOGIN]</button>
+        </div>
+        <div id="spotifybody"><div class="iv-empty">SPOTIFY STANDBY</div></div>
+      </div>
       <div class="col-title">DELEGATED TASKS <span id="jobcount" class="jobcount"></span></div>
       <div id="jobs">
         <div class="iv-empty">NO NESTED AGENT RUNS // ORCHESTRATOR DIRECT</div>
@@ -1414,6 +1440,15 @@
 
       const handle = (evt) => {
         switch (evt.type) {
+          case 'brain': {
+            // v5.5: which brain answered this run (fast vs escalated heavy).
+            const bl = document.getElementById('backendline');
+            if (bl && evt.model) {
+              const mark = evt.escalated ? ' ⬆HEAVY' : '';
+              bl.textContent = 'BACKEND: ' + (document.body.dataset.backend === 'local' ? 'OLLAMA' : 'HOSTED').toUpperCase() + ' · ' + esc(String(evt.model)) + mark;
+            }
+            break;
+          }
           case 'tool_use': {
             setCoreState('executing');
             const node = nodeByTool.get(evt.name);
@@ -1748,6 +1783,116 @@
     });
   }
   if (atlasCheckBtn) atlasCheckBtn.addEventListener('click', pollAtlas);
+
+  // ---- v5.5 FREEBBUFF DESKTOP // real /api/freebuff panel ----
+  const fbuffBodyEl = document.getElementById('fbuffbody');
+  const fbuffBadgeEl = document.getElementById('fbuffbadge');
+  const fbuffCheckBtn = document.getElementById('fbuffCheckBtn');
+  function renderFbuff(d) {
+    if (!d.configured) {
+      if (fbuffBadgeEl) fbuffBadgeEl.textContent = '';
+      if (fbuffBodyEl) fbuffBodyEl.innerHTML = '<div class="iv-empty">' + esc(d.detail || 'FREEBBUFF NOT CONFIGURED') + '</div>';
+      return;
+    }
+    const acc = d.account || {};
+    if (fbuffBadgeEl) fbuffBadgeEl.textContent = (d.thread_count != null ? d.thread_count + ' THREADS' : 'LIVE');
+    const rows = [];
+    rows.push('<div class="repofact"><div class="rf-title">ACCOUNT // ' + esc(acc.name || '?') + ' · ' + esc(acc.email || '') + '</div>' +
+      (d.project_count != null ? '<div class="rf-path">' + String(d.project_count) + ' PROJECTS · ' + String(d.thread_count || 0) + ' THREADS · ' + (d.notes_count != null ? d.notes_count + ' NOTES' : '?') + ' · ' + (d.skills_count != null ? d.skills_count + ' SKILLS' : '?') + '</div>' : '') + '</div>');
+    const projects = d.projects || [];
+    projects.forEach(p => {
+      rows.push('<div class="repofact"><div class="rf-title">' + esc(String(p.path || '').split('/').filter(Boolean).pop() || p.path || '?') + ' // ' + String(p.thread_count || 0) + ' THREADS</div>');
+      (p.threads || []).slice(0, 2).forEach(t => {
+        rows.push('<div class="rf-path">• [' + esc(t.status || '?') + '/' + esc(t.turnState || '?') + '] ' + esc(t.title || '') + '</div>');
+      });
+    });
+    if (fbuffBodyEl) fbuffBodyEl.innerHTML = rows.join('');
+  }
+  async function pollFbuff() {
+    try { const r = await fetch('/api/freebuff'); renderFbuff(await r.json()); }
+    catch (e) { /* transient */ }
+  }
+  pollFbuff();
+  setInterval(pollFbuff, 6000);
+  if (fbuffCheckBtn) fbuffCheckBtn.addEventListener('click', pollFbuff);
+
+  // ---- v5.6 NEURAL ORCHESTRATOR // real /api/neuro panel ----
+  const neuroBodyEl = document.getElementById('neurobody');
+  const neuroBadgeEl = document.getElementById('neurobadge');
+  const neuroCheckBtn = document.getElementById('neuroCheckBtn');
+  const neuroTrainBtn = document.getElementById('neuroTrainBtn');
+  function renderNeuro(d) {
+    if (!d.enabled) {
+      if (neuroBadgeEl) neuroBadgeEl.textContent = '';
+      if (neuroBodyEl) neuroBodyEl.innerHTML = '<div class="iv-empty">' + esc(d.note || 'NEURAL ORCHESTRATOR OFF') + '</div>';
+      return;
+    }
+    if (neuroBadgeEl) neuroBadgeEl.textContent = d.active ? 'ACTIVE' : (d.experience_count > 0 ? 'LEARNING' : 'STANDBY');
+    const pct = v => v == null ? '—' : (Math.round(v * 100) + '%');
+    const rows = [];
+    rows.push('<div class="repofact"><div class="rf-title">' +
+      (d.active ? 'ACTIVE // BLENDING INTO ORCHESTRATION' : d.experience_count > 0 ? 'LEARNING // COLLECTING EXPERIENCE' : 'STANDBY // NO DATA YET') +
+      '</div><div class="rf-path">' + String(d.experience_count || 0) + ' EXPERIENCES · ' + String(d.trained_count || 0) + ' TRAINED' +
+      (d.agents && d.agents.length ? ' · ' + String(d.agents.length) + ' AGENTS' : '') + '</div></div>');
+    if (d.last_train) {
+      rows.push('<div class="repofact"><div class="rf-title">LAST TRAIN // ' + esc(String(d.last_train).replace('T', ' ')) + '</div>' +
+        '<div class="rf-path">LOSS ' + (d.loss == null ? '—' : Number(d.loss).toFixed(3)) + ' · VAL ' + pct(d.val_acc) +
+        ' · TRAIN ' + pct(d.train_acc) + ' · ROUTING ' + pct(d.agent_acc) + '</div></div>');
+    } else {
+      rows.push('<div class="repofact"><div class="rf-path">No trained weights yet — deterministic heuristics still drive orchestration (zero regression).</div></div>');
+    }
+    if (neuroBodyEl) neuroBodyEl.innerHTML = rows.join('');
+  }
+  async function pollNeuro() {
+    try { const r = await fetch('/api/neuro'); renderNeuro(await r.json()); }
+    catch (e) { /* transient */ }
+  }
+  pollNeuro();
+  setInterval(pollNeuro, 6000);
+  if (neuroCheckBtn) neuroCheckBtn.addEventListener('click', pollNeuro);
+  if (neuroTrainBtn) neuroTrainBtn.addEventListener('click', async () => {
+    try {
+      const r = await fetch('/api/neuro/train', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      await r.json();
+      setTimeout(pollNeuro, 800);
+    } catch (e) { /* transient */ }
+  });
+
+  // ---- v5.7 SPOTIFY // real /api/spotify panel ----
+  const spotBodyEl = document.getElementById('spotifybody');
+  const spotBadgeEl = document.getElementById('spotifybadge');
+  const spotCheckBtn = document.getElementById('spotifyCheckBtn');
+  const spotLoginBtn = document.getElementById('spotifyLoginBtn');
+  function renderSpot(d) {
+    if (!d.configured) {
+      if (spotBadgeEl) spotBadgeEl.textContent = '';
+      if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">SPOTIFY NOT CONFIGURED — ' + esc(d.hint || 'set SPOTIFY_CLIENT_ID') + '</div>';
+      return;
+    }
+    if (spotBadgeEl) spotBadgeEl.textContent = d.linked ? 'LINKED' : 'NOT LINKED';
+    const rows = [];
+    rows.push('<div class="repofact"><div class="rf-title">' + (d.linked ? 'LINKED // ' + esc(String(d.detail || '').replace('linked as ', '')) : 'CLIENT ID SET // NOT LINKED') + '</div>' +
+      '<div class="rf-path">' + esc(d.hint || '') + '</div></div>');
+    if (d.now_playing) {
+      rows.push('<div class="repofact"><div class="rf-title">NOW PLAYING</div><div class="rf-path">' + esc(String(d.now_playing).replace(/\n/g, ' ').slice(0, 140)) + '</div></div>');
+    }
+    if (spotBodyEl) spotBodyEl.innerHTML = rows.join('');
+  }
+  async function pollSpot() {
+    try { const r = await fetch('/api/spotify'); renderSpot(await r.json()); }
+    catch (e) { /* transient */ }
+  }
+  pollSpot();
+  setInterval(pollSpot, 8000);
+  if (spotCheckBtn) spotCheckBtn.addEventListener('click', pollSpot);
+  if (spotLoginBtn) spotLoginBtn.addEventListener('click', async () => {
+    try {
+      const r = await fetch('/api/spotify/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      await r.json();
+      if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">Browser opened — approve the app there, then CHECK.</div>';
+      setTimeout(pollSpot, 4000);
+    } catch (e) { /* transient */ }
+  });
 
   // ---- v4.1 PROJECT MEMORY // real /api/repo index panel (P6+) ----
   const repofactsEl = document.getElementById('repofacts');

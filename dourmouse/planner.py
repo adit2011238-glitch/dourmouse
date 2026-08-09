@@ -150,14 +150,25 @@ def _task_only(prompt: str) -> str:
 
 
 def looks_multi_step(prompt: str) -> bool:
-    """Cheap deterministic heuristic: sequencing language or 2+ outcomes."""
+    """Is this prompt multi-step? Deterministic heuristic OR the learned net.
+
+    The heuristic (sequencing language or 2+ outcome verbs) is the floor;
+    the neural orchestrator (orch_net) adds an OR-branch only when it is
+    trained AND confident (p > 0.65) from real outcomes. Delayed import so
+    planner stays dependency-light for tests and the net's absence changes
+    nothing (Rule 2.8: the decision is a deterministic function either way).
+    """
     prompt = _task_only(prompt)
     lower = " " + prompt.lower().strip() + " "
     if any(m in lower for m in _SEQUENCE_MARKERS):
         return True
     clauses = re.split(r"[,.!?;]", lower)
     verbs_hit = sum(len(_OUTCOME_RE.findall(c)) for c in clauses)
-    return verbs_hit >= 2
+    if verbs_hit >= 2:
+        return True
+    from dourmouse.orch_net import neural_is_multi_step
+
+    return neural_is_multi_step(prompt)
 
 
 def find_agents_for_query(
@@ -209,6 +220,17 @@ def find_agents_for_query(
     # ("draft an email" boosts comms AND mail); normal scoring then decides
     # the winner. Deterministic: no iteration-order dependence.
     domain_targets = {_DOMAIN_ROUTE[w] for w in tokens if w in _DOMAIN_ROUTE}
+    # Learned evidence (v5.6), computed ONCE per query (not per agent): the
+    # neural orchestrator's routing head adds positive evidence only —
+    # 0.5 * max(0, logit). Its max boost (~2) sits BELOW the deterministic
+    # tool-mention (+5), domain (+4) and name (+3) bonuses, so the net
+    # refines ties and near-misses but can never overturn a strong
+    # deterministic match. Unknown/untrained agents score 0 and are
+    # unaffected. Delayed import keeps planner dependency-light.
+    from dourmouse.orch_net import _ROUTE_LAMBDA, neural_agent_scores
+
+    agent_names = [s.name for s in registry.all_subagents()]
+    nn = neural_agent_scores(query, agent_names)
     scored = []
     for sub in registry.all_subagents():
         haystack = " ".join(
@@ -242,6 +264,8 @@ def find_agents_for_query(
         # by a domain word (reviewer-caught).
         if sub.name in domain_targets:
             score += 4
+        if nn is not None and sub.name in nn:
+            score += _ROUTE_LAMBDA * max(0.0, nn[sub.name])
         if score > 0:
             scored.append(
                 {

@@ -116,28 +116,39 @@ class TestFreebuff:
         assert report["freebuff"]["ok"] is False
         assert "not running" in report["freebuff"]["detail"]
 
-    def test_app_running_no_token_not_usable(self, monkeypatch):
-        """ok means USABLE: a running app without the API token is not
-        fully connected — the row is ○ with an honest fix hint."""
+    def test_app_running_not_authed_not_usable(self, monkeypatch):
+        """v5.5: ok means USABLE — the app's own renderer API (51819, no
+        token) must answer auth/status as authed. A running app that is
+        not authed is honestly ○ with the fix hint."""
         monkeypatch.setattr(
             conn, "_tcp_reachable",
-            lambda host, port, timeout=0.6: port in (conn._FREEBUFF_UI_PORT, conn._FREEBUFF_API_PORT),
+            lambda host, port, timeout=0.6: port == conn._FREEBUFF_UI_PORT,
+        )
+        monkeypatch.setattr(
+            conn, "freebuff_status",
+            lambda: {"ok": False, "detail": "app running · not authed", "hint": "start the Freebuff app and sign in"},
         )
         report = conn.check_connections()
         assert report["freebuff"]["ok"] is False
-        assert "token MISSING" in report["freebuff"]["detail"]
+        assert "not authed" in report["freebuff"]["detail"]
 
-    def test_app_and_token_ready(self, monkeypatch):
+    def test_app_authed_ready(self, monkeypatch):
+        """v5.5: an authed 51819 API is USABLE with NO token (the 51820
+        bridge's per-launch random token is the debugger API, not the read
+        path — the old token check was misleading)."""
         monkeypatch.setattr(
             conn, "_tcp_reachable",
-            lambda host, port, timeout=0.6: port in (conn._FREEBUFF_UI_PORT, conn._FREEBUFF_API_PORT),
+            lambda host, port, timeout=0.6: port == conn._FREEBUFF_UI_PORT,
         )
-        monkeypatch.setenv("FREEBUFF_API_TOKEN", "fb-token")
+        monkeypatch.setattr(
+            conn, "freebuff_status",
+            lambda: {"ok": True, "detail": "app running · user", "account": {"email": "user@example.com"}},
+        )
         report = conn.check_connections()
         assert report["freebuff"]["ok"] is True
-        assert "API ready" in report["freebuff"]["detail"]
-        # the token never leaks into the report
-        assert "fb-token" not in json.dumps(report)
+        assert "app running" in report["freebuff"]["detail"]
+        # the account email never leaks into the report
+        assert "user@example.com" not in json.dumps(report)
 
     def test_ollama_probe_used(self, monkeypatch):
         seen: list[tuple] = []

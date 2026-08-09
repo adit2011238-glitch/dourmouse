@@ -1,2 +1,3 @@
 openai>=2.52.0
 python-dotenv>=1.0.0
+numpy>=2.0.0  # v5.6 neural orchestrator (pure-numpy MLP, no torch)

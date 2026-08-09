@@ -10,8 +10,11 @@ Dourmouse can actually reach today:
 - ``codex``    — the user's real Codex CLI on PATH + ~/.codex/auth.json
                  (their ChatGPT login). Usage limits surface at run time.
 - ``gmail``    — the mail tools' Gmail config (env or local_secrets.py)
-- ``freebuff`` — the Freebuff Desktop app (local UI/API ports) + whether
-                 FREEBUFF_API_URL/FREEBUFF_API_TOKEN are set for API calls
+- ``freebuff`` — the Freebuff Desktop app (its own loopback renderer API
+                 on 51819) reporting whether an authed account is readable
+                 (v5.5: read-only, no token needed — the 51820 bridge's
+                 per-launch random token is the debugger API, not the read
+                 path)
 - ``slack``    — Slack bot/app tokens present
 - ``alpaca``   — Alpaca paper-trading keys present
 - ``atlas``    — ATLAS_REPO_PATH + ATLAS_VENV_PATH present and the repo
@@ -35,7 +38,6 @@ from pathlib import Path
 from typing import Any
 
 _FREEBUFF_UI_PORT = 51819
-_FREEBUFF_API_PORT = 51820
 _OLLAMA_PROBE = ("127.0.0.1", 11434)
 
 
@@ -99,6 +101,21 @@ def _gmail_status() -> dict[str, str]:
         return {"ok": "missing", "detail": "google module unavailable"}
 
 
+def _spotify_status() -> dict[str, str]:
+    """Honest Spotify status via dourmouse.spotify_services (v5.7)."""
+    try:
+        from dourmouse import spotify_services as ss
+
+        st = ss.status()
+        if st.get("linked"):
+            return {"ok": "configured", "detail": f"linked · {st['detail']}"}
+        if st.get("configured"):
+            return {"ok": "missing", "detail": st["detail"]}
+        return {"ok": "missing", "detail": st["detail"]}
+    except Exception:  # noqa: BLE001 -- a broken import never kills the report
+        return {"ok": "missing", "detail": "spotify module unavailable"}
+
+
 def check_connections() -> dict[str, dict[str, Any]]:
     """Deterministic per-service status report (see module docstring)."""
     out: dict[str, dict[str, Any]] = {}
@@ -145,21 +162,19 @@ def check_connections() -> dict[str, dict[str, Any]]:
         "hint": "GOOGLE_GMAIL_USER/APP_PASSWORD or dourmouse/local_secrets.py",
     }
 
-    fb_ui = _tcp_reachable("127.0.0.1", _FREEBUFF_UI_PORT)
-    fb_api = _tcp_reachable("127.0.0.1", _FREEBUFF_API_PORT)
-    fb_token = _env_present("FREEBUFF_API_TOKEN")
-    if fb_ui and fb_api and fb_token:
-        fb_detail = "app running · API reachable · token set (API ready)"
-    elif fb_ui:
-        fb_detail = "app running (UI) · API token MISSING"
-    else:
-        fb_detail = "Freebuff Desktop not running"
+    # v5.5: the REAL Freebuff read surface is the app's own renderer API on
+    # 51819 (loopback, no token). The 51820 bridge needs a per-launch random
+    # token (crypto.randomUUID — regenerates every app start, never persisted)
+    # and is the app's internal debugger/preview API, NOT the read path. So
+    # "usable" = the 51819 API answers auth/status as authed. The old
+    # token-gated check was misleading — a pasted token would break on the
+    # next app launch anyway. Uses the module-level ``freebuff_status()``
+    # (a clean seam tests can patch without touching the real API).
+    fb = freebuff_status()
     out["freebuff"] = {
-        # "ok" means USABLE, not merely present: the app's API needs the
-        # bearer token, so a running app without it is honestly not ready.
-        "ok": bool(fb_ui and fb_api and fb_token),
-        "detail": fb_detail,
-        "hint": "paste FREEBUFF_API_TOKEN from the Freebuff app into .env",
+        "ok": bool(fb.get("ok")),
+        "detail": fb.get("detail", "Freebuff Desktop not running"),
+        "hint": fb.get("hint", "start the Freebuff app and sign in (reads need no token)"),
     }
 
     slack = _env_present("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN")
@@ -194,22 +209,46 @@ def check_connections() -> dict[str, dict[str, Any]]:
         "detail": atlas_detail,
         "hint": "ATLAS_REPO_PATH + ATLAS_VENV_PATH in .env",
     }
+
+    # v5.7: Spotify — Client ID set AND account linked once (PKCE login).
+    spotify = _spotify_status()
+    out["spotify"] = {
+        "ok": spotify["ok"] == "configured",
+        "detail": spotify["detail"],
+        "hint": "SPOTIFY_CLIENT_ID in .env/local_secrets + run spotify_login (music agent)",
+    }
     return out
 
 
 def freebuff_status() -> dict[str, Any]:
-    """Freebuff Desktop detail for tools/UI (app + API + token)."""
+    """Freebuff Desktop detail for tools/UI (real API probe, no token).
+
+    v5.5: the app's own renderer API (51819, loopback, unauthenticated) is
+    the read surface. A running + authed app is USABLE (``ok`` True) — no
+    token needed (the 51820 bridge's per-launch random token is the debugger
+    API, not the read path). Shape matches the bridge module so callers can
+    treat them interchangeably: ok/detail/hint/account/app_running.
+    """
     fb_ui = _tcp_reachable("127.0.0.1", _FREEBUFF_UI_PORT)
-    fb_api = _tcp_reachable("127.0.0.1", _FREEBUFF_API_PORT)
-    return {
+    base: dict[str, Any] = {
         "app_running": fb_ui,
-        "api_reachable": fb_api,
-        "api_token_set": _env_present("FREEBUFF_API_TOKEN"),
-        "hint": (
-            "FREEBUFF_API_URL + FREEBUFF_API_TOKEN in .env (token shown in "
-            "the Freebuff app) unlocks real API reads"
-        ),
+        "ok": False,
+        "hint": "start the Freebuff app and sign in (reads need no token)",
     }
+    if not fb_ui:
+        base["detail"] = "Freebuff Desktop not running"
+        return base
+    try:
+        from dourmouse.freebuff_bridge import freebuff_status as fb_probe
+
+        st = fb_probe()
+    except Exception:  # noqa: BLE001 -- a broken probe never kills the report
+        base["detail"] = "app running · probe error"
+        return base
+    base["ok"] = bool(st.get("ok"))
+    base["account"] = st.get("account")
+    base["detail"] = st.get("detail", "app running")
+    return base
 
 
 def format_connections() -> str:
@@ -227,6 +266,6 @@ def format_connections() -> str:
     fb = freebuff_status()
     lines.append("FREEBUFF APP: " + ("running" if fb["app_running"] else "not running"))
     lines.append(
-        "FREEBUFF API: " + ("ready" if fb["api_reachable"] and fb["api_token_set"] else "token missing")
+        "FREEBUFF API: " + ("ready" if fb.get("api_ready") else "app running · no authed account")
     )
     return "\n".join(lines)

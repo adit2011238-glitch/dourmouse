@@ -85,6 +85,8 @@ class TestRosterShape:
             "code_claude",
             "messenger",  # v3.0: inter-agent messaging
             "atlas",  # v4.0: ATLAS command-centre telemetry
+            "freebuff",  # v5.5: Freebuff Desktop reads
+            "music",  # v5.7: Spotify playback + discovery
         }
 
     def test_orchestrator_exposes_delegate_task(self):
@@ -102,6 +104,8 @@ class TestRosterShape:
             "delete_path",
             "run_privileged_command",
             "gmail_send",  # v5.0: sending email always requires a human
+            "spotify_playback_control",  # v5.7: changing playback needs a human
+            "spotify_play",
         }
 
     def test_internet_tools_registered(self):

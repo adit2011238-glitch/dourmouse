@@ -534,6 +534,17 @@ def build_setup_status(server) -> dict[str, Any]:
         }
     except Exception:  # noqa: BLE001
         items["gmail"] = {"configured": False, "detail": "google module error", "hint": ""}
+    try:
+        from dourmouse.spotify_services import status as spotify_status
+
+        sst = spotify_status()
+        items["spotify"] = {
+            "configured": bool(sst.get("linked")),
+            "detail": sst.get("detail", "not linked"),
+            "hint": sst.get("hint", "developer.spotify.com -> Client ID + spotify_login"),
+        }
+    except Exception:  # noqa: BLE001
+        items["spotify"] = {"configured": False, "detail": "spotify module error", "hint": ""}
     items["upload"] = {
         "configured": True,
         "detail": str(_uploads_root()),
@@ -564,6 +575,21 @@ def build_setup_status(server) -> dict[str, Any]:
         "hint": "DOURMOUSE_LIVE=1",
     }
     return {"items": items}
+
+
+def _bootstrap_neuro() -> None:
+    """v5.6: background bootstrap of the neural orchestrator.
+
+    Replays workspace/sessions/*.jsonl into experiences and auto-retrains
+    when enough exist. Runs in a daemon thread at serve time; a raising
+    store must never affect serving.
+    """
+    try:
+        from dourmouse.orch_net import bootstrap_from_sessions
+
+        bootstrap_from_sessions()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _safe_asset_path(rel: str) -> Path | None:
@@ -744,6 +770,29 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.atlas_cli import atlas_panel_snapshot
 
             self._send_json(atlas_panel_snapshot())
+        elif path == "/api/freebuff":
+            # v5.5: Freebuff Desktop panel — account, projects, threads.
+            from dourmouse.freebuff_bridge import freebuff_panel_snapshot
+
+            self._send_json(freebuff_panel_snapshot())
+        elif path == "/api/neuro":
+            # v5.6: Neural Orchestrator panel — honest learning state.
+            from dourmouse.orch_net import status as neuro_status
+
+            self._send_json(neuro_status())
+        elif path == "/api/spotify":
+            # v5.7: Spotify panel — config/linked state + now playing.
+            from dourmouse.spotify_services import status as ss_status
+
+            payload = ss_status()
+            if payload.get("linked"):
+                try:
+                    from dourmouse.spotify_services import now_playing
+
+                    payload["now_playing"] = now_playing()
+                except Exception:  # noqa: BLE001 - honest panel, never crash
+                    payload["now_playing"] = "SPOTIFY: playback read failed."
+            self._send_json(payload)
         elif path == "/api/files":
             # v5.0: list uploaded files (name, size, age) newest first.
             try:
@@ -845,6 +894,15 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/atlas/run":
             # v5.4: start one managed ATLAS command (single-flight).
             self._handle_atlas_run()
+        elif parsed.path == "/api/neuro/train":
+            # v5.6: force a background retrain of the neural orchestrator.
+            self._handle_neuro_train()
+        elif parsed.path == "/api/spotify/login":
+            # v5.7: start the one-time Spotify account linking (background).
+            from dourmouse.spotify_services import spotify_login
+
+            message = spotify_login(background=True)
+            self._send_json({"ok": True, "message": message})
         else:
             self.send_error(404, "not found")
 
@@ -1172,15 +1230,49 @@ class _Handler(BaseHTTPRequestHandler):
             }
         )
 
+    def _handle_neuro_train(self) -> None:
+        """v5.6: POST /api/neuro/train — force a background retrain.
+
+        Single-flight: if a trainer is already running it honestly reports
+        that instead of queueing. Returns ok even when the retrain is
+        async — the panel polls GET /api/neuro for the result.
+        """
+        from dourmouse.orch_net import retrain_now
+
+        names = [s.name for s in self.server.registry.all_subagents()]
+        if retrain_now(names):
+            self._send_json({"ok": True, "training": True})
+        else:
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": "a retrain is already running, or DOURMOUSE_NET is off",
+                },
+                status=409,
+            )
+
     def _handle_feedback(self) -> None:
         """v2.9: operator 👍/👎 rating of the last completed turn.
 
         Stored as a 'feedback' fact in the long-term store so recall surfaces
-        it and the model learns what the operator liked. Honest errors: no
-        store -> 409, bad rating -> 400, nothing fabricated.
+        it and the model learns what the operator liked. v5.6: the SAME
+        rating is the neural orchestrator's reward signal (sample-weight
+        reweight + background retrain). Honest errors: no store -> 409, bad
+        rating -> 400, nothing fabricated.
         """
         body = self._read_json_body()
         rating = (body.get("rating") or "").strip()
+        # v5.6: apply the rating to the neural store FIRST (independent of
+        # the memory store — the NN learns even when recall is off). A
+        # raising neural store must never break feedback.
+        if rating in ("good", "bad"):
+            try:
+                from dourmouse.orch_net import apply_feedback as _neuro_feedback
+
+                stem = Path(self.server.session.session_file).stem
+                _neuro_feedback(stem, rating)
+            except Exception:
+                pass
         store = self.server.memory
         if store is None or not learn_enabled():
             self._send_json(
@@ -1420,6 +1512,7 @@ def run_server(
     memory: MemoryStore | None = None,
     bus: MessageBus | None = None,
     reporting: bool = False,
+    neuro: bool = False,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns the running ThreadingHTTPServer.
 
@@ -1586,6 +1679,20 @@ def run_server(
     # DOURMOUSE_REPORT (default on); tests opt out via reporting=False.
     from dourmouse.report import DailyReporter
 
+    # v5.6: neural orchestrator — the real serving path bootstraps the net
+    # from session history in the background (never blocks startup). Tests
+    # keep neuro=False so the suite stays hermetic.
+    server.neuro = neuro
+    if neuro:
+        try:
+            from dourmouse.orch_net import orch_enabled
+
+            if orch_enabled():
+                threading.Thread(
+                    target=_bootstrap_neuro, daemon=True, name="neuro-bootstrap"
+                ).start()
+        except Exception:  # noqa: BLE001, S110 - bootstrap must never block serving
+            pass
     server.daily_reporter: DailyReporter | None = None
     if reporting:
         server.daily_reporter = DailyReporter(registry, server.tracker, server.bus)
@@ -1636,6 +1743,8 @@ def serve_forever(
         live_polling=live_polling,
         memory=memory,
         reporting=reporting,
+        # v5.6: the real serving path learns — bootstrap from session history.
+        neuro=True,
     )
     print(f"Dourmouse UI running at http://{host}:{port}")
     print(f"Registry: {', '.join(sorted(registry.subagent_names))}")
@@ -1645,6 +1754,17 @@ def serve_forever(
         print("Daily report: scheduled (DOURMOUSE_REPORT_TIME)")
     if server.memory is not None and learn_enabled():
         print(f"Store & Learn: {server.memory.count()} fact(s) in long-term memory")
+    try:
+        from dourmouse.orch_net import status as _neuro_status
+
+        ns = _neuro_status()
+        print(
+            f"Neural orchestrator: "
+            f"{'ACTIVE (blending)' if ns['active'] else 'learning' if ns['enabled'] else 'off'} — "
+            f"{ns['experience_count']} experience(s)"
+        )
+    except Exception:  # noqa: BLE001, S110 - a broken neuro import never blocks serving
+        print("Neural orchestrator: off")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

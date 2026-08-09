@@ -1936,6 +1936,85 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    # -- v5.5 Freebuff read agent -------------------------------------- #
+    # Real read-only access to the user's Freebuff Desktop app (loopback
+    # API): account, projects, thread conversations, notes, skills, git
+    # changes. Honest NOT CONFIGURED when the app is not running/authed
+    # (Rule 2.2). Read-only by design — nothing is ever sent or mutated.
+    from dourmouse.freebuff_bridge import build_freebuff_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "freebuff",
+            "Projects",
+            "Freebuff Desktop reads — account, projects, thread conversations, notes, skills.",
+            build_freebuff_tool_specs(),
+        )
+    )
+
+    # -- v5.7 Spotify wrappers ---------------------------------------- #
+    # Thin adapters around dourmouse.spotify_services — the module already
+    # returns honest text (NOT CONFIGURED / NOT LINKED / real API errors),
+    # so the wrapper only normalizes exceptions to text (Rule 2.2).
+    def _spotify_wrap(fn):
+        def _call(arguments: dict[str, Any]) -> str:
+            try:
+                return fn(arguments)
+            except RuntimeError as exc:
+                return f"SPOTIFY (reported honestly): {exc}"
+        return _call
+
+    def _spotify_link_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import spotify_login
+
+        return spotify_login(background=True)
+
+    def _spotify_now_playing_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import now_playing
+
+        return now_playing()
+
+    def _spotify_state_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import playback_state
+
+        return playback_state()
+
+    def _spotify_control_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import playback_control
+
+        return playback_control(str(arguments.get("action") or ""))
+
+    def _spotify_play_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import play_uri
+
+        return play_uri(str(arguments.get("uri") or ""))
+
+    def _spotify_search_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import search_tracks
+
+        return search_tracks(
+            str(arguments.get("query") or ""),
+            int(arguments.get("limit", 5)),
+        )
+
+    def _spotify_top_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import top_tracks
+
+        return top_tracks(
+            str(arguments.get("time_range") or "medium_term"),
+            int(arguments.get("limit", 5)),
+        )
+
+    def _spotify_recent_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import recently_played
+
+        return recently_played(int(arguments.get("limit", 10)))
+
+    def _spotify_playlists_tool(arguments: dict[str, Any]) -> str:
+        from dourmouse.spotify_services import list_playlists
+
+        return list_playlists(int(arguments.get("limit", 20)))
+
     # -- v2.3 preloaded live-intelligence agents ----------------------- #
     registry.register_subagent(
         _subagent(
@@ -2002,6 +2081,144 @@ def build_general_registry() -> DispatchRegistry:
                         },
                     },
                     handler=_market_movers_tool,
+                ),
+            ],
+        )
+    )
+
+    # -- v5.7 Spotify music agent -------------------------------------- #
+    # The user's Spotify account: read-only taste/history tools plus
+    # confirmation-gated playback control (changes state on the account, so a
+    # human always approves — Rule 2.9). Honest NOT CONFIGURED until a Client
+    # ID is set and the account is linked once (PKCE login).
+    registry.register_subagent(
+        _subagent(
+            "music",
+            "Media",
+            "Spotify — now playing, playback control, search, top/recent tracks, playlists.",
+            [
+                ToolSpec(
+                    name="spotify_link",
+                    description=(
+                        "One-time linking to the user's Spotify account: opens the "
+                        "browser for approval (background). Requires SPOTIFY_CLIENT_ID "
+                        "to be set first. Re-run after linking to check."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_spotify_link_tool,
+                ),
+                ToolSpec(
+                    name="spotify_now_playing",
+                    description=(
+                        "What is CURRENTLY playing on the linked Spotify account "
+                        "(track, artists, progress) — or honestly 'nothing playing'."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_spotify_wrap(_spotify_now_playing_tool),
+                ),
+                ToolSpec(
+                    name="spotify_playback_state",
+                    description=(
+                        "Current Spotify playback state: device, shuffle, repeat, "
+                        "volume, and the selected track."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_spotify_wrap(_spotify_state_tool),
+                ),
+                ToolSpec(
+                    name="spotify_playback_control",
+                    description=(
+                        "CONTROL Spotify playback: next | previous | pause | resume | "
+                        "volume <0-100>. Confirmation-gated (changes the user's "
+                        "playback). Requires Spotify Premium."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "description": "next | previous | pause | resume | volume <0-100>"},
+                        },
+                        "required": ["action"],
+                    },
+                    handler=_spotify_control_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Control Spotify playback: {a.get('action', '?')}"
+                    ),
+                ),
+                ToolSpec(
+                    name="spotify_play",
+                    description=(
+                        "Start playback of a spotify: track/album/playlist URI on an "
+                        "active device. Confirmation-gated. Requires Spotify Premium."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "uri": {"type": "string", "description": "e.g. spotify:track:4uLU6hMCjMI75M1A2tKUQC"},
+                        },
+                        "required": ["uri"],
+                    },
+                    handler=_spotify_play_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: f"Play on Spotify: {a.get('uri', '?')}",
+                ),
+                ToolSpec(
+                    name="spotify_search",
+                    description=(
+                        "Search Spotify for tracks (then albums/artists). Returns "
+                        "real matches with spotify: URIs you can play."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "e.g. daft punk"},
+                            "limit": {"type": "integer", "default": 5},
+                        },
+                        "required": ["query"],
+                    },
+                    handler=_spotify_search_tool,
+                ),
+                ToolSpec(
+                    name="spotify_top_tracks",
+                    description=(
+                        "The user's most-played tracks (short_term | medium_term | "
+                        "long_term) — listening-habit analytics."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "time_range": {"type": "string", "default": "medium_term"},
+                            "limit": {"type": "integer", "default": 5},
+                        },
+                    },
+                    handler=_spotify_top_tool,
+                ),
+                ToolSpec(
+                    name="spotify_recently_played",
+                    description=(
+                        "The user's recently played tracks, newest first — what "
+                        "they've been listening to lately."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "default": 10},
+                        },
+                    },
+                    handler=_spotify_recent_tool,
+                ),
+                ToolSpec(
+                    name="spotify_playlists",
+                    description=(
+                        "The user's Spotify playlists with track counts and URIs."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "default": 20},
+                        },
+                    },
+                    handler=_spotify_playlists_tool,
                 ),
             ],
         )

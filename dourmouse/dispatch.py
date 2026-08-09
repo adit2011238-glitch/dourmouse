@@ -50,7 +50,7 @@ from dourmouse.governance import (
     validate_against_schema,
     validate_tool_arguments,
 )
-from dourmouse.planner import build_plan
+from dourmouse.planner import build_plan, looks_multi_step
 
 
 # Transient API failures worth retrying (institutional self-correction):
@@ -711,6 +711,30 @@ def _build_client(config: NvidiaConfig) -> Any:
     return OpenAI(api_key=key, base_url=config.base_url)
 
 
+def _resolve_brain_model(
+    *,
+    fast: str,
+    default: str,
+    prompt: str,
+    explicit: str | None,
+) -> tuple[str, bool]:
+    """v5.5: choose the dispatch brain deterministically — (model, escalated).
+
+    ``explicit`` (a focus-agent model override) always wins. Otherwise a
+    MULTI-STEP prompt escalates to the full default brain (the model heavy
+    agents already use) instead of the fast orchestrator brain, so hard
+    multi-step work gets the stronger model while simple chat stays fast.
+    Deterministic (Rule 2.8): the planner's cheap multi-step heuristic,
+    never an LLM judgment. ``escalated`` is True when the heavy brain was
+    chosen and differs from the fast one — the UI surfaces it honestly.
+    """
+    if explicit:
+        return explicit, False
+    if looks_multi_step(prompt):
+        return default, default != fast
+    return fast, False
+
+
 def _emit_event(
     event_sink: Callable[[dict[str, Any]], None] | None, entry: dict[str, Any]
 ) -> None:
@@ -955,6 +979,8 @@ def run_dispatch_messages(
     dlp: DlpFilter | None = None,
     rbac: RbacPolicy | None = None,
     model: str | None = None,
+    experience_sink: Callable[[dict[str, Any]], None] | None = None,
+    session_stem: str | None = None,
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -981,24 +1007,61 @@ def run_dispatch_messages(
     results and model output before it reaches the API boundary or the
     transcript; ``rbac`` refuses tools outside the role's allow-set before
     they execute. All three are threaded through delegated nested runs.
+
+    v5.6 neural orchestration: ``experience_sink`` (optional, called ONCE per
+    TOP-LEVEL run with a self-supervised experience record — the prompt, the
+    agents whose tools were actually used, and how cleanly the run ended) is
+    how the system learns from its own orchestration. ``session_stem`` ties
+    the record to a session so operator 👍/👎 ratings can reweight it. The
+    sink is a pure observer like ``event_sink``: it must never break
+    execution, and nested delegate runs never log (only depth 0 does).
     """
     # v3.1 per-agent models: an explicit ``model`` override (e.g. a nested
     # delegate resolved to its target subagent's model) wins over the
     # config default. Deterministic (Rule 2.8) — the caller picks the model;
     # the engine never guesses.
+    escalated_brain = False
     if client is None:
         config = config or load_llm_config()
         client = _build_client(config)
         # v5.0 fast dispatch: the orchestrator (looping dispatch brain)
         # defaults to its per-agent model (qwen3:4b on the local backend) so
         # every turn is fast; explicit ``model`` overrides still win.
-        model = model or (
+        # v5.5 brain escalation: multi-step prompts use the full default
+        # brain; simple chat stays on the fast orchestrator brain.
+        fast = (
             config.model_for_agent("orchestrator")
             if hasattr(config, "model_for_agent")
             else config.model
         )
+        last_user = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+            "",
+        )
+        # ``config`` is typed NvidiaConfig | None at the parameter boundary;
+        # getattr avoids the narrowing mypy can't do after the pre-existing
+        # ``config = config or load_llm_config()`` reassignment above.
+        default_brain = str(getattr(config, "model", "test-model"))
+        model, escalated_brain = _resolve_brain_model(
+            fast=fast, default=default_brain, prompt=str(last_user), explicit=model
+        )
     else:
         model = model or (config.model if config is not None else "test-model")
+    # The chosen brain is surfaced honestly so the UI can show which model
+    # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
+    # of the tree: nested delegate runs ride the parent's event sink, so a
+    # delegate's model must never clobber the top-level brain indicator
+    # (reviewer-caught; the loop already streams assistant_delta only at
+    # depth 0 for the same reason).
+    if event_sink is not None and depth == 0:
+        _emit_event(
+            event_sink,
+            {
+                "type": "brain",
+                "model": model,
+                "escalated": escalated_brain,
+            },
+        )
 
     # Compulsory governance defaults: cost-capping and DLP are ON by default
     # (institutional baseline); RBAC is off unless a role is supplied, so the
@@ -1037,12 +1100,96 @@ def run_dispatch_messages(
         registry._ctx_stack = stack
     stack.append(ctx)
     try:
-        return _run_dispatch_loop(messages, registry, max_turns, ctx)
+        report = _run_dispatch_loop(messages, registry, max_turns, ctx)
     finally:
         stack.pop()
         if not stack:
             # Leave no stale stack on the registry for a later fresh run.
             delattr(registry, "_ctx_stack")
+    # v5.6: one experience per TOP-LEVEL run feeds the neural orchestrator.
+    # A raising sink must never abort the run — it is a pure observer.
+    if depth == 0 and experience_sink is not None:
+        try:
+            record = _build_experience(messages, ctx, report, session_stem)
+            if record is not None:
+                experience_sink(record)
+        except Exception:  # noqa: BLE001, S110 - a raising observer never breaks dispatch
+            pass
+    return report
+
+
+def _build_experience(
+    messages: list[dict[str, Any]],
+    ctx: DispatchContext,
+    report: dict[str, Any],
+    session_stem: str | None,
+) -> dict[str, Any] | None:
+    """Derive one self-supervised orchestration experience from a finished run.
+
+    Labels come from OUTCOMES, not opinions: the agents whose tools were
+    actually used (``agents_used``), whether a plan existed, whether the run
+    ended cleanly (no plan caveat, no tool errors, no max-turns / budget
+    exhaustion, and a real final answer). Pure-chat turns log as multi-step
+    negatives — the net learns that most prompts need no plan. Returns None
+    only when there is no user prompt to learn from.
+    """
+    last_user = next(
+        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+        "",
+    )
+    prompt = str(last_user or "").strip()
+    if not prompt:
+        return None
+    transcript: list[dict[str, Any]] = report.get("transcript") or []
+    owner: dict[str, str] = {}
+    for sub in ctx.registry.all_subagents():
+        for tool in sub.tools:
+            owner[tool.name] = sub.name
+    tools_used = [e["name"] for e in transcript if e.get("type") == "tool_use"]
+    agents_used: list[str] = []
+    for t in tools_used:
+        o = owner.get(t)
+        if o and o not in agents_used:
+            agents_used.append(o)
+    agents_scoped: list[str] = []
+    for e in transcript:
+        if e.get("type") == "plan":
+            for step in e.get("steps") or []:
+                a = step.get("subagent")
+                if a and a not in agents_scoped:
+                    agents_scoped.append(a)
+    has_caveat = any(
+        e.get("type") == "plan_reminder"
+        or (
+            e.get("type") == "assistant_text"
+            and "not executed via tools" in str(e.get("text") or "")
+        )
+        for e in transcript
+    )
+    tool_errors = any(
+        e.get("type") == "tool_result"
+        and str(e.get("text") or "").startswith(("ERROR", "REFUSED"))
+        for e in transcript
+    )
+    exhausted = any(
+        e.get("type") == "result" and e.get("is_error") for e in transcript
+    )
+    budget_hit = any(e.get("type") == "budget_exhausted" for e in transcript)
+    final_text = str(report.get("final_text") or "").strip()
+    return {
+        "prompt": prompt,
+        "ts": _now_iso(),
+        "session_stem": session_stem,
+        "plan_given": any(e.get("type") == "plan" for e in transcript),
+        "tools_used": tools_used,
+        "agents_used": agents_used,
+        "agents_scoped": agents_scoped,
+        "outcome_ok": bool(
+            not has_caveat and not tool_errors and not exhausted
+            and not budget_hit and final_text
+        ),
+        "model": ctx.model,
+    }
 
 
 def _build_parent_context(
@@ -1419,8 +1566,32 @@ def run_dispatch(
         config=config,
         confirmation_gate=confirmation_gate,
         model=model,
+        # The CLI is a learning surface too: log the single-shot run so the
+        # neural orchestrator learns from it.
+        experience_sink=(
+            None if not orch_net_enabled() else _cli_experience_sink(registry)
+        ),
     )
     return {"final_text": report["final_text"], "transcript": report["transcript"]}
+
+
+def orch_net_enabled() -> bool:
+    """Delayed gate so dispatch never imports numpy unless learning is on."""
+    from dourmouse.orch_net import orch_enabled
+
+    return orch_enabled()
+
+
+def _cli_experience_sink(registry: DispatchRegistry) -> Callable[[dict[str, Any]], None]:
+    """CLI experience sink: log with the full roster as the vocabulary hint."""
+    from dourmouse.orch_net import log_experience
+
+    names = [s.name for s in registry.all_subagents()]
+
+    def _sink(record: dict[str, Any]) -> None:
+        log_experience(record, agent_names=names)
+
+    return _sink
 
 
 def _cli_confirmation_gate(prompt_text: str) -> bool:

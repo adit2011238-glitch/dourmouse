@@ -173,6 +173,11 @@ class ChatSession:
                 dlp=self.dlp,
                 rbac=self.rbac,
                 model=model,
+                # v5.6 neural orchestration: every top-level turn feeds the
+                # neural orchestrator (delayed import — a disabled gate is a
+                # no-op, and the sink can never break the turn).
+                experience_sink=self._neuro_sink,
+                session_stem=self.session_file.stem,
             )
         except Exception:
             # Keep the history well-formed even on API failure (mirrors the
@@ -202,6 +207,23 @@ class ChatSession:
                 except Exception:
                     pass
         return report
+
+    # ------------------------------------------------------------------ #
+    # Neural orchestration (v5.6) — learn from every turn's outcome
+    # ------------------------------------------------------------------ #
+
+    def _neuro_sink(self, record: dict[str, Any]) -> None:
+        """Feed one finished turn to the neural orchestrator.
+
+        The full roster is passed as the vocabulary hint so the routing
+        head always covers every registered agent, not only those seen in
+        data. A disabled gate or a raising store is a no-op — learning
+        must never affect the conversation.
+        """
+        from dourmouse.orch_net import log_experience
+
+        names = [s.name for s in self.registry.all_subagents()]
+        log_experience(record, agent_names=names)
 
     def history(self) -> list[dict[str, Any]]:
         """Read-only view of the OpenAI-format conversation history."""

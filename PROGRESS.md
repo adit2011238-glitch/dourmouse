@@ -1,7 +1,71 @@
 # Dourmouse — Progress
 
-## Current Phase: V5.2 — SPEED + QUALITY OVERHAUL (2026-08-08)
-## Last updated: 2026-08-08
+## Current Phase: V5.6 — NEURAL ORCHESTRATOR (2026-08-09)
+## Last updated: 2026-08-09
+
+### v5.6 shipped — a real neural network that learns orchestration
+
+1. **`dourmouse/orch_net.py`** — a genuine MLP (hashed-bag-of-words
+   featurizer + 64-unit ReLU hidden layer + multi-step sigmoid head + agent
+   softmax head) trained by hand-written backprop with Adam in pure numpy
+   (no torch; trains in <1s on this machine). It learns TWO orchestration
+   decisions from real outcomes: (a) which prompts are multi-step, (b)
+   which subagent should own a request — self-supervised from the agents
+   actually used, weighted by run quality and operator 👍/👎 ratings.
+2. **Safety-by-design**: the net BLENDS, never replaces — routing adds
+   `0.5 * max(0, logit)` (max ~2, below the deterministic +5 tool-mention,
+   +4 domain, +3 name bonuses); multi-step is `heuristic OR (net confident
+   > 0.65)`; activation needs >= 25 experiences + trained weights; gated by
+   `DOURMOUSE_NET` (default on); degrades to today's heuristics at zero
+   regression until then.
+3. **Experience loop**: every top-level dispatch run logs an experience
+   (prompt, agents used, how cleanly it ended); chat.py wires it per turn;
+   feedback ratings reweight samples + trigger retrains; auto-retrain every
+   20 new experiences in a background thread (single-flight); bootstraps
+   from workspace/sessions/*.jsonl on first server start.
+4. **UI**: GET /api/neuro + a NEURAL ORCHESTRATOR HUD panel (experiences,
+   trained count, loss, val/train/routing accuracy, [TRAIN] button), and a
+   POST /api/neuro/train force-retrain endpoint.
+5. **Wiring**: planner.looks_multi_step OR-branch, find_agents_for_query
+   neural blend, dispatch experience sink (depth-0 only), webui feedback
+   hook, requirements.txt numpy pin, .env.example docs.
+
+---
+
+## Previous: V5.5 — FREEBBUFF READ BRIDGE + BRAIN ESCALATION (2026-08-09)
+## Last updated: 2026-08-09
+
+### v5.5 shipped — real Freebuff account access + stronger brain for hard work
+
+1. **Freebuff read bridge (`dourmouse/freebuff_bridge.py`)** — real, read-only
+   access to the user's Freebuff Desktop account through the app's OWN
+   loopback renderer API (127.0.0.1:51819, no token): account identity,
+   projects, thread conversations, notes, skills, and git changes. Tools on
+   a new `freebuff` subagent: `freebuff_status/projects/threads/read_thread/`
+   `notes/skills/changes`. Honest NOT CONFIGURED when the app isn't running/
+   authed (Rule 2.2); read-only by design — nothing is ever sent or mutated.
+   Discovery: the old 51820 bridge needs a per-launch random token
+   (crypto.randomUUID, never persisted) and is the app's internal debugger
+   API — the misleading "paste FREEBUFF_API_TOKEN" guidance was corrected;
+   the real read surface needs NO token.
+2. **HUD FREEBBUFF DESKTOP panel** — account, project/thread counts, newest
+   threads per project; GET /api/freebuff + SETUP row now probe the real API.
+3. **Brain escalation (`dispatch.py`)** — multi-step prompts escalate to the
+   full default brain; simple chat stays on the fast orchestrator brain
+   (deterministic planner heuristic, Rule 2.8). The HUD backend line shows
+   the live brain + a ⬆HEAVY marker when escalated.
+4. **Security**: thread ids path-validated (UUID-ish only), project paths
+   must be absolute from the app, loopback-only reads, no secret leakage
+   (account email never appears in the connections report).
+
+Tests: 933 pass (was 910 → +23: freebuff bridge ×17, brain escalation ×4,
+connections rewrite ×2). Ruff clean on all new files; mypy net-zero on
+changed modules (dispatch.py carries 24 pre-existing errors at baseline).
+New files: `dourmouse/freebuff_bridge.py`, `tests/test_freebuff_bridge.py`;
+edited: general_roster.py, connections.py, webui.py, dispatch.py,
+ui/index.html, .env.example, tests (connections/dispatch/general_roster).
+
+---
 
 ### v5.2 shipped — latency 28s→0.7s, agentic routing fixed, UI polish
 
