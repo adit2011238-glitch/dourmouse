@@ -591,6 +591,7 @@
       <select id="sessionpick" title="Resume a recent session (real data from workspace/sessions)"><option value="">⌁ RESUME SESSION…</option></select>
       <button id="mapbtn" title="Open the agent orchestration map in a new window">⧉ AGENT MAP</button>
       <button id="atlasTermBtn" title="Open the ATLAS Terminal (backtesting & strategy lab) in a new window">◈ ATLAS TERMINAL</button>
+      <button id="hubbtn" title="Open the COMMERCIAL HUB — ATLAS / DOURMOUSE / TAILSCALE FEED in one shell" style="color:var(--gold)">◉ COMMERCIAL HUB</button>
       <button id="setupbtn" title="Capability checklist — what's configured and how to fix the rest">[SETUP]</button>
       <div class="clock" id="clock">--:--:--</div>
       <div class="memload" id="memload">MEM_LOAD: — — GB / 16.00GB</div>
@@ -1604,7 +1605,8 @@
   // v2.5: inside the native desktop window (pywebview) the map opens as a
   // SECOND native window via the js_api bridge; in a plain browser it falls
   // back to window.open exactly as before.
-  document.getElementById('mapbtn').addEventListener('click', () => {
+  document.getElementById('hubbtn')?.addEventListener('click', () => { window.open('hub.html', '_blank'); });
+document.getElementById('mapbtn').addEventListener('click', () => {
     const api = (window.pywebview && window.pywebview.api) || null;
     if (api && typeof api.open_map === 'function') {
       api.open_map();
