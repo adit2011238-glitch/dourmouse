@@ -468,6 +468,36 @@ def _check_connections_tool(arguments: dict[str, Any]) -> str:
     return format_connections()
 
 
+def _extract_pdf_tool(arguments: dict[str, Any]) -> str:
+    """v5.x: extract text from a PDF by absolute path."""
+    from dourmouse.extract import extract_pdf_text
+
+    path = (arguments.get("path") or "").strip()
+    if not path:
+        return "ERROR: extract_pdf requires an absolute 'path'."
+    try:
+        return extract_pdf_text(path)
+    except RuntimeError as exc:
+        return f"EXTRACT PDF (reported honestly): {exc}"
+    except Exception as exc:  # noqa: BLE001 - readable failure
+        return f"EXTRACT PDF FAILED: {type(exc).__name__}: {exc}"
+
+
+def _extract_receipt_tool(arguments: dict[str, Any]) -> str:
+    """v5.x: parse a receipt/invoice PDF into structured fields."""
+    from dourmouse.extract import extract_receipt
+
+    path = (arguments.get("path") or "").strip()
+    if not path:
+        return "ERROR: extract_receipt requires an absolute 'path'."
+    try:
+        return extract_receipt(path)
+    except RuntimeError as exc:
+        return f"EXTRACT RECEIPT (reported honestly): {exc}"
+    except Exception as exc:  # noqa: BLE001 - readable failure
+        return f"EXTRACT RECEIPT FAILED: {type(exc).__name__}: {exc}"
+
+
 def _read_upload_tool(arguments: dict[str, Any]) -> str:
     """v5.0: read a file the user uploaded through the HUD (/uploads/<name>).
 
@@ -545,6 +575,35 @@ def build_system_subagent() -> Subagent:
                     "required": ["name"],
                 },
                 handler=_read_upload_tool,
+            ),
+            ToolSpec(
+                name="extract_pdf",
+                description=(
+                    "Extract the words from a PDF document by absolute path "
+                    "(receipts, invoices, reports). Needs the optional pypdf "
+                    "extra installed; otherwise reports NOT CONFIGURED "
+                    "honestly."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+                handler=_extract_pdf_tool,
+            ),
+            ToolSpec(
+                name="extract_receipt",
+                description=(
+                    "Parse a receipt/invoice PDF into structured fields "
+                    "(vendor, date, total, line items). Best-effort regex; "
+                    "reports fields it could NOT parse, never estimates them."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+                handler=_extract_receipt_tool,
             ),
             ToolSpec(
                 name="list_path",
