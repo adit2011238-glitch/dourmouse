@@ -306,7 +306,7 @@ class MemoryStore:
         path = Path(path)
         added = 0
         try:
-            lines = path.read_text(errors="replace").splitlines()
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             return 0
         for line in lines:
@@ -337,7 +337,7 @@ class MemoryStore:
             return 0
         for p in sorted(root.rglob("*.md")):
             try:
-                body = p.read_text(errors="replace").strip()
+                body = p.read_text(encoding="utf-8", errors="replace").strip()
             except OSError:
                 continue
             if not body:

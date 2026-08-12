@@ -130,7 +130,7 @@ def _reports_dir() -> Path:
 
 def _read_report_md(target: Path, snippet_chars: int = _REPORT_SNIPPET_CHARS) -> dict[str, Any]:
     """One dated report: name, modified iso, full body (capped) + snippet."""
-    body = target.read_text(errors="replace")
+    body = target.read_text(encoding="utf-8", errors="replace")
     try:
         mtime = datetime.fromtimestamp(
             target.stat().st_mtime, tz=timezone.utc

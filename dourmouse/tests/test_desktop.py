@@ -247,14 +247,14 @@ class TestPackaging:
     def test_desktop_requirements_manifest(self):
         manifest = _PROJECT_ROOT / "requirements-desktop.txt"
         assert manifest.is_file()
-        text = manifest.read_text()
+        text = manifest.read_text(encoding="utf-8")
         assert "pywebview" in text
 
     def test_start_command_launches_desktop_module(self):
-        launcher = (_PROJECT_ROOT / "start.command").read_text()
+        launcher = (_PROJECT_ROOT / "start.command").read_text(encoding="utf-8")
         assert "dourmouse.desktop" in launcher
         assert "requirements-desktop.txt" in launcher
 
     def test_build_app_command_uses_osacompile(self):
-        builder = (_PROJECT_ROOT / "build_app.command").read_text()
+        builder = (_PROJECT_ROOT / "build_app.command").read_text(encoding="utf-8")
         assert "osacompile" in builder

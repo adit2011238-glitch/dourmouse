@@ -9,6 +9,8 @@ refusals, and system_info/clipboard/open best-effort paths.
 from __future__ import annotations
 
 import json
+import os
+import sys
 
 import pytest
 
@@ -25,6 +27,37 @@ from dourmouse.system_access import (
     build_system_subagent,
     classify_command,
 )
+
+
+def _sensitive_paths() -> list[str]:
+    """Platform-appropriate credential/system paths the guard must refuse.
+
+    The guard treats POSIX-style paths as RELATIVE on Windows (no drive
+    root), so hardcoding "/etc/hosts" would trip the absolute-path check
+    with a different message. Use the platform's real shapes instead.
+    """
+    if os.name == "nt":
+        return [
+            r"C:\Windows\System32\drivers\etc\hosts",
+            r"C:\Windows\System32\config\SAM",
+            r"C:\Users\me\.ssh\id_rsa",
+            r"C:\Users\me\.ssh\authorized_keys",
+            r"C:\Users\me\.aws\credentials",
+            r"C:\Users\me\.gnupg\secring.gpg",
+            r"C:\Users\me\.kube\config",
+            r"C:\Users\me\.docker\config.json",
+        ]
+    return [
+        "/etc/hosts",
+        "/usr/local/x",
+        "/Library/Keychains/x",
+        "/Users/me/.ssh/id_rsa",
+        "/Users/me/.ssh/authorized_keys",
+        "/Users/me/.aws/credentials",
+        "/Users/me/.gnupg/secring.gpg",
+        "/Users/me/.kube/config",
+        "/Users/me/.docker/config.json",
+    ]
 
 
 class _FakeFunction:
@@ -135,17 +168,7 @@ class TestReadPathGuard:
     write/delete — previously it could silently read credentials."""
 
     def test_read_refuses_credential_dir_paths(self):
-        for p in [
-            "/etc/hosts",
-            "/usr/local/x",
-            "/Library/Keychains/x",
-            "/Users/me/.ssh/id_rsa",
-            "/Users/me/.ssh/authorized_keys",
-            "/Users/me/.aws/credentials",
-            "/Users/me/.gnupg/secring.gpg",
-            "/Users/me/.kube/config",
-            "/Users/me/.docker/config.json",
-        ]:
+        for p in _sensitive_paths():
             result = _read_path_tool({"path": p})
             assert "REFUSED" in result, f"expected refusal for {p}"
             assert "never reads there" in result
@@ -222,7 +245,7 @@ class TestFullScopeFiles:
 
         w = tmp_path / "sub" / "new.txt"
         assert "WROTE" in _write_path_tool({"path": str(w), "content": "abc"})
-        assert w.read_text() == "abc"
+        assert w.read_text(encoding="utf-8") == "abc"
 
         listing = _list_path_tool({"path": str(tmp_path)})
         assert "note.txt" in listing and "sub/" in listing
@@ -232,13 +255,12 @@ class TestFullScopeFiles:
         assert "ABSOLUTE" in result
 
     def test_write_refuses_sensitive_paths(self):
-        for p in ["/etc/hosts", "/usr/local/bin/x", "/Library/Keychains/x",
-                  "/Users/me/.ssh/authorized_keys", "/Users/me/.aws/credentials"]:
+        for p in _sensitive_paths():
             result = _write_path_tool({"path": p, "content": "x"})
             assert "REFUSED" in result, f"expected refusal for {p}"
 
     def test_delete_refuses_sensitive_paths(self):
-        result = _delete_path_tool({"path": "/etc/hosts"})
+        result = _delete_path_tool({"path": _sensitive_paths()[0]})
         assert "REFUSED" in result
 
     def test_delete_requires_absolute(self):

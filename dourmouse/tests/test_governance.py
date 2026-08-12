@@ -747,7 +747,7 @@ class TestAuditLedger:
 
         ok, errors = verify_session_audit(path)
         assert ok, errors
-        lines = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
         assert len(lines) == 2
         # Chain: record 2's prev_hash == record 1's hash.
         assert lines[1]["prev_hash"] == lines[0]["hash"]
@@ -768,7 +768,7 @@ class TestAuditLedger:
         )
         session.ask("one")
         session.ask("two")
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         first = json.loads(lines[0])
         first["final_text"] = "tampered!"
         lines[0] = json.dumps(first)
@@ -788,7 +788,7 @@ class TestAuditLedger:
         )
         session.ask("one")
         session.ask("two")
-        lines = [l for l in path.read_text().splitlines() if l.strip()]
+        lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
         path.write_text(lines[1] + "\n")  # drop the first record entirely
         ok, errors = verify_session_audit(path)
         assert not ok
@@ -820,7 +820,7 @@ class TestAuditLedger:
             confirmation_gate=lambda t: True,
         )
         session.ask("go")
-        rec = json.loads(session.session_file.read_text().splitlines()[0])
+        rec = json.loads(session.session_file.read_text(encoding="utf-8").splitlines()[0])
         assert len(rec["interventions"]) == 2
         assert rec["interventions"][0]["type"] == "confirmation_requested"
         assert rec["interventions"][1]["approved"] is True
@@ -841,7 +841,7 @@ class TestAuditLedger:
         resumed.ask("two")
         ok, errors = verify_session_audit(path)
         assert ok, errors
-        lines = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
         assert lines[1]["prev_hash"] == lines[0]["hash"]
 
 
@@ -946,7 +946,7 @@ class TestAuditExport:
         out = tmp_path / "export" / "ledger.jsonl"
         ok, errors = export_audit(session.session_file, out)
         assert ok, errors
-        assert out.read_text() == session.session_file.read_text()
+        assert out.read_text(encoding="utf-8") == session.session_file.read_text(encoding="utf-8")
 
     def test_export_refuses_tampered_ledger(self, tmp_path, monkeypatch):
         """A broken chain is never propagated to the compliance export."""
@@ -955,7 +955,7 @@ class TestAuditExport:
         session = self._session(tmp_path, monkeypatch)
         session.ask("one")
         session.ask("two")
-        lines = session.session_file.read_text().splitlines()
+        lines = session.session_file.read_text(encoding="utf-8").splitlines()
         first = json.loads(lines[0])
         first["final_text"] = "tampered!"
         lines[0] = json.dumps(first)
@@ -994,7 +994,7 @@ class TestAuditExport:
 
         session = self._session(tmp_path, monkeypatch)
         session.ask("one")
-        lines = session.session_file.read_text().splitlines()
+        lines = session.session_file.read_text(encoding="utf-8").splitlines()
         first = json.loads(lines[0])
         first["final_text"] = "tampered!"
         lines[0] = json.dumps(first)
@@ -1019,7 +1019,7 @@ class TestAuditExport:
 
         session = self._session(tmp_path, monkeypatch)
         session.ask("one")
-        lines = session.session_file.read_text().splitlines()
+        lines = session.session_file.read_text(encoding="utf-8").splitlines()
         first = json.loads(lines[0])
         first["final_text"] = "tampered!"
         lines[0] = json.dumps(first)

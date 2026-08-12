@@ -499,7 +499,7 @@ class TestUiWiring:
     def _read(self, rel: str) -> str:
         from pathlib import Path
 
-        return (Path(__file__).resolve().parents[2] / rel).read_text()
+        return (Path(__file__).resolve().parents[2] / rel).read_text(encoding="utf-8")
 
     def test_dashboard_has_comms_panel(self):
         html = self._read("ui/index.html")

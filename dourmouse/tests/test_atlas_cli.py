@@ -32,6 +32,17 @@ from dourmouse.general_roster import build_general_registry
 
 _ECHO_SCRIPT = "#!/usr/bin/env bash\necho \"FAKE_RAN:$*\"\nexit 0\n"
 _FAIL_SCRIPT = "#!/usr/bin/env bash\necho 'boom on stderr' >&2\nexit 3\n"
+_SLEEP_SCRIPT = "#!/usr/bin/env bash\nsleep 5\n"
+
+# Windows cannot execute POSIX bash scripts. The Windows fake is a REAL
+# interpreter copy plus a REAL atlas.ops.cli module in the fake repo — the
+# exact subprocess path production takes (`python -m atlas.ops.cli`), with
+# the same observable behavior as each POSIX bash fake.
+_FAKE_CLI_MODULE = {
+    _ECHO_SCRIPT: "import sys\nprint('FAKE_RAN:' + ' '.join(sys.argv[1:]))\n",
+    _FAIL_SCRIPT: "import sys\nprint('boom on stderr', file=sys.stderr)\nsys.exit(3)\n",
+    _SLEEP_SCRIPT: "import time\ntime.sleep(5)\n",
+}
 
 
 def _fake_atlas(
@@ -51,11 +62,32 @@ def _fake_atlas(
     os.utime(repo / "deliverables" / "fx" / "2026-08-06.md", (2_000_000_000, 2_000_000_000))
     os.utime(repo / "deliverables" / "fx" / "2026-08-05.md", (1_000_000_000, 1_000_000_000))
     venv = tmp_path / "venv"
-    bindir = venv / "bin"
-    bindir.mkdir(parents=True)
-    py = bindir / "python"
-    py.write_text(script)
-    py.chmod(0o755)
+    if os.name == "nt":
+        # Real interpreter copy + real module: bash can't run on Windows.
+        import shutil as _shutil
+        import sys as _sys
+
+        bindir = venv / "Scripts"
+        bindir.mkdir(parents=True)
+        base = Path(_sys._base_executable)
+        _shutil.copyfile(base, bindir / "python.exe")
+        for dll in base.parent.glob("*.dll"):
+            _shutil.copyfile(dll, bindir / dll.name)
+        ops = repo / "atlas" / "ops"
+        ops.mkdir(parents=True)
+        (repo / "atlas" / "__init__.py").write_text("")
+        (ops / "__init__.py").write_text("")
+        (ops / "cli.py").write_text(_FAKE_CLI_MODULE[script])
+        # PYTHONHOME silences "Could not find platform independent
+        # libraries" from a copied interpreter; -m still resolves the fake
+        # module from the repo cwd.
+        monkeypatch.setenv("PYTHONHOME", str(base.parent))
+    else:
+        bindir = venv / "bin"
+        bindir.mkdir(parents=True)
+        py = bindir / "python"
+        py.write_text(script)
+        py.chmod(0o755)
     monkeypatch.setenv("ATLAS_REPO_PATH", str(repo))
     monkeypatch.setenv("ATLAS_VENV_PATH", str(venv))
     return repo
@@ -94,8 +126,7 @@ class TestRunAtlasCli:
     def test_timeout_raises_honestly(self, tmp_path, monkeypatch):
         """subprocess.run raises TimeoutExpired; the tool formats it honestly."""
         _fake_atlas(
-            tmp_path, monkeypatch,
-            script="#!/usr/bin/env bash\nsleep 5\n",
+            tmp_path, monkeypatch, script=_SLEEP_SCRIPT,
         )
         with pytest.raises(subprocess.TimeoutExpired):
             _, _, _ = atlas_cli.run_atlas_cli(["version"], timeout=1)

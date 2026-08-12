@@ -212,7 +212,7 @@ class TestFailurePaths:
         assert session._turn_count == 1
         # The failed turn was still persisted honestly (empty final_text).
         assert session_file.exists()
-        record = json.loads(session_file.read_text().strip().splitlines()[0])
+        record = json.loads(session_file.read_text(encoding="utf-8").strip().splitlines()[0])
         assert record["user"] == "do the thing"
         assert record["final_text"] == ""
 
@@ -226,11 +226,11 @@ class TestPersistence:
         session.ask("remember this")
 
         assert session_file.exists()
-        record = json.loads(session_file.read_text().strip().splitlines()[0])
+        record = json.loads(session_file.read_text(encoding="utf-8").strip().splitlines()[0])
         assert record["user"] == "remember this"
         assert record["final_text"] == "Saved."
         assert session._state_file.exists()
-        state = json.loads(session._state_file.read_text())
+        state = json.loads(session._state_file.read_text(encoding="utf-8"))
         assert [m["role"] for m in state] == ["system", "user", "assistant"]
 
     def test_resume_rebuilds_history_from_state(self, tmp_path):

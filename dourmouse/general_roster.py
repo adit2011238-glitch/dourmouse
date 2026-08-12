@@ -552,7 +552,7 @@ def _read_file_tool(arguments: dict[str, Any]) -> str:
         return f"REFUSED: {exc}"
     if not target.is_file():
         return f"ERROR: no such file in workspace: {arguments.get('path')!r}"
-    return target.read_text(errors="replace")
+    return target.read_text(encoding="utf-8", errors="replace")
 
 
 def _search_files_tool(arguments: dict[str, Any]) -> str:
@@ -594,7 +594,7 @@ def _search_files_tool(arguments: dict[str, Any]) -> str:
             if p.is_dir() or p.is_symlink():
                 continue
             try:
-                for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
+                for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
                     if query in line:
                         raw += f"{p.relative_to(_workspace_root())}:{i}:{line}\n"
             except OSError:
@@ -623,7 +623,7 @@ def _diff_preview_tool(arguments: dict[str, Any], *, for_write: bool = False) ->
         return f"DIFF (new file): {target.relative_to(_workspace_root())} would be created ({len(new_content)} chars)."
     if not target.is_file():
         return f"ERROR: not a file in workspace: {arguments.get('path')!r}"
-    old = target.read_text(errors="replace").splitlines()
+    old = target.read_text(encoding="utf-8", errors="replace").splitlines()
     new = new_content.splitlines()
     diff = "\n".join(
         difflib.unified_diff(old, new, fromfile=str(target.relative_to(_workspace_root())), tofile=str(target.relative_to(_workspace_root())))
@@ -672,7 +672,7 @@ def _edit_file_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: edit_file requires a non-empty 'old_str'."
     if not target.is_file():
         return f"ERROR: no such file in workspace: {arguments.get('path')!r}"
-    text = target.read_text(errors="replace")
+    text = target.read_text(encoding="utf-8", errors="replace")
     count = text.count(old_str)
     if count == 0:
         return f"ERROR: old_str not found in {arguments.get('path')!r} — nothing edited."
@@ -835,7 +835,7 @@ def _search_vault_tool(arguments: dict[str, Any]) -> str:
     matches = []
     for p in sorted(root.rglob("*.md")):
         try:
-            text = p.read_text(errors="replace")
+            text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         if query in text.lower():
@@ -857,7 +857,7 @@ def _read_note_tool(arguments: dict[str, Any]) -> str:
         return f"REFUSED: {exc}"
     if not target.is_file():
         return f"ERROR: no such note in vault: {arguments.get('path')!r}"
-    return target.read_text(errors="replace")
+    return target.read_text(encoding="utf-8", errors="replace")
 
 
 def _write_note_tool(arguments: dict[str, Any]) -> str:

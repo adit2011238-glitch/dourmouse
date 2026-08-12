@@ -932,18 +932,6 @@ class _Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
         name = (qs.get("name") or [""])[0].strip()
-        if not _UPLOAD_NAME_RE.match(name):
-            self._send_json(
-                {
-                    "ok": False,
-                    "error": (
-                        "filename must be 1-120 chars of letters/digits/"
-                        "dot/underscore/dash (no paths)"
-                    ),
-                },
-                status=400,
-            )
-            return
         raw_len = self.headers.get("Content-Length", "0") or "0"
         try:
             length = int(raw_len)
@@ -953,6 +941,26 @@ class _Handler(BaseHTTPRequestHandler):
         if length < 0 or length > _MAX_UPLOAD_BYTES:
             self._send_json(
                 {"ok": False, "error": f"upload too large (max {_MAX_UPLOAD_BYTES} bytes)"},
+                status=400,
+            )
+            return
+        if not _UPLOAD_NAME_RE.match(name):
+            # Drain the request body before responding: Windows closes a
+            # socket holding unread received data via RST, so the client
+            # would see a connection reset instead of this 400. Bounded by
+            # the size cap checked above.
+            try:
+                self.rfile.read(length)
+            except OSError:
+                pass
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": (
+                        "filename must be 1-120 chars of letters/digits/"
+                        "dot/underscore/dash (no paths)"
+                    ),
+                },
                 status=400,
             )
             return
@@ -1574,7 +1582,7 @@ def run_server(
             first_user = ""
             last_answer = ""
             try:
-                for line in f.read_text(errors="replace").splitlines():
+                for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
                     if not line.strip():
                         continue
                     rec = json.loads(line)
@@ -1590,7 +1598,7 @@ def run_server(
                     "first_user": first_user[:140],
                     "last_answer": last_answer[:140],
                     "turns": f.stat().st_size and sum(
-                        1 for ln in f.read_text(errors="replace").splitlines() if ln.strip()
+                        1 for ln in f.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()
                     ),
                 }
             )

@@ -90,7 +90,7 @@ class TestLoop:
         with pytest.raises(SystemExit):
             w.main()
         assert sync_called == []  # first run: record only, no sync
-        assert (tmp_path / "workspace" / "upstream_head.txt").read_text().strip() \
+        assert (tmp_path / "workspace" / "upstream_head.txt").read_text(encoding="utf-8").strip() \
             == "abc123abc123abc123abc123abc123abc123abc1"
 
     def test_changed_head_triggers_sync_and_notify_once(self, tmp_path, monkeypatch):
@@ -110,7 +110,7 @@ class TestLoop:
         with pytest.raises(SystemExit):
             w.main()
         assert calls == ["sync", "notify"]  # exactly once each
-        assert (tmp_path / "workspace" / "upstream_head.txt").read_text().strip() \
+        assert (tmp_path / "workspace" / "upstream_head.txt").read_text(encoding="utf-8").strip() \
             == "newheadnewheadnewheadnewheadnewheadnewheadnewhead"
 
     def test_unchanged_head_does_nothing(self, tmp_path, monkeypatch):
