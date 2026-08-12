@@ -1,0 +1,9 @@
+# dourmouse-finetuned — portable Modelfile (rebuilt from this repo)
+#
+# Base: qwen2.5:7b (verified by blob match sha256:2bada8a745067)
+# Adapter: lora-dourmouse-claude.gguf (23.1 MB LoRA, exported from the live
+#          Ollama blob; see TRAINING_RECIPE.md)
+#
+# Rebuild:  ollama create dourmouse-finetuned -f Modelfile
+FROM qwen2.5:7b
+ADAPTER ./lora-dourmouse-claude.gguf
