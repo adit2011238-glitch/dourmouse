@@ -14,6 +14,37 @@ alternative. No Node, no build step, no cloud account.
 
 ---
 
+## Quickstart (no jargon, ~3 minutes)
+
+> **What this is:** a personal assistant that runs on *your* computer. You type
+> or speak a goal — "sort the invoices in my Downloads folder", "summarise
+> today's market news", "every Monday at 9am, check my inbox and draft
+> replies" — and it does the steps, showing you each one, asking before
+> anything risky.
+
+1. **Install Python 3.10+** (python.org if you don't have it) and, optionally,
+   [Ollama](https://ollama.com) for a fully-local brain.
+2. **Unzip** the package anywhere. Double-click **`start.command`** (macOS) or
+   **`start.bat`** (Windows). It sets itself up — no config files to edit.
+3. The dashboard opens. **Type what you want done.** That's it.
+
+**Three things to know before you start:**
+
+- **It can act, not just talk.** It reads/writes files, runs scheduled tasks,
+  and can send messages — always shown in the action log, and always asking
+  before anything consequential. Watch the log; use the red kill switch to
+  stop everything instantly.
+- **Your data stays yours.** Conversations, memory, and files live on your
+  machine (see `PRIVACY.md`). Nothing phones home. If you use a cloud model
+  backend instead of local Ollama, what you type goes to that provider.
+- **It learns.** After each session it remembers what it learned, so answers
+  improve over time. Set `DOURMOUSE_LEARN=0` to turn that off.
+
+Legal: using this software means you accept `LICENSE` and `EULA.md`; data
+handling is described in `PRIVACY.md`.
+
+---
+
 ## 0. What's new in v4.0 (self-hosted personal AI OS)
 
 - **Local-first brain (Phase 2)** — `DOURMOUSE_LLM_BACKEND=auto` probes your local
