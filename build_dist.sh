@@ -66,7 +66,16 @@ STAGE="$(cd "$STAGE" && pwd)"
 
 echo "==> copying source (EXPLICIT include-list — an include-list cannot"
 echo "    leak .env/.venv/workspace/.git by accident; a wholesale cp can)"
-cp -R "$ROOT/dourmouse/dourmouse" "$STAGE/dourmouse"
+# The package may live flat at <root>/dourmouse (this repo) or nested at
+# <root>/dourmouse/dourmouse (older layouts). Pick whichever exists.
+if [ -d "$ROOT/dourmouse/dourmouse" ]; then
+  cp -R "$ROOT/dourmouse/dourmouse" "$STAGE/dourmouse"
+elif [ -d "$ROOT/dourmouse" ]; then
+  cp -R "$ROOT/dourmouse" "$STAGE/dourmouse"
+else
+  echo "error: no dourmouse package found under $ROOT" >&2
+  exit 1
+fi
 cp -R "$ROOT/ui" "$STAGE/ui"
 # tests/docs are NOT shipped — keep the dist clean; the package is self-contained.
 rm -rf "$STAGE/dourmouse/tests" "$STAGE/dourmouse/__pycache__" "$STAGE/ui"/*.orig 2>/dev/null || true
@@ -189,19 +198,20 @@ echo "==> creating fresh virtualenv with $PYTHON_BIN ($("$PYTHON_BIN" --version)
 "$PYTHON_BIN" -m venv "$STAGE/.venv"
 
 echo "==> installing dependencies (this downloads the wheels)"
-VOICE_EXTRA=""
-if [ -n "${WITH_VOICE}" ]; then
-  VOICE_EXTRA=" -r $ROOT/requirements-voice.txt"
+# Array (not a string): requirement paths may contain spaces (e.g.
+# /Volumes/ATLAS /Atlas/...), and unquoted expansion would split them.
+EXTRA_REQS=()
+if [ -n "${WITH_VOICE}" ] && [ -f "$ROOT/requirements-voice.txt" ]; then
+  EXTRA_REQS+=(-r "$ROOT/requirements-voice.txt")
 fi
 # The personal build is offline-first: pywebview (the NATIVE app window) must
 # ship in the venv, not be installed on first run. The portable build leaves
 # it out — its start.command installs requirements-desktop.txt at first run.
-DESKTOP_EXTRA=""
 if [ -n "$PERSONAL" ] && [ -f "$ROOT/requirements-desktop.txt" ]; then
-  DESKTOP_EXTRA=" -r $ROOT/requirements-desktop.txt"
+  EXTRA_REQS+=(-r "$ROOT/requirements-desktop.txt")
 fi
 "$STAGE/.venv/bin/pip" install --quiet --upgrade pip
-"$STAGE/.venv/bin/pip" install --quiet -r "$ROOT/requirements.txt" $VOICE_EXTRA $DESKTOP_EXTRA
+"$STAGE/.venv/bin/pip" install --quiet -r "$ROOT/requirements.txt" "${EXTRA_REQS[@]}"
 
 if [ -n "$PERSONAL" ]; then
   echo "==> installing ATLAS engine deps into the SAME venv (shared interpreter — fastest atlas)"
