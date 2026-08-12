@@ -11,6 +11,8 @@ lookalikes.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -20,6 +22,34 @@ from dourmouse import key_check
 from dourmouse.config import NVIDIA_DEFAULT_BASE_URL, NVIDIA_DEFAULT_MODEL
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _usable_bash() -> str | None:
+    """Return a real bash, or None if only the WSL stub is on PATH.
+
+    GitHub Windows runners resolve ``bash`` to the WSL shim (exit 1, "no
+    installed distributions"), which breaks ``bash -n``. Prefer Git Bash's
+    canonical path; verify the candidate actually runs.
+    """
+    candidates = []
+    if os.name == "nt":
+        candidates += [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ]
+    for cand in candidates:
+        if Path(cand).exists():
+            return cand
+    on_path = shutil.which("bash")
+    if on_path:
+        try:
+            r = subprocess.run([on_path, "--version"], capture_output=True,
+                               timeout=10)
+            if r.returncode == 0:
+                return on_path
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return None
 
 _VALID_KEY = "nvapi-" + "a" * 30
 
@@ -333,5 +363,8 @@ class TestStartCommandWiring:
 
     def test_bash_n_passes(self):
         script = _PROJECT_ROOT / "start.command"
-        result = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
+        bash = _usable_bash()
+        if bash is None:
+            pytest.skip("no usable bash on this runner")
+        result = subprocess.run([bash, "-n", str(script)], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr

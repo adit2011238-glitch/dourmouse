@@ -10,6 +10,8 @@ results (Rule 2.1).
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +22,35 @@ from dourmouse import desktop
 from dourmouse.tests.test_webui import _echo_registry
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _usable_bash() -> str | None:
+    """Return a real bash executable, or None if only the WSL stub exists.
+
+    On GitHub's Windows runners, ``bash`` on PATH resolves to the WSL shim
+    ("Windows Subsystem for Linux has no installed distributions..." exit 1),
+    not Git Bash — so ``bash -n`` fails there. Prefer Git Bash's canonical
+    path when present, and verify the candidate actually runs.
+    """
+    candidates = []
+    if os.name == "nt":
+        candidates += [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ]
+    for cand in candidates:
+        if Path(cand).exists():
+            return cand
+    on_path = shutil.which("bash")
+    if on_path:
+        try:
+            r = subprocess.run([on_path, "--version"], capture_output=True,
+                               timeout=10)
+            if r.returncode == 0:
+                return on_path
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -235,8 +266,11 @@ class TestLauncherScriptSyntax:
         script = _PROJECT_ROOT / rel
         if not script.exists():
             pytest.skip(f"{rel} not present in this checkout")
+        bash = _usable_bash()
+        if bash is None:
+            pytest.skip(f"no usable bash on this runner ({rel})")
         result = subprocess.run(
-            ["bash", "-n", str(script)],
+            [bash, "-n", str(script)],
             capture_output=True,
             text=True,
         )
