@@ -552,7 +552,7 @@ def _read_file_tool(arguments: dict[str, Any]) -> str:
         return f"REFUSED: {exc}"
     if not target.is_file():
         return f"ERROR: no such file in workspace: {arguments.get('path')!r}"
-    return target.read_text(errors="replace")
+    return target.read_text(encoding="utf-8", errors="replace")
 
 
 def _search_files_tool(arguments: dict[str, Any]) -> str:
@@ -594,7 +594,7 @@ def _search_files_tool(arguments: dict[str, Any]) -> str:
             if p.is_dir() or p.is_symlink():
                 continue
             try:
-                for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
+                for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
                     if query in line:
                         raw += f"{p.relative_to(_workspace_root())}:{i}:{line}\n"
             except OSError:
@@ -623,7 +623,7 @@ def _diff_preview_tool(arguments: dict[str, Any], *, for_write: bool = False) ->
         return f"DIFF (new file): {target.relative_to(_workspace_root())} would be created ({len(new_content)} chars)."
     if not target.is_file():
         return f"ERROR: not a file in workspace: {arguments.get('path')!r}"
-    old = target.read_text(errors="replace").splitlines()
+    old = target.read_text(encoding="utf-8", errors="replace").splitlines()
     new = new_content.splitlines()
     diff = "\n".join(
         difflib.unified_diff(old, new, fromfile=str(target.relative_to(_workspace_root())), tofile=str(target.relative_to(_workspace_root())))
@@ -672,7 +672,7 @@ def _edit_file_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: edit_file requires a non-empty 'old_str'."
     if not target.is_file():
         return f"ERROR: no such file in workspace: {arguments.get('path')!r}"
-    text = target.read_text(errors="replace")
+    text = target.read_text(encoding="utf-8", errors="replace")
     count = text.count(old_str)
     if count == 0:
         return f"ERROR: old_str not found in {arguments.get('path')!r} — nothing edited."
@@ -835,7 +835,7 @@ def _search_vault_tool(arguments: dict[str, Any]) -> str:
     matches = []
     for p in sorted(root.rglob("*.md")):
         try:
-            text = p.read_text(errors="replace")
+            text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         if query in text.lower():
@@ -857,7 +857,7 @@ def _read_note_tool(arguments: dict[str, Any]) -> str:
         return f"REFUSED: {exc}"
     if not target.is_file():
         return f"ERROR: no such note in vault: {arguments.get('path')!r}"
-    return target.read_text(errors="replace")
+    return target.read_text(encoding="utf-8", errors="replace")
 
 
 def _write_note_tool(arguments: dict[str, Any]) -> str:
@@ -1359,6 +1359,72 @@ def _complete_task_tool(arguments: dict[str, Any]) -> str:
     return f"TASK COMPLETE: {task_id}"
 
 
+def _schedule_recurring_tool(arguments: dict[str, Any]) -> str:
+    """User-defined recurring workflow: schedule a real tool call to repeat.
+
+    The model maps the user's intent to a concrete tool+args ONCE here;
+    the SchedulerRunner executes it deterministically afterwards (Rule 2.8).
+    """
+    from dourmouse import schedules
+
+    tool = (arguments.get("tool") or "").strip()
+    args = arguments.get("arguments") or {}
+    schedule_text = (arguments.get("schedule_text") or "").strip()
+    if not tool:
+        return "ERROR: schedule_recurring requires a 'tool' name."
+    if not schedule_text:
+        return "ERROR: schedule_recurring requires a 'schedule_text' (e.g. 'every Monday at 9:00')."
+    if not isinstance(args, dict):
+        return "ERROR: 'arguments' must be a JSON object of tool arguments."
+    registry = build_general_registry()
+    if registry.lookup(tool) is None:
+        return (
+            f"ERROR: no such tool: {tool!r}. List the registry first to pick a "
+            "real tool name. Nothing was scheduled."
+        )
+    try:
+        spec = schedules.parse_schedule(schedule_text)
+    except ValueError as exc:
+        return f"SCHEDULE REJECTED: {exc}"
+    store = schedules.Schedules()
+    entry = store.add(tool, args, spec, schedule_text)
+    return (
+        f"SCHEDULED {entry['id']}: {tool} {schedules.describe_spec(spec)} — "
+        f"next run {schedules.describe_next_run(entry)}. The scheduler runner "
+        "executes it deterministically; cancel with cancel_schedule "
+        f"({entry['id']})."
+    )
+
+
+def _list_schedules_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse import schedules
+
+    store = schedules.Schedules()
+    entries = store.list()
+    if not entries:
+        return "SCHEDULES: none."
+    lines = []
+    for e in entries:
+        state = "" if e.get("enabled") else " (disabled)"
+        spec = e.get("spec") or {}
+        lines.append(
+            f"- {e.get('id')}{state}: {e.get('tool')} "
+            f"{schedules.describe_spec(spec)} — next {schedules.describe_next_run(e)}"
+        )
+    return "SCHEDULES:\n" + "\n".join(lines)
+
+
+def _cancel_schedule_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse import schedules
+
+    sid = (arguments.get("schedule_id") or "").strip()
+    if not sid:
+        return "ERROR: cancel_schedule requires a 'schedule_id'."
+    if schedules.Schedules().remove(sid):
+        return f"SCHEDULE CANCELLED: {sid}"
+    return f"SCHEDULE {sid}: not found (nothing cancelled)."
+
+
 def _subagent(name: str, domain: str, description: str, tools: list[ToolSpec]) -> Subagent:
     return Subagent(name=name, domain=domain, description=description, tools=tuple(tools))
 
@@ -1663,6 +1729,82 @@ def build_general_registry() -> DispatchRegistry:
                     ),
                     parameters={"type": "object", "properties": {}},
                     handler=_list_calendar_events_tool,
+                ),
+            ],
+        )
+    )
+
+    def _sheets_read_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import sheets_read
+
+        try:
+            return sheets_read(
+                arguments.get("spreadsheet_id", ""),
+                arguments.get("sheet", "Sheet1"),
+                arguments.get("max_rows", 50),
+                arguments.get("max_cols", 20),
+            )
+        except RuntimeError as exc:
+            return f"SHEETS READ (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network/parse failures, readable
+            return f"SHEETS READ FAILED: {type(exc).__name__}: {exc}"
+
+    def _drive_download_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import drive_download
+
+        try:
+            return drive_download(arguments.get("file_id", ""), arguments.get("dest", ""))
+        except RuntimeError as exc:
+            return f"DRIVE DOWNLOAD (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DRIVE DOWNLOAD FAILED: {type(exc).__name__}: {exc}"
+
+    registry.register_subagent(
+        _subagent(
+            "docs",
+            "General",
+            "Reads link-shared Google Sheets and downloads link-shared Drive "
+            "items. Read-only; no login needed for shared items.",
+            [
+                ToolSpec(
+                    name="sheets_read",
+                    description=(
+                        "Read a Google Sheet's values as rows (read-only). "
+                        "Needs the spreadsheet ID from the URL and the sheet "
+                        "name; works when the sheet is shared 'Anyone with "
+                        "the link can view'. Private sheets report the exact "
+                        "fix instead of fabricating data."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "spreadsheet_id": {"type": "string", "description": "the token in the sheet URL between /d/ and /edit"},
+                            "sheet": {"type": "string", "default": "Sheet1"},
+                            "max_rows": {"type": "integer", "default": 50},
+                            "max_cols": {"type": "integer", "default": 20},
+                        },
+                        "required": ["spreadsheet_id"],
+                    },
+                    handler=_sheets_read_h,
+                ),
+                ToolSpec(
+                    name="drive_download",
+                    description=(
+                        "Download a link-shared Google Drive item by its ID "
+                        "(read-only). Works when the item is shared 'Anyone "
+                        "with the link'; private items report the exact fix. "
+                        "Writes into the uploads folder unless a dest path "
+                        "is given."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "file_id": {"type": "string", "description": "the token in the file URL between /d/ and /view"},
+                            "dest": {"type": "string", "description": "optional save path (default: uploads sandbox)"},
+                        },
+                        "required": ["file_id"],
+                    },
+                    handler=_drive_download_h,
                 ),
             ],
         )
@@ -2039,6 +2181,86 @@ def build_general_registry() -> DispatchRegistry:
         from dourmouse.spotify_services import list_playlists
 
         return list_playlists(int(arguments.get("limit", 20)))
+
+    # -- v6.0 forex-data pipeline agent -------------------------------- #
+    # Real telemetry from the forex research pipeline (FOREX_DATA_PATH):
+    # data inventory, the validated commodity-seasonal strategy + live
+    # paper calendar, upcoming economic events, the paper log, and IBKR
+    # gateway reachability. Deterministic (Rule 2.8), honest NOT
+    # CONFIGURED when FOREX_DATA_PATH is unset (Rule 2.2).
+    from dourmouse.forex_ops import build_forex_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "forex",
+            "Projects",
+            "forex-data pipeline telemetry — inventory, seasonal strategy, events, paper log, IBKR gateway.",
+            build_forex_tool_specs(),
+        )
+    )
+
+    # -- v8.2 Trading 212 broker agent -------------------------------- #
+    # Real account + order access via the official T212 Public API
+    # (demo/live, X-Api-Token). Paper-first: t212_order refuses without an
+    # explicit paper_confirm=true, and live is double-gated. Honest NOT
+    # CONFIGURED without T212_API_KEY (Rule 2.2). Equity/ISA scope only —
+    # the API does not expose CFDs, so the seasonal CFD legs stay manual
+    # or via IBKR.
+    from dourmouse.trading212_ops import build_t212_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "t212",
+            "Projects",
+            "Trading 212 broker — real account summary, open positions, portfolio, and paper-first order placement (demo/live, double-gated).",
+            build_t212_tool_specs(),
+        )
+    )
+
+    # -- v8.3 MetaTrader 5 paper broker agent ------------------------- #
+    # Low-friction paper venue: free MT5 demo accounts come with real-time
+    # quotes and simulated fills (no data subscriptions, no futures margin
+    # floors), and MT5 brokers commonly list the ag CFDs the seasonal
+    # strategy trades. Paper-first: mt5_order refuses without
+    # paper_confirm=true; live accounts are double-gated.
+    from dourmouse.mt5_ops import build_mt5_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "mt5",
+            "Projects",
+            "MetaTrader 5 paper broker — status, seasonal-universe symbol availability, live quotes, and paper-first orders on a free demo account (no subscriptions, no margin floors).",
+            build_mt5_tool_specs(),
+        )
+    )
+
+    # -- v8.0 ATLAS Terminal agent ------------------------------------ #
+    # What the ATLAS Terminal (streamlit, atlas_terminal/) shows right now.
+    from dourmouse.atlas_ui_ops import build_atlas_ui_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "atlas_ui",
+            "Projects",
+            "ATLAS Terminal status — what the streamlit terminal would show now (validation, next trade, events, paper, IBKR).",
+            build_atlas_ui_tool_specs(),
+        )
+    )
+
+    # -- v8.1 ATLAS Command Center ------------------------------------- #
+    # RUN the real research pipeline from here: validation suite, walk-
+    # forward, backtest, paper log, calendar, events refresh. Also owns
+    # the locked STANDARD (reports/validation_standard.json).
+    from dourmouse.atlas_command import build_atlas_cmd_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "atlas_cmd",
+            "Projects",
+            "ATLAS Command Center — run the research pipeline (validation suite, backtest, paper log, calendar) and read the locked standard.",
+            build_atlas_cmd_tool_specs(),
+        )
+    )
 
     # -- v2.3 preloaded live-intelligence agents ----------------------- #
     registry.register_subagent(
@@ -2570,6 +2792,49 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["task_id"],
                     },
                     handler=_complete_task_tool,
+                ),
+                ToolSpec(
+                    name="schedule_recurring",
+                    description=(
+                        "Schedule a real tool call to repeat automatically "
+                        "('do this every Monday'). Pass the exact tool name "
+                        "and its arguments you want repeated, plus a plain-"
+                        "English schedule: 'every Monday at 9:00', 'daily at "
+                        "8:30', 'every 30 minutes', 'weekly'. Returns the "
+                        "schedule id; the runner executes it deterministically "
+                        "(no model in the loop) and persists across restarts."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "tool": {"type": "string", "description": "an existing tool name in this system"},
+                            "arguments": {"type": "object", "description": "the tool's arguments as a JSON object"},
+                            "schedule_text": {"type": "string", "description": "'every Monday at 9:00', 'daily at 8:30', 'every 30 minutes'"},
+                        },
+                        "required": ["tool", "arguments", "schedule_text"],
+                    },
+                    handler=_schedule_recurring_tool,
+                ),
+                ToolSpec(
+                    name="list_schedules",
+                    description=(
+                        "List every recurring schedule (id, tool, when, next "
+                        "run, last run)."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_list_schedules_tool,
+                ),
+                ToolSpec(
+                    name="cancel_schedule",
+                    description="Stop a recurring schedule by its id (from list_schedules).",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "schedule_id": {"type": "string"},
+                        },
+                        "required": ["schedule_id"],
+                    },
+                    handler=_cancel_schedule_tool,
                 ),
             ],
         )

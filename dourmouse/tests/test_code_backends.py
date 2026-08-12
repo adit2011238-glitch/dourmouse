@@ -8,6 +8,8 @@ binary, the preloaded subagent tool wiring, and the roster shape.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from dourmouse import code_backends
@@ -232,6 +234,14 @@ class TestRunCodeTask:
 # --------------------------------------------------------------------------- #
 
 def _write_fake_cli(tmp_path, script: str) -> str:
+    if os.name == "nt":
+        p = tmp_path / "fake-claude.cmd"
+        if ">&2" in script:
+            body = ["@echo off", "echo boom 1>&2", "exit /b 3"]
+        else:
+            body = ["@echo off", 'echo CLAUDE SAYS: print("hello")']
+        p.write_text("\r\n".join(body) + "\r\n", encoding="utf-8")
+        return str(p)
     p = tmp_path / "fake-claude"
     p.write_text("#!/bin/bash\n" + script)
     p.chmod(0o755)

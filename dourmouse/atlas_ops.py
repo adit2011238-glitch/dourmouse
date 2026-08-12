@@ -125,7 +125,7 @@ def atlas_bootstrap_status() -> dict[str, Any]:
     log_tail = ""
     if log.is_file():
         try:
-            lines = log.read_text(errors="replace").splitlines()
+            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
             log_tail = "\n".join(lines[-5:])
         except OSError:
             log_tail = "(log unreadable)"

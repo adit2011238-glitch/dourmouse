@@ -20,6 +20,7 @@ import os
 import subprocess
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +32,17 @@ from dourmouse.general_roster import build_general_registry
 
 _ECHO_SCRIPT = "#!/usr/bin/env bash\necho \"FAKE_RAN:$*\"\nexit 0\n"
 _FAIL_SCRIPT = "#!/usr/bin/env bash\necho 'boom on stderr' >&2\nexit 3\n"
+_SLEEP_SCRIPT = "#!/usr/bin/env bash\nsleep 5\n"
+
+# Windows cannot execute POSIX bash scripts. The Windows fake is a REAL
+# interpreter copy plus a REAL atlas.ops.cli module in the fake repo — the
+# exact subprocess path production takes (`python -m atlas.ops.cli`), with
+# the same observable behavior as each POSIX bash fake.
+_FAKE_CLI_MODULE = {
+    _ECHO_SCRIPT: "import sys\nprint('FAKE_RAN:' + ' '.join(sys.argv[1:]))\n",
+    _FAIL_SCRIPT: "import sys\nprint('boom on stderr', file=sys.stderr)\nsys.exit(3)\n",
+    _SLEEP_SCRIPT: "import time\ntime.sleep(5)\n",
+}
 
 
 def _fake_atlas(
@@ -50,11 +62,32 @@ def _fake_atlas(
     os.utime(repo / "deliverables" / "fx" / "2026-08-06.md", (2_000_000_000, 2_000_000_000))
     os.utime(repo / "deliverables" / "fx" / "2026-08-05.md", (1_000_000_000, 1_000_000_000))
     venv = tmp_path / "venv"
-    bindir = venv / "bin"
-    bindir.mkdir(parents=True)
-    py = bindir / "python"
-    py.write_text(script)
-    py.chmod(0o755)
+    if os.name == "nt":
+        # Real interpreter copy + real module: bash can't run on Windows.
+        import shutil as _shutil
+        import sys as _sys
+
+        bindir = venv / "Scripts"
+        bindir.mkdir(parents=True)
+        base = Path(_sys._base_executable)
+        _shutil.copyfile(base, bindir / "python.exe")
+        for dll in base.parent.glob("*.dll"):
+            _shutil.copyfile(dll, bindir / dll.name)
+        ops = repo / "atlas" / "ops"
+        ops.mkdir(parents=True)
+        (repo / "atlas" / "__init__.py").write_text("")
+        (ops / "__init__.py").write_text("")
+        (ops / "cli.py").write_text(_FAKE_CLI_MODULE[script])
+        # PYTHONHOME silences "Could not find platform independent
+        # libraries" from a copied interpreter; -m still resolves the fake
+        # module from the repo cwd.
+        monkeypatch.setenv("PYTHONHOME", str(base.parent))
+    else:
+        bindir = venv / "bin"
+        bindir.mkdir(parents=True)
+        py = bindir / "python"
+        py.write_text(script)
+        py.chmod(0o755)
     monkeypatch.setenv("ATLAS_REPO_PATH", str(repo))
     monkeypatch.setenv("ATLAS_VENV_PATH", str(venv))
     return repo
@@ -93,8 +126,7 @@ class TestRunAtlasCli:
     def test_timeout_raises_honestly(self, tmp_path, monkeypatch):
         """subprocess.run raises TimeoutExpired; the tool formats it honestly."""
         _fake_atlas(
-            tmp_path, monkeypatch,
-            script="#!/usr/bin/env bash\nsleep 5\n",
+            tmp_path, monkeypatch, script=_SLEEP_SCRIPT,
         )
         with pytest.raises(subprocess.TimeoutExpired):
             _, _, _ = atlas_cli.run_atlas_cli(["version"], timeout=1)
@@ -281,6 +313,95 @@ class TestRunManager:
         snap = mgr.snapshot()
         assert snap["exit_code"] == -1
         assert "repo exploded" in snap["tail"]
+
+
+class TestSpewrate:
+    """v8.2 — real measured ATLAS spewrate (candidates/sec)."""
+
+    def test_idle_before_any_run(self):
+        mgr = atlas_cli.AtlasRunManager()
+        out = mgr.spewrate()
+        assert out["state"] == "idle"
+        assert out["rate"] is None
+        assert out["unit"] == "candidates/s"
+
+    def test_parses_evaluated_from_real_output_shape(self):
+        tail = (
+            '{\n  "report_path": "deliverables/fx/2026-08-09.md",\n'
+            '  "pairs": 7,\n  "evaluated": 63,\n  "accepted": 4,\n'
+            '  "failed": false\n}\n'
+            "fx-daily: report written to deliverables/fx/2026-08-09.md\n"
+        )
+        assert atlas_cli._evaluated_from_tail(tail) == 63
+
+    def test_no_evaluated_returns_none(self):
+        assert atlas_cli._evaluated_from_tail("boom on stderr") is None
+
+    def test_done_run_computes_rate(self):
+        mgr = atlas_cli.AtlasRunManager()
+        started = datetime.now(timezone.utc) - timedelta(seconds=30)
+        mgr._state.update(
+            {
+                "command": "fx-daily",
+                "running": False,
+                "started_at": started.isoformat(timespec="seconds"),
+                "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "exit_code": 0,
+                "tail": '{"evaluated": 63, "accepted": 4}',
+            }
+        )
+        out = mgr.spewrate()
+        assert out["state"] == "done"
+        assert out["work"] == 63
+        assert out["elapsed_s"] is not None
+        assert out["rate"] is not None
+        # 63 candidates in ~30s ≈ 2.1/s — the roundtrip must stay sane.
+        assert 1.0 <= out["rate"] <= 5.0
+
+    def test_done_without_work_count_is_honest(self):
+        mgr = atlas_cli.AtlasRunManager()
+        started = datetime.now(timezone.utc) - timedelta(seconds=10)
+        mgr._state.update(
+            {
+                "command": "health",
+                "running": False,
+                "started_at": started.isoformat(timespec="seconds"),
+                "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "exit_code": 0,
+                "tail": "health: all providers nominal",
+            }
+        )
+        out = mgr.spewrate()
+        assert out["state"] == "done"
+        assert out["rate"] is None
+        assert "no parseable evaluated count" in out["note"]
+
+    def test_running_state_has_no_rate(self):
+        mgr = atlas_cli.AtlasRunManager()
+        mgr._state.update(
+            {
+                "command": "fx-daily",
+                "running": True,
+                "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "finished_at": None,
+                "exit_code": None,
+                "tail": "",
+            }
+        )
+        out = mgr.spewrate()
+        assert out["state"] == "running"
+        assert out["rate"] is None
+        assert out["elapsed_s"] is not None
+
+    def test_panel_payload_carries_spewrate(self, tmp_path, monkeypatch):
+        repo = _fake_atlas(tmp_path, monkeypatch)
+        monkeypatch.setattr(atlas_cli, "_version_cache", {"at": 0.0, "value": None})
+        monkeypatch.setattr(atlas_cli, "atlas_run_manager", atlas_cli.AtlasRunManager())
+        payload = atlas_cli.atlas_panel_snapshot()
+        assert payload["configured"] is True
+        assert payload["repo"] == str(repo)
+        assert payload["spewrate"]["state"] == "idle"
+        assert payload["spewrate"]["unit"] == "candidates/s"
 
 
 class TestPanelSnapshot:

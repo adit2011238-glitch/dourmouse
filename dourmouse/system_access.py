@@ -68,6 +68,13 @@ _SYSTEM_ROOT_PARTS = (
     "/System",
     "/Library/Keychains",
     "/private/etc",
+    # Windows system roots (matched case-insensitively — see _is_sensitive).
+    # Without these the guard silently misses C:\Windows\... on Windows,
+    # which is exactly the credential/system hole this gate exists to close.
+    r"C:\Windows",
+    r"C:\Program Files",
+    r"C:\Program Files (x86)",
+    r"C:\ProgramData",
 )
 _SENSITIVE_COMPONENTS = {".ssh", ".aws", ".gnupg", ".kube", ".docker", "Keychains"}
 
@@ -180,10 +187,15 @@ def _is_sensitive(path: Path) -> bool:
         return True
     for root in _SYSTEM_ROOT_PARTS:
         try:
-            resolved.relative_to(Path(root))
+            if os.name == "nt" and root.startswith("C:"):
+                # Windows paths are case-insensitive; relative_to is not.
+                if str(resolved).lower().startswith(root.lower()):
+                    return True
+            else:
+                resolved.relative_to(Path(root))
+                return True
         except ValueError:
             continue
-        return True
     return False
 
 
@@ -204,7 +216,7 @@ def _read_path_tool(arguments: dict[str, Any]) -> str:
     if not target.is_file():
         return f"ERROR: no such file: {target}"
     try:
-        return target.read_text(errors="replace")
+        return target.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return f"ERROR: could not read {target}: {exc}"
 
@@ -355,11 +367,32 @@ def _system_info_tool(arguments: dict[str, Any]) -> str:
             ).stdout.strip()
             if mem.isdigit():
                 info.append(f"MEMORY: {int(mem) / (1024 ** 3):.1f} GB")
+        elif os.name == "nt":
+            # os.sysconf is POSIX-only; use the GlobalMemoryStatusEx API.
+            import ctypes
+
+            class _MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            m = _MEMORYSTATUSEX()
+            m.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+                info.append(f"MEMORY: {m.ullTotalPhys / (1024 ** 3):.1f} GB")
         else:
             mem = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
             if mem > 0:
                 info.append(f"MEMORY: {mem / (1024 ** 3):.1f} GB")
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, AttributeError, subprocess.SubprocessError):
         pass
     try:
         usage = shutil.disk_usage(Path.home())
@@ -433,6 +466,36 @@ def _check_connections_tool(arguments: dict[str, Any]) -> str:
     from dourmouse.connections import format_connections
 
     return format_connections()
+
+
+def _extract_pdf_tool(arguments: dict[str, Any]) -> str:
+    """v5.x: extract text from a PDF by absolute path."""
+    from dourmouse.extract import extract_pdf_text
+
+    path = (arguments.get("path") or "").strip()
+    if not path:
+        return "ERROR: extract_pdf requires an absolute 'path'."
+    try:
+        return extract_pdf_text(path)
+    except RuntimeError as exc:
+        return f"EXTRACT PDF (reported honestly): {exc}"
+    except Exception as exc:  # noqa: BLE001 - readable failure
+        return f"EXTRACT PDF FAILED: {type(exc).__name__}: {exc}"
+
+
+def _extract_receipt_tool(arguments: dict[str, Any]) -> str:
+    """v5.x: parse a receipt/invoice PDF into structured fields."""
+    from dourmouse.extract import extract_receipt
+
+    path = (arguments.get("path") or "").strip()
+    if not path:
+        return "ERROR: extract_receipt requires an absolute 'path'."
+    try:
+        return extract_receipt(path)
+    except RuntimeError as exc:
+        return f"EXTRACT RECEIPT (reported honestly): {exc}"
+    except Exception as exc:  # noqa: BLE001 - readable failure
+        return f"EXTRACT RECEIPT FAILED: {type(exc).__name__}: {exc}"
 
 
 def _read_upload_tool(arguments: dict[str, Any]) -> str:
@@ -512,6 +575,35 @@ def build_system_subagent() -> Subagent:
                     "required": ["name"],
                 },
                 handler=_read_upload_tool,
+            ),
+            ToolSpec(
+                name="extract_pdf",
+                description=(
+                    "Extract the words from a PDF document by absolute path "
+                    "(receipts, invoices, reports). Needs the optional pypdf "
+                    "extra installed; otherwise reports NOT CONFIGURED "
+                    "honestly."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+                handler=_extract_pdf_tool,
+            ),
+            ToolSpec(
+                name="extract_receipt",
+                description=(
+                    "Parse a receipt/invoice PDF into structured fields "
+                    "(vendor, date, total, line items). Best-effort regex; "
+                    "reports fields it could NOT parse, never estimates them."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+                handler=_extract_receipt_tool,
             ),
             ToolSpec(
                 name="list_path",

@@ -99,22 +99,28 @@ def get_atlas_venv_python() -> Path:
     and a second interpreter to spawn — the fastest possible path.
     """
     raw = os.environ.get("ATLAS_VENV_PATH")
-    if raw:
-        py = Path(raw).expanduser() / "bin" / "python"
-        if not py.is_file():
-            # Explicit config wins over the bundle BY DESIGN: a broken env
-            # path is reported, never silently replaced.
-            raise AtlasNotConfiguredError(f"No python interpreter found at {py}")
-        return py
-    if find_bundled_atlas() is not None and _bundled_venv_can_run_atlas():
-        return Path(sys.executable)
-    raise AtlasNotConfiguredError(
-        "ATLAS_VENV_PATH is not set and the bundled atlas/ cannot run under "
-        "the app's own interpreter. ATLAS has its own dependency tree "
-        "(pandas, scipy, ...): in a personal dist run the build's dependency "
-        "step, or set ATLAS_VENV_PATH in .env to a venv where ATLAS's real "
-        "requirements are installed."
-    )
+    if not raw:
+        if find_bundled_atlas() is not None and _bundled_venv_can_run_atlas():
+            return Path(sys.executable)
+        raise AtlasNotConfiguredError(
+            "ATLAS_VENV_PATH is not set and the bundled atlas/ cannot run under "
+            "the app's own interpreter. ATLAS has its own dependency tree "
+            "(pandas, scipy, ...): in a personal dist run the build's dependency "
+            "step, or set ATLAS_VENV_PATH in .env to a venv where ATLAS's real "
+            "requirements are installed."
+        )
+    # Windows venvs put the interpreter in Scripts/, POSIX in bin/. Try
+    # both layouts so a venv created on either platform resolves.
+    root = Path(raw).expanduser()
+    candidates = [root / "Scripts" / "python.exe", root / "bin" / "python"]
+    if os.name != "nt":
+        candidates.reverse()
+    py = next((c for c in candidates if c.is_file()), None)
+    if py is None:
+        # Explicit config wins over the bundle BY DESIGN: a broken env
+        # path is reported, never silently replaced.
+        raise AtlasNotConfiguredError(f"No python interpreter found under {root}")
+    return py
 
 
 def run_atlas_research(

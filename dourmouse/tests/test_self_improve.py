@@ -89,10 +89,10 @@ class TestLiveDigest:
         assert isinstance(digest["suggestions"], list)
 
     def test_roster_ships_daily_digest_tool(self):
-        src = (Path(__file__).resolve().parents[2] / "dourmouse" / "general_roster.py").read_text()
+        src = (Path(__file__).resolve().parents[2] / "dourmouse" / "general_roster.py").read_text(encoding="utf-8")
         assert "daily_digest" in src
         assert "_build_memory_subagent" in src
 
     def test_webui_ships_selfimprove_route(self):
-        src = (Path(__file__).resolve().parents[2] / "dourmouse" / "webui.py").read_text()
+        src = (Path(__file__).resolve().parents[2] / "dourmouse" / "webui.py").read_text(encoding="utf-8")
         assert "/api/selfimprove" in src

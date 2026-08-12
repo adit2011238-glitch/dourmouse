@@ -160,9 +160,9 @@ def _digest_many(path: Path) -> list[tuple[str, str, str]]:
     suffix = path.suffix.lower()
     try:
         if suffix == ".py":
-            return [("", _python_skeleton(path.read_text(errors="replace"), _MAX_SKELETON), "python")]
+            return [("", _python_skeleton(path.read_text(encoding="utf-8", errors="replace"), _MAX_SKELETON), "python")]
         if suffix in (".md", ".markdown"):
-            text = path.read_text(errors="replace").strip()
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
             if not text:
                 return []
             name = path.name.upper()
@@ -175,7 +175,7 @@ def _digest_many(path: Path) -> list[tuple[str, str, str]]:
                 return [("", text[:_MAX_MD] + ("…" if len(text) > _MAX_MD else ""), "markdown")]
             return [("", text[:_MAX_MD] + ("…" if len(text) > _MAX_MD else ""), "markdown")]
         if suffix in (".json", ".html", ".csv", ".txt", ".yaml", ".yml", ".toml", ".ini", ".cfg"):
-            text = path.read_text(errors="replace").strip()
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
             if not text:
                 return []
             return [("", text[:_MAX_REPORT] + ("…" if len(text) > _MAX_REPORT else ""), "text")]
@@ -237,7 +237,10 @@ def scan_repo(
     walked: set[str] = set()
     produced_by_rel: dict[str, set[str]] = {}
     for p in _collect_files(root):
-        rel = str(p.relative_to(root))
+        # POSIX-normalized relative path: repo facts are shared knowledge that
+        # must look identical on macOS and Windows (a Windows backslash path
+        # would break cross-platform lookups and the PATH= body line).
+        rel = p.relative_to(root).as_posix()
         walked.add(rel)
         digests = _digest_many(p)
         if not digests:

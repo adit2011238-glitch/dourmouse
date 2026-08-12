@@ -1,0 +1,5 @@
+# PDF/receipt/invoice extraction extra (v5.x) — OPTIONAL, pure-Python.
+# Without these wheels extract_pdf / extract_receipt report NOT CONFIGURED
+# honestly (same pattern as the voice/desktop extras).
+# Install with: pip install -r requirements.txt -r requirements-extract.txt
+pypdf>=4.0

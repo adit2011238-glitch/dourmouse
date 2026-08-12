@@ -322,7 +322,7 @@ class TestCli:
 
 class TestStartCommandWiring:
     def test_onboarding_runs_live_check_before_writing_env(self):
-        launcher = (_PROJECT_ROOT / "start.command").read_text()
+        launcher = (_PROJECT_ROOT / "start.command").read_text(encoding="utf-8")
         # The live check must come BEFORE the .env write, and reject loudly.
         live_idx = launcher.index("dourmouse.key_check")
         write_idx = launcher.index("printf 'NVIDIA_API_KEY=")

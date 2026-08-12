@@ -244,7 +244,7 @@ class TestPlanEventInTranscript:
         session.ask("Search the web, then draft an email about it", max_turns=2)
         records = [
             json.loads(ln)
-            for ln in session.session_file.read_text().splitlines()
+            for ln in session.session_file.read_text(encoding="utf-8").splitlines()
             if ln.strip()
         ]
         assert records[0]["transcript"][0]["type"] == "plan"

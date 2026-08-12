@@ -266,7 +266,7 @@ class ChatSession:
         if not self._state_file.exists():
             return
         try:
-            loaded = json.loads(self._state_file.read_text())
+            loaded = json.loads(self._state_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             # Corrupt state must never silently break a session.
             raise RuntimeError(
@@ -393,7 +393,7 @@ def _last_record_hash(session_file: Path) -> str | None:
         return None
     last_hash: str | None = None
     try:
-        for line in session_file.read_text(errors="replace").splitlines():
+        for line in session_file.read_text(encoding="utf-8", errors="replace").splitlines():
             if not line.strip():
                 continue
             rec = json.loads(line)
@@ -418,7 +418,7 @@ def export_audit(session_file: Path | str, out_path: Path | str) -> tuple[bool, 
     src = Path(session_file)
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    records = [ln for ln in src.read_text(errors="replace").splitlines() if ln.strip()]
+    records = [ln for ln in src.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
     with out.open("w", encoding="utf-8") as fh:
         for line in records:
             fh.write(line + "\n")
@@ -438,7 +438,7 @@ def verify_session_audit(session_file: Path | str) -> tuple[bool, list[str]]:
     errors: list[str] = []
     prev_hash: str | None = None
     records = 0
-    for lineno, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+    for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
         if not line.strip():
             continue
         records += 1

@@ -39,6 +39,6 @@ whisper_models/
 *.onnx
 
 # ── OS junk ──────────────────────────────────────────────────────────────
-.DS_Store
-# AppleDouble sidecar files (exFAT drives create these next to every file)
-._*
+.DS_Store  # AppleDouble sidecar files (exFAT drives create these next to every file)
+  ._*
+  sync_log.txt

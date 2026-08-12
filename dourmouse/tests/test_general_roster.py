@@ -89,6 +89,12 @@ class TestRosterShape:
             "freebuff",  # v5.5: Freebuff Desktop reads
             "music",  # v5.7: Spotify playback + discovery
             "worldmonitor",  # v5.12: global intelligence (markets/risk/conflict)
+            "forex",  # v5.x: FX research/archive agents
+            "atlas_cmd",  # v5.x: ATLAS CLI command runner
+            "atlas_ui",  # v5.x: ATLAS UI bridge
+            "mt5",  # v5.x: MetaTrader 5 broker ops
+            "t212",  # v5.x: Trading 212 broker ops
+            "docs",  # v5.x: Google Sheets/Drive link-shared access
         }
 
     def test_orchestrator_exposes_delegate_task(self):
@@ -237,7 +243,7 @@ class TestComms:
         assert "NOT SENT" in result
         drafts = list((workspace / "drafts").glob("draft_*.json"))
         assert len(drafts) == 1
-        saved = json.loads(drafts[0].read_text())
+        saved = json.loads(drafts[0].read_text(encoding="utf-8"))
         assert saved["status"] == "draft — NOT SENT"
         assert saved["to"] == "boss@corp.com"
 
@@ -287,7 +293,7 @@ class TestDevCoding:
     def test_write_then_read_file_in_workspace(self, workspace):
         written = _write_file_tool({"path": "src/hello.py", "content": "print('hi')"})
         assert "WROTE" in written
-        assert (workspace / "src" / "hello.py").read_text() == "print('hi')"
+        assert (workspace / "src" / "hello.py").read_text(encoding="utf-8") == "print('hi')"
         read = _read_file_tool({"path": "src/hello.py"})
         assert read == "print('hi')"
 
@@ -327,7 +333,7 @@ class TestPhase2WorkspaceTools:
         assert "DIFF PREVIEW" in result
         assert "-line two" in result
         assert "+line TWO" in result
-        assert f.read_text() == "line one\nline two\n", "diff_preview must NOT write"
+        assert f.read_text(encoding="utf-8") == "line one\nline two\n", "diff_preview must NOT write"
 
     def test_diff_preview_new_file(self, workspace):
         result = _diff_preview_tool({"path": "new.txt", "content": "hi"})
@@ -348,7 +354,7 @@ class TestPhase2WorkspaceTools:
         assert "DIFF (what changed in this write):" in result
         assert "-old value" in result
         assert "+new value" in result
-        assert f.read_text() == "new value"
+        assert f.read_text(encoding="utf-8") == "new value"
 
     def test_write_file_new_target_has_no_diff(self, workspace):
         result = _write_file_tool({"path": "fresh.txt", "content": "x"})
@@ -362,7 +368,7 @@ class TestPhase2WorkspaceTools:
         assert "EDITED" in result
         assert "-print('before')" in result
         assert "+print('changed')" in result
-        assert f.read_text() == "print('changed')\nprint('after')\n"
+        assert f.read_text(encoding="utf-8") == "print('changed')\nprint('after')\n"
 
     def test_edit_file_old_str_not_found(self, workspace):
         (workspace / "x.txt").write_text("hello")
@@ -376,7 +382,7 @@ class TestPhase2WorkspaceTools:
         result = _edit_file_tool({"path": "dup.txt", "old_str": "same", "new_str": "other"})
         assert "2 times" in result
         assert "refusing" in result
-        assert f.read_text() == "same\nsame\n", "ambiguous edit must not write"
+        assert f.read_text(encoding="utf-8") == "same\nsame\n", "ambiguous edit must not write"
 
     def test_edit_file_requires_old_str(self, workspace):
         (workspace / "y.txt").write_text("a")
@@ -443,7 +449,7 @@ class TestMemory:
     def test_write_note_creates_real_note(self, vault):
         result = _write_note_tool({"path": "daily/2026-08-01.md", "content": "# Day\nnotes"})
         assert "WROTE" in result
-        assert (vault / "daily" / "2026-08-01.md").read_text() == "# Day\nnotes"
+        assert (vault / "daily" / "2026-08-01.md").read_text(encoding="utf-8") == "# Day\nnotes"
 
     def test_vault_unset_reports_not_configured(self, monkeypatch):
         monkeypatch.delenv("OBSIDIAN_VAULT_PATH", raising=False)

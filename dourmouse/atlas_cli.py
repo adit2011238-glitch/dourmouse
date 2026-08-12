@@ -137,7 +137,7 @@ def _reports_dir() -> Path:
 
 def _read_report_md(target: Path, snippet_chars: int = _REPORT_SNIPPET_CHARS) -> dict[str, Any]:
     """One dated report: name, modified iso, full body (capped) + snippet."""
-    body = target.read_text(errors="replace")
+    body = target.read_text(encoding="utf-8", errors="replace")
     try:
         mtime = datetime.fromtimestamp(
             target.stat().st_mtime, tz=timezone.utc
@@ -524,6 +524,75 @@ class AtlasRunManager:
                 }
             )
 
+    def spewrate(self) -> dict[str, Any]:
+        """Real measured output rate of ATLAS work — never fabricated.
+
+        Units are **candidates evaluated per second**, parsed from the actual
+        fx-daily summary JSON (``"evaluated": N``) in the captured output,
+        divided by the real wall-clock elapsed time of the run.
+
+        Honest states (Rule 2.2):
+
+        - ``idle`` — no managed run has happened yet; rate ``None``.
+        - ``running`` — a run is in progress; rate ``None`` (no work count
+          is known until it finishes), with live elapsed seconds.
+        - ``done`` — last run finished; rate computed when the output
+          carries a parseable evaluated count, else ``None`` with a note.
+        """
+        with self._lock:
+            state = dict(self._state)
+        started = state.get("started_at")
+        finished = state.get("finished_at")
+        if not started:
+            return {
+                "state": "idle",
+                "unit": "candidates/s",
+                "rate": None,
+                "work": None,
+                "elapsed_s": None,
+                "note": "no managed ATLAS run yet — spewrate appears after the first [FX-DAILY]",
+            }
+        start_dt = datetime.fromisoformat(started)
+        end_dt = datetime.fromisoformat(finished) if finished else datetime.now(timezone.utc)
+        elapsed = max((end_dt - start_dt).total_seconds(), 1e-9)
+        if state.get("running"):
+            return {
+                "state": "running",
+                "unit": "candidates/s",
+                "rate": None,
+                "work": None,
+                "elapsed_s": round(elapsed, 1),
+                "note": "measuring… work count lands when the run finishes",
+            }
+        work = _evaluated_from_tail(state.get("tail") or "")
+        if work is None:
+            return {
+                "state": "done",
+                "unit": "candidates/s",
+                "rate": None,
+                "work": None,
+                "elapsed_s": round(elapsed, 1),
+                "note": "last run finished but its output carried no parseable evaluated count",
+            }
+        return {
+            "state": "done",
+            "unit": "candidates/s",
+            "rate": round(work / elapsed, 3),
+            "work": work,
+            "elapsed_s": round(elapsed, 1),
+            "note": "measured from the real run output and wall-clock time",
+        }
+
+
+def _evaluated_from_tail(tail: str) -> int | None:
+    """Parse ATLAS's real ``"evaluated": N`` summary field from run output.
+
+    Returns ``None`` (not 0) when absent, so callers can distinguish "no
+    work count in the output" from a genuinely empty evaluation.
+    """
+    match = re.search(r'"evaluated"\s*:\s*(\d+)', tail)
+    return int(match.group(1)) if match else None
+
 
 atlas_run_manager = AtlasRunManager()
 
@@ -566,4 +635,5 @@ def atlas_panel_snapshot() -> dict[str, Any]:
         payload["deliverables"] = []
     payload["latest_report"] = latest_fx_report()
     payload["last_run"] = atlas_run_manager.snapshot()
+    payload["spewrate"] = atlas_run_manager.spewrate()
     return payload

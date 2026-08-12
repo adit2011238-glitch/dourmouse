@@ -30,10 +30,12 @@ import imaplib
 import json
 import os
 import smtplib
+import urllib.error
 import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 from email.utils import formataddr, parsedate_to_datetime
+from pathlib import Path
 from typing import Any
 
 #: Swappable in tests (hermetic HTTP, no network).
@@ -686,6 +688,195 @@ def calendar_events(max_results: int = 5) -> str:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Google Sheets + Drive — link-shared access via stdlib urllib (no OAuth).
+#
+# The zero-setup small-business case: a sheet/file shared "Anyone with the
+# link can view" is readable without any login. Private items honestly
+# report the exact fix (share with the link) instead of fabricating data
+# (Rule 2.2). Writes/private-Drive access need OAuth, which stays a future
+# opt-in dependency — never a hard one.
+# --------------------------------------------------------------------------- #
+
+_UA = "Mozilla/5.0 (Dourmouse/1.0)"
+
+
+def _http_get(url: str, timeout: int = 25) -> tuple[int, bytes, str]:
+    """GET a URL with a browser-ish UA; returns (status, body, content_type)."""
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read(), (resp.headers.get("Content-Type") or "")
+    except urllib.error.HTTPError as exc:
+        return exc.code, b"", (exc.headers.get("Content-Type") or "")
+    except Exception as exc:  # noqa: BLE001 - network failures, readable
+        raise RuntimeError(f"NETWORK ERROR: {type(exc).__name__}: {exc}") from exc
+
+
+def _gviz_to_json(payload: str) -> str:
+    """Convert gviz's single-quoted/bare-key payload into strict JSON.
+
+    Google's endpoint emits ``{version:'0.6',...}`` (bare keys, single-
+    quoted string values, bare numbers) and ``Date(2024,1,1,0,0,0)`` for
+    date cells. This stateful pass swaps the delimiters without touching
+    apostrophes inside values, and turns Date(...) into a readable string.
+    """
+    import re
+
+    out: list[str] = []
+    i, n = 0, len(payload)
+    while i < n:
+        ch = payload[i]
+        if ch == "'":
+            prev = out[-1] if out else ""
+            nxt = payload[i + 1] if i + 1 < n else ""
+            if nxt == "'":  # escaped apostrophe inside a value
+                out.append("'")
+                i += 2
+                continue
+            if nxt in ",}]:":  # closing a quoted value
+                out.append('"')
+            elif prev in ":,[{":  # opening a quoted value
+                out.append('"')
+            else:
+                out.append(ch)  # apostrophe inside a value — keep literal
+        else:
+            out.append(ch)
+        i += 1
+    text = "".join(out)
+    # gviz object keys are bare (version:...) — wrap them for strict JSON.
+    text = re.sub(r"([,{]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)", r'\1"\2"\3', text)
+    return re.sub(r"Date\((\d{4}),(\d{1,2}),(\d{1,2})[^)]*\)", r'"\1-\2-\3"', text)
+
+
+def _valid_google_id(value: str, what: str) -> bool:
+    """A Google doc/file id is a plain token — reject path-ish input outright."""
+    v = (value or "").strip()
+    return bool(v) and "/" not in v and len(v) <= 200 and all(c.isalnum() or c in "-_" for c in v)
+
+
+def sheets_read(
+    spreadsheet_id: str, sheet: str = "Sheet1", max_rows: int = 50, max_cols: int = 20
+) -> str:
+    """Read a Google Sheet's values as aligned rows (link-shared, no login).
+
+    Uses Google's public gviz JSON endpoint, so it works for any sheet
+    shared "Anyone with the link can view" — the zero-setup case. Private
+    sheets honestly report the exact fix (Rule 2.2).
+    """
+    sid = (spreadsheet_id or "").strip()
+    if not _valid_google_id(sid, "spreadsheet"):
+        return (
+            "ERROR: sheets_read needs the spreadsheet ID (the long token in "
+            "the URL between /d/ and /edit)."
+        )
+    name = (sheet or "Sheet1").strip()
+    url = (
+        "https://docs.google.com/spreadsheets/d/" + sid
+        + "/gviz/tq?tqx=out:json&sheet=" + urllib.parse.quote(name)
+    )
+    status, body, _ctype = _http_get(url)
+    text = body.decode("utf-8", errors="replace")
+    if status != 200:
+        return (
+            f"SHEETS READ FAILED: HTTP {status}. The sheet must be shared "
+            "'Anyone with the link can view' (Share -> General access -> "
+            "Anyone with the link). No data was fabricated."
+        )
+    # gviz wraps the JSON in google.visualization.Query.setResponse({...});
+    prefix = "google.visualization.Query.setResponse("
+    if prefix not in text:
+        return "SHEETS READ FAILED: unexpected response from Google (not gviz JSON)."
+    payload = text[text.index(prefix) + len(prefix):]
+    payload = payload[: payload.rfind(");")]
+    try:
+        data = json.loads(_gviz_to_json(payload))
+    except json.JSONDecodeError as exc:
+        return f"SHEETS READ FAILED: could not parse the sheet response ({exc})."
+    if data.get("status") == "error":
+        detail = " ".join(str(e) for e in data.get("errors") or [])
+        return (
+            f"SHEETS READ FAILED: Google said: {detail or 'access denied'}. "
+            "The sheet must be shared 'Anyone with the link can view'. "
+            "No data was fabricated."
+        )
+    table = data.get("table") or {}
+    cols = [
+        ((c or {}).get("label") or (c or {}).get("id") or "")
+        for c in (table.get("cols") or [])[:max_cols]
+    ]
+    rows = []
+    for r in (table.get("rows") or [])[:max_rows]:
+        cells = [
+            (c or {}).get("v") if isinstance(c, dict) else None
+            for c in (r.get("c") or [])[:max_cols]
+        ]
+        rows.append(cells)
+    if not cols and not rows:
+        return "SHEETS READ: the sheet is empty."
+    out = [f"SHEETS READ: {name}", ""]
+    out.append(" | ".join(str(c) for c in cols))
+    out.append("-" * 60)
+    for cells in rows:
+        out.append(" | ".join("" if v is None else str(v) for v in cells))
+    out.append("")
+    out.append(f"({len(rows)} rows x {len(cols)} cols shown)")
+    return "\n".join(out)
+
+
+def drive_download(file_id: str, dest: str = "") -> str:
+    """Download a link-shared Google Drive file by its ID (stdlib urllib).
+
+    Works for files shared "Anyone with the link" — the zero-setup case.
+    Private files honestly report the exact fix. With no dest, saves into
+    the workspace uploads sandbox (readable back via read_upload).
+    """
+    fid = (file_id or "").strip()
+    if not _valid_google_id(fid, "drive file"):
+        return (
+            "ERROR: drive_download needs the file ID (the long token in the "
+            "URL between /d/ and /view)."
+        )
+    if not dest:
+        from dourmouse.system_access import _uploads_root
+
+        dest = str(_uploads_root() / f"{fid}.bin")
+    try:
+        path = Path(dest).expanduser()
+    except Exception:  # noqa: BLE001
+        return "ERROR: drive_download needs a writable destination path."
+    url = f"https://drive.google.com/uc?export=download&id={fid}"
+    status, body, ctype = _http_get(url)
+    if status != 200:
+        return (
+            f"DRIVE DOWNLOAD FAILED: HTTP {status}. The file must be shared "
+            "'Anyone with the link' (Share -> General access -> Anyone with "
+            "the link). Nothing was downloaded."
+        )
+    text = body.decode("utf-8", errors="replace")
+    if ctype.startswith("text/html") and "googleusercontent.com" not in text:
+        if "signin" in text.lower() or "Sign in" in text:
+            return (
+                "DRIVE DOWNLOAD FAILED: Google wants a login — the file is "
+                "not link-shared. Share it 'Anyone with the link' (General "
+                "access -> Anyone with the link) and retry. Nothing was "
+                "downloaded."
+            )
+        if "confirm=" in text or "virus scan" in text.lower():
+            return (
+                "DRIVE DOWNLOAD: the file is large or behind Google's "
+                "virus-scan confirmation. Download it manually in a browser "
+                "or use a smaller file. Nothing was saved."
+            )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(body)
+    except OSError as exc:
+        return f"DRIVE DOWNLOAD FAILED: could not write {path}: {exc}"
+    return f"DRIVE DOWNLOAD OK: {path} ({len(body)} bytes, {ctype or 'unknown type'})"
+
+
 def status() -> dict[str, Any]:
     """Honest capability report for the SETUP panel."""
     source = "env" if os.environ.get("GOOGLE_GMAIL_USER", "").strip() else "local_secrets.py"
@@ -695,6 +886,8 @@ def status() -> dict[str, Any]:
             f"{_user()} (via {source})" if gmail_configured() else "no Gmail login set"
         ),
         "hint": "env vars OR dourmouse/local_secrets.py; 2-Step Verification -> App passwords",
+        "sheets": "link-shared sheets readable via the gviz endpoint (no login)",
+        "drive": "link-shared files downloadable via uc?export=download (no login)",
     }
 
 
@@ -705,6 +898,8 @@ def _main(argv: list[str] | None = None) -> int:
     if "--check" in argv:
         s = status()
         print(f"GMAIL: {'CONFIGURED ' + s['detail'] if s['configured'] else 'NOT CONFIGURED — ' + s['hint']}")
+        print(f"SHEETS: {s['sheets']}")
+        print(f"DRIVE: {s['drive']}")
         print("SETUP: 1) enable 2-Step Verification  2) create an App password")
         print("       3) set GOOGLE_GMAIL_USER + GOOGLE_GMAIL_APP_PASSWORD in .env")
         print("          or fill GMAIL_USER/GMAIL_APP_PASSWORD in dourmouse/local_secrets.py")

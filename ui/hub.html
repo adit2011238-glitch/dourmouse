@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // COMMERCIAL HUB</title>
+<style>
+  :root {
+    --ground: #0B0E14; --surface: #12151E; --surface2: #161B27;
+    --cyan: #4FC3F7; --cyan-rgb: 79,195,247;
+    --amber: #F5A623; --red: #EF5350; --gold: #FFD232; --dead: #8A929E;
+    --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22; --a30: 0.30;
+    --a45: 0.45; --a60: 0.60; --a85: 0.85;
+    --font-display: "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
+    --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
+    --text: rgba(var(--cyan-rgb), var(--a85));
+    --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    --line: rgba(var(--cyan-rgb), var(--a10));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--ground); color: var(--text); font-family: var(--font-mono);
+         height: 100vh; display: flex; flex-direction: column; }
+  /* ---- top bar ---- */
+  header { display: flex; align-items: center; gap: 18px; padding: 10px 18px;
+           border-bottom: 1px solid var(--line); background: var(--surface); }
+  .wordmark { font-family: var(--font-wordmark); font-size: 15px; letter-spacing: 3px;
+              color: var(--gold); white-space: nowrap; }
+  .wordmark span { color: var(--cyan); }
+  .health { display: flex; gap: 14px; font-size: 11px; letter-spacing: 1px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  .dot.ok { background: var(--cyan); box-shadow: 0 0 8px rgba(var(--cyan-rgb), .8); }
+  .dot.bad { background: var(--red); box-shadow: 0 0 8px rgba(239,83,80,.8); }
+  .spacer { flex: 1; }
+  /* ---- tabs ---- */
+  nav { display: flex; gap: 2px; padding: 0 14px; background: var(--ground); }
+  .tab { padding: 10px 22px; font-family: var(--font-display); font-size: 12px;
+         letter-spacing: 2px; color: var(--text-dim); cursor: pointer;
+         border: 1px solid transparent; border-bottom: none; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--cyan); background: var(--surface); border-color: var(--line);
+                box-shadow: inset 0 2px 0 var(--cyan); }
+  .tab .tag { color: var(--amber); font-size: 10px; }
+  main { flex: 1; overflow: hidden; }
+  .pane { display: none; height: 100%; padding: 14px 18px; overflow: auto; }
+  .pane.active { display: block; }
+  iframe { width: 100%; height: 100%; border: none; background: var(--surface); }
+  /* ---- atlas widgets ---- */
+  .row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); padding: 12px 14px; min-width: 260px; }
+  .card h3 { font-size: 11px; letter-spacing: 2px; color: var(--amber); margin-bottom: 8px; }
+  .card .big { font-size: 26px; color: var(--text); }
+  .card .sub { font-size: 11px; color: var(--text-dim); }
+  button { background: var(--surface2); color: var(--cyan); border: 1px solid var(--line);
+           font-family: var(--font-mono); font-size: 12px; letter-spacing: 1px;
+           padding: 8px 16px; cursor: pointer; }
+  button:hover { border-color: var(--cyan); }
+  button:disabled { color: var(--dead); cursor: wait; }
+  pre { background: var(--surface); border: 1px solid var(--line); padding: 12px;
+        font-size: 11px; overflow: auto; max-height: 380px; white-space: pre-wrap; }
+  select, input { background: var(--surface2); color: var(--text); border: 1px solid var(--line);
+                  font-family: var(--font-mono); font-size: 12px; padding: 7px 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11px; }
+  th, td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+  th { color: var(--amber); letter-spacing: 1px; }
+  .msg { font-size: 12px; padding: 8px 0; }
+  .err { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <div class="wordmark">DOURMOUSE<span>//COMMERCIAL</span></div>
+  <div class="health">
+    <span><span class="dot" id="hShell"></span>SHELL</span>
+    <span><span class="dot" id="hAtlas"></span>ATLAS</span>
+    <span><span class="dot" id="hFeed"></span>FEED</span>
+  </div>
+  <div class="spacer"></div>
+  <div style="font-size:11px;color:var(--text-dim)" id="who">desktop-atlas</div>
+</header>
+
+<nav>
+  <div class="tab active" data-pane="product">◉ PRODUCT <span class="tag">the lab</span></div>
+  <div class="tab" data-pane="atlas">▣ ATLAS <span class="tag">engine</span></div>
+  <div class="tab" data-pane="dourmouse">◈ DOURMOUSE <span class="tag">core</span></div>
+  <div class="tab" data-pane="feed">≡ TAILSCALE FEED <span class="tag">live</span></div>
+</nav>
+
+<main>
+  <!-- ================= PRODUCT (one screen on load, tabs behind the Lab door) ================= -->
+  <section class="pane active" id="pane-product">
+    <iframe id="frameProd" src="product.html" style="width:100%; height:100%; border:none; background:var(--ground)"></iframe>
+  </section>
+
+  <!-- ================= ATLAS ================= -->
+  <section class="pane" id="pane-atlas">
+    <div class="row" style="margin-bottom:8px">
+    <div class="card" style="flex:1">
+      <h3>PIPELINE (supervisor :8792)</h3>
+      <div id="svcs" style="font-size:12px;letter-spacing:1px">loading…</div>
+    </div>
+  </div>
+  <div class="row">
+      <div class="card"><h3>REGISTRY KEYS</h3>
+        <div class="big" id="kKeys">—</div><div class="sub" id="kKeysSub">loading…</div></div>
+      <div class="card"><h3>DATA COVERAGE</h3>
+        <div class="big" id="kOk">—</div><div class="sub">keys passing quality gates</div></div>
+      <div class="card"><h3>ENGINE</h3>
+        <div class="big" id="kBt">3</div><div class="sub">registered backtests</div></div>
+    </div>
+    <div class="row">
+      <div class="card" style="flex:1; min-width:340px">
+        <h3>RUN BACKTEST</h3>
+        <div class="msg">USDJPY news-drift k=1 (the live strategy's engine test)</div>
+        <button id="btDrift">run usdjpy_drift_k1</button>
+        <span style="padding:0 8px"></span>
+        <button id="btGates">run registry_gates</button>
+        <span style="padding:0 8px"></span>
+        <button id="btGold" style="color:var(--gold)">run golden_regressions</button>
+        <pre id="btOut" style="margin-top:10px">—</pre>
+      </div>
+      <div class="card" style="flex:1; min-width:340px">
+        <h3>DATA INSPECTOR</h3>
+        <select id="keySel" style="width:100%; margin-bottom:8px"><option>loading keys…</option></select>
+        <button id="btData">inspect</button>
+        <pre id="dataOut" style="margin-top:10px">—</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= DOURMOUSE ================= -->
+  <section class="pane" id="pane-dourmouse">
+    <iframe id="frameDm" src="index.html"></iframe>
+  </section>
+
+  <!-- ================= FEED ================= -->
+  <section class="pane" id="pane-feed">
+    <iframe id="frameFeed" src="__FEED_URL__/"></iframe>
+  </section>
+</main>
+
+<script>
+const ENGINE = "http://127.0.0.1:8790";
+const FEED   = "__FEED_URL__".startsWith("__") ? "http://127.0.0.1:8788" : "__FEED_URL__";
+const ENGINE_TOKEN = "__ENGINE_TOKEN__";
+const EH = ENGINE_TOKEN && ENGINE_TOKEN !== "" ? { "Content-Type": "application/json", "X-Engine-Token": ENGINE_TOKEN } : { "Content-Type": "application/json" };
+
+// ---- tabs ----
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+  document.querySelectorAll(".pane").forEach(x => x.classList.remove("active"));
+  t.classList.add("active");
+  document.getElementById("pane-" + t.dataset.pane).classList.add("active");
+}));
+
+// ---- health ----
+async function health() {
+  const set = (id, ok) => { const d = document.getElementById(id); d.className = "dot " + (ok ? "ok" : "bad"); };
+  try { await fetch(ENGINE + "/api/health", {headers: EH}); set("hAtlas", true); } catch (e) { set("hAtlas", false); }
+  try { await fetch(FEED + "/feed?since=0"); set("hFeed", true); } catch (e) { set("hFeed", false); }
+  set("hShell", true);
+}
+health(); setInterval(health, 10000);
+
+// ---- atlas: keys + coverage ----
+async function loadKeys() {
+  try {
+    const r = await fetch(ENGINE + "/api/keys", {headers: EH});
+    const d = await r.json();
+    const keys = d.keys;
+    document.getElementById("kKeys").textContent = keys.length;
+    const sel = document.getElementById("keySel");
+    sel.innerHTML = "";
+    keys.forEach(k => {
+      const o = document.createElement("option");
+      o.value = k.key; o.textContent = k.key;
+      sel.appendChild(o);
+    });
+    // coverage via gates backtest
+    const g = await (await fetch(ENGINE + "/api/backtest", {method:"POST",
+      headers: EH, body: JSON.stringify({id:"registry_gates"})})).json();
+    document.getElementById("kOk").textContent = g.result.keys_ok;
+    document.getElementById("kKeysSub").textContent = "ok " + g.result.keys_ok + " / fail " + g.result.keys_fail;
+  } catch (e) { document.getElementById("kKeysSub").textContent = "engine unreachable: " + e; }
+}
+loadKeys();
+
+// ---- backtests ----
+async function runBt(id, btn) {
+  const out = document.getElementById("btOut");
+  out.textContent = "running…";
+  btn.disabled = true;
+  try {
+    const r = await fetch(ENGINE + "/api/backtest", {method:"POST",
+      headers: EH, body: JSON.stringify({id})});
+    const d = await r.json();
+    out.textContent = d.ok ? JSON.stringify(d.result, null, 2) : "ERROR: " + d.error;
+  } catch (e) { out.textContent = "engine unreachable: " + e; }
+  btn.disabled = false;
+}
+document.getElementById("btDrift").addEventListener("click", e => runBt("usdjpy_drift_k1", e.target));
+document.getElementById("btGates").addEventListener("click", e => runBt("registry_gates", e.target));
+document.getElementById("btGold").addEventListener("click", e => runBt("golden_regressions", e.target));
+
+// pipeline health
+async function svcs() {
+  const el = document.getElementById("svcs");
+  try {
+    const r = await fetch("http://127.0.0.1:8792/");
+    const d = await r.json();
+    el.innerHTML = Object.entries(d.services).map(([n, s]) =>
+      `<span style="color:${s.up ? "var(--cyan)" : "var(--red)"}">${s.up ? "●" : "○"} ${n}${s.restarts ? " ⚠" + s.restarts : ""}</span>`).join(" &nbsp; ");
+  } catch (e) { el.textContent = "supervisor unreachable"; }
+}
+svcs(); setInterval(svcs, 15000);
+
+// ---- data inspector ----
+document.getElementById("btData").addEventListener("click", async () => {
+  const key = document.getElementById("keySel").value;
+  const out = document.getElementById("dataOut");
+  out.textContent = "loading " + key + "…";
+  try {
+    const r = await fetch(ENGINE + "/api/data/" + key + "?limit=5", {headers: EH});
+    const d = await r.json();
+    out.textContent = d.ok ? JSON.stringify({key:d.key, rows:d.rows, from:d.from, to:d.to, sample:d.sample}, null, 2)
+                           : "ERROR: " + d.error;
+  } catch (e) { out.textContent = "engine unreachable: " + e; }
+});
+</script>
+</body>
+</html>

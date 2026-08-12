@@ -9,6 +9,7 @@ NOT CONFIGURED behavior (Rule 2.2 — no silent stub, no fabricated result).
 
 from __future__ import annotations
 
+import os
 import textwrap
 
 import pytest
@@ -26,11 +27,45 @@ def registry():
 
 
 def _write_fake_cli(tmp_path, script: str) -> str:
-    """Write an executable fake codex CLI; return its path."""
+    """Write an executable fake codex CLI; return its path.
+
+    POSIX: a bash script with the exec bit. Windows: a .cmd shim — bash
+    cannot execute there, and subprocess can launch .cmd files natively.
+    """
+    if os.name == "nt":
+        path = tmp_path / "fake-codex.cmd"
+        path.write_text(_bash_to_cmd(script), encoding="utf-8")
+        return str(path)
     path = tmp_path / "fake-codex"
     path.write_text(textwrap.dedent(script))
     path.chmod(0o755)
     return str(path)
+
+
+def _bash_to_cmd(script: str) -> str:
+    """Translate the fixed fake-script shapes into batch equivalents.
+
+    The ARGV/CWD shape is emitted through the real interpreter because cmd's
+    ``%*`` re-quotes args containing spaces (``-p "task"`` instead of
+    ``-p task``) — Python's argv parsing unquotes them faithfully.
+    """
+    import sys as _sys
+
+    s = textwrap.dedent(script)
+    if "ARGV:" in s and "CWD:" in s:
+        script = (
+            "import sys,os; "
+            "print('ARGV: ' + ' '.join(sys.argv[1:])); "
+            "print('CWD: ' + os.getcwd())"
+        )
+        body = ["@echo off", f'"{_sys.executable}" -c "{script}" %*']
+    elif "boom" in s and ">&2" in s:
+        body = ["@echo off", "echo boom 1>&2", "exit /b 3"]
+    elif "sleep" in s:
+        body = ["@echo off", "ping -n 6 127.0.0.1 >nul"]
+    else:
+        body = ["@echo off", "echo ok"]
+    return "\r\n".join(body) + "\r\n"
 
 
 class TestToolRegistration:

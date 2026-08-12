@@ -122,10 +122,18 @@ _DOMAIN_ROUTE: dict[str, str] = {
     "calendar": "scheduling",
     "schedule": "scheduling",
     "meeting": "scheduling",
+    "terminal": "system",  # "run a terminal command" must reach the agent
+    # that owns run_command, never tie-break to a description overlap
+    # (atlas_cmd's "Command Center — run the research pipeline" collides).
     # NOT here: "web" — too broad. "build a web app" would steal a coding
     # request to research_info; "search the web" already routes via the
     # search verb + research_info's web_search tool stem (reviewer-caught).
     "wikipedia": "research_info",
+    "sheet": "docs",
+    "sheets": "docs",
+    "spreadsheet": "docs",
+    "spreadsheets": "docs",
+    "drive": "docs",
 }
 
 # Stop words that are ALSO strong domain words must not be stripped — the

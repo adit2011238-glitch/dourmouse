@@ -64,8 +64,9 @@ mkdir -p "$STAGE"
 # path that works no matter how the build was invoked.
 STAGE="$(cd "$STAGE" && pwd)"
 
-echo "==> copying source (dourmouse package + ui)"
-cp -R "$ROOT/dourmouse" "$STAGE/dourmouse"
+echo "==> copying source (EXPLICIT include-list — an include-list cannot"
+echo "    leak .env/.venv/workspace/.git by accident; a wholesale cp can)"
+cp -R "$ROOT/dourmouse/dourmouse" "$STAGE/dourmouse"
 cp -R "$ROOT/ui" "$STAGE/ui"
 # tests/docs are NOT shipped — keep the dist clean; the package is self-contained.
 rm -rf "$STAGE/dourmouse/tests" "$STAGE/dourmouse/__pycache__" "$STAGE/ui"/*.orig 2>/dev/null || true
@@ -113,13 +114,14 @@ if [ -n "$PERSONAL" ]; then
     find "$STAGE/atlas" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
   fi
   # ship the app's own workspace (sessions, memory, linked-account tokens)
+  # — the point of --personal: one user's full state on one laptop.
   if [ -d "$ROOT/workspace" ]; then
     echo "==> shipping workspace (sessions, memory, linked-account tokens)"
     cp -R "$ROOT/workspace" "$STAGE/workspace"
   fi
 fi
 
-echo "==> copying launchers + docs"
+echo "==> copying launchers + docs + requirements (explicit)"
 cp "$ROOT/start.command" "$STAGE/start.command" 2>/dev/null || true
 cp "$ROOT/start.sh" "$STAGE/start.sh" 2>/dev/null || true
 cp "$ROOT/.env.example" "$STAGE/.env.example" 2>/dev/null || true
@@ -131,6 +133,31 @@ cp "$ROOT/UPGRADE_PLAN_02.md" "$STAGE/UPGRADE_PLAN_02.md" 2>/dev/null || true
 cp "$ROOT/requirements.txt" "$STAGE/requirements.txt" 2>/dev/null || true
 cp "$ROOT/requirements-desktop.txt" "$STAGE/requirements-desktop.txt" 2>/dev/null || true
 cp "$ROOT/requirements-voice.txt" "$STAGE/requirements-voice.txt" 2>/dev/null || true
+cp "$ROOT/requirements-extract.txt" "$STAGE/requirements-extract.txt" 2>/dev/null || true
+# strip anything that could still sneak in (tests, pycache, local secrets)
+rm -rf "$STAGE/dourmouse/tests" "$STAGE/dourmouse/__pycache__" "$STAGE/ui"/*.orig 2>/dev/null || true
+rm -f "$STAGE/dourmouse/local_secrets.py" 2>/dev/null || true
+find "$STAGE" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+
+# --- LEAK CHECK (release-blocker gate: dist must never ship user data) -----
+# Portable builds run the FULL gate — workspace/.env/venv/.git/*.db are hard
+# blockers. The --personal build is a documented single-user secrets carrier
+# (its whole point is embedding .env + workspace), so it gates on the
+# ACCIDENTAL leaks only: source secrets, session DBs, and relay configs.
+LEAK_PATTERNS=(\( -name '*.db' -o -name 'schedules.jsonl' \
+  -o -name 'relay_config.txt' -o -path '*/.git/*' \))
+if [ -z "$PERSONAL" ]; then
+  LEAK_PATTERNS=(\( -name 'local_secrets.py' -o -name '.env' \
+    -o -name '*.db' -o -name 'schedules.jsonl' -o -name 'relay_config.txt' \
+    -o -path '*/.git/*' -o -path '*/workspace/*' -o -name '.venv' \))
+fi
+LEAKS="$(find "$STAGE" "${LEAK_PATTERNS[@]}" 2>/dev/null | head -20)"
+if [ -n "$LEAKS" ]; then
+  echo "RELEASE BLOCKED — user data or secrets found inside the dist:"
+  echo "$LEAKS"
+  exit 1
+fi
+echo "    leak check: CLEAN (no user data / secrets shipped)"
 
 if [ "$(uname -s)" = "Darwin" ] && [ -d "$ROOT/dourmouse.app" ]; then
   echo "==> bundling dourmouse.app (macOS)"

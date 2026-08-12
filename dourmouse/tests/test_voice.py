@@ -407,18 +407,30 @@ class TestWebRoutes:
 class TestHudWiring:
     UI_DIR = Path(__file__).resolve().parents[2] / "ui"
 
+    @staticmethod
+    def _read_index() -> str:
+        # HTML is UTF-8 (declared in <meta charset>); the locale default
+        # (cp1252 on Windows) chokes on non-ASCII — read explicitly.
+        return (TestHudWiring.UI_DIR / "index.html").read_text(encoding="utf-8")
+
     def test_mic_and_speaker_buttons_present(self):
-        html = (self.UI_DIR / "index.html").read_text()
+        html = self._read_index()
         assert 'id="micBtn"' in html
         assert 'id="spkBtn"' in html
 
     def test_hud_calls_the_voice_endpoints(self):
-        html = (self.UI_DIR / "index.html").read_text()
+        html = self._read_index()
         assert "fetch('/api/voice')" in html
         assert "fetch('/api/speech'" in html
         assert "fetch('/api/speech?text=' + encodeURIComponent" in html
 
     def test_no_external_urls_in_voice_js(self):
-        html = (self.UI_DIR / "index.html").read_text()
+        html = self._read_index()
         script = html.split("<script>")[-1].split("</script>")[0]
-        assert "https://" not in script and "http://" not in script
+        # Loopback URLs are local (the ATLAS Terminal button opens
+        # http://127.0.0.1:<port>); the contract is NO EXTERNAL network.
+        import re
+
+        external = re.findall(r"https?://[^\s\"'`)]+", script)
+        external = [u for u in external if "127.0.0.1" not in u and "localhost" not in u]
+        assert not external, f"external URLs in voice js: {external}"

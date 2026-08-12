@@ -898,6 +898,8 @@
     <div class="clock-block">
       <select id="sessionpick" title="Resume a recent session (real data from workspace/sessions)"><option value="">⌁ RESUME SESSION…</option></select>
       <button id="mapbtn" title="Open the agent orchestration map in a new window">⧉ AGENT MAP</button>
+      <button id="atlasTermBtn" title="Open the ATLAS Terminal (backtesting & strategy lab) in a new window">◈ ATLAS TERMINAL</button>
+      <button id="hubbtn" title="Open the COMMERCIAL HUB — ATLAS / DOURMOUSE / TAILSCALE FEED in one shell" style="color:var(--gold)">◉ COMMERCIAL HUB</button>
       <button id="setupbtn" title="Capability checklist — what's configured and how to fix the rest">[SETUP]</button>
       <div class="clock" id="clock">--:--:--</div>
       <div class="memload" id="memload">MEM_LOAD: —</div>
@@ -1035,6 +1037,28 @@
           <button id="artClearBtn" class="vtbtn" title="Clear the session artifact store">[CLEAR]</button>
         </div>
         <div id="artifactbody"><div class="iv-empty">NO ARTIFACTS YET — ASK A RESEARCH/CODING AGENT FOR A TABLE, CHART, OR REPORT</div></div>
+      </div>
+      <!-- v8.2 — ATLAS SPEWRATE: real measured output rate of the last
+           managed ATLAS run (candidates evaluated per second, parsed from
+           the real run output ÷ real wall-clock time). Never fabricated;
+           honest states for idle / running / no-work-count. -->
+      <div class="col-title">ATLAS SPEWRATE</div>
+      <div id="atlasspew">
+        <div class="iv-empty">SPEWRATE STANDBY</div>
+      </div>
+      <!-- v8.3 — MT5 PAPER BROKER: real terminal/account/universe state via
+           the subprocess-bounded /api/mt5 snapshot (never fabricated, and
+           the poll can never hang on the terminal). -->
+      <div class="col-title">MT5 PAPER BROKER</div>
+      <div id="mt5panel">
+        <div class="iv-empty">MT5 STANDBY</div>
+      </div>
+      <!-- v8.4 — TRADINGVIEW BRIDGE: alert webhook status, locked seasonal
+           legs, and the last signals received (honest: unconfigured until
+           TV_WEBHOOK_SECRET is set). -->
+      <div class="col-title">TRADINGVIEW BRIDGE</div>
+      <div id="tvpanel">
+        <div class="iv-empty">TV STANDBY</div>
       </div>
       <div class="col-title">DELEGATED TASKS <span id="jobcount" class="jobcount"></span></div>
       <div id="jobs">
@@ -2014,7 +2038,8 @@
   // v2.5: inside the native desktop window (pywebview) the map opens as a
   // SECOND native window via the js_api bridge; in a plain browser it falls
   // back to window.open exactly as before.
-  document.getElementById('mapbtn').addEventListener('click', () => {
+  document.getElementById('hubbtn')?.addEventListener('click', () => { window.open('hub.html', '_blank'); });
+document.getElementById('mapbtn').addEventListener('click', () => {
     const api = (window.pywebview && window.pywebview.api) || null;
     if (api && typeof api.open_map === 'function') {
       api.open_map();
@@ -2022,6 +2047,22 @@
       window.open('/map', 'dourmouseMap', 'width=1280,height=860');
     }
   });
+  // v8.2 — ATLAS TERMINAL: open the streamlit backtesting terminal in a
+  // new window. Port is configurable via DOURMOUSE_ATLAS_TERMINAL_PORT;
+  // defaults to the launcher's 8511. Never fabricated — it either opens
+  // the real terminal or the window shows the connection failure.
+  const atlasTermBtn = document.getElementById('atlasTermBtn');
+  if (atlasTermBtn) {
+    atlasTermBtn.addEventListener('click', () => {
+      const port = (window.__ATLAS_TERMINAL_PORT__ || '8511');
+      const api = (window.pywebview && window.pywebview.api) || null;
+      if (api && typeof api.open_url === 'function') {
+        api.open_url('http://127.0.0.1:' + port);
+      } else {
+        window.open('http://127.0.0.1:' + port, 'atlasTerminal', 'width=1400,height=900');
+      }
+    });
+  }
   sendBtn.addEventListener('click', send);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -2133,7 +2174,32 @@
   const atlasBadgeEl = document.getElementById('atlasbadge');
   const atlasDailyBtn = document.getElementById('atlasDailyBtn');
   const atlasCheckBtn = document.getElementById('atlasCheckBtn');
+  const spewEl = document.getElementById('atlasspew');
+  // ---- v8.2 ATLAS SPEWRATE // real measured candidates/sec ----
+  function renderSpew(s) {
+    if (!spewEl) return;
+    // Coalesce numerics locally (the renderAtlas ``n`` is scoped to that fn).
+    const num = v => String(Number(v) || 0);
+    if (!s || !s.state || s.state === 'idle') {
+      spewEl.innerHTML = '<div class="iv-empty">' + esc((s && s.note) || 'NO MEASURED RUN YET // RUN [FX-DAILY]') + '</div>';
+      return;
+    }
+    if (s.state === 'running') {
+      spewEl.innerHTML = '<div class="repofact"><div class="rf-title">MEASURING… // RUN IN PROGRESS</div>' +
+        '<div class="rf-path">' + num(s.elapsed_s) + 's ELAPSED · ' + esc(s.note || '') + '</div></div>';
+      return;
+    }
+    // done
+    if (s.rate == null) {
+      spewEl.innerHTML = '<div class="repofact"><div class="rf-title">SPEWRATE // — CANDIDATES/SEC</div>' +
+        '<div class="rf-path">' + num(s.elapsed_s) + 's ELAPSED · ' + esc(s.note || '') + '</div></div>';
+      return;
+    }
+    spewEl.innerHTML = '<div class="repofact"><div class="rf-title">SPEWRATE // ' + esc(String(s.rate)) + ' CANDIDATES/SEC</div>' +
+      '<div class="rf-path">' + num(s.work) + ' CANDIDATES EVALUATED IN ' + num(s.elapsed_s) + 's · ' + esc(s.unit || 'candidates/s') + '</div></div>';
+  }
   function renderAtlas(d) {
+    renderSpew(d && d.spewrate);
     if (!d.configured) {
       if (atlasBadgeEl) atlasBadgeEl.textContent = '';
       if (atlasBodyEl) atlasBodyEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'ATLAS NOT CONFIGURED') + '</div>';
@@ -2168,8 +2234,66 @@
     try { const r = await fetch('/api/atlas'); renderAtlas(await r.json()); }
     catch (e) { /* transient */ }
   }
+  // ---- v8.3 MT5 PAPER BROKER // subprocess-bounded /api/mt5 panel ----
+  const mt5PanelEl = document.getElementById('mt5panel');
+  function renderMt5(d) {
+    if (!mt5PanelEl) return;
+    const mnum = v => String(Number(v) || 0);
+    const st = (d && d.status) || {};
+    if (!st.configured) {
+      mt5PanelEl.innerHTML = '<div class="repofact"><div class="rf-title">NOT CONFIGURED // ' + esc(st.error || 'NO TERMINAL') + '</div>' +
+        '<div class="rf-path">INSTALL MT5 + LOG INTO A DEMO ACCOUNT</div></div>';
+      return;
+    }
+    const a = st.account || {};
+    const env = (st.environment || '?').toUpperCase();
+    const univ = (d && d.universe) || {};
+    const avail = univ.available ? Object.keys(univ.available).length : 0;
+    const miss = (univ.not_listed || []).length;
+    const rows = [];
+    rows.push('<div class="repofact"><div class="rf-title">' + env + ' // ACCT ' + esc(String(a.login || '?')) + ' · ' + esc(a.server || '?') + '</div>' +
+      '<div class="rf-path">EQUITY ' + mnum(a.equity) + ' ' + esc(a.currency || 'USD') + ' · FREE MARGIN ' + mnum(a.margin_free) + '</div></div>');
+    rows.push('<div class="repofact"><div class="rf-title">UNIVERSE // ' + mnum(avail) + ' SYMBOLS LISTED' + (miss ? ' · ' + mnum(miss) + ' MISSING' : '') + '</div>' +
+      '<div class="rf-path">' + esc((univ.available ? Object.values(univ.available).slice(0, 8).join(', ') : '—') + (miss ? ' …' : '')) + '</div></div>');
+    mt5PanelEl.innerHTML = rows.join('');
+  }
+  async function pollMt5() {
+    try { const r = await fetch('/api/mt5'); renderMt5(await r.json()); }
+    catch (e) { /* transient */ }
+  }
+  // ---- v8.4 TRADINGVIEW BRIDGE // /api/tv panel ----
+  const tvPanelEl = document.getElementById('tvpanel');
+  function renderTv(d) {
+    if (!tvPanelEl) return;
+    if (!d) { tvPanelEl.innerHTML = '<div class="iv-empty">TV STANDBY</div>'; return; }
+    const rows = [];
+    const cfg = d.configured ? 'SECRET GATED' : 'OPEN WEBHOOK';
+    rows.push('<div class="repofact"><div class="rf-title">' + cfg + ' // POST /api/tv-webhook</div>' +
+      '<div class="rf-path">' + esc(d.webhook_url || '') + (d.public_url ? ' · ' + esc(d.public_url) : '') + '</div></div>');
+    const legs = (d.legs || []).map(l => l.key + ' ' + l.ticker + ' ' + (l.month || '?') + ' ' + (l.direction || '?').toUpperCase()).join(' · ');
+    rows.push('<div class="repofact"><div class="rf-title">LOCKED LEGS // ' + (d.legs || []).length + '</div>' +
+      '<div class="rf-path">' + esc(legs) + '</div></div>');
+    const sigs = (d.recent_signals || []);
+    if (sigs.length) {
+      const last = sigs[sigs.length - 1];
+      rows.push('<div class="repofact"><div class="rf-title">LAST SIGNAL // ' + esc(String(last.strategy || '?')) + ' ' + esc(String(last.side || '?')) + ' ' + esc(String(last.ticker || '?')) + '</div>' +
+        '<div class="rf-path">@ ' + esc(String(last.price || '?')) + ' · ' + esc(String(last.received_utc || '')) + '</div></div>');
+    } else {
+      rows.push('<div class="repofact"><div class="rf-title">NO SIGNALS YET</div>' +
+        '<div class="rf-path">CREATE A TV ALERT → POST /api/tv-webhook</div></div>');
+    }
+    tvPanelEl.innerHTML = rows.join('');
+  }
+  async function pollTv() {
+    try { const r = await fetch('/api/tv'); renderTv(await r.json()); }
+    catch (e) { /* transient */ }
+  }
+  pollMt5();
+  pollTv();
   pollAtlas();
   setInterval(pollAtlas, 6000);
+  setInterval(pollMt5, 6000);
+  setInterval(pollTv, 6000);
   if (atlasDailyBtn) {
     atlasDailyBtn.addEventListener('click', async () => {
       atlasDailyBtn.disabled = true;
