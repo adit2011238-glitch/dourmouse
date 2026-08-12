@@ -2,7 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- v5.22.3 PWA: install DourMouse on your phone as a standalone app
+       (own icon, full-screen window, no Safari/Chrome chrome). The web
+       manifest + apple-touch-icon drive "Add to Home Screen" on iOS and
+       the install banner on Android. -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0a0f1e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="DourMouse">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="/assets/icon-192.png">
 <title>DOURMOUSE // CENTRAL AGENT DISPATCH</title>
 <style>
   :root {
@@ -429,6 +441,11 @@
   .repo-bar { display: flex; gap: 6px; }
   #reposearch { flex: 1; min-width: 0; background: rgba(18,21,30,0.7); border: 1px solid var(--line); color: var(--text); font-family: var(--font-mono); font-size: 9px; padding: 7px 9px; letter-spacing: 0.06em; }
   #reposearch:focus { outline: none; border-color: rgba(var(--cyan-rgb), var(--a45)); box-shadow: 0 0 10px rgba(var(--cyan-rgb), var(--a16)); }
+  #spotifysearch { flex: 1; min-width: 0; background: rgba(18,21,30,0.7); border: 1px solid var(--line); color: var(--text); font-family: var(--font-mono); font-size: 9px; padding: 7px 9px; letter-spacing: 0.06em; }
+  #spotifysearch:focus { outline: none; border-color: rgba(var(--cyan-rgb), var(--a45)); box-shadow: 0 0 10px rgba(var(--cyan-rgb), var(--a16)); }
+  .spotmusic { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .spotmusic .repofact { cursor: pointer; transition: border-color 200ms; }
+  .spotmusic .repofact:hover { border-color: rgba(var(--cyan-rgb), var(--a45)); }
   .repo-meta { font-size: 8px; letter-spacing: 0.06em; font-weight: 300; color: var(--text-dim); opacity: 0.8; text-align: center; padding: 2px 0 0; }
   .repofact { border: 1px solid var(--line); padding: 8px 10px; background: rgba(18,21,30,0.7); font-size: 9px; line-height: 1.45; animation: enter 300ms cubic-bezier(.34,1.56,.64,1); }
   .rf-title { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -790,6 +807,37 @@
     .dm-grid { grid-template-columns: 1fr; }
   }
   /* v5.20 — offline / stale-data banner (desktop portfolio Phase 5). */
+  /* v5.21 — floating Spotify mini-player, top-left while a song plays. */
+  .spotmini {
+    position: fixed; top: 10px; left: 12px; z-index: 65;
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 12px; max-width: min(420px, 52vw);
+    background: rgba(10,15,24,0.88); backdrop-filter: blur(10px);
+    border: 1px solid rgba(var(--cyan-rgb), var(--a40));
+    box-shadow: 0 0 18px rgba(var(--cyan-rgb), var(--a22)), 0 4px 14px rgba(0,0,0,0.45);
+    animation: spotminiIn 320ms cubic-bezier(.34,1.56,.64,1);
+  }
+  .spotmini[hidden] { display: none; }
+  @keyframes spotminiIn {
+    from { opacity: 0; transform: translateY(-10px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .spotmini-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: #5ee7a0; box-shadow: 0 0 8px #5ee7a0;
+    animation: spotPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes spotPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .spotmini-track {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em;
+    color: var(--text); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 210px;
+  }
+  .spotmini .vtbtn { font-size: 12px; padding: 4px 7px; }
+  .spotmini-main {
+    border-color: rgba(var(--cyan-rgb), var(--a55));
+    box-shadow: 0 0 10px rgba(var(--cyan-rgb), var(--a30));
+  }
   #offlinebanner {
     position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
     display: none; align-items: center; justify-content: center; gap: 8px;
@@ -832,6 +880,15 @@
 </div>
 <!-- v5.20: honest offline/stale marker — cached data is never shown as live -->
 <div id="offlinebanner" aria-live="polite"><span class="live-dot"></span>OFFLINE · SHOWING CACHED DATA — MARKED STALE · RECONNECT TO REFRESH</div>
+<!-- v5.21 — floating Spotify mini-player (top-left): appears while a track
+     is playing, with previous / pause-resume / next controls. -->
+<div id="spotmini" class="spotmini" hidden aria-live="polite">
+  <span class="spotmini-dot"></span>
+  <span id="spotminiTrack" class="spotmini-track">♪</span>
+  <button id="spotminiPrev" class="vtbtn" title="Previous track">⏮</button>
+  <button id="spotminiPause" class="vtbtn spotmini-main" title="Pause / resume">⏯</button>
+  <button id="spotminiNext" class="vtbtn" title="Next track">⏭</button>
+</div>
 <div id="app">
   <header id="telemetry">
     <div class="brand-block">
@@ -843,7 +900,7 @@
       <button id="mapbtn" title="Open the agent orchestration map in a new window">⧉ AGENT MAP</button>
       <button id="setupbtn" title="Capability checklist — what's configured and how to fix the rest">[SETUP]</button>
       <div class="clock" id="clock">--:--:--</div>
-      <div class="memload" id="memload">MEM_LOAD: — — GB / 16.00GB</div>
+      <div class="memload" id="memload">MEM_LOAD: —</div>
       <div class="memline" id="memline">MEMORY: -- FACTS // LEARNING --</div>
       <div class="sessline" id="sessionlabel">SESSION: —</div>
       <div class="sessline" id="backendline">BACKEND: — —</div>
@@ -941,7 +998,8 @@
         </div>
         <div id="neurobody"><div class="iv-empty">NEURAL ORCHESTRATOR STANDBY</div></div>
       </div>
-      <!-- v5.7 — Spotify: linked account, now playing, login button. -->
+      <!-- v5.7 — Spotify (v5.21: play-anything music section — search any
+           song or play one of your playlists; the click IS the approval). -->
       <div class="col-title">SPOTIFY <span id="spotifybadge" class="jobcount"></span></div>
       <div id="spotifypanel">
         <div class="repo-bar">
@@ -949,6 +1007,24 @@
           <button id="spotifyLoginBtn" class="vtbtn" title="Link the Spotify account (opens browser)">[LOGIN]</button>
         </div>
         <div id="spotifybody"><div class="iv-empty">SPOTIFY STANDBY</div></div>
+        <div id="spotifymusic" class="spotmusic" hidden>
+          <div class="repo-bar">
+            <button id="spotifyPrevBtn" class="vtbtn" title="Previous track">⏮</button>
+            <button id="spotifyPauseBtn" class="vtbtn" title="Pause / resume">⏯</button>
+            <button id="spotifyNextBtn" class="vtbtn" title="Next track">⏭</button>
+          </div>
+          <div class="repo-bar">
+            <input id="spotifysearch" type="text" placeholder="PLAY ANY SONG…" spellcheck="false" autocomplete="off">
+            <button id="spotifySearchBtn" class="vtbtn" title="Search Spotify for a track to play">[SEARCH]</button>
+          </div>
+          <div id="spotifyresults"><div class="iv-empty">SEARCH TO PLAY ANY SONG</div></div>
+          <div class="repo-meta">MY PLAYLISTS — CLICK TO PLAY</div>
+          <div id="spotifylists"><div class="iv-empty">LOADING…</div></div>
+          <div class="repo-meta">RECENTLY PLAYED</div>
+          <div id="spotifyrecent"><div class="iv-empty">LOADING…</div></div>
+          <div class="repo-meta">TOP TRACKS (MEDIUM TERM)</div>
+          <div id="spotifytop"><div class="iv-empty">LOADING…</div></div>
+        </div>
       </div>
       <!-- v5.8 — Artifact renderer: live tables, equity curves, markdown
            reports published by agents during a run, rendered beside the
@@ -992,7 +1068,7 @@
     <div class="console-inner">
       <span class="keyhint">⌘ + ENTER TO BROADCAST</span>
       <button id="micBtn" class="vtbtn" title="Speak a directive (local STT)">[MIC]</button>
-      <textarea id="input" rows="1" placeholder="Ask anything — e.g. check my inbox, what is BTC worth, search the web for X…" spellcheck="false"></textarea>
+      <textarea id="input" rows="1" placeholder="Ask anything — or /all <goal> to put every resource (Claude · ChatGPT/Codex · DeepSeek · web) on it · /claude /codex /freebuff…" spellcheck="false"></textarea>
       <button id="spkBtn" class="vtbtn" title="Hear the last reply (local TTS)">[SPK]</button>
       <button id="send">[SEND_DIRECTIVE]</button>
     </div>
@@ -1248,7 +1324,7 @@
           <div class="nname">${esc(ag.name)}</div>
           <div class="ndesc">${esc(ag.description)}</div>
           <div class="nmodel">MODEL: ${esc(ag.model || 'default')}</div>
-          <div class="nperf">[SPEED: <span class="rate">0</span> t/sec]</div>
+          <div class="nperf">[STATE: <span class="rate">—</span>]</div>
           <div class="nchips">${chips}</div>
         </div>
         <div class="npill">[READY]</div>
@@ -1262,16 +1338,9 @@
         base: 120 + Math.floor(Math.random() * 480),
       });
     }
-    // live fluctuating speeds per node
-    setInterval(() => {
-      for (const n of nodes.values()) {
-        const computing = n.el.classList.contains('computing');
-        const v = computing ? n.base * (1.6 + Math.random()) : n.base * (0.75 + Math.random() * 0.5);
-        n.rate.textContent = Math.round(v).toLocaleString();
-      }
-    }, 1300);
-    // keep the left cluster visually alive even when idle
-    for (const n of nodes.values()) n.rate.textContent = Math.round(n.base * (0.75 + Math.random() * 0.5)).toLocaleString();
+    // v5.22.14 audit fix: per-agent state is driven by the REAL /api/activity
+    // feed in pollLiveActivity (ACTIVE/IDLE) — the previous random "t/sec"
+    // numbers were simulated telemetry and are gone (Rule 2.2).
   }).catch(() => {
     nodesEl.innerHTML = '<div class="iv-empty">ROSTER OFFLINE</div>';
   });
@@ -1326,6 +1395,13 @@
       const agents = data.agents || {};
       for (const [name, st] of Object.entries(agents)) {
         if (st.status === 'live') setNodeState(name, 'live');
+        // v5.22.14: honest per-agent state in the cluster (no fake t/sec).
+        const node = nodes.get(name);
+        if (node) {
+          const active = ['live', 'computing'].includes(st.status);
+          node.rate.textContent = active ? 'ACTIVE' : 'IDLE';
+          node.rate.style.color = active ? '#4FC3F7' : 'inherit';
+        }
       }
       const int = document.getElementById('integrity');
       const sub = document.getElementById('integritysub');
@@ -1428,28 +1504,36 @@
   function tickClock() { clock.textContent = now(); }
   tickClock();
   setInterval(tickClock, 1000);
-  setInterval(() => {
-    const gb = (3.2 + Math.random() * 1.6).toFixed(2);
-    memload.textContent = `MEM_LOAD: ${gb}GB / 16.00GB`;
-  }, 2200);
-
-  // ---------- metrics micro-bars (simulated telemetry) ----------
+  // ---------- REAL host telemetry (v5.22.14 audit fix) ----------
+  // Rule 2.2: real numbers from /api/telemetry, or an honest "—" when the
+  // host is unreachable — never Math.random() simulated values.
   const mThrough = { el: document.getElementById('m-throughput'), bar: document.getElementById('b-throughput') };
   const mLat = { el: document.getElementById('m-latency'), bar: document.getElementById('b-latency') };
   const mInst = { el: document.getElementById('m-instances'), bar: document.getElementById('b-instances') };
-  let tVal = 42, lVal = 18, iVal = 5;
-  setInterval(() => {
-    const busy = core.classList.contains('computing');
-    tVal = Math.max(8, Math.min(100, tVal + (Math.random() - 0.48) * (busy ? 14 : 5)));
-    lVal = Math.max(4, Math.min(60, lVal + (Math.random() - 0.5) * 6));
-    iVal = Math.max(1, Math.min(16, iVal + (Math.random() - 0.5) * (busy ? 3 : 1)));
-    mThrough.el.textContent = (tVal * 1.7).toFixed(1) + 'k t/s';
-    mThrough.bar.style.width = tVal + '%';
-    mLat.el.textContent = Math.round(lVal) + ' ms';
-    mLat.bar.style.width = lVal + '%';
-    mInst.el.textContent = Math.round(iVal);
-    mInst.bar.style.width = (iVal * 6) + '%';
-  }, 900);
+  async function pollTelemetry() {
+    try {
+      const r = await fetch('/api/telemetry');
+      const t = await r.json();
+      if (t.unavailable) {
+        memload.textContent = 'MEM_LOAD: — (host telemetry unavailable)';
+        mThrough.el.textContent = '—';
+        mLat.el.textContent = '—';
+        mInst.el.textContent = '—';
+        for (const b of [mThrough.bar, mLat.bar, mInst.bar]) b.style.width = '0%';
+        return;
+      }
+      memload.textContent = `MEM_LOAD: ${t.mem_used_gb}GB / ${t.mem_total_gb}GB`;
+      // throughput ≈ real CPU %, latency ≈ 1-min load avg, instances ≈ mem %
+      mThrough.el.textContent = t.cpu_pct.toFixed(1) + '%';
+      mThrough.bar.style.width = Math.min(100, t.cpu_pct) + '%';
+      mLat.el.textContent = t.load[0].toFixed(2) + ' load';
+      mLat.bar.style.width = Math.min(100, t.load[0] * 20) + '%';
+      mInst.el.textContent = t.mem_pct.toFixed(0) + '%';
+      mInst.bar.style.width = Math.min(100, t.mem_pct) + '%';
+    } catch (e) { /* transient — next poll */ }
+  }
+  pollTelemetry();
+  setInterval(pollTelemetry, 2200);
 
   pollLiveActivity();
   setInterval(pollLiveActivity, 2500);
@@ -1736,6 +1820,18 @@
 
       const handle = (evt) => {
         switch (evt.type) {
+          case 'allhands_started': {
+            // v5.22.9: an ALL HANDS run started — open its dedicated window.
+            if (evt.run_id) {
+              fline('ALL HANDS', 'Run <b>' + esc(evt.run_id) + '</b> started — every resource is on the goal. Opening the ALL HANDS window…', null);
+              if (window.pywebview && window.pywebview.api && window.pywebview.api.open_all_hands) {
+                window.pywebview.api.open_all_hands(evt.run_id, '');
+              } else {
+                window.open('/all-hands?run=' + encodeURIComponent(evt.run_id), '_blank');
+              }
+            }
+            break;
+          }
           case 'brain': {
             // v5.5: which brain answered this run (fast vs escalated heavy).
             const bl = document.getElementById('backendline');
@@ -2160,15 +2256,106 @@
     } catch (e) { /* transient */ }
   });
 
-  // ---- v5.7 SPOTIFY // real /api/spotify panel ----
+  // ---- v5.7 SPOTIFY (v5.21: play-anything music section) // real panel ----
   const spotBodyEl = document.getElementById('spotifybody');
   const spotBadgeEl = document.getElementById('spotifybadge');
   const spotCheckBtn = document.getElementById('spotifyCheckBtn');
   const spotLoginBtn = document.getElementById('spotifyLoginBtn');
+  const spotMusicEl = document.getElementById('spotifymusic');
+  const spotSearchEl = document.getElementById('spotifysearch');
+  const spotSearchBtn = document.getElementById('spotifySearchBtn');
+  const spotResultsEl = document.getElementById('spotifyresults');
+  const spotListsEl = document.getElementById('spotifylists');
+  const spotRecentEl = document.getElementById('spotifyrecent');
+  const spotTopEl = document.getElementById('spotifytop');
+  const spotPrevBtn = document.getElementById('spotifyPrevBtn');
+  const spotPauseBtn = document.getElementById('spotifyPauseBtn');
+  const spotNextBtn = document.getElementById('spotifyNextBtn');
+  let spotIsPlaying = false; // last known state, for the ⏯ toggle
+  let spotListsLoaded = false; // playlists fetch once per session
+  function spotPlayRow(uri) {
+    // data-attribute (URIs are alphanumeric; esc() already handles &<>).
+    return '<button class="vtbtn" data-spoturi="' + esc(uri) + '" title="Play">[PLAY]</button>';
+  }
+  async function spotPlay(uri) {
+    if (!uri) return;
+    try {
+      const r = await fetch('/api/spotify/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uri }) });
+      const d = await r.json();
+      if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">' + esc(d.message || (d.ok ? 'SPOTIFY: playback started.' : 'SPOTIFY: play failed.')) + '</div>';
+      setTimeout(pollSpot, 3000); // now-playing refreshes after the command
+    } catch (e) { /* transient */ }
+  }
+  async function spotSearch() {
+    const q = (spotSearchEl && spotSearchEl.value || '').trim();
+    if (!q || !spotResultsEl) return;
+    try {
+      const r = await fetch('/api/spotify/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, limit: 8 }) });
+      const d = await r.json();
+      if (!d.ok) { spotResultsEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'SEARCH FAILED') + '</div>'; return; }
+      const rows = (d.results || []).map(t =>
+        '<div class="repofact"><div class="rf-title">' + esc(t.name) + '</div>' +
+        '<div class="rf-path">' + esc(t.artists) + ' — ' + spotPlayRow(t.uri) + '</div></div>');
+      spotResultsEl.innerHTML = rows.length
+        ? rows.join('')
+        : '<div class="iv-empty">NO MATCHES (HONEST)</div>';
+    } catch (e) { /* transient */ }
+  }
+  async function spotLoadPlaylists() {
+    if (!spotListsEl) return;
+    try {
+      const r = await fetch('/api/spotify/playlists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json();
+      if (!d.ok) { spotListsEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'PLAYLISTS UNAVAILABLE') + '</div>'; return; }
+      const rows = (d.playlists || []).map(p =>
+        '<div class="repofact"><div class="rf-title">' + esc(p.name) + ' <span class="jobcount">' + (p.tracks == null ? '?' : p.tracks) + '</span></div>' +
+        '<div class="rf-path">' + spotPlayRow(p.uri) + '</div></div>');
+      spotListsEl.innerHTML = rows.length
+        ? rows.join('')
+        : '<div class="iv-empty">NO PLAYLISTS (HONEST)</div>';
+    } catch (e) { /* transient */ }
+  }
+  async function spotLoadRecent() {
+    if (!spotRecentEl) return;
+    try {
+      const r = await fetch('/api/spotify/recent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json();
+      if (!d.ok) { spotRecentEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'RECENT UNAVAILABLE') + '</div>'; return; }
+      const rows = (d.recent || []).map(t =>
+        '<div class="repofact"><div class="rf-title">' + esc(t.name) + '</div>' +
+        '<div class="rf-path">' + esc(t.artists) + ' — ' + spotPlayRow(t.uri) + '</div></div>');
+      spotRecentEl.innerHTML = rows.length
+        ? rows.join('')
+        : '<div class="iv-empty">NO RECENT TRACKS (HONEST)</div>';
+    } catch (e) { /* transient */ }
+  }
+  async function spotLoadTop() {
+    if (!spotTopEl) return;
+    try {
+      const r = await fetch('/api/spotify/top', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ time_range: 'medium_term' }) });
+      const d = await r.json();
+      if (!d.ok) { spotTopEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'TOP UNAVAILABLE') + '</div>'; return; }
+      const rows = (d.top || []).map(t =>
+        '<div class="repofact"><div class="rf-title">' + esc(t.name) + '</div>' +
+        '<div class="rf-path">' + esc(t.artists) + ' — ' + spotPlayRow(t.uri) + '</div></div>');
+      spotTopEl.innerHTML = rows.length
+        ? rows.join('')
+        : '<div class="iv-empty">NO TOP TRACKS (HONEST)</div>';
+    } catch (e) { /* transient */ }
+  }
+  function spotControl(action) {
+    fetch('/api/spotify/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
+      .then(r => r.json()).then(d => {
+        if (spotBodyEl && d.message) spotBodyEl.innerHTML = '<div class="iv-empty">' + esc(d.message) + '</div>';
+        setTimeout(pollSpot, 3000);
+      }).catch(() => { /* transient */ });
+  }
   function renderSpot(d) {
     if (!d.configured) {
       if (spotBadgeEl) spotBadgeEl.textContent = '';
       if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">SPOTIFY NOT CONFIGURED — ' + esc(d.hint || 'set SPOTIFY_CLIENT_ID') + '</div>';
+      if (spotMusicEl) spotMusicEl.hidden = true;
+      spotMiniHide(); // never leave a stale track floating
       return;
     }
     if (spotBadgeEl) spotBadgeEl.textContent = d.linked ? 'LINKED' : 'NOT LINKED';
@@ -2177,8 +2364,31 @@
       '<div class="rf-path">' + esc(d.hint || '') + '</div></div>');
     if (d.now_playing) {
       rows.push('<div class="repofact"><div class="rf-title">NOW PLAYING</div><div class="rf-path">' + esc(String(d.now_playing).replace(/\n/g, ' ').slice(0, 140)) + '</div></div>');
+      spotIsPlaying = String(d.now_playing).indexOf('▶') !== -1;
+      // v5.21 mini-player: show whenever a track is actually loaded — the
+      // glyph ▶ (playing) or ⏸ (paused) — never for "nothing is playing".
+      const miniTrack = String(d.now_playing)
+        .replace(/^SPOTIFY NOW PLAYING: [▶⏸]\s*/, '')
+        .split(' (')[0].slice(0, 60);
+      if (/^SPOTIFY NOW PLAYING: [▶⏸]/.test(String(d.now_playing))) {
+        spotMiniShow(miniTrack || '♪'); // textContent — no escaping needed
+      } else {
+        spotMiniHide();
+      }
+    } else {
+      spotMiniHide();
     }
     if (spotBodyEl) spotBodyEl.innerHTML = rows.join('');
+    // v5.21: the play-anything section appears only when linked.
+    if (spotMusicEl) spotMusicEl.hidden = !d.linked;
+    // Load the playlists/recent/top once, when the section first becomes
+    // visible — three real fetches, then the panel is fully interactive.
+    if (d.linked && !spotListsLoaded) {
+      spotListsLoaded = true;
+      spotLoadPlaylists();
+      spotLoadRecent();
+      spotLoadTop();
+    }
   }
   async function pollSpot() {
     try { const r = await fetch('/api/spotify'); renderSpot(await r.json()); }
@@ -2186,13 +2396,40 @@
   }
   pollSpot();
   setInterval(pollSpot, 8000);
-  if (spotCheckBtn) spotCheckBtn.addEventListener('click', pollSpot);
+  if (spotCheckBtn) spotCheckBtn.addEventListener('click', () => { pollSpot(); spotLoadPlaylists(); spotLoadRecent(); spotLoadTop(); });
+  if (spotSearchBtn) spotSearchBtn.addEventListener('click', spotSearch);
+  if (spotSearchEl) spotSearchEl.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') spotSearch(); });
+  if (spotPrevBtn) spotPrevBtn.addEventListener('click', () => spotControl('previous'));
+  if (spotPauseBtn) spotPauseBtn.addEventListener('click', () => spotControl(spotIsPlaying ? 'pause' : 'resume'));
+  if (spotNextBtn) spotNextBtn.addEventListener('click', () => spotControl('next'));
+  const spotPanelEl = document.getElementById('spotifypanel');
+  if (spotPanelEl) spotPanelEl.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-spoturi]');
+    if (btn) spotPlay(btn.getAttribute('data-spoturi'));
+  });
+  // ---- v5.21 floating mini-player (top-left while a song plays) ----
+  const spotMiniEl = document.getElementById('spotmini');
+  const spotMiniTrackEl = document.getElementById('spotminiTrack');
+  const spotMiniPrevBtn = document.getElementById('spotminiPrev');
+  const spotMiniPauseBtn = document.getElementById('spotminiPause');
+  const spotMiniNextBtn = document.getElementById('spotminiNext');
+  function spotMiniShow(trackText) {
+    if (!spotMiniEl) return;
+    if (spotMiniTrackEl) spotMiniTrackEl.textContent = trackText;
+    spotMiniEl.hidden = false;
+  }
+  function spotMiniHide() {
+    if (spotMiniEl) spotMiniEl.hidden = true;
+  }
+  if (spotMiniPrevBtn) spotMiniPrevBtn.addEventListener('click', () => spotControl('previous'));
+  if (spotMiniPauseBtn) spotMiniPauseBtn.addEventListener('click', () => spotControl(spotIsPlaying ? 'pause' : 'resume'));
+  if (spotMiniNextBtn) spotMiniNextBtn.addEventListener('click', () => spotControl('next'));
   if (spotLoginBtn) spotLoginBtn.addEventListener('click', async () => {
     try {
       const r = await fetch('/api/spotify/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       await r.json();
       if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">Browser opened — approve the app there, then CHECK.</div>';
-      setTimeout(pollSpot, 4000);
+      setTimeout(() => { pollSpot(); spotLoadPlaylists(); spotLoadRecent(); spotLoadTop(); }, 4000);
     } catch (e) { /* transient */ }
   });
 

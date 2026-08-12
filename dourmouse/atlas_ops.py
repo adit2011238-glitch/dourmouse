@@ -17,13 +17,10 @@ Until it is set, every tool reports NOT CONFIGURED honestly — never a stub.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-_REPO_ENV = "ATLAS_REPO_PATH"
 
 
 class AtlasNotConfiguredError(NotImplementedError):
@@ -31,17 +28,24 @@ class AtlasNotConfiguredError(NotImplementedError):
 
 
 def get_atlas_repo_path() -> Path:
-    """The real ATLAS repo root, or raise honestly (Rule 2.2)."""
-    raw = os.environ.get(_REPO_ENV)
-    if not raw:
-        raise AtlasNotConfiguredError(
-            f"{_REPO_ENV} is not set. Set it in .env to the real ATLAS repo "
-            "root to enable ATLAS telemetry."
-        )
-    path = Path(raw).expanduser()
-    if not path.is_dir():
-        raise AtlasNotConfiguredError(f"{_REPO_ENV} does not exist: {path}")
-    return path
+    """The real ATLAS repo root, or raise honestly (Rule 2.2).
+
+    Single source of truth is :func:`research_agent.get_atlas_repo_path`,
+    which resolves ``ATLAS_REPO_PATH`` first and then falls back to the
+    bundled ``atlas/`` engine shipped next to the package in a personal
+    dist (so the app works with NO external repo path configured). The
+    exception class is re-raised as this module's own so the public
+    contract (``AtlasNotConfiguredError``) is unchanged for callers.
+    """
+    from dourmouse.research_agent import (
+        AtlasNotConfiguredError as _ResearchAtlasNotConfiguredError,
+        get_atlas_repo_path as _resolve_repo_path,
+    )
+
+    try:
+        return _resolve_repo_path()
+    except _ResearchAtlasNotConfiguredError as exc:
+        raise AtlasNotConfiguredError(str(exc)) from None
 
 
 # --------------------------------------------------------------------------- #

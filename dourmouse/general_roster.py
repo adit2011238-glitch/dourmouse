@@ -1062,9 +1062,10 @@ def _build_memory_subagent(registry: DispatchRegistry) -> Subagent:
                 name="remember",
                 description=(
                     "Store a fact/note in the LONG-TERM memory store "
-                    "(SQLite FTS5, source/title/body). Use when the user "
-                    "says 'remember X' or when a durable fact must survive "
-                    "beyond this conversation."
+                    "(SQLite FTS5, source/title/body). MANDATORY when the "
+                    "user says 'remember X' — never just acknowledge; call "
+                    "this tool so the fact actually persists. Also use when "
+                    "a durable fact must survive beyond this conversation."
                 ),
                 parameters={
                     "type": "object",
@@ -1845,7 +1846,13 @@ def build_general_registry() -> DispatchRegistry:
             [
                 ToolSpec(
                     name="list_files",
-                    description="List files/dirs in the workspace sandbox (read-only)." + path_note,
+                    description=(
+                        "List files/dirs in the workspace sandbox (read-only). "
+                        "The sandbox root IS the workspace; pass '.' or omit "
+                        "path to list it, or pass a path RELATIVE to the root "
+                        "(e.g. 'docs/'). Never guess absolute paths — they are "
+                        "refused." + path_note
+                    ),
                     parameters={
                         "type": "object",
                         "properties": {"path": {"type": "string", "default": "."}},
@@ -2084,8 +2091,12 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="market_movers",
                     description=(
-                        "Top day GAINERS or LOSERS (Yahoo Finance screener, "
-                        "keyless): symbol, name, price, change, change_pct."
+                        "Top day GAINERS or LOSERS / biggest movers today "
+                        "(Yahoo Finance screener, keyless, instant): symbol, "
+                        "name, price, change, change_pct. USE THIS for any "
+                        "market-movers / top-gainers / top-losers / "
+                        "biggest-movers / hot-stocks request — do NOT route "
+                        "it to web search."
                     ),
                     parameters={
                         "type": "object",
@@ -2167,7 +2178,11 @@ def build_general_registry() -> DispatchRegistry:
                     name="spotify_play",
                     description=(
                         "Start playback of a spotify: track/album/playlist URI on an "
-                        "active device. Confirmation-gated. Requires Spotify Premium."
+                        "active device. Confirmation-gated. Requires Spotify Premium. "
+                        "NEVER invent a URI: call spotify_playlists (for the user's "
+                        "playlists) or spotify_search (for tracks/albums/artists) "
+                        "FIRST and use the exact URI they return. Fabricated playlist "
+                        "URIs fail with an honest error listing the real playlists."
                     ),
                     parameters={
                         "type": "object",
@@ -2183,8 +2198,12 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="spotify_search",
                     description=(
-                        "Search Spotify for tracks (then albums/artists). Returns "
-                        "real matches with spotify: URIs you can play."
+                        "Search Spotify for TRACKS/ALBUMS/ARTISTS (public "
+                        "catalog only). Returns real matches with spotify: "
+                        "URIs you can play. NOTE: the user's OWN playlists are "
+                        "NOT searchable here — for 'my playlist' requests use "
+                        "spotify_playlists, which returns the user's actual "
+                        "playlists with exact URIs."
                     ),
                     parameters={
                         "type": "object",
@@ -2228,12 +2247,23 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="spotify_playlists",
                     description=(
-                        "The user's Spotify playlists with track counts and URIs."
+                        "The user's OWN Spotify playlists with track counts and "
+                        "exact URIs. MANDATORY when the user asks to play or "
+                        "list 'my playlist' / 'my playlists' — the user's "
+                        "playlists are NOT in spotify_search results (search "
+                        "only returns public Spotify playlists, never the "
+                        "user's private ones). Look the playlist up here FIRST "
+                        "and pass its exact URI to spotify_play."
                     ),
                     parameters={
                         "type": "object",
                         "properties": {
-                            "limit": {"type": "integer", "default": 20},
+                            "limit": {"type": "integer", "default": 20,
+                                        "description": "Number of playlists to "
+                                        "return. When the user names a SPECIFIC "
+                                        "playlist, use the default (20) or "
+                                        "larger — a small limit (e.g. 1) hides "
+                                        "the playlist you are looking for."},
                         },
                     },
                     handler=_spotify_playlists_tool,

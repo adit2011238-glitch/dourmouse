@@ -198,7 +198,12 @@ class TestChangelogSemanticRegression:
         "Historical and parametric VaR and CVaR at 95%/99%, plus risk_summary()\n"
         "Tightened the daily loss limit and exposure caps."
     )
-    _QUERY = "why did we change the risk parameters"
+    # Query words are risk-domain (parameter/scenario) so the semantic layer
+    # matches the changelog, but NONE of the distilled terms (parameter,
+    # scenario, trigger, change) appear in either stored fact — so even the
+    # OR-matched FTS5 recall (v5.x fix) finds nothing. This keeps the guard
+    # semantic-only instead of relying on the old AND-brittle FTS5 behavior.
+    _QUERY = "what scenario would trigger a parameter change"
 
     @staticmethod
     def _fake_urlopen_factory():

@@ -243,7 +243,7 @@ def test_sw_served_with_js_content_type(server):
     with urllib.request.urlopen(server + "/sw.js") as resp:
         assert resp.headers.get("Content-Type") == "application/javascript"
         body = resp.read().decode()
-    assert "dourmouse-shell-v1" in body
+    assert "dourmouse-shell-v2" in body
     assert "X-Dourmouse-Stale" in body
     assert "X-Dourmouse-Scope" in body
 

@@ -9,4 +9,4 @@ v4.0: rebranded DOURMOUSE, local-first LLM backend, ATLAS command centre,
 automation, multi-device access, premium HUD, self-review digest.
 """
 
-__version__ = "5.19.0"
+__version__ = "5.20.0"

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DOURMOUSE // ACCESS GATE</title>
+<title>DOURMOUSE // SIGN IN</title>
 <style>
   :root {
     /* ---- JARVIS Scene Archive & Design System · palette ---- */
@@ -12,7 +12,7 @@
     --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
     --amber: #F5A623; --amber-rgb: 245,166,35;
     --red:   #EF5350; --red-rgb:   239,83,80;
-    --gold:  #FFD232; --gold-rgb:  255,210,50;
+    --green: #26D07C; --green-rgb: 38,208,124;
     --dead:  #8A929E; --dead-rgb:  138,146,158;
     --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22;
     --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
@@ -26,7 +26,7 @@
     --text-dim: rgba(var(--cyan-rgb), var(--a45));
     --line: rgba(var(--cyan-rgb), var(--a10));
     --line-strong: rgba(var(--cyan-rgb), var(--a30));
-    --panel: rgba(18,21,30,0.72);
+    --panel: rgba(18,21,30,0.78);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -36,15 +36,15 @@
       linear-gradient(rgba(var(--cyan-rgb), var(--a06)) 1px, transparent 1px) 0 0 / 34px 34px,
       var(--ground);
     color: var(--text);
-    font-family: var(--font-mono);
+    font-family: var(--font-prose);
     display: flex; align-items: center; justify-content: center;
   }
   .gate {
-    width: min(92vw, 420px);
+    width: min(92vw, 400px);
     border: 1px solid var(--line);
     background: var(--panel);
     backdrop-filter: blur(10px);
-    padding: 34px 30px;
+    padding: 30px 30px 26px;
     position: relative;
     box-shadow: 0 0 60px rgba(var(--cyan-rgb), var(--a10));
   }
@@ -54,64 +54,154 @@
   }
   .gate::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
   .gate::after  { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+
+  /* ---- brand row ---- */
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .mark {
+    width: 38px; height: 38px; flex: none;
+    border: 1px solid var(--line-strong); border-radius: 10px;
+    display: grid; place-items: center;
+    font-family: var(--font-wordmark); font-size: 18px; color: var(--cyan);
+    background: radial-gradient(circle at 30% 30%, rgba(var(--cyan-rgb), 0.22), rgba(var(--cyan-rgb), 0.03));
+    box-shadow: 0 0 18px rgba(var(--cyan-rgb), 0.25);
+    text-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.8);
+  }
   h1 {
     font-family: var(--font-wordmark); font-weight: 400;
-    font-size: 15px; letter-spacing: 0.30em; margin-left: 0.30em; color: var(--text);
-    text-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a45)), 0 0 50px rgba(var(--cyan-rgb), var(--a22)); margin-bottom: 8px;
+    font-size: 14px; letter-spacing: 0.26em; color: var(--text);
+    text-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a45)), 0 0 50px rgba(var(--cyan-rgb), var(--a22));
   }
-  p.sub { font-size: 10px; font-weight: 300; color: var(--text-dim); margin-bottom: 26px; line-height: 1.6; }
+  p.sub { font-size: 12px; font-weight: 300; color: var(--text-dim); margin-bottom: 22px; line-height: 1.65; }
+
+  /* ---- Gmail-style Google sign-in card ---- */
+  .google-card { border: 1px solid var(--line); border-radius: 12px; padding: 20px 18px 16px; background: rgba(11,14,20,0.55); }
+  .google-card .g-title { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.5px; color: var(--text); margin-bottom: 4px; }
+  .google-card .g-note { font-size: 11px; color: var(--text-dim); margin-bottom: 16px; line-height: 1.55; }
+
+  /* The official Google button look: white, the Google G, brand-weight
+     type — the signifier everyone recognizes from signing into Gmail. */
+  .gbtn {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    width: 100%; padding: 12px 14px; cursor: pointer;
+    background: #fff; color: #1f1f1f;
+    font-family: "Roboto","Inter",-apple-system,var(--font-prose);
+    font-size: 13.5px; font-weight: 500; letter-spacing: 0.1px;
+    border: 1px solid #dadce0; border-radius: 6px;
+    transition: all .18s;
+  }
+  .gbtn:hover { background: #f6f7f8; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+  .gbtn:active { background: #eef0f1; }
+  .gbtn svg { flex: none; }
+  .gmsg { margin-top: 12px; font-size: 11px; line-height: 1.7; color: var(--text-dim); }
+  .gmsg b { color: var(--text); }
+  .gmsg .warn { color: rgba(var(--amber-rgb), 0.95); }
+  .gmsg .err { color: rgba(var(--red-rgb), 0.95); }
+
+  /* ---- signed-in account card ---- */
+  .account-card { display: none; border: 1px solid rgba(var(--green-rgb), var(--a30)); border-radius: 12px; padding: 22px 18px; background: rgba(var(--green-rgb), 0.04); text-align: center; }
+  .account-card .avatar {
+    width: 64px; height: 64px; border-radius: 50%; object-fit: cover;
+    border: 2px solid rgba(var(--green-rgb), 0.5);
+    box-shadow: 0 0 24px rgba(var(--green-rgb), 0.35);
+    margin: 0 auto 12px; display: block; background: rgba(var(--cyan-rgb), 0.12);
+  }
+  .account-card .who b { display: block; font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: 0.3px; }
+  .account-card .who span { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); margin-top: 3px; }
+  .account-card .signed-tag { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 16px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: rgba(var(--green-rgb), 0.95); }
+  .account-card .signed-tag::before { content: "✓"; }
+  .gbtn.ghost {
+    background: transparent; color: rgba(var(--amber-rgb), 0.95);
+    border-color: rgba(var(--amber-rgb), 0.45);
+  }
+  .gbtn.ghost:hover { background: rgba(var(--amber-rgb), 0.08); box-shadow: 0 0 12px rgba(var(--amber-rgb), 0.25); }
+  .account-card a.enter {
+    display: block; margin-top: 14px; font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 1px; color: var(--cyan); text-decoration: none;
+  }
+  .account-card a.enter:hover { text-decoration: underline; }
+
+  /* ---- token fallback (collapsed) ---- */
+  details.token-alt { margin-top: 16px; }
+  details.token-alt summary {
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 1px;
+    color: var(--text-dim); cursor: pointer; list-style: none; text-align: center;
+  }
+  details.token-alt summary::-webkit-details-marker { display: none; }
+  details.token-alt summary:hover { color: var(--text); }
+  details.token-alt[open] summary { margin-bottom: 14px; }
   label { display: block; font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); margin-bottom: 8px; }
-  input {
+  input[type="password"] {
     width: 100%; background: rgba(11,14,20,0.9); border: 1px solid var(--line);
     color: var(--text); font-family: var(--font-mono); font-size: 14px; font-weight: 300;
     padding: 12px 14px; letter-spacing: 0.08em; outline: none;
   }
-  input:focus { border-color: rgba(var(--cyan-rgb), var(--a45)); }
-  button {
-    width: 100%; margin-top: 18px; padding: 12px; cursor: pointer;
+  input[type="password"]:focus { border-color: rgba(var(--cyan-rgb), var(--a45)); }
+  .tok-btn {
+    width: 100%; margin-top: 14px; padding: 12px; cursor: pointer;
     background: rgba(var(--cyan-rgb), var(--a16));
     border: 1px solid rgba(var(--cyan-rgb), var(--a30)); color: var(--text);
     font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.13em;
     transition: all .2s;
   }
-  button:hover { background: rgba(var(--cyan-rgb), var(--a22)); }
-  #msg { margin-top: 14px; font-size: 10px; min-height: 16px; color: var(--red); }
+  .tok-btn:hover { background: rgba(var(--cyan-rgb), var(--a22)); }
+  #msg { margin-top: 12px; font-size: 10px; min-height: 16px; color: var(--red); }
   .ok { color: var(--text) !important; }
-  /* v5.15 — Google sign-in */
-  .ggoogle { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
-  .ggoogle .glabel { font-size: 9px; letter-spacing: 0.13em; color: var(--text-dim); margin-bottom: 10px; }
-  .ggoogle a.gbtn, .ggoogle button.gbtn {
-    display: block; width: 100%; text-align: center; padding: 12px; cursor: pointer;
-    background: #fff; color: #202124; font-family: var(--font-mono);
-    font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-decoration: none;
-    border: 1px solid rgba(255,255,255,0.35); transition: all .2s;
-  }
-  .ggoogle a.gbtn:hover, .ggoogle button.gbtn:hover { background: #e8eaed; }
-  .ggoogle .gmsg { margin-top: 10px; font-size: 9.5px; line-height: 1.7; color: var(--text-dim); }
-  .ggoogle .gmsg a { color: var(--text); }
 </style>
 </head>
 <body>
   <div class="gate">
-    <h1>DOURMOUSE // ACCESS GATE</h1>
-    <p class="sub">One DourMouse, every device. Sign in with Google to unlock
-      your account and everything linked to it (Gmail · Calendar), or use the
-      access token from the server's <span style="color:var(--text)">.env</span>.</p>
+    <div class="brand">
+      <div class="mark">◈</div>
+      <h1>DOURMOUSE // SIGN IN</h1>
+    </div>
+    <p class="sub">One DourMouse, every device. Sign in with your Google
+      account and everything linked to it — Gmail, Calendar, Drive —
+      works on this device.</p>
 
-    <!-- v5.15 — Google sign-in (button appears only when the server has an
-         OAuth client configured; honest NOT CONFIGURED otherwise) -->
-    <div class="ggoogle" id="ggoogle">
-      <div class="glabel">// SIGN IN WITH GOOGLE</div>
-      <a class="gbtn" id="ggoogleBtn" href="/api/auth/google/start">SIGN IN WITH GOOGLE ▸</a>
+    <!-- Signed-out: the Gmail-style Google button (shown only when the
+         server has an OAuth client; honest NOT CONFIGURED otherwise) -->
+    <div class="google-card" id="signedOut">
+      <div class="g-title">Continue with Google</div>
+      <div class="g-note">Your watchlist, alerts and prefs follow the
+        account — not the device.</div>
+      <button class="gbtn" id="ggoogleBtn" style="display:none">
+        <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Sign in with Google
+      </button>
       <div class="gmsg" id="ggoogleMsg">Checking server configuration…</div>
     </div>
 
-    <label for="tok" style="margin-top:20px">ACCESS TOKEN</label>
-    <input id="tok" type="password" autocomplete="current-password" autofocus spellcheck="false">
-    <button id="go">AUTHENTICATE ▸</button>
-    <div id="msg"></div>
+    <!-- Signed-in: Google-style account card with avatar + sign out -->
+    <div class="account-card" id="signedIn">
+      <img class="avatar" id="avatar" alt="" referrerpolicy="no-referrer">
+      <div class="who">
+        <b id="whoName"></b>
+        <span id="whoEmail"></span>
+      </div>
+      <div class="signed-tag">SIGNED IN WITH GOOGLE</div>
+      <button class="gbtn ghost" id="glogout">SIGN OUT</button>
+      <div class="g-note" style="margin-top:12px">Linking a second Google
+        account? SIGN OUT, then sign in with the other one — each account
+        keeps its own watchlist, alerts and linked services.</div>
+      <a class="enter" href="/">Open the command centre →</a>
+    </div>
+
+    <!-- Fallback: the server access token (collapsed, keeps the Google look) -->
+    <details class="token-alt">
+      <summary>USE AN ACCESS TOKEN INSTEAD</summary>
+      <label for="tok">ACCESS TOKEN</label>
+      <input id="tok" type="password" autocomplete="current-password" spellcheck="false" autofocus>
+      <button class="tok-btn" id="go">AUTHENTICATE ▸</button>
+      <div id="msg"></div>
+    </details>
   </div>
 <script>
+  "use strict";
   const msg = document.getElementById('msg');
   const tok = document.getElementById('tok');
   async function attempt() {
@@ -133,40 +223,157 @@
   document.getElementById('go').addEventListener('click', attempt);
   tok.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
 
-  // v5.15 — Google login readiness (honest, Rule 2.2): the button is shown
-  // only when the server has an OAuth client; if already signed in we say so.
+  // Live-caught in the e2e sweep: the button was displayed but had NO click
+  // handler — clicking did nothing. /api/auth/google/start 302s to Google
+  // consent (PKCE), so this is the whole flow in one line.
+  //
+  // v5.22.11: Google REFUSES sign-in inside the desktop app's embedded
+  // WebKit webview ("this browser or app may not be secure"). In a webview
+  // the button therefore opens the consent page in the user's REAL browser
+  // and parks a claim code; `pollClaim()` adopts the session when the
+  // browser tab completes. In a normal browser the plain redirect works.
+  const ggoogleBtn = document.getElementById('ggoogleBtn');
+  // The desktop app's webview always exposes window.pywebview (the bridge);
+  // a real browser never does. User-agent sniffing is fragile here (pywebview
+  // UA strings are not guaranteed to contain 'dourmouse'/'webkit'), so the
+  // presence of the bridge itself is the honest detector.
+  const IN_WEBVIEW = typeof window.pywebview !== 'undefined' &&
+      !!window.pywebview.api &&
+      typeof window.pywebview.api.open_external === 'function';
+  // v5.22.12: honest fallback when the system browser can't be opened — show
+  // a copyable link + a retry button instead of silently navigating the
+  // webview (Google blocks embedded WebKit; a silent nav would 500 again).
+  function showManualLink(googleUrl, claim) {
+    const w = document.getElementById('claimNote');
+    if (!w) return;
+    w.style.display = 'block';
+    const safeUrl = String(googleUrl).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    w.innerHTML = '<span class="warn">Could not open Chrome automatically — ' +
+      '<b>click the button</b> below, or copy the link and paste it into ' +
+      'your Chrome browser:</span>' +
+      '<br><input id="manualUrl" type="text" readonly value="' + safeUrl + '" ' +
+      'style="width:100%;margin:8px 0;padding:6px;font:12px monospace;' +
+      'background:#0b0f14;color:#7fd8ff;border:1px solid #233;border-radius:6px;">' +
+      '<button id="retryOpen" class="gg-btn" style="margin-top:4px">' +
+      'OPEN IN CHROME ▸</button>' +
+      '<p style="margin:8px 0 0;font-size:12px;color:#6a7a8a">Approve it there — ' +
+      'this window signs you in automatically when done.</p>';
+    document.getElementById('manualUrl').addEventListener('click', e => e.target.select());
+    document.getElementById('retryOpen').addEventListener('click', () => {
+      window.pywebview?.api?.open_external(googleUrl)
+        .then(ok => { if (!ok) showManualLink(googleUrl, claim); })
+        .catch(() => showManualLink(googleUrl, claim));
+    });
+  }
+
+  ggoogleBtn.addEventListener('click', () => {
+    if (!IN_WEBVIEW) { window.location.href = '/api/auth/google/start'; return; }
+    const claim = crypto.randomUUID().replace(/-/g, '');
+    // Step 1: get the Google consent URL from the server (start 302s; fetch
+    // follows it, giving us the final Google URL without leaving this page).
+    fetch('/api/auth/google/start?claim=' + claim, { redirect: 'follow' })
+      .then(r => r.url)
+      .then(googleUrl => {
+        // Step 2: open Chrome (the bridge prefers Chrome, falls back to the
+        // default browser). When it honestly cannot, show a copyable link.
+        window.pywebview?.api?.open_external(googleUrl)
+          .then(opened => { if (opened === false) showManualLink(googleUrl, claim); })
+          .catch(() => showManualLink(googleUrl, claim));
+        // Step 3: mark the claim in the URL — pollClaim() below adopts the
+        // session once the browser tab finishes and redirects to /login?claimed=1.
+        history.replaceState(null, '', '/login?claiming=' + claim);
+        startClaimPoll(claim);
+        const w = document.getElementById('claimNote');
+        if (w) {
+          w.style.display = 'block';
+          w.innerHTML = '<span class="warn">Google opened in your browser — ' +
+            'approve it there. This window signs you in automatically when done.</span>';
+        }
+      })
+      .catch(() => { window.location.href = '/api/auth/google/start?claim=' + claim; });
+  });
+
+  // Adopt a system-browser session: poll /api/auth/claim until the code is
+  // redeemed (browser finished), then land signed in. Also auto-starts when
+  // the page loads with ?claiming= (e.g. after an app restart mid-flow).
+  function startClaimPoll(claim) {
+    const attempts = 150; // 5 minutes at 2s — generous, honest ceiling
+    let n = 0;
+    const timer = setInterval(async () => {
+      n += 1;
+      if (n > attempts) { clearInterval(timer); return; }
+      try {
+        const r = await fetch('/api/auth/claim?code=' + claim);
+        if (r.ok) { clearInterval(timer); location.href = '/'; return; }
+      } catch (e) { /* server restarting mid-flow — keep polling */ }
+    }, 2000);
+  }
+  const claiming = new URLSearchParams(location.search).get('claiming');
+  if (claiming) startClaimPoll(claiming);
+
+  // A cancelled consent (Google → /login?reason=denied) deserves a
+  // friendly line, not silence.
+  const reason = new URLSearchParams(location.search).get('reason');
+  const gmsg = document.getElementById('ggoogleMsg');
+
+  // Honest readiness (Rule 2.2): show the button only when the server has
+  // an OAuth client; when already signed in, swap to the account card.
   (async () => {
-    const box = document.getElementById('ggoogle');
-    const msg = document.getElementById('ggoogleMsg');
-    const btn = document.getElementById('ggoogleBtn');
     try {
       const r = await fetch('/api/auth/status');
       const d = await r.json();
       if (d.me) {
-        btn.style.display = 'none';
-        msg.innerHTML = 'Signed in as <b style="color:var(--text)">' +
-          String(d.me.email || 'you').replace(/&/g,'&amp;').replace(/</g,'&lt;') +
-          '</b> — <a href="/">open the command centre →</a><br>' +
-          '<button class="gbtn" id="glogout" style="margin-top:8px;background:transparent;color:var(--amber);border-color:rgba(245,166,35,0.4)">SIGN OUT</button>';
-        const lo = document.getElementById('glogout');
-        if (lo) lo.addEventListener('click', async () => {
-          await fetch('/api/auth/logout', { method: 'POST' });
-          window.location.reload();
-        });
+        showSignedIn(d.me);
       } else if (d.configured) {
-        btn.style.display = 'block';
-        msg.textContent = 'One click — your account, your Gmail and Calendar.';
+        document.getElementById('ggoogleBtn').style.display = 'flex';
+        gmsg.textContent = 'One click — Google shows your account chooser, then you are in.';
+        if (reason === 'denied') {
+          gmsg.innerHTML = '<span class="warn">Sign-in was cancelled — no problem, nothing changed.</span>';
+        }
       } else {
-        btn.style.display = 'none';
-        msg.textContent = 'Google login NOT CONFIGURED — set GOOGLE_CLIENT_ID + ' +
-          'GOOGLE_CLIENT_SECRET in .env (Google Cloud Console → OAuth client). ' +
-          'The access token above still works.';
+        gmsg.innerHTML = '<span class="warn">GOOGLE LOGIN NOT CONFIGURED.</span> To link your ' +
+          'Google account: Google Cloud Console → APIs &amp; Services → Credentials → ' +
+          '<b>Create OAuth client ID</b> (Web) → add the redirect URI ' +
+          '<b>http://127.0.0.1:8765/api/auth/google/callback</b> → put the two values in ' +
+          '<b>.env</b> as <b>GOOGLE_CLIENT_ID</b> and <b>GOOGLE_CLIENT_SECRET</b> → restart. ' +
+          'The access token below still works meanwhile.';
       }
     } catch (e) {
-      btn.style.display = 'none';
-      msg.textContent = 'Server unreachable — the access token above still works.';
+      document.getElementById('ggoogleBtn').style.display = 'none';
+      gmsg.textContent = 'Server unreachable — the access token below still works.';
     }
   })();
+
+  async function showSignedIn(email) {
+    document.getElementById('signedOut').style.display = 'none';
+    // The token fallback is a separate gate — no need to see it when a
+    // Google account is already linked here (reviewer polish).
+    const alt = document.querySelector('details.token-alt');
+    if (alt) alt.style.display = 'none';
+    const card = document.getElementById('signedIn');
+    card.style.display = 'block';
+    // Pull the full profile (name + picture) for the account card.
+    let name = '', picture = '';
+    try {
+      const r = await fetch('/api/auth/me');
+      const d = await r.json();
+      const me = d.me || {};
+      name = me.name || ''; picture = me.picture || '';
+    } catch (e) { /* email-only fallback is fine */ }
+    document.getElementById('whoEmail').textContent = email;
+    document.getElementById('whoName').textContent = name || email;
+    const img = document.getElementById('avatar');
+    // The picture claim is stored in the AuthStore DB — only ever assign a
+    // real http(s) URL to img.src (a poisoned row must not load an
+    // arbitrary scheme, reviewer-caught).
+    if (picture && /^https?:\/\//i.test(picture)) { img.src = picture; }
+    else { img.style.display = 'none'; }
+  }
+
+  document.getElementById('glogout').addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.reload();
+  });
 </script>
 </body>
 </html>

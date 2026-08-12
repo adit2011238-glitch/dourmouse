@@ -1,4 +1,7 @@
 openai>=2.52.0
+psutil>=5.9.0  # v5.22.14 host telemetry (HUD MEM_LOAD + metrics micro-bars); optional-guarded
 python-dotenv>=1.0.0
 numpy>=2.0.0  # v5.6 neural orchestrator (pure-numpy MLP, no torch)
 segno>=1.6.0  # v5.13 phone-link QR codes (pure-Python, zero native deps)
+worldmonitor-sdk>=0.1.1  # v5.18 World Monitor tab (country briefs / risk feeds); module-level import
+pywebview>=6.0  # v5.19 desktop shell native window (documented browser fallback without it)

@@ -157,7 +157,8 @@ class TestAuthGate:
             resp = conn.getresponse()
             assert resp.status == 200
             body = resp.read().decode()
-            assert "ACCESS GATE" in body
+            # v5.22.8: the login page is the Gmail-style Google sign-in.
+            assert "Sign in with Google" in body
             conn.close()
         finally:
             server.shutdown()

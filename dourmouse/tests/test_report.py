@@ -21,7 +21,9 @@ from dourmouse.report import (
     _report_enabled,
     _report_time,
     _seconds_until,
+    brief_on_open_enabled,
     build_morning_report,
+    schedule_brief_on_open,
 )
 from dourmouse.message_bus import MessageBus
 from dourmouse.general_roster import build_general_registry
@@ -35,11 +37,26 @@ class _FakeTracker:
         self.events.append(entry)
 
 
+def _fake_lab(leaderboard_fn, backtest_fn=None):
+    """A stand-in for dourmouse.atlas_lab (SimpleNamespace — NOT a class, so
+    the lambda is a plain attribute, never bound as a method).
+
+    ``backtest_fn`` is the stand-in for ``get_latest_backtest()`` (v5.22.15).
+    When None, returns None — the "no backtests yet" path."""
+    import types
+    return types.SimpleNamespace(
+        leaderboard=leaderboard_fn,
+        get_latest_backtest=backtest_fn or (lambda: None),
+    )
+
+
 def _fake_fetcher(tool: str, args: dict[str, Any]) -> str:
     if tool == "market_movers":
         return "MARKET MOVERS (fake): AAPL +2.1%\nMSFT +1.4%"
     if tool == "news_headlines":
         return "NEWS (fake): Fed holds rates."
+    if tool == "gmail_search":
+        return "MAIL (fake): 1. Fed holds rates (finance@x) — 08:00"
     if tool == "list_tasks":
         return "TASKS: none (honest)."
     return f"{tool}: {args}"
@@ -53,12 +70,17 @@ class TestReportContent:
         assert "MARKET MOVERS — GAINERS" in report
         assert "MARKET MOVERS — LOSERS" in report
         assert "LIVE NEWS HEADLINES" in report
+        assert "GMAIL — UNREAD INBOX" in report
         assert "TASKS" in report
         assert "ATLAS QUANT REPO" in report
+        assert "ATLAS STRATEGY REPORT" in report
+        assert "LATEST ATLAS BACKTEST" in report
         assert "SYSTEM HEALTH" in report
         # fake content flowed through
         assert "AAPL" in report
         assert "Fed holds rates" in report
+        # the mail reader section renders its real content
+        assert "MAIL (fake)" in report
 
     def test_failing_section_is_honest(self):
         registry = build_general_registry()
@@ -102,6 +124,89 @@ class TestReportContent:
         report = build_morning_report(registry, fetcher=_fake_fetcher)
         assert "ATLAS atlas_status (fake)" in report
         assert "atlas_status" in calls and "atlas_bootstrap" in calls
+
+    def test_atlas_strategy_report_renders_leaderboard(self, monkeypatch):
+        registry = build_general_registry()
+        monkeypatch.setattr(
+            report_module, "atlas_lab",
+            _fake_lab(lambda include_description=True: [
+                {"name": "fx_mean_reversion", "sharpe": 2.31},
+                {"name": "trend_follow", "sharpe": 1.87},
+            ]),
+        )
+        report = build_morning_report(registry, fetcher=_fake_fetcher)
+        assert "ATLAS STRATEGY REPORT" in report
+        assert "fx_mean_reversion" in report and "2.31" in report
+        assert "trend_follow" in report and "1.87" in report
+
+    def test_atlas_strategy_report_honest_when_empty(self, monkeypatch):
+        registry = build_general_registry()
+        monkeypatch.setattr(
+            report_module, "atlas_lab",
+            _fake_lab(lambda include_description=True: []),
+        )
+        report = build_morning_report(registry, fetcher=_fake_fetcher)
+        assert "ATLAS STRATEGY REPORT" in report
+        assert "no strategies synced yet" in report
+
+    def test_atlas_strategy_report_honest_when_lab_errors(self, monkeypatch):
+        registry = build_general_registry()
+
+        def _boom(**kwargs):  # noqa: ARG001
+            raise RuntimeError("repo not synced")
+
+        monkeypatch.setattr(report_module, "atlas_lab", _fake_lab(_boom))
+        report = build_morning_report(registry, fetcher=_fake_fetcher)
+        assert "ATLAS STRATEGY REPORT FAILED" in report
+        assert "repo not synced" in report
+
+    def test_latest_backtest_section_renders(self, monkeypatch):
+        registry = build_general_registry()
+        monkeypatch.setattr(
+            report_module, "atlas_lab",
+            _fake_lab(
+                leaderboard_fn=lambda include_description=True: [],
+                backtest_fn=lambda: {
+                    "strategy_name": "Test strat", "pair": "EURUSD",
+                    "verdict": "PAPER TRADE",
+                    "sharpe_ratio": 1.523, "t_statistic": 3.214,
+                    "p_value": 0.002, "mean_return_pct": 0.45,
+                    "std_dev_pct": 0.82, "win_rate_pct": 62.5,
+                    "n_trades": 45,
+                },
+            ),
+        )
+        report = build_morning_report(registry, fetcher=_fake_fetcher)
+        assert "LATEST ATLAS BACKTEST" in report
+        assert "Test strat" in report and "EURUSD" in report
+        assert "PAPER TRADE" in report
+        assert "1.523" in report  # sharpe
+        assert "3.214" in report  # t-stat
+        assert "0.002" in report  # p-value
+
+    def test_latest_backtest_section_honest_when_none(self, monkeypatch):
+        registry = build_general_registry()
+        monkeypatch.setattr(
+            report_module, "atlas_lab",
+            _fake_lab(leaderboard_fn=lambda include_description=True: []),
+        )
+        report = build_morning_report(registry, fetcher=_fake_fetcher)
+        assert "LATEST ATLAS BACKTEST" in report
+        assert "no backtests completed yet" in report
+
+    def test_latest_backtest_honest_when_lab_errors(self, monkeypatch):
+        registry = build_general_registry()
+
+        def _boom(**kwargs):  # noqa: ARG001
+            raise RuntimeError("lab unavailable")
+
+        monkeypatch.setattr(
+            report_module, "atlas_lab",
+            _fake_lab(leaderboard_fn=lambda i: [], backtest_fn=_boom),
+        )
+        report = build_morning_report(registry, fetcher=_fake_fetcher)
+        assert "LATEST BACKTEST FAILED" in report
+        assert "lab unavailable" in report
 
 
 class TestSchedule:
@@ -190,3 +295,90 @@ class TestDailyReporter:
         finally:
             server2.daily_reporter.stop()
             server2.server_close()
+
+    def test_fire_now_posts_to_tracker_and_bus(self, monkeypatch):
+        # The REAL atlas handlers fetch dukascopy (slow, verbose, network).
+        # Replace them with short fakes so the bus's body cap never truncates
+        # the sections under test — the report stays short.
+        class _FakeSpec:
+            def __init__(self, text):
+                self._text = text
+
+            def handler(self, args):  # noqa: ARG001
+                return self._text
+
+        registry = build_general_registry()
+        monkeypatch.setattr(
+            registry, "lookup",
+            lambda name: _FakeSpec(f"ATLAS {name} (fake)")
+            if name.startswith("atlas_") else None,
+        )
+        monkeypatch.setattr(
+            report_module, "atlas_lab",
+            _fake_lab(lambda include_description=True: [
+                {"name": "fx_mean_reversion", "sharpe": 2.31}]),
+        )
+        tracker = _FakeTracker()
+        bus = MessageBus()
+        rep = DailyReporter(
+            registry, tracker, bus,
+            fetcher=_fake_fetcher, enabled=True,
+        )
+        rep.fire_now()  # immediate, no clock needed
+        assert tracker.events, "expected a tracker event"
+        msgs = bus.snapshot()
+        assert msgs and msgs[-1]["subject"] == "daily briefing"
+        assert "DAILY BRIEFING" in msgs[-1]["body"]
+        assert "GMAIL — UNREAD INBOX" in msgs[-1]["body"]
+        assert "ATLAS STRATEGY REPORT" in msgs[-1]["body"]
+        assert "LATEST ATLAS BACKTEST" in msgs[-1]["body"]
+        assert "fx_mean_reversion" in msgs[-1]["body"]
+
+
+class TestBriefOnOpen:
+    """v5.22.13: the launch briefing — fire the daily report shortly after
+    the app opens, not only at the scheduled 08:30."""
+
+    class _FakeReporter:
+        def __init__(self, running=True):
+            self.running = running
+            self.fired = 0
+
+        def fire_now(self):
+            self.fired += 1
+
+    def test_fires_after_delay(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_BRIEF_ON_OPEN", "1")
+        monkeypatch.setenv("DOURMOUSE_BRIEF_DELAY", "0")
+        reporter = self._FakeReporter()
+        thread = schedule_brief_on_open(reporter)
+        assert thread is not None
+        thread.join(timeout=5)
+        assert reporter.fired == 1
+        assert thread.is_alive() is False
+
+    def test_fires_exactly_once(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_BRIEF_ON_OPEN", "1")
+        monkeypatch.setenv("DOURMOUSE_BRIEF_DELAY", "0")
+        reporter = self._FakeReporter()
+        schedule_brief_on_open(reporter).join(timeout=5)
+        schedule_brief_on_open(reporter).join(timeout=5)
+        # each launch schedules exactly one fire — no duplicate spam
+        assert reporter.fired == 2
+
+    def test_noop_when_reporter_stopped(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_BRIEF_ON_OPEN", "1")
+        reporter = self._FakeReporter(running=False)
+        assert schedule_brief_on_open(reporter) is None
+        assert reporter.fired == 0
+
+    def test_noop_when_env_off(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_BRIEF_ON_OPEN", "0")
+        reporter = self._FakeReporter()
+        assert schedule_brief_on_open(reporter) is None
+        assert reporter.fired == 0
+
+    def test_enabled_matrix(self, monkeypatch):
+        for raw, expected in [("1", True), ("0", False), ("", False),
+                              ("off", False), ("yes", True)]:
+            assert brief_on_open_enabled(raw) is expected

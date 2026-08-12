@@ -23,11 +23,20 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
+# v5.22.13: the ATLAS strategy leaderboard (lab, GitHub-synced). Imported at
+# module level so tests can monkeypatch the attribute; the lab itself never
+# imports report.py, so there is no cycle.
+from dourmouse import atlas_lab  # noqa: E402
+
 # Sections, in display order. Each is (label, tool_name, args, max_len).
 _SECTIONS: list[tuple[str, str, dict[str, Any], int]] = [
     ("MARKET MOVERS — GAINERS", "market_movers", {"direction": "gainers", "count": 5}, 600),
     ("MARKET MOVERS — LOSERS", "market_movers", {"direction": "losers", "count": 5}, 600),
     ("LIVE NEWS HEADLINES", "news_headlines", {"max_results": 5}, 800),
+    # v5.22.13: the daily MAIL reader — unread inbox via the signed-in
+    # Google account (gmail_search). Honest NOT-CONFIGURED line when the
+    # account isn't linked (Rule 2.2) — never a fabricated inbox.
+    ("GMAIL — UNREAD INBOX", "gmail_search", {"query": "in:inbox is:unread", "max_results": 5}, 900),
     ("TASKS", "list_tasks", {"include_done": False}, 600),
 ]
 
@@ -117,6 +126,51 @@ def build_morning_report(
     except Exception as exc:
         lines.append(f"ATLAS SECTION FAILED (reported honestly): {exc}")
     lines.append("")
+    # v5.22.13: the ATLAS STRATEGY REPORT — the lab's live leaderboard
+    # (best → worst, synced from the valerygordon200-byte GitHub repo). A
+    # missing/unsynced repo contributes an honest line, never a fake table.
+    lines.append("── ATLAS STRATEGY REPORT ──")
+    try:
+        top = atlas_lab.leaderboard(include_description=False)[:5]
+        if not top:
+            lines.append("(no strategies synced yet — open the ATLAS window to sync)")
+        else:
+            for i, s in enumerate(top, 1):
+                name = s.get("name", "?")
+                sharpe = s.get("sharpe")
+                sharpe_txt = f"{sharpe:.2f}" if isinstance(sharpe, (int, float)) else "n/a"
+                lines.append(f"{i:>2}. {name}  —  sharpe {sharpe_txt}")
+    except Exception as exc:
+        lines.append(f"ATLAS STRATEGY REPORT FAILED (reported honestly): {exc}")
+    lines.append("")
+    # v5.22.15: the LATEST ATLAS BACKTEST — sharpe, t-stat, p-value, mean/
+    # median return, std dev. Renders the most recently completed backtest,
+    # or an honest line when none exist (Rule 2.2 — never fabricated).
+    lines.append("── LATEST ATLAS BACKTEST ──")
+    try:
+        bt = atlas_lab.get_latest_backtest()
+        if bt is None:
+            lines.append("(no backtests completed yet)")
+        else:
+            name = bt.get("strategy_name", "?")[:60]
+            pair = bt.get("pair", "?")
+            verdict = bt.get("verdict", "?")
+            lines.append(f"{name} — {pair}  |  verdict: {verdict}")
+            for label, key, fmt in [
+                ("Sharpe", "sharpe_ratio", ".3f"),
+                ("t-statistic", "t_statistic", ".3f"),
+                ("p-value", "p_value", ".5f"),
+                ("Mean return %", "mean_return_pct", ".2f"),
+                ("Std dev %", "std_dev_pct", ".2f"),
+                ("Win rate %", "win_rate_pct", ".1f"),
+                ("Trades", "n_trades", "d"),
+            ]:
+                val = bt.get(key)
+                if val is not None:
+                    lines.append(f"  {label}: {val:{fmt}}")
+    except Exception as exc:
+        lines.append(f"LATEST BACKTEST FAILED (reported honestly): {exc}")
+    lines.append("")
     lines.append(_system_health_block())
     return "\n".join(lines)
 
@@ -201,7 +255,13 @@ class DailyReporter:
             # jump to tomorrow so we don't re-fire within the same minute
             self._stop.wait(60)
 
-    def _fire(self) -> None:
+    def fire_now(self) -> None:
+        """Build and post the briefing immediately (v5.22.13).
+
+        The on-open path calls this a few seconds after the app starts, so
+        the day's headline + mail + stocks + ATLAS report land on the feed
+        without waiting for the scheduled 08:30. Same honest failure
+        behavior as the scheduled fire — a dead feed never fabricates."""
         report = build_morning_report(self._registry, fetcher=self._fetcher)
         # 1) into the tracker so the dashboard feed shows it
         try:
@@ -226,3 +286,52 @@ class DailyReporter:
                 )
         except Exception:
             pass
+
+    def _fire(self) -> None:
+        self.fire_now()
+
+
+def _brief_on_open_delay() -> float:
+    """DOURMOUSE_BRIEF_DELAY seconds to wait after start (default 15). The
+    delay lets the app finish booting (roster, live loops) before the
+    briefing's real tool handlers run; validated, honest on bad config."""
+    raw = os.environ.get("DOURMOUSE_BRIEF_DELAY", "15").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 15.0
+    return max(0.0, min(value, 300.0))
+
+
+def brief_on_open_enabled(value: str | None = None) -> bool:
+    """DOURMOUSE_BRIEF_ON_OPEN (default on) — the launch briefing. Only
+    meaningful when the reporter itself is enabled; webui gates on both."""
+    raw = value if value is not None else os.environ.get("DOURMOUSE_BRIEF_ON_OPEN", "1")
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def schedule_brief_on_open(reporter: DailyReporter) -> threading.Thread | None:
+    """v5.22.13: fire the daily briefing once, shortly after the app opens.
+
+    Returns the daemon thread (or None when the reporter is disabled or the
+    launch briefing is switched off). The thread waits
+    ``DOURMOUSE_BRIEF_DELAY`` (default 15s) so boot finishes, then fires the
+    report ONCE through the same tracker/bus path as the scheduled 08:30
+    run. Never raises; a dead reporter just means no briefing."""
+    if reporter is None or not reporter.running or not brief_on_open_enabled():
+        return None
+
+    def _launch_briefing() -> None:
+        try:
+            time.sleep(_brief_on_open_delay())
+        except Exception:  # noqa: BLE001 - sleep can't fail, but be honest
+            pass
+        try:
+            if reporter.running:
+                reporter.fire_now()
+        except Exception:  # noqa: BLE001 - the launch briefing never crashes boot
+            pass
+
+    thread = threading.Thread(target=_launch_briefing, daemon=True, name="dourmouse-brief-on-open")
+    thread.start()
+    return thread

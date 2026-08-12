@@ -397,6 +397,32 @@ def _backend_label(config: Any | None) -> str:
     return "nvidia"
 
 
+def _system_telemetry() -> dict:
+    """Real host telemetry for the HUD header + metrics micro-bars.
+
+    Rule 2.2: real numbers or an honest ``unavailable`` — never simulated.
+    ``psutil`` is a project dependency (report.py uses it); if it is missing
+    for any reason the HUD shows "—" instead of fabricated values.
+    """
+    try:
+        import os
+        import platform
+
+        import psutil  # type: ignore[import-not-found]
+        mem = psutil.virtual_memory()
+        return {
+            "host": platform.node(),
+            "mem_used_gb": round(mem.used / (1024 ** 3), 2),
+            "mem_total_gb": round(mem.total / (1024 ** 3), 2),
+            "mem_pct": round(mem.percent, 1),
+            "cpu_pct": round(psutil.cpu_percent(interval=0.1), 1),
+            "load": [round(x, 2) for x in os.getloadavg()],
+            "at": datetime.now().isoformat(timespec="seconds"),
+        }
+    except Exception as exc:  # honest degradation (Rule 2.2)
+        return {"unavailable": True, "detail": f"{type(exc).__name__}: {exc}"}
+
+
 def _effective_model(config: Any | None, agent: str) -> str:
     """v3.1: the NVIDIA model a subagent runs on, for the roster/agent UI.
 
@@ -799,6 +825,20 @@ class _Handler(BaseHTTPRequestHandler):
             # codes server-side.
             self._handle_mobile_page()
             return
+        if path == "/voice":
+            # v5.x: minimal voice-command interface (ui/voice.html) — like
+            # /mobile, served pre-auth so a fresh device can land on it;
+            # its API calls (status/STT/TTS/chat) still respect the token
+            # gate and it points the operator to /login when needed.
+            self._serve_static("voice.html")
+            return
+        if path == "/hud":
+            # v5.x: Stark MK. Zero HUD (ui/hud.html) — the tactical command
+            # surface. Served pre-auth like /voice; its API calls respect
+            # the token gate and it points the operator to /login when
+            # needed.
+            self._serve_static("hud.html")
+            return
         if path == "/api/auth/status":
             # v5.15: Google login status — pre-auth so the login page can
             # decide whether to show the sign-in button (honest, Rule 2.2).
@@ -818,6 +858,12 @@ class _Handler(BaseHTTPRequestHandler):
             # identity — a signed-out client must get {"me": null}, not 401.
             self._handle_auth_me()
             return
+        if path == "/api/auth/claim":
+            # v5.22.11: system-browser sign-in bridge — adopt the session a
+            # real-browser consent parked under our claim code. PRE-gate like
+            # status: it only unlocks a session the caller's own code owns.
+            self._handle_auth_claim()
+            return
         if not self._authorized():
             self._send_unauthorized()
             return
@@ -825,6 +871,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_static("index.html")
         elif path in ("/map", "/map.html"):
             self._serve_static("map.html")
+        elif path in ("/atlas-lab", "/atlas-lab.html"):
+            # v5.22.6: the dedicated ATLAS window — a second DOURMOUSE that
+            # is ONLY the strategy lab (live GitHub-synced leaderboard).
+            self._serve_static("atlas_lab.html")
+        elif path in ("/all-hands", "/all-hands.html"):
+            # v5.22.9: the dedicated ALL HANDS window — one goal, every
+            # resource (Claude/Codex/ChatGPT/DeepSeek/web) in parallel.
+            self._serve_static("all_hands.html")
         elif path.startswith("/agent/"):
             # v2.7: each agent gets its own LIVE window (/agent/<name>).
             agent_name = urllib.parse.unquote(path[len("/agent/"):]).strip("/")
@@ -836,12 +890,19 @@ class _Handler(BaseHTTPRequestHandler):
             agent_name = urllib.parse.unquote(path[len("/api/agent/"):]).strip("/")
             self._handle_agent_api(agent_name)
         elif path.startswith("/assets/"):
-            self._serve_static(path[len("/assets/"):])
+            # v5.22.3 fix: the URL prefix is /assets/<file> but the files
+            # live at ui/assets/<file> — re-add the directory before serving
+            # (a latent bug: every /assets/* request used to 404).
+            self._serve_static("assets/" + path[len("/assets/"):])
         elif path == "/sw.js":
             # v5.20: the offline-shell service worker (desktop portfolio
             # Phase 5). Real JS content type; no-store keeps the SW script
             # re-validating per the browser's own update rules.
             self._serve_static("sw.js")
+        elif path == "/manifest.json":
+            # v5.22.3: the PWA web manifest — lets a phone install
+            # DourMouse as a standalone app (own icon, full screen).
+            self._serve_static("manifest.json")
         elif path == "/api/roster":
             self._send_json(
                 build_roster_payload(self.server.registry, self.server.config)
@@ -850,6 +911,20 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(build_link_topology(self.server.registry))
         elif path == "/api/activity":
             self._send_json(self.server.tracker.snapshot())
+        elif path == "/api/tasks":
+            # v5.x: read-only task list for the HUD — same store the tasks
+            # agent uses (workspace/tasks.json), so the dashboard and the
+            # agent never diverge.
+            from dourmouse.live_feeds import list_tasks
+
+            tasks = list_tasks(include_done=True)
+            self._send_json(
+                {
+                    "tasks": tasks,
+                    "active": sum(1 for t in tasks if not t.get("done")),
+                    "total": len(tasks),
+                }
+            )
         elif path == "/api/events":
             # v5.9: server-push fan-out — the HUD's long-lived SSE connection
             # for live Freebuff thread activity. Anything broadcast (watcher
@@ -897,6 +972,10 @@ class _Handler(BaseHTTPRequestHandler):
                     "base_url": cfg.base_url if cfg is not None else None,
                 }
             )
+        elif path == "/api/telemetry":
+            # v5.22.14: real host telemetry (mem/cpu/load) — replaces the
+            # previously SIMULATED MEM_LOAD + metrics micro-bars (audit fix).
+            self._send_json(_system_telemetry())
         elif path == "/api/memory":
             self._handle_memory_api()
         elif path == "/api/repo":
@@ -923,6 +1002,69 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.atlas_cli import atlas_panel_snapshot
 
             self._send_json(atlas_panel_snapshot())
+        elif path == "/api/atlas-lab":
+            # v5.22.1: ATLAS LAB — LLM backtesting + strategy catalog.
+            from dourmouse.atlas_lab import get_state
+
+            state = get_state()
+            self._send_json({
+                "ok": True,
+                "strategy_count": len(state.strategies),
+                "last_sync": state.last_sync,
+                "sync_error": state.sync_error,
+                "version": state.version,
+                "backtest_queue": len(state.backtest_requests),
+            })
+        elif path == "/api/atlas-lab/strategies":
+            from dourmouse.atlas_lab import list_strategies
+
+            self._send_json({"ok": True, "strategies": list_strategies()})
+        elif path == "/api/atlas-lab/leaderboard":
+            # v5.22.6: best→worst ranked strategies for the Atlas window.
+            from dourmouse.atlas_lab import leaderboard
+
+            self._send_json({"ok": True, "leaderboard": leaderboard()})
+        elif path == "/api/allhands":
+            # v5.22.9: all All-Hands runs (newest first) for the window.
+            from dourmouse.all_hands import default_runner
+
+            self._send_json({"ok": True, "runs": default_runner().all_runs()})
+        elif path.startswith("/api/allhands/"):
+            # v5.22.9: ONE All-Hands run's live snapshot.
+            from dourmouse.all_hands import default_runner
+
+            run_id = urllib.parse.unquote(path[len("/api/allhands/"):])
+            snap = default_runner().snapshot(run_id)
+            if snap is None:
+                self._send_json({"ok": False, "error": "run not found"}, status=404)
+            else:
+                self._send_json({"ok": True, "run": snap})
+        elif path == "/api/atlas-lab/reports":
+            from dourmouse.atlas_lab import get_reports
+
+            self._send_json({"ok": True, "reports": get_reports()})
+        elif path == "/api/atlas-lab/backtest":
+            from dourmouse.atlas_lab import list_backtests
+
+            self._send_json({"ok": True, "backtests": list_backtests()})
+        elif path.startswith("/api/atlas-lab/backtest/"):
+            from dourmouse.atlas_lab import get_backtest_status
+
+            req_id = path[len("/api/atlas-lab/backtest/"):]
+            result = get_backtest_status(req_id)
+            if result is None:
+                self._send_json({"ok": False, "error": "backtest not found"}, status=404)
+            else:
+                self._send_json({"ok": True, "backtest": result})
+        elif path.startswith("/api/atlas-lab/strategies/"):
+            from dourmouse.atlas_lab import get_strategy_detail
+
+            strategy_id = path[len("/api/atlas-lab/strategies/"):]
+            detail = get_strategy_detail(strategy_id)
+            if detail is None:
+                self._send_json({"ok": False, "error": "strategy not found"}, status=404)
+            else:
+                self._send_json({"ok": True, "strategy": detail})
         elif path == "/api/freebuff":
             # v5.5: Freebuff Desktop panel — account, projects, threads.
             from dourmouse.freebuff_bridge import freebuff_panel_snapshot
@@ -1121,9 +1263,57 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/upload":
             # v5.0: raw-body file upload into the sandboxed uploads root.
             self._handle_upload()
+        elif parsed.path == "/api/tasks":
+            # v5.x: HUD task intake — deterministic CRUD into the same
+            # workspace/tasks.json the tasks agent owns.
+            body = self._read_json_body()
+            title = (body.get("title") or "").strip()
+            if not title:
+                self._send_json({"ok": False, "error": "title is required"}, status=400)
+                return
+            from dourmouse.live_feeds import add_task
+
+            try:
+                task = add_task(title)
+            except RuntimeError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self._send_json({"ok": True, "task": task})
         elif parsed.path == "/api/atlas/run":
             # v5.4: start one managed ATLAS command (single-flight).
             self._handle_atlas_run()
+        elif parsed.path == "/api/atlas-lab/sync":
+            # v5.22.1: force a GitHub sync of the strategy lab.
+            from dourmouse.atlas_lab import sync
+
+            result = sync()
+            self._send_json(result)
+        elif parsed.path == "/api/allhands":
+            # v5.22.9: start an All-Hands run from the window / HUD button.
+            from dourmouse.all_hands import start_all_hands
+
+            body = self._read_json_body()
+            goal = (body.get("goal") or "").strip()
+            if not goal:
+                self._send_json({"ok": False, "error": "goal is required"}, status=400)
+                return
+            run_id = start_all_hands(goal, owner=self._session_user())
+            self._send_json({"ok": True, "run_id": run_id})
+        elif parsed.path == "/api/atlas-lab/backtest":
+            # v5.22.1: submit a prompt-driven backtest.
+            from dourmouse.atlas_lab import submit_backtest
+
+            body = self._read_json_body()
+            prompt = (body.get("prompt") or "").strip()
+            if not prompt:
+                self._send_json({"ok": False, "error": "prompt is required"}, status=400)
+                return
+            pair = (body.get("pair") or "EURUSD").strip()
+            try:
+                result = submit_backtest(prompt, pair=pair)
+                self._send_json({"ok": True, **result})
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
         elif parsed.path == "/api/neuro/train":
             # v5.6: force a background retrain of the neural orchestrator.
             self._handle_neuro_train()
@@ -1133,6 +1323,88 @@ class _Handler(BaseHTTPRequestHandler):
 
             message = spotify_login(background=True)
             self._send_json({"ok": True, "message": message})
+        elif parsed.path == "/api/spotify/search":
+            # v5.21 HUD music section: structured track search (the user
+            # clicks a row to play). Real API rows, never fabricated.
+            from dourmouse.spotify_services import search_tracks_data
+
+            payload = self._read_json_body()
+            if not isinstance(payload, dict):
+                payload = {}
+            query = str(payload.get("query") or "")
+            limit = payload.get("limit") or 8
+            try:
+                results = search_tracks_data(query, limit)
+            except (RuntimeError, ValueError) as error:
+                self._send_json({"ok": False, "error": str(error)})
+                return
+            self._send_json({"ok": True, "results": results})
+        elif parsed.path == "/api/spotify/play":
+            # v5.21 HUD music section: play a track/playlist URI. The panel
+            # button click IS the human approval (Rule 2.9) — the roster's
+            # confirmation gate guards the agent path, not the user's own
+            # click.
+            from dourmouse.spotify_services import play_uri
+
+            payload = self._read_json_body()
+            if not isinstance(payload, dict):
+                payload = {}
+            uri = str(payload.get("uri") or "")
+            try:
+                message = play_uri(uri)
+            except (RuntimeError, ValueError) as error:
+                self._send_json({"ok": False, "message": str(error)})
+                return
+            self._send_json({"ok": not message.startswith("ERROR"), "message": message})
+        elif parsed.path == "/api/spotify/playlists":
+            # v5.21 HUD music section: the user's playlists, each playable.
+            from dourmouse.spotify_services import playlists_data
+
+            try:
+                playlists = playlists_data()
+            except (RuntimeError, ValueError) as error:
+                self._send_json({"ok": False, "error": str(error)})
+                return
+            self._send_json({"ok": True, "playlists": playlists})
+        elif parsed.path == "/api/spotify/recent":
+            # v5.21 HUD music section: recently played, each row playable.
+            from dourmouse.spotify_services import recently_played_data
+
+            try:
+                recent = recently_played_data()
+            except (RuntimeError, ValueError) as error:
+                self._send_json({"ok": False, "error": str(error)})
+                return
+            self._send_json({"ok": True, "recent": recent})
+        elif parsed.path == "/api/spotify/top":
+            # v5.21 HUD music section: most-played tracks, each playable.
+            from dourmouse.spotify_services import top_tracks_data
+
+            payload = self._read_json_body()
+            if not isinstance(payload, dict):
+                payload = {}
+            time_range = str(payload.get("time_range") or "medium_term")
+            try:
+                top = top_tracks_data(time_range=time_range)
+            except (RuntimeError, ValueError) as error:
+                self._send_json({"ok": False, "error": str(error)})
+                return
+            self._send_json({"ok": True, "top": top})
+        elif parsed.path == "/api/spotify/control":
+            # v5.21 HUD music section: next/previous/pause/resume. Same
+            # human-click contract as /api/spotify/play.
+            from dourmouse.spotify_services import playback_control
+
+            payload = self._read_json_body()
+            if not isinstance(payload, dict):
+                payload = {}
+            action = str(payload.get("action") or "")
+            try:
+                message = playback_control(action)
+            except (RuntimeError, ValueError) as error:
+                self._send_json({"ok": False, "message": str(error)})
+                return
+            self._send_json({"ok": not message.startswith("ERROR"), "message": message})
         elif parsed.path == "/api/artifacts/clear":
             # v5.8: wipe the session artifact store (a fresh renderer slate).
             store = getattr(self.server, "artifacts", None)
@@ -1412,6 +1684,24 @@ class _Handler(BaseHTTPRequestHandler):
         artifacts_store = getattr(self.server, "artifacts", None)
         if artifacts_store is not None:
             artifacts_store.set_sink(stream.emit)
+        # v5.22.9: slash commands (/all /claude /codex /chatgpt /freebuff) and
+        # the "use all resources" All-Hands goal route through the SAME SSE
+        # stream as normal chat — assistant_text chunks + a terminal done — so
+        # every client renders them identically, and the ALL HANDS window
+        # opens when a run starts. Runs without the session lock (no gate).
+        from dourmouse import all_hands
+
+        slash = all_hands.parse_slash(prompt)
+        if slash is not None or all_hands.detect_all_hands(prompt):
+            try:
+                self._handle_slash_chat(prompt, slash, stream, sink)
+            finally:
+                if artifacts_store is not None:
+                    artifacts_store.set_sink(None)
+            # Prompt SSE termination exactly like the normal chat path
+            # (reviewer-caught: the early return must close the stream).
+            self.close_connection = True
+            return
         with self.server.session_lock:
             gate.set_emit(stream.emit)
             session.confirmation_gate = gate
@@ -1448,6 +1738,45 @@ class _Handler(BaseHTTPRequestHandler):
         # Terminate the SSE response after done/error so the client gets EOF
         # instead of hanging on keep-alive.
         self.close_connection = True
+
+    def _handle_slash_chat(self, prompt: str, slash, stream, sink) -> None:
+        """v5.22.9: route a slash command / All-Hands goal through the same
+        SSE stream as normal chat (assistant_text chunks + done).
+
+        ``slash`` is ``(cmd, text)`` from all_hands.parse_slash, or None
+        when the prompt matched the "use all resources" natural-language
+        detector (then it becomes an /all run). The ALL HANDS window opens
+        on the ``allhands_started`` event the HUD listens for. Runs without
+        the session lock — no confirmation gate involved.
+        """
+        from dourmouse import all_hands
+
+        if slash is not None:
+            cmd, text = slash
+        else:
+            cmd, text = "all", prompt
+        sink({"type": "brain", "model": f"slash:{cmd}", "escalated": False})
+        try:
+            result = all_hands.run_slash(cmd, text, owner=self._session_user())
+        except Exception as exc:  # noqa: BLE001 -- surface the real failure
+            result = {"ok": False, "text": f"ERROR: {exc}"}
+        final = str(result.get("text") or "")
+        if result.get("run_id"):
+            # The dedicated ALL HANDS window opens on this event.
+            sink({"type": "allhands_started", "run_id": result["run_id"]})
+        sink({"type": "assistant_text", "text": final})
+        sink({"type": "done", "final_text": final})
+        # v5.22.9 (sweep-found): slash runs bypass ask() so they were never
+        # audited — record them in the same hash-chained session ledger.
+        try:
+            session = getattr(self.server, "session", None)
+            if session is not None and hasattr(session, "record_slash"):
+                tools = [f"slash:{cmd}"]
+                if result.get("run_id"):
+                    tools.append("allhands:" + str(result["run_id"]))
+                session.record_slash(prompt, final, tools=tools)
+        except Exception:  # noqa: BLE001 -- an audit failure never breaks chat
+            pass
 
     def _handle_events(self) -> None:
         """v5.9: long-lived server-push SSE for the HUD feed.
@@ -1579,7 +1908,9 @@ class _Handler(BaseHTTPRequestHandler):
         """Drop abandoned OAuth flows older than the TTL (reviewer-caught:
         a user who never completes consent would otherwise leak one dict
         entry per attempt forever). Entries without a parseable ``created``
-        (legacy/planted) are treated as stale too. Caller holds oauth_lock."""
+        (legacy/planted) are treated as stale too. Also prunes the
+        system-browser claim slots (v5.22.11) — same TTL, same discipline.
+        Caller holds oauth_lock (and claim_lock when pruned)."""
         cutoff = datetime.now().timestamp() - _OAUTH_PENDING_TTL_SECONDS
         stale = [
             state
@@ -1589,9 +1920,25 @@ class _Handler(BaseHTTPRequestHandler):
         ]
         for state in stale:
             self.server.oauth_pending.pop(state, None)
+        claims = getattr(self.server, "claim_pending", {})
+        stale_claims = [
+            code
+            for code, claim in claims.items()
+            if _pending_created_ts(claim) is None
+            or _pending_created_ts(claim) < cutoff
+        ]
+        for code in stale_claims:
+            claims.pop(code, None)
 
     def _handle_google_start(self) -> None:
-        """GET /api/auth/google/start — 302 to Google consent (PKCE)."""
+        """GET /api/auth/google/start[?claim=CODE] — 302 to Google consent (PKCE).
+
+        v5.22.11: ``?claim=CODE`` is the system-browser bridge. Google refuses
+        sign-in inside the desktop app's embedded WebKit webview, so the
+        login page passes a single-use claim code: the consent page opens in
+        the user's REAL browser, the callback parks the completed session
+        under that code, and the webview adopts it via GET /api/auth/claim.
+        Without ``claim`` the flow is unchanged (plain in-app redirect)."""
         import secrets
 
         from dourmouse import google_auth
@@ -1602,6 +1949,9 @@ class _Handler(BaseHTTPRequestHandler):
                 status=400,
             )
             return
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        claim = (qs.get("claim") or [""])[0].strip() or None
         state = secrets.token_urlsafe(24)
         verifier, challenge = google_auth.new_pkce()
         redirect_uri = self._google_redirect_uri()
@@ -1611,6 +1961,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "verifier": verifier,
                 "redirect_uri": redirect_uri,
                 "redirect_to": "/",
+                "claim": claim,
                 "created": datetime.now().isoformat(),
             }
         url = google_auth.authorization_url(redirect_uri, state, challenge)
@@ -1667,16 +2018,34 @@ class _Handler(BaseHTTPRequestHandler):
             sub=identity.get("sub", ""),
         )
         sid = store.create_session(email, identity.get("name", ""), identity.get("picture", ""))
-        self.send_response(302)
-        self.send_header("Location", pending.get("redirect_to") or "/")
-        # Secure is intentionally omitted: the server is plain HTTP on
-        # loopback/LAN (browsers ignore Secure from http:// anyway). If
-        # DourMouse is ever served over HTTPS, add Secure here AND on the
-        # logout cookie below — HttpOnly + SameSite=Strict already apply.
-        self.send_header(
-            "Set-Cookie",
-            f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000",
-        )
+        claim = pending.get("claim")
+        if claim:
+            # v5.22.11: system-browser bridge — the consent page ran in the
+            # user's REAL browser (Google blocks WebKit webviews). Park the
+            # session under the single-use claim code; the app's webview
+            # adopts it via /api/auth/claim and lands on /. The browser is
+            # sent to a plain "you can close this tab" page.
+            with self.server.claim_lock:
+                self.server.claim_pending[claim] = {
+                    "sid": sid,
+                    "email": email,
+                    "name": identity.get("name", ""),
+                    "picture": identity.get("picture", ""),
+                    "created": datetime.now().isoformat(),
+                }
+            self.send_response(302)
+            self.send_header("Location", "/login?claimed=1")
+        else:
+            self.send_response(302)
+            self.send_header("Location", pending.get("redirect_to") or "/")
+            # Secure is intentionally omitted: the server is plain HTTP on
+            # loopback/LAN (browsers ignore Secure from http:// anyway). If
+            # DourMouse is ever served over HTTPS, add Secure here AND on the
+            # logout cookie below — HttpOnly + SameSite=Strict already apply.
+            self.send_header(
+                "Set-Cookie",
+                f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000",
+            )
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -1689,6 +2058,44 @@ class _Handler(BaseHTTPRequestHandler):
             return
         profile = self.server.auth.user_profile(email)
         self._send_json({"me": profile})
+
+    def _handle_auth_claim(self) -> None:
+        """GET /api/auth/claim?code=CODE — adopt a system-browser session
+        (v5.22.11). The consent page runs in the user's REAL browser (Google
+        blocks embedded WebKit webviews); when the callback parks the session
+        under the claim code, the app's webview polls here and lands signed
+        in. Single-use + TTL-pruned — a code can be redeemed once, ever.
+        Pre-auth (like /api/auth/status): it only reveals a session the
+        caller's own claim code unlocked."""
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        code = (qs.get("code") or [""])[0].strip()
+        if not code:
+            self._send_json({"ok": False, "error": "claim code required"}, status=400)
+            return
+        with self.server.oauth_lock:
+            self._prune_oauth_pending()
+        with self.server.claim_lock:
+            claim = self.server.claim_pending.pop(code, None)
+        if claim is None:
+            self._send_json(
+                {"ok": False, "error": "claim code unknown/expired — start the login again"},
+                status=404,
+            )
+            return
+        sid = claim["sid"]
+        self.send_response(200)
+        # Same cookie contract as the in-app callback: HttpOnly, SameSite,
+        # 30-day lifetime. The webview gets this response and is signed in.
+        self.send_header(
+            "Set-Cookie",
+            f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000",
+        )
+        self._send_json({"ok": True, "me": {
+            "email": claim["email"],
+            "name": claim.get("name", ""),
+            "picture": claim.get("picture", ""),
+        }})
 
     def _handle_auth_logout(self) -> None:
         """POST /api/auth/logout — end the user session + clear the cookie.
@@ -2551,6 +2958,14 @@ def run_server(
     bind_auth_store(auth)
     server.oauth_pending: dict[str, dict[str, Any]] = {}
     server.oauth_lock = threading.Lock()
+    # v5.22.11: system-browser sign-in bridge. Google refuses sign-in inside
+    # embedded WebKit webviews ("this browser or app may not be secure"), so
+    # the desktop app opens the consent page in the user's REAL browser; the
+    # completed session is parked here under a single-use claim code and the
+    # app adopts it via GET /api/auth/claim. Same TTL discipline as
+    # oauth_pending (pruned together).
+    server.claim_pending: dict[str, dict[str, Any]] = {}
+    server.claim_lock = threading.Lock()
     server.confirm_resolver = None  # set per-chat via gate resolver closure
     server.session = ChatSession(
         registry,
@@ -2584,6 +2999,23 @@ def run_server(
     # Freebuff app. The watcher emits into the hub, the hub pushes to every
     # connected HUD stream.
     server.events_broadcast = _SSEBroadcast()
+    # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
+    # HUD and the dedicated window listen to (live per-brain cards).
+    from dourmouse import all_hands
+
+    all_hands.bind_events_hub(server.events_broadcast)
+    # v5.22.14: the ATLAS strategy lab also broadcasts sync events on the same
+    # hub — the HUD shows the leaderboard updating live without any refresh.
+    from dourmouse import atlas_lab
+
+    atlas_lab.bind_events_hub(server.events_broadcast)
+    # Start the auto-sync loop at boot so strategies from the GitHub repo
+    # (valerygordon200-byte/atlas-strategy-lab) flow in with zero user steps
+    # even if nobody opens the ATLAS window. Gated behind ``reporting`` so
+    # tests (which default to reporting=False) never touch the real git repo
+    # or filesystem.
+    if reporting:
+        atlas_lab.start_auto_sync()
     server.freebuff_watcher = None
     if freebuff_events:
         from dourmouse.freebuff_events import FreebuffEventWatcher
@@ -2604,8 +3036,15 @@ def run_server(
             pass
     server.daily_reporter: DailyReporter | None = None
     if reporting:
+        from dourmouse.report import schedule_brief_on_open
+
         server.daily_reporter = DailyReporter(registry, server.tracker, server.bus)
         server.daily_reporter.start()
+        # v5.22.13: the daily briefing fires ~15s after the app opens (not
+        # just at the scheduled time) — headlines, unread mail, market
+        # movers and the ATLAS strategy report land on the feed immediately.
+        # Env-gated by DOURMOUSE_BRIEF_ON_OPEN (default on).
+        server.brief_on_open_thread = schedule_brief_on_open(server.daily_reporter)
     return server
 
 

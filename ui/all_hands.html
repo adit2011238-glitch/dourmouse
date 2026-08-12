@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALL HANDS // EVERY RESOURCE</title>
+<style>
+  :root {
+    --ground: #070B12; --surface: #0E1420;
+    --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
+    --green: #26D07C; --green-rgb: 38,208,124;
+    --amber: #F5A623; --amber-rgb: 245,166,35;
+    --red:   #EF5350; --red-rgb:   239,83,80;
+    --dead:  #8A929E; --dead-rgb:  138,146,158;
+    --a06:0.06; --a10:0.10; --a16:0.16; --a30:0.30; --a45:0.45; --a60:0.60; --a85:0.85;
+    --font-display: "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
+    --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --font-prose: "Inter",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    --text: rgba(var(--cyan-rgb), var(--a85));
+    --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    --line: rgba(var(--cyan-rgb), var(--a10));
+    --line-strong: rgba(var(--cyan-rgb), var(--a30));
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(var(--cyan-rgb), 0.07), transparent 60%),
+      radial-gradient(900px 500px at 10% 110%, rgba(var(--green-rgb), 0.05), transparent 60%),
+      linear-gradient(180deg, #0A101B 0%, var(--ground) 100%);
+    color: var(--text); font-family: var(--font-prose); font-size: 13px;
+    overflow-y: auto;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(var(--cyan-rgb), 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--cyan-rgb), 0.025) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 20px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(var(--cyan-rgb), var(--a06)), transparent);
+    position: sticky; top: 0; z-index: 5;
+  }
+  .mark {
+    width: 34px; height: 34px; flex: none;
+    border: 1px solid var(--line-strong); border-radius: 9px;
+    display: grid; place-items: center;
+    font-family: var(--font-display); font-weight: 700; font-size: 16px; color: var(--cyan);
+    background: radial-gradient(circle at 30% 30%, rgba(var(--cyan-rgb), 0.22), rgba(var(--cyan-rgb), 0.03));
+    box-shadow: 0 0 18px rgba(var(--cyan-rgb), 0.25);
+  }
+  h1 { font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: 2px; }
+  h1 .dim { color: var(--text-dim); font-weight: 400; }
+  .status { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+  .status .live { color: rgba(var(--green-rgb), 0.9); display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+         box-shadow: 0 0 8px rgba(var(--green-rgb), 0.9); animation: pulse 2s infinite; display: inline-block; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  .goal { padding: 16px 20px 4px; }
+  .goal .g-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: var(--text-dim); }
+  .goal h2 { font-size: 16px; font-weight: 600; color: var(--text); margin-top: 4px; line-height: 1.4; }
+  .goal .meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; padding: 14px 20px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+    background: rgba(14,20,32,0.7); position: relative; overflow: hidden;
+  }
+  .card.running { border-color: rgba(var(--amber-rgb), 0.45); }
+  .card.done { border-color: rgba(var(--green-rgb), 0.35); }
+  .card.error { border-color: rgba(var(--red-rgb), 0.5); }
+  .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .card-head .bname { font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 1px; }
+  .badge {
+    margin-left: auto; font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+    padding: 2px 8px; border-radius: 4px; border: 1px solid;
+  }
+  .badge.pending { color: var(--dead); border-color: rgba(var(--dead-rgb), 0.4); }
+  .badge.running { color: var(--amber); border-color: rgba(var(--amber-rgb), 0.5); }
+  .badge.done { color: var(--green); border-color: rgba(var(--green-rgb), 0.5); }
+  .badge.error { color: var(--red); border-color: rgba(var(--red-rgb), 0.6); }
+  .card .body { font-family: var(--font-mono); font-size: 11px; line-height: 1.6; color: rgba(226,236,248,0.82);
+                max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+  .card .body.err { color: rgba(var(--red-rgb), 0.95); }
+  .card .elapsed { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-top: 8px; }
+
+  .synth { margin: 6px 20px 16px; border: 1px solid rgba(var(--green-rgb), 0.4); border-radius: 12px;
+           padding: 16px 18px; background: rgba(var(--green-rgb), 0.05); }
+  .synth .s-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: rgba(var(--green-rgb), 0.9); margin-bottom: 8px; }
+  .synth .s-body { font-size: 13px; line-height: 1.7; color: rgba(226,236,248,0.92); white-space: pre-wrap; word-break: break-word; }
+  .synth .s-err { color: rgba(var(--red-rgb), 0.95); }
+
+  .new-run { margin: 16px 20px; display: flex; gap: 10px; }
+  .new-run input {
+    flex: 1; background: rgba(var(--cyan-rgb), 0.05); border: 1px solid var(--line);
+    color: var(--text); font-family: var(--font-mono); font-size: 12px;
+    padding: 10px 12px; border-radius: 6px; outline: none;
+  }
+  .new-run input:focus { border-color: var(--line-strong); }
+  button {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
+    color: var(--cyan); background: rgba(var(--cyan-rgb), 0.08);
+    border: 1px solid var(--line-strong); border-radius: 6px; padding: 9px 16px; cursor: pointer;
+  }
+  button:hover { background: rgba(var(--cyan-rgb), 0.18); }
+
+  .runs { padding: 6px 20px 20px; }
+  .runs .r-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: var(--text-dim); margin-bottom: 8px; }
+  .run-row {
+    display: flex; gap: 10px; align-items: center; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer;
+    background: rgba(14,20,32,0.5);
+  }
+  .run-row:hover { border-color: var(--line-strong); }
+  .run-row .r-goal { flex: 1; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-row .r-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+  .empty { text-align: center; color: var(--text-dim); padding: 40px 0; font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<header>
+  <div class="mark">⚡</div>
+  <h1>ALL HANDS <span class="dim">// EVERY RESOURCE</span></h1>
+  <div class="status">
+    <span class="live" id="live"><span class="dot"></span>LIVE</span>
+    <span id="runmeta"></span>
+  </div>
+</header>
+
+<div class="goal" id="goalbox" style="display:none">
+  <div class="g-label">GOAL</div>
+  <h2 id="goal"></h2>
+  <div class="meta" id="meta"></div>
+</div>
+
+<div class="new-run" id="newrun">
+  <input id="goalinput" placeholder="Give me a goal and I'll put every resource on it — e.g. research the EV charging market and recommend 3 plays" spellcheck="false">
+  <button id="startbtn">⚡ ALL HANDS</button>
+</div>
+
+<div class="grid" id="grid"></div>
+<div class="synth" id="synth" style="display:none">
+  <div class="s-label">SYNTHESIS — MERGED BY THE FAST HOSTED BRAIN</div>
+  <div class="s-body" id="synthbody"></div>
+</div>
+
+<div class="runs" id="runsbox" style="display:none">
+  <div class="r-title">RECENT RUNS</div>
+  <div id="runslist"></div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+let runId = (params.get("run") || "").trim();
+let current = null;
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+const BRAIN_LABELS = { claude: "CLAUDE", nvidia: "NVIDIA", deepseek: "DEEPSEEK", codex: "CHATGPT/CODEX", web: "WEB SEARCH" };
+
+function cardHTML(key, b) {
+  const badge = `<span class="badge ${b.status}">${esc(b.status.toUpperCase())}</span>`;
+  let body = '';
+  if (b.status === 'pending') body = '<span style="color:var(--dead)">queued…</span>';
+  else if (b.status === 'running') body = '<span style="color:var(--amber)">working…</span>';
+  else if (b.status === 'done') body = esc((b.result || '')).slice(0, 2400);
+  else if (b.status === 'error') body = esc(b.error || 'failed');
+  const elapsed = b.elapsed !== null && b.elapsed !== undefined ? b.elapsed + 's' : '—';
+  return `<div class="card ${b.status}" data-k="${esc(key)}">
+    <div class="card-head"><span class="bname">${esc(BRAIN_LABELS[key] || key)}</span>${badge}</div>
+    <div class="body ${b.status === 'error' ? 'err' : ''}">${body}</div>
+    <div class="elapsed">ELAPSED ${esc(String(elapsed))}</div>
+  </div>`;
+}
+
+function renderRun(run) {
+  current = run;
+  if (!run) return;
+  $("goalbox").style.display = "block";
+  $("goal").textContent = run.goal;
+  const st = run.status.toUpperCase();
+  const when = run.started ? new Date(run.started).toLocaleTimeString() : "";
+  $("meta").textContent = `RUN ${run.id} · ${st} · STARTED ${when}` + (run.owner ? ` · OWNER ${run.owner}` : "");
+  $("live").style.display = run.status === "running" ? "" : "none";
+  $("grid").innerHTML = Object.entries(run.brains || {}).map(([k, b]) => cardHTML(k, b)).join("");
+  const syn = $("synth");
+  if (run.synthesis) {
+    syn.style.display = "block";
+    $("synthbody").className = "s-body";
+    $("synthbody").textContent = run.synthesis;
+  } else if (run.error) {
+    syn.style.display = "block";
+    $("synthbody").className = "s-body s-err";
+    $("synthbody").textContent = run.error;
+  } else {
+    syn.style.display = "none";
+  }
+}
+
+async function fetchRun(id) {
+  try {
+    const r = await fetch("/api/allhands/" + encodeURIComponent(id), { cache: "no-store" });
+    const d = await r.json();
+    if (d.ok && d.run) renderRun(d.run);
+  } catch (e) { /* transient — the SSE/poll retries */ }
+}
+
+async function fetchRuns() {
+  try {
+    const r = await fetch("/api/allhands", { cache: "no-store" });
+    const d = await r.json();
+    const runs = (d.runs || []).slice(0, 8);
+    if (!runs.length) return;
+    $("runsbox").style.display = "block";
+    $("runslist").innerHTML = runs.map((run) => `
+      <div class="run-row" data-id="${esc(run.id)}">
+        <span class="r-goal">${esc(run.goal)}</span>
+        <span class="r-meta">${esc(run.status.toUpperCase())} · ${Object.values(run.brains || {}).filter(b => b.status === 'done').length}/${Object.values(run.brains || {}).length}</span>
+      </div>`).join("");
+    document.querySelectorAll(".run-row").forEach((el) => el.addEventListener("click", () => {
+      runId = el.dataset.id;
+      history.replaceState(null, "", "/all-hands?run=" + encodeURIComponent(runId));
+      fetchRun(runId);
+      $("newrun").style.display = "none";
+    }));
+  } catch (e) { /* window may be offline */ }
+}
+
+// Live SSE: the same hub the HUD listens on; filter allhands events for
+// this run. Poll every 2s as the always-on fallback (SSE may lag a re-open).
+function connectSSE() {
+  try {
+    const es = new EventSource("/api/events");
+    es.onmessage = (ev) => {
+      let d;
+      try { d = JSON.parse(ev.data); } catch (e) { return; }
+      if (d.type === "allhands" && (!runId || d.run_id === runId)) {
+        if (!runId && d.run_id) { runId = d.run_id; history.replaceState(null, "", "/all-hands?run=" + encodeURIComponent(runId)); }
+        fetchRun(d.run_id);
+        fetchRuns();
+      }
+    };
+    es.onerror = () => es.close(); // poll covers it; EventSource retries anyway
+  } catch (e) { /* SSE unavailable — poll only */ }
+}
+
+$("startbtn").addEventListener("click", async () => {
+  const goal = $("goalinput").value.trim();
+  if (!goal) return;
+  $("startbtn").disabled = true;
+  try {
+    const r = await fetch("/api/allhands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goal }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      runId = d.run_id;
+      history.replaceState(null, "", "/all-hands?run=" + encodeURIComponent(runId));
+      $("newrun").style.display = "none";
+      fetchRun(runId);
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.open_all_hands) {
+        window.pywebview.api.open_all_hands(d.run_id, goal);
+      }
+    }
+  } catch (e) {
+    $("runmeta").textContent = "⚠ could not start: " + e;
+  }
+  $("startbtn").disabled = false;
+});
+$("goalinput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("startbtn").click(); });
+
+if (runId) {
+  $("newrun").style.display = "none";
+  fetchRun(runId);
+  // Poll only while the run is live — a finished run stays rendered from
+  // its final snapshot (reviewer: no pointless requests on an idle window).
+  setInterval(() => {
+    if (!current || current.status === "running") fetchRun(runId);
+  }, 2000);
+}
+fetchRuns();
+setInterval(fetchRuns, 15000);
+connectSSE();
+</script>
+</body>
+</html>

@@ -191,23 +191,47 @@ def check_connections() -> dict[str, dict[str, Any]]:
         "hint": "APCA_API_KEY_ID + APCA_API_SECRET_KEY in .env",
     }
 
-    atlas_repo = os.environ.get("ATLAS_REPO_PATH", "").strip()
-    atlas_venv = os.environ.get("ATLAS_VENV_PATH", "").strip()
-    atlas_ok = (
-        bool(atlas_repo)
-        and Path(atlas_repo).expanduser().is_dir()
-        and bool(atlas_venv)
-    )
-    if atlas_repo and Path(atlas_repo).expanduser().is_dir() and atlas_venv:
+    # v5.22: resolve through the shared helpers so a personal dist with the
+    # bundled atlas/ engine reads as configured WITHOUT any env vars. The
+    # display strings are unchanged (env-setup users see exactly what they
+    # saw before); imports stay lazy + failure-safe so a broken module never
+    # kills the report (this module's contract).
+    try:
+        from dourmouse.atlas_ops import get_atlas_repo_path as _atlas_repo
+        from dourmouse.research_agent import get_atlas_venv_python as _atlas_venv
+
+        atlas_repo_resolves = True
+        try:
+            _atlas_repo()
+        except Exception:  # noqa: BLE001 -- probe failure is just "not configured"
+            atlas_repo_resolves = False
+        # venv slot: any non-empty ATLAS_VENV_PATH counts (the historic loose
+        # contract — the actual CLI checks the binary at use time), else the
+        # personal dist's shared venv must actually resolve.
+        atlas_venv_resolves = bool(os.environ.get("ATLAS_VENV_PATH", "").strip())
+        if not atlas_venv_resolves:
+            try:
+                _atlas_venv()
+                atlas_venv_resolves = True
+            except Exception:  # noqa: BLE001 -- probe failure is just "not configured"
+                atlas_venv_resolves = False
+    except Exception:  # noqa: BLE001
+        atlas_repo_resolves = atlas_venv_resolves = False
+    # Detail text keys off the ENV vars (historic contract) so a bundled
+    # engine with broken env paths still says so instead of a happy lie;
+    # the ok boolean already counts the bundle.
+    env_repo = os.environ.get("ATLAS_REPO_PATH", "").strip()
+    env_venv = os.environ.get("ATLAS_VENV_PATH", "").strip()
+    if atlas_repo_resolves and atlas_venv_resolves:
         atlas_detail = "repo path + venv configured"
-    elif atlas_repo and atlas_venv:
+    elif env_repo and env_venv:
         atlas_detail = "paths set but repo dir not found"
     else:
         atlas_detail = "ATLAS_REPO_PATH / ATLAS_VENV_PATH not set"
     out["atlas"] = {
-        "ok": atlas_ok,
+        "ok": atlas_repo_resolves and atlas_venv_resolves,
         "detail": atlas_detail,
-        "hint": "ATLAS_REPO_PATH + ATLAS_VENV_PATH in .env",
+        "hint": "ATLAS_REPO_PATH + ATLAS_VENV_PATH in .env (or build the personal dist with the bundled engine)",
     }
 
     # v5.7: Spotify — Client ID set AND account linked once (PKCE login).

@@ -1,0 +1,24 @@
+{
+  "total_conversations": 82,
+  "total_turns": 2095,
+  "total_pairs": 943,
+  "domains": {
+    "finance": {
+      "count": 77,
+      "turns": 2007
+    },
+    "coding": {
+      "count": 1,
+      "turns": 2
+    },
+    "general": {
+      "count": 4,
+      "turns": 86
+    }
+  },
+  "date_range": [
+    "2026-04-26",
+    "2026-08-09"
+  ],
+  "conversations_written": 82
+}

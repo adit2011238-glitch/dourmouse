@@ -53,25 +53,29 @@ if [ -z "$PY" ]; then
   read -r -n1 -s -p "Press any key to close..." ; echo
   exit 1
 fi
-echo "  python         : $PY ($("$PY" --version 2>&1))"
-
-# --- 2. virtualenv + dependencies ------------------------------------------
+echo "  python         : $PY ($("$PY" --version 2>&1))"# --- 2. virtualenv + dependencies ------------------------------------------
 if [ ! -x ".venv/bin/python" ]; then
   echo "  creating .venv ..."
   "$PY" -m venv .venv || { echo "✕ venv creation failed."; read -r -n1 -s -p "Press any key to close..."; echo; exit 1; }
 fi
-echo "  installing dependencies ..."
-
-".venv/bin/python" -m pip install --quiet --upgrade pip
-".venv/bin/python" -m pip install --quiet -r requirements.txt || {
-  echo "✕ dependency install failed — check your network connection."
-  read -r -n1 -s -p "Press any key to close..."; echo; exit 1;
-}
-# Desktop extra (pywebview = native window). Non-fatal: the app falls back to
-# the browser if this fails.
-if [ -f requirements-desktop.txt ]; then
-  ".venv/bin/python" -m pip install --quiet -r requirements-desktop.txt || \
-    echo "  ⚠ desktop extra install failed — will fall back to the browser."
+# The personal build ships a fully provisioned venv (marker written at build
+# time) — skip pip entirely so it stays fast and offline. Dev trees and the
+# portable build have no marker and install as before.
+if [ ! -f ".deps-installed" ]; then
+  echo "  installing dependencies ..."
+  ".venv/bin/python" -m pip install --quiet --upgrade pip
+  ".venv/bin/python" -m pip install --quiet -r requirements.txt || {
+    echo "✕ dependency install failed — check your network connection."
+    read -r -n1 -s -p "Press any key to close..."; echo; exit 1;
+  }
+  # Desktop extra (pywebview = native window). Non-fatal: the app falls back
+  # to the browser if this fails.
+  if [ -f requirements-desktop.txt ]; then
+    ".venv/bin/python" -m pip install --quiet -r requirements-desktop.txt || \
+      echo "  ⚠ desktop extra install failed — will fall back to the browser."
+  fi
+else
+  echo "  dependencies already provisioned (personal build)"
 fi
 
 # --- 3. first-run NVIDIA API key onboarding (Rule 2.6: never hardcode) ------
@@ -171,12 +175,18 @@ fi
 mkdir -p workspace
 echo ""
 echo "  booting dispatch core ... (log → .dourmouse-ui.log)"
-DEEP_LINK_ARGS=()
+# bash 3.2 (the macOS system bash) treats "${arr[@]}" on an EMPTY array as
+# an unbound variable under `set -u` and kills the script — so branch on the
+# deep link explicitly instead of expanding an array (v5.22.1 fix).
 if [ -n "${DOURMOUSE_DEEP_LINK:-}" ]; then
-  DEEP_LINK_ARGS=(-- "$DOURMOUSE_DEEP_LINK")
   echo "  cold start with deep link: $DOURMOUSE_DEEP_LINK"
+  nohup ".venv/bin/python" -u -m dourmouse.desktop -- "$DOURMOUSE_DEEP_LINK" \
+    > .dourmouse-ui.log 2>&1 &
+else
+  # -u: unbuffered stdout so .dourmouse-ui.log is actually useful for
+  # diagnosing boot problems instead of holding everything in a buffer.
+  nohup ".venv/bin/python" -u -m dourmouse.desktop > .dourmouse-ui.log 2>&1 &
 fi
-nohup ".venv/bin/python" -m dourmouse.desktop "${DEEP_LINK_ARGS[@]}" > .dourmouse-ui.log 2>&1 &
 echo $! > .dourmouse-ui.pid
 
 UP=0

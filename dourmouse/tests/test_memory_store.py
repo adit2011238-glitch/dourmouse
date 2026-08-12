@@ -47,7 +47,9 @@ class TestMemoryStore:
         assert store.count() == 1  # same (source, title) upserts
         hits = store.search("value two")
         assert hits and hits[0]["title"] == "key"
-        assert store.search("value one") == []  # old body gone
+        # Old body gone — asserted directly (FTS is OR-matched, so a stale-
+        # body term alone no longer proves absence; the row itself does).
+        assert store.get("agent", "key")["body"] == "value two"
 
     def test_search_ranks_relevant_over_noise(self, store):
         store.remember("agent", "a", "the nvidia gpu launch was delayed")
@@ -120,9 +122,18 @@ class TestMemoryStore:
 
     def test_fts_query_escapes_user_input(self):
         # A bare MATCH string with FTS5 syntax must NOT inject query grammar.
-        assert _fts_query("sneaky \" OR *") == '"sneaky" AND "OR"'
+        assert _fts_query("sneaky \" OR *") == '"sneaky" OR "OR"'
         assert _fts_query("  ") == ""
-        assert _fts_query("nvidia gpu") == '"nvidia" AND "gpu"'
+        assert _fts_query("nvidia gpu") == '"nvidia" OR "gpu"'
+
+    def test_fts_query_multi_term_recall(self):
+        # OR semantics: bm25 ranks rows matching MORE terms first, so a
+        # single matching term still surfaces a hit instead of the all-or-
+        # nothing AND behavior that returned zero hits for most recall
+        # queries (e.g. distilled "economics franchise context project").
+        assert _fts_query("economics franchise context project") == (
+            '"economics" OR "franchise" OR "context" OR "project"'
+        )
 
 
 # --------------------------------------------------------------------------- #

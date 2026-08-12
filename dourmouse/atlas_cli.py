@@ -24,6 +24,7 @@ Also owns:
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import threading
@@ -78,6 +79,11 @@ def run_atlas_cli(argv: list[str], timeout: int = _DEFAULT_TIMEOUT) -> tuple[int
     """
     repo = get_atlas_repo_path()
     python = get_atlas_venv_python()
+    # PYTHONPATH makes ``import atlas`` resolve from the repo even when the
+    # interpreter is the app's own shared venv (personal dist). Belt-and-
+    # suspenders with cwd — harmless in the external-repo dev setup.
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(repo) + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
         [str(python), "-m", "atlas.ops.cli", *argv],
         cwd=str(repo),
@@ -85,6 +91,7 @@ def run_atlas_cli(argv: list[str], timeout: int = _DEFAULT_TIMEOUT) -> tuple[int
         text=True,
         timeout=timeout,
         check=False,  # non-zero exits are surfaced, never raised
+        env=env,
     )
     return proc.returncode, proc.stdout or "", proc.stderr or ""
 

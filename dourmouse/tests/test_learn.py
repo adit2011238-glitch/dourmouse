@@ -173,9 +173,14 @@ class TestChatLearning:
         assert "nebula" in hits[0]["snippet"]
         assert "argon" in hits[0]["snippet"]
 
-    def test_relevant_memory_is_recalled_into_next_prompt(self, tmp_path, store):
+    def test_relevant_memory_is_recalled_into_next_prompt(
+        self, tmp_path, store, monkeypatch
+    ):
         """The 'learns from it' half: stored knowledge is injected into the
-        system message of the NEXT relevant prompt."""
+        system message of the NEXT relevant prompt. The fast lane is pinned
+        off so the assert sees the full base prompt (the compact-prompt swap
+        is covered by the dispatch fast-lane tests)."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         client = FakeClient(
             [
                 _FakeResponse(_FakeMessage(content="Stored.")),
@@ -198,7 +203,10 @@ class TestChatLearning:
         assert any("argon" in s for s in system_msgs)
         assert sent[0]["content"] == system_message(_registry())
 
-    def test_no_match_leaves_system_message_unchanged(self, tmp_path, store):
+    def test_no_match_leaves_system_message_unchanged(
+        self, tmp_path, store, monkeypatch
+    ):
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         client = FakeClient(
             [
                 _FakeResponse(_FakeMessage(content="Stored.")),
@@ -225,6 +233,7 @@ class TestChatLearning:
 
     def test_learn_gate_disables_ingest_and_recall(self, tmp_path, store, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         client = FakeClient(
             [
                 _FakeResponse(_FakeMessage(content="Stored.")),

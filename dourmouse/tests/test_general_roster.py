@@ -266,7 +266,8 @@ class TestScheduling:
     def test_calendar_reads_are_honestly_not_configured(self):
         result = _list_calendar_events_tool({})
         assert "NOT CONFIGURED" in result
-        assert "fabricated" in result
+        # Honesty contract: never claims events were read when they weren't.
+        assert "no events were fetched" in result
 
 
 class TestDevCoding:

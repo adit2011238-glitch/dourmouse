@@ -355,15 +355,21 @@ class MemoryStore:
 
 
 def _fts_query(query: str) -> str:
-    """Build a safe FTS5 MATCH expression: AND of double-quoted terms.
+    """Build a safe FTS5 MATCH expression: OR of double-quoted terms.
 
     User input is never interpolated raw into FTS5 syntax (a bare MATCH
     string with special chars like `" OR "` would inject query syntax). Terms
     are tokenized on non-alphanumerics and each one double-quoted with
     embedded quotes doubled — the safe, standard form.
+
+    OR (not AND) so recall degrades gracefully: FTS5 bm25 ranks rows that
+    match more terms first, so a multi-term query still surfaces the best
+    hits, while AND made recall all-or-nothing — every distilled term had
+    to co-occur in ONE fact, so most natural-language recall queries
+    ("what do you remember about X") returned zero hits.
     """
     terms = [t for t in re.split(r"[^A-Za-z0-9_]+", query) if t]
     if not terms:
         return ""
     quoted = ["\"" + t.replace('"', '""') + "\"" for t in terms]
-    return " AND ".join(quoted)
+    return " OR ".join(quoted)

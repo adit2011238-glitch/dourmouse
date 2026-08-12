@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE VOICE</title>
+<style>
+  :root {
+    --bg: #080c14;
+    --panel: #0d1420;
+    --line: #1b2735;
+    --cyan: #22d3ee;
+    --cyan-dim: #67e8f9;
+    --cyan-faint: rgba(34, 211, 238, .12);
+    --text: #cbd5e1;
+    --dim: #64748b;
+    --red: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 45%, rgba(34,211,238,.06), transparent 70%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+  }
+  /* ---------- top bar ---------- */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 28px; border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; letter-spacing: .14em; }
+  .brand .shield { width: 18px; height: 18px; color: var(--cyan); }
+  .brand b { color: var(--cyan); font-weight: 600; text-shadow: 0 0 14px rgba(34,211,238,.55); }
+  .brand .sub { color: var(--dim); font-size: 12px; letter-spacing: .2em; }
+  .topchips { display: flex; align-items: center; gap: 18px; font-size: 12px; letter-spacing: .08em; }
+  .chip { display: flex; align-items: center; gap: 7px; color: var(--dim); }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .chip .dot.on { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .chip .dot.err { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .chip b { color: var(--text); font-weight: 500; }
+  .authbtn {
+    background: var(--cyan); color: #04121a; border: 0; border-radius: 6px;
+    padding: 6px 14px; font-size: 12px; font-weight: 600; letter-spacing: .06em; cursor: pointer;
+  }
+  .authbtn:hover { filter: brightness(1.12); }
+  .authbtn.ok { background: var(--cyan-faint); color: var(--cyan); }
+
+  /* ---------- center stage ---------- */
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px; position: relative; }
+  .statusline { text-align: center; }
+  .statusline .kicker { font-size: 11px; letter-spacing: .34em; color: var(--dim); }
+  .statusline .big { font-size: 22px; font-weight: 600; letter-spacing: .2em; color: var(--cyan);
+    text-shadow: 0 0 22px rgba(34,211,238,.5); margin-top: 6px; }
+
+  /* ---------- radar + orb ---------- */
+  .radar { position: relative; width: 300px; height: 300px; }
+  .radar .ring { position: absolute; border: 1px solid rgba(34,211,238,.16); border-radius: 50%; }
+  .radar .r1 { inset: 0; }
+  .radar .r2 { inset: 34px; border-color: rgba(34,211,238,.12); }
+  .radar .r3 { inset: 68px; border-color: rgba(34,211,238,.10); }
+  .radar .r4 { inset: 102px; border-color: rgba(34,211,238,.08); }
+  .radar .tick { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .radar .t1 { top: 0; left: 50%; transform: translate(-50%, -50%); }
+  .radar .t2 { bottom: 0; left: 50%; transform: translate(-50%, 50%); }
+  .radar .t3 { top: 50%; left: 0; transform: translate(-50%, -50%); }
+  .radar .t4 { top: 50%; right: 0; transform: translate(50%, -50%); }
+  .orb {
+    position: absolute; inset: 76px; border-radius: 50%;
+    background: radial-gradient(circle at 38% 32%, #a5f3fc 0%, #22d3ee 28%, #0e7490 62%, #083344 100%);
+    box-shadow: 0 0 44px rgba(34,211,238,.5), inset 0 0 26px rgba(8,12,20,.55);
+    animation: breathe 4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
+  .radar.pulse .orb { box-shadow: 0 0 70px rgba(34,211,238,.85), inset 0 0 26px rgba(8,12,20,.55); }
+  .radar.listening .orb { animation: breathfast .7s ease-in-out infinite; }
+  @keyframes breathfast { 0%,100% { transform: scale(1.02); } 50% { transform: scale(1.1); } }
+  .radar.listening .ring { border-color: rgba(34,211,238,.34); }
+
+  /* ---------- mic button ---------- */
+  .micwrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .micbtn {
+    width: 72px; height: 72px; border-radius: 50%; border: 1px solid var(--cyan);
+    background: rgba(34,211,238,.06); color: var(--cyan); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 24px rgba(34,211,238,.25), inset 0 0 16px rgba(34,211,238,.10);
+    transition: all .18s ease;
+  }
+  .micbtn:hover { background: rgba(34,211,238,.14); box-shadow: 0 0 34px rgba(34,211,238,.45); }
+  .micbtn:active { transform: scale(.94); }
+  .micbtn.rec {
+    background: var(--red); border-color: var(--red); color: #2b0a0a;
+    box-shadow: 0 0 34px rgba(248,113,113,.6);
+    animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 34px rgba(248,113,113,.6);} 50% { box-shadow: 0 0 52px rgba(248,113,113,.9);} }
+  .micbtn svg { width: 26px; height: 26px; }
+  .miclabel { font-size: 11px; letter-spacing: .3em; color: var(--dim); }
+  .miclabel.hot { color: var(--cyan); }
+
+  /* ---------- answer panel ---------- */
+  .answer {
+    min-height: 46px; max-height: 130px; width: min(620px, 86vw); overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 18px; font-size: 14.5px; line-height: 1.55; display: none;
+  }
+  .answer .who { font-size: 10.5px; letter-spacing: .24em; color: var(--dim); margin-bottom: 6px; }
+  .answer .who.you { color: var(--cyan); }
+  .answer.show { display: block; }
+  .answer .caret { display: inline-block; width: 7px; height: 15px; background: var(--cyan); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .answer .err { color: var(--red); }
+
+  /* ---------- corners ---------- */
+  .corner { position: absolute; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--dim); letter-spacing: .06em; line-height: 1.9; }
+  .corner.bl { left: 28px; bottom: 22px; }
+  .corner.br { right: 28px; bottom: 22px; text-align: right; }
+  .corner b { color: var(--cyan-dim); font-weight: 500; }
+
+  #authnote {
+    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.35); color: var(--red);
+    font-size: 12.5px; padding: 8px 16px; border-radius: 8px; display: none;
+  }
+  #authnote a { color: var(--cyan); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg class="shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+    <div><b>DOURMOUSE</b> <span class="sub">// VOICE</span></div>
+  </div>
+  <div class="topchips">
+    <span class="chip"><span class="dot" id="sttDot"></span>STT&nbsp;<b id="sttName">…</b></span>
+    <span class="chip"><span class="dot" id="ttsDot"></span>TTS&nbsp;<b id="ttsName">…</b></span>
+    <span class="chip"><span class="dot" id="memDot"></span>MEM&nbsp;<b id="memCount">…</b></span>
+    <button class="authbtn" id="authBtn">INITIALIZE AUTH</button>
+  </div>
+</header>
+
+<main>
+  <div id="authnote"></div>
+  <div class="statusline">
+    <div class="kicker">SYSTEM STATUS</div>
+    <div class="big" id="sysStatus">INITIALIZING</div>
+  </div>
+
+  <div class="radar" id="radar">
+    <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="ring r4"></div>
+    <div class="tick t1"></div><div class="tick t2"></div><div class="tick t3"></div><div class="tick t4"></div>
+    <div class="orb"></div>
+  </div>
+
+  <div class="micwrap">
+    <button class="micbtn" id="micBtn" title="Tap to command">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>
+      </svg>
+    </button>
+    <div class="miclabel" id="micLabel">TAP TO COMMAND</div>
+  </div>
+
+  <div class="answer" id="answer"></div>
+
+  <div class="corner bl">
+    LOC: <b id="locVal">—</b><br>
+    LAT: <b id="latVal">—</b>
+  </div>
+  <div class="corner br">
+    FACTS: <b id="factsVal">—</b><br>
+    BRAIN: <b id="brainVal">—</b>
+  </div>
+</main>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const radar = $('radar'), micBtn = $('micBtn'), micLabel = $('micLabel'), answer = $('answer');
+
+/* ---------- status ---------- */
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (r.status === 401) throw Object.assign(new Error('auth'), {auth: true});
+  return r;
+}
+async function loadStatus() {
+  try {
+    const [v, m, t] = await Promise.all([
+      api('/api/voice').then(r => r.json()),
+      api('/api/memory').then(r => r.json()).catch(() => ({})),
+      api('/api/telemetry').then(r => r.json()).catch(() => ({})),
+    ]);
+    const sttOk = v.stt === 'faster-whisper';
+    const ttsOk = v.tts !== 'not-configured';
+    dot('sttDot', sttOk ? 'on' : 'err'); $('sttName').textContent = sttOk ? 'WHISPER' : v.stt || 'OFF';
+    dot('ttsDot', ttsOk ? 'on' : 'err'); $('ttsName').textContent = ttsOk ? (v.tts || '?').toUpperCase() : 'OFF';
+    dot('memDot', 'on'); $('memCount').textContent = m.count != null ? m.count : '—';
+    $('sysStatus').textContent = (sttOk && ttsOk) ? 'SYSTEM READY' : (sttOk ? 'SYSTEM READY · TTS OFF' : 'VOICE NOT CONFIGURED');
+    $('factsVal').textContent = m.count != null ? m.count + ' facts' : '—';
+    $('brainVal').textContent = (v.whisper_model || '—').toUpperCase();
+    if (t.mem_used_gb != null) { $('locVal').textContent = t.mem_pct + '% MEM'; $('latVal').textContent = t.cpu_pct + '% CPU'; }
+    $('authBtn').textContent = 'AUTHENTICATED'; $('authBtn').classList.add('ok');
+  } catch (e) {
+    if (e.auth) {
+      $('sysStatus').textContent = 'AUTH REQUIRED';
+      $('authnote').style.display = 'block';
+      $('authnote').innerHTML = 'Not authenticated — <a href="/login">log in first</a>, then reload.';
+    } else {
+      $('sysStatus').textContent = 'VOICE OFFLINE';
+      $('authnote').style.display = 'block';
+      $('authnote').textContent = 'Status unavailable: ' + e.message;
+    }
+  }
+}
+function dot(id, cls) { const d = $(id); d.className = 'dot' + (cls === 'on' ? ' on' : cls === 'err' ? ' err' : ''); }
+
+/* ---------- recording ---------- */
+let mediaRec = null, chunks = [], stream = null, recording = false;
+
+async function toggleMic() {
+  if (recording) { stopRecording(); return; }
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('microphone not available in this browser');
+    }
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+    mediaRec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    chunks = [];
+    mediaRec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    mediaRec.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: mediaRec.mimeType || 'audio/webm' });
+      transcribe(blob);
+    };
+    mediaRec.start();
+    recording = true;
+    setRec(true);
+  } catch (e) {
+    line('You', 'Mic error: ' + e.message, true);
+  }
+}
+function stopRecording() {
+  try { mediaRec && mediaRec.state !== 'inactive' && mediaRec.stop(); } catch (_) {}
+  recording = false; setRec(false);
+}
+function setRec(on) {
+  micBtn.classList.toggle('rec', on);
+  micLabel.textContent = on ? 'LISTENING… TAP TO STOP' : 'TAP TO COMMAND';
+  micLabel.classList.toggle('hot', on);
+  radar.classList.toggle('listening', on);
+}
+
+/* ---------- transcribe -> chat -> speak ---------- */
+async function transcribe(blob) {
+  setBusy('HEARING…');
+  try {
+    const r = await api('/api/speech', { method: 'POST', body: blob });
+    const d = await r.json();
+    const text = (d.text || '').trim();
+    if (!text) { line('You', '…(no speech detected)', true); setBusy('SYSTEM READY'); return; }
+    line('You', esc(text));
+    await ask(text);
+  } catch (e) {
+    line('System', e.auth ? 'Login required — /login' : 'STT failed: ' + e.message, true);
+    setBusy('SYSTEM READY');
+  }
+}
+
+async function ask(prompt) {
+  setBusy('PROCESSING…');
+  showAnswer('System', '');
+  const cur = $('answer');
+  try {
+    const r = await api('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let finalText = '';
+    let brain = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) !== -1) {
+        const raw = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
+        if (!raw.startsWith('data:')) continue;
+        let evt; try { evt = JSON.parse(raw.slice(5).trim()); } catch (_) { continue; }
+        if (evt.type === 'brain' && evt.model) { brain = evt.model; $('brainVal').textContent = brain.toUpperCase(); }
+        if (evt.type === 'assistant_delta' && evt.text) finalText += evt.text;
+        if (evt.type === 'assistant_text' && evt.text) finalText = evt.text;
+        if (evt.final_text) finalText = evt.final_text;
+        renderLive(finalText);
+      }
+    }
+    finalText = finalText.trim();
+    setBusy('SYSTEM READY');
+    if (finalText) {
+      renderLive(finalText, true);
+      speak(finalText);
+    } else {
+      line('System', 'No response received.', true);
+    }
+  } catch (e) {
+    setBusy('SYSTEM READY');
+    line('System', e.auth ? 'Login required — /login' : 'Chat failed: ' + e.message, true);
+  }
+}
+
+function renderLive(text, final) {
+  showAnswer('System', esc(text) + (final ? '' : '<span class="caret"></span>'));
+}
+function speak(text) {
+  const url = '/api/speech?text=' + encodeURIComponent(text.slice(0, 600));
+  const a = new Audio(url);
+  a.onerror = () => { /* TTS optional — never breaks the answer */ };
+  a.play().catch(() => {});
+}
+
+/* ---------- helpers ---------- */
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function line(who, html, isErr) {
+  showAnswer(who, (isErr ? '<span class="err">' : '') + html + (isErr ? '</span>' : ''));
+}
+function showAnswer(who, html) {
+  answer.classList.add('show');
+  answer.innerHTML = '<div class="who ' + (who === 'You' ? 'you' : '') + '">' + who.toUpperCase() + '</div>' + html;
+}
+function setBusy(label) { $('sysStatus').textContent = label; radar.classList.toggle('pulse', label !== 'SYSTEM READY'); }
+
+$('authBtn').addEventListener('click', () => { location.href = '/login'; });
+micBtn.addEventListener('click', toggleMic);
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopRecording(); });
+loadStatus();
+</script>
+</body>
+</html>

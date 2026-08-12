@@ -102,7 +102,12 @@ class TestMultiTurnMemory:
         roles2 = [m["role"] for m in session.messages]
         assert roles2 == ["system", "user", "assistant", "user", "assistant"]
 
-    def test_full_history_is_sent_to_model(self, tmp_path):
+    def test_full_history_is_sent_to_model(self, tmp_path, monkeypatch):
+        # The fast lane (v5.x) swaps the roster prompt for a compact style-
+        # only prompt on pure-chat turns; this test asserts the FULL roster
+        # is carried every turn, so pin the fast lane off (same pattern as
+        # test_learn.py).
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         client = FakeClient(
             [
                 _FakeResponse(_FakeMessage(content="First.")),

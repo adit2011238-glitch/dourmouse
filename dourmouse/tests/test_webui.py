@@ -336,9 +336,11 @@ class TestSseChat:
         models = [c["model"] for c in srv.session.client.chat.completions.calls]
         assert models and all(m == "nvidia/echo-70b" for m in models)
 
-    def test_chat_without_focus_uses_session_default_model(self, server):
+    def test_chat_without_focus_uses_session_default_model(self, server, monkeypatch):
         """No focus_agent -> the session's default config model drives the
-        run (no per-agent override injected)."""
+        run (no per-agent override injected). Fast lane pinned off — this
+        asserts session-default plumbing, not the simple-response lane."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         from dourmouse.config import NvidiaConfig
 
         srv, port = server
@@ -516,3 +518,421 @@ class TestSseChat:
         tool_result = next(e for e in remaining if e["type"] == "tool_result")
         assert "DECLINED" in tool_result["text"]
         assert "GATED-EXECUTED" not in tool_result["text"]
+
+
+class TestSpotifyPlayEndpoints:
+    """v5.21 HUD music section: the play-anything POST endpoints. The
+    spotify_services functions are stubbed at the module level (the handlers
+    import them lazily per request), so these assert the HTTP contract —
+    payload parsing, ok/error shape — without touching the Spotify API.
+    """
+
+    @staticmethod
+    def _stub_spotify(monkeypatch) -> None:
+        from dourmouse import spotify_services as ss
+
+        monkeypatch.setattr(
+            ss, "search_tracks_data",
+            lambda query, limit=8: [
+                {"name": "Around the World", "artists": "Daft Punk", "uri": "spotify:track:1"}
+            ],
+        )
+        monkeypatch.setattr(ss, "play_uri", lambda uri: "SPOTIFY: playback started.")
+        monkeypatch.setattr(
+            ss, "playlists_data",
+            lambda limit=20: [
+                {"name": "Chill", "uri": "spotify:playlist:9", "tracks": 42}
+            ],
+        )
+        monkeypatch.setattr(
+            ss, "recently_played_data",
+            lambda limit=8: [
+                {"name": "Get Lucky", "artists": "Daft Punk", "uri": "spotify:track:7"}
+            ],
+        )
+        monkeypatch.setattr(
+            ss, "top_tracks_data",
+            lambda time_range="medium_term", limit=8: [
+                {"name": "One More Time", "artists": "Daft Punk", "uri": "spotify:track:8"}
+            ],
+        )
+        monkeypatch.setattr(
+            ss, "playback_control", lambda action: f"SPOTIFY: {action} — done."
+        )
+
+    def _post(self, port, path, body):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", path,
+            body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        return resp.status, data
+
+    def test_search_returns_structured_results(self, server, monkeypatch):
+        self._stub_spotify(monkeypatch)
+        srv, port = server
+        status, data = self._post(port, "/api/spotify/search", {"query": "daft punk", "limit": 8})
+        assert status == 200
+        assert data["ok"] is True
+        assert data["results"][0]["uri"] == "spotify:track:1"
+
+    def test_play_returns_message(self, server, monkeypatch):
+        self._stub_spotify(monkeypatch)
+        srv, port = server
+        status, data = self._post(port, "/api/spotify/play", {"uri": "spotify:playlist:9"})
+        assert status == 200
+        assert data["ok"] is True
+        assert "playback started" in data["message"]
+
+    def test_playlists_returns_rows(self, server, monkeypatch):
+        self._stub_spotify(monkeypatch)
+        srv, port = server
+        status, data = self._post(port, "/api/spotify/playlists", {})
+        assert status == 200
+        assert data["ok"] is True
+        assert data["playlists"][0]["uri"] == "spotify:playlist:9"
+
+    def test_control_returns_message(self, server, monkeypatch):
+        self._stub_spotify(monkeypatch)
+        srv, port = server
+        status, data = self._post(port, "/api/spotify/control", {"action": "next"})
+        assert status == 200
+        assert data["ok"] is True
+        assert "next" in data["message"]
+
+    def test_play_error_is_honest_ok_false(self, server, monkeypatch):
+        from dourmouse import spotify_services as ss
+
+        monkeypatch.setattr(ss, "play_uri", lambda uri: "ERROR: no active device")
+        srv, port = server
+        status, data = self._post(port, "/api/spotify/play", {"uri": "spotify:track:1"})
+        assert status == 200
+        assert data["ok"] is False
+        assert "no active device" in data["message"]
+
+    def test_bad_limit_does_not_crash(self, server, monkeypatch):
+        """Regression: a non-numeric limit previously 500'd the handler."""
+        self._stub_spotify(monkeypatch)
+        srv, port = server
+        status, data = self._post(port, "/api/spotify/search", {"query": "x", "limit": "abc"})
+        assert status == 200
+        assert data["ok"] is True
+
+    def test_recent_returns_playable_rows(self, server, monkeypatch):
+        self._stub_spotify(monkeypatch)
+        srv, port = server
+        status, data = self._post(port, "/api/spotify/recent", {})
+        assert status == 200
+        assert data["ok"] is True
+        assert data["recent"][0]["uri"] == "spotify:track:7"
+
+    def test_top_returns_playable_rows(self, server, monkeypatch):
+        self._stub_spotify(monkeypatch)
+        srv, port = server
+        status, data = self._post(port, "/api/spotify/top", {"time_range": "medium_term"})
+        assert status == 200
+        assert data["ok"] is True
+        assert data["top"][0]["uri"] == "spotify:track:8"
+
+    def test_non_dict_payload_does_not_crash(self, server, monkeypatch):
+        self._stub_spotify(monkeypatch)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/spotify/search",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert resp.status == 200
+        assert data["ok"] is True  # treated as an empty payload, not a 500
+
+
+class TestSpotifyHudLinkedState:
+    """v5.7: the HUD Spotify panel (/api/spotify) and /api/connections report
+    'linked' honestly once a spotify_tokens.json exists in the workspace, and
+    'not linked' when it doesn't (Rule 2.2 honest contract). The token file is
+    written to the fixture's hermetic workspace — the endpoints read REAL
+    disk state; only the network probes (now_playing, connections checks) are
+    stubbed so the test never touches the Spotify API or local services.
+    """
+
+    @staticmethod
+    def _write_tokens(tmp_path, display_name: str = "Adit") -> None:
+        ws = tmp_path / "ws"  # the server fixture's DOURMOUSE_WORKSPACE
+        ws.mkdir(parents=True, exist_ok=True)
+        (ws / "spotify_tokens.json").write_text(
+            json.dumps(
+                {
+                    "access_token": "test-access",
+                    "refresh_token": "test-refresh",
+                    "expires_at": time.time() + 3600,
+                    "scope": "user-read-currently-playing",
+                    "display_name": display_name,
+                    "user_id": "test-user",
+                }
+            )
+        )
+
+    @staticmethod
+    def _stub_network(monkeypatch: pytest.MonkeyPatch) -> None:
+        # /api/spotify calls now_playing() (a REAL Spotify API call) when
+        # linked, and /api/connections probes local services/subprocesses.
+        # Both are stubbed so these tests assert on disk state alone.
+        import dourmouse.connections as conn_mod
+        from dourmouse import spotify_services as ss
+
+        monkeypatch.setattr(conn_mod, "_tcp_reachable", lambda *a, **k: False)
+        monkeypatch.setattr(conn_mod, "_cli_version", lambda name: None)
+        monkeypatch.setattr(conn_mod, "_codex_auth_mode", lambda: "none")
+        monkeypatch.setattr(
+            conn_mod, "_gmail_status", lambda: {"ok": "missing", "detail": "test"}
+        )
+        monkeypatch.setattr(
+            ss, "now_playing",
+            lambda: "SPOTIFY NOW PLAYING: ▶ Test Track — Test Artist (0:30 / 3:00)",
+        )
+
+    def test_spotify_panel_reports_linked_once_token_exists(
+        self, server, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SPOTIFY_CLIENT_ID", "test-client-id")
+        self._write_tokens(tmp_path)
+        self._stub_network(monkeypatch)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/spotify")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["configured"] is True
+        assert data["linked"] is True
+        assert data["detail"] == "linked as Adit"
+        assert "Test Track" in data["now_playing"]
+
+    def test_connections_reports_spotify_linked_once_token_exists(
+        self, server, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SPOTIFY_CLIENT_ID", "test-client-id")
+        self._write_tokens(tmp_path)
+        self._stub_network(monkeypatch)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/connections")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read())
+        conn.close()
+        spot = data["spotify"]
+        assert spot["ok"] is True
+        assert spot["detail"] == "linked · linked as Adit"
+
+    def test_both_report_not_linked_without_token(self, server, tmp_path, monkeypatch):
+        """The honest counterpart: no token file -> NOT linked, even with a
+        client ID configured (a vacuous always-true test proves nothing)."""
+        monkeypatch.setenv("SPOTIFY_CLIENT_ID", "test-client-id")
+        self._stub_network(monkeypatch)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/spotify")
+        panel = json.loads(conn.getresponse().read())
+        conn.request("GET", "/api/connections")
+        conns = json.loads(conn.getresponse().read())
+        conn.close()
+        assert panel["configured"] is True
+        assert panel["linked"] is False
+        assert conns["spotify"]["ok"] is False
+        assert "not linked" in conns["spotify"]["detail"]
+
+
+class TestPwaEndpoints:
+    """v5.22.3: the installable-app surface — manifest, service worker, icons.
+
+    These are the files the phone browser fetches to install DourMouse as a
+    standalone app (own icon, full screen). The /assets/ route previously
+    stripped the directory and 404'd EVERY asset — locked by this test.
+    """
+
+    def _get(self, server, path: str):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        body = resp.read()
+        ctype = resp.getheader("Content-Type", "")
+        status = resp.status
+        conn.close()
+        return status, ctype, body
+
+    def test_manifest_serves_standalone_json(self, server):
+        status, ctype, body = self._get(server, "/manifest.json")
+        assert status == 200
+        assert "application/json" in ctype
+        manifest = json.loads(body)
+        assert manifest["display"] == "standalone"
+        assert manifest["short_name"] == "DourMouse"
+        assert any(i["sizes"] == "512x512" for i in manifest["icons"])
+
+    def test_service_worker_serves(self, server):
+        status, ctype, body = self._get(server, "/sw.js")
+        assert status == 200
+        assert "javascript" in ctype
+        assert b"manifest.json" in body  # PWA assets joined the shell cache
+
+    def test_assets_route_serves_icons(self, server):
+        # Regression: /assets/<file> used to serve from the UI root and 404.
+        for icon in ("icon-192.png", "icon-512.png", "apple-touch-icon.png"):
+            status, ctype, body = self._get(server, f"/assets/{icon}")
+            assert status == 200, f"{icon} should serve"
+            assert "image/png" in ctype
+            assert body[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_index_has_pwa_head_tags(self, server):
+        status, ctype, body = self._get(server, "/")
+        assert status == 200
+        html = body.decode("utf-8", errors="replace")
+        assert 'rel="manifest"' in html
+        assert "apple-touch-icon" in html
+        assert "apple-mobile-web-app-capable" in html
+
+
+class TestSystemBrowserClaimFlow:
+    """v5.22.11: the system-browser sign-in bridge. Google refuses consent
+    inside embedded WebKit webviews, so the flow is: webview asks
+    /api/auth/google/start?claim=CODE → consent opens in the REAL browser →
+    the callback parks the session under the claim code → the webview
+    adopts it via /api/auth/claim?code=CODE. Hermetic: google_auth's network
+    calls are monkeypatched; only the server wiring is exercised."""
+
+    #: The identity Google's verified id_token would report.
+    _IDENTITY = {"email": "bridge@example.com", "name": "Bridge User",
+                 "picture": "", "sub": "sub-123"}
+
+    def _patch_google(self, monkeypatch):
+        """Patch google_auth's network surface so the flow is hermetic."""
+        from dourmouse import google_auth
+        import dourmouse.webui as webui_module
+
+        monkeypatch.setattr(google_auth, "google_configured", lambda: True)
+        monkeypatch.setattr(
+            google_auth, "authorization_url",
+            lambda *a, **k: "https://accounts.google.com/o/oauth2/v2/auth?fake=1")
+        monkeypatch.setattr(
+            google_auth, "exchange_code",
+            lambda *a, **k: {"id_token": "tok", "access_token": "a",
+                             "refresh_token": "r"})
+        monkeypatch.setattr(
+            google_auth, "verify_id_token", lambda *a, **k: dict(self._IDENTITY))
+        # Parked entries are never stale inside the test (now = far future).
+        monkeypatch.setattr(webui_module, "_pending_created_ts", lambda p: 4_100_000_000)
+
+    def _seed_pending(self, srv, state: str, claim: str):
+        with srv.oauth_lock:
+            srv.oauth_pending[state] = {
+                "verifier": "v", "redirect_uri": "http://127.0.0.1/cb",
+                "redirect_to": "/", "claim": claim,
+                "created": "2026-01-01T00:00:00",
+            }
+
+    def _get(self, server, path: str, cookie: str | None = None):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        headers = {"Cookie": cookie} if cookie else {}
+        conn.request("GET", path, headers=headers)
+        resp = conn.getresponse()
+        status = resp.status
+        location = resp.getheader("Location")
+        set_cookie = resp.getheader("Set-Cookie")
+        body = resp.read()
+        conn.close()
+        return status, location, set_cookie, body
+
+    def _complete_callback(self, server, state: str) -> str:
+        """Simulate Google redirecting back with ?code=..&state=.."""
+        status, location, _, _ = self._get(
+            server, f"/api/auth/google/callback?code=abc&state={state}")
+        assert status == 302, f"callback should 302, got {status}"
+        return location
+
+    def _claim(self, server, code: str):
+        status, location, set_cookie, raw = self._get(server, f"/api/auth/claim?code={code}")
+        body = json.loads(raw.decode() or "{}")
+        return status, body, set_cookie
+
+    def test_claim_flow_parks_session_and_adopts(self, server, monkeypatch):
+        self._patch_google(monkeypatch)
+        srv, _ = server
+        state, claim = "st1", "claim-abc123"
+        self._seed_pending(srv, state, claim)
+        # 1) Google redirects back; the session is parked, NOT cookie-set.
+        location = self._complete_callback(server, state)
+        assert location == "/login?claimed=1"
+        # 2) The webview polls /api/auth/claim and adopts the session.
+        status, body, set_cookie = self._claim(server, claim)
+        assert status == 200 and body["ok"] is True
+        assert body["me"]["email"] == self._IDENTITY["email"]
+        assert set_cookie and "dourmouse_user_session=" in set_cookie
+        # 3) The adopted cookie is a real, working session — /api/auth/me
+        # recognizes it (the whole point of the bridge).
+        sid = set_cookie.split("dourmouse_user_session=")[1].split(";")[0]
+        status, _, _, raw = self._get(server, "/api/auth/me",
+                                      cookie=f"dourmouse_user_session={sid}")
+        assert status == 200
+        assert json.loads(raw)["me"]["email"] == self._IDENTITY["email"]
+
+    def test_claim_code_single_use(self, server, monkeypatch):
+        self._patch_google(monkeypatch)
+        srv, _ = server
+        state, claim = "st2", "claim-single-use"
+        self._seed_pending(srv, state, claim)
+        self._complete_callback(server, state)
+        status1, body1, _ = self._claim(server, claim)
+        assert status1 == 200 and body1["ok"] is True
+        # Second redemption of the same code must fail — single-use, ever.
+        status2, body2, _ = self._claim(server, claim)
+        assert status2 == 404 and body2["ok"] is False
+
+    def test_claim_requires_code(self, server, monkeypatch):
+        self._patch_google(monkeypatch)
+        status, body, _ = self._claim(server, "")
+        assert status == 400 and body["ok"] is False
+
+    def test_unknown_claim_is_404(self, server, monkeypatch):
+        self._patch_google(monkeypatch)
+        status, body, _ = self._claim(server, "never-issued")
+        assert status == 404 and body["ok"] is False
+
+    def test_claim_flow_start_accepts_claim_param(self, server, monkeypatch):
+        # The start endpoint must accept ?claim= (the webview's entry point)
+        # and still 302 to Google consent.
+        self._patch_google(monkeypatch)
+        status, location, _, _ = self._get(
+            server, "/api/auth/google/start?claim=claim-from-webview")
+        assert status == 302
+        assert location and location.startswith("https://accounts.google.com")
+        # The claim code was recorded against the pending state.
+        srv, _ = server
+        pending = srv.oauth_pending.values()
+        assert any(p.get("claim") == "claim-from-webview" for p in pending)
+
+    def test_login_page_ships_chrome_bridge_and_fallback(self, server):
+        """v5.22.12: the login page must open consent via the Chrome-first
+        bridge (window.pywebview.api.open_external) and, when the browser
+        cannot be opened, show a copyable link instead of silently
+        navigating the blocked webview."""
+        status, _, _, raw = self._get(server, "/login")
+        assert status == 200
+        html = raw.decode("utf-8", errors="replace")
+        assert "open_external" in html
+        assert "OPEN IN CHROME" in html
+        assert "showManualLink" in html
+        assert "startClaimPoll" in html
+        # The plain-browser path (no webview) must still redirect directly.
+        assert "IN_WEBVIEW" in html

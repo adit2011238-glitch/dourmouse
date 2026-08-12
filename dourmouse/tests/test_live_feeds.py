@@ -293,8 +293,11 @@ class TestPreloadedAgents:
     def test_mail_agent_tool(self):
         registry = build_general_registry()
         tools = {t.name for t in registry.get_subagent("mail").tools}
-        # v5.0: the mail agent grew Gmail search/read/send alongside IMAP.
-        assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send"} == tools
+        # v5.0: the mail agent grew Gmail search/read/send alongside IMAP;
+        # v5.2x: the per-user Google scope surface added drive_search +
+        # drive_read (same OAuth session as gmail).
+        assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send",
+                "drive_read", "drive_search"} == tools
 
     def test_tasks_agent_tools(self):
         registry = build_general_registry()

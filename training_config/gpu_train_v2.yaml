@@ -1,0 +1,32 @@
+# GPU training config — dourmouse LoRA retrain (v2 dataset)
+# For the future GPU training machine (Linux + CUDA, 24GB+ VRAM recommended).
+# 7B base = the verified production base (qwen2.5:7b / Qwen2.5-7B-Instruct).
+# Dataset built by scripts/build_v2_dataset.py: 877 train rows
+# (849 real dispatcher pairs + 28 pivot action-label rows), 94 valid rows.
+base_model_name: Qwen/Qwen2.5-7B-Instruct
+train_file: /Volumes/ATLAS /Atlas/dourmouse-4.0.0/training_data/v2_train.jsonl
+valid_file: /Volumes/ATLAS /Atlas/dourmouse-4.0.0/training_data/v2_valid.jsonl
+output_dir: artifacts/dourmouse-lora-v2
+
+model:
+  use_4bit: true          # bitsandbytes 4-bit (CUDA). NOTE: must be false on macOS
+  torch_dtype: bfloat16
+  device_map: auto
+
+lora:
+  rank: 16                # per TRAINING_PLAN spec for the original run
+  alpha: 32
+  dropout: 0.05
+
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 4
+  learning_rate: 0.0002
+  warmup_ratio: 0.03
+  max_seq_length: 8192    # longest row is ~3.8k tokens (roster prompt + answer)
+  logging_steps: 10
+  save_steps: 200
+  save_total_limit: 2
+  eval_strategy: steps    # requires train_lora_v2.py (eval-enabled entrypoint)
+  eval_steps: 200

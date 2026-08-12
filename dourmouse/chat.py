@@ -133,13 +133,13 @@ class ChatSession:
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("ask() requires a non-empty prompt")
-        # Wall-time budget is per request-tree, not per session: restart the
-        # clock at the start of every turn. Without this, a session that has
-        # been alive longer than max_wall_seconds (600s default) would reject
-        # EVERY new directive instantly with BUDGET EXHAUSTED — the web UI's
-        # single long-lived ChatSession hits this after ten minutes of uptime.
-        # Calls and cost remain session-scoped and cumulative.
-        self.cost_budget.reset_wall_clock()
+        # The whole budget envelope is per request-tree, not per session:
+        # restart calls, cost AND the clock at the start of every turn.
+        # Without this, a long-lived session crosses the 40-call/$1 caps and
+        # then rejects EVERY new directive with BUDGET EXHAUSTED — the web
+        # UI's single long-lived ChatSession bricks permanently (observed
+        # live: the app stopped answering anything after ~14 directives).
+        self.cost_budget.reset_run()
         self.messages.append({"role": "user", "content": prompt})
         # v2.9 Store & Learn: before each turn, deterministically recall the
         # stored knowledge most relevant to THIS prompt and inject it into the
@@ -303,6 +303,51 @@ class ChatSession:
         ``verify_session_audit()``. Also records wall-clock latency and every
         human intervention (confirmation requested/resolved) from the turn.
         """
+        self.session_file.parent.mkdir(parents=True, exist_ok=True)
+        interventions = [
+            e
+            for e in report.get("transcript", [])
+            if e.get("type") in ("confirmation_requested", "confirmation_resolved")
+        ]
+        record: dict[str, Any] = {
+            "turn": self._turn_count,
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_ms": elapsed_ms,
+            "user": prompt,
+            "final_text": report.get("final_text", ""),
+            "interventions": interventions,
+            "role_changes": list(self.role_changes),
+            "transcript": report.get("transcript", []),
+            "prev_hash": self._prev_hash,
+        }
+        record["hash"] = _record_hash(record)
+        with self.session_file.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+        self._prev_hash = record["hash"]
+        # Snapshot the full message state for resumability.
+        self._state_file.write_text(json.dumps(self.messages))
+
+    def record_slash(self, prompt: str, final_text: str,
+                     tools: list[str] | None = None) -> None:
+        """v5.22.9: audit a slash-command run (they bypass ``ask()``).
+
+        Slash commands (/claude, /codex, /all, ...) execute their own
+        backends instead of the LLM dispatch loop, so they never reach
+        ``_persist`` — without this, the session audit would silently skip
+        them (a gap the live E2E sweep found). The record keeps the same
+        hash-chained shape, marked ``kind: "slash"`` so the ledger stays
+        tamper-evident and verifiable.
+        """
+        transcript = [
+            {"type": "tool_use", "name": t, "raw_arguments": "{}"}
+            for t in (tools or [])
+        ]
+        self._persist(
+            prompt,
+            {"final_text": final_text, "transcript": transcript},
+            elapsed_ms=0.0,
+        )
+        self._turn_count += 1
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
         interventions = [
             e

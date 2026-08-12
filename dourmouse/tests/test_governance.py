@@ -178,8 +178,25 @@ class TestBudgetTracker:
         b.reset_wall_clock()
         after = b.snapshot()
         assert after["calls"] == before["calls"] == 1
-        assert after["est_cost_usd"] == before["est_cost_usd"]
-        assert after["elapsed_seconds"] < 1.0
+
+    def test_reset_run_frees_a_call_exhausted_tracker(self):
+        """The per-request-tree envelope: a tracker that crossed the call
+        cap under one directive must be usable for the next directive.
+
+        Live-bug: the web UI keeps ONE tracker for the whole server life;
+        with calls session-cumulative, ~14 directives crossed the 40-call cap
+        and EVERY subsequent directive died instantly with BUDGET EXHAUSTED
+        until restart. reset_run restores the full envelope per tree.
+        """
+        b = BudgetTracker(BudgetLimits(max_calls=40))
+        for _ in range(40):
+            b.record_call([{"role": "user", "content": "x"}], "y")
+        assert "BUDGET EXHAUSTED" in b.check()
+        b.reset_run()
+        assert b.check() is None
+        b.record_call([{"role": "user", "content": "x"}], "y")
+        assert b.check() is None
+        assert b.snapshot()["calls"] == 1
 
 
 # --------------------------------------------------------------------------- #

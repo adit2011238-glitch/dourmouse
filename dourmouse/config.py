@@ -390,6 +390,22 @@ def bind_host() -> str:
     return raw or "127.0.0.1"
 
 
+def fast_lane_enabled(value: str | None = None) -> bool:
+    """DOURMOUSE_FAST_LANE: route pure-chat turns (no plan, no tool match)
+    to the small local fast model. Default on. Set to 0/off to disable.
+    """
+    raw = value if value is not None else os.environ.get("DOURMOUSE_FAST_LANE", "1")
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def fast_lane_model() -> str:
+    """DOURMOUSE_FAST_MODEL: the small model used for simple responses.
+    Default qwen3:4b (2.5GB, several times faster than qwen3:8b on this
+    class of machine). Falls back to the default on empty/whitespace.
+    """
+    return os.environ.get("DOURMOUSE_FAST_MODEL", "qwen3:4b").strip() or "qwen3:4b"
+
+
 def llm_backend() -> str:
     """The active backend name from DOURMOUSE_LLM_BACKEND
     (ollama|omniroute|nvidia|auto)."""

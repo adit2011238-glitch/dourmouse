@@ -19,8 +19,12 @@
  * user) ever enter the cache. A signed-in user going offline sees the
  * shared bucket — honestly marked stale — never someone's personal data.
  */
-const CACHE = 'dourmouse-shell-v1';
-const SHELL = ['/', '/index.html', '/login.html', '/map', '/map.html'];
+const CACHE = 'dourmouse-shell-v2';  // v5.22.3: manifest + icons joined the shell
+// v5.22.3: the PWA manifest + icons join the shell so the INSTALLED app
+// opens instantly with its icon even offline.
+const SHELL = ['/', '/index.html', '/login.html', '/map', '/map.html',
+  '/manifest.json', '/assets/icon-192.png', '/assets/icon-512.png',
+  '/assets/apple-touch-icon.png'];
 const ASSET_PREFIX = '/assets/';
 const STALE_HEADER = 'X-Dourmouse-Stale';
 const SCOPE_HEADER = 'X-Dourmouse-Scope';

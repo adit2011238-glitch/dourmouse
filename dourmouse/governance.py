@@ -74,15 +74,28 @@ class BudgetTracker:
             self._in_tokens += _estimate_tokens(request_messages)
             self._out_tokens += max(0, len(response_text) // 4)
 
-    def reset_wall_clock(self) -> None:
-        """Restart ONLY the wall-time window (per-request-tree semantics).
+    def reset_run(self) -> None:
+        """Restart the FULL budget window for a new top-level request tree.
 
-        Calls and estimated cost stay cumulative across the session; the
-        wall-clock window resets so a long-lived session can never reject
-        every new request once ``max_wall_seconds`` of total uptime passes.
-        The web UI keeps ONE ChatSession (and thus one tracker) for the whole
-        life of the server, so without this the 600s default cap bricks the
-        entire interface after ten minutes of uptime.
+        Calls, estimated cost and the wall clock all reset together. The
+        caps are per-request-tree (see :class:`BudgetLimits` — "one dispatch
+        run"), so every new directive gets a fresh 40-call/$1/600s envelope;
+        a pathological single run is still bounded, but a long-lived session
+        can never be bricked by cumulative usage. The web UI keeps ONE
+        ChatSession (and thus one tracker) for the whole life of the server,
+        so without this the call/cost caps permanently reject every new
+        request once the session crosses them — observed live: the app
+        stopped answering anything after ~14 directives in a row.
+        """
+        with self._lock:
+            self._started = time.monotonic()
+            self._calls = 0
+            self._in_tokens = 0
+            self._out_tokens = 0
+
+    def reset_wall_clock(self) -> None:
+        """Restart ONLY the wall-time window (back-compat; use ``reset_run``
+        for a full per-request-tree reset).
         """
         with self._lock:
             self._started = time.monotonic()

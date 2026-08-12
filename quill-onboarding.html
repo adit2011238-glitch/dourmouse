@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quill — Set up your workspace</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+      colors: {
+        ink: '#09090b',
+        panel: '#18181b',
+        accent: '#7c3aed',
+      },
+    }
+  }
+}
+</script>
+<style>
+  /* ============ registry-ported animations ============ */
+  /* marquee (magicui registry) */
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to   { transform: translateX(calc(-100% - var(--gap))); }
+  }
+  .animate-marquee { animation: marquee var(--duration) linear infinite; }
+  .marquee-hover:hover .animate-marquee { animation-play-state: paused; }
+
+  /* shine border (magicui shine-border registry) */
+  @keyframes shine {
+    0%   { background-position: 0% 0%; }
+    50%  { background-position: 100% 100%; }
+    to   { background-position: 0% 0%; }
+  }
+  .shine-border {
+    --border-width: 1px;
+    --duration: 14s;
+    background-image: radial-gradient(transparent, transparent, #7c3aed, #3b82f6, transparent, transparent);
+    background-size: 300% 300%;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    padding: var(--border-width);
+    animation: shine var(--duration) infinite linear;
+    will-change: background-position;
+  }
+
+  /* border beam (magicui border-beam registry) */
+  @keyframes beam {
+    from { offset-distance: 0%; }
+    to   { offset-distance: 100%; }
+  }
+  .border-beam-wrap { position: relative; }
+  .border-beam-wrap::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(90deg, transparent, rgba(124,58,237,.9), rgba(59,130,246,.9), transparent);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: beam-rotate 3.2s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes beam-rotate {
+    0%   { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+  }
+
+  /* blur fade (magicui blur-fade registry) */
+  .step { display: none; }
+  .step.active { display: block; animation: blurFade .45s ease-out; }
+  @keyframes blurFade {
+    from { opacity: 0; transform: translateY(6px); filter: blur(6px); }
+    to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+  }
+
+  /* card lift (bento-card hover behavior) */
+  .bento { transition: box-shadow .3s, border-color .3s, transform .3s; }
+  .bento:hover { box-shadow: 0 -20px 80px -20px rgba(255,255,255,.06) inset, 0 8px 40px -12px rgba(124,58,237,.25); border-color: rgba(124,58,237,.45); transform: translateY(-2px); }
+  .bento .cta { opacity: 0; transform: translateY(8px); transition: all .3s; }
+  .bento:hover .cta { opacity: 1; transform: translateY(0); }
+  .bento:hover .bento-icon { transform: scale(.82) translateY(-4px); }
+  .bento-icon { transition: transform .3s; }
+
+  /* dock (magicui dock registry — magnification via JS) */
+  .dock-icon { transition: transform .18s cubic-bezier(.2,.8,.2,1), background .2s; will-change: transform; }
+
+  /* selection / focus rings (shadcn input) */
+  .field { transition: border-color .2s, box-shadow .2s; }
+  .field:focus-visible { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 1px #7c3aed; }
+  .radio-card { transition: border-color .2s, background .2s, transform .2s; }
+  .radio-card:hover { border-color: rgba(124,58,237,.5); }
+  .radio-card[aria-checked="true"] { border-color: #7c3aed; background: rgba(124,58,237,.08); }
+  .radio-card[aria-checked="true"] .radio-dot { background: #7c3aed; box-shadow: 0 0 12px rgba(124,58,237,.8); }
+  .chip { transition: all .2s; }
+  .chip[aria-checked="true"] { background: rgba(124,58,237,.14); border-color: #7c3aed; color: #ddd6fe; }
+  .chip[aria-checked="true"] .chip-check { opacity: 1; transform: scale(1); }
+  .chip-check { opacity: 0; transform: scale(.6); transition: all .2s; }
+
+  /* soft aurora glow behind hero */
+  .aurora {
+    background:
+      radial-gradient(40% 60% at 20% 10%, rgba(124,58,237,.18), transparent 60%),
+      radial-gradient(35% 55% at 80% 20%, rgba(59,130,246,.12), transparent 60%),
+      radial-gradient(50% 70% at 55% 90%, rgba(124,58,237,.08), transparent 60%);
+  }
+
+  /* keep any scrolled-into-view content clear of the sticky header */
+  .step, .step * { scroll-margin-top: 96px; }
+
+  /* step dots */
+  .stepdot { transition: all .3s; }
+  .stepdot.done { background: #7c3aed; }
+  .stepdot.current { box-shadow: 0 0 0 4px rgba(124,58,237,.25); }
+
+  ::selection { background: rgba(124,58,237,.4); }
+  html { scrollbar-color: #27272a #09090b; }
+</style>
+</head>
+<body class="bg-ink text-zinc-300 font-sans antialiased min-h-screen aurora">
+
+  <!-- ======================= HEADER / STEADY CHROME ======================= -->
+  <header class="sticky top-0 z-40 border-b border-zinc-800/50 bg-[#09090b]/85 backdrop-blur-md">
+    <div class="mx-auto flex max-w-6xl items-center justify-between gap-6 px-6 py-4 md:px-8">
+      <div class="flex items-center gap-3">
+        <div class="grid h-9 w-9 place-items-center rounded-xl bg-accent text-white shadow-[0_0_24px_rgba(124,58,237,.5)]">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>
+        </div>
+        <div>
+          <p class="text-sm font-semibold leading-none text-white">Quill Studio</p>
+          <p class="mt-1 text-[11px] leading-none text-zinc-500">AI copywriting workspace</p>
+        </div>
+      </div>
+
+      <!-- stepper -->
+      <div class="flex items-center gap-2 md:gap-3" id="stepper" aria-label="Progress">
+        <div class="hidden items-center gap-3 sm:flex" id="stepperLabels"></div>
+        <div class="hidden h-1 w-24 overflow-hidden rounded-full bg-zinc-800 md:block">
+          <div id="progressBar" class="h-full rounded-full bg-accent transition-all duration-500" style="width:0%"></div>
+        </div>
+        <span id="stepCount" class="text-xs font-medium tabular-nums text-zinc-500">1 / 5</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-6xl px-6 pb-32 pt-10 md:px-8 md:pt-14">
+
+    <!-- ======================= STEP 1 — PLAN ======================= -->
+    <section class="step active" data-step="0">
+      <div class="mx-auto max-w-2xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-violet-400">Step 1 · Choose a plan</p>
+        <h1 class="mt-4 text-3xl font-bold tracking-tight text-white md:text-5xl">Build the workspace where <span class="bg-gradient-to-r from-violet-400 to-blue-400 bg-clip-text text-transparent">your words sell</span></h1>
+        <p class="mt-4 text-base leading-relaxed text-zinc-400 md:text-lg">Pick a plan and we'll tailor Quill's voice, templates, and integrations to your team in the next two minutes.</p>
+      </div>
+
+      <!-- plan cards (bento-grid pattern) -->
+      <div class="mt-10 grid w-full auto-rows-[22rem] grid-cols-1 gap-4 md:grid-cols-3">
+        <!-- Starter -->
+        <div class="bento group relative col-span-1 flex flex-col justify-between overflow-hidden rounded-xl border border-zinc-800/50 bg-panel p-6" data-plan="starter" role="radio" aria-checked="false" tabindex="0">
+          <div class="flex items-start justify-between">
+            <div class="grid h-11 w-11 place-items-center rounded-lg border border-zinc-700/60 bg-zinc-800/40 text-zinc-300 bento-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+            </div>
+            <span class="rounded-full border border-zinc-700/60 bg-zinc-800/40 px-2.5 py-1 text-[11px] font-medium text-zinc-400">Free forever</span>
+          </div>
+          <div>
+            <h3 class="text-xl font-semibold text-white">Starter</h3>
+            <p class="mt-2 max-w-md text-sm leading-relaxed text-zinc-400">For solo creators shipping weekly. 25 AI generations a day, 3 brand voices, core templates.</p>
+          </div>
+          <div class="flex items-center justify-between">
+            <p class="text-2xl font-bold text-white">$0<span class="text-sm font-normal text-zinc-500">/mo</span></p>
+            <span class="cta inline-flex items-center gap-1.5 text-sm font-medium text-violet-400">Choose <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
+          </div>
+        </div>
+
+        <!-- Creator (featured) -->
+        <div class="bento border-beam-wrap group relative col-span-1 flex flex-col justify-between overflow-hidden rounded-xl border border-zinc-800/50 bg-panel p-6" data-plan="creator" role="radio" aria-checked="false" tabindex="0">
+          <div class="flex items-start justify-between">
+            <div class="grid h-11 w-11 place-items-center rounded-lg bg-accent text-white bento-icon shadow-[0_0_20px_rgba(124,58,237,.45)]">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+            </div>
+            <span class="rounded-full bg-violet-500/15 px-2.5 py-1 text-[11px] font-semibold text-violet-300 ring-1 ring-violet-500/30">Most popular</span>
+          </div>
+          <div>
+            <h3 class="text-xl font-semibold text-white">Creator</h3>
+            <p class="mt-2 max-w-md text-sm leading-relaxed text-zinc-400">For growing teams that ship daily. Unlimited generations, 20 brand voices, all templates, 5 seats.</p>
+          </div>
+          <div class="flex items-center justify-between">
+            <p class="text-2xl font-bold text-white">$29<span class="text-sm font-normal text-zinc-500">/mo</span></p>
+            <span class="cta inline-flex items-center gap-1.5 text-sm font-medium text-violet-400">Choose <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
+          </div>
+        </div>
+
+        <!-- Studio -->
+        <div class="bento group relative col-span-1 flex flex-col justify-between overflow-hidden rounded-xl border border-zinc-800/50 bg-panel p-6" data-plan="studio" role="radio" aria-checked="false" tabindex="0">
+          <div class="flex items-start justify-between">
+            <div class="grid h-11 w-11 place-items-center rounded-lg border border-zinc-700/60 bg-zinc-800/40 text-zinc-300 bento-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+            </div>
+            <span class="rounded-full border border-zinc-700/60 bg-zinc-800/40 px-2.5 py-1 text-[11px] font-medium text-zinc-400">Best for teams</span>
+          </div>
+          <div>
+            <h3 class="text-xl font-semibold text-white">Studio</h3>
+            <p class="mt-2 max-w-md text-sm leading-relaxed text-zinc-400">For agencies & brands. Everything in Creator plus brand portals, API access, priority output, 20 seats.</p>
+          </div>
+          <div class="flex items-center justify-between">
+            <p class="text-2xl font-bold text-white">$79<span class="text-sm font-normal text-zinc-500">/mo</span></p>
+            <span class="cta inline-flex items-center gap-1.5 text-sm font-medium text-violet-400">Choose <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mx-auto mt-8 max-w-md text-center">
+        <p id="planError" class="hidden text-sm text-rose-400">Pick a plan to continue.</p>
+        <button class="w-full rounded-xl bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-[0_8px_32px_-8px_rgba(124,58,237,.6)] transition-all hover:bg-violet-600 active:scale-[.98]" data-next>Continue <span class="ml-1">→</span></button>
+        <p class="mt-4 text-xs text-zinc-500">14-day trial on paid plans · cancel anytime</p>
+      </div>
+    </section>
+
+    <!-- ======================= STEP 2 — BRAND VOICE ======================= -->
+    <section class="step" data-step="1">
+      <div class="mx-auto max-w-2xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-violet-400">Step 2 · Your voice</p>
+        <h2 class="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">Give your brand a voice</h2>
+        <p class="mt-3 text-base text-zinc-400">Quill learns a tone profile from these answers and keeps every draft consistent with it.</p>
+      </div>
+
+      <div class="mx-auto mt-10 max-w-3xl space-y-8">
+        <!-- brand name -->
+        <div class="rounded-xl border border-zinc-800/50 bg-panel p-6 md:p-8">
+          <label for="brandName" class="text-sm font-medium text-white">What's your brand called?</label>
+          <input id="brandName" class="field mt-3 h-11 w-full rounded-lg border border-zinc-700/60 bg-zinc-900/60 px-4 text-sm text-white placeholder:text-zinc-500" placeholder="e.g. Northwind Coffee" value="">
+          <p class="mt-2 text-xs text-zinc-500">We'll use this in signatures, subject lines, and channel greetings.</p>
+        </div>
+
+        <!-- tone selector -->
+        <div>
+          <p class="text-sm font-medium text-white">Choose a default tone</p>
+          <div class="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3" id="toneGrid">
+            <div class="radio-card cursor-pointer rounded-xl border border-zinc-800/50 bg-panel p-4" data-tone="warm" role="radio" aria-checked="false" tabindex="0">
+              <div class="flex items-center gap-2.5">
+                <span class="radio-dot h-2.5 w-2.5 rounded-full bg-zinc-600 transition-all"></span>
+                <p class="text-sm font-medium text-white">Warm</p>
+              </div>
+              <p class="mt-2 text-xs leading-relaxed text-zinc-400">Friendly, personal, neighborly</p>
+            </div>
+            <div class="radio-card cursor-pointer rounded-xl border border-zinc-800/50 bg-panel p-4" data-tone="confident" role="radio" aria-checked="false" tabindex="0">
+              <div class="flex items-center gap-2.5">
+                <span class="radio-dot h-2.5 w-2.5 rounded-full bg-zinc-600 transition-all"></span>
+                <p class="text-sm font-medium text-white">Confident</p>
+              </div>
+              <p class="mt-2 text-xs leading-relaxed text-zinc-400">Direct, bold, authoritative</p>
+            </div>
+            <div class="radio-card cursor-pointer rounded-xl border border-zinc-800/50 bg-panel p-4" data-tone="playful" role="radio" aria-checked="false" tabindex="0">
+              <div class="flex items-center gap-2.5">
+                <span class="radio-dot h-2.5 w-2.5 rounded-full bg-zinc-600 transition-all"></span>
+                <p class="text-sm font-medium text-white">Playful</p>
+              </div>
+              <p class="mt-2 text-xs leading-relaxed text-zinc-400">Quirky, witty, lighthearted</p>
+            </div>
+            <div class="radio-card cursor-pointer rounded-xl border border-zinc-800/50 bg-panel p-4" data-tone="premium" role="radio" aria-checked="false" tabindex="0">
+              <div class="flex items-center gap-2.5">
+                <span class="radio-dot h-2.5 w-2.5 rounded-full bg-zinc-600 transition-all"></span>
+                <p class="text-sm font-medium text-white">Premium</p>
+              </div>
+              <p class="mt-2 text-xs leading-relaxed text-zinc-400">Polished, understated, luxurious</p>
+            </div>
+            <div class="radio-card cursor-pointer rounded-xl border border-zinc-800/50 bg-panel p-4" data-tone="technical" role="radio" aria-checked="false" tabindex="0">
+              <div class="flex items-center gap-2.5">
+                <span class="radio-dot h-2.5 w-2.5 rounded-full bg-zinc-600 transition-all"></span>
+                <p class="text-sm font-medium text-white">Technical</p>
+              </div>
+              <p class="mt-2 text-xs leading-relaxed text-zinc-400">Precise, expert, data-led</p>
+            </div>
+            <div class="radio-card cursor-pointer rounded-xl border border-zinc-800/50 bg-panel p-4" data-tone="empathetic" role="radio" aria-checked="false" tabindex="0">
+              <div class="flex items-center gap-2.5">
+                <span class="radio-dot h-2.5 w-2.5 rounded-full bg-zinc-600 transition-all"></span>
+                <p class="text-sm font-medium text-white">Empathetic</p>
+              </div>
+              <p class="mt-2 text-xs leading-relaxed text-zinc-400">Caring, reassuring, supportive</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- formality slider -->
+        <div class="rounded-xl border border-zinc-800/50 bg-panel p-6 md:p-8">
+          <div class="flex items-center justify-between">
+            <p class="text-sm font-medium text-white">Formality</p>
+            <p class="text-xs font-medium text-violet-300" id="formalityValue">Casual</p>
+          </div>
+          <input id="formality" type="range" min="0" max="100" value="30" class="mt-5 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-zinc-700 accent-violet-500">
+          <div class="mt-2 flex justify-between text-[11px] text-zinc-500"><span>Casual · “hey!”</span><span>Formal · “Dear Sir”</span></div>
+        </div>
+      </div>
+
+      <div class="mx-auto mt-8 flex max-w-3xl items-center justify-between gap-4">
+        <button class="rounded-xl border border-zinc-700/60 bg-zinc-900/60 px-6 py-3.5 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white" data-back>← Back</button>
+        <button class="flex-1 rounded-xl bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-[0_8px_32px_-8px_rgba(124,58,237,.6)] transition-all hover:bg-violet-600 active:scale-[.98] sm:flex-none sm:px-10" data-next>Continue →</button>
+      </div>
+    </section>
+
+    <!-- ======================= STEP 3 — TEMPLATES ======================= -->
+    <section class="step" data-step="2">
+      <div class="mx-auto max-w-2xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-violet-400">Step 3 · Pick your playbook</p>
+        <h2 class="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">Choose the templates you'll ship</h2>
+        <p class="mt-3 text-base text-zinc-400">Select at least three. You can add more from the library any time.</p>
+      </div>
+
+      <!-- live marquee preview (magicui marquee: N sibling animated copies) -->
+      <div class="marquee-hover relative mt-10 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_12%,black_88%,transparent)]">
+        <div class="flex w-max gap-4 overflow-hidden [--duration:34s] [--gap:1rem] p-2" id="marqueeTrack"></div>
+      </div>
+
+      <div class="mx-auto mt-8 max-w-3xl">
+        <p class="text-sm font-medium text-white">Templates</p>
+        <div class="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3" id="templateGrid"></div>
+        <p id="templateError" class="mt-3 hidden text-sm text-rose-400">Pick at least three templates to continue.</p>
+      </div>
+
+      <div class="mx-auto mt-8 flex max-w-3xl items-center justify-between gap-4">
+        <button class="rounded-xl border border-zinc-700/60 bg-zinc-900/60 px-6 py-3.5 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white" data-back>← Back</button>
+        <button class="flex-1 rounded-xl bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-[0_8px_32px_-8px_rgba(124,58,237,.6)] transition-all hover:bg-violet-600 active:scale-[.98] sm:flex-none sm:px-10" data-next>Continue →</button>
+      </div>
+    </section>
+
+    <!-- ======================= STEP 4 — INTEGRATIONS ======================= -->
+    <section class="step" data-step="3">
+      <div class="mx-auto max-w-2xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-violet-400">Step 4 · Connect your stack</p>
+        <h2 class="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">Where should Quill deliver?</h2>
+        <p class="mt-3 text-base text-zinc-400">Connect the tools your team already uses — drafts flow straight to them.</p>
+      </div>
+
+      <div class="mx-auto mt-10 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2" id="integrationGrid"></div>
+
+      <div class="mx-auto mt-8 flex max-w-3xl items-center justify-between gap-4">
+        <button class="rounded-xl border border-zinc-700/60 bg-zinc-900/60 px-6 py-3.5 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white" data-back>← Back</button>
+        <button class="flex-1 rounded-xl bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-[0_8px_32px_-8px_rgba(124,58,237,.6)] transition-all hover:bg-violet-600 active:scale-[.98] sm:flex-none sm:px-10" data-next>Continue →</button>
+      </div>
+    </section>
+
+    <!-- ======================= STEP 5 — REVIEW & LAUNCH ======================= -->
+    <section class="step" data-step="4">
+      <div class="mx-auto max-w-2xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-violet-400">Step 5 · Launch</p>
+        <h2 class="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">You're all set</h2>
+        <p class="mt-3 text-base text-zinc-400">Here's your workspace. Tweak anything, then launch — we'll generate a welcome draft for your first campaign.</p>
+      </div>
+
+      <div class="relative mx-auto mt-10 max-w-3xl rounded-2xl border border-zinc-800/50 bg-panel p-6 md:p-8">
+        <div class="shine-border pointer-events-none absolute inset-0 rounded-2xl"></div>
+        <div class="relative">
+          <div class="flex items-center justify-between border-b border-zinc-800/60 pb-4">
+            <p class="text-sm font-semibold text-white">Workspace summary</p>
+            <span class="rounded-full bg-violet-500/15 px-2.5 py-1 text-[11px] font-semibold text-violet-300 ring-1 ring-violet-500/30" id="summaryPlan"></span>
+          </div>
+          <dl class="divide-y divide-zinc-800/60 text-sm" id="summaryList"></dl>
+          <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button class="rounded-xl border border-zinc-700/60 bg-zinc-900/60 px-6 py-3.5 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white" data-back>← Back</button>
+            <button id="launchBtn" class="rounded-xl bg-accent px-8 py-3.5 text-sm font-semibold text-white shadow-[0_8px_32px_-8px_rgba(124,58,237,.6)] transition-all hover:bg-violet-600 active:scale-[.98]">Launch workspace 🚀</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- success overlay -->
+    <div id="successOverlay" class="fixed inset-0 z-50 hidden place-items-center bg-[#09090b]/80 backdrop-blur-sm">
+      <div class="mx-4 max-w-md rounded-2xl border border-zinc-800/50 bg-panel p-8 text-center shadow-2xl">
+        <div class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-accent shadow-[0_0_40px_rgba(124,58,237,.6)]">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <h3 class="mt-5 text-2xl font-bold text-white">Workspace launched</h3>
+        <p class="mt-2 text-sm leading-relaxed text-zinc-400">Your welcome campaign is drafting now. Check your connected channels in a minute.</p>
+        <button id="replayBtn" class="mt-6 w-full rounded-xl border border-zinc-700/60 bg-zinc-900/60 px-6 py-3 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-600">Start over</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ======================= DOCK (magicui dock) ======================= -->
+  <nav class="fixed bottom-6 left-1/2 z-40 -translate-x-1/2">
+    <div id="dock" class="flex h-[58px] w-max items-center justify-center gap-2 rounded-2xl border border-zinc-700/40 bg-white/5 p-2 shadow-[0_12px_40px_-8px_rgba(0,0,0,.7)] backdrop-blur-md" aria-label="Wizard dock">
+      <button class="dock-icon grid h-10 w-10 cursor-pointer place-items-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white" data-dock="0" aria-label="Plan">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+      </button>
+      <button class="dock-icon grid h-10 w-10 cursor-pointer place-items-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white" data-dock="1" aria-label="Voice">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+      </button>
+      <button class="dock-icon grid h-10 w-10 cursor-pointer place-items-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white" data-dock="2" aria-label="Templates">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+      </button>
+      <button class="dock-icon grid h-10 w-10 cursor-pointer place-items-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white" data-dock="3" aria-label="Integrations">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+      </button>
+      <button class="dock-icon grid h-10 w-10 cursor-pointer place-items-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white" data-dock="4" aria-label="Launch">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+      </button>
+    </div>
+  </nav>
+
+<script>
+/* =========================================================
+   Ported from registry sources:
+   - dock magnification  : magicui/dock.tsx (distance -> spring scale)
+   - blur fade steps     : magicui/blur-fade.tsx
+   - marquee             : magicui/marquee.tsx
+   - shine border        : magicui/shine-border.tsx
+   - bento cards         : magicui/bento-grid.tsx
+   - buttons / inputs    : shadcn registry (new-york)
+   ========================================================= */
+
+const STEPS = 5;
+const state = { plan: null, brand: '', tone: null, formality: 30, templates: new Set(), integrations: new Set() };
+let current = 0;
+
+const $ = (sel, root=document) => root.querySelector(sel);
+const $$ = (sel, root=document) => [...root.querySelectorAll(sel)];
+
+/* ---------- stepper chrome ---------- */
+const STEP_LABELS = ['Plan', 'Voice', 'Playbook', 'Connections', 'Launch'];
+function renderStepper() {
+  $('#stepperLabels').innerHTML = STEP_LABELS.map((l, i) =>
+    `<button data-jump="${i}" class="stepdot rounded-full px-3 py-1 text-xs font-medium transition-colors ${i < current ? 'bg-accent/20 text-violet-300' : i === current ? 'bg-accent/20 text-white ring-1 ring-accent/60' : 'text-zinc-500 hover:text-zinc-300'}">${l}</button>`
+  ).join('');
+  $$('#stepperLabels [data-jump]').forEach(b => b.addEventListener('click', () => jump(+b.dataset.jump)));
+  $$('#dock [data-dock]').forEach(b => b.addEventListener('click', () => jump(+b.dataset.dock)));
+  $('#progressBar').style.width = (current / (STEPS - 1) * 100) + '%';
+  $('#stepCount').textContent = `${current + 1} / ${STEPS}`;
+  $$('#dock .dock-icon').forEach((b, i) => {
+    b.classList.toggle('bg-accent/20', i === current);
+    b.classList.toggle('text-white', i === current);
+  });
+}
+
+/* ---------- navigation ---------- */
+function jump(to) {
+  if (to < 0 || to >= STEPS) return;
+  const prev = current;
+  current = to;
+  $$('.step').forEach(s => s.classList.toggle('active', +s.dataset.step === current));
+  if (current === STEPS - 1) renderSummary();
+  renderStepper();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  const active = $(`.step[data-step="${current}"]`);
+  active.style.animation = 'none';
+  void active.offsetWidth; // restart blur-fade
+  active.style.animation = '';
+}
+function next() {
+  if (current === 0 && !state.plan) { $('#planError').classList.remove('hidden'); return; }
+  if (current === 2 && state.templates.size < 3) { $('#templateError').classList.remove('hidden'); return; }
+  jump(current + 1);
+}
+$$('[data-next]').forEach(b => b.addEventListener('click', next));
+$$('[data-back]').forEach(b => b.addEventListener('click', () => jump(current - 1)));
+
+/* ---------- step 1: plan cards ---------- */
+$$('[data-plan]').forEach(card => {
+  const select = () => {
+    state.plan = card.dataset.plan;
+    $$('[data-plan]').forEach(c => { c.setAttribute('aria-checked', String(c === card)); });
+    $('#planError').classList.add('hidden');
+    $$('[data-plan] .border-beam-wrap') && $$('[data-plan]').forEach(c => {
+      if (c.classList.contains('border-beam-wrap')) c.classList.remove('border-beam-wrap');
+    });
+    if (card.dataset.plan === 'creator') card.classList.add('border-beam-wrap');
+    else card.classList.remove('border-beam-wrap');
+  };
+  card.addEventListener('click', select);
+  card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); } });
+});
+
+/* ---------- step 2: brand + tone + formality ---------- */
+$('#brandName').addEventListener('input', e => state.brand = e.target.value);
+$('#formality').addEventListener('input', e => {
+  state.formality = +e.target.value;
+  $('#formalityValue').textContent = state.formality < 34 ? 'Casual' : state.formality < 67 ? 'Balanced' : 'Formal';
+});
+$$('#toneGrid [data-tone]').forEach(card => {
+  const select = () => {
+    state.tone = card.dataset.tone;
+    $$('#toneGrid [data-tone]').forEach(c => c.setAttribute('aria-checked', String(c === card)));
+  };
+  card.addEventListener('click', select);
+  card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); } });
+});
+
+/* ---------- step 3: templates + marquee ---------- */
+const TEMPLATES = [
+  { name: 'Email campaign', desc: 'Nurture sequences & launches', icon: 'mail' },
+  { name: 'Social post', desc: 'Feed + stories + threads', icon: 'zap' },
+  { name: 'Landing copy', desc: 'Heroes, bullets, FAQ', icon: 'layout' },
+  { name: 'Ad variations', desc: 'Meta, Google, TikTok', icon: 'target' },
+  { name: 'Product page', desc: 'Descriptions that convert', icon: 'box' },
+  { name: 'Press release', desc: 'Launch & announcement', icon: 'news' },
+  { name: 'Cold outreach', desc: 'Personalized first touch', icon: 'paperplane' },
+  { name: 'Case study', desc: 'Proof that wins deals', icon: 'award' },
+  { name: 'Newsletter', desc: 'Digests people open', icon: 'inbox' },
+];
+const ICONS = {
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  zap: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+  layout: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>',
+  target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+  news: '<path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/>',
+  paperplane: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  award: '<circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+};
+function renderTemplates() {
+  $('#templateGrid').innerHTML = TEMPLATES.map((t, i) =>
+    `<div class="chip cursor-pointer rounded-xl border border-zinc-800/50 bg-panel p-4" data-template="${i}" role="checkbox" aria-checked="false" tabindex="0">
+      <div class="flex items-center justify-between">
+        <svg class="text-zinc-400" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[t.icon]}</svg>
+        <svg class="chip-check text-violet-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </div>
+      <p class="mt-3 text-sm font-medium text-white">${t.name}</p>
+      <p class="mt-1 text-xs text-zinc-500">${t.desc}</p>
+    </div>`
+  ).join('');
+  $$('#templateGrid [data-template]').forEach(chip => {
+    const toggle = () => {
+      const i = +chip.dataset.template;
+      state.templates.has(i) ? state.templates.delete(i) : state.templates.add(i);
+      chip.setAttribute('aria-checked', String(state.templates.has(i)));
+      $('#templateError').classList.add('hidden');
+    };
+    chip.addEventListener('click', toggle);
+    chip.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  });
+  // marquee: 4 sibling animated copies for a seamless infinite loop
+  // (magicui marquee.tsx: each copy translates -100% of its own width)
+  const chip = (t) =>
+    `<div class="flex shrink-0 items-center gap-2 rounded-lg border border-zinc-800/60 bg-zinc-900/70 px-3 py-1.5 text-xs font-medium text-zinc-300">
+      <svg class="text-violet-400" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[t.icon]}</svg>${t.name}
+    </div>`;
+  const group = TEMPLATES.slice(0, 6).map(chip).join('');
+  $('#marqueeTrack').innerHTML = Array.from({ length: 4 }, () =>
+    `<div class="animate-marquee flex shrink-0 items-center gap-4">${group}</div>`
+  ).join('');
+}
+
+/* ---------- step 4: integrations ---------- */
+const INTEGRATIONS = [
+  { name: 'Slack', desc: 'Draft approvals in channels', initial: true },
+  { name: 'Notion', desc: 'Sync drafts to your wiki', initial: true },
+  { name: 'Gmail', desc: 'Send & schedule email', initial: false },
+  { name: 'Shopify', desc: 'Product + ad copy sync', initial: false },
+  { name: 'WordPress', desc: 'Publish with one click', initial: false },
+  { name: 'HubSpot', desc: 'Push to CRM sequences', initial: false },
+];
+function renderIntegrations() {
+  INTEGRATIONS.forEach((intg, i) => { if (intg.initial) state.integrations.add(i); });
+  $('#integrationGrid').innerHTML = INTEGRATIONS.map((intg, i) =>
+    `<div class="radio-card flex cursor-pointer items-center gap-4 rounded-xl border border-zinc-800/50 bg-panel p-5" data-integration="${i}" role="switch" aria-checked="${state.integrations.has(i)}" tabindex="0">
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-zinc-800/60 text-zinc-300">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[intg.icon || 'box']}</svg>
+      </div>
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium text-white">${intg.name}</p>
+        <p class="truncate text-xs text-zinc-500">${intg.desc}</p>
+      </div>
+      <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${state.integrations.has(i) ? 'bg-accent' : 'bg-zinc-700'}" data-knob>
+        <span class="inline-block h-4 w-4 translate-x-1 transform rounded-full bg-white transition-transform ${state.integrations.has(i) ? 'translate-x-6' : ''}" data-knobdot></span>
+      </span>
+    </div>`).join('');
+  $$('#integrationGrid [data-integration]').forEach(row => {
+    const toggle = () => {
+      const i = +row.dataset.integration;
+      state.integrations.has(i) ? state.integrations.delete(i) : state.integrations.add(i);
+      row.setAttribute('aria-checked', String(state.integrations.has(i)));
+      const track = row.querySelector('[data-knob]'), dot = row.querySelector('[data-knobdot]');
+      track.classList.toggle('bg-accent', state.integrations.has(i));
+      track.classList.toggle('bg-zinc-700', !state.integrations.has(i));
+      dot.classList.toggle('translate-x-6', state.integrations.has(i));
+    };
+    row.addEventListener('click', toggle);
+    row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  });
+}
+
+/* ---------- step 5: summary + launch ---------- */
+function renderSummary() {
+  const plan = state.plan ? state.plan[0].toUpperCase() + state.plan.slice(1) : '—';
+  $('#summaryPlan').textContent = plan + ' plan';
+  const rows = [
+    ['Brand', state.brand || '—'],
+    ['Tone', state.tone ? state.tone[0].toUpperCase() + state.tone.slice(1) : '—'],
+    ['Formality', state.formality < 34 ? 'Casual' : state.formality < 67 ? 'Balanced' : 'Formal'],
+    ['Templates', state.templates.size ? [...state.templates].map(i => TEMPLATES[i].name).join(', ') : '—'],
+    ['Integrations', state.integrations.size ? [...state.integrations].map(i => INTEGRATIONS[i].name).join(', ') : 'None'],
+  ];
+  $('#summaryList').innerHTML = rows.map(([k, v]) =>
+    `<div class="flex items-start justify-between gap-6 py-3.5"><dt class="shrink-0 text-zinc-500">${k}</dt><dd class="text-right font-medium text-zinc-200">${v}</dd></div>`
+  ).join('');
+}
+$('#launchBtn').addEventListener('click', () => $('#successOverlay').classList.remove('hidden'));
+$('#replayBtn').addEventListener('click', () => {
+  $('#successOverlay').classList.add('hidden');
+  state.plan = null; state.brand = ''; state.tone = null; state.formality = 30;
+  state.templates.clear(); state.integrations.clear();
+  $('#brandName').value = ''; $('#formality').value = 30; $('#formalityValue').textContent = 'Casual';
+  $$('[data-plan]').forEach(c => { c.setAttribute('aria-checked', 'false'); c.classList.remove('border-beam-wrap'); });
+  $$('#toneGrid [data-tone]').forEach(c => c.setAttribute('aria-checked', 'false'));
+  renderTemplates(); renderIntegrations();
+  jump(0);
+});
+
+/* ---------- dock magnification (magicui dock.tsx math) ---------- */
+(function dockMagnify() {
+  const dock = $('#dock');
+  const icons = $$('.dock-icon', dock);
+  const SIZE = 40, MAGNIFY = 54, DISTANCE = 140;
+  let mouseX = Infinity;
+  dock.addEventListener('mousemove', e => mouseX = e.clientX);
+  dock.addEventListener('mouseleave', () => { mouseX = Infinity; icons.forEach(i => i.style.transform = ''); });
+  function frame() {
+    icons.forEach(icon => {
+      const r = icon.getBoundingClientRect();
+      const d = mouseX - r.x - r.width / 2;
+      const t = Math.abs(d) > DISTANCE ? SIZE : SIZE + (MAGNIFY - SIZE) * (1 - Math.abs(d) / DISTANCE);
+      icon.style.transform = `scale(${t / SIZE})`;
+    });
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+
+/* ---------- init ---------- */
+renderTemplates();
+renderIntegrations();
+renderStepper();
+</script>
+</body>
+</html>

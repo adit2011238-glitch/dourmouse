@@ -50,11 +50,23 @@ from typing import Any
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
 
+# Load .env from the project root even when this module is the entry point
+# (``python -m dourmouse.spotify_services --login``). The server loads it via
+# dourmouse.config, but the CLI and any fresh process must resolve
+# SPOTIFY_CLIENT_ID too, or a configured app would misreport NOT CONFIGURED.
+# Double-loading is harmless (dotenv never overrides existing env vars).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(_PROJECT_ROOT / ".env")
+except Exception:  # noqa: BLE001 - dotenv missing = env/secrets still work
+    pass
+
 _AUTH_URL = "https://accounts.spotify.com/authorize"
 _TOKEN_URL = "https://accounts.spotify.com/api/token"
 _API_URL = "https://api.spotify.com/v1"
 _REDIRECT_PORT = int(os.environ.get("SPOTIFY_REDIRECT_PORT", "8766"))
-_LOGIN_TIMEOUT = 180  # seconds a login waits for the browser approval
+_LOGIN_TIMEOUT = int(os.environ.get("SPOTIFY_LOGIN_TIMEOUT", "180"))
 
 # Scopes: read-only history/taste plus playback state/control and playlists.
 _SCOPES = (
@@ -180,10 +192,19 @@ def _post_form(url: str, body: bytes) -> dict[str, Any]:
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
-def _api(method: str, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+def _api(
+    method: str,
+    path: str,
+    params: dict[str, Any] | None = None,
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Call the Spotify Web API with automatic one-shot refresh-on-401.
 
-    Raises RuntimeError with the REAL error on failure — never fabricates.
+    ``params`` become the URL query string (GET-style); ``body`` is sent as a
+    JSON request body (PUT/POST/DELETE-style — e.g. playback endpoints need
+    ``{"uris": [...]}`` / ``{"context_uri": ...}`` in the body, not the
+    URL). Raises RuntimeError with the REAL error on failure — never
+    fabricates.
     """
     token = _access_token()
     if not token:
@@ -195,19 +216,43 @@ def _api(method: str, path: str, params: dict[str, Any] | None = None) -> dict[s
     url = _API_URL + path
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(
-        url, headers={"Authorization": f"Bearer {token}"}, method=method
-    )
+    headers = {"Authorization": f"Bearer {token}"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            return json.loads(raw) if raw else {}
+            raw = resp.read().decode("utf-8", errors="replace").strip()
+            if not raw:
+                # Playback endpoints answer 204/empty on SUCCESS (pause,
+                # resume, next, play). An empty body is a win, never a parse
+                # failure — the old code raised JSONDecodeError here and
+                # reported success as an error.
+                return {}
+            if method in ("PUT", "POST", "DELETE"):
+                # State-changing commands (play, pause, resume, next, ...)
+                # answer 200 with an opaque non-JSON token body on SUCCESS
+                # (observed live: e.g. b'og7U813vcVLnQIkWs4sb8eiwKPU'). A
+                # 2xx from a command IS success whatever the body says.
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError:
+                    return {}
+            # GET is a data read: the body must be real JSON, and a
+            # malformed one is a genuine problem to surface, not to mask.
+            return json.loads(raw)
     except urllib.error.HTTPError as exc:
-        return _handle_http_error(exc, method, path, params)
+        return _handle_http_error(exc, method, path, params, body)
 
 
 def _handle_http_error(
-    exc: Any, method: str, path: str, params: dict[str, Any] | None,
+    exc: Any,
+    method: str,
+    path: str,
+    params: dict[str, Any] | None,
+    body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
 
     if exc.code == 401:
@@ -215,22 +260,36 @@ def _handle_http_error(
         tokens = _load_tokens()
         if tokens.get("refresh_token"):
             _refresh_access_token(tokens)
-            return _api(method, path, params)
+            return _api(method, path, params, body)
         raise RuntimeError(
             "SPOTIFY AUTH FAILED: access token rejected and no refresh token "
             "exists — run spotify_login to link the account again."
         ) from exc
     if exc.code == 403:
+        # Surface the REAL reason (Rule 2.2 — no guessing). Spotify's body
+        # names the actual restriction (e.g. "Restriction violated") or says
+        # the action needs Premium; the message quotes it instead of
+        # assuming.
+        detail = _exc_body(exc)
+        if "premium" in detail.lower() or "permission" in detail.lower():
+            raise RuntimeError(
+                "SPOTIFY 403: this action needs Spotify Premium (playback "
+                "control) or the linked account lacks permission. Nothing was "
+                "changed."
+            ) from exc
         raise RuntimeError(
-            "SPOTIFY 403: this action needs Spotify Premium (playback control) "
-            "or the linked account lacks permission. Nothing was changed."
+            f"SPOTIFY 403: {detail or exc.reason} — nothing was changed."
         ) from exc
-    body = ""
-    try:
-        body = exc.read().decode("utf-8", errors="replace")[:300]
-    except Exception:  # noqa: BLE001, S110 - surface real API errors instead
-        pass
+    body = _exc_body(exc)
     raise RuntimeError(f"SPOTIFY API {exc.code}: {body or exc.reason}") from exc
+
+
+def _exc_body(exc: Any) -> str:
+    """The real response body of an HTTPError, best-effort."""
+    try:
+        return exc.read().decode("utf-8", errors="replace")[:300]
+    except Exception:  # noqa: BLE001, S110 - body already consumed/unreadable
+        return ""
 
 
 # --------------------------------------------------------------------------- #
@@ -347,6 +406,9 @@ def spotify_login(background: bool = False) -> str:
     )
     server = _start_callback_server(_REDIRECT_PORT)
     url = f"{_AUTH_URL}?{auth_params}"
+    # Print the URL before opening the browser: if the tab doesn't appear
+    # (headless session, focus issues), the user can click the link directly.
+    print(f"SPOTIFY LOGIN URL: {url}", flush=True)
     webbrowser.open(url)
     deadline = time.monotonic() + _LOGIN_TIMEOUT
     try:
@@ -465,15 +527,117 @@ def playback_control(action: str) -> str:
     )
 
 
+def _available_device_id() -> str | None:
+    """The id of the first usable device (active preferred), or None.
+
+    Spotify only auto-targets the ACTIVE device when a play command names
+    no device; a player that is open but paused/cold is listed but not
+    active, so an unqualified play fails with NO_ACTIVE_DEVICE. Naming a
+    device_id explicitly starts playback there instead.
+    """
+    try:
+        devices = (_api("GET", "/me/player/devices") or {}).get("devices") or []
+    except RuntimeError:
+        return None
+    for device in devices:
+        if device.get("is_active") and device.get("id"):
+            return device["id"]
+    for device in devices:
+        if device.get("id"):
+            return device["id"]
+    return None
+
+
 def play_uri(uri: str) -> str:
-    """Start playback of a track/album/playlist URI on an active device."""
+    """Start playback of a track/album/playlist URI on an active device.
+
+    Tracks go in ``uris``; album/playlist/artist URIs go in ``context_uri``
+    (the Spotify API rejects playlist URIs inside ``uris``). Both are JSON
+    bodies — the URL query form silently fails, so this never plays "as a
+    side effect of a GET". If no device is active, the first available
+    device (active preferred) is targeted explicitly, so a cold-but-open
+    player still starts.
+    """
     uri = (uri or "").strip()
     if not uri.startswith("spotify:"):
         return "ERROR: play needs a spotify: URI (use spotify_search to find one)."
-    data = _api("PUT", "/me/player/play", {"uris": [uri]})
+    if uri.startswith(("spotify:playlist:", "spotify:album:", "spotify:artist:",
+                       "spotify:track:")):
+        # v5.22.4 honesty fix: Spotify answers a play command with a
+        # NON-EXISTENT context URI as 204 (looks like success) while
+        # playing NOTHING. Verify the resource exists before claiming
+        # playback started — a fabricated URI must fail loudly, never
+        # silently. (Root cause of the "play my jazz playlist" report:
+        # the LLM invented a URI; play_uri said "started".)
+        _kind, _sep, context_id = uri.partition(":")[2].partition(":")
+        try:
+            _api("GET", f"/{_kind}s/{context_id}")
+        except RuntimeError as error:
+            # ``NO_ACTIVE_DEVICE`` is ALSO a 404 — but it is a playback
+            # state, never a "this resource doesn't exist". Only claim
+            # non-existence for a plain 404 (missing resource) or 400
+            # (malformed id — observed for fabricated track URIs), and let
+            # the play path below handle device recovery for the other case.
+            if "NO_ACTIVE_DEVICE" in str(error) or (
+                "404" not in str(error) and "400" not in str(error)
+            ):
+                raise
+            hint = _nonexistent_uri_hint(_kind)
+            return (
+                f"ERROR: that {_kind} does not exist on this account "
+                f"(404 for '{context_id}'). {hint}"
+            )
+        if _kind == "track":
+            payload = {"uris": [uri]}
+        else:
+            payload = {"context_uri": uri}
+    else:
+        payload = {"uris": [uri]}
+    try:
+        data = _api("PUT", "/me/player/play", body=payload)
+    except RuntimeError as error:
+        # ``NO_ACTIVE_DEVICE`` is the one honest failure we can self-heal:
+        # retry once, naming an available device so playback actually starts.
+        if "NO_ACTIVE_DEVICE" not in str(error):
+            raise
+        device_id = _available_device_id()
+        if not device_id:
+            raise
+        data = _api(
+            "PUT", "/me/player/play",
+            params={"device_id": device_id}, body=payload,
+        )
     if data:
         return f"SPOTIFY: error starting playback: {data}."
     return "SPOTIFY: playback started."
+
+
+def _nonexistent_uri_hint(kind: str) -> str:
+    """Build the 'here is what actually exists' hint for a fabricated URI.
+
+    ``kind`` is the singular resource kind (playlist/album/artist/track).
+    Guarded: if listing playlists itself fails, degrade to an honest
+    "couldn't list" message instead of letting the raw error escape the
+    friendly ERROR path.
+    """
+    try:
+        playlists = _api("GET", "/me/playlists", {"limit": 20}).get("items") or []
+    except RuntimeError:
+        return "Could not verify against your account right now — try spotify_search."
+    names = ", ".join(p.get("name") or "" for p in playlists[:10])
+    if not names:
+        return "Your account has no playlists yet — use spotify_search."
+    if kind == "playlist":
+        return (
+            f"Your playlists: {names}. "
+            "Use spotify_playlists to get the exact URI."
+        )
+    # Albums, artists and tracks live outside playlists — searching is the
+    # honest path to a real URI.
+    return (
+        f"Your playlists (for reference): {names}. "
+        "Use spotify_search to find the real track/album/artist URI."
+    )
 
 
 def search_tracks(query: str, limit: int = 5) -> str:
@@ -494,6 +658,38 @@ def search_tracks(query: str, limit: int = 5) -> str:
     if not rows:
         return f"SPOTIFY SEARCH: no tracks matched {query!r}."
     return "SPOTIFY SEARCH RESULTS:\n" + "\n".join(rows)
+
+
+def search_tracks_data(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    """Structured track search for the HUD music section.
+
+    Returns real rows ``[{name, artists, uri}]`` (URI playable via
+    ``play_uri``) — the agent-facing ``search_tracks`` returns formatted text,
+    the panel needs clickable rows, so this is the machine twin (Rule 2.2:
+    same real API data, different shape).
+    """
+    query = (query or "").strip()
+    if not query:
+        return []
+    try:
+        limit = max(1, min(int(limit), 10))
+    except (TypeError, ValueError):
+        limit = 8
+    data = _api(
+        "GET", "/search",
+        {"q": query, "type": "track", "limit": limit},
+    )
+    rows = []
+    for t in (data.get("tracks") or {}).get("items") or []:
+        artists = ", ".join(a.get("name", "") for a in (t.get("artists") or [])[:3])
+        rows.append(
+            {
+                "name": t.get("name"),
+                "artists": artists,
+                "uri": t.get("uri"),
+            }
+        )
+    return rows
 
 
 def top_tracks(time_range: str = "medium_term", limit: int = 5) -> str:
@@ -529,6 +725,89 @@ def recently_played(limit: int = 10) -> str:
         played = (entry.get("played_at") or "")[:16].replace("T", " ")
         rows.append(f"{i}. {t.get('name')} — {artists} ({played})")
     return "SPOTIFY RECENTLY PLAYED:\n" + "\n".join(rows)
+
+
+def recently_played_data(limit: int = 8) -> list[dict[str, Any]]:
+    """Structured recently-played rows for the HUD music section.
+
+    Machine twin of ``recently_played``: ``[{name, artists, uri}]``, each
+    ``uri`` playable via ``play_uri``. Real API data, never fabricated.
+    """
+    try:
+        limit = max(1, min(int(limit), 25))
+    except (TypeError, ValueError):
+        limit = 8
+    data = _api("GET", "/me/player/recently-played", {"limit": limit})
+    rows = []
+    for entry in data.get("items") or []:
+        t = entry.get("track") or {}
+        artists = ", ".join(a.get("name", "") for a in (t.get("artists") or [])[:3])
+        rows.append(
+            {
+                "name": t.get("name"),
+                "artists": artists,
+                "uri": t.get("uri"),
+            }
+        )
+    return rows
+
+
+def playlists_data(limit: int = 20) -> list[dict[str, Any]]:
+    """Structured playlist list for the HUD music section.
+
+    Returns real rows ``[{name, uri, tracks}]`` — the machine twin of
+    ``list_playlists``; each ``uri`` is playable via ``play_uri`` (which sends
+    it as ``context_uri``, since the API rejects playlist URIs in ``uris``).
+    ``tracks`` is the API's reported count, or None when the API omits it
+    (a playlist with tracks must never display as "0").
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    data = _api("GET", "/me/playlists", {"limit": limit})
+    rows = []
+    for p in data.get("items") or []:
+        count = None
+        if p.get("tracks") is not None:
+            count = (p.get("tracks") or {}).get("total")
+        rows.append(
+            {
+                "name": p.get("name"),
+                "uri": p.get("uri"),
+                "tracks": count,
+            }
+        )
+    return rows
+
+
+def top_tracks_data(time_range: str = "medium_term", limit: int = 8) -> list[dict[str, Any]]:
+    """Structured top-tracks rows for the HUD music section.
+
+    Machine twin of ``top_tracks``: ``[{name, artists, uri}]`` over the
+    user's most-played history (short|medium|long_term), each playable.
+    """
+    if time_range not in ("short_term", "medium_term", "long_term"):
+        time_range = "medium_term"
+    try:
+        limit = max(1, min(int(limit), 20))
+    except (TypeError, ValueError):
+        limit = 8
+    data = _api(
+        "GET", "/me/top/tracks",
+        {"time_range": time_range, "limit": limit},
+    )
+    rows = []
+    for t in data.get("items") or []:
+        artists = ", ".join(a.get("name", "") for a in (t.get("artists") or [])[:3])
+        rows.append(
+            {
+                "name": t.get("name"),
+                "artists": artists,
+                "uri": t.get("uri"),
+            }
+        )
+    return rows
 
 
 def list_playlists(limit: int = 20) -> str:

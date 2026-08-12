@@ -428,10 +428,13 @@ class TestRecursiveDispatch:
         assert jobs.snapshot()[0]["status"] == "done"
         assert report["final_text"] == "parent ok"
 
-    def test_delegate_target_uses_that_agents_model(self, registry, jobs):
+    def test_delegate_target_uses_that_agents_model(self, registry, jobs, monkeypatch):
         """v3.1: when a nested run is routed AT one subagent, it runs on
         THAT agent's configured NVIDIA model (DOURMOUSE_MODEL_<AGENT>); the
-        parent keeps its own default. Deterministic (Rule 2.8)."""
+        parent keeps its own default. Deterministic (Rule 2.8). Fast lane
+        pinned off — this test asserts config-default plumbing, not the
+        simple-response speed lane."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         from dourmouse.config import NvidiaConfig
 
         config = NvidiaConfig(

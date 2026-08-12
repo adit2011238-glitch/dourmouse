@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATLAS // STRATEGY LAB</title>
+<style>
+  :root {
+    --ground: #070B12;
+    --surface: #0E1420;
+    --panel: rgba(14,20,32,0.82);
+    --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
+    --green: #26D07C; --green-rgb: 38,208,124;
+    --amber: #F5A623; --amber-rgb: 245,166,35;
+    --red:   #EF5350; --red-rgb:   239,83,80;
+    --gold:  #FFD232; --gold-rgb:  255,210,50;
+    --dead:  #8A929E;
+    --a06: 0.06; --a10: 0.10; --a16: 0.16; --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
+    --font-display: "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
+    --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --font-prose: "Inter",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    --text: rgba(var(--cyan-rgb), var(--a85));
+    --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    --line: rgba(var(--cyan-rgb), var(--a10));
+    --line-strong: rgba(var(--cyan-rgb), var(--a30));
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(var(--cyan-rgb), 0.07), transparent 60%),
+      radial-gradient(900px 500px at 10% 110%, rgba(var(--green-rgb), 0.05), transparent 60%),
+      linear-gradient(180deg, #0A101B 0%, var(--ground) 100%);
+    color: var(--text);
+    font-family: var(--font-prose);
+    font-size: 13px;
+    overflow: hidden;
+  }
+  /* grid overlay */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(var(--cyan-rgb), 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--cyan-rgb), 0.025) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(var(--cyan-rgb), var(--a06)), transparent);
+    position: relative; z-index: 2;
+  }
+  .mark {
+    width: 34px; height: 34px; flex: none;
+    border: 1px solid var(--line-strong);
+    border-radius: 9px;
+    display: grid; place-items: center;
+    font-family: var(--font-display); font-weight: 700; font-size: 17px;
+    color: var(--cyan);
+    background: radial-gradient(circle at 30% 30%, rgba(var(--cyan-rgb), 0.22), rgba(var(--cyan-rgb), 0.03));
+    box-shadow: 0 0 18px rgba(var(--cyan-rgb), 0.25);
+    text-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.8);
+  }
+  h1 {
+    font-family: var(--font-display); font-weight: 600; font-size: 17px;
+    letter-spacing: 2px; color: var(--text);
+  }
+  h1 .dim { color: var(--text-dim); font-weight: 400; }
+  .status {
+    margin-left: auto; display: flex; align-items: center; gap: 16px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  }
+  .status .live {
+    display: flex; align-items: center; gap: 6px;
+    color: rgba(var(--green-rgb), 0.9);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+         box-shadow: 0 0 8px rgba(var(--green-rgb), 0.9); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  button {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
+    color: var(--cyan); background: rgba(var(--cyan-rgb), 0.08);
+    border: 1px solid var(--line-strong); border-radius: 6px;
+    padding: 6px 12px; cursor: pointer; transition: all 0.15s;
+  }
+  button:hover { background: rgba(var(--cyan-rgb), 0.18); box-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.3); }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 20px; border-bottom: 1px solid var(--line);
+    position: relative; z-index: 2;
+  }
+  .toolbar .count { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+  .toolbar .count b { color: var(--cyan); font-weight: 600; }
+  .search {
+    margin-left: auto; min-width: 220px;
+    background: rgba(var(--cyan-rgb), 0.05);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 10px; color: var(--text); font-family: var(--font-mono); font-size: 12px;
+    outline: none; transition: border-color 0.15s;
+  }
+  .search:focus { border-color: var(--line-strong); }
+  .filters { display: flex; gap: 6px; }
+  .chip {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px;
+    padding: 4px 10px; border-radius: 20px; cursor: pointer;
+    border: 1px solid var(--line); color: var(--text-dim);
+    background: transparent; transition: all 0.15s;
+  }
+  .chip:hover { border-color: var(--line-strong); color: var(--text); }
+  .chip.on { border-color: rgba(var(--cyan-rgb), 0.6); color: var(--cyan); background: rgba(var(--cyan-rgb), 0.1); }
+
+  main { position: relative; z-index: 1; height: calc(100% - 104px); overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 0; z-index: 3;
+    text-align: left; padding: 9px 14px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px;
+    color: var(--text-dim); font-weight: 500;
+    background: rgba(10,16,27,0.95); backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line-strong);
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--line);
+    transition: background 0.12s; cursor: pointer;
+  }
+  tbody tr:hover { background: rgba(var(--cyan-rgb), 0.05); }
+  tbody tr.expanded { background: rgba(var(--cyan-rgb), 0.08); }
+  tbody td { padding: 9px 14px; font-family: var(--font-mono); font-size: 12px; vertical-align: middle; }
+  .rank { color: var(--text-dim); width: 34px; }
+  .rank b { color: var(--cyan); font-weight: 600; }
+  .strat { font-family: var(--font-prose); font-weight: 600; color: var(--text); letter-spacing: 0.5px; }
+  .strat .dir { font-size: 10px; color: var(--text-dim); font-weight: 400; margin-left: 6px; }
+  .num { text-align: right; }
+  .pos { color: rgba(var(--green-rgb), 0.95); }
+  .neg { color: rgba(var(--red-rgb), 0.95); }
+  .mut { color: var(--dead); }
+  .badge {
+    display: inline-block; padding: 3px 9px; border-radius: 4px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; font-weight: 600;
+  }
+  .b-candidate { color: var(--cyan); background: rgba(var(--cyan-rgb), 0.12); border: 1px solid rgba(var(--cyan-rgb), 0.4); }
+  .b-hold      { color: var(--amber); background: rgba(var(--amber-rgb), 0.12); border: 1px solid rgba(var(--amber-rgb), 0.4); }
+  .b-strong    { color: var(--green); background: rgba(var(--green-rgb), 0.12); border: 1px solid rgba(var(--green-rgb), 0.4); }
+  .b-paper     { color: var(--green); background: rgba(var(--green-rgb), 0.16); border: 1px solid rgba(var(--green-rgb), 0.6); }
+  .b-fail      { color: var(--red); background: rgba(var(--red-rgb), 0.12); border: 1px solid rgba(var(--red-rgb), 0.4); }
+  .b-unknown   { color: var(--dead); background: rgba(var(--dead), 0.1); border: 1px solid rgba(var(--dead), 0.3); }
+
+  .detail-row { display: none; }
+  tr.expanded + tr.detail-row { display: table-row; }
+  .detail {
+    padding: 14px 20px 18px 68px;
+    font-family: var(--font-prose); font-size: 12.5px; line-height: 1.6;
+    color: rgba(226,236,248, 0.85);
+    background: rgba(var(--cyan-rgb), 0.03);
+  }
+  .detail .gates { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+  .error-banner {
+    margin: 14px 20px 0; padding: 10px 14px;
+    border: 1px solid rgba(var(--red-rgb), 0.4); border-radius: 8px;
+    background: rgba(var(--red-rgb), 0.08);
+    color: rgba(var(--red-rgb), 0.95); font-family: var(--font-mono); font-size: 12px;
+  }
+  .empty { text-align: center; color: var(--text-dim); padding: 60px 0; font-family: var(--font-mono); }
+
+  /* ---- v5.22.7: in-window split screen ---- */
+  #splitwrap { display: flex; height: 100%; }
+  #paneL { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+  #paneR {
+    flex: 0 0 0; min-width: 0; display: none;
+    flex-direction: column; border-left: 1px solid var(--line-strong);
+    background: rgba(10,16,27,0.6);
+  }
+  body.split #paneR { flex: 1 1 50%; display: flex; }
+  body.split #paneL { flex: 1 1 50%; }
+  #divider {
+    flex: 0 0 5px; cursor: col-resize; display: none;
+    background: rgba(var(--cyan-rgb), 0.15); transition: background 0.15s;
+  }
+  body.split #divider { display: block; }
+  #divider:hover, #divider.dragging { background: rgba(var(--cyan-rgb), 0.55); }
+  .pane2-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-bottom: 1px solid var(--line);
+    background: rgba(var(--cyan-rgb), 0.05); flex: none;
+  }
+  .pane2-bar .p2-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-dim); }
+  .pane2-bar select, .pane2-bar input {
+    background: rgba(var(--cyan-rgb), 0.05); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+    font-family: var(--font-mono); font-size: 11px; outline: none; max-width: 240px;
+  }
+  .pane2-bar input { flex: 1 1 auto; }
+  #pane2frame { flex: 1 1 auto; border: 0; width: 100%; background: #0B1019; }
+  .splitbtn.on { border-color: rgba(var(--green-rgb), 0.6); color: var(--green); background: rgba(var(--green-rgb), 0.12); }
+  .native-split-bar {
+    margin: 8px 20px 0; padding: 8px 12px;
+    border: 1px solid rgba(var(--amber-rgb), 0.35); border-radius: 8px;
+    background: rgba(var(--amber-rgb), 0.07);
+    font-family: var(--font-mono); font-size: 11px; color: rgba(var(--amber-rgb), 0.9);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .native-split-bar select { background: rgba(var(--amber-rgb), 0.1); color: var(--text); border: 1px solid rgba(var(--amber-rgb), 0.4); border-radius: 6px; padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; }
+  .native-split-bar .note { font-size: 10px; color: var(--text-dim); }
+  .native-split-bar .err { color: rgba(var(--red-rgb), 0.95); }
+</style>
+</head>
+<body>
+<header>
+  <div class="mark">◈</div>
+  <h1>ATLAS <span class="dim">// STRATEGY LAB</span></h1>
+  <div class="status">
+    <span>VER <span id="ver">—</span></span>
+    <span id="syncinfo">LAST SYNC —</span>
+    <span class="live"><span class="dot"></span>LIVE</span>
+    <button id="splitbtn" title="In-window split: leaderboard beside any page or URL">◫ SPLIT</button>
+    <button id="syncbtn">⟳ SYNC NOW</button>
+  </div>
+</header>
+
+<div class="toolbar">
+  <span class="count"><b id="count">0</b> STRATEGIES TESTED</span>
+  <div class="filters" id="filters">
+    <button class="chip on" data-v="">ALL</button>
+    <button class="chip" data-v="CANDIDATE">CANDIDATE</button>
+    <button class="chip" data-v="HOLD">HOLD</button>
+    <button class="chip" data-v="FAIL">FAIL</button>
+  </div>
+  <input class="search" id="search" type="text" placeholder="filter strategies… e.g. HE, news, EURUSD">
+</div>
+
+<div class="native-split-bar" id="nativesplit" style="display:none">
+  <span>◫ NATIVE SPLIT — tile ATLAS beside any running app:</span>
+  <select id="appselect"><option value="">loading apps…</option></select>
+  <button id="appsplit">SPLIT NOW</button>
+  <span class="note">(ATLAS → left half · app → right half)</span>
+</div>
+
+<main id="splitwrap">
+  <div id="paneL">
+    <div id="errorbox"></div>
+    <table>
+      <thead>
+        <tr>
+          <th class="rank">#</th>
+          <th>STRATEGY</th>
+          <th class="num">MEAN %</th>
+          <th class="num">T-VAL</th>
+          <th class="num">P-VAL</th>
+          <th class="num">WIN %</th>
+          <th class="num">N</th>
+          <th>VERDICT</th>
+          <th>GATES</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div id="divider" title="drag to resize panes"></div>
+  <div id="paneR">
+    <div class="pane2-bar">
+      <span class="p2-title">SPLIT VIEW</span>
+      <select id="p2preset">
+        <option value="">— page or URL —</option>
+        <option value="/map">Agent Map</option>
+        <option value="/">Central Dispatch</option>
+        <option value="/atlas-lab">ATLAS Lab (self)</option>
+      </select>
+      <input id="p2url" type="text" placeholder="…or paste any URL" spellcheck="false">
+      <button id="p2open">OPEN</button>
+      <button id="p2close" title="close split">✕</button>
+    </div>
+    <iframe id="pane2frame" sandbox="allow-scripts allow-forms allow-popups"
+            title="split pane"></iframe>
+  </div>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let ALL = [];
+let filterVerdict = "";
+let lastId = null;
+
+const VERDICT_CLASS = {
+  "CANDIDATE": "b-candidate", "HOLD": "b-hold", "STRONG": "b-strong",
+  "PAPER TRADE": "b-paper", "FAIL": "b-fail", "FAILED": "b-fail",
+};
+
+function fmtNum(v, digits) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+  const n = Number(v);
+  if (!isFinite(n)) return "—";
+  if (digits === 0) return n.toFixed(0);
+  return n.toFixed(digits === undefined ? 2 : digits);
+}
+function cls(v) { return v > 0.000001 ? "pos" : v < -0.000001 ? "neg" : "mut"; }
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function rowHTML(s, idx) {
+  const rank = idx + 1;
+  const bc = VERDICT_CLASS[s.verdict] || "b-unknown";
+  const mean = fmtNum(s.mean_return_pct, 2);
+  const t = fmtNum(s.t_stat, 2);
+  const p = s.p_value === null || s.p_value === undefined ? "—" : fmtNum(s.p_value, 4);
+  const win = s.win_rate_pct === null ? "—" : fmtNum(s.win_rate_pct, 0) + "%";
+  const dir = s.direction === "SHORT" ? "▼ SHORT" : s.direction === "LONG" ? "▲ LONG" : "";
+  const desc = esc(s.description);
+  const gates = esc(s.passed_gates || "");
+  return `<tr data-id="${esc(s.id)}">
+      <td class="rank"><b>${rank}</b></td>
+      <td class="strat">${esc(s.name || s.id)}<span class="dir">${dir}</span></td>
+      <td class="num ${cls(s.mean_return_pct)}">${mean}</td>
+      <td class="num ${cls(s.t_stat)}">${t}</td>
+      <td class="num ${p === "—" ? "mut" : p < 0.05 ? "pos" : "mut"}">${p}</td>
+      <td class="num">${win}</td>
+      <td class="num mut">${fmtNum(s.n_observations, 0)}</td>
+      <td><span class="badge ${bc}">${esc(s.verdict || "?")}</span></td>
+      <td class="mut" style="font-size:10px">${gates}</td>
+    </tr>
+    <tr class="detail-row"><td colspan="9"><div class="detail">
+      <div>${desc || "<i>No plain-English description published for this strategy yet.</i>"}</div>
+      <div class="gates">GATES: ${gates || "—"} · OBS: ${fmtNum(s.n_observations, 0)}</div>
+    </div></td></tr>`;
+}
+
+function render() {
+  const q = ($("search").value || "").trim().toLowerCase();
+  let rows = ALL;
+  if (filterVerdict) rows = rows.filter((s) => (s.verdict || "") === filterVerdict);
+  if (q) rows = rows.filter((s) =>
+    (s.name + " " + s.id + " " + (s.description || "") + " " + (s.passed_gates || "")).toLowerCase().includes(q));
+  $("count").textContent = ALL.length;
+  $("rows").innerHTML = rows.map(rowHTML).join("");
+  // re-expand the previously open row (persist across refreshes)
+  if (lastId) {
+    const tr = document.querySelector(`tr[data-id="${CSS.escape(lastId)}"]`);
+    if (tr) { tr.classList.add("expanded"); }
+  }
+}
+
+$("rows").addEventListener("click", (ev) => {
+  const tr = ev.target.closest("tr[data-id]");
+  if (!tr) return;
+  tr.classList.toggle("expanded");
+  lastId = tr.classList.contains("expanded") ? tr.dataset.id : null;
+});
+
+$("search").addEventListener("input", render);
+$("filters").addEventListener("click", (ev) => {
+  const chip = ev.target.closest(".chip");
+  if (!chip) return;
+  document.querySelectorAll(".chip").forEach((c) => c.classList.remove("on"));
+  chip.classList.add("on");
+  filterVerdict = chip.dataset.v;
+  render();
+});
+
+async function refresh() {
+  try {
+    const res = await fetch("/api/atlas-lab/leaderboard", { cache: "no-store" });
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.leaderboard)) {
+      ALL = data.leaderboard;
+      render();
+    }
+    try {
+      const lab = await (await fetch("/api/atlas-lab", { cache: "no-store" })).json();
+      $("ver").textContent = lab.version || "—";
+      const last = lab.last_sync ? new Date(lab.last_sync).toLocaleTimeString() : "—";
+      $("syncinfo").textContent = "LAST SYNC " + last;
+      if (lab.sync_error) {
+        $("errorbox").innerHTML = `<div class="error-banner">⚠ SYNC ERROR: ${esc(lab.sync_error)} — showing last good data</div>`;
+      } else {
+        $("errorbox").innerHTML = "";
+      }
+    } catch (e) { /* status panel is best-effort */ }
+  } catch (e) {
+    $("errorbox").innerHTML = `<div class="error-banner">⚠ CANNOT REACH ATLAS LAB: ${esc(String(e))}</div>`;
+  }
+}
+
+$("syncbtn").addEventListener("click", async () => {
+  $("syncbtn").disabled = true;
+  $("syncbtn").textContent = "⟳ SYNCING…";
+  try {
+    await fetch("/api/atlas-lab/sync", { method: "POST" });
+  } catch (e) { /* banner shows the truth */ }
+  await refresh();
+  $("syncbtn").disabled = false;
+  $("syncbtn").textContent = "⟳ SYNC NOW";
+});
+
+// ------------------------------------------------------------------ //
+// v5.22.7: split screen
+// ------------------------------------------------------------------ //
+
+// -- in-window split (leaderboard + any page/URL) --
+function setSplit(on) {
+  document.body.classList.toggle("split", on);
+  $("splitbtn").classList.toggle("on", on);
+  $("splitbtn").textContent = on ? "◫ SPLIT ON" : "◫ SPLIT";
+  try { localStorage.setItem("atlas.split", on ? "1" : "0"); } catch (e) {}
+  if (on) {
+    const saved = localStorage.getItem("atlas.split.url") || "/map";
+    loadPane(saved);
+  } else {
+    $("pane2frame").removeAttribute("src");
+  }
+}
+function loadPane(url) {
+  if (!url) return;
+  const internal = url.startsWith("/");
+  if (!internal) {
+    // Bare text like "nytimes.com" becomes a real external URL.
+    if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  } else {
+    url = url.startsWith("/") ? url : "/" + url;
+  }
+  const frame = $("pane2frame");
+  // External URLs load WITHOUT allow-same-origin — an untrusted page must
+  // never share our origin (it could read the app's localStorage/cookies).
+  // Internal pages (/, /map, /atlas-lab) need same-origin for the
+  // pywebview bridge + localStorage, so it is granted only for those.
+  frame.sandbox = internal
+    ? "allow-scripts allow-same-origin allow-forms allow-popups"
+    : "allow-scripts allow-forms allow-popups";
+  frame.src = url;
+  $("p2url").value = url;
+  try { localStorage.setItem("atlas.split.url", url); } catch (e) {}
+}
+$("splitbtn").addEventListener("click", () => setSplit(!document.body.classList.contains("split")));
+$("p2open").addEventListener("click", () => loadPane($("p2url").value.trim()));
+$("p2url").addEventListener("keydown", (e) => { if (e.key === "Enter") loadPane($("p2url").value.trim()); });
+$("p2preset").addEventListener("change", () => { const v = $("p2preset").value; if (v) loadPane(v); });
+$("p2close").addEventListener("click", () => setSplit(false));
+
+// draggable divider
+const divider = $("divider");
+let dragging = false;
+function dividerStart(e) { dragging = true; divider.classList.add("dragging"); e.preventDefault(); }
+function dividerMove(e) {
+  if (!dragging) return;
+  const wrap = $("splitwrap").getBoundingClientRect();
+  const x = e.clientX - wrap.left;
+  const pct = Math.min(0.75, Math.max(0.25, x / wrap.width)) * 100;
+  document.body.style.setProperty("--splitL", pct + "%");
+  document.body.classList.add("custom-split");
+  document.getElementById("paneL").style.flex = `0 0 ${pct}%`;
+  document.getElementById("paneR").style.flex = `1 1 ${100 - pct}%`;
+}
+function dividerEnd() { dragging = false; divider.classList.remove("dragging"); }
+divider.addEventListener("mousedown", dividerStart);
+window.addEventListener("mousemove", dividerMove);
+window.addEventListener("mouseup", dividerEnd);
+
+// -- native split (tile beside any running macOS app) --
+const api = window.pywebview && window.pywebview.api;
+$("appsplit").addEventListener("click", async () => {
+  const opt = $("appselect").selectedOptions[0];
+  const name = opt ? opt.value : "";
+  const bundleId = opt ? (opt.dataset.bundle || "") : "";
+  const note = $("nativesplit").querySelector(".note");
+  if (!name) { note.textContent = "pick an app first"; return; }
+  if (!api || !api.split_with_app) {
+    note.textContent = "native split needs the desktop window (browser fallback can't tile apps)";
+    return;
+  }
+  note.textContent = "splitting…";
+  try {
+    // Pass the bundle id so AppleScript targets the app by id, never by a
+    // display name that could carry invisible Unicode marks or quotes.
+    const r = await api.split_with_app(name, bundleId);
+    note.textContent = r && r.error ? "⚠ " + r.error : (r && r.ok ? "✓ tiled" : "✓ ATLAS tiled left");
+  } catch (e) {
+    note.textContent = "⚠ " + String(e);
+  }
+});
+function loadApps() {
+  if (!api || !api.list_running_apps) return;
+  api.list_running_apps().then((apps) => {
+    const sel = $("appselect");
+    sel.innerHTML = '<option value="">— pick an app —</option>' + apps.map((a) =>
+      `<option value="${esc(a.name)}" data-bundle="${esc(a.bundle_id || "")}">${esc(a.name)}</option>`).join("");
+  }).catch(() => {});
+}
+
+refresh();
+// Live leaderboard: re-pull every 15s so strategies pushed to the GitHub
+// repo appear within the minute (auto-sync daemon re-pulls every 300s).
+setInterval(refresh, 15000);
+// Native split bar is desktop-only (the pywebview bridge exists only in
+// the native window, not the browser fallback).
+if (api && api.split_with_app) {
+  $("nativesplit").style.display = "flex";
+  loadApps();
+}
+try {
+  if (localStorage.getItem("atlas.split") === "1") setSplit(true);
+} catch (e) {}
+</script>
+</body>
+</html>

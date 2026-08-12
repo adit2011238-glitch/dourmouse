@@ -1,0 +1,9 @@
+CODING — 1 conversations
+==================================================
+
+=== Computer running slow (bed1f464) ===
+Summary: **Conversation Overview**
+
+The person asked a general question about why their computer was running slowly. Claude responded by requesting diagnostic clarification rather than providing a generic list of possible causes. Specifically, Claude asked about the nature of the slowness (boot time, app lau
+Messages: 2
+

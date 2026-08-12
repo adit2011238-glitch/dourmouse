@@ -7,8 +7,12 @@ loudly / reports an explicit error — it never fabricates research output.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
+from dourmouse import research_agent
 from dourmouse.research_agent import (
     AtlasNotConfiguredError,
     call_research_tool,
@@ -49,6 +53,46 @@ class TestConfigResolution:
         (bin_dir / "python").write_text("#!/bin/sh\n")
         monkeypatch.setenv("ATLAS_VENV_PATH", str(tmp_path))
         assert get_atlas_venv_python() == bin_dir / "python"
+
+
+class TestBundledAtlasResolution:
+    """Personal-dist behavior (v5.22): the ATLAS engine ships next to the
+    package at ``<dist>/atlas``, so the env vars are optional there."""
+
+    def test_bundled_repo_fallback(self, monkeypatch, tmp_path):
+        bundled = tmp_path / "atlas"
+        bundled.mkdir()
+        monkeypatch.delenv("ATLAS_REPO_PATH", raising=False)
+        monkeypatch.setattr(research_agent, "_BUNDLED_ATLAS_DIR", bundled)
+        assert get_atlas_repo_path() == bundled
+
+    def test_bundled_venv_reuses_running_interpreter(self, monkeypatch, tmp_path):
+        bundled = tmp_path / "atlas"
+        bundled.mkdir()
+        monkeypatch.delenv("ATLAS_REPO_PATH", raising=False)
+        monkeypatch.delenv("ATLAS_VENV_PATH", raising=False)
+        monkeypatch.setattr(research_agent, "_BUNDLED_ATLAS_DIR", bundled)
+        monkeypatch.setattr(research_agent, "_bundled_venv_can_run_atlas", lambda: True)
+        assert get_atlas_venv_python() == Path(sys.executable)
+
+    def test_bundled_venv_without_deps_raises_honestly(self, monkeypatch, tmp_path):
+        bundled = tmp_path / "atlas"
+        bundled.mkdir()
+        monkeypatch.delenv("ATLAS_REPO_PATH", raising=False)
+        monkeypatch.delenv("ATLAS_VENV_PATH", raising=False)
+        monkeypatch.setattr(research_agent, "_BUNDLED_ATLAS_DIR", bundled)
+        monkeypatch.setattr(research_agent, "_bundled_venv_can_run_atlas", lambda: False)
+        with pytest.raises(AtlasNotConfiguredError, match="ATLAS_VENV_PATH is not set"):
+            get_atlas_venv_python()
+
+    def test_env_still_wins_over_bundle(self, monkeypatch, tmp_path):
+        bundled = tmp_path / "atlas"
+        bundled.mkdir()
+        external = tmp_path / "external-repo"
+        external.mkdir()
+        monkeypatch.setenv("ATLAS_REPO_PATH", str(external))
+        monkeypatch.setattr(research_agent, "_BUNDLED_ATLAS_DIR", bundled)
+        assert get_atlas_repo_path() == external
 
 
 class TestRunAtlasResearchGuardsFabrication:

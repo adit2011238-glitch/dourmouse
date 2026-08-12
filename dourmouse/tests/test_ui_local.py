@@ -21,7 +21,11 @@ class TestFullyLocal:
     )
 
     def _pages(self) -> list[Path]:
-        return sorted(self.UI_DIR.glob("*.html"))
+        # Skip AppleDouble metadata junk (._index.html) that macOS can drop
+        # next to real files on external/FAT volumes (audit fix v5.22.14).
+        return sorted(
+            p for p in self.UI_DIR.glob("*.html") if not p.name.startswith("._")
+        )
 
     def test_pages_exist(self):
         names = {p.name for p in self._pages()}

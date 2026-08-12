@@ -40,3 +40,5 @@ whisper_models/
 
 # ── OS junk ──────────────────────────────────────────────────────────────
 .DS_Store
+# AppleDouble sidecar files (exFAT drives create these next to every file)
+._*

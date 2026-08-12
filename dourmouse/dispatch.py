@@ -33,6 +33,7 @@ crashes and not fabricated success.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import time
@@ -46,6 +47,8 @@ from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
     OmniRouteConfig,
+    fast_lane_enabled,
+    fast_lane_model,
     load_llm_config,
 )
 from dourmouse.governance import (
@@ -76,9 +79,13 @@ def _is_transient_error(exc: Exception) -> bool:
 
 
 # Hard cap on a single LLM response. qwen3 without a cap can ramble for
-# hundreds of tokens at local speeds; 1400 tokens covers any answer and any
-# tool-call JSON with room to spare.
-_DEFAULT_MAX_TOKENS = 1400
+# hundreds of tokens at local speeds. Measured dispatch outputs (tool-call
+# JSON and chat answers) run 120-300 tokens, so 800 covers any answer and
+# any tool-call JSON with 2.7x headroom while halving worst-case generation
+# latency on this hardware (the old 1400 cap meant up to ~80-140s at the
+# 10-17 tok/s thermal ceiling; 800 bounds it to ~45-80s). Code completions
+# pass their own 4000 cap via code_backends.
+_DEFAULT_MAX_TOKENS = 800
 
 # ---- LLM context bounding (v4.2 speed) ------------------------------- #
 # Measured on the user's M3 Air: prefill runs ~46 tok/s under sustained
@@ -89,7 +96,7 @@ _DEFAULT_MAX_TOKENS = 1400
 # as fit the budget. The authoritative ``messages`` list is untouched (still
 # persisted, resumable, and returned to callers) — only the API boundary is
 # bounded.
-# 4600 + max_tokens(1400) = 6000, leaving ~2.2k hard headroom under the
+# 4600 + max_tokens(800) = 5400, leaving ~2.8k hard headroom under the
 # 8192 num_ctx even when the chars/4 estimate underestimates real tokens.
 _MAX_LLM_TOKENS = 4600
 _MAX_TOOL_RESULT_CHARS = 800  # OLD tool results re-read by the model get cut
@@ -504,7 +511,38 @@ _SYSTEM_PROMPT = (
     "'Let me', 'I think', or meta-talk about the conversation ('the user "
     "asked', 'as I said before'). Do not restate the question. Just deliver "
     "the answer. If you do not know, say so in one sentence and offer the "
-    "nearest tool that could find out."
+    "nearest tool that could find out.\n"
+    "10. AGENT ROUTING — use the right agent/tool for the task:\n"
+    "  - Coding, building, debugging → dev_coding (run_python, edit_file, "
+    "claude_code, codex_code). Coding via an external LLM CLI → code_claude, "
+    "code_codex, code_deepseek, code_nvidia, code_ollama.\n"
+    "  - Full laptop access (files anywhere, shell) → system (dangerous "
+    "commands are confirmation-gated); sandboxed workspace file cleanup → "
+    "admin_ops (deletion is always per-item confirmed).\n"
+    "  - Stock quotes / market movers → markets; web research & synthesis → "
+    "research_info (web_search, fetch_url); live R&D intel → rnd.\n"
+    "  - Email / Gmail / Drive → mail; drafting messages → comms (draft "
+    "only, sending confirmed); calendar → scheduling (read-only + proposed "
+    "times, booking confirmed).\n"
+    "  - Storing or recalling knowledge → memory (remember, recall, "
+    "memory_search_semantic); long-term chat recall is ALSO injected "
+    "automatically into your context when relevant — use it when it appears.\n"
+    "  - News headlines → news; local task list → tasks; Spotify → music; "
+    "ATLAS quant repo → atlas; Freebuff → freebuff; global intelligence → "
+    "worldmonitor; inter-agent messages → messenger; nested subtasks → "
+    "delegate_task (depth-bounded).\n"
+    "11. DAILY TASKS — your standing duties (the live agents run these on a "
+    "fixed cadence and you operate them):\n"
+    "  - Live polls: news headlines every 2 min; market gainers + losers "
+    "every 2 min; rnd news + movers every 3 min; inbox (top 5) every 5 min; "
+    "task list every 1 min. Results are broadcast on the inter-agent bus and "
+    "keep each LIVE agent current — never present a poll result as new "
+    "research or as the operator's data.\n"
+    "  - When asked to summarize the day or review what happened, run the "
+    "honest daily self-review via the memory agent's daily_digest tool — "
+    "never fabricate a digest from memory alone.\n"
+    "  - Surface anything time-sensitive the live feeds expose; do not "
+    "silently drop a poll result that matters."
 )
 
 
@@ -755,6 +793,19 @@ def _build_client(config: NvidiaConfig | OllamaConfig | OmniRouteConfig) -> Any:
     return OpenAI(api_key=key, base_url=config.base_url)
 
 
+#: v5.22.5: domains where a hallucinated answer is worse than a slow one.
+#: The fast orchestrator brain is great at chat but fabricates on
+#: tool-critical single-step prompts (observed: invented Spotify playlist
+#: URIs, "the playlist is empty" without calling any tool). These
+#: deterministic keywords force the heavy brain — cheap, never an LLM
+#: judgment (Rule 2.8).
+_TOOL_CRITICAL_RE = re.compile(
+    r"(spotify|playlist|play a song|play music|play my|play track|"
+    r"currently playing|top tracks|now playing|music)",
+    re.IGNORECASE,
+)
+
+
 def _resolve_brain_model(
     *,
     fast: str,
@@ -775,6 +826,14 @@ def _resolve_brain_model(
     if explicit:
         return explicit, False
     if looks_multi_step(prompt):
+        return default, default != fast
+    # v5.22.5: TOOL-CRITICAL domains also escalate to the heavy brain.
+    # Music/Spotify is the poster child: the fast brain (qwen2.5:7b)
+    # FABRICATES playlist URIs and even hallucinates "the playlist is
+    # empty" without calling a tool — the stronger model follows the
+    # spotify_playlists-lookup instruction and routes honestly. Cheap
+    # deterministic keyword test (Rule 2.8), never an LLM judgment.
+    if _TOOL_CRITICAL_RE.search(prompt):
         return default, default != fast
     return fast, False
 
@@ -1065,6 +1124,11 @@ def run_dispatch_messages(
     # config default. Deterministic (Rule 2.8) — the caller picks the model;
     # the engine never guesses.
     escalated_brain = False
+    _explicit_model = model  # the caller's override, captured before resolution
+    last_user = next(
+        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+        "",
+    )
     if client is None:
         config = config or load_llm_config()
         client = _build_client(config)
@@ -1078,10 +1142,6 @@ def run_dispatch_messages(
             if hasattr(config, "model_for_agent")
             else config.model
         )
-        last_user = next(
-            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
-            "",
-        )
         # ``config`` is typed NvidiaConfig | None at the parameter boundary;
         # getattr avoids the narrowing mypy can't do after the pre-existing
         # ``config = config or load_llm_config()`` reassignment above.
@@ -1091,6 +1151,22 @@ def run_dispatch_messages(
         )
     else:
         model = model or (config.model if config is not None else "test-model")
+    # Fast lane (v5.x): a PURE-CHAT turn — no plan and no agent match (the
+    # loop's exact scoped-tools condition, deterministic and LLM-free) — is
+    # the "simple response" case. It answers in ONE completion with a compact
+    # system prompt (no 21-agent roster) instead of looping, so "2+2" and
+    # knowledge questions return in seconds. Anything agentic keeps the
+    # resolved brain and the full loop; an explicit model override (v3.1
+    # per-agent) always wins. Opt out with DOURMOUSE_FAST_LANE=0, pick the
+    # model with DOURMOUSE_FAST_MODEL.
+    fast_lane = (
+        _explicit_model is None
+        and not escalated_brain
+        and fast_lane_enabled()
+        and _is_pure_chat(str(last_user), registry)
+    )
+    if fast_lane:
+        model = fast_lane_model()
     # The chosen brain is surfaced honestly so the UI can show which model
     # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
     # of the tree: nested delegate runs ride the parent's event sink, so a
@@ -1142,6 +1218,14 @@ def run_dispatch_messages(
     if stack is None:
         stack = []
         registry._ctx_stack = stack
+    if fast_lane:
+        # The lane still runs the loop (pure-chat exits after ONE call since
+        # tools are empty), but the API boundary sees the compact system
+        # prompt instead of the 2.2k-token roster — the dominant prefill
+        # cost on a fanless M3. The authoritative ``messages`` (persisted)
+        # keeps the full prompt so an agentic turn later in the session
+        # still routes tools correctly.
+        ctx.compact_system = True
     stack.append(ctx)
     try:
         report = _run_dispatch_loop(messages, registry, max_turns, ctx)
@@ -1269,6 +1353,73 @@ _MAX_TEXT_ONLY_NUDGE_CHARS = 240
 # reminder listing the unexecuted steps, so multi-step chains cannot silently
 # end half-finished.
 _MAX_PLAN_REMINDERS = 1
+
+
+# Knowledge questions the local model can answer directly from its weights.
+# The fast lane takes them EVEN when a research/info agent matches, because
+# routing a stable fact through web research adds seconds without improving
+# the answer (the model knows it).
+_KNOWLEDGE_CUES = (
+    "what is", "what's", "who is", "who's", "when was", "when did",
+    "where is", "where's", "why is", "why does", "how does", "how many",
+    "capital of", "largest", "smallest", "tallest", "deepest", "oldest",
+    "meaning of", "definition", "difference between", "explain",
+    "example of", "synonym", "spell", "first letter",
+)
+# Live-data / action words that force the agentic path even inside a
+# knowledge-shaped question (weather today, latest news, prices, email...).
+_LIVE_DATA_WORDS = (
+    "news", "market", "stock", "price", "forex", "crypto", "email",
+    "inbox", "mail", "weather", "forecast", "temperature", "today",
+    "latest", "breaking", "play", "track", "song", "music", "task",
+    "todo", "code", "file", "folder", "scan", "backup", "schedule",
+    "meeting", "calendar", "send", "draft", "status", "report",
+    "digest", "score", "result", "election", "match", "game",
+)
+
+
+# Compact system prompt for PURE-CHAT fast-lane turns. The full orchestrator
+# prompt carries a ~2.2k-token roster of 21 agents that a no-tools answer
+# never uses — prefill of that prompt is most of the latency on a fanless
+# M3 (~160 tok/s). The fast lane sends this style-only prompt instead,
+# keeping the response-quality rules that actually govern chat output.
+_FAST_LANE_SYSTEM = (
+    "You are Dourmouse, a concise personal assistant. Answer directly and "
+    "warmly: the headline in one or two sentences, then detail if the "
+    "question needs it. No preamble, no meta-commentary, no emojis unless "
+    "asked. Never start with 'Okay,', 'Hmm,', 'Let me', or 'I think'. Do not "
+    "restate the question. If you do not know, say so in one sentence. Never "
+    "claim to have done something you did not do. Long-term memory appears "
+    "below as REMEMBERED CONTEXT when relevant."
+)
+
+
+def _is_pure_chat(prompt: str, registry: Any) -> bool:
+    """Deterministic pure-chat check: no plan AND no agent match (score >= 3),
+    plus a knowledge-question exemption so stable facts answer on the fast
+    lane even when a research agent nominally matches.
+
+    Mirrors the loop's scoped-tools condition (build_plan + the same
+    find_agents_for_query threshold); the knowledge exemption only ever
+    widens the fast lane, and when the fast lane is off the loop's own
+    scoped-tools logic is unchanged.
+    """
+    prompt_l = str(prompt).lower()
+    if build_plan(str(prompt), registry):
+        return False
+    from dourmouse.planner import find_agents_for_query
+
+    agentic = any(
+        m.get("score", 0) >= 3
+        for m in find_agents_for_query(registry, str(prompt), limit=2)
+    )
+    if not agentic:
+        return True
+    # Agent matched, but a pure knowledge question with no live-data intent
+    # answers faster (and just as well) on the local model.
+    return any(cue in prompt_l for cue in _KNOWLEDGE_CUES) and not any(
+        w in prompt_l for w in _LIVE_DATA_WORDS
+    )
 
 
 def _run_dispatch_loop(
@@ -1401,6 +1552,18 @@ def _run_dispatch_loop(
         # in-flight exchange + recent history), never the unbounded
         # conversation. The full list stays authoritative for persistence.
         bounded = _bounded_context(messages, _MAX_LLM_TOKENS)
+        # Fast lane (v5.x): pure-chat turns swap the 2.2k-token orchestrator
+        # roster for the compact style-only prompt AT THE API BOUNDARY only.
+        # The authoritative messages are untouched, so a later agentic turn
+        # in the same session still routes tools from the full prompt.
+        if (
+            getattr(ctx, "compact_system", False)
+            and bounded
+            and bounded[0].get("role") == "system"
+        ):
+            bounded = [
+                {"role": "system", "content": _FAST_LANE_SYSTEM}
+            ] + bounded[1:]
         response = _call_with_retry(
             client,
             model=model,

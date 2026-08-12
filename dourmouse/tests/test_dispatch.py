@@ -610,13 +610,97 @@ class TestModelOverride:
         )
         assert client.chat.completions.calls[0]["model"] == "nvidia/special-70b"
 
-    def test_config_default_model_when_no_override(self):
+    def test_config_default_model_when_no_override(self, monkeypatch):
+        # Override-plumbing test: pin the fast lane OFF so it asserts the
+        # config default flows through, not the lane's fast model.
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         from dourmouse.config import NvidiaConfig
 
         config = NvidiaConfig(api_key="k", base_url="u", model="nvidia/base-120b")
         client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
         run_dispatch("hi", _test_registry(), client=client, config=config)
         assert client.chat.completions.calls[0]["model"] == "nvidia/base-120b"
+
+    def test_fast_lane_uses_small_model_for_pure_chat(self, monkeypatch):
+        """v5.x: a PURE-CHAT turn (no plan, no agent match) answers on the
+        small local fast model — the "simple response" speed lane."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="4."))])
+        run_dispatch("what is 2+2", registry, client=client)
+        assert client.chat.completions.calls[0]["model"] == "qwen3:4b"
+
+    def test_fast_lane_skips_agentic_and_explicit(self, monkeypatch):
+        """An agentic directive (tools scoped) and an explicit model override
+        must NOT hit the fast lane — deterministic override wins."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", registry, client=client)
+        assert client.chat.completions.calls[0]["model"] != "qwen3:4b"
+
+        client2 = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("just say hi", registry, client=client2, model="nvidia/special-70b")
+        assert client2.chat.completions.calls[0]["model"] == "nvidia/special-70b"
+
+    def test_fast_lane_takes_knowledge_questions(self, monkeypatch):
+        """A stable-fact question ("what is the tallest mountain...") answers
+        on the fast model with NO tools even when a research agent nominally
+        matches — web research adds seconds for facts the model already knows.
+        Live-data questions (weather today, prices) stay agentic."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse.dispatch import _is_pure_chat
+
+        registry = build_general_registry()
+        assert _is_pure_chat("what is the tallest mountain on earth", registry)
+        assert _is_pure_chat("who is the current pope", registry)
+        assert _is_pure_chat("explain how dns works", registry)
+        # live-data intent must still escalate even in knowledge phrasing
+        assert not _is_pure_chat("what is the weather in London today", registry)
+        assert not _is_pure_chat("what is the stock price of AAPL", registry)
+        assert not _is_pure_chat("check my inbox", registry)
+
+        # integration: a knowledge question routes to the fast model and
+        # carries no tools at all
+        client = FakeClient([_FakeResponse(_FakeMessage(content="Everest."))])
+        run_dispatch("what is the tallest mountain on earth", registry, client=client)
+        call = client.chat.completions.calls[0]
+        assert call["model"] == "qwen3:4b"
+        assert not call.get("tools")
+
+    def test_fast_lane_sends_compact_system_prompt(self, monkeypatch):
+        """The fast lane swaps the 2.2k-token roster prompt for the compact
+        style-only prompt AT THE API BOUNDARY (prefill is the dominant
+        latency on a fanless M3). Agentic turns must keep the full prompt,
+        and the persisted authoritative messages stay untouched."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
+        from dourmouse.dispatch import _FAST_LANE_SYSTEM
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+
+        # pure chat: compact system at the API boundary
+        client = FakeClient([_FakeResponse(_FakeMessage(content="4"))])
+        run_dispatch("what is 2+2", registry, client=client)
+        sent = client.chat.completions.calls[0]["messages"]
+        assert sent[0]["role"] == "system"
+        assert sent[0]["content"] == _FAST_LANE_SYSTEM
+        assert "Lead Orchestrator" not in sent[0]["content"]
+
+        # agentic turn: full system prompt intact
+        client2 = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", registry, client=client2)
+        sent2 = client2.chat.completions.calls[0]["messages"]
+        assert "Lead Orchestrator" in sent2[0]["content"]
 
     def test_override_beats_config_default(self):
         from dourmouse.config import NvidiaConfig
@@ -1127,4 +1211,30 @@ class TestBrainEscalation:
             fast="full-model", default="full-model", prompt="do a then b", explicit=None
         )
         assert model == "full-model"
+        assert escalated is False
+
+    def test_music_prompt_escalates_tool_critical(self):
+        """v5.22.5: a single-step Spotify/music directive is tool-critical —
+        the fast brain fabricated playlist URIs and hallucinated an empty
+        playlist, so the stronger brain must handle it."""
+        for prompt in (
+            "play my jazz bar in nyc playlist on spotify",
+            "what's currently playing on Spotify",
+            "show me my top tracks",
+        ):
+            model, escalated = dispatch_module._resolve_brain_model(
+                fast="fast-model",
+                default="full-model",
+                prompt=prompt,
+                explicit=None,
+            )
+            assert model == "full-model", prompt
+            assert escalated is True, prompt
+
+    def test_non_music_simple_prompt_stays_fast(self):
+        model, escalated = dispatch_module._resolve_brain_model(
+            fast="fast-model", default="full-model",
+            prompt="what is the weather", explicit=None,
+        )
+        assert model == "fast-model"
         assert escalated is False

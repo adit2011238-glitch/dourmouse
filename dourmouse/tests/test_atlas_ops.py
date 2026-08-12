@@ -57,6 +57,27 @@ class TestConfig:
         monkeypatch.setenv("ATLAS_REPO_PATH", str(repo))
         assert get_atlas_repo_path() == repo
 
+    def test_bundled_fallback_without_env(self, monkeypatch, tmp_path):
+        """v5.22 personal dist: no env vars needed — the bundled atlas/ next
+        to the package resolves through the same chokepoint, and the honest
+        error class is preserved."""
+        import dourmouse.research_agent as research_agent
+
+        bundled = tmp_path / "atlas"
+        bundled.mkdir()
+        monkeypatch.delenv("ATLAS_REPO_PATH", raising=False)
+        monkeypatch.setattr(research_agent, "_BUNDLED_ATLAS_DIR", bundled)
+        assert get_atlas_repo_path() == bundled
+
+    def test_bundled_failure_still_raises_own_exception(self, monkeypatch):
+        import dourmouse.research_agent as research_agent
+
+        missing = Path("/no/bundled/atlas/here")
+        monkeypatch.delenv("ATLAS_REPO_PATH", raising=False)
+        monkeypatch.setattr(research_agent, "_BUNDLED_ATLAS_DIR", missing)
+        with pytest.raises(AtlasNotConfiguredError, match="ATLAS_REPO_PATH is not set"):
+            get_atlas_repo_path()
+
 
 class TestAtlasStatus:
     def test_counts_files_and_reports_branch(self, monkeypatch, tmp_path):

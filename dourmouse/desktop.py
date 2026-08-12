@@ -32,11 +32,13 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 import webbrowser
+from pathlib import Path
 from typing import Any, Callable
 
 _PORT_ENV = "DOURMOUSE_UI_PORT"
@@ -61,6 +63,44 @@ def _import_webview() -> Any:
             "`.venv/bin/python -m pip install -r requirements-desktop.txt`."
         ) from exc
     return webview
+
+
+_SPLIT_EXCLUDE = {
+    "python", "python3", "dourmouse", "finder", "loginwindow", "dock",
+    "systemuiserver", "controlcenter", "notificationcenter", "windowserver",
+    "touchbaragent", "spotlight", "wallpaper", "wifi", "stocks",
+    "shortcuts", "textedit", "preview", "pages", "numbers", "terminal",
+    "chronod", "coreautha", "talagentd", "universalaccessauthwarn",
+}
+
+
+def _applescript_escape(value: str) -> str:
+    """Escape a string for safe interpolation inside AppleScript double
+    quotes. Backslashes and double quotes are the two injection vectors
+    (reviewer-caught: app display names can carry invisible Unicode marks
+    like ``\u200eWhatsApp`` or quotes, so the native-split path prefers
+    bundle ids — this is the fallback for names without a known id)."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _is_split_app(name: str) -> bool:
+    """Is this app a sensible split-screen target? Excludes helper agents,
+    services and system daemons — the picker should show apps the user
+    actually chose to run (Chrome, Spotify, Claude, ...), not 60 helper
+    processes."""
+    low = name.lower()
+    if low in _SPLIT_EXCLUDE:
+        return False
+    for junk in ("helper", "service", "agent", "web content", "web ui",
+                 "graphics and media", "networking", "uielement",
+                 "autofill", "open and save panel", "notification",
+                 "siriactions", "uikit", "universal control", "wallpaper",
+                 "viewbridge", "widget"):
+        if junk in low:
+            return False
+    # Require a real bundle id with a dot (com.spotify.client) — filters out
+    # bare daemon ids.
+    return True
 
 
 class DesktopBridge:
@@ -98,12 +138,228 @@ class DesktopBridge:
         self._base_url = base_url
         self._state = state  # the server's StateStore (in-process)
         self._main_window: Any | None = None
+        self._atlas_window: Any | None = None
         self._agent_windows: dict[str, Any] = {}
 
     def attach_main_window(self, window: Any) -> None:
         """The shell's main window — created after the bridge, so attached
         once available (navigate() and close-persistence need it)."""
         self._main_window = window
+
+    def attach_atlas_window(self, window: Any) -> None:
+        """v5.22.7: the ATLAS strategy-lab window (for split-screen tiling)."""
+        self._atlas_window = window
+
+    def open_external(self, url: str) -> bool:
+        """v5.22.11: open a URL in a REAL browser — Google Chrome first.
+
+        The Google sign-in bridge lives here: Google refuses consent inside
+        the embedded WebKit webview, so the login page hands this the consent
+        URL. We PREFER Chrome (v5.22.12 — the user asked for Chrome
+        specifically; Google's sign-in is never blocked there) via AppKit's
+        bundle lookup, and fall back to the default browser via
+        ``webbrowser.open`` when Chrome is missing or AppKit is unavailable
+        (headless server, tests). Only http(s) URLs are ever accepted (no
+        file:, no schemes) — returns False honestly otherwise. Never raises
+        in a way that could crash the webview."""
+        import webbrowser
+
+        if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+            return False
+        if self._open_in_chrome(url):
+            return True
+        try:
+            return bool(webbrowser.open(url))
+        except Exception:  # noqa: BLE001 -- the bridge never crashes the webview
+            return False
+
+    @staticmethod
+    def _open_in_chrome(url: str) -> bool:
+        """Launch the URL in Google Chrome via AppKit (bundle lookup — no
+        assumptions about where Chrome lives; None when not installed).
+        Honest False when Chrome is missing, AppKit is unavailable, or the
+        launch fails — the caller falls back to the default browser."""
+        try:
+            from AppKit import NSWorkspace  # pyobjc ships with the desktop build
+            from Foundation import NSURL
+
+            workspace = NSWorkspace.sharedWorkspace()
+            chrome = workspace.URLForApplicationWithBundleIdentifier_(
+                "com.google.Chrome")
+            if chrome is None:
+                return False
+            ok = workspace.openURLs_withApplicationAtURL_options_configuration_error_(
+                [NSURL.URLWithString_(url)], chrome, 0, {}, None)
+            return bool(ok)
+        except Exception:  # noqa: BLE001 -- fall back to the default browser
+            return False
+
+    # -- v5.22.7: split-screen ------------------------------------------- #
+
+    def screen_size(self) -> dict[str, int]:
+        """The main display size in points, for split-screen math. Honest
+        fallback: (2560, 1440) when the display cannot be queried."""
+        try:
+            from AppKit import NSScreen  # pyobjc ships with the desktop build
+            frame = NSScreen.mainScreen().frame()
+            return {"width": int(frame.size.width), "height": int(frame.size.height)}
+        except Exception:  # noqa: BLE001 -- split math degrades to a sane default
+            return {"width": 2560, "height": 1440}
+
+    def list_running_apps(self) -> list[dict[str, str]]:
+        """Running GUI apps (macOS) the user can split-screen ATLAS with.
+
+        Uses ``lsappinfo`` (no permissions needed — it is a read-only
+        listing). Returns [{name, path}] sorted by name; [] honestly when
+        the query fails or is unavailable."""
+        if not sys.platform.startswith("darwin"):
+            return []
+        try:
+            proc = subprocess.run(
+                ["lsappinfo", "list"], capture_output=True, text=True, timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        # lsappinfo list format (macOS 13+): each app is a block like
+        #     N) "Spotify" ASN:0x0-0x54054:
+        #        bundleID="com.spotify.client"
+        #        bundle path="..."
+        # The display name is on the header line; bundleID on the next.
+        apps: dict[str, str] = {}
+        lines = proc.stdout.splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            header = re.match(r'^\d+\)\s+"([^"]+)"\s+ASN:', stripped)
+            if header:
+                name = header.group(1)
+                bundle = ""
+                # bundleID is on the first indented line after the header.
+                for nxt in lines[i + 1 : i + 4]:
+                    m = re.match(r'^\s+bundleID="([^"]+)"', nxt)
+                    if m:
+                        bundle = m.group(1)
+                        break
+                if bundle and _is_split_app(name):
+                    apps[name] = bundle
+        return [{"name": n, "bundle_id": b} for n, b in sorted(apps.items())]
+
+    def split_with_app(self, app_name: str,
+                       bundle_id: str | None = None) -> dict[str, Any]:
+        """Tile the ATLAS window on the LEFT half of the screen and the
+        named app's frontmost window on the RIGHT half (macOS).
+
+        ``bundle_id`` (from ``list_running_apps``) is the preferred target:
+        ``tell application id \"com.spotify.client\"`` is immune to display
+        names carrying invisible Unicode marks or quotes. Without it, the
+        name is AppleScript-escaped. Uses AppleScript + System Events
+        (Accessibility permission required to move OTHER apps' windows;
+        ATLAS itself is moved via pywebview, which needs no permission).
+        Returns an honest dict: ok, atlas_half (always attempted),
+        other_half (None when the other app window could not be moved),
+        error (when osascript itself failed).
+        """
+        if not sys.platform.startswith("darwin"):
+            return {"ok": False, "error": "split-screen is macOS-only"}
+        size = self.screen_size()
+        half_w = size["width"] // 2
+        result: dict[str, Any] = {"ok": True, "atlas_half": True, "other_half": None}
+        # 1) ATLAS window to the left half — pure pywebview, no permissions.
+        try:
+            atlas = self._atlas_window
+            if atlas is not None and hasattr(atlas, "move") and hasattr(atlas, "resize"):
+                atlas.move(0, 0)
+                atlas.resize(half_w, size["height"])
+                atlas.show()
+        except Exception:  # noqa: BLE001 -- report, keep going
+            result["atlas_half"] = False
+        # 2) Bring the other app forward, then tile its front window right.
+        app_name = (app_name or "").strip()
+        if not app_name:
+            result["ok"] = False
+            result["error"] = "no app name given"
+            return result
+        # Target the app by bundle id when known — bundle ids are
+        # [a-z0-9.-], always interpolation-safe. The display name is the
+        # escaped fallback.
+        if bundle_id:
+            app_ref = f'id "{bundle_id}"'
+            proc_ref = f'(first process whose bundle identifier is "{bundle_id}")'
+        else:
+            safe = _applescript_escape(app_name)
+            app_ref = f'"{safe}"'
+            proc_ref = f'"{safe}"'
+        try:
+            script = (
+                f"tell application {app_ref} to activate\n"
+                "delay 0.1\n"
+                "tell application \"System Events\"\n"
+                f"    tell {proc_ref}\n"
+                "        set frontmost to true\n"
+                "        if (count of windows) > 0 then\n"
+                f"            set position of window 1 to {{{half_w}, 0}}\n"
+                f"            set size of window 1 to {{{half_w}, {size['height']}}}\n"
+                "        end if\n"
+                "    end tell\n"
+                "end tell"
+            )
+            proc = subprocess.run(
+                ["osascript", "-e", script], capture_output=True, text=True, timeout=15,
+            )
+            if proc.returncode == 0:
+                result["other_half"] = True
+            else:
+                err = (proc.stderr or "").strip()
+                result["ok"] = False
+                result["other_half"] = False
+                if "assistive" in err.lower() or "accessibility" in err.lower() \
+                        or "not allowed" in err.lower() or "not authorised" in err.lower():
+                    result["error"] = (
+                        "ATLAS is on the left half. To tile the other app's "
+                        "window I need Accessibility permission — System "
+                        "Settings → Privacy & Security → Accessibility → "
+                        "enable the terminal/app that launched DourMouse."
+                    )
+                else:
+                    result["error"] = f"could not tile '{app_name}': {err[:200]}"
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            result["ok"] = False
+            result["other_half"] = False
+            result["error"] = f"osascript unavailable: {exc}"
+        return result
+
+    def split_in_window(self, url: str | None = None) -> bool:
+        """v5.22.7: navigate the ATLAS window's second pane to an arbitrary
+        URL (in-window split). The page handles the split UI; this simply
+        returns True honestly when the window is attached (no-op on the
+        browser fallback)."""
+        return self._atlas_window is not None
+
+    def open_all_hands(self, run_id: str, goal: str = "") -> bool:
+        """v5.22.9: open the dedicated ALL HANDS window for one run.
+
+        One window per run id (reused/brought to front, never duplicated —
+        the same dedupe pattern as open_agent). Falls back honestly to
+        False when no run id was given (the page then shows recent runs).
+        """
+        run_id = (run_id or "").strip()
+        if not run_id:
+            return False
+        win = self._agent_windows.get(f"allhands:{run_id}")
+        if win is not None and not getattr(win, "closed", False):
+            win.show()
+            return True
+        title = f"ALL HANDS // {(goal or run_id).strip()[:28].upper()}"
+        win = self._webview.create_window(
+            title,
+            f"{self._base_url}/all-hands?run={run_id}",
+            width=980,
+            height=760,
+            min_size=(720, 540),
+        )
+        self._agent_windows[f"allhands:{run_id}"] = win
+        return True
 
     def open_map(self) -> None:
         self._map_window.show()
@@ -332,6 +588,40 @@ def _fallback_to_browser(url: str, reason: str) -> int:
     return 1
 
 
+def _brand_native_app() -> None:
+    """Set the native macOS app identity — name in the Dock/menu bar,
+    Force Quit window, and the app icon — instead of showing "Python".
+
+    Best-effort (guarded): pyobjc may not be available, and the personal
+    build ships pywebview which pulls pyobjc — so this normally works.
+    Without it the app still runs, it just shows "Python" in the menu bar.
+    """
+    try:
+        from AppKit import NSApplication, NSImage
+        from Foundation import NSBundle
+
+        app = NSApplication.sharedApplication()
+        app.setName_("DourMouse")
+        # Also set the bundle-level name so Force Quit, Dock tooltip, etc.
+        # reflect it.
+        bundle = NSBundle.mainBundle()
+        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+        if info:
+            info.setObject_forKey_("DourMouse", "CFBundleName")
+            info.setObject_forKey_("DourMouse", "CFBundleDisplayName")
+        # Dock icon: use the bundled DourMouse.icns if found next to the app.
+        icon_path = str(Path(__file__).resolve().parent.parent / "dourmouse.app" / "Contents" / "Resources" / "DourMouse.icns")
+        if not Path(icon_path).is_file():
+            # Try the installed /Applications path.
+            icon_path = "/Applications/dourmouse-dist/dourmouse.app/Contents/Resources/DourMouse.icns"
+        if Path(icon_path).is_file():
+            img = NSImage.alloc().initWithContentsOfFile_(icon_path)
+            if img:
+                app.setApplicationIconImage_(img)
+    except Exception:
+        pass  # Best-effort: the app runs without branding.
+
+
 def launch(
     registry: Any | None = None,
     *,
@@ -341,20 +631,21 @@ def launch(
     height: int = 900,
     webview_loader: Callable[[], Any] | None = None,
     live_polling: bool = True,
-    open_all_windows: bool = True,
+    open_all_windows: bool = False,
     deep_link: str | None = None,
 ) -> int:
     """Launch the DOURMOUSE desktop app. Returns a process exit code.
 
-    Starts the web UI server on a background thread, then opens a native
-    PyWebView window pointed at it. Falls back to the default browser with an
-    honest message when pywebview is unavailable.
+    Starts the web UI server on a background thread, opens a SINGLE native
+    PyWebView window (no 30 agent windows at startup — they open on demand
+    when you interact with an agent in the UI). Falls back to the default
+    browser with an honest message when pywebview is unavailable.
 
+    Pass ``open_all_windows=True`` only for testing (and if you really want
+    every agent's window at launch — the pre-v5.22.2 behaviour).
     ``webview_loader`` is the test seam for ``_import_webview``.
     ``live_polling`` (v2.8): start the always-on live agent loops (env
     DOURMOUSE_LIVE=0 still disables them, see live_runtime.live_enabled).
-    ``open_all_windows`` (v2.8): open every agent's own native window at
-    startup so the whole roster is live and immediately working.
     ``memory`` (v2.9): long-term store for the Store & Learn loop. None
     (default) opens the default store — the real app learns from every
     completed session (DOURMOUSE_LEARN=0 honestly disables it, see
@@ -438,6 +729,35 @@ def launch(
             js_api=bridge,
         )
         bridge.attach_main_window(main_window)
+        # v5.22.6: the ATLAS window — a second DOURMOUSE that is ONLY the
+        # strategy lab. A live leaderboard (best→worst) that auto-syncs from
+        # the valerygordon200-byte/atlas-strategy-lab GitHub repo, so
+        # strategies pushed from the other desktop appear automatically.
+        # Opened at launch, sized smaller, positioned offset from the main
+        # window; the bridge's open_agent-style reuse keeps it to ONE.
+        atlas_window = webview.create_window(
+            "ATLAS // STRATEGY LAB",
+            f"{url}/atlas-lab",
+            width=1100,
+            height=760,
+            min_size=(820, 540),
+            js_api=bridge,
+        )
+        bridge.attach_atlas_window(atlas_window)
+        try:
+            # Open on the right of the main window when geometry is known,
+            # otherwise let the OS tile it. pywebview Window geometry is
+            # moved via move(x, y), not attribute assignment (reviewer-
+            # caught: ``window.x = N`` silently no-ops).
+            if (getattr(main_window, "x", None) is not None
+                    and getattr(main_window, "width", None) is not None
+                    and getattr(atlas_window, "move", None) is not None):
+                atlas_window.move(
+                    int(getattr(main_window, "x")) + int(getattr(main_window, "width")) + 8,
+                    int(getattr(main_window, "y", 0) or 0),
+                )
+        except Exception:  # noqa: BLE001 -- tiling is best-effort
+            pass
         # Persist geometry on close so the next launch reopens where the
         # user left it. Guarded: a webview without window.events (old
         # backend / test fake) must never break the shell.
@@ -471,6 +791,9 @@ def launch(
 
             notifier_sink = _HubSink()
             events_hub.register(notifier_sink)
+        # Brand the native app before starting the window loop — sets the
+        # Dock icon and menu-bar name to "DourMouse" instead of "Python".
+        _brand_native_app()
         # Blocks until every window is closed; Ctrl+C also returns. If the
         # GUI backend fails at start() (headless/SSH session, missing pyobjc),
         # degrade to the browser with a clear message — the server stays up.
