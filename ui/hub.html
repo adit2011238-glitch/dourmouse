@@ -80,14 +80,20 @@
 </header>
 
 <nav>
-  <div class="tab active" data-pane="atlas">▣ ATLAS <span class="tag">engine</span></div>
+  <div class="tab active" data-pane="product">◉ PRODUCT <span class="tag">the lab</span></div>
+  <div class="tab" data-pane="atlas">▣ ATLAS <span class="tag">engine</span></div>
   <div class="tab" data-pane="dourmouse">◈ DOURMOUSE <span class="tag">core</span></div>
   <div class="tab" data-pane="feed">≡ TAILSCALE FEED <span class="tag">live</span></div>
 </nav>
 
 <main>
+  <!-- ================= PRODUCT (one screen on load, tabs behind the Lab door) ================= -->
+  <section class="pane active" id="pane-product">
+    <iframe id="frameProd" src="product.html" style="width:100%; height:100%; border:none; background:var(--ground)"></iframe>
+  </section>
+
   <!-- ================= ATLAS ================= -->
-  <section class="pane active" id="pane-atlas">
+  <section class="pane" id="pane-atlas">
     <div class="row" style="margin-bottom:8px">
     <div class="card" style="flex:1">
       <h3>PIPELINE (supervisor :8792)</h3>
@@ -129,13 +135,13 @@
 
   <!-- ================= FEED ================= -->
   <section class="pane" id="pane-feed">
-    <iframe id="frameFeed" src="http://127.0.0.1:8788/"></iframe>
+    <iframe id="frameFeed" src="__FEED_URL__/"></iframe>
   </section>
 </main>
 
 <script>
 const ENGINE = "http://127.0.0.1:8790";
-const FEED   = "http://127.0.0.1:8788";
+const FEED   = "__FEED_URL__".startsWith("__") ? "http://127.0.0.1:8788" : "__FEED_URL__";
 const ENGINE_TOKEN = "__ENGINE_TOKEN__";
 const EH = ENGINE_TOKEN && ENGINE_TOKEN !== "" ? { "Content-Type": "application/json", "X-Engine-Token": ENGINE_TOKEN } : { "Content-Type": "application/json" };
 

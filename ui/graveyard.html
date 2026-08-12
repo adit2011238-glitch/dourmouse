@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // GRAVEYARD</title>
+<style>
+  :root {
+    --ground: #0B0E14; --surface: #12151E; --surface2: #161B27;
+    --cyan: #4FC3F7; --cyan-rgb: 79,195,247;
+    --amber: #F5A623; --red: #EF5350; --gold: #FFD232; --dead: #8A929E;
+    --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22; --a45: 0.45; --a85: 0.85;
+    --font-display: "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
+    --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
+    --text: rgba(var(--cyan-rgb), var(--a85));
+    --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    --line: rgba(var(--cyan-rgb), var(--a10));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--ground); color: var(--text); font-family: var(--font-mono);
+         min-height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 18px;
+           border-bottom: 1px solid var(--line); background: var(--surface); }
+  .wordmark { font-family: var(--font-wordmark); font-size: 15px; letter-spacing: 3px; color: var(--gold); }
+  .wordmark span { color: var(--cyan); }
+  .tag { font-size: 10px; letter-spacing: 2px; color: var(--amber);
+         border: 1px solid rgba(245,166,35,.4); padding: 2px 8px; }
+  .spacer { flex: 1; }
+  .count { font-size: 20px; color: var(--red); font-family: var(--font-display); }
+  main { flex: 1; max-width: 1080px; width: 100%; margin: 0 auto; padding: 20px 18px 40px; }
+  .controls { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  input, select { background: var(--surface2); color: var(--text); border: 1px solid var(--line);
+                  font-family: var(--font-mono); font-size: 12px; padding: 8px 12px; }
+  input { flex: 1; min-width: 240px; }
+  select { min-width: 180px; }
+  .hint { font-size: 10px; color: var(--text-dim); letter-spacing: 1px; margin-bottom: 16px; }
+  .entry { background: var(--surface); border: 1px solid var(--line); margin-bottom: 14px; cursor: pointer; }
+  .entry:hover { border-color: rgba(var(--cyan-rgb), var(--a45)); }
+  .e-h { display: flex; align-items: center; gap: 12px; padding: 12px 14px; flex-wrap: wrap; }
+  .e-name { font-family: var(--font-display); font-size: 13px; color: var(--text); }
+  .e-fam { font-size: 9px; letter-spacing: 2px; color: var(--amber); border: 1px solid rgba(245,166,35,.3);
+           padding: 2px 8px; white-space: nowrap; }
+  .e-status { font-size: 9px; letter-spacing: 2px; color: var(--red); border: 1px solid rgba(239,83,80,.5);
+              padding: 2px 8px; white-space: nowrap; }
+  .e-date { font-size: 10px; color: var(--text-dim); margin-left: auto; white-space: nowrap; }
+  .e-head { width: 100%; font-size: 11px; color: var(--dead); padding: 0 14px 10px; }
+  .e-body { display: none; padding: 0 14px 14px; border-top: 1px solid var(--line); font-size: 11px; }
+  .entry.open .e-body { display: block; }
+  .e-body h4 { font-size: 9px; letter-spacing: 2px; color: var(--amber); margin: 12px 0 4px; }
+  .e-body p { color: var(--text-dim); line-height: 1.55; }
+  .e-body li { margin-left: 18px; color: var(--text-dim); }
+  .e-src { font-size: 10px; color: var(--dead); margin-top: 10px; word-break: break-all; }
+  .none { color: var(--dead); font-size: 12px; padding: 20px; text-align: center; }
+  footer { padding: 14px 18px; border-top: 1px solid var(--line); font-size: 10px;
+           color: var(--text-dim); letter-spacing: 1px; }
+  a { color: var(--cyan); text-decoration: none; } a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wordmark">DOURMOUSE<span>//</span>GRAVEYARD</div>
+  <div class="tag">THE DEAD</div>
+  <div class="spacer"></div>
+  <span class="count" id="count">17</span>
+  <span style="font-size:10px;color:var(--text-dim)">killed strategies · every one with its post-mortem</span>
+</header>
+<main>
+  <div class="controls">
+    <input id="q" placeholder="search: name, family, mechanism, post-mortem, asset…" oninput="apply()">
+    <select id="fam" onchange="apply()"><option value="">ALL FAMILIES</option><option value="breakout">breakout</option><option value="calendar">calendar</option><option value="calendar-forced hedging">calendar-forced hedging</option><option value="calendar-forced hedging (portfolio construction)">calendar-forced hedging (portfolio construction)</option><option value="cross-asset">cross-asset</option><option value="informed under-reaction">informed under-reaction</option><option value="mean-reversion">mean-reversion</option><option value="momentum">momentum</option><option value="positioning">positioning</option><option value="price-action">price-action</option><option value="relative-value / statistical arbitrage">relative-value / statistical arbitrage</option><option value="structurally-forced flows">structurally-forced flows</option><option value="volume">volume</option></select>
+  </div>
+  <div class="hint">17 killed strategies across 13 mechanism families — every number sourced, every post-mortem honest. Click any entry for the full record. Nothing here is 'fixed' — it's evidence.</div>
+  <div id="list"></div>
+</main>
+<footer>VERDICT: A (THE LAB) · WE DON'T SELL PICKS, WE SELL THE RECEIPTS · <a href="product.html">back to the product</a></footer>
+<script>
+const DATA = {"count": 17, "families": ["breakout", "calendar", "calendar-forced hedging", "calendar-forced hedging (portfolio construction)", "cross-asset", "informed under-reaction", "mean-reversion", "momentum", "positioning", "price-action", "relative-value / statistical arbitrage", "structurally-forced flows", "volume"], "entries": [{"id": "seasonal-lean-hogs-aug", "name": "Lean Hogs August SHORT (commodity seasonal)", "family": "calendar-forced hedging", "mechanism_claim": "Hog producers must move hogs before summer heat; packers buy at a fixed calendar cadence.", "forced_participant": "Named: hog producers/packers (biological calendar). BUT the effect did not survive the roll check — see post-mortem.", "data": "Yahoo =F continuous front-month, 2000-2026 daily OHLC; roll-decomposed front/back/gap legs.", "tests_run": ["305-cell selection 2000-2014 |t|>2", "blind holdout 2015-2026 net of spread+financing", "roll decomposition (legA held path / legB back path / roll gap)", "golden regression lock"], "kill_criterion": "Roll artifact: apparent edge lives in the roll discontinuity, not in any capturable held position.", "post_mortem": "Continuous series: -13.62% mean, t=-7.53 (looks like a gift). Decomposed: real held-position path -0.03%, t=-0.02 (a coin flip); the roll gap itself carries -13.59%, t=-10.99. The 'edge' was the cost of splicing contracts, never a tradeable return. A short in August on the continuous series is not a short in the contract that is live in August.", "killed_date": "2026-08-11", "source": "reports/SEASONAL_VERDICT.md; E:/forex-data/scripts/hog_august_roll_check; golden_regressions.py", "headline": "continuous -13.62% t-7.53 -> real path -0.03% t-0.02 (roll gap -13.59% t-10.99)", "status": "dead"}, {"id": "seasonal-commodities-28", "name": "All 28 commodity-month seasonals, clean test", "family": "calendar-forced hedging", "mechanism_claim": "Recurring monthly price patterns from forced physical-calendar flows (harvests, blends, seasons).", "forced_participant": "Candidates named per cell, but see result: 0/28 significant on the roll-adjusted test.", "data": "26 instruments x 12 months = 312 cells; Yahoo =F continuous; roll-adjusted returns.", "tests_run": ["312-cell clean roll-adjusted test", "per-cell |t| threshold", "roll-resistance check"], "kill_criterion": "0/28 significant once returns are roll-adjusted and tradeable — the entire family is void.", "post_mortem": "The flagship (Aug hogs) died to the roll artifact; the clean test confirmed the whole family follows. The apparent edge was construction, not market. Do not re-test any single-instrument calendar effect.", "killed_date": "2026-08-11", "source": "reports/SEASONAL_VERDICT.md; campaign brief step 1 roll-adjusted re-run", "headline": "0/28 significant on clean roll-adjusted test — seasonal catalog is void", "status": "dead"}, {"id": "seasonal-portfolio-35", "name": "35-selection seasonal portfolio at $100 (naive)", "family": "calendar-forced hedging (portfolio construction)", "mechanism_claim": "Diversified seasonal basket at $100 compounded.", "forced_participant": "n/a — construction test, not mechanism test.", "data": "Same seasonal universe; $100 starting capital, $100 min notional, platform margin rules.", "tests_run": ["$100 compounded simulation, all 35 selections every year"], "kill_criterion": "Account blown: equity -$1.93 by 2015-09, Sharpe -2.76, max DD -101.9%.", "post_mortem": "The $100 minimum with ~9 concurrent positions forces ~9x gross leverage (280 months forced oversizing). At $100 the platform cap allows 6-8 trades/yr, not 35. A portfolio built without the account-size constraint is untradeable by construction.", "killed_date": "2026-08-11", "source": "reports/SEASONAL_VERDICT.md (Version A)", "headline": "blown account in 8 months at $100; Sharpe -2.76 — untradeable construction", "status": "dead"}, {"id": "fx-donchian-breakout", "name": "Donchian Channel Breakout (Turtle-style)", "family": "breakout", "mechanism_claim": "Trend following on channel breaks, classic Turtle rules.", "forced_participant": "None found. Trend followers are voluntary; no one is forced to transact.", "data": "12 FX pairs D1+H1, 2016-2026, 13,655 backtest trades.", "tests_run": ["registry backtest battery", "IS/OOS split", "strict cost model"], "kill_criterion": "OOS median Sharpe negative (-0.484); best-pair Sharpe 0.297 in-sample decays to negative OOS.", "post_mortem": "Directional breakout systems fade after publication (this project's graveyard rule). No forced participant, no survival.", "killed_date": "2026-08-06", "source": "E:/forex-data/strategies/registry.parquet (donchian-breakout)", "headline": "IS best Sharpe 0.297 -> OOS median -0.484", "status": "dead"}, {"id": "fx-pin-bar-reversal", "name": "Pin Bar / Hammer Reversal", "family": "price-action", "mechanism_claim": "Single-candle rejection patterns predict reversal.", "forced_participant": "None found.", "data": "12 FX pairs, 4,482 backtest trades.", "tests_run": ["registry backtest battery", "IS/OOS split", "strict cost model"], "kill_criterion": "OOS median Sharpe -1.437; IS best 0.662 is noise.", "post_mortem": "Chart patterns without a mechanism and without a forced participant. The IS edge is in-sample noise (as the permutation stages confirm).", "killed_date": "2026-08-06", "source": "E:/forex-data/strategies/registry.parquet (pin-bar-reversal)", "headline": "IS 0.662 -> OOS median -1.437", "status": "dead"}, {"id": "fx-harami-pullback", "name": "Harami Pullback Entry", "family": "price-action", "mechanism_claim": "Candlestick pullback continuation.", "forced_participant": "None found.", "data": "12 FX pairs, 4 backtest trades.", "tests_run": ["registry backtest battery"], "kill_criterion": "Insufficient sample (4 trades) — statistically meaningless.", "post_mortem": "Nothing to believe: 4 trades cannot support any claim. Registry status: insufficient-sample.", "killed_date": "2026-08-06", "source": "E:/forex-data/strategies/registry.parquet (harami-pullback)", "headline": "4 trades total — insufficient sample", "status": "dead"}, {"id": "fx-cross-sectional-momentum", "name": "Cross-sectional momentum on FX pairs", "family": "momentum", "mechanism_claim": "Rank pairs by trailing return, buy the leaders.", "forced_participant": "None found.", "data": "12 FX pairs D1, 2016-2026.", "tests_run": ["full strict battery", "permutation", "walk-forward"], "kill_criterion": "Fails OOS; graveyard-listed.", "post_mortem": "Directional momentum is competed away fast (documented post-publication decay). No forced flow sustains it.", "killed_date": "2026-08-08", "source": "EDGE-FINDING MASTER PLAN graveyard; fx_campaign results", "headline": "dead per project graveyard (no OOS hold)", "status": "dead"}, {"id": "fx-day-of-week-turn-of-month", "name": "Day-of-week / turn-of-month calendar effects", "family": "calendar", "mechanism_claim": "Recurring weekday/month-boundary FX patterns.", "forced_participant": "None named — retail calendar folklore.", "data": "12 FX pairs D1, 2016-2026.", "tests_run": ["full strict battery"], "kill_criterion": "No consistent OOS effect on liquid FX.", "post_mortem": "Calendar patterns on major FX are arbitraged; graveyard-listed.", "killed_date": "2026-08-08", "source": "EDGE-FINDING MASTER PLAN graveyard", "headline": "dead", "status": "dead"}, {"id": "fx-dollar-basket-underreaction", "name": "Dollar-basket EUR/USD news under-reaction", "family": "informed under-reaction", "mechanism_claim": "US releases move the dollar; markets under-react to genuine surprises.", "forced_participant": "Mechanism plausible (hedgers forced to reprice), but the test failed — see post-mortem.", "data": "Forex Factory event archive; 5-pair basket; EURUSD execution leg.", "tests_run": ["404-cell campaign", "surprise z vs basket move", "momentum control arm", "strict battery"], "kill_criterion": "1/404 full-pass initially; per-pair evaluation after a concatenation bug fix — the apparent signal was a construction artifact (all pairs aggregated into one frame).", "post_mortem": "The first-pass 'survivor' was a bug: sizez/volman/streak builders concatenated all 5 pairs, so each 'pair' row was the same aggregate. Fixed to per-pair evaluation: 404 honest tests, no surviving full-pass candidate. The failure was real per-pair null, not just a proxy problem.", "killed_date": "2026-08-11", "source": "fx_campaign_round2.py; fx_strict_battery.py; campaign reports", "headline": "404 tests, 1 artifact 'pass' -> 0 after per-pair fix", "status": "dead"}, {"id": "fx-breakout-family", "name": "Opening-range / Dual Thrust / London breakouts", "family": "breakout", "mechanism_claim": "Range breaks carry momentum.", "forced_participant": "None found.", "data": "12 FX pairs D1, 2016-2026.", "tests_run": ["full strict battery", "walk-forward"], "kill_criterion": "Fades out-of-sample; graveyard-listed.", "post_mortem": "All directional breakout systems tested in this project fade rather than follow.", "killed_date": "2026-08-08", "source": "EDGE-FINDING MASTER PLAN graveyard", "headline": "dead", "status": "dead"}, {"id": "fx-single-instrument-momentum", "name": "Single-instrument time-series momentum / trend-following", "family": "momentum", "mechanism_claim": "Trend persistence on one instrument.", "forced_participant": "None found.", "data": "12 FX pairs D1, 2016-2026.", "tests_run": ["full strict battery"], "kill_criterion": "Decays sharply post-publication (Sharpe 0.96 -> 0.04 documented for the published variant).", "post_mortem": "Genuinely strong in-sample, genuinely gone out-of-sample. The canonical case of an edge being arbitraged the moment it is published.", "killed_date": "2026-08-08", "source": "EDGE-FINDING MASTER PLAN graveyard; prior momentum tests", "headline": "dead — published edges decay", "status": "dead"}, {"id": "fx-cot-standalone", "name": "COT positioning as a standalone signal", "family": "positioning", "mechanism_claim": "Commercial positioning predicts price.", "forced_participant": "Commercials are the forced participants — but the public report is too lagged and too crowded to trade.", "data": "COT weekly reports, FX, 2016-2026.", "tests_run": ["full strict battery"], "kill_criterion": "No standalone OOS edge.", "post_mortem": "The mechanism is real (commercials ARE forced) but the signal is public, weekly, and lagged — everyone trades it, so it prices the information before you can. Mechanism real, tradeability zero.", "killed_date": "2026-08-08", "source": "EDGE-FINDING MASTER PLAN graveyard", "headline": "dead as standalone signal", "status": "dead"}, {"id": "fx-volume-directional", "name": "Volume as a directional predictor", "family": "volume", "mechanism_claim": "Volume precedes price direction.", "forced_participant": "None — volume reflects participation, it forces nothing.", "data": "12 FX pairs D1, 2016-2026.", "tests_run": ["full strict battery"], "kill_criterion": "Volume predicts move SIZE, not direction — confirmed null for direction.", "post_mortem": "A rare confirmed-positive: volume DOES predict the size of future moves (validated with real t-stats), and is null for direction. Repurposed as a risk-sizing input, never an entry signal.", "killed_date": "2026-08-08", "source": "EDGE-FINDING MASTER PLAN graveyard; VOL_MODULE.md", "headline": "null for direction; valid for size (risk-sizing only)", "status": "dead"}, {"id": "fx-weekend-crypto", "name": "Weekend crypto move -> FX prediction", "family": "cross-asset", "mechanism_claim": "Weekend crypto moves leak into Monday FX.", "forced_participant": "None found.", "data": "BTCUSD + FX pairs D1.", "tests_run": ["full strict battery"], "kill_criterion": "No OOS effect.", "post_mortem": "Graveyard-listed after failed test.", "killed_date": "2026-08-08", "source": "EDGE-FINDING MASTER PLAN graveyard", "headline": "dead", "status": "dead"}, {"id": "fx-bollinger-mean-reversion", "name": "Bollinger-band mean reversion (single instrument)", "family": "mean-reversion", "mechanism_claim": "Price reverts to the band.", "forced_participant": "None — without a cointegration structure there is no reason for the level to revert.", "data": "12 FX pairs D1, 2016-2026.", "tests_run": ["full strict battery"], "kill_criterion": "Fails OOS without cointegration; graveyard-listed.", "post_mortem": "Single-instrument band reversion is not mean reversion — it is gambling on a level with no anchor. The cointegration variants (spreads with a real economic link) remain untested/eligible.", "killed_date": "2026-08-08", "source": "EDGE-FINDING MASTER PLAN graveyard", "headline": "dead (single-instrument; no cointegration)", "status": "dead"}, {"id": "campaign-tier1-flows", "name": "Index reconstitution / witching / LETF decay / window dressing", "family": "structurally-forced flows", "mechanism_claim": "Index add/drop, expiry close-outs, LETF daily rebalancing, quarter-end window dressing create forced flows.", "forced_participant": "Named per mechanism (index funds, LETF issuers, fund managers) — but tested and killed in the 30-candidate campaign.", "data": "Russell reconstitution dates, witching dates, leveraged ETF pairs, IPO lockups; yfinance.", "tests_run": ["30-candidate campaign", "full strict battery", "event studies"], "kill_criterion": "No candidate survived the full pipeline; campaign verdict = no promoted survivors.", "post_mortem": "The mechanisms are real (these ARE forced flows) but the effects are either already priced (crowded, e.g. witching) or too small after costs (IPO lockups: 844-name sample, no OOS edge strong enough). Real mechanism does not guarantee a tradeable residual.", "killed_date": "2026-08-11", "source": "reports/campaign_30_verdict.md; TRACK_A/B/C reports", "headline": "0 survivors from the 30-candidate campaign", "status": "dead"}, {"id": "spreads-crush-crack-feed", "name": "Crush / crack / hog-corn feed spreads", "family": "relative-value / statistical arbitrage", "mechanism_claim": "Processor margins (soybean crush, crude crack, hog-corn feed) mean-revert around an economic anchor.", "forced_participant": "Named: processors must hedge margins (forced flows on both legs).", "data": "Continuous + individual contract legs; roll-resistance tested both ways.", "tests_run": ["roll-resistance check (two constructions)", "Engle-Granger cointegration IS+OOS", "full strict battery"], "kill_criterion": "Campaign verdict: no spread candidate survived the full pipeline on the roll-resistant construction.", "post_mortem": "The mechanisms are the project's strongest (genuine forced hedgers) but the tradable residual did not survive: cointegration not stable OOS, or net edge below 2x round-trip cost after two legs of spread + financing. Roll-resistance check ran before any number was trusted (per the standing rule).", "killed_date": "2026-08-11", "source": "reports/TRACK_A_SPREADS.md", "headline": "0/4 spreads survived the pipeline", "status": "dead"}]};
+const famSel = document.getElementById("fam");
+DATA.families.forEach(f => { const o = document.createElement("option"); o.value = f; o.textContent = f; famSel.appendChild(o); });
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function rows(e){
+  const body = e.tests_run && e.tests_run.length
+    ? `<h4>TESTS RUN</h4><ul>${e.tests_run.map(t=>`<li>${esc(t)}</li>`).join("")}</ul>` : "";
+  return `<div class="e-body">
+    <h4>HYPOTHESIS</h4><p>${esc(e.mechanism_claim)}</p>
+    <h4>FORCED PARTICIPANT</h4><p>${esc(e.forced_participant)}</p>
+    <h4>DATA</h4><p>${esc(e.data)}</p>
+    ${body}
+    <h4>KILL CRITERION</h4><p style="color:var(--red)">${esc(e.kill_criterion)}</p>
+    <h4>POST-MORTEM</h4><p>${esc(e.post_mortem)}</p>
+    <div class="e-src">source: ${esc(e.source)}</div>
+  </div>`;
+}
+function apply(){
+  const q = document.getElementById("q").value.toLowerCase();
+  const fam = document.getElementById("fam").value;
+  const list = document.getElementById("list");
+  const hits = DATA.entries.filter(e => {
+    if (fam && e.family !== fam) return false;
+    if (!q) return true;
+    const hay = [e.name, e.family, e.mechanism_claim, e.forced_participant,
+                 e.data, e.post_mortem, e.kill_criterion, e.headline].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+  document.getElementById("count").textContent = hits.length;
+  list.innerHTML = hits.length ? "" : '<div class="none">nothing here — that is the point. (try a different filter)</div>';
+  hits.forEach(e => {
+    const el = document.createElement("div");
+    el.className = "entry";
+    el.innerHTML = `<div class="e-h">
+        <span class="e-name">${esc(e.name)}</span>
+        <span class="e-fam">${esc(e.family)}</span>
+        <span class="e-status">${esc(e.status)}</span>
+        <span class="e-date">killed ${esc(e.killed_date)}</span>
+        <div class="e-head">${esc(e.headline)}</div>
+      </div>${rows(e)}`;
+    el.addEventListener("click", () => el.classList.toggle("open"));
+    list.appendChild(el);
+  });
+}
+apply();
+</script>
+</body>
+</html>

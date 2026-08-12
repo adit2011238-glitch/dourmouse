@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // PRODUCT</title>
+<style>
+  :root {
+    --ground: #0B0E14; --surface: #12151E; --surface2: #161B27;
+    --cyan: #4FC3F7; --cyan-rgb: 79,195,247;
+    --amber: #F5A623; --red: #EF5350; --gold: #FFD232; --dead: #8A929E;
+    --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22; --a45: 0.45; --a85: 0.85;
+    --font-display: "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
+    --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
+    --text: rgba(var(--cyan-rgb), var(--a85));
+    --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    --line: rgba(var(--cyan-rgb), var(--a10));
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--ground); color: var(--text); font-family: var(--font-mono);
+         min-height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 18px;
+           border-bottom: 1px solid var(--line); background: var(--surface); }
+  .wordmark { font-family: var(--font-wordmark); font-size: 15px; letter-spacing: 3px;
+              color: var(--gold); }
+  .wordmark span { color: var(--cyan); }
+  .tag { font-size: 10px; letter-spacing: 2px; color: var(--amber);
+         border: 1px solid rgba(245,166,35,.4); padding: 2px 8px; }
+  .spacer { flex: 1; }
+  .clock { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; }
+  .demo-banner { background: rgba(255,210,50,.08); color: var(--gold); font-size: 10px;
+                 letter-spacing: 1px; padding: 4px 18px; border-bottom: 1px solid var(--line); }
+  main { flex: 1; max-width: 1080px; width: 100%; margin: 0 auto; padding: 20px 18px 40px; }
+  .zone { margin-bottom: 26px; }
+  .zone-h { font-family: var(--font-display); font-size: 11px; letter-spacing: 3px;
+            color: var(--amber); margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+  .zone-h::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .zone-h .q { color: var(--text-dim); font-size: 10px; letter-spacing: 1px; }
+  /* ---- HOLD ---- */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--text-dim); font-size: 10px; letter-spacing: 2px;
+       padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid rgba(var(--cyan-rgb), var(--a06)); }
+  tr:hover td { background: var(--surface); }
+  .pos { color: var(--text); }
+  .pnl-up { color: var(--cyan); } .pnl-dn { color: var(--red); }
+  .empty { color: var(--dead); font-size: 11px; padding: 14px 10px; }
+  /* ---- DO TODAY ---- */
+  .card { background: var(--surface); border: 1px solid var(--line); margin-bottom: 12px;
+          cursor: pointer; transition: border-color .15s; }
+  .card:hover { border-color: rgba(var(--cyan-rgb), var(--a45)); }
+  .card.calm { border-color: rgba(255,210,50,.5); background: var(--surface2); }
+  .card.guard { border-color: rgba(239,83,80,.5); }
+  .card.pending { border-color: rgba(var(--cyan-rgb), .4); }
+  .card-h { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+  .state { font-size: 9px; letter-spacing: 2px; padding: 3px 8px; white-space: nowrap; }
+  .state.pending { color: var(--cyan); border: 1px solid rgba(var(--cyan-rgb),.5); }
+  .state.filled { color: #69DB7C; border: 1px solid rgba(105,219,124,.5); }
+  .state.guard { color: var(--red); border: 1px solid rgba(239,83,80,.5); }
+  .state.notrade { color: var(--gold); border: 1px solid rgba(255,210,50,.5); }
+  .card-title { font-family: var(--font-display); font-size: 13px; color: var(--text); }
+  .card-sub { font-size: 10px; color: var(--text-dim); }
+  .card-detail { display: none; padding: 0 14px 12px; border-top: 1px solid var(--line);
+                 font-size: 11px; }
+  .card.open .card-detail { display: block; }
+  .chain li { list-style: none; padding: 6px 0 6px 16px; border-left: 2px solid var(--line);
+              margin: 0 0 4px 4px; color: var(--text-dim); }
+  .chain li b { color: var(--text); font-weight: normal; }
+  .chain li:last-child { border-left-color: var(--amber); }
+  .guardline { color: var(--red); }
+  .calm-line { color: var(--gold); }
+  .approve-row { display: flex; gap: 10px; margin-top: 10px; }
+  button { background: var(--surface2); color: var(--cyan); border: 1px solid var(--line);
+           font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
+           padding: 7px 14px; cursor: pointer; }
+  button:hover { border-color: var(--cyan); }
+  button.approve { background: rgba(105,219,124,.12); color: #69DB7C;
+                   border-color: rgba(105,219,124,.4); }
+  button.reject { background: rgba(239,83,80,.12); color: var(--red);
+                  border-color: rgba(239,83,80,.4); }
+  /* ---- WHY ---- */
+  .why-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+              gap: 12px; }
+  .why-box { background: var(--surface); border: 1px solid var(--line); padding: 12px 14px; }
+  .why-box h4 { font-size: 10px; letter-spacing: 2px; color: var(--amber); margin-bottom: 8px; }
+  .why-box p { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+  .why-box .big { font-size: 20px; color: var(--text); margin-top: 4px; }
+  .graveyard { margin-top: 16px; background: var(--surface); border: 1px solid var(--line);
+               padding: 12px 14px; display: flex; align-items: center; gap: 12px;
+               font-size: 11px; color: var(--text-dim); }
+  .graveyard .num { font-size: 22px; color: var(--red); font-family: var(--font-display); }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  footer { padding: 14px 18px; border-top: 1px solid var(--line); font-size: 10px;
+           color: var(--text-dim); letter-spacing: 1px; display: flex; gap: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wordmark">DOURMOUSE<span>//</span>PRODUCT</div>
+  <div class="tag">THE LAB</div>
+  <div class="spacer"></div>
+  <div class="clock" id="clock"></div>
+</header>
+<div class="demo-banner" id="demoBanner"></div>
+
+<main>
+  <!-- ZONE A: HOLD -->
+  <section class="zone">
+    <div class="zone-h">WHAT DO I HOLD? <span class="q">positions</span></div>
+    <table>
+      <thead><tr><th>ASSET</th><th>DIR</th><th>SIZE</th><th>ENTRY</th><th>LAST</th><th>PNL</th><th>LEDGER</th></tr></thead>
+      <tbody id="holdBody"></tbody>
+    </table>
+    <div class="empty" id="holdEmpty" style="display:none">No live positions. Paper cycle pending (T11).</div>
+  </section>
+
+  <!-- ZONE B: DO TODAY -->
+  <section class="zone">
+    <div class="zone-h">WHAT SHOULD I DO TODAY? <span class="q">decision cards</span></div>
+    <div id="cards"></div>
+  </section>
+
+  <!-- ZONE C: WHY -->
+  <section class="zone">
+    <div class="zone-h">WHY SHOULD I TRUST IT? <span class="q">mechanism · data · p</span></div>
+    <div class="why-grid" id="whyGrid"></div>
+    <div class="graveyard">
+      <span class="num" id="graveCount">—</span>
+      <span>strategies in the graveyard — every one with its post-mortem and permutation p.
+        <a href="graveyard.html" target="_blank">open the graveyard</a></span>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span>VERDICT: A (THE LAB) · RATIFIED 7/7</span>
+  <span>HITL LAUNCH · AUTO V2</span>
+  <span>GUARDRAILS IN GOLDEN SUITE</span>
+</footer>
+
+<script>
+// ---- embedded fallback demo (used if decision_cards.json is unreachable) ----
+const DEMO_CARDS = [
+  {id:"dc-demo-001",ts:"",signal:"usdjpy_drift_k1",asset:"USDJPY",direction:"LONG",size:0.1,
+   mechanism:"The market under-reacts to a genuine surprise (survey consensus beat/miss): the move continues over ~4 sessions.",
+   forced_participant:"none forced — informed under-reaction to a genuine surprise",data_refs:["USDJPY_D1"],p_value:0.0007,
+   outcome:"PENDING_APPROVAL",guardrail:null,ledger_ref:null,
+   chain:["signal: drift detected on USDJPY (k=1)","mechanism: under-reaction to a genuine surprise — the move continues ~4 sessions",
+          "data: USDJPY_D1 + event bank — 210 sessions","p: 0.0007 (permutation)",
+          "outcome: awaiting your approval — HITL (verdict #5)"]},
+  {id:"dc-demo-002",ts:"",signal:"dual_momentum_k1",asset:"GC_FUT",direction:"LONG",size:0.05,
+   mechanism:"Trend-following leg; forced participant is the late chaser entering on confirmation day.",
+   forced_participant:"late chaser entering on confirmation",data_refs:["GC_D1"],p_value:0.021,
+   outcome:"REJECTED_AT_GUARDRAIL",guardrail:"position_cap",ledger_ref:null,
+   chain:["signal: dual momentum positive on GC","mechanism: late chasers pay the spread on confirmation day",
+          "data: GC_D1 — 1,400 sessions","p: 0.021",
+          "outcome: REJECTED AT GUARDRAIL position_cap (exposure already at cap)"]},
+  {id:"dc-demo-003",ts:"",signal:"central_bank_net_buying",asset:"GOLD",direction:"HOLD",size:0,
+   mechanism:"Central-bank net buying is positive (beta +0.144) but the OOS window is too short to trust a new entry today.",
+   forced_participant:"n/a — informational factor",data_refs:["central_bank_gold"],p_value:1.08,
+   outcome:"NO_TRADE",guardrail:null,ledger_ref:null,
+   chain:["signal: CB net buying positive this month","mechanism: CBs buying -> gold up (beta +0.144)",
+          "data: WGC monthly series, 55 obs (Nov-2020..Jun-2026)","p: 1.08 — NOT significant",
+          "outcome: DO NOTHING TODAY — here's why: the factor's sign is right but the evidence isn't strong enough for a trade yet."]}
+];
+const DEMO_HOLD = [
+  {asset:"USDJPY",dir:"LONG",size:0.1,entry:147.22,last:147.58,pnl:"+0.24%"},
+  {asset:"GC_FUT",dir:"—",size:0.0,entry:"—",last:"—",pnl:"—"}
+];
+const STATE_LABEL = {PENDING_APPROVAL:["PENDING APPROVAL","pending"],FILLED:["FILLED","filled"],
+  REJECTED_AT_GUARDRAIL:["REJECTED · GUARDRAIL","guard"],NO_TRADE:["DO NOTHING TODAY","notrade"]};
+
+function fmtTime(t){ if(!t) return ""; return new Date(t).toISOString().slice(0,16).replace("T"," "); }
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function renderHold(rows){
+  const tb = document.getElementById("holdBody"); tb.innerHTML = "";
+  const live = rows.filter(r=>r.dir!=="—");
+  document.getElementById("holdEmpty").style.display = live.length ? "none" : "block";
+  rows.forEach(r=>{
+    const up = r.pnl && !r.pnl.startsWith("-") && r.pnl!=="—";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="pos">${esc(r.asset)}</td><td>${esc(r.dir)}</td><td>${r.size}</td>
+      <td>${esc(r.entry)}</td><td>${esc(r.last)}</td>
+      <td class="${r.pnl==="—"?"":up?"pnl-up":"pnl-dn"}">${esc(r.pnl)}</td><td class="empty">${live.length?"ledger":""}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+function renderCard(c){
+  const el = document.createElement("div");
+  const [label, cls] = STATE_LABEL[c.outcome] || [c.outcome,"pending"];
+  const guard = c.outcome==="REJECTED_AT_GUARDRAIL"
+    ? `<span class="guardline"> — ${esc(c.guardrail)}</span>` : "";
+  const calm = c.outcome==="NO_TRADE"
+    ? `<span class="calm-line">${esc(c.chain[c.chain.length-1])}</span>` : "";
+  el.className = "card " + (c.outcome==="NO_TRADE"?"calm":c.outcome==="REJECTED_AT_GUARDRAIL"?"guard":"pending");
+  el.innerHTML = `
+    <div class="card-h">
+      <span class="state ${cls}">${label}</span>
+      <div><div class="card-title">${esc(c.signal)} · ${esc(c.asset)} · ${esc(c.direction)}</div>
+      <div class="card-sub">${esc(c.mechanism)}${guard}</div></div>
+    </div>
+    <div class="card-detail"><ul class="chain">
+      ${c.chain.map(s=>`<li>${esc(s)}</li>`).join("")}
+    </ul>
+    ${c.outcome==="PENDING_APPROVAL"
+      ? `<div class="approve-row">
+           <button class="approve" onclick="approve(this,'${esc(c.id)}')">APPROVE</button>
+           <button class="reject" onclick="reject(this,'${esc(c.id)}')">REJECT</button>
+           <span style="align-self:center;color:var(--dead);font-size:10px">HITL — you are the gate (verdict #5)</span>
+         </div>` : ""}
+    ${calm?`<div style="font-size:10px;color:var(--dead);margin-top:8px">calm state — a first-class outcome, not dead space (+2)</div>`:""}
+    </div>`;
+  el.addEventListener("click", e=>{ if(e.target.closest("button")) return; el.classList.toggle("open"); });
+  return el;
+}
+
+function approve(btn,id){ btn.closest(".approve-row").innerHTML = '<span style="color:#69DB7C">APPROVED — queued for paper execution (T11 gate). Demo only until the ledger is live.</span>'; }
+function reject(btn,id){ btn.closest(".card").querySelector(".state").textContent = "REJECTED BY USER"; btn.closest(".approve-row").innerHTML = '<span style="color:var(--dead)">Logged to the audit trail.</span>'; }
+
+function renderWhy(cards){
+  const top = cards.find(c=>c.outcome==="PENDING_APPROVAL") || cards.find(c=>c.outcome!=="NO_TRADE") || cards[0];
+  const g = document.getElementById("whyGrid");
+  g.innerHTML = `
+    <div class="why-box"><h4>MECHANISM</h4><p>${esc(top.mechanism)}</p>
+      <p style="margin-top:6px">forced participant: <b style="color:var(--text)">${esc(top.forced_participant)}</b></p></div>
+    <div class="why-box"><h4>DATA</h4><p>${esc(top.data_refs.join(" + "))}</p>
+      <p style="margin-top:6px">every claim deep-links to the raw series — the moat is the linked evidence, not the prose.</p></div>
+    <div class="why-box"><h4>P-VALUE</h4><div class="big">${top.p_value}</div>
+      <p>permutation p. Anything that can't show it is a story, not a signal.</p></div>`;
+}
+
+fetch("decision_cards.json").then(r=>r.json()).then(d=>{
+  document.getElementById("demoBanner").textContent = "DEMO DATA — decision cards generated by scripts/decision_cards.py. Real pipeline wires at the engine once T11 lands.";
+  renderCards(d.cards, d.graveyard ? d.graveyard.count : null);
+}).catch(()=>{
+  document.getElementById("demoBanner").textContent = "DEMO DATA (embedded fallback) — decision_cards.json not served; run scripts/decision_cards.py --demo.";
+  renderCards(DEMO_CARDS, 0);
+});
+
+function renderCards(cards, graveN){
+  const box = document.getElementById("cards"); box.innerHTML = "";
+  cards.forEach(c=>box.appendChild(renderCard(c)));
+  renderWhy(cards);
+  if (graveN !== null && graveN !== undefined) document.getElementById("graveCount").textContent = graveN;
+}
+
+renderHold(DEMO_HOLD);
+function tick(){ document.getElementById("clock").textContent = new Date().toISOString().slice(11,19)+" UTC"; }
+tick(); setInterval(tick, 1000);
+</script>
+</body>
+</html>

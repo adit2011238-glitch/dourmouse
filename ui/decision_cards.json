@@ -1,0 +1,82 @@
+{
+  "generated": "2026-08-11T18:05:21Z",
+  "mode": "default-demo",
+  "graveyard": {
+    "count": 17
+  },
+  "cards": [
+    {
+      "id": "dc-demo-001",
+      "ts": "2026-08-11T18:05:21Z",
+      "signal": "usdjpy_drift_k1",
+      "asset": "USDJPY",
+      "direction": "LONG",
+      "size": 0.1,
+      "mechanism": "News-driven drift persists for ~4 sessions; the forced participant is the market itself \u2014 it under-reacts to a genuine surprise.",
+      "forced_participant": "none forced \u2014 informed under-reaction to a genuine surprise",
+      "data_refs": [
+        "USDJPY_D1",
+        "event_bank_news"
+      ],
+      "p_value": 0.0007,
+      "outcome": "PENDING_APPROVAL",
+      "guardrail": null,
+      "ledger_ref": null,
+      "chain": [
+        "signal: drift detected on USDJPY (k=1)",
+        "mechanism: under-reaction to a genuine surprise \u2014 the move continues ~4 sessions",
+        "data: USDJPY_D1 + event bank \u2014 210 sessions",
+        "p: 0.0007 (permutation)",
+        "outcome: awaiting your approval \u2014 HITL (verdict #5)"
+      ]
+    },
+    {
+      "id": "dc-demo-002",
+      "ts": "2026-08-11T18:05:21Z",
+      "signal": "dual_momentum_k1",
+      "asset": "GC_FUT",
+      "direction": "LONG",
+      "size": 0.05,
+      "mechanism": "Trend-following leg; forced participant is the late chaser entering on confirmation day.",
+      "forced_participant": "late chaser entering on confirmation",
+      "data_refs": [
+        "GC_D1"
+      ],
+      "p_value": 0.021,
+      "outcome": "REJECTED_AT_GUARDRAIL",
+      "guardrail": "position_cap",
+      "ledger_ref": null,
+      "chain": [
+        "signal: dual momentum positive on GC",
+        "mechanism: late chasers pay the spread on confirmation day",
+        "data: GC_D1 \u2014 1,400 sessions",
+        "p: 0.021",
+        "outcome: REJECTED AT GUARDRAIL position_cap (exposure already at cap)"
+      ]
+    },
+    {
+      "id": "dc-demo-003",
+      "ts": "2026-08-11T18:05:21Z",
+      "signal": "central_bank_net_buying",
+      "asset": "GOLD",
+      "direction": "HOLD",
+      "size": 0.0,
+      "mechanism": "Central-bank net buying is positive (beta +0.144) but the OOS window is too short to trust a new entry today.",
+      "forced_participant": "n/a \u2014 informational factor, not a trade trigger",
+      "data_refs": [
+        "central_bank_gold"
+      ],
+      "p_value": 1.08,
+      "outcome": "NO_TRADE",
+      "guardrail": null,
+      "ledger_ref": null,
+      "chain": [
+        "signal: CB net buying positive this month",
+        "mechanism: CBs buying -> gold up (calibrated beta +0.144)",
+        "data: WGC monthly series, 55 obs (Nov-2020..Jun-2026)",
+        "p: 1.08 \u2014 NOT significant; OOS window too short",
+        "outcome: DO NOTHING TODAY \u2014 here's why: the factor's sign is right but the evidence isn't strong enough for a trade yet."
+      ]
+    }
+  ]
+}

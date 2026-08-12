@@ -20,6 +20,10 @@ from pathlib import Path
 
 UI = Path(__file__).resolve().parent.parent / "ui"
 TOKEN = os.environ.get("HUB_ENGINE_TOKEN", "")
+# The FEED pane iframe points at the local chat feed. Desktop default is
+# 127.0.0.1:8788; a laptop checkout should set HUB_FEED_URL to its own feed
+# (chat_feed.py --port 8789 -> http://127.0.0.1:8789).
+FEED_URL = os.environ.get("HUB_FEED_URL", "http://127.0.0.1:8788")
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -38,6 +42,7 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 raw = (UI / "hub.html").read_bytes()
                 body = raw.replace(b"__ENGINE_TOKEN__", TOKEN.encode())
+                body = body.replace(b"__FEED_URL__", FEED_URL.encode())
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
