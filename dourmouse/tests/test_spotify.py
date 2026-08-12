@@ -99,13 +99,23 @@ class TestHonesty:
         with pytest.raises(RuntimeError, match="NOT LINKED"):
             ss.now_playing()
 
-    def test_client_id_from_local_secrets(self, _workspace, monkeypatch, tmp_path):
+    def test_client_id_from_local_secrets(self, _workspace, monkeypatch):
+        """Env wins, then the gitignored local_secrets module (Rule 2.2).
+        Hermetic: inject a fake module instead of requiring the real
+        gitignored file, so the test passes on fresh checkouts/CI."""
+        import sys
+
         monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
-        secrets_file = (
-            Path(__file__).resolve().parent.parent / "local_secrets.py"
-        )
-        assert ss._client_id() == ""  # placeholder is empty
-        assert secrets_file.is_file()
+        assert ss._client_id() == ""  # no env, no local_secrets -> empty
+
+        fake = type(sys)("dourmouse.local_secrets")
+        fake.SPOTIFY_CLIENT_ID = "fake-from-local-secrets"
+        monkeypatch.setitem(sys.modules, "dourmouse.local_secrets", fake)
+        assert ss._client_id() == "fake-from-local-secrets"
+
+        monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
+        monkeypatch.setenv("SPOTIFY_CLIENT_ID", "env-wins")
+        assert ss._client_id() == "env-wins"
 
 
 # --------------------------------------------------------------------------- #
