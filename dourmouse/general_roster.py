@@ -1358,6 +1358,72 @@ def _complete_task_tool(arguments: dict[str, Any]) -> str:
     return f"TASK COMPLETE: {task_id}"
 
 
+def _schedule_recurring_tool(arguments: dict[str, Any]) -> str:
+    """User-defined recurring workflow: schedule a real tool call to repeat.
+
+    The model maps the user's intent to a concrete tool+args ONCE here;
+    the SchedulerRunner executes it deterministically afterwards (Rule 2.8).
+    """
+    from dourmouse import schedules
+
+    tool = (arguments.get("tool") or "").strip()
+    args = arguments.get("arguments") or {}
+    schedule_text = (arguments.get("schedule_text") or "").strip()
+    if not tool:
+        return "ERROR: schedule_recurring requires a 'tool' name."
+    if not schedule_text:
+        return "ERROR: schedule_recurring requires a 'schedule_text' (e.g. 'every Monday at 9:00')."
+    if not isinstance(args, dict):
+        return "ERROR: 'arguments' must be a JSON object of tool arguments."
+    registry = build_general_registry()
+    if registry.lookup(tool) is None:
+        return (
+            f"ERROR: no such tool: {tool!r}. List the registry first to pick a "
+            "real tool name. Nothing was scheduled."
+        )
+    try:
+        spec = schedules.parse_schedule(schedule_text)
+    except ValueError as exc:
+        return f"SCHEDULE REJECTED: {exc}"
+    store = schedules.Schedules()
+    entry = store.add(tool, args, spec, schedule_text)
+    return (
+        f"SCHEDULED {entry['id']}: {tool} {schedules.describe_spec(spec)} — "
+        f"next run {schedules.describe_next_run(entry)}. The scheduler runner "
+        "executes it deterministically; cancel with cancel_schedule "
+        f"({entry['id']})."
+    )
+
+
+def _list_schedules_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse import schedules
+
+    store = schedules.Schedules()
+    entries = store.list()
+    if not entries:
+        return "SCHEDULES: none."
+    lines = []
+    for e in entries:
+        state = "" if e.get("enabled") else " (disabled)"
+        spec = e.get("spec") or {}
+        lines.append(
+            f"- {e.get('id')}{state}: {e.get('tool')} "
+            f"{schedules.describe_spec(spec)} — next {schedules.describe_next_run(e)}"
+        )
+    return "SCHEDULES:\n" + "\n".join(lines)
+
+
+def _cancel_schedule_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse import schedules
+
+    sid = (arguments.get("schedule_id") or "").strip()
+    if not sid:
+        return "ERROR: cancel_schedule requires a 'schedule_id'."
+    if schedules.Schedules().remove(sid):
+        return f"SCHEDULE CANCELLED: {sid}"
+    return f"SCHEDULE {sid}: not found (nothing cancelled)."
+
+
 def _subagent(name: str, domain: str, description: str, tools: list[ToolSpec]) -> Subagent:
     return Subagent(name=name, domain=domain, description=description, tools=tuple(tools))
 
@@ -2402,6 +2468,49 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["task_id"],
                     },
                     handler=_complete_task_tool,
+                ),
+                ToolSpec(
+                    name="schedule_recurring",
+                    description=(
+                        "Schedule a real tool call to repeat automatically "
+                        "('do this every Monday'). Pass the exact tool name "
+                        "and its arguments you want repeated, plus a plain-"
+                        "English schedule: 'every Monday at 9:00', 'daily at "
+                        "8:30', 'every 30 minutes', 'weekly'. Returns the "
+                        "schedule id; the runner executes it deterministically "
+                        "(no model in the loop) and persists across restarts."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "tool": {"type": "string", "description": "an existing tool name in this system"},
+                            "arguments": {"type": "object", "description": "the tool's arguments as a JSON object"},
+                            "schedule_text": {"type": "string", "description": "'every Monday at 9:00', 'daily at 8:30', 'every 30 minutes'"},
+                        },
+                        "required": ["tool", "arguments", "schedule_text"],
+                    },
+                    handler=_schedule_recurring_tool,
+                ),
+                ToolSpec(
+                    name="list_schedules",
+                    description=(
+                        "List every recurring schedule (id, tool, when, next "
+                        "run, last run)."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_list_schedules_tool,
+                ),
+                ToolSpec(
+                    name="cancel_schedule",
+                    description="Stop a recurring schedule by its id (from list_schedules).",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "schedule_id": {"type": "string"},
+                        },
+                        "required": ["schedule_id"],
+                    },
+                    handler=_cancel_schedule_tool,
                 ),
             ],
         )

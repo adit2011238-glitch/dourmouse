@@ -1679,6 +1679,14 @@ def run_server(
     if live_polling and live_enabled():
         server.live_runtime = LiveRuntime(registry, server.tracker, bus=server.bus)
         server.live_runtime.start()
+    # v5.x: user-defined recurring workflows ("do this every Monday"). The
+    # runner executes workspace/schedules.jsonl entries when they come due.
+    from dourmouse.schedules import SchedulerRunner
+
+    server.scheduler_runner: SchedulerRunner | None = None
+    if live_polling and live_enabled():
+        server.scheduler_runner = SchedulerRunner(registry, server.tracker, bus=server.bus)
+        server.scheduler_runner.start()
     # v4.0: proactive daily briefing (automation engine). Env-gated by
     # DOURMOUSE_REPORT (default on); tests opt out via reporting=False.
     from dourmouse.report import DailyReporter
