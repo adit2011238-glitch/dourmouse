@@ -24,6 +24,10 @@ TOKEN = os.environ.get("HUB_ENGINE_TOKEN", "")
 # 127.0.0.1:8788; a laptop checkout should set HUB_FEED_URL to its own feed
 # (chat_feed.py --port 8789 -> http://127.0.0.1:8789).
 FEED_URL = os.environ.get("HUB_FEED_URL", "http://127.0.0.1:8788")
+# The DOURMOUSE pane iframe embeds the dispatch core (index.html + its /api).
+# When serve_hub serves ui/ statically there is no /api, so a laptop checkout
+# should set HUB_DM_URL to its own running app (webui.py -> http://127.0.0.1:8765).
+DM_URL = os.environ.get("HUB_DM_URL", "index.html")
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -43,6 +47,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raw = (UI / "hub.html").read_bytes()
                 body = raw.replace(b"__ENGINE_TOKEN__", TOKEN.encode())
                 body = body.replace(b"__FEED_URL__", FEED_URL.encode())
+                body = body.replace(b"__DM_URL__", DM_URL.encode())
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
