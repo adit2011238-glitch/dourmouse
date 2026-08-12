@@ -90,6 +90,7 @@ class TestRosterShape:
             "atlas_ui",  # v5.x: ATLAS UI bridge
             "mt5",  # v5.x: MetaTrader 5 broker ops
             "t212",  # v5.x: Trading 212 broker ops
+            "docs",  # v5.x: Google Sheets/Drive link-shared access
         }
 
     def test_orchestrator_exposes_delegate_task(self):

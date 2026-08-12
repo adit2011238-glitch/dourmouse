@@ -1667,6 +1667,82 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    def _sheets_read_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import sheets_read
+
+        try:
+            return sheets_read(
+                arguments.get("spreadsheet_id", ""),
+                arguments.get("sheet", "Sheet1"),
+                arguments.get("max_rows", 50),
+                arguments.get("max_cols", 20),
+            )
+        except RuntimeError as exc:
+            return f"SHEETS READ (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network/parse failures, readable
+            return f"SHEETS READ FAILED: {type(exc).__name__}: {exc}"
+
+    def _drive_download_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import drive_download
+
+        try:
+            return drive_download(arguments.get("file_id", ""), arguments.get("dest", ""))
+        except RuntimeError as exc:
+            return f"DRIVE DOWNLOAD (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DRIVE DOWNLOAD FAILED: {type(exc).__name__}: {exc}"
+
+    registry.register_subagent(
+        _subagent(
+            "docs",
+            "General",
+            "Reads link-shared Google Sheets and downloads link-shared Drive "
+            "items. Read-only; no login needed for shared items.",
+            [
+                ToolSpec(
+                    name="sheets_read",
+                    description=(
+                        "Read a Google Sheet's values as rows (read-only). "
+                        "Needs the spreadsheet ID from the URL and the sheet "
+                        "name; works when the sheet is shared 'Anyone with "
+                        "the link can view'. Private sheets report the exact "
+                        "fix instead of fabricating data."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "spreadsheet_id": {"type": "string", "description": "the token in the sheet URL between /d/ and /edit"},
+                            "sheet": {"type": "string", "default": "Sheet1"},
+                            "max_rows": {"type": "integer", "default": 50},
+                            "max_cols": {"type": "integer", "default": 20},
+                        },
+                        "required": ["spreadsheet_id"],
+                    },
+                    handler=_sheets_read_h,
+                ),
+                ToolSpec(
+                    name="drive_download",
+                    description=(
+                        "Download a link-shared Google Drive item by its ID "
+                        "(read-only). Works when the item is shared 'Anyone "
+                        "with the link'; private items report the exact fix. "
+                        "Writes into the uploads folder unless a dest path "
+                        "is given."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "file_id": {"type": "string", "description": "the token in the file URL between /d/ and /view"},
+                            "dest": {"type": "string", "description": "optional save path (default: uploads sandbox)"},
+                        },
+                        "required": ["file_id"],
+                    },
+                    handler=_drive_download_h,
+                ),
+            ],
+        )
+    )
+
     registry.register_subagent(
         _subagent(
             "dev_coding",
