@@ -316,7 +316,113 @@ section{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:80px 
 .meter i{display:block;height:100%;width:64%;background:linear-gradient(90deg,var(--cyan),var(--gold));
   border-radius:3px;box-shadow:0 0 10px rgba(var(--cyan-rgb),.5)}
 
-/* ---------- section 4: direction cards ---------- */
+/* ---------- section 4: the voice lab ---------- */
+.vlab{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-bottom:26px}
+@media(max-width:900px){.vlab{grid-template-columns:1fr}}
+
+/* the voice deck mockup */
+.vdeck{position:relative;border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;
+  background:var(--ground);box-shadow:0 30px 90px rgba(0,0,0,.5);min-height:640px;display:flex;flex-direction:column}
+.vdeck .statusbar{display:flex;align-items:center;gap:18px;padding:10px 18px;font-family:var(--font-mono);
+  font-size:11px;letter-spacing:.12em;color:var(--text-dim);border-bottom:1px solid var(--line);
+  background:rgba(6,8,15,.7)}
+.vdeck .statusbar .live{display:flex;align-items:center;gap:7px;color:var(--green)}
+.vdeck .statusbar .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 8px var(--green);animation:blink 1.8s infinite}
+.vdeck .statusbar .sep{width:1px;height:14px;background:var(--line)}
+.vdeck .statusbar .right{margin-left:auto;color:var(--text-faint)}
+.vdeck .statusbar .gold{color:var(--gold)}
+.vdeck-body{display:grid;grid-template-columns:1fr 1fr 300px;flex:1;min-height:0}
+@media(max-width:1000px){.vdeck-body{grid-template-columns:1fr 1fr}.vlab-panel-ft{display:none}}
+@media(max-width:720px){.vdeck-body{grid-template-columns:1fr}.vlab-panel-tx{display:none}}
+
+/* the listening orb stage */
+.orb-stage{position:relative;display:flex;flex-direction:column;min-height:340px;
+  background:radial-gradient(480px 360px at 50% 45%,rgba(var(--cyan-rgb),.08),transparent 70%)}
+.orb-wrap{flex:1;display:grid;place-items:center;position:relative;padding:30px}
+.orb{position:relative;width:220px;height:220px;border-radius:50%}
+.orb .o-ring{position:absolute;border-radius:50%;border:1px solid var(--line-strong);transition:.4s}
+.orb .o-ring.r1{inset:0;border-top-color:var(--cyan);border-right-color:var(--cyan);
+  border-bottom-color:transparent;border-left-color:transparent;animation:spin 5s linear infinite}
+.orb .o-ring.r2{inset:14px;border-top-color:var(--gold);border-right-color:transparent;
+  border-bottom-color:var(--gold);border-left-color:transparent;animation:spin 3.4s linear infinite reverse}
+.orb .o-ring.r3{inset:30px;border:1px dashed var(--cyan);opacity:.4;animation:spin 9s linear infinite}
+.orb .core{position:absolute;inset:52px;border-radius:50%;display:grid;place-items:center;
+  border:1px solid var(--line-strong);background:radial-gradient(circle at 50% 40%,rgba(var(--cyan-rgb),.22),rgba(6,8,15,.6) 70%)}
+.orb .core .txt{font-family:var(--font-hud);font-weight:700;font-size:12px;letter-spacing:.3em;text-align:center;
+  color:var(--cyan-bright);text-transform:uppercase;line-height:1.6}
+.orb .core .txt small{display:block;font-size:9px;letter-spacing:.18em;color:var(--gold)}
+.orb .core-dot{position:absolute;top:50%;left:50%;width:8px;height:8px;transform:translate(-50%,-50%);
+  border-radius:50%;background:var(--gold);box-shadow:0 0 16px var(--gold);opacity:.9}
+/* listening state: ring burst + brighter core */
+.orb.listening .o-ring.r1{animation-duration:1.1s}
+.orb.listening .o-ring.r2{animation-duration:.8s}
+.orb.listening .core{background:radial-gradient(circle at 50% 40%,rgba(var(--cyan-rgb),.5),rgba(6,8,15,.6) 70%);
+  box-shadow:0 0 50px rgba(var(--cyan-rgb),.5)}
+.orb.listening .core-dot{background:var(--cyan);box-shadow:0 0 20px var(--cyan)}
+.orb.listening .burst{position:absolute;inset:0;border-radius:50%;border:1px solid var(--cyan);opacity:0}
+@keyframes burst{0%{transform:scale(1);opacity:.8}100%{transform:scale(1.5);opacity:0}}
+.orb.listening .burst{animation:burst 1.4s ease-out infinite}
+.orb.listening .burst.b2{animation-delay:.5s}
+.orb.listening .burst.b3{animation-delay:1s}
+.orb.speaking .o-ring.r2{border-top-color:var(--green);border-bottom-color:var(--green)}
+.orb.speaking .core-dot{background:var(--green);box-shadow:0 0 20px var(--green)}
+.orb.thinking .o-ring.r1{border-top-color:var(--gold);border-right-color:var(--gold)}
+.orb.thinking .core-dot{background:var(--gold)}
+
+.orb-caption{position:absolute;bottom:16px;left:0;right:0;text-align:center;font-family:var(--font-mono);
+  font-size:11px;letter-spacing:.22em;color:var(--text-dim);text-transform:uppercase}
+.orb-caption b{color:var(--cyan-bright)}
+
+/* live transcript pane */
+.vlab-pane{background:var(--panel);border:1px solid var(--line);padding:16px;display:flex;flex-direction:column;gap:12px}
+.vlab-pane h5{font-family:var(--font-hud);font-weight:700;font-size:12px;letter-spacing:.26em;color:var(--gold);
+  text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.vlab-pane h5::after{content:"";flex:1;height:1px;background:var(--line)}
+.tx-line{font-family:var(--font-mono);font-size:12px;line-height:1.7;color:var(--text-dim);border-bottom:1px dashed rgba(var(--cyan-rgb),.08);padding:7px 0}
+.tx-line:last-child{border-bottom:none}
+.tx-line .who{color:var(--cyan-bright)}
+.tx-line .sys{color:var(--gold)}
+.tx-line .conf{display:flex;align-items:center;gap:8px;margin-top:3px;font-size:10.5px;color:var(--text-faint)}
+.tx-line .conf i{display:block;height:4px;width:100%;background:rgba(var(--cyan-rgb),.1);border-radius:2px;overflow:hidden}
+.tx-line .conf i b{display:block;height:100%;width:98%;background:linear-gradient(90deg,var(--cyan),var(--gold));border-radius:2px}
+.tx-line .conf i.b2 b{width:91%}.tx-line .conf i.b3 b{width:84%}.tx-line .conf i.b4 b{width:76%}
+
+/* fine-tune pipeline pane */
+.vlab-panel-ft{display:flex;flex-direction:column;gap:12px;padding:16px;border-left:1px solid var(--line);background:rgba(6,8,15,.45)}
+.ft-card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:13px}
+.ft-card h6{font-family:var(--font-hud);font-weight:700;font-size:11.5px;letter-spacing:.18em;color:var(--text-dim);
+  text-transform:uppercase;margin-bottom:10px;display:flex;justify-content:space-between}
+.ft-card h6 .val{color:var(--cyan-bright);font-family:var(--font-mono);font-size:11px}
+.ft-row{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);padding:5px 0}
+.ft-row b{color:var(--text);font-weight:400}
+.ft-row .up{color:var(--green)}.ft-row .warn{color:var(--gold)}
+.ft-meter{height:6px;background:rgba(var(--cyan-rgb),.1);border-radius:3px;overflow:hidden;margin-top:9px}
+.ft-meter i{display:block;height:100%;width:40%;background:linear-gradient(90deg,var(--cyan),var(--gold));border-radius:3px;
+  box-shadow:0 0 10px rgba(var(--cyan-rgb),.5);transition:width .6s}
+.ft-btn{font-family:var(--font-hud);font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+  padding:10px 0;border-radius:7px;cursor:pointer;transition:.2s;border:1px solid;text-align:center}
+.ft-btn.pri{color:var(--gold-bright);border-color:var(--gold);background:rgba(var(--gold-rgb),.08)}
+.ft-btn.pri:hover{background:rgba(var(--gold-rgb),.2)}
+.ft-btn.sec{color:var(--cyan-bright);border-color:var(--cyan);background:rgba(var(--cyan-rgb),.08);margin-top:8px}
+.ft-btn.sec:hover{background:rgba(var(--cyan-rgb),.2)}
+.ft-btn:disabled{opacity:.45;cursor:default}
+
+/* feedback strip under the deck */
+.feedback{display:flex;align-items:center;gap:10px;padding:14px 18px;border-top:1px solid var(--line);
+  background:rgba(6,8,15,.75);flex-wrap:wrap}
+.feedback .lbl{font-family:var(--font-mono);font-size:11px;letter-spacing:.2em;color:var(--text-faint);text-transform:uppercase}
+.fb-btn{font-family:var(--font-hud);font-weight:700;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+  padding:8px 16px;border-radius:7px;cursor:pointer;transition:.15s;border:1px solid}
+.fb-btn.good{color:var(--green);border-color:rgba(61,220,132,.5);background:rgba(61,220,132,.08)}
+.fb-btn.good:hover{background:rgba(61,220,132,.2)}
+.fb-btn.bad{color:var(--red);border-color:rgba(239,83,80,.5);background:rgba(239,83,80,.08)}
+.fb-btn.bad:hover{background:rgba(239,83,80,.2)}
+.fb-btn.on{background:rgba(var(--cyan-rgb),.2)}
+.fb-stat{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--text-faint)}
+.fb-stat b{color:var(--gold)}
+
+/* ---------- section 5: direction cards ---------- */
 .dirs{display:grid;grid-template-columns:1fr 1fr;gap:26px}
 @media(max-width:900px){.dirs{grid-template-columns:1fr}}
 .dir{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;
@@ -359,6 +465,7 @@ footer .line .g{color:var(--gold)}
     <a href="#boot">The Boot</a>
     <a href="#system">Design System</a>
     <a href="#layout">The Deck</a>
+    <a href="#voice">Voice Lab</a>
     <a href="#directions">Directions</a>
   </div>
 </nav>
@@ -540,7 +647,83 @@ footer .line .g{color:var(--gold)}
   </div>
 </section>
 
-<!-- ================= SECTION 4 : DIRECTIONS ================= -->
+<!-- ================= SECTION 4 : THE VOICE LAB ================= -->
+<section id="voice">
+  <div class="shead"><span class="num">04</span><h2>The <span class="amp">//</span> Voice Lab</h2><span class="rule"></span></div>
+  <div class="vlab">
+    <div class="note"><span class="n">A</span><h4>Talk, nothing else</h4><p>One screen, one mode: wake word → speak → it answers by voice. No typing, no routing. The whole dispatch answers with its voice.</p></div>
+    <div class="note"><span class="n">B</span><h4>Train recognition</h4><p>Enroll your voice, tune the wake word, adapt to your accent. Confidence bars show what it actually heard — every segment becomes training data.</p></div>
+    <div class="note"><span class="n">C</span><h4>Fine-tune further</h4><p>Rate every exchange GOOD / BAD. Corrections, new vocabulary, and voice samples queue into the SFT training pipeline — the Dell node is the compute target.</p></div>
+    <div class="note"><span class="n">D</span><h4>Wake-word stack</h4><p>Local VAD → wake word → speech-to-text → intent → dispatch. The arc-reactor dial becomes a listening orb with a live transcript pane.</p></div>
+  </div>
+
+  <div class="vdeck">
+    <div class="statusbar">
+      <span class="live" id="vLive">LISTENING</span>
+      <span class="sep"></span>
+      <span>WAKE · “DOURMOUSE”</span>
+      <span class="sep"></span>
+      <span>SPEAKER · <span class="gold">ADIT · 96% MATCH</span></span>
+      <span class="right">VAD · STT · INTENT · DISPATCH</span>
+    </div>
+    <div class="vdeck-body">
+      <!-- listening orb -->
+      <div class="orb-stage">
+        <div class="orb-wrap">
+          <div class="orb" id="vOrb">
+            <div class="o-ring r1"></div><div class="o-ring r2"></div><div class="o-ring r3"></div>
+            <div class="burst"></div><div class="burst b2"></div><div class="burst b3"></div>
+            <div class="core"><div class="txt" id="vState">STANDBY<small>SAY “DOURMOUSE”</small></div></div>
+            <div class="core-dot"></div>
+          </div>
+        </div>
+        <div class="orb-caption">VOICE SENSOR <b>ONLINE</b> · <span style="color:var(--gold)">TRAINING QUEUE 3</span></div>
+      </div>
+      <!-- live transcript -->
+      <div class="vlab-pane">
+        <h5>Live Transcript · Recognition</h5>
+        <div class="tx-line"><span class="who">YOU ▸</span> “run the gold monthly report”
+          <div class="conf">confidence <i><b></b></i> 98%</div></div>
+        <div class="tx-line"><span class="sys">DOURMOUSE ▸</span> “Done, sir — gold monthly is compiling. Central-bank net buying is up 41 tonnes this quarter.”
+          <div class="conf">voice reply · TTS</div></div>
+        <div class="tx-line"><span class="who">YOU ▸</span> “and pull the USD/CAD 1m forecast”
+          <div class="conf">confidence <i class="b2"><b></b></i> 91%</div></div>
+        <div class="tx-line"><span class="sys">DOURMOUSE ▸</span> “Model says 1.3949 short-term — stretched, expect a retrace toward 1.3990 before anything else.”
+          <div class="conf">voice reply · TTS</div></div>
+        <div class="tx-line" id="vNewLine" style="display:none"><span class="who">YOU ▸</span> “good morning, dourmouse”
+          <div class="conf">confidence <i class="b3"><b></b></i> 84% · wake word <b style="color:var(--green)">LOCKED</b></div></div>
+      </div>
+      <!-- fine-tune pipeline -->
+      <div class="vlab-panel-ft">
+        <h5>Fine-Tune · Voice + Behaviour</h5>
+        <div class="ft-card">
+          <h6>VOICE ENROLLMENT <span class="val">87%</span></h6>
+          <div class="ft-row">Samples <b>1,284</b></div>
+          <div class="ft-row">Accent match <b class="up">96% · adapting</b></div>
+          <div class="ft-row">Wake-word <b>locked · 3/3</b></div>
+          <div class="ft-meter"><i id="vMeter"></i></div>
+        </div>
+        <div class="ft-card">
+          <h6>RECOGNITION SFT <span class="val">READY</span></h6>
+          <div class="ft-row">New corrections <b class="warn">14 GOOD · 2 BAD</b></div>
+          <div class="ft-row">Queue <b id="vQueue">3 batches</b></div>
+          <div class="ft-row">Compute target <b>Dell node</b></div>
+        </div>
+        <button class="ft-btn pri" id="vSend">Send to Training Queue</button>
+        <button class="ft-btn sec" id="vEnroll">Re-enroll Voice</button>
+      </div>
+    </div>
+    <!-- feedback strip -->
+    <div class="feedback">
+      <span class="lbl">Rate this exchange</span>
+      <button class="fb-btn good" data-fb="good">✓ Good</button>
+      <button class="fb-btn bad" data-fb="bad">✗ Bad · correct it</button>
+      <span class="fb-stat" id="vFbStat">14 GOOD · 2 BAD this session</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SECTION 5 : DIRECTIONS ================= -->
 <section id="directions">
   <div class="shead"><span class="num">04</span><h2>Direction <span class="amp">//</span> Pick One</h2><span class="rule"></span></div>
   <div class="dirs">
@@ -681,6 +864,69 @@ function drawBrain(){
   requestAnimationFrame(drawBrain);
 }
 drawBrain();
+
+/* ---------------- voice lab demo ---------------- */
+const vOrb = document.getElementById('vOrb');
+const vState = document.getElementById('vState');
+const vLive = document.getElementById('vLive');
+const vNewLine = document.getElementById('vNewLine');
+const vQueue = document.getElementById('vQueue');
+const vFbStat = document.getElementById('vFbStat');
+const vMeter = document.getElementById('vMeter');
+let vGood = 14, vBad = 2, vQueueN = 3;
+
+function setVState(s){ // listening | thinking | speaking | standby
+  vOrb.classList.remove('listening','thinking','speaking');
+  if(s==='listening'){ vOrb.classList.add('listening'); vState.innerHTML='LISTENING<small>SPEAK, SIR</small>'; vLive.textContent='LISTENING'; vLive.style.color='var(--cyan-bright)'; }
+  else if(s==='thinking'){ vOrb.classList.add('thinking'); vState.innerHTML='THINKING<small>DISPATCH ROUTING</small>'; vLive.textContent='THINKING'; vLive.style.color='var(--gold)'; }
+  else if(s==='speaking'){ vOrb.classList.add('speaking'); vState.innerHTML='SPEAKING<small>REPLYING BY VOICE</small>'; vLive.textContent='SPEAKING'; vLive.style.color='var(--green)'; }
+  else { vState.innerHTML='STANDBY<small>SAY “DOURMOUSE”</small>'; vLive.textContent='STANDBY'; vLive.style.color='var(--text-dim)'; }
+}
+
+// demo cycle: click the orb to run the conversation
+let vDemoTimer=null;
+function vDemo(){
+  clearTimeout(vDemoTimer);
+  setVState('listening');
+  vDemoTimer=setTimeout(()=>{
+    setVState('thinking');
+    vDemoTimer=setTimeout(()=>{
+      setVState('speaking');
+      vNewLine.style.display='block';
+      vDemoTimer=setTimeout(()=>{ setVState('standby'); }, 2200);
+    }, 1500);
+  }, 1800);
+}
+vOrb.addEventListener('click', vDemo);
+
+// feedback buttons
+const vGoodBtn = document.querySelector('.fb-btn.good');
+const vBadBtn  = document.querySelector('.fb-btn.bad');
+let vFbPick = null;
+function vPick(btn, which){
+  document.querySelectorAll('.fb-btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  vFbPick = which;
+}
+vGoodBtn.addEventListener('click',()=>{ vPick(vGoodBtn,'good'); vGood++; vFbStat.textContent = vGood+' GOOD · '+vBad+' BAD this session'; });
+vBadBtn.addEventListener('click',()=>{ vPick(vBadBtn,'bad'); vBad++; vFbStat.textContent = vGood+' GOOD · '+vBad+' BAD this session'; });
+
+// send to training queue
+const vSendBtn = document.getElementById('vSend');
+const vEnrollBtn = document.getElementById('vEnroll');
+vSendBtn.addEventListener('click',()=>{
+  vSendBtn.textContent = 'Queued ✓';
+  vSendBtn.disabled = true;
+  vQueueN++;
+  vQueue.textContent = vQueueN+' batches';
+  vMeter.style.width = Math.min(40 + vQueueN*8, 96) + '%';
+  setTimeout(()=>{ vSendBtn.textContent='Send to Training Queue'; vSendBtn.disabled=false; }, 1800);
+});
+vEnrollBtn.addEventListener('click',()=>{
+  setVState('listening');
+  vEnrollBtn.textContent = 'Listening… repeat 3 phrases';
+  setTimeout(()=>{ setVState('standby'); vEnrollBtn.textContent='Re-enroll Voice'; vMeter.style.width='96%'; }, 2600);
+});
 
 /* ---------------- direction pick (review hook) ---------------- */
 document.querySelectorAll('.pick').forEach(b=>{
