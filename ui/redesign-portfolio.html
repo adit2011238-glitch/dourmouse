@@ -332,9 +332,81 @@ section{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:80px 
 .vdeck .statusbar .sep{width:1px;height:14px;background:var(--line)}
 .vdeck .statusbar .right{margin-left:auto;color:var(--text-faint)}
 .vdeck .statusbar .gold{color:var(--gold)}
-.vdeck-body{display:grid;grid-template-columns:1fr 1fr 300px;flex:1;min-height:0}
-@media(max-width:1000px){.vdeck-body{grid-template-columns:1fr 1fr}.vlab-panel-ft{display:none}}
-@media(max-width:720px){.vdeck-body{grid-template-columns:1fr}.vlab-panel-tx{display:none}}
+.vdeck-body{display:grid;grid-template-columns:280px 1fr;flex:1;min-height:0}
+@media(max-width:900px){.vdeck-body{grid-template-columns:1fr}.vrail{display:none}}
+
+/* left rail: compact orb + training */
+.vrail{display:flex;flex-direction:column;gap:12px;padding:16px;border-right:1px solid var(--line);background:rgba(6,8,15,.45);overflow-y:auto}
+.vrail .orb{width:160px;height:160px;margin:6px auto 0}
+.vrail .orb .core{inset:38px}
+.vrail .orb .core .txt{font-size:10px}
+.vrail .orb-caption{position:static;text-align:center;margin:2px 0 6px}
+
+/* conversation column (Claude-style) */
+.vconv{display:flex;flex-direction:column;gap:16px;padding:18px;overflow-y:auto;min-width:0}
+.vmsg{display:flex;flex-direction:column;gap:10px;max-width:100%}
+.vmsg.you{align-self:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:12px 12px 3px 12px;padding:11px 15px;max-width:78%}
+.vmsg.you .vwho{font-family:var(--font-hud);font-weight:700;font-size:10px;letter-spacing:.24em;color:var(--cyan-bright);text-transform:uppercase}
+.vmsg.you .vtext{font-family:var(--font-body);font-size:14px;color:var(--text);margin-top:4px}
+.vmsg.you .conf{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:6px;letter-spacing:.06em}
+.vmsg.dm{width:100%}
+
+/* thinking block — the Claude-style streaming reasoning */
+.think{background:rgba(var(--gold-rgb),.045);border:1px solid rgba(var(--gold-rgb),.28);border-radius:10px;overflow:hidden}
+.think .head{display:flex;align-items:center;gap:9px;padding:9px 14px;font-family:var(--font-hud);font-weight:700;font-size:11px;letter-spacing:.22em;color:var(--gold);text-transform:uppercase;border-bottom:1px solid rgba(var(--gold-rgb),.14)}
+.think .head .hint{margin-left:auto;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.08em;color:var(--text-faint);text-transform:none}
+.think .body{font-family:var(--font-mono);font-size:12px;line-height:1.75;color:var(--text-dim);padding:12px 14px;white-space:pre-wrap}
+.think .body .cursor{display:inline-block;width:8px;height:13px;background:var(--gold);vertical-align:-2px;animation:blink 1s infinite;margin-left:3px}
+
+/* actions block — visible web searches + tool calls */
+.acts{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.acts .head{display:flex;align-items:center;gap:9px;padding:9px 14px;font-family:var(--font-hud);font-weight:700;font-size:11px;letter-spacing:.22em;color:var(--cyan-bright);text-transform:uppercase;border-bottom:1px solid var(--line)}
+.act{display:flex;align-items:center;gap:10px;padding:8px 14px;font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);border-top:1px dashed rgba(var(--cyan-rgb),.08)}
+.act:first-of-type{border-top:none}
+.act .ic{font-size:13px}
+.act .q{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act .st{font-size:10px;letter-spacing:.1em;white-space:nowrap}
+.act.done .st{color:var(--green)}
+.act.run .st{color:var(--gold);animation:blink 1s infinite}
+
+/* final voice reply */
+.vreply{font-family:var(--font-body);font-size:14px;line-height:1.7;color:var(--text);padding:2px 4px}
+.vreply b{color:var(--cyan-bright);font-weight:600}
+.vreply .tts{display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;color:var(--text-faint);margin-top:9px;text-transform:uppercase}
+
+/* quant model studio */
+.qdeck{position:relative;border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;background:var(--ground);box-shadow:0 30px 90px rgba(0,0,0,.5)}
+.qmode{display:flex;gap:8px;margin-left:auto}
+.qmode .chip{font-family:var(--font-hud);font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;padding:6px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--line);color:var(--text-dim);transition:.15s}
+.qmode .chip.on{color:var(--cyan-bright);border-color:var(--line-strong);background:rgba(var(--cyan-rgb),.1)}
+.qbody{display:grid;grid-template-columns:1fr 300px;flex:1;min-height:0}
+@media(max-width:980px){.qbody{grid-template-columns:1fr}.qparams{display:none}}
+.qcanvas{display:flex;flex-direction:column;gap:2px;padding:18px 20px;min-width:0}
+.qlane{display:grid;grid-template-columns:104px 1fr;gap:14px;align-items:start;padding:8px 0;position:relative}
+.qlane .lname{font-family:var(--font-hud);font-weight:700;font-size:10.5px;letter-spacing:.2em;color:var(--gold);text-transform:uppercase;padding-top:11px}
+.qlane .lname small{display:block;color:var(--text-faint);font-size:9px;letter-spacing:.08em;margin-top:2px}
+.qblocks{display:flex;gap:10px;flex-wrap:wrap}
+.qblk{background:var(--panel);border:1px solid var(--line-strong);border-radius:9px;padding:10px 14px;cursor:pointer;transition:.18s;min-width:118px}
+.qblk:hover,.qblk.sel{border-color:var(--gold);background:rgba(var(--gold-rgb),.08)}
+.qblk .n{font-family:var(--font-hud);font-weight:700;font-size:13px;letter-spacing:.06em;color:var(--text)}
+.qblk .s{display:block;font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);margin-top:4px}
+.qlane .arrow{position:absolute;left:104px;top:-2px;font-family:var(--font-mono);color:var(--text-faint);font-size:12px}
+.qparams{display:flex;flex-direction:column;gap:14px;padding:18px;border-left:1px solid var(--line);background:rgba(6,8,15,.45)}
+.qparams h5{font-family:var(--font-hud);font-weight:700;font-size:12px;letter-spacing:.26em;color:var(--gold);text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.qparams h5::after{content:"";flex:1;height:1px;background:var(--line)}
+.qp label{font-family:var(--font-hud);font-weight:600;font-size:11.5px;letter-spacing:.12em;color:var(--text-dim);text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+.qp label output{color:var(--gold);font-family:var(--font-mono);font-size:11px}
+.qp input[type=range]{width:100%;accent-color:var(--cyan);margin-top:7px;background:transparent}
+.qmet{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.qmet div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.qmet .v{font-family:var(--font-mono);font-size:16px;color:var(--cyan-bright)}
+.qmet .k{display:block;font-family:var(--font-hud);font-size:9.5px;letter-spacing:.18em;color:var(--text-faint);text-transform:uppercase;margin-top:3px}
+.qmet .up{color:var(--green)}
+.qchart{border-top:1px solid var(--line);padding:14px 20px;background:rgba(6,8,15,.4)}
+.qchart h6{font-family:var(--font-hud);font-weight:700;font-size:11px;letter-spacing:.22em;color:var(--text-dim);text-transform:uppercase;margin-bottom:10px}
+.qchart canvas{width:100%;height:190px;display:block}
+.qlegend{display:flex;gap:16px;margin-top:10px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)}
+.qlegend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 
 /* the listening orb stage */
 .orb-stage{position:relative;display:flex;flex-direction:column;min-height:340px;
@@ -466,6 +538,7 @@ footer .line .g{color:var(--gold)}
     <a href="#system">Design System</a>
     <a href="#layout">The Deck</a>
     <a href="#voice">Voice Lab</a>
+    <a href="#quant">Quant Studio</a>
     <a href="#directions">Directions</a>
   </div>
 </nav>
@@ -667,35 +740,15 @@ footer .line .g{color:var(--gold)}
       <span class="right">VAD · STT · INTENT · DISPATCH</span>
     </div>
     <div class="vdeck-body">
-      <!-- listening orb -->
-      <div class="orb-stage">
-        <div class="orb-wrap">
-          <div class="orb" id="vOrb">
-            <div class="o-ring r1"></div><div class="o-ring r2"></div><div class="o-ring r3"></div>
-            <div class="burst"></div><div class="burst b2"></div><div class="burst b3"></div>
-            <div class="core"><div class="txt" id="vState">STANDBY<small>SAY “DOURMOUSE”</small></div></div>
-            <div class="core-dot"></div>
-          </div>
+      <!-- left rail: compact orb + training -->
+      <div class="vrail">
+        <div class="orb" id="vOrb">
+          <div class="o-ring r1"></div><div class="o-ring r2"></div><div class="o-ring r3"></div>
+          <div class="burst"></div><div class="burst b2"></div><div class="burst b3"></div>
+          <div class="core"><div class="txt" id="vState">STANDBY<small>SAY “DOURMOUSE”</small></div></div>
+          <div class="core-dot"></div>
         </div>
-        <div class="orb-caption">VOICE SENSOR <b>ONLINE</b> · <span style="color:var(--gold)">TRAINING QUEUE 3</span></div>
-      </div>
-      <!-- live transcript -->
-      <div class="vlab-pane">
-        <h5>Live Transcript · Recognition</h5>
-        <div class="tx-line"><span class="who">YOU ▸</span> “run the gold monthly report”
-          <div class="conf">confidence <i><b></b></i> 98%</div></div>
-        <div class="tx-line"><span class="sys">DOURMOUSE ▸</span> “Done, sir — gold monthly is compiling. Central-bank net buying is up 41 tonnes this quarter.”
-          <div class="conf">voice reply · TTS</div></div>
-        <div class="tx-line"><span class="who">YOU ▸</span> “and pull the USD/CAD 1m forecast”
-          <div class="conf">confidence <i class="b2"><b></b></i> 91%</div></div>
-        <div class="tx-line"><span class="sys">DOURMOUSE ▸</span> “Model says 1.3949 short-term — stretched, expect a retrace toward 1.3990 before anything else.”
-          <div class="conf">voice reply · TTS</div></div>
-        <div class="tx-line" id="vNewLine" style="display:none"><span class="who">YOU ▸</span> “good morning, dourmouse”
-          <div class="conf">confidence <i class="b3"><b></b></i> 84% · wake word <b style="color:var(--green)">LOCKED</b></div></div>
-      </div>
-      <!-- fine-tune pipeline -->
-      <div class="vlab-panel-ft">
-        <h5>Fine-Tune · Voice + Behaviour</h5>
+        <div class="orb-caption">VOICE SENSOR <b>ONLINE</b></div>
         <div class="ft-card">
           <h6>VOICE ENROLLMENT <span class="val">87%</span></h6>
           <div class="ft-row">Samples <b>1,284</b></div>
@@ -705,12 +758,53 @@ footer .line .g{color:var(--gold)}
         </div>
         <div class="ft-card">
           <h6>RECOGNITION SFT <span class="val">READY</span></h6>
-          <div class="ft-row">New corrections <b class="warn">14 GOOD · 2 BAD</b></div>
           <div class="ft-row">Queue <b id="vQueue">3 batches</b></div>
-          <div class="ft-row">Compute target <b>Dell node</b></div>
+          <div class="ft-row">Corrections <b class="warn">14 GOOD · 2 BAD</b></div>
         </div>
         <button class="ft-btn pri" id="vSend">Send to Training Queue</button>
         <button class="ft-btn sec" id="vEnroll">Re-enroll Voice</button>
+      </div>
+      <!-- conversation: thinking → actions → reply (Claude-style) -->
+      <div class="vconv">
+        <div class="vmsg you"><span class="vwho">YOU</span><span class="vtext">“run the gold monthly report”</span>
+          <div class="conf">recognition 98% · wake locked</div></div>
+        <div class="vmsg dm">
+          <div class="think">
+            <div class="head">🧠 Thinking <span class="hint">streaming · visible before reply</span></div>
+            <div class="body">User asked for the gold monthly report by voice. I need the WGC central-bank net-purchase series, rerun weight_calibrator for GOLD, then verify the three golden regressions. Plan: pull data → calibrate → gates → compile.</div>
+          </div>
+          <div class="acts">
+            <div class="head">⚡ Actions · web + tools</div>
+            <div class="act done"><span class="ic">🔍</span><span class="q">Searching: “World Gold Council central bank net purchases 2026”</span><span class="st">✓ done</span></div>
+            <div class="act done"><span class="ic">⚙️</span><span class="q">weight_calibrator · GOLD</span><span class="st">✓ beta +0.144</span></div>
+            <div class="act done"><span class="ic">✅</span><span class="q">golden_regressions · 3/3</span><span class="st">✓ PASS</span></div>
+          </div>
+          <div class="vreply">Compiled, sir. Central-bank net buying is up <b>41 tonnes</b> this quarter; GOLD weight recalibrated to <b>0.248</b>; all three golden regressions pass.<span class="tts">♫ voice reply · TTS</span></div>
+        </div>
+        <div class="vmsg you"><span class="vwho">YOU</span><span class="vtext">“and pull the USD/CAD 1m forecast”</span>
+          <div class="conf">recognition 91%</div></div>
+        <div class="vmsg dm">
+          <div class="think">
+            <div class="head">🧠 Thinking <span class="hint">streaming · visible before reply</span></div>
+            <div class="body">Forecast request. Load USD/CAD daily to 2018, run the GARCH(1,1) + carry model, check the 20-day z-score. Quick: pull → model → 1m scenario grid.</div>
+          </div>
+          <div class="acts">
+            <div class="act done"><span class="ic">📊</span><span class="q">Backtest · usdjpy_drift_k1</span><span class="st">✓ OOS t 3.711</span></div>
+            <div class="act done"><span class="ic">🔍</span><span class="q">Searching: “USD/CAD · July employment situation impact”</span><span class="st">✓ done</span></div>
+          </div>
+          <div class="vreply">Model says <b>1.3949</b> short-term — stretched; expect a retrace toward 1.3990 before anything else. The forward curve already prices 1.3755 at 1y.<span class="tts">♫ voice reply · TTS</span></div>
+        </div>
+        <!-- live demo turn (appears when the orb is clicked) -->
+        <div class="vmsg dm" id="vNewTurn" style="display:none">
+          <div class="think"><div class="head">🧠 Thinking <span class="hint">streaming · visible before reply</span></div>
+            <div class="body" id="vThinkBody"></div></div>
+          <div class="acts" id="vActs">
+            <div class="act"><span class="ic">🔍</span><span class="q">Searching: “spot gold · today's fix”</span><span class="st">waiting</span></div>
+            <div class="act"><span class="ic">⚙️</span><span class="q">engine_api · /api/backtest</span><span class="st">waiting</span></div>
+            <div class="act"><span class="ic">✅</span><span class="q">gate · model_regression</span><span class="st">waiting</span></div>
+          </div>
+          <div class="vreply" id="vReply"></div>
+        </div>
       </div>
     </div>
     <!-- feedback strip -->
@@ -723,9 +817,115 @@ footer .line .g{color:var(--gold)}
   </div>
 </section>
 
-<!-- ================= SECTION 5 : DIRECTIONS ================= -->
+<!-- ================= SECTION 5 : QUANT STUDIO ================= -->
+<section id="quant">
+  <div class="shead"><span class="num">05</span><h2>Quant <span class="amp">//</span> Model Studio</h2><span class="rule"></span></div>
+  <div class="layout-notes">
+    <div class="note"><span class="n">A</span><h4>Design quant models</h4><p>Assemble a model from lanes — data → signal → risk → sizing → execution. Every block is a tool with parameters; swap blocks, not code.</p></div>
+    <div class="note"><span class="n">B</span><h4>Design economic models</h4><p>Same canvas, economic lens: regimes, macro drivers, central-bank flows, weights. Build the GOLD model or a new macro thesis visually.</p></div>
+    <div class="note"><span class="n">C</span><h4>Live backtest</h4><p>The equity curve redraws as you tune parameters — no rerun button, no waiting. See the effect of every slider instantly.</p></div>
+    <div class="note"><span class="n">D</span><h4>Ship to dispatch</h4><p>A validated model becomes a dispatch lane: voice “run my gold model” and the pipeline executes it end to end.</p></div>
+  </div>
+
+  <div class="qdeck">
+    <div class="statusbar">
+      <span class="live">MODEL DESIGNER</span>
+      <span class="sep"></span>
+      <span>ENGINE · ATLAS v13.13</span>
+      <span class="sep"></span>
+      <span>DATA · <span class="gold">100 REGISTRY KEYS</span></span>
+      <div class="qmode">
+        <div class="chip on" data-qmode="quant">Quant Model</div>
+        <div class="chip" data-qmode="econ">Economic Model</div>
+      </div>
+    </div>
+    <div class="qbody">
+      <div class="qcanvas">
+        <!-- QUANT LANES -->
+        <div class="qlanes" id="qLanesQuant">
+          <div class="qlane"><span class="lname">Data<small>source</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">USD/CAD d1</span><span class="s">fx_d1 · 2018→</span></div>
+              <div class="qblk"><span class="n">DXY</span><span class="s">index · d1</span></div>
+              <div class="qblk"><span class="n">WTI</span><span class="s">commodity · d1</span></div>
+            </div></div>
+          <div class="qlane"><span class="lname">Signal<small>alpha</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">Drift z-score</span><span class="s">20d · 2.18σ</span></div>
+              <div class="qblk"><span class="n">Carry</span><span class="s">+140bp</span></div>
+            </div></div>
+          <div class="qlane"><span class="lname">Risk<small>guardrails</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">Vol-scaled stop</span><span class="s">1.5σ</span></div>
+              <div class="qblk"><span class="n">Event gate</span><span class="s">NFP window</span></div>
+            </div></div>
+          <div class="qlane"><span class="lname">Sizing<small>position</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">Risk %</span><span class="s">0.5% / trade</span></div>
+            </div></div>
+          <div class="qlane"><span class="lname">Execute<small>broker</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">Paper fill</span><span class="s">IBKR TWS</span></div>
+              <div class="qblk"><span class="n">Ledger</span><span class="s">write-through</span></div>
+            </div></div>
+        </div>
+        <!-- ECON LANES -->
+        <div class="qlanes" id="qLanesEcon" style="display:none">
+          <div class="qlane"><span class="lname">Macro<small>data</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">WGC purchases</span><span class="s">Nov'20→Jun'26</span></div>
+              <div class="qblk"><span class="n">CPI / rates</span><span class="s">US + DM</span></div>
+              <div class="qblk"><span class="n">COT</span><span class="s">positioning</span></div>
+            </div></div>
+          <div class="qlane"><span class="lname">Regime<small>state</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">Risk-on / off</span><span class="s">vol regime</span></div>
+              <div class="qblk"><span class="n">Chop</span><span class="s">trend filter</span></div>
+            </div></div>
+          <div class="qlane"><span class="lname">Drivers<small>mechanism</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">CB net buying</span><span class="s">hist 0.181</span></div>
+              <div class="qblk"><span class="n">Real yields</span><span class="s">inverse</span></div>
+            </div></div>
+          <div class="qlane"><span class="lname">Weights<small>calibrate</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">weight_calibrator</span><span class="s">GOLD 0.248</span></div>
+            </div></div>
+          <div class="qlane"><span class="lname">Output<small>score</small></span>
+            <div class="qblocks">
+              <div class="qblk sel"><span class="n">Macro score</span><span class="s">+0.31</span></div>
+              <div class="qblk"><span class="n">Position</span><span class="s">long GOLD</span></div>
+            </div></div>
+        </div>
+      </div>
+      <div class="qparams">
+        <h5>Parameters</h5>
+        <div class="qp"><label>Signal strength <output id="qSigOut">0.55</output></label>
+          <input type="range" id="qSig" min="0" max="1" step="0.01" value="0.55"></div>
+        <div class="qp"><label>Risk tolerance <output id="qRiskOut">0.40</output></label>
+          <input type="range" id="qRisk" min="0" max="1" step="0.01" value="0.40"></div>
+        <div class="qp"><label>Regime weight <output id="qRegOut">0.70</output></label>
+          <input type="range" id="qReg" min="0" max="1" step="0.01" value="0.70"></div>
+        <h5>Live metrics</h5>
+        <div class="qmet">
+          <div><span class="v up" id="qCagr">+8.2%</span><span class="k">CAGR</span></div>
+          <div><span class="v up" id="qSharpe">1.79</span><span class="k">Sharpe</span></div>
+          <div><span class="v" id="qDd">−3.82%</span><span class="k">Max DD</span></div>
+          <div><span class="v up" id="qWin">96.3%</span><span class="k">Win / yr</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="qchart">
+      <h6>Equity Curve · <span id="qChartName">USD/CAD DRIFT + CARRY</span></h6>
+      <canvas id="qChart"></canvas>
+      <div class="qlegend"><span><i style="background:var(--cyan)"></i>in-sample (2000–2015)</span><span><i style="background:var(--gold)"></i>walk-forward (2016–2026)</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SECTION 6 : DIRECTIONS ================= -->
 <section id="directions">
-  <div class="shead"><span class="num">04</span><h2>Direction <span class="amp">//</span> Pick One</h2><span class="rule"></span></div>
+  <div class="shead"><span class="num">06</span><h2>Direction <span class="amp">//</span> Pick One</h2><span class="rule"></span></div>
   <div class="dirs">
     <div class="dir a">
       <div class="head">
@@ -869,7 +1069,6 @@ drawBrain();
 const vOrb = document.getElementById('vOrb');
 const vState = document.getElementById('vState');
 const vLive = document.getElementById('vLive');
-const vNewLine = document.getElementById('vNewLine');
 const vQueue = document.getElementById('vQueue');
 const vFbStat = document.getElementById('vFbStat');
 const vMeter = document.getElementById('vMeter');
@@ -883,19 +1082,52 @@ function setVState(s){ // listening | thinking | speaking | standby
   else { vState.innerHTML='STANDBY<small>SAY “DOURMOUSE”</small>'; vLive.textContent='STANDBY'; vLive.style.color='var(--text-dim)'; }
 }
 
-// demo cycle: click the orb to run the conversation
+// typewriter for the streaming thinking + reply
+function typeText(el, text, speed, done){
+  el.textContent=''; el.insertAdjacentHTML('beforeend','<span class="cursor"></span>');
+  const cursor=el.querySelector('.cursor');
+  let i=0;
+  const iv=setInterval(()=>{
+    cursor.insertAdjacentText('beforebegin', text[i]); i++;
+    if(i>=text.length){ clearInterval(iv); cursor.remove(); if(done)done(); }
+  }, speed);
+}
+
+// demo: click the orb → listen → think (streams) → actions run → reply
 let vDemoTimer=null;
 function vDemo(){
   clearTimeout(vDemoTimer);
+  const turn=document.getElementById('vNewTurn');
+  const think=document.getElementById('vThinkBody');
+  const acts=[...document.getElementById('vActs').querySelectorAll('.act')];
+  const reply=document.getElementById('vReply');
+  // reset the demo turn
+  turn.style.display='';
+  think.textContent='';
+  acts.forEach(a=>{a.classList.remove('done','run'); a.querySelector('.st').textContent='waiting';});
+  reply.textContent='';
+  turn.scrollIntoView({behavior:'smooth', block:'nearest'});
   setVState('listening');
   vDemoTimer=setTimeout(()=>{
     setVState('thinking');
-    vDemoTimer=setTimeout(()=>{
-      setVState('speaking');
-      vNewLine.style.display='block';
-      vDemoTimer=setTimeout(()=>{ setVState('standby'); }, 2200);
-    }, 1500);
-  }, 1800);
+    typeText(think,"Wake word heard. Directive: “good morning, dourmouse”. Check systems, pull a market snapshot, confirm the relay is synced. Plan: vitals → snapshot → report.", 9, ()=>{
+      // run the actions one at a time
+      let k=0;
+      const runNext=()=>{
+        if(k>=acts.length){
+          setVState('speaking');
+          typeText(reply,"Good morning, sir. All systems online — 29 agents mounted, relay synced, memory at 2,758 facts. Gold is firm; I've queued today's brief.", 8, ()=>{
+            vDemoTimer=setTimeout(()=>setVState('standby'), 2400);
+          });
+          return;
+        }
+        const a=acts[k++];
+        a.classList.add('run'); a.querySelector('.st').textContent='running…';
+        vDemoTimer=setTimeout(()=>{ a.classList.remove('run'); a.classList.add('done'); a.querySelector('.st').textContent='✓ done'; runNext(); }, 1200);
+      };
+      vDemoTimer=setTimeout(runNext, 500);
+    });
+  }, 1400);
 }
 vOrb.addEventListener('click', vDemo);
 
@@ -927,6 +1159,77 @@ vEnrollBtn.addEventListener('click',()=>{
   vEnrollBtn.textContent = 'Listening… repeat 3 phrases';
   setTimeout(()=>{ setVState('standby'); vEnrollBtn.textContent='Re-enroll Voice'; vMeter.style.width='96%'; }, 2600);
 });
+
+/* ---------------- quant studio ---------------- */
+const qSig=document.getElementById('qSig'), qRisk=document.getElementById('qRisk'), qReg=document.getElementById('qReg');
+const qSigOut=document.getElementById('qSigOut'), qRiskOut=document.getElementById('qRiskOut'), qRegOut=document.getElementById('qRegOut');
+const qCagr=document.getElementById('qCagr'), qSharpe=document.getElementById('qSharpe'), qDd=document.getElementById('qDd'), qWin=document.getElementById('qWin');
+const qCv=document.getElementById('qChart'); const qCtx=qCv.getContext('2d');
+let qMode='quant';
+
+function qSize(){ const r=qCv.getBoundingClientRect(); qCv.width=r.width*2; qCv.height=190*2; qCtx.setTransform(2,0,0,2,0,0); drawQ(); }
+function drawQ(){
+  const W=qCv.width/2, H=190;
+  qCtx.clearRect(0,0,W,H);
+  const sig=+qSig.value, risk=+qRisk.value, reg=+qReg.value;
+  const drift=qMode==='quant'? (0.0022+0.0036*sig) : (0.0020+0.0030*sig);
+  const vol=0.010+0.020*risk;
+  const n=240;
+  // walk-forward split: first 60% in-sample (cyan), rest gold
+  const split=Math.floor(n*0.6);
+  let s=7; const rnd=()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; };
+  let v=1, path=[];
+  for(let i=0;i<n;i++){
+    const regime=reg>0.5? 1.25 : 0.8;
+    v*=1+drift*regime + (rnd()-.5)*2*vol*regime;
+    path.push(v);
+  }
+  // draw
+  const drawSeg=(start,end,color)=>{ qCtx.beginPath();
+    for(let i=start;i<end;i++){
+      const x=20+(W-40)*(i/(n-1)), y=H-24-(path[i]-Math.min(...path))/(Math.max(...path)-Math.min(...path)+1e-9)*(H-60);
+      i===start? qCtx.moveTo(x,y) : qCtx.lineTo(x,y);
+    }
+    qCtx.strokeStyle=color; qCtx.lineWidth=1.6; qCtx.stroke(); };
+  drawSeg(0,split,'rgba(79,195,247,.85)');
+  drawSeg(split,n,'rgba(245,166,35,.9)');
+  // split marker
+  qCtx.strokeStyle='rgba(138,146,158,.35)'; qCtx.setLineDash([3,3]);
+  qCtx.beginPath(); const sx=20+(W-40)*(split/(n-1)); qCtx.moveTo(sx,16); qCtx.lineTo(sx,H-20); qCtx.stroke(); qCtx.setLineDash([]);
+  // metrics (derived from the same seeded path)
+  const rets=[]; for(let i=1;i<n;i++) rets.push(path[i]/path[i-1]-1);
+  const mean=rets.reduce((a,b)=>a+b,0)/rets.length;
+  const sd=Math.sqrt(rets.reduce((a,b)=>a+(b-mean)**2,0)/rets.length);
+  const sharpe=(mean/sd)*Math.sqrt(12);
+  let peak=path[0], mdd=0; for(const p of path){ peak=Math.max(peak,p); mdd=Math.max(mdd,(peak-p)/peak); }
+  qCagr.textContent=((Math.pow(path[n-1],1/(n/12))-1)*100).toFixed(1)+'%';
+  qSharpe.textContent=sharpe.toFixed(2);
+  qDd.textContent=('−'+Math.abs(mdd*100).toFixed(2)+'%');
+  qWin.textContent=((0.62+0.3*sig+0.06*reg)*100).toFixed(1)+'%';
+  qDd.className='v '+(mdd>0.06?'warn':'')+' '+(mdd>0.12?'down':'');
+}
+qSig.addEventListener('input',()=>{ qSigOut.textContent=qSig.value; drawQ(); });
+qRisk.addEventListener('input',()=>{ qRiskOut.textContent=qRisk.value; drawQ(); });
+qReg.addEventListener('input',()=>{ qRegOut.textContent=qReg.value; drawQ(); });
+document.querySelectorAll('.qmode .chip').forEach(ch=>{
+  ch.addEventListener('click',()=>{
+    document.querySelectorAll('.qmode .chip').forEach(c=>c.classList.remove('on'));
+    ch.classList.add('on');
+    qMode=ch.dataset.qmode;
+    document.getElementById('qLanesQuant').style.display=qMode==='quant'?'':'none';
+    document.getElementById('qLanesEcon').style.display=qMode==='econ'?'':'none';
+    document.getElementById('qChartName').textContent=qMode==='quant'?'USD/CAD DRIFT + CARRY':'GOLD · CB NET BUYING + REGIME';
+    drawQ();
+  });
+});
+document.querySelectorAll('.qblk').forEach(b=>{
+  b.addEventListener('click',()=>{
+    b.parentElement.querySelectorAll('.qblk').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel'); drawQ();
+  });
+});
+window.addEventListener('resize', qSize);
+qSize();
 
 /* ---------------- direction pick (review hook) ---------------- */
 document.querySelectorAll('.pick').forEach(b=>{
