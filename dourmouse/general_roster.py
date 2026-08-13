@@ -322,6 +322,57 @@ def _wikipedia_search(query: str, max_results: int = 5) -> str:
     return "WEB SEARCH RESULTS (Wikipedia, live):\n" + "\n".join(lines)
 
 
+def _brave_search(query: str, max_results: int = 5) -> str | None:
+    """Keyless general web search via Brave's HTML results page.
+
+    2026-08: DuckDuckGo's HTML endpoints now serve bot challenges (HTTP 202
+    with no parseable results) to keyless scrapers. Brave still returns a
+    real, server-rendered results page without a key, so it becomes the
+    primary keyless engine. Returns formatted results or None if nothing
+    usable came back (caller falls through to DuckDuckGo then Wikipedia).
+    """
+    url = (
+        "https://search.brave.com/search?q="
+        + urllib.parse.quote(query)
+        + "&source=web"
+    )
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0 Safari/537.36"
+            )
+        },
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        html = resp.read(400_000).decode("utf-8", errors="replace")
+    parts = html.split('<div class="snippet ')
+    if len(parts) < 2:
+        return None
+    lines: list[str] = []
+    n = 0
+    for part in parts[1:]:
+        if n >= max_results:
+            break
+        href = re.search(r'<a href="(https?://[^"]+)"', part)
+        title = re.search(r'class="title[^"]*"[^>]*>([^<]+)<', part)
+        if not (href and title):
+            continue
+        t = re.sub(r"<[^>]+>", "", title.group(1)).strip()
+        text = re.sub(r"<script[\s\S]*?</script>", " ", part)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        idx = text.find(t)
+        desc = text[idx + len(t): idx + len(t) + 240].strip() if idx != -1 else ""
+        n += 1
+        lines.append(f"{n}. {t} — {desc}\n   {href.group(1)}")
+    if not lines:
+        return None
+    return "WEB SEARCH RESULTS (Brave, live):\n" + "\n".join(lines)
+
+
 def _duckduckgo_search(query: str, max_results: int = 5) -> str | None:
     """Keyless general web search via DuckDuckGo's HTML endpoint.
 
@@ -362,14 +413,17 @@ def _web_search_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: web_search requires a non-empty 'query'."
     max_results = int(arguments.get("max_results", 5))
     errors: list[str] = []
-    # General search first (DuckDuckGo), Wikipedia as a reliable fallback.
-    try:
-        ddg = _duckduckgo_search(query, max_results)
-        if ddg is not None:
-            return ddg
-        errors.append("DuckDuckGo returned no parseable results")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        errors.append(f"DuckDuckGo failed: {exc}")
+    # Keyless engines in resilience order: Brave first (2026-08: DDG's HTML
+    # endpoints serve bot challenges), DuckDuckGo second (may recover), then
+    # Wikipedia as the always-reliable fallback.
+    for name, fn in (("Brave", _brave_search), ("DuckDuckGo", _duckduckgo_search)):
+        try:
+            res = fn(query, max_results)
+            if res is not None:
+                return res
+            errors.append(f"{name} returned no parseable results")
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            errors.append(f"{name} failed: {exc}")
     try:
         return _wikipedia_search(query, max_results)
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
