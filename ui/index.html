@@ -856,23 +856,29 @@
     .dm-grid { grid-template-columns: 1fr; }
   }
   /* v5.20 — offline / stale-data banner (desktop portfolio Phase 5). */
-  /* v5.21 — floating Spotify mini-player, top-left while a song plays. */
+  /* v5.21 — always-on Spotify music dock (bottom-center): now-playing with
+     previous / pause-resume / next controls + a search bar (play anything,
+     anytime — no directive needed). */
   .spotmini {
-    position: fixed; top: 10px; left: 12px; z-index: 65;
-    display: flex; align-items: center; gap: 6px;
-    padding: 7px 12px; max-width: min(420px, 52vw);
-    background: rgba(10,15,24,0.88); backdrop-filter: blur(10px);
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 65; display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; max-width: min(640px, 94vw);
+    background: rgba(10,15,24,0.92); backdrop-filter: blur(10px);
     border: 1px solid rgba(var(--cyan-rgb), var(--a40));
     box-shadow: 0 0 18px rgba(var(--cyan-rgb), var(--a22)), 0 4px 14px rgba(0,0,0,0.45);
     animation: spotminiIn 320ms cubic-bezier(.34,1.56,.64,1);
   }
+  @media (max-width: 899px) { .spotmini { bottom: 62px; } }
   .spotmini[hidden] { display: none; }
   @keyframes spotminiIn {
-    from { opacity: 0; transform: translateY(-10px) scale(0.96); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+    from { opacity: 0; transform: translate(-50%, -10px) scale(0.96); }
+    to { opacity: 1; transform: translate(-50%, 0) scale(1); }
   }
   .spotmini-dot {
     width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: var(--dim); box-shadow: 0 0 6px rgba(148,163,184,0.4);
+  }
+  .spotmini.playing .spotmini-dot {
     background: #5ee7a0; box-shadow: 0 0 8px #5ee7a0;
     animation: spotPulse 1.6s ease-in-out infinite;
   }
@@ -880,13 +886,20 @@
   .spotmini-track {
     font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em;
     color: var(--text); white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; max-width: 210px;
+    text-overflow: ellipsis; max-width: 220px;
   }
   .spotmini .vtbtn { font-size: 12px; padding: 4px 7px; }
   .spotmini-main {
     border-color: rgba(var(--cyan-rgb), var(--a55));
     box-shadow: 0 0 10px rgba(var(--cyan-rgb), var(--a30));
   }
+  .spotmini-search {
+    flex: 1; min-width: 140px; max-width: 260px;
+    background: rgba(18,21,30,0.8); border: 1px solid var(--line);
+    color: var(--text); font-family: var(--font-mono); font-size: 9px;
+    padding: 7px 9px; letter-spacing: 0.06em;
+  }
+  .spotmini-search:focus { outline: none; border-color: rgba(var(--cyan-rgb), var(--a45)); box-shadow: 0 0 10px rgba(var(--cyan-rgb), var(--a16)); }
   #offlinebanner {
     position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
     display: none; align-items: center; justify-content: center; gap: 8px;
@@ -1054,14 +1067,16 @@
 </div>
 <!-- v5.20: honest offline/stale marker — cached data is never shown as live -->
 <div id="offlinebanner" aria-live="polite"><span class="live-dot"></span>OFFLINE · SHOWING CACHED DATA — MARKED STALE · RECONNECT TO REFRESH</div>
-<!-- v5.21 — floating Spotify mini-player (top-left): appears while a track
-     is playing, with previous / pause-resume / next controls. -->
-<div id="spotmini" class="spotmini" hidden aria-live="polite">
+<!-- v5.21 — always-on Spotify music dock (bottom-center): now-playing with
+     previous / pause-resume / next controls + a search bar. Play anything
+     from anywhere — no directive needed. -->
+<div id="spotmini" class="spotmini" aria-live="polite">
   <span class="spotmini-dot"></span>
-  <span id="spotminiTrack" class="spotmini-track">♪</span>
+  <span id="spotminiTrack" class="spotmini-track">NOTHING PLAYING</span>
   <button id="spotminiPrev" class="vtbtn" title="Previous track">⏮</button>
   <button id="spotminiPause" class="vtbtn spotmini-main" title="Pause / resume">⏯</button>
   <button id="spotminiNext" class="vtbtn" title="Next track">⏭</button>
+  <input id="spotminisearch" class="spotmini-search" type="text" placeholder="SEARCH ANY SONG…" spellcheck="false" autocomplete="off">
 </div>
 <div id="app">
   <header id="telemetry">
@@ -2667,7 +2682,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
       if (spotBadgeEl) spotBadgeEl.textContent = '';
       if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">SPOTIFY NOT CONFIGURED — ' + esc(d.hint || 'set SPOTIFY_CLIENT_ID') + '</div>';
       if (spotMusicEl) spotMusicEl.hidden = true;
-      spotMiniHide(); // never leave a stale track floating
+      spotMiniSet('SPOTIFY NOT LINKED', false); // dock always visible
       return;
     }
     if (spotBadgeEl) spotBadgeEl.textContent = d.linked ? 'LINKED' : 'NOT LINKED';
@@ -2683,12 +2698,12 @@ document.getElementById('mapbtn').addEventListener('click', () => {
         .replace(/^SPOTIFY NOW PLAYING: [▶⏸]\s*/, '')
         .split(' (')[0].slice(0, 60);
       if (/^SPOTIFY NOW PLAYING: [▶⏸]/.test(String(d.now_playing))) {
-        spotMiniShow(miniTrack || '♪'); // textContent — no escaping needed
+        spotMiniSet(miniTrack || '♪', spotIsPlaying); // always-visible dock
       } else {
-        spotMiniHide();
+        spotMiniSet('NOTHING PLAYING', false);
       }
     } else {
-      spotMiniHide();
+      spotMiniSet('NOTHING PLAYING', false);
     }
     if (spotBodyEl) spotBodyEl.innerHTML = rows.join('');
     // v5.21: the play-anything section appears only when linked.
@@ -2719,20 +2734,31 @@ document.getElementById('mapbtn').addEventListener('click', () => {
     const btn = ev.target.closest('[data-spoturi]');
     if (btn) spotPlay(btn.getAttribute('data-spoturi'));
   });
-  // ---- v5.21 floating mini-player (top-left while a song plays) ----
+  // ---- v5.21 always-on music dock: now-playing + controls + search ----
   const spotMiniEl = document.getElementById('spotmini');
   const spotMiniTrackEl = document.getElementById('spotminiTrack');
   const spotMiniPrevBtn = document.getElementById('spotminiPrev');
   const spotMiniPauseBtn = document.getElementById('spotminiPause');
   const spotMiniNextBtn = document.getElementById('spotminiNext');
-  function spotMiniShow(trackText) {
+  const spotMiniSearchEl = document.getElementById('spotminisearch');
+  function spotMiniSet(trackText, playing) {
     if (!spotMiniEl) return;
-    if (spotMiniTrackEl) spotMiniTrackEl.textContent = trackText;
-    spotMiniEl.hidden = false;
+    if (spotMiniTrackEl) spotMiniTrackEl.textContent = trackText || '♪';
+    spotMiniEl.classList.toggle('playing', !!playing);
+    spotMiniEl.hidden = false; // the music dock is ALWAYS visible
   }
-  function spotMiniHide() {
-    if (spotMiniEl) spotMiniEl.hidden = true;
+  async function spotMiniSearch() {
+    const q = (spotMiniSearchEl && spotMiniSearchEl.value || '').trim();
+    if (!q) return;
+    try {
+      const r = await fetch('/api/spotify/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, limit: 1 }) });
+      const d = await r.json();
+      const t = (d.results || [])[0];
+      if (t && t.uri) { await spotPlay(t.uri); if (spotMiniSearchEl) spotMiniSearchEl.value = ''; }
+      else { spotMiniSet('NO MATCHES · ' + q.slice(0, 40), false); }
+    } catch (e) { /* transient */ }
   }
+  if (spotMiniSearchEl) spotMiniSearchEl.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') spotMiniSearch(); });
   if (spotMiniPrevBtn) spotMiniPrevBtn.addEventListener('click', () => spotControl('previous'));
   if (spotMiniPauseBtn) spotMiniPauseBtn.addEventListener('click', () => spotControl(spotIsPlaying ? 'pause' : 'resume'));
   if (spotMiniNextBtn) spotMiniNextBtn.addEventListener('click', () => spotControl('next'));
@@ -3033,6 +3059,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   <a class="dms-item" data-route="/atlas" href="#/atlas"><span class="g">◈</span>ATLAS</a>
   <a class="dms-item" data-route="/world" href="#/world"><span class="g">◎</span>WORLD MONITOR</a>
   <a class="dms-item" data-route="/portfolio" href="#/portfolio"><span class="g">▣</span>PORTFOLIO</a>
+  <a class="dms-item" data-route="/media" href="#/media"><span class="g">♪</span>MEDIA</a>
   <a class="dms-item" data-route="/markets" href="#/markets"><span class="g">▥</span>MARKETS</a>
   <a class="dms-item" data-route="/intelligence" href="#/intelligence"><span class="g">✦</span>INTELLIGENCE</a>
   <a class="dms-item" data-route="/alerts" href="#/alerts"><span class="g">◉</span>ALERTS<span class="dms-badge" id="dmsAlertBadge"></span></a>
@@ -3079,6 +3106,27 @@ document.getElementById('mapbtn').addEventListener('click', () => {
       <div class="dm-card"><div class="dm-k">ATLAS SUMMARY</div><div id="portfolioAtlas" class="dm-empty">LOADING…</div></div>
     </div>
     <div class="dm-card"><div class="dm-k">CROSS-DEVICE</div><div class="dm-empty">Star a symbol here, open the same URL on your phone → the star is there. One store, one server, every device reads it (spec §7).</div></div>
+  </section>
+
+  <!-- MEDIA -->
+  <section class="dmview" id="view-media">
+    <div class="dmv-head"><h2>MEDIA</h2><div class="dmv-sub">SPOTIFY SEARCH · PLAYLISTS · RECENT · TOP · #/media</div></div>
+    <div class="dm-card">
+      <div class="dm-k">SEARCH ANY SONG · ARTIST · PLAYLIST</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input id="mediaSearch" type="text" placeholder="SEARCH ANY SONG…" spellcheck="false" autocomplete="off" style="flex:1;min-width:0;background:rgba(18,21,30,0.7);border:1px solid var(--line);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:9px 11px;letter-spacing:0.06em">
+        <button class="dm-btn" id="mediaSearchBtn">SEARCH</button>
+      </div>
+      <div id="mediaResults" class="dm-empty" style="margin-top:12px">SEARCH TO FIND MUSIC</div>
+    </div>
+    <div class="dm-grid">
+      <div class="dm-card"><div class="dm-k">NOW PLAYING</div><div id="mediaNow" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card"><div class="dm-k">MY PLAYLISTS — CLICK TO PLAY</div><div id="mediaLists" class="dm-empty">LOADING…</div></div>
+    </div>
+    <div class="dm-grid">
+      <div class="dm-card"><div class="dm-k">RECENTLY PLAYED</div><div id="mediaRecent" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card"><div class="dm-k">TOP TRACKS · MEDIUM TERM</div><div id="mediaTop" class="dm-empty">LOADING…</div></div>
+    </div>
   </section>
 
   <!-- MARKETS / INTELLIGENCE — honest scaffolds, feeds land in Phase R1 -->
@@ -3138,6 +3186,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   <a class="dmt-tab" data-route="/atlas" href="#/atlas"><span>◈</span>ATLAS<span class="bar"></span></a>
   <a class="dmt-tab" data-route="/world" href="#/world"><span>◎</span>WORLD<span class="bar"></span></a>
   <a class="dmt-tab" data-route="/portfolio" href="#/portfolio"><span>▣</span>PORTFOLIO<span class="bar"></span></a>
+  <a class="dmt-tab" data-route="/media" href="#/media"><span>♪</span>MEDIA<span class="bar"></span></a>
   <a class="dmt-tab" data-route="/more" href="#/more"><span>☰</span>MORE<span class="bar"></span></a>
 </nav>
 <button class="dmt-fab" id="dmtFab" title="Command palette">⚡</button>
@@ -3161,7 +3210,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const GLYPH = { home:'▤', atlas:'◈', world:'◎', portfolio:'▣', markets:'▥', intelligence:'✦', alerts:'◉', settings:'⚙' };
+  const GLYPH = { home:'▤', atlas:'◈', world:'◎', portfolio:'▣', media:'♪', markets:'▥', intelligence:'✦', alerts:'◉', settings:'⚙' };
 
   // ---- device identity (local, per browser — drives the resume banner) --
   let DEVICE = localStorage.getItem('dm_device');
@@ -3173,9 +3222,9 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   // ---- routing: deep links map onto the same eight destinations ---------
   const ROUTES = { '':'home','/':'home','/home':'home','/atlas':'atlas','/atlas/portfolio':'atlas',
     '/atlas/research':'atlas','/atlas/risk':'atlas','/world':'world','/world/events':'world',
-    '/portfolio':'portfolio','/markets':'markets','/intelligence':'intelligence',
+    '/portfolio':'portfolio','/media':'media','/markets':'markets','/intelligence':'intelligence',
     '/alerts':'alerts','/settings':'settings','/more':'more' };
-  const VIEWS = ['atlas','world','portfolio','markets','intelligence','alerts','settings','more'];
+  const VIEWS = ['atlas','world','portfolio','media','markets','intelligence','alerts','settings','more'];
   const isMobile = () => window.innerWidth < 900;
 
   let state = { watchlist: [], alerts: [], muted: [], prefs: {}, recent: [], workspaces: [] };
@@ -3381,6 +3430,72 @@ document.getElementById('mapbtn').addEventListener('click', () => {
     });
   }
 
+  // ---- MEDIA view: Spotify search + playlists + recent + top + now ----
+  async function mediaFetch(path, body) {
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : '{}' });
+      return await r.json();
+    } catch (e) { return { ok: false }; }
+  }
+  function mediaRow(item, kind) {
+    const uri = item.uri || '';
+    return '<div class="dm-row" style="border-bottom:1px solid var(--line);padding:9px 2px">' +
+      '<span class="g" style="font-size:14px">' + (kind === 'playlist' ? '▤' : '♪') + '</span>' +
+      '<div class="grow"><div class="n">' + esc(item.name) + '</div>' +
+      (item.artists ? '<div class="d">' + esc(item.artists) + '</div>' : '') +
+      (item.tracks != null ? '<div class="d">' + item.tracks + ' tracks</div>' : '') +
+      '</div><button class="dm-btn" data-mplay="' + esc(uri) + '">PLAY</button></div>';
+  }
+  function mediaFill(elId, list, kind, emptyText) {
+    const el = $(elId); if (!el) return;
+    el.className = '';
+    el.innerHTML = (list && list.length)
+      ? list.map(x => mediaRow(x, kind)).join('')
+      : '<div class="dm-empty">' + emptyText + '</div>';
+  }
+  async function mediaNow() {
+    const el = $('mediaNow'); if (!el) return;
+    try {
+      const r = await fetch('/api/spotify'); const d = await r.json();
+      if (!d.configured) { el.className = 'dm-empty'; el.textContent = 'SPOTIFY NOT CONFIGURED — ' + (d.hint || ''); return; }
+      el.className = '';
+      const np = d.now_playing ? esc(String(d.now_playing).replace(/\n/g, ' ').slice(0, 160)) : 'NOTHING PLAYING';
+      el.innerHTML = '<div class="dm-row" style="padding:6px 2px"><span class="g">♪</span><div class="grow"><div class="n">' + np + '</div></div>' +
+        '<button class="dm-btn" data-mplay="ctl:previous">⏮</button>' +
+        '<button class="dm-btn" data-mplay="ctl:pause">⏯</button>' +
+        '<button class="dm-btn" data-mplay="ctl:next">⏭</button></div>';
+    } catch (e) { el.className = 'dm-empty'; el.textContent = 'NOW PLAYING UNAVAILABLE'; }
+  }
+  async function wireMedia() {
+    const input = $('mediaSearch'), btn = $('mediaSearchBtn');
+    const doSearch = async () => {
+      const q = (input && input.value || '').trim(); if (!q) return;
+      const d = await mediaFetch('/api/spotify/search', { query: q, limit: 12 });
+      mediaFill('mediaResults', d.ok ? (d.results || []) : [], 'track', (d.ok ? 'NO MATCHES (HONEST)' : (d.error || 'SEARCH FAILED')));
+    };
+    if (btn) btn.addEventListener('click', doSearch);
+    if (input) input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') doSearch(); });
+    // load once per session
+    if (!wireMedia._loaded) {
+      wireMedia._loaded = true;
+      mediaNow();
+      mediaFetch('/api/spotify/playlists', {}).then(d => mediaFill('mediaLists', d.ok ? (d.playlists || []) : [], 'playlist', (d.ok ? 'NO PLAYLISTS (HONEST)' : (d.error || 'PLAYLISTS UNAVAILABLE'))));
+      mediaFetch('/api/spotify/recent', {}).then(d => mediaFill('mediaRecent', d.ok ? (d.recent || []) : [], 'track', (d.ok ? 'NO RECENT TRACKS (HONEST)' : (d.error || 'RECENT UNAVAILABLE'))));
+      mediaFetch('/api/spotify/top', { time_range: 'medium_term' }).then(d => mediaFill('mediaTop', d.ok ? (d.top || []) : [], 'track', (d.ok ? 'NO TOP TRACKS (HONEST)' : (d.error || 'TOP UNAVAILABLE'))));
+    }
+  }
+  document.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('[data-mplay]'); if (!b) return;
+    const v = b.getAttribute('data-mplay');
+    if (v.startsWith('ctl:')) {
+      await mediaFetch('/api/spotify/control', { action: v.slice(4) });
+      setTimeout(mediaNow, 2000);
+    } else if (v) {
+      await mediaFetch('/api/spotify/play', { uri: v });
+      setTimeout(mediaNow, 2000);
+    }
+  });
+
   // ---- ATLAS view -------------------------------------------------------
   async function renderAtlas() {
     const statusEl = $('atlasStatus'), bootEl = $('atlasBootstrap'),
@@ -3484,7 +3599,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   function renderMore() {
     const list = $('moreList');
     if (!list) return;
-    list.innerHTML = ['markets', 'intelligence', 'alerts', 'settings'].map(v =>
+    list.innerHTML = ['media', 'markets', 'intelligence', 'alerts', 'settings'].map(v =>
       `<a class="dm-row" href="#/${v}" style="text-decoration:none"><span class="g" style="font-size:14px">${GLYPH[v]}</span>` +
       `<div class="grow"><div class="n">${v.toUpperCase()}</div><div class="d">open ${v}</div></div><span style="color:var(--text-dim)">→</span></a>`
     ).join('') +
@@ -3625,7 +3740,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   window.addEventListener('online', () => { setOffline(false); fetchState(); });
   window.addEventListener('hashchange', route);
   window.addEventListener('resize', () => { renderResume(); });
-  wireActions(); wirePalette(); renderMore();
+  wireActions(); wirePalette(); renderMore(); wireMedia();
   loadPalette();
   route();
   fetchState(); renderAtlas(); renderWorld(); renderSettings();

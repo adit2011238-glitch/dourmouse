@@ -3,93 +3,109 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DOURMOUSE VOICE</title>
+<title>DOURMOUSE // VOICE LAB</title>
 <style>
+  @font-face{font-family:'Orbitron';font-style:normal;font-weight:700;font-display:swap;src:url('assets/fonts/orbitron-700-latin.woff2') format('woff2');}
+  @font-face{font-family:'Orbitron';font-style:normal;font-weight:900;font-display:swap;src:url('assets/fonts/orbitron-900-latin.woff2') format('woff2');}
+  @font-face{font-family:'Rajdhani';font-style:normal;font-weight:500;font-display:swap;src:url('assets/fonts/rajdhani-500-latin.woff2') format('woff2');}
+  @font-face{font-family:'Rajdhani';font-style:normal;font-weight:600;font-display:swap;src:url('assets/fonts/rajdhani-600-latin.woff2') format('woff2');}
+  @font-face{font-family:'Rajdhani';font-style:normal;font-weight:700;font-display:swap;src:url('assets/fonts/rajdhani-700-latin.woff2') format('woff2');}
+  @font-face{font-family:'Share Tech Mono';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/share-tech-mono-400-latin.woff2') format('woff2');}
+  @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/space-grotesk-400-latin.woff2') format('woff2');}
+  @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:500;font-display:swap;src:url('assets/fonts/space-grotesk-500-latin.woff2') format('woff2');}
+  @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:600;font-display:swap;src:url('assets/fonts/space-grotesk-600-latin.woff2') format('woff2');}
   :root {
-    --bg: #080c14;
-    --panel: #0d1420;
-    --line: #1b2735;
+    --bg: #070b12;
+    --panel: #0c1220;
+    --line: #182435;
     --cyan: #22d3ee;
-    --cyan-dim: #67e8f9;
-    --cyan-faint: rgba(34, 211, 238, .12);
-    --text: #cbd5e1;
+    --cyan-rgb: 34, 211, 238;
+    --gold: #f5c86a;
+    --gold-rgb: 245, 200, 106;
+    --text: #dbe4f0;
     --dim: #64748b;
     --red: #f87171;
+    --green: #5ee7a0;
+    --font-hud: 'Rajdhani', system-ui, sans-serif;
+    --font-mono: 'Share Tech Mono', ui-monospace, Menlo, monospace;
+    --font-prose: 'Space Grotesk', system-ui, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
     background:
-      radial-gradient(ellipse 80% 60% at 50% 45%, rgba(34,211,238,.06), transparent 70%),
+      radial-gradient(ellipse 80% 60% at 50% 38%, rgba(var(--cyan-rgb),.06), transparent 70%),
       var(--bg);
     color: var(--text);
-    font-family: -apple-system, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+    font-family: var(--font-prose);
     display: flex; flex-direction: column; overflow: hidden;
     -webkit-user-select: none; user-select: none;
   }
   /* ---------- top bar ---------- */
   header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 28px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    padding: 14px 24px; border-bottom: 1px solid var(--line);
+    background: rgba(7,11,18,0.75);
   }
-  .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; letter-spacing: .14em; }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-hud); font-size: 16px; letter-spacing: .16em; }
   .brand .shield { width: 18px; height: 18px; color: var(--cyan); }
-  .brand b { color: var(--cyan); font-weight: 600; text-shadow: 0 0 14px rgba(34,211,238,.55); }
-  .brand .sub { color: var(--dim); font-size: 12px; letter-spacing: .2em; }
-  .topchips { display: flex; align-items: center; gap: 18px; font-size: 12px; letter-spacing: .08em; }
+  .brand b { color: var(--cyan); font-weight: 700; text-shadow: 0 0 14px rgba(var(--cyan-rgb),.55); }
+  .brand .dot { color: var(--gold); }
+  .brand .sub { color: var(--dim); font-size: 11px; letter-spacing: .24em; font-family: var(--font-mono); }
+  .topchips { display: flex; align-items: center; gap: 16px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; }
   .chip { display: flex; align-items: center; gap: 7px; color: var(--dim); }
   .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
-  .chip .dot.on { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .chip .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
   .chip .dot.err { background: var(--red); box-shadow: 0 0 8px var(--red); }
-  .chip b { color: var(--text); font-weight: 500; }
+  .chip b { color: var(--text); font-weight: 400; }
   .authbtn {
     background: var(--cyan); color: #04121a; border: 0; border-radius: 6px;
-    padding: 6px 14px; font-size: 12px; font-weight: 600; letter-spacing: .06em; cursor: pointer;
+    padding: 6px 14px; font-family: var(--font-hud); font-size: 12px; font-weight: 700; letter-spacing: .08em; cursor: pointer;
   }
   .authbtn:hover { filter: brightness(1.12); }
-  .authbtn.ok { background: var(--cyan-faint); color: var(--cyan); }
+  .authbtn.ok { background: rgba(var(--cyan-rgb),.12); color: var(--cyan); }
 
-  /* ---------- center stage ---------- */
-  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px; position: relative; }
+  /* ---------- stage ---------- */
+  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+  .stage {
+    display: flex; align-items: center; justify-content: center; gap: 34px;
+    padding: 18px 24px 10px; flex-wrap: wrap;
+  }
   .statusline { text-align: center; }
-  .statusline .kicker { font-size: 11px; letter-spacing: .34em; color: var(--dim); }
-  .statusline .big { font-size: 22px; font-weight: 600; letter-spacing: .2em; color: var(--cyan);
-    text-shadow: 0 0 22px rgba(34,211,238,.5); margin-top: 6px; }
+  .statusline .kicker { font-family: var(--font-mono); font-size: 10px; letter-spacing: .34em; color: var(--dim); }
+  .statusline .big { font-family: var(--font-hud); font-size: 21px; font-weight: 700; letter-spacing: .22em; color: var(--cyan);
+    text-shadow: 0 0 22px rgba(var(--cyan-rgb),.5); margin-top: 4px; }
 
-  /* ---------- radar + orb ---------- */
-  .radar { position: relative; width: 300px; height: 300px; }
-  .radar .ring { position: absolute; border: 1px solid rgba(34,211,238,.16); border-radius: 50%; }
+  /* ---------- orb ---------- */
+  .radar { position: relative; width: 220px; height: 220px; flex: none; }
+  .radar .ring { position: absolute; border: 1px solid rgba(var(--cyan-rgb),.16); border-radius: 50%; }
   .radar .r1 { inset: 0; }
-  .radar .r2 { inset: 34px; border-color: rgba(34,211,238,.12); }
-  .radar .r3 { inset: 68px; border-color: rgba(34,211,238,.10); }
-  .radar .r4 { inset: 102px; border-color: rgba(34,211,238,.08); }
-  .radar .tick { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
-  .radar .t1 { top: 0; left: 50%; transform: translate(-50%, -50%); }
-  .radar .t2 { bottom: 0; left: 50%; transform: translate(-50%, 50%); }
-  .radar .t3 { top: 50%; left: 0; transform: translate(-50%, -50%); }
-  .radar .t4 { top: 50%; right: 0; transform: translate(50%, -50%); }
+  .radar .r2 { inset: 28px; border-color: rgba(var(--cyan-rgb),.12); }
+  .radar .r3 { inset: 56px; border-color: rgba(var(--cyan-rgb),.10); }
+  .radar .r4 { inset: 84px; border-color: rgba(var(--cyan-rgb),.08); }
   .orb {
-    position: absolute; inset: 76px; border-radius: 50%;
-    background: radial-gradient(circle at 38% 32%, #a5f3fc 0%, #22d3ee 28%, #0e7490 62%, #083344 100%);
-    box-shadow: 0 0 44px rgba(34,211,238,.5), inset 0 0 26px rgba(8,12,20,.55);
+    position: absolute; inset: 58px; border-radius: 50%;
+    background: radial-gradient(circle at 38% 32%, #a5f3fc 0%, var(--cyan) 28%, #0e7490 62%, #083344 100%);
+    box-shadow: 0 0 44px rgba(var(--cyan-rgb),.5), inset 0 0 26px rgba(7,11,18,.55);
     animation: breathe 4s ease-in-out infinite;
   }
   @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
-  .radar.pulse .orb { box-shadow: 0 0 70px rgba(34,211,238,.85), inset 0 0 26px rgba(8,12,20,.55); }
-  .radar.listening .orb { animation: breathfast .7s ease-in-out infinite; }
+  .radar.listening .orb { animation: breathfast .7s ease-in-out infinite; box-shadow: 0 0 70px rgba(var(--cyan-rgb),.85), inset 0 0 26px rgba(7,11,18,.55); }
   @keyframes breathfast { 0%,100% { transform: scale(1.02); } 50% { transform: scale(1.1); } }
-  .radar.listening .ring { border-color: rgba(34,211,238,.34); }
+  .radar.listening .ring { border-color: rgba(var(--cyan-rgb),.34); }
+  .radar.think .orb { background: radial-gradient(circle at 38% 32%, #fdf3d8 0%, var(--gold) 30%, #a5761c 65%, #4a3606 100%); box-shadow: 0 0 54px rgba(var(--gold-rgb),.6), inset 0 0 26px rgba(7,11,18,.55); }
+  .radar.speak .orb { background: radial-gradient(circle at 38% 32%, #d9ffe9 0%, var(--green) 30%, #0f7a4a 65%, #06341f 100%); box-shadow: 0 0 54px rgba(94,231,160,.6), inset 0 0 26px rgba(7,11,18,.55); }
 
-  /* ---------- mic button ---------- */
-  .micwrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  /* ---------- mic ---------- */
+  .micwrap { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: none; }
   .micbtn {
-    width: 72px; height: 72px; border-radius: 50%; border: 1px solid var(--cyan);
-    background: rgba(34,211,238,.06); color: var(--cyan); cursor: pointer;
+    width: 62px; height: 62px; border-radius: 50%; border: 1px solid var(--cyan);
+    background: rgba(var(--cyan-rgb),.06); color: var(--cyan); cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 0 24px rgba(34,211,238,.25), inset 0 0 16px rgba(34,211,238,.10);
+    box-shadow: 0 0 24px rgba(var(--cyan-rgb),.25), inset 0 0 16px rgba(var(--cyan-rgb),.10);
     transition: all .18s ease;
   }
-  .micbtn:hover { background: rgba(34,211,238,.14); box-shadow: 0 0 34px rgba(34,211,238,.45); }
+  .micbtn:hover { background: rgba(var(--cyan-rgb),.14); box-shadow: 0 0 34px rgba(var(--cyan-rgb),.45); }
   .micbtn:active { transform: scale(.94); }
   .micbtn.rec {
     background: var(--red); border-color: var(--red); color: #2b0a0a;
@@ -97,42 +113,74 @@
     animation: pulse 1s ease-in-out infinite;
   }
   @keyframes pulse { 0%,100% { box-shadow: 0 0 34px rgba(248,113,113,.6);} 50% { box-shadow: 0 0 52px rgba(248,113,113,.9);} }
-  .micbtn svg { width: 26px; height: 26px; }
-  .miclabel { font-size: 11px; letter-spacing: .3em; color: var(--dim); }
+  .micbtn svg { width: 24px; height: 24px; }
+  .miclabel { font-family: var(--font-mono); font-size: 10px; letter-spacing: .3em; color: var(--dim); }
   .miclabel.hot { color: var(--cyan); }
 
-  /* ---------- answer panel ---------- */
-  .answer {
-    min-height: 46px; max-height: 130px; width: min(620px, 86vw); overflow-y: auto;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 14px 18px; font-size: 14.5px; line-height: 1.55; display: none;
+  /* ---------- deck: transcript + profile ---------- */
+  .deck { flex: 1; display: grid; grid-template-columns: 1fr 250px; gap: 14px; padding: 0 24px 18px; min-height: 0; }
+  .convo {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    overflow-y: auto; padding: 14px 16px; min-height: 0;
+    font-size: 13.5px; line-height: 1.6;
   }
-  .answer .who { font-size: 10.5px; letter-spacing: .24em; color: var(--dim); margin-bottom: 6px; }
-  .answer .who.you { color: var(--cyan); }
-  .answer.show { display: block; }
-  .answer .caret { display: inline-block; width: 7px; height: 15px; background: var(--cyan); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  .convo:empty::before { content: "TAP THE ORB AND TALK — WATCH DOURMOUSE THINK, ACT, THEN REPLY."; color: var(--dim); font-family: var(--font-mono); font-size: 10px; letter-spacing: .2em; display: block; text-align: center; margin-top: 30px; }
+  .turn { margin-bottom: 16px; }
+  .tq { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
+  .tq .who { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .26em; color: var(--cyan); flex: none; }
+  .tq .q { color: var(--text); }
+  .th { border-left: 2px solid rgba(var(--gold-rgb), .5); padding: 4px 0 4px 12px; margin: 4px 0 8px; }
+  .th-head { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .24em; color: var(--gold); margin-bottom: 4px; }
+  .th-line { font-size: 12.5px; color: rgba(219,228,240,.72); margin: 2px 0; }
+  .th-line .caret { display: inline-block; width: 6px; height: 12px; background: var(--gold); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  .ac { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; margin: 3px 0; color: var(--text); }
+  .ac .tag { flex: none; font-size: 9px; letter-spacing: .12em; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--dim); }
+  .ac .nm { color: var(--cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
+  .ac .st { margin-left: auto; flex: none; color: var(--dim); font-size: 9.5px; letter-spacing: .16em; }
+  .ac.done .st { color: var(--green); }
+  .ac.done .tag { color: var(--green); border-color: rgba(94,231,160,.4); }
+  .ac .snip { color: var(--dim); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
+  .rep { border-left: 2px solid rgba(var(--cyan-rgb), .5); padding: 4px 0 4px 12px; margin-top: 8px; }
+  .rp-head { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .24em; color: var(--cyan); margin-bottom: 4px; }
+  .rp-head .voice { color: var(--dim); letter-spacing: .14em; }
+  .rp-body { white-space: pre-wrap; }
+  .rp-body .caret { display: inline-block; width: 7px; height: 14px; background: var(--cyan); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  .err { color: var(--red); font-size: 12.5px; }
   @keyframes blink { 50% { opacity: 0; } }
-  .answer .err { color: var(--red); }
 
-  /* ---------- corners ---------- */
-  .corner { position: absolute; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--dim); letter-spacing: .06em; line-height: 1.9; }
-  .corner.bl { left: 28px; bottom: 22px; }
-  .corner.br { right: 28px; bottom: 22px; text-align: right; }
-  .corner b { color: var(--cyan-dim); font-weight: 500; }
+  .side { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .card .k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .26em; color: var(--gold); margin-bottom: 10px; }
+  .card .row { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--dim); padding: 4px 0; border-bottom: 1px dashed rgba(24,36,53,.7); }
+  .card .row:last-of-type { border-bottom: 0; }
+  .card .row b { color: var(--text); font-weight: 400; }
+  .card .note { font-size: 11px; color: var(--dim); line-height: 1.5; margin-top: 8px; }
+  .qbtn {
+    width: 100%; margin-top: 10px; background: rgba(var(--gold-rgb),.1); color: var(--gold);
+    border: 1px solid rgba(var(--gold-rgb),.4); border-radius: 6px; padding: 8px 10px;
+    font-family: var(--font-hud); font-size: 11px; font-weight: 700; letter-spacing: .12em; cursor: pointer;
+  }
+  .qbtn:hover { background: rgba(var(--gold-rgb),.2); }
+  .qbtn:disabled { opacity: .5; cursor: default; }
 
   #authnote {
-    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.35); color: var(--red);
-    font-size: 12.5px; padding: 8px 16px; border-radius: 8px; display: none;
+    font-size: 12.5px; padding: 8px 16px; border-radius: 8px; display: none; z-index: 5;
   }
   #authnote a { color: var(--cyan); }
+  @media (max-width: 860px) {
+    .deck { grid-template-columns: 1fr; }
+    .side { flex-direction: row; flex-wrap: wrap; }
+    .card { flex: 1; min-width: 200px; }
+  }
 </style>
 </head>
 <body>
 <header>
   <div class="brand">
     <svg class="shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
-    <div><b>DOURMOUSE</b> <span class="sub">// VOICE</span></div>
+    <div><b>DOURMOUSE<span class="dot">.</span></b> <span class="sub">// VOICE LAB</span></div>
   </div>
   <div class="topchips">
     <span class="chip"><span class="dot" id="sttDot"></span>STT&nbsp;<b id="sttName">…</b></span>
@@ -144,42 +192,45 @@
 
 <main>
   <div id="authnote"></div>
-  <div class="statusline">
-    <div class="kicker">SYSTEM STATUS</div>
-    <div class="big" id="sysStatus">INITIALIZING</div>
+  <div class="stage">
+    <div class="statusline">
+      <div class="kicker">SYSTEM STATUS</div>
+      <div class="big" id="sysStatus">INITIALIZING</div>
+    </div>
+    <div class="radar" id="radar">
+      <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="ring r4"></div>
+      <div class="orb"></div>
+    </div>
+    <div class="micwrap">
+      <button class="micbtn" id="micBtn" title="Tap to command">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>
+        </svg>
+      </button>
+      <div class="miclabel" id="micLabel">TAP TO COMMAND</div>
+    </div>
   </div>
 
-  <div class="radar" id="radar">
-    <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="ring r4"></div>
-    <div class="tick t1"></div><div class="tick t2"></div><div class="tick t3"></div><div class="tick t4"></div>
-    <div class="orb"></div>
-  </div>
-
-  <div class="micwrap">
-    <button class="micbtn" id="micBtn" title="Tap to command">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>
-      </svg>
-    </button>
-    <div class="miclabel" id="micLabel">TAP TO COMMAND</div>
-  </div>
-
-  <div class="answer" id="answer"></div>
-
-  <div class="corner bl">
-    LOC: <b id="locVal">—</b><br>
-    LAT: <b id="latVal">—</b>
-  </div>
-  <div class="corner br">
-    FACTS: <b id="factsVal">—</b><br>
-    BRAIN: <b id="brainVal">—</b>
+  <div class="deck">
+    <div class="convo" id="convo"></div>
+    <aside class="side">
+      <div class="card">
+        <div class="k">VOICE PROFILE</div>
+        <div class="row"><span>SAMPLES</span><b id="profSamples">0</b></div>
+        <div class="row"><span>ACCENT MATCH</span><b>ADAPTING</b></div>
+        <div class="row"><span>STT ENGINE</span><b id="profStt">—</b></div>
+        <div class="row"><span>TTS ENGINE</span><b id="profTts">—</b></div>
+        <div class="note">Every conversation is a training signal. Queue this session and your corrections feed the next SFT dataset build for the dourmouse fine-tune.</div>
+        <button class="qbtn" id="queueBtn">QUEUE SESSION FOR FINE-TUNE</button>
+      </div>
+    </aside>
   </div>
 </main>
 
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const radar = $('radar'), micBtn = $('micBtn'), micLabel = $('micLabel'), answer = $('answer');
+const radar = $('radar'), micBtn = $('micBtn'), micLabel = $('micLabel'), convo = $('convo');
 
 /* ---------- status ---------- */
 async function api(path, opts) {
@@ -196,13 +247,12 @@ async function loadStatus() {
     ]);
     const sttOk = v.stt === 'faster-whisper';
     const ttsOk = v.tts !== 'not-configured';
-    dot('sttDot', sttOk ? 'on' : 'err'); $('sttName').textContent = sttOk ? 'WHISPER' : v.stt || 'OFF';
+    dot('sttDot', sttOk ? 'on' : 'err'); $('sttName').textContent = sttOk ? 'WHISPER' : (v.stt || 'OFF').toUpperCase();
     dot('ttsDot', ttsOk ? 'on' : 'err'); $('ttsName').textContent = ttsOk ? (v.tts || '?').toUpperCase() : 'OFF';
     dot('memDot', 'on'); $('memCount').textContent = m.count != null ? m.count : '—';
     $('sysStatus').textContent = (sttOk && ttsOk) ? 'SYSTEM READY' : (sttOk ? 'SYSTEM READY · TTS OFF' : 'VOICE NOT CONFIGURED');
-    $('factsVal').textContent = m.count != null ? m.count + ' facts' : '—';
-    $('brainVal').textContent = (v.whisper_model || '—').toUpperCase();
-    if (t.mem_used_gb != null) { $('locVal').textContent = t.mem_pct + '% MEM'; $('latVal').textContent = t.cpu_pct + '% CPU'; }
+    $('profStt').textContent = (v.whisper_model || '—').toUpperCase();
+    $('profTts').textContent = (v.piper_voice || (v.tts || '—')).toUpperCase();
     $('authBtn').textContent = 'AUTHENTICATED'; $('authBtn').classList.add('ok');
   } catch (e) {
     if (e.auth) {
@@ -241,7 +291,7 @@ async function toggleMic() {
     recording = true;
     setRec(true);
   } catch (e) {
-    line('You', 'Mic error: ' + e.message, true);
+    addTurn('Mic error: ' + e.message, true);
   }
 }
 function stopRecording() {
@@ -254,27 +304,59 @@ function setRec(on) {
   micLabel.classList.toggle('hot', on);
   radar.classList.toggle('listening', on);
 }
+function setState(mode) {
+  radar.classList.toggle('listening', mode === 'listen');
+  radar.classList.toggle('think', mode === 'think');
+  radar.classList.toggle('speak', mode === 'speak');
+  if (mode) $('sysStatus').textContent = mode === 'think' ? 'THINKING…' : mode === 'speak' ? 'SPEAKING…' : 'SYSTEM READY';
+}
 
-/* ---------- transcribe -> chat -> speak ---------- */
+/* ---------- transcript ---------- */
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function el(html) { const d = document.createElement('div'); d.innerHTML = html; return d.firstElementChild; }
+function addTurn(question, isErr) {
+  const turn = el(
+    '<div class="turn"><div class="tq"><span class="who">YOU</span><span class="q"></span></div>' +
+    '<div class="proc"><div class="th" style="display:none"><div class="th-head">[T] REASONING</div><div class="th-lines"></div></div>' +
+    '<div class="acts" style="display:none"></div>' +
+    '<div class="rep" style="display:none"><div class="rp-head">DOURMOUSE <span class="voice">VOICE REPLY · TTS</span></div><div class="rp-body"></div></div></div></div>'
+  );
+  if (isErr) turn.querySelector('.q').innerHTML = '<span class="err">' + esc(question) + '</span>';
+  else turn.querySelector('.q').textContent = question;
+  convo.appendChild(turn);
+  convo.scrollTop = convo.scrollHeight;
+  return {
+    th: turn.querySelector('.th'), thLines: turn.querySelector('.th-lines'),
+    acts: turn.querySelector('.acts'), rep: turn.querySelector('.rep'), rpBody: turn.querySelector('.rp-body'),
+    tools: {}, // name -> {row, st}
+  };
+}
+
+/* ---------- transcribe -> chat (streaming) -> speak ---------- */
 async function transcribe(blob) {
-  setBusy('HEARING…');
+  setState('listen'); $('sysStatus').textContent = 'HEARING…';
   try {
     const r = await api('/api/speech', { method: 'POST', body: blob });
     const d = await r.json();
     const text = (d.text || '').trim();
-    if (!text) { line('You', '…(no speech detected)', true); setBusy('SYSTEM READY'); return; }
-    line('You', esc(text));
+    if (!text) { addTurn('…(no speech detected)', true); setState(null); return; }
     await ask(text);
   } catch (e) {
-    line('System', e.auth ? 'Login required — /login' : 'STT failed: ' + e.message, true);
-    setBusy('SYSTEM READY');
+    addTurn(e.auth ? 'Login required — /login' : 'STT failed: ' + e.message, true);
+    setState(null);
   }
 }
 
 async function ask(prompt) {
-  setBusy('PROCESSING…');
-  showAnswer('System', '');
-  const cur = $('answer');
+  const turn = addTurn(prompt);
+  setState('think');
+  let finalText = '';
+  // Claude-style: the reasoning phase is ALWAYS visible before the reply —
+  // real plan steps stream in when the dispatcher emits them, and the
+  // placeholder keeps the thinking block present for quick turns.
+  turn.th.style.display = '';
+  const pre = el('<div class="th-line">Reasoning through the request…</div>');
+  turn.thLines.appendChild(pre);
   try {
     const r = await api('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -283,8 +365,7 @@ async function ask(prompt) {
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
-    let finalText = '';
-    let brain = '';
+    let thinkingStarted = false;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -294,47 +375,115 @@ async function ask(prompt) {
         const raw = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
         if (!raw.startsWith('data:')) continue;
         let evt; try { evt = JSON.parse(raw.slice(5).trim()); } catch (_) { continue; }
-        if (evt.type === 'brain' && evt.model) { brain = evt.model; $('brainVal').textContent = brain.toUpperCase(); }
-        if (evt.type === 'assistant_delta' && evt.text) finalText += evt.text;
-        if (evt.type === 'assistant_text' && evt.text) finalText = evt.text;
-        if (evt.final_text) finalText = evt.final_text;
-        renderLive(finalText);
+        handleEvent(turn, evt);
+      }
+    }
+    function handleEvent(t, evt) {
+      switch (evt.type) {
+        case 'plan': {
+          // Claude-style thinking: the plan streams in BEFORE the reply.
+          t.th.style.display = '';
+          thinkingStarted = true;
+          // drop the placeholder once real reasoning arrives
+          t.thLines.innerHTML = '';
+          const steps = Array.isArray(evt.steps) ? evt.steps : [];
+          steps.forEach(s => {
+            const n = (s && (s.n != null ? s.n + '. ' : '')) + (s && s.task ? s.task : String(s));
+            const line = el('<div class="th-line"></div>');
+            line.textContent = n;
+            t.thLines.appendChild(line);
+          });
+          if (!steps.length) {
+            const line = el('<div class="th-line"><span class="caret"></span></div>');
+            t.thLines.appendChild(line);
+          }
+          convo.scrollTop = convo.scrollHeight;
+          break;
+        }
+        case 'tool_use': {
+          // visible web-search / tool actions with running → done ticks
+          t.acts.style.display = '';
+          const name = evt.name || 'tool';
+          const row = el('<div class="ac"><span class="tag">[RUN]</span><span class="nm"></span><span class="st">RUNNING…</span></div>');
+          row.querySelector('.nm').textContent = name + (evt.raw_arguments ? ' ' + String(evt.raw_arguments).slice(0, 60) : '');
+          t.acts.appendChild(row);
+          t.tools[name] = row;
+          convo.scrollTop = convo.scrollHeight;
+          break;
+        }
+        case 'tool_result': {
+          const row = t.tools[evt.name];
+          if (row) {
+            row.classList.add('done');
+            row.querySelector('.st').textContent = '✓ DONE';
+            const snip = String(evt.text || '').replace(/\s+/g, ' ').slice(0, 70);
+            if (snip) {
+              const s = el('<span class="snip"></span>');
+              s.textContent = snip;
+              row.appendChild(s);
+            }
+          }
+          break;
+        }
+        case 'assistant_delta': {
+          if (evt.text) { finalText += evt.text; renderReply(t, finalText, false); }
+          break;
+        }
+        case 'assistant_text': {
+          if (evt.text) { finalText = evt.text; renderReply(t, finalText, false); }
+          break;
+        }
+        case 'brain': {
+          if (evt.model) $('brainVal') && ($('brainVal').textContent = String(evt.model).toUpperCase());
+          break;
+        }
       }
     }
     finalText = finalText.trim();
-    setBusy('SYSTEM READY');
     if (finalText) {
-      renderLive(finalText, true);
+      renderReply(turn, finalText, true);
       speak(finalText);
-    } else {
-      line('System', 'No response received.', true);
+    } else if (!turn.tools && !turn.thLines.children.length) {
+      addTurn('No response received.', true);
     }
+    setState(null);
+    bumpSamples();
   } catch (e) {
-    setBusy('SYSTEM READY');
-    line('System', e.auth ? 'Login required — /login' : 'Chat failed: ' + e.message, true);
+    setState(null);
+    addTurn(e.auth ? 'Login required — /login' : 'Chat failed: ' + e.message, true);
   }
 }
 
-function renderLive(text, final) {
-  showAnswer('System', esc(text) + (final ? '' : '<span class="caret"></span>'));
+function renderReply(t, text, final) {
+  t.rep.style.display = '';
+  t.rpBody.innerHTML = esc(text) + (final ? '' : '<span class="caret"></span>');
+  convo.scrollTop = convo.scrollHeight;
 }
 function speak(text) {
+  setState('speak');
   const url = '/api/speech?text=' + encodeURIComponent(text.slice(0, 600));
   const a = new Audio(url);
-  a.onerror = () => { /* TTS optional — never breaks the answer */ };
-  a.play().catch(() => {});
+  a.onerror = () => { setState(null); };
+  a.onended = () => { setState(null); };
+  a.play().catch(() => { setState(null); });
 }
 
-/* ---------- helpers ---------- */
-function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
-function line(who, html, isErr) {
-  showAnswer(who, (isErr ? '<span class="err">' : '') + html + (isErr ? '</span>' : ''));
+/* ---------- voice profile (local) ---------- */
+let sampleCount = Number(localStorage.getItem('dm_voice_samples') || 0);
+let queueCount = Number(localStorage.getItem('dm_voice_queue') || 0);
+$('profSamples').textContent = sampleCount;
+function bumpSamples() {
+  sampleCount += 1;
+  localStorage.setItem('dm_voice_samples', String(sampleCount));
+  $('profSamples').textContent = sampleCount;
 }
-function showAnswer(who, html) {
-  answer.classList.add('show');
-  answer.innerHTML = '<div class="who ' + (who === 'You' ? 'you' : '') + '">' + who.toUpperCase() + '</div>' + html;
-}
-function setBusy(label) { $('sysStatus').textContent = label; radar.classList.toggle('pulse', label !== 'SYSTEM READY'); }
+$('queueBtn').addEventListener('click', () => {
+  queueCount += 1;
+  localStorage.setItem('dm_voice_queue', String(queueCount));
+  const b = $('queueBtn');
+  b.disabled = true; b.textContent = 'QUEUED · ' + queueCount + ' SESSION(S)';
+  setTimeout(() => { b.disabled = false; b.textContent = 'QUEUE SESSION FOR FINE-TUNE'; }, 2000);
+});
 
 $('authBtn').addEventListener('click', () => { location.href = '/login'; });
 micBtn.addEventListener('click', toggleMic);

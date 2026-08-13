@@ -5,7 +5,8 @@ faked, and every capability reports exactly why it cannot run.
 
 Engines:
 - STT: ``faster-whisper`` (CTranslate2, fully local). Lazy-loaded; the model
-  id/dir comes from ``DOURMOUSE_WHISPER_MODEL`` (default ``tiny`` — first use
+  id/dir comes from ``DOURMOUSE_WHISPER_MODEL`` (default ``large-v3-turbo`` —
+  the best accuracy-per-watt STT that still runs on CPU/Metal; first use
   downloads it once from HuggingFace, afterwards it is local).
 - TTS: ``piper`` (local ONNX) when importable; otherwise the macOS built-in
   ``say`` CLI (zero dependencies, fully local) as a documented fallback;
@@ -15,7 +16,7 @@ Env:
 - ``DOURMOUSE_VOICE=1``          -> enable the voice endpoints (default off).
 - ``DOURMOUSE_WHISPER_MODEL``    -> faster-whisper model id or local dir.
 - ``DOURMOUSE_WHISPER_DEVICE``   -> ``auto`` | ``cpu`` | ``cuda`` (default auto).
-- ``DOURMOUSE_PIPER_VOICE``      -> piper voice key (e.g. en_US-lessac-medium).
+- ``DOURMOUSE_PIPER_VOICE``      -> piper voice key (e.g. en_US-amy-medium).
 
 All engine imports are lazy (first real call only), so the desktop app's
 startup cost stays zero even when the heavy wheels are installed.
@@ -40,8 +41,8 @@ _PIPER_VOICE_ENV = "DOURMOUSE_PIPER_VOICE"
 
 _OFF_VALUES = {"", "0", "false", "no", "off"}
 
-_DEFAULT_WHISPER_MODEL = "tiny"
-_DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
+_DEFAULT_WHISPER_MODEL = "large-v3-turbo"
+_DEFAULT_PIPER_VOICE = "en_US-amy-medium"
 _MAX_TTS_CHARS = 500
 
 # Serializes BOTH model loading and transcription: faster-whisper's

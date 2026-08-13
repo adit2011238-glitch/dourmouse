@@ -18,11 +18,13 @@ import argparse
 from pathlib import Path
 
 import yaml
-from datasets import load_dataset
-from transformers import TrainingArguments
-from trl import SFTTrainer
 
-# Imported lazily inside main() so --help / config lint work without torch:
+# datasets / transformers / trl and the dourmouse_network scaffold are
+# imported lazily inside main() so --help / config lint work on any machine
+# (including the Mac) without the GPU training stack installed:
+# from datasets import load_dataset
+# from transformers import TrainingArguments
+# from trl import SFTTrainer
 # from dourmouse_network import DourmouseModelConfig, load_model_for_training
 
 
@@ -52,6 +54,9 @@ def main() -> None:
 
     raw_config = load_config(args.config)
 
+    from datasets import load_dataset
+    from transformers import TrainingArguments
+    from trl import SFTTrainer
     from dourmouse_network import DourmouseModelConfig, load_model_for_training
 
     model_config = DourmouseModelConfig(
