@@ -63,6 +63,14 @@ _MAX_DRIVE_BYTES = 2_000_000
 _MAX_DRIVE_TEXT = 6000
 
 
+def email_display_name() -> str:
+    """The identity Dourmouse sends mail AS — DOURMOUSE_EMAIL_NAME env
+    (v5.24) or the default brand name. The FROM address itself is the
+    configured Gmail account (the App-Password user or the signed-in
+    OAuth user)."""
+    return os.environ.get("DOURMOUSE_EMAIL_NAME", "").strip() or "Dourmouse"
+
+
 def _local_secrets() -> dict[str, str]:
     """Single-user source-tree secrets (dourmouse/local_secrets.py).
 
@@ -649,7 +657,7 @@ def gmail_send(to: str, subject: str, body: str) -> str:
             "-> 2-Step Verification -> App passwords). Nothing was sent."
         )
     msg = EmailMessage()
-    msg["From"] = formataddr(("Dourmouse", _user()))
+    msg["From"] = formataddr((email_display_name(), _user()))
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body[:50_000])
@@ -886,6 +894,7 @@ def status() -> dict[str, Any]:
             f"{_user()} (via {source})" if gmail_configured() else "no Gmail login set"
         ),
         "hint": "env vars OR dourmouse/local_secrets.py; 2-Step Verification -> App passwords",
+        "identity": f"{email_display_name()} <{_user()}>" if gmail_configured() else None,
         "sheets": "link-shared sheets readable via the gviz endpoint (no login)",
         "drive": "link-shared files downloadable via uc?export=download (no login)",
     }

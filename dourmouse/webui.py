@@ -1693,6 +1693,8 @@ class _Handler(BaseHTTPRequestHandler):
             ".html": "text/html",
             ".css": "text/css",
             ".js": "application/javascript",
+            ".mjs": "application/javascript",  # v5.23: MediaPipe vision bundle (self-hosted)
+            ".wasm": "application/wasm",       # v5.23: MediaPipe vision WASM
             ".webmanifest": "application/manifest+json",
             ".json": "application/json",
             ".png": "image/png",

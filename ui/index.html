@@ -1069,6 +1069,134 @@
     width: 3px; height: 20px; background: var(--gold); border-radius: 0 2px 2px 0; }
   .dmt-tab { font-family: var(--font-hud); font-weight: 600; letter-spacing: .1em; }
   .dm-k, .dm-tag, .dm-empty { font-family: var(--font-mono); }
+
+  /* ================= v5.24 MOTION — the six Skiper effects, vanilla ========
+     Ported from the Skiper UI React components to zero-dependency CSS/JS
+     (no React, no Swiper, no framer-motion, no CDN — tested invariant). */
+  #view-motion { position: relative; }
+  .motion-stack { display: flex; flex-direction: column; gap: 26px; }
+  .motion-block { position: relative; border: 1px solid var(--line); border-radius: 12px;
+    background: rgba(11,15,26,.5); padding: 20px; overflow: hidden; }
+  .motion-block .mb-tag { font-family: var(--font-mono); font-size: 9px; letter-spacing: .18em;
+    color: var(--gold-bright); margin-bottom: 4px; text-transform: uppercase; }
+  .motion-block .mb-title { font-family: var(--font-wordmark); font-weight: 400; font-size: 15px;
+    letter-spacing: .12em; color: var(--cyan-bright); margin-bottom: 18px; }
+
+  /* 1 — count-up numbers (skiper37: NumberFlow-style) */
+  .num-stage { display: flex; align-items: center; justify-content: center; gap: 30px; flex-wrap: wrap; }
+  .num-big { font-family: var(--font-wordmark); font-size: clamp(34px,7vw,64px); font-weight: 400;
+    color: var(--cyan-bright); text-shadow: 0 0 22px rgba(var(--cyan-rgb), var(--a45)); font-variant-numeric: tabular-nums; }
+  .num-big small { font-size: .4em; color: var(--text-dim); letter-spacing: .2em; margin-left: 6px; }
+
+  /* 2 — hover-expand stack (skiper53) */
+  .hx-stack { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .hx-card { position: relative; width: min(420px,92%); height: 44px; overflow: hidden; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 14px; transition: height .32s ease-in-out; }
+  .hx-card.exp { height: 240px; }
+  .hx-card .hx-img { position: absolute; inset: 0; background: linear-gradient(160deg,
+      rgba(var(--cyan-rgb), .28), rgba(9,12,20,.85)), radial-gradient(220px 140px at 30% 20%,
+      rgba(var(--amber-rgb), .18), transparent 60%); border-radius: 14px; }
+  .hx-card .hx-num { position: absolute; right: 16px; bottom: 10px; font-family: var(--font-mono);
+    font-size: 10px; color: rgba(var(--cyan-rgb), .55); }
+  .hx-card .hx-label { position: absolute; left: 16px; bottom: 12px; font-family: var(--font-hud);
+    font-size: 12px; letter-spacing: .12em; color: #fff; text-shadow: 0 0 10px rgba(var(--cyan-rgb), .5); }
+  .hx-card .hx-detail { position: absolute; left: 16px; top: 16px; right: 16px; font-family: var(--font-prose);
+    font-size: 12px; line-height: 1.6; color: rgba(var(--cyan-rgb), .85); opacity: 0; transition: opacity .3s .15s; }
+  .hx-card.exp .hx-detail { opacity: 1; }
+
+  /* 3+4 — creative / coverflow carousels (skiper50/49) */
+  .cf-stage { height: 240px; position: relative; perspective: 900px; overflow: hidden; }
+  .cf-track { position: absolute; left: 50%; top: 50%; transform-style: preserve-3d; }
+  .cf-slide { position: absolute; width: 190px; height: 150px; border-radius: 16px;
+    border: 1px solid var(--line-strong); background: linear-gradient(150deg,
+      rgba(var(--cyan-rgb), .22), rgba(9,12,20,.9)); display: grid; place-items: center;
+    font-family: var(--font-wordmark); font-size: 13px; letter-spacing: .16em; color: var(--cyan-bright);
+    box-shadow: 0 18px 40px rgba(0,0,0,.5); backface-visibility: hidden; }
+  .cf-slide .cf-k { position: absolute; bottom: 8px; right: 12px; font-family: var(--font-mono);
+    font-size: 8px; color: rgba(var(--cyan-rgb), .5); }
+  .cf-nav { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
+  .cf-nav button { background: rgba(var(--cyan-rgb), var(--a14)); border: 1px solid rgba(var(--cyan-rgb), var(--a30));
+    color: var(--text); font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+  .cf-nav button:hover { background: rgba(var(--cyan-rgb), var(--a22)); }
+
+  /* 5 — progressive blur edges (skiper41) */
+  .pb-scroll { position: relative; height: 210px; overflow-y: scroll; border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 20px; }
+  .pb-scroll .pb-txt { font-family: var(--font-prose); font-size: 12px; line-height: 1.8;
+    color: var(--text-dim); }
+  .pb-edge { position: absolute; left: 0; right: 0; height: 46px; pointer-events: none; z-index: 2; }
+  .pb-edge.top { top: 0; }
+  .pb-edge.bot { bottom: 0; }
+  .pb-edge.top::before, .pb-edge.bot::before { content: ""; position: absolute; inset: 0;
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+  .pb-edge.top::after, .pb-edge.bot::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(to bottom, rgba(6,8,15,.9), transparent); }
+  .pb-edge.bot::after { background: linear-gradient(to top, rgba(6,8,15,.9), transparent); }
+
+  /* 6 — perspective text scroll (skiper28) */
+  .p3d-scroll { position: relative; height: 300px; overflow: hidden; }
+  .p3d-pane { position: sticky; top: 0; height: 300px; display: grid; place-items: center;
+    perspective: 260px; }
+  .p3d-txt { font-family: var(--font-wordmark); font-size: clamp(22px,3.4vw,34px); font-weight: 400;
+    color: var(--gold-bright); text-align: center; letter-spacing: .04em; line-height: 1.35;
+    transform-style: preserve-3d; text-shadow: 0 0 30px rgba(var(--gold-rgb), .4); }
+  .p3d-spacer { height: 60vh; }
+
+  /* 3D core — wireframe globe model (canvas) */
+  #view-motion .globe-wrap { display: grid; place-items: center; padding: 10px 0 4px; }
+  canvas#globe3d { width: min(360px, 82vw); height: min(360px, 82vw); display: block; }
+
+  /* ================= v5.24 TASK DECK — tabs show live task activity ========
+     When a directive starts, a deck of tabs slides up (SEARCH / CODE / MAIL /
+     DATA / REPLY) fed by the real SSE stream — what the agent is doing, live. */
+  #taskdeck { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%) translateY(20px);
+    width: min(760px, 94vw); z-index: 85; opacity: 0; pointer-events: none;
+    transition: opacity .3s, transform .3s; }
+  #taskdeck.on { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+  .td-head { display: flex; gap: 6px; align-items: flex-end; }
+  .td-tab { font-family: var(--font-hud); font-size: 9.5px; letter-spacing: .12em; color: var(--text-dim);
+    padding: 7px 14px 6px; border: 1px solid var(--line); border-bottom: none; border-radius: 8px 8px 0 0;
+    background: rgba(11,15,26,.7); cursor: pointer; display: flex; gap: 6px; align-items: center; }
+  .td-tab .td-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dead); }
+  .td-tab.act { color: var(--cyan-bright); border-color: var(--gold); background: rgba(9,12,20,.96); }
+  .td-tab.act .td-dot { background: var(--gold-bright); box-shadow: 0 0 8px rgba(var(--gold-rgb), .8); }
+  .td-body { border: 1px solid var(--gold); border-radius: 0 10px 10px 10px; background: rgba(9,12,20,.96);
+    padding: 14px 16px; max-height: 250px; overflow-y: auto; font-family: var(--font-mono); font-size: 10.5px;
+    line-height: 1.7; box-shadow: 0 24px 60px rgba(0,0,0,.6); }
+  .td-body .td-line { color: var(--text-dim); white-space: pre-wrap; word-break: break-word; }
+  .td-body .td-line b { color: var(--cyan-bright); font-weight: 600; }
+  .td-body .td-line .ok { color: var(--green); }
+  .td-body .td-line .warn { color: var(--amber); }
+  .td-close { position: absolute; top: -10px; right: -6px; width: 22px; height: 22px; border-radius: 50%;
+    border: 1px solid var(--line-strong); background: rgba(9,12,20,.95); color: var(--text-dim);
+    font-size: 11px; cursor: pointer; display: grid; place-items: center; }
+  .td-close:hover { color: var(--red); border-color: var(--red); }
+
+  /* ================= v5.24 VISION — face + hand control =================== */
+  #view-vision { position: relative; }
+  .vis-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 820px) { .vis-layout { grid-template-columns: 1fr; } }
+  .vis-cam-wrap { position: relative; border: 1px solid var(--line-strong); border-radius: 12px;
+    overflow: hidden; background: #000; aspect-ratio: 16/9; }
+  #visCam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  canvas#visOverlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .vis-hint { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 14px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--cyan-bright);
+    background: linear-gradient(transparent, rgba(6,8,15,.9)); }
+  .vis-status { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .vis-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: rgba(11,15,26,.5); }
+  .vis-card .vc-k { font-family: var(--font-mono); font-size: 9px; letter-spacing: .18em; color: var(--gold-bright); }
+  .vis-card .vc-v { font-family: var(--font-hud); font-size: 15px; letter-spacing: .12em; color: var(--cyan-bright);
+    margin-top: 6px; }
+  .vis-gesture-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .vis-gesture-table td { font-family: var(--font-mono); font-size: 10px; padding: 5px 2px;
+    border-bottom: 1px solid rgba(var(--cyan-rgb), var(--a10)); color: var(--text-dim); }
+  .vis-gesture-table td:first-child { color: var(--text); width: 40%; }
+  .vis-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .dm-btn.big { padding: 10px 20px; font-size: 11px; }
+  .vis-cam-off { position: absolute; inset: 0; display: grid; place-items: center;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -2062,16 +2190,24 @@
     input.style.height = 'auto';
     setBusy(true);
     fline('DIRECTIVE', `<span class="directive">${esc(prompt)}</span>`, 'user');
+    if (window.__taskDeck && typeof window.__taskDeck.open === 'function') {
+      try { window.__taskDeck.open(prompt); } catch (_) {}
+    }
     toolCardsByName.clear();
     lastAssistantText = '';
     activePlan = null;
     resetLiveAnswer();
 
     try {
+      // v5.24: the open-palm vision gesture halts the task by aborting this
+      // fetch mid-stream (vision exposes window.__activeStreamAbort).
+      const ac = new AbortController();
+      window.__activeStreamAbort = ac;
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
+        signal: ac.signal,
       });
       if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
 
@@ -2081,6 +2217,12 @@
       let streamFinished = false;
 
       const handle = (evt) => {
+        // v5.24: task deck — every real streamed event also goes to the
+        // live tabs (SEARCH / CODE / MAIL / DATA / REPLY). Zero-cost when
+        // the deck is idle; the module decides what to surface.
+        if (window.__taskDeck && typeof window.__taskDeck.ingest === 'function') {
+          try { window.__taskDeck.ingest(evt); } catch (_) { /* deck must never break the stream */ }
+        }
         switch (evt.type) {
           case 'allhands_started': {
             // v5.22.9: an ALL HANDS run started — open its dedicated window.
@@ -2261,10 +2403,15 @@
       }
       try { await reader.cancel(); } catch (e) { /* ignore */ }
     } catch (e) {
-      fline('ERROR', `<span class="errmsg" style="color:var(--red)"></span>`, null);
-      const last = feed.lastElementChild;
-      if (last) last.querySelector('.errmsg').textContent = e.message;
+      if (e && e.name === 'AbortError') {
+        fline('HALT', '<span class="msg">task halted by vision gesture</span>', null);
+      } else {
+        fline('ERROR', `<span class="errmsg" style="color:var(--red)"></span>`, null);
+        const last = feed.lastElementChild;
+        if (last) last.querySelector('.errmsg').textContent = e.message;
+      }
     } finally {
+      window.__activeStreamAbort = null;
       if (activeNode) setNodeState(activeNode, 'ready');
       activeNode = null;
       setBusy(false);
@@ -3080,6 +3227,646 @@ document.getElementById('mapbtn').addEventListener('click', () => {
     mo.observe(coreEl, { attributes: true, attributeFilter: ['class'] });
   }
 })();
+
+/* ================= v5.24 — TASK DECK, MOTION, VISION ======================
+   Three self-contained modules, zero dependencies, fully local.
+   TASK DECK: live tabs fed by the REAL SSE stream (window.__taskDeck.ingest).
+   MOTION: the six Skiper effects ported to vanilla CSS/JS + a 3D wireframe
+   core model. VISION: self-hosted MediaPipe face + hand tracking with
+   gesture → action mapping.
+   Runs on DOMContentLoaded (this block sits in the FIRST script, whose
+   DOM queries must see the view markup parsed later in the body). */
+const __runV524 = () => {
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  /* ---------------- TASK DECK ---------------- */
+  __probeMark('start');
+  const DECK = {
+    el: document.getElementById('taskdeck'),
+    head: document.getElementById('tdHead'),
+    body: document.getElementById('tdBody'),
+    tabs: [], active: null, lines: {}, open: false,
+  };
+  const TAB_META = {
+    'SEARCH': { dot: 'rgba(var(--cyan-rgb),.9)' },
+    'CODE':   { dot: 'rgba(var(--amber-rgb),.9)' },
+    'MAIL':   { dot: 'rgba(var(--green-rgb),.9)' },
+    'DATA':   { dot: 'rgba(186,104,200,.9)' },
+    'REPLY':  { dot: 'rgba(var(--gold-rgb),.9)' },
+    'TOOLS':  { dot: 'rgba(var(--dead-rgb),.9)' },
+  };
+  // tool name → deck tab
+  function toolTab(name) {
+    const n = String(name || '').toLowerCase();
+    if (/(search|web|brave|duckduckgo|ddg|news|fetch_url|read_url)/.test(n)) return 'SEARCH';
+    if (/(run_command|code|sandbox|exec|shell|terminal|python|npm|git)/.test(n)) return 'CODE';
+    if (/(gmail|mail|send_email|inbox|email)/.test(n)) return 'MAIL';
+    if (/(quote|stock|market|price|ticker|fx|forex|crypto|data|atlas|backtest)/.test(n)) return 'DATA';
+    return 'TOOLS';
+  }
+  function deckRender() {
+    if (!DECK.el) return;
+    DECK.head.innerHTML = DECK.tabs.map(t =>
+      `<div class="td-tab ${t === DECK.active ? 'act' : ''}" data-tab="${esc(t)}">` +
+      `<span class="td-dot" style="background:${TAB_META[t].dot}"></span>${esc(t)}</div>`
+    ).join('');
+    DECK.head.querySelectorAll('.td-tab').forEach(tb => {
+      tb.addEventListener('click', () => { DECK.active = tb.dataset.tab; deckRender(); });
+    });
+    const lines = DECK.lines[DECK.active] || [];
+    DECK.body.innerHTML = lines.slice(-30).join('') || '<div class="td-line">— idle —</div>';
+    DECK.body.scrollTop = DECK.body.scrollHeight;
+  }
+  function deckAdd(tab, html) {
+    if (!DECK.el) return;
+    if (DECK.tabs.indexOf(tab) === -1) DECK.tabs.push(tab);
+    DECK.active = tab;
+    (DECK.lines[tab] = DECK.lines[tab] || []).push(`<div class="td-line">${html}</div>`);
+    if (DECK.lines[tab].length > 60) DECK.lines[tab].shift();
+    deckRender();
+  }
+  function deckShow(on) {
+    if (!DECK.el) return;
+    DECK.open = on;
+    DECK.el.classList.toggle('on', on);
+  }
+  let lastConfirmId = null;
+  let deckStart = 0, deckFirstToken = 0, deckModel = '', deckEscalated = false;
+  window.__taskDeck = {
+    open(prompt) {
+      DECK.tabs = []; DECK.lines = {}; DECK.active = null;
+      deckStart = performance.now(); deckFirstToken = 0; deckModel = ''; deckEscalated = false;
+      deckAdd('REPLY', `<b>DIRECTIVE</b> · ${esc(prompt)}`);
+      deckShow(true);
+    },
+    ingest(evt) {
+      if (!DECK.open && evt.type !== 'tool_use' && evt.type !== 'plan') return;
+      switch (evt.type) {
+        case 'brain': {
+          deckModel = String(evt.model || ''); deckEscalated = !!evt.escalated;
+          break;
+        }
+        case 'plan': {
+          (evt.steps || []).forEach(s => {
+            deckAdd('TOOLS', `<b>PLAN</b> step ${s.n}/${evt.total} · ${esc(s.task)} <span class="ok">[${esc(s.subagent)}]</span>`);
+          });
+          break;
+        }
+        case 'tool_use': {
+          const tab = toolTab(evt.name);
+          deckAdd(tab, `<b>RUN</b> ${esc(evt.name)} · ${esc(String(evt.raw_arguments || '').slice(0, 140))}`);
+          break;
+        }
+        case 'tool_result': {
+          const tab = toolTab(evt.name);
+          deckAdd(tab, `<b>RESULT</b> ${esc(evt.name)} · <span class="ok">done</span>`);
+          break;
+        }
+        case 'assistant_delta': {
+          if (DECK.open) {
+            if (!deckFirstToken) {
+              deckFirstToken = performance.now();
+              const ms = Math.round(deckFirstToken - deckStart);
+              const lane = deckEscalated ? 'HEAVY' : 'FAST';
+              deckAdd('REPLY', `<b>FIRST TOKEN</b> · ${ms}ms <span class="ok">[${lane} LANE${deckModel ? ' · ' + esc(deckModel) : ''}]</span>`);
+            }
+            deckAdd('REPLY', esc(String(evt.text || '').slice(0, 200)));
+          }
+          break;
+        }
+        case 'confirmation_requested': {
+          lastConfirmId = evt.id || null;
+          deckAdd('TOOLS', `<span class="warn">CONFIRM</span> ${esc(evt.prompt)} — thumbs up to approve`);
+          break;
+        }
+        case 'error': {
+          deckAdd('TOOLS', `<span class="warn">ERROR</span> ${esc(evt.message || '')}`);
+          break;
+        }
+      }
+    },
+    approveConfirm() {
+      if (!lastConfirmId) return false;
+      fetch('/api/confirm', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ id: lastConfirmId, approved: true }) }).catch(() => {});
+      deckAdd('TOOLS', '<span class="ok">APPROVED via vision gesture</span>');
+      return true;
+    },
+    lastConfirmId: () => lastConfirmId,
+  };
+  const tdClose = document.getElementById('tdClose');
+  if (tdClose) tdClose.addEventListener('click', () => deckShow(false));
+
+  /* ---------------- MOTION — 3D wireframe core model ---------------- */
+  __probeMark('pre-globe');
+  (function globe() {
+    const cv = document.getElementById('globe3d');
+    if (!cv || !cv.getContext) return;
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    function size() {
+      DPR = window.devicePixelRatio || 1;
+      const r = cv.getBoundingClientRect();
+      // v5.24: the MOTION view starts display:none (router), so the rect is
+      // 0 at init — fall back to the CSS size and re-size on visibility.
+      W = r.width || parseInt(getComputedStyle(cv).width, 10) || 360;
+      H = r.height || parseInt(getComputedStyle(cv).height, 10) || 360;
+      cv.width = Math.max(1, W * DPR); cv.height = Math.max(1, H * DPR);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    size();
+    window.addEventListener('resize', size);
+    // Re-size the instant the view is shown (router flips display to block).
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(size);
+      ro.observe(cv);
+      ro.observe(cv.parentElement);
+    }
+    const R = 0.34; // globe radius (fraction of min dimension)
+    let s = 42; const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    // wireframe vertices on a sphere (fibonacci distribution)
+    const N = 160, pts = [];
+    for (let i = 0; i < N; i++) {
+      const y = 1 - (i / (N - 1)) * 2, rad = Math.sqrt(1 - y * y), th = 2.399963 * i;
+      pts.push({ x: rad * Math.cos(th), y, z: rad * Math.sin(th) });
+    }
+    // edge pairs for the wireframe
+    const edges = [];
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+      const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y, dz = pts[i].z - pts[j].z;
+      if (dx*dx + dy*dy + dz*dz < 0.085) edges.push([i, j]);
+    }
+    // orbiting agent nodes
+    const agents = [];
+    for (let i = 0; i < 7; i++) {
+      const a = rnd() * Math.PI * 2, inc = (rnd() - .5) * 1.1, sp = 0.5 + rnd() * 0.8;
+      agents.push({ a, inc, sp, rr: 0.52 + rnd() * 0.16, col: i === 0 ? '245,166,35' : '79,195,247' });
+    }
+    function rot(p, rx, ry) {
+      let x = p.x, y = p.y, z = p.z;
+      // rotX
+      let y2 = y * Math.cos(rx) - z * Math.sin(rx), z2 = y * Math.sin(rx) + z * Math.cos(rx);
+      // rotY
+      let x3 = x * Math.cos(ry) + z2 * Math.sin(ry), z3 = -x * Math.sin(ry) + z2 * Math.cos(ry);
+      return { x: x3, y: y2, z: z3 };
+    }
+    let t = 0;
+    function draw() {
+      t += 0.008;
+      const cx = W / 2, cy = H / 2, radius = Math.min(W, H) * R;
+      ctx.clearRect(0, 0, W, H);
+      const rx = Math.sin(t * 0.5) * 0.35, ry = t * 0.6;
+      // project + draw edges (back faces dimmer)
+      const proj = pts.map(p => {
+        const r3 = rot(p, rx, ry);
+        const persp = 2.2 / (2.2 - r3.z);
+        return { x: cx + r3.x * radius * persp, y: cy + r3.y * radius * persp, z: r3.z, persp };
+      });
+      proj.sort((a, b) => a.z - b.z);
+      ctx.lineWidth = 0.5;
+      for (const [i, j] of edges) {
+        const a = proj[i], b = proj[j];
+        const depth = Math.min(0.55, Math.max(0.05, 0.3 - (a.z + b.z) * 0.22));
+        ctx.strokeStyle = `rgba(79,195,247,${depth.toFixed(3)})`;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+      // vertices
+      for (const p of proj) {
+        ctx.fillStyle = `rgba(127,224,255,${(0.35 + (0.65 - p.z * 0.5)).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, (p.z < 0 ? 0.7 : 1.5) * p.persp, 0, Math.PI * 2); ctx.fill();
+      }
+      // equator + meridian rings (normalized coords so persp stays positive)
+      for (const [axis, col] of [['y','79,195,247'], ['x','79,195,247']]) {
+        ctx.strokeStyle = `rgba(${col},0.4)`; ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        for (let i = 0; i <= 48; i++) {
+          const a = (i / 48) * Math.PI * 2;
+          const p = axis === 'y'
+            ? rot({ x: Math.cos(a), y: 0, z: Math.sin(a) }, rx, ry)
+            : rot({ x: Math.cos(a), y: Math.sin(a), z: 0 }, rx, ry);
+          const persp = 2.2 / (2.2 - p.z);
+          const X = cx + p.x * radius * persp, Y = cy + p.y * radius * persp;
+          if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+        }
+        ctx.stroke();
+      }
+      // orbiting agent nodes (normalized, scaled by radius for persp)
+      for (const ag of agents) {
+        const a = ag.a + t * ag.sp;
+        const p = { x: Math.cos(a) * ag.rr, y: Math.sin(a) * ag.rr * Math.cos(ag.inc),
+                    z: Math.sin(a) * ag.rr * Math.sin(ag.inc) };
+        const r3 = rot(p, rx, ry);
+        const persp = 2.2 / (2.2 - r3.z);
+        const X = cx + r3.x * radius * persp, Y = cy + r3.y * radius * persp;
+        ctx.fillStyle = `rgba(${ag.col},0.85)`;
+        ctx.beginPath(); ctx.arc(X, Y, 2.4 * persp, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = `rgba(${ag.col},0.5)`; ctx.lineWidth = 0.7;
+        ctx.beginPath(); ctx.arc(X, Y, 4.5 * persp, 0, Math.PI * 2); ctx.stroke();
+      }
+      // core
+      const glow = 0.7 + 0.3 * Math.sin(t * 2);
+      ctx.fillStyle = `rgba(255,196,77,${glow.toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = `rgba(245,166,35,${(0.35 + 0.2 * Math.sin(t * 3)).toFixed(3)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, 10 + 3 * Math.sin(t * 2.5), 0, Math.PI * 2); ctx.stroke();
+      requestAnimationFrame(draw);
+    }
+    draw();
+  })();
+
+  /* ---------------- MOTION — Skiper ports ---------------- */
+  // 1 — count-up numbers (skiper37 NumberFlow-style)
+  __probeMark('pre-countups');
+  (function countups() {
+    const els = [document.getElementById('numA'), document.getElementById('numB'), document.getElementById('numC')];
+    if (!els[0]) return;
+    function run(el) {
+      const target = parseFloat(el.dataset.target || '0');
+      const dec = parseInt(el.dataset.decimals || '0', 10);
+      const prefix = el.dataset.prefix || '', suffix = el.dataset.suffix || '';
+      const steps = 40, dur = 1200;
+      const start = performance.now();
+      // setTimeout-driven (v5.24): rAF is throttled for hidden canvases and
+      // background tabs, which left the count stuck at $0 when the view
+      // started display:none. Timers always run; cheap and plenty smooth.
+      const timer = setInterval(() => {
+        const now = performance.now();
+        const p = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        const v = target * eased;
+        el.textContent = prefix + v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec }) + suffix;
+        if (p >= 1) clearInterval(timer);
+      }, 30);
+    }
+    function startAll() { els.forEach(el => { if (el && !el.dataset.counted) { el.dataset.counted = '1'; run(el); } }); }
+    // v5.24: the view starts display:none, so IO never fires until it is
+    // shown — also start the count the first time the view becomes visible.
+    // If it was already marked while hidden, reset so it restarts properly.
+    const motionView = document.getElementById('view-motion');
+    const tryStart = () => {
+      if (motionView && getComputedStyle(motionView).display !== 'none') {
+        const stuck = els.some(el => el && el.dataset.counted && /\b0\b/.test(el.textContent || ''));
+        if (stuck) els.forEach(el => { if (el) delete el.dataset.counted; });
+        startAll();
+      }
+    };
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver((ents) => {
+        ents.forEach(en => { if (en.isIntersecting) { startAll(); io.disconnect(); } });
+      }, { threshold: 0.2 });
+      els.forEach(el => el && io.observe(el));
+    } else { startAll(); }
+    window.addEventListener('hashchange', tryStart);
+    // v5.24: the router flips display inline — watch it so the count starts
+    // the instant the view is shown (the IO alone misses this race).
+    if (motionView && typeof MutationObserver !== 'undefined') {
+      const mo = new MutationObserver(tryStart);
+      mo.observe(motionView, { attributes: true, attributeFilter: ['style'] });
+    }
+    setTimeout(tryStart, 400);
+  })();
+
+  // 2 — hover-expand stack (skiper53)
+  __probeMark('pre-hx');
+  (function hx() {
+    const stack = document.getElementById('hxStack');
+    if (!stack) return;
+    const items = [
+      { n: '01', label: 'AGENT MESH', d: '29 subagents coordinate on one directive — each with its own tools, model and live window.' },
+      { n: '02', label: 'WORLD MONITOR', d: 'Global intelligence bridge streaming real events from the configured feeds.' },
+      { n: '03', label: 'SPOTIFY DOCK', d: 'Always-on music dock — search any song from anywhere in the app.' },
+      { n: '04', label: 'VOICE LAB', d: 'Full local STT + TTS pipeline: whisper large-v3-turbo and piper amy.' },
+      { n: '05', label: 'GOOGLE WORKSPACE', d: 'Gmail read/send, Calendar and Drive behind one Google sign-in.' },
+      { n: '06', label: 'ATLAS QUANT CORE', d: 'Evolutionary strategy search with walk-forward validation and a strict gate.' },
+    ];
+    stack.innerHTML = items.map(it =>
+      `<div class="hx-card"><div class="hx-img"></div><div class="hx-num">${it.n}</div>` +
+      `<div class="hx-label">${esc(it.label)}</div><div class="hx-detail">${esc(it.d)}</div></div>`
+    ).join('');
+    const cards = [...stack.querySelectorAll('.hx-card')];
+    cards.forEach(c => {
+      c.addEventListener('mouseenter', () => { cards.forEach(x => x.classList.remove('exp')); c.classList.add('exp'); });
+      c.addEventListener('click', () => c.classList.toggle('exp'));
+    });
+    cards[0] && cards[0].classList.add('exp');
+  })();
+
+  // 3+4 — creative + coverflow carousels (skiper50/49)
+  __probeMark('pre-carousel');
+  function wireCarousel(stageId, navId, mode) {
+    const stage = document.getElementById(stageId), nav = document.getElementById(navId);
+    if (!stage) return;
+    const items = ['AGENTS', 'MARKETS', 'MEDIA', 'VOICE', 'VISION', 'ATLAS', 'WORLD', 'MAIL', 'MOTION', 'MORE'];
+    const slides = items.map((it, i) => {
+      const d = document.createElement('div');
+      d.className = 'cf-slide';
+      d.innerHTML = esc(it) + `<span class="cf-k">#${String(i + 1).padStart(2, '0')}</span>`;
+      stage.appendChild(d);
+      return d;
+    });
+    let idx = 0;
+    function layout() {
+      const cx = stage.clientWidth / 2, cy = stage.clientHeight / 2;
+      slides.forEach((d, i) => {
+        let off = i - idx;
+        if (off < -Math.floor(items.length / 2)) off += items.length;
+        if (off > Math.floor(items.length / 2)) off -= items.length;
+        if (mode === 'creative') {
+          const a = off * (Math.PI / 9.5);
+          const z = -Math.abs(off) * 130;
+          const tx = off * 85, rot = -off * 12;
+          d.style.transform = `translate(-50%,-50%) translate(${tx}px,${Math.sin(a) * 14}px) rotateY(${rot}deg) translateZ(${z}px)`;
+          d.style.opacity = 1 - Math.abs(off) * 0.16;
+          d.style.zIndex = 10 - Math.abs(off);
+        } else {
+          const rot = off * 42, z = -Math.abs(off) * 120, tx = off * 120;
+          d.style.transform = `translate(-50%,-50%) rotateY(${rot}deg) translateZ(${z}px)`;
+          d.style.opacity = 1 - Math.abs(off) * 0.2;
+          d.style.zIndex = 10 - Math.abs(off);
+        }
+      });
+      if (nav) nav.innerHTML = `<button data-d="-1">‹ PREV</button><button data-d="1">NEXT ›</button>`;
+      nav && nav.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+        idx = (idx + parseInt(b.dataset.d, 10) + items.length) % items.length;
+        layout();
+      }));
+    }
+    // slides start hidden; position on first paint (and on view-show)
+    slides.forEach(d => { d.style.left = '50%'; d.style.top = '50%'; d.style.transition = 'transform .5s ease, opacity .5s ease'; });
+    let laid = false;
+    const doLayout = () => { if (stage.clientWidth > 0) { layout(); laid = true; } };
+    requestAnimationFrame(() => requestAnimationFrame(doLayout));
+    window.addEventListener('hashchange', () => { if (!laid) setTimeout(doLayout, 120); });
+    setTimeout(doLayout, 500);
+    let auto = setInterval(() => { idx = (idx + 1) % items.length; layout(); }, 2600);
+    stage.addEventListener('mouseenter', () => clearInterval(auto));
+    stage.addEventListener('mouseleave', () => { auto = setInterval(() => { idx = (idx + 1) % items.length; layout(); }, 2600); });
+  }
+  wireCarousel('cfStageCreative', 'cfNavCreative', 'creative');
+  wireCarousel('cfStageCover', 'cfNavCover', 'coverflow');
+
+  // 5 — progressive blur (skiper41)
+  __probeMark('pre-pb');
+  (function pb() {
+    const scroll = document.getElementById('pbScroll');
+    if (!scroll) return;
+    document.getElementById('pbTxt').textContent =
+      Array.from({ length: 12 }, (_, i) => `DOURMOUSE SECTOR ${String(i + 1).padStart(2, '0')} — the agent mesh stays coherent across every domain: dispatch routes, tools execute, results stream home. Edge blur fades this column so the HUD never clips.`).join('\n\n');
+  })();
+
+  // 6 — perspective text scroll (skiper28)
+  __probeMark('pre-p3d');
+  (function p3d() {
+    const scroll = document.getElementById('p3dScroll'), txt = document.getElementById('p3dTxt');
+    if (!scroll || !txt) return;
+    let raf = null;
+    function onScroll() {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        const r = scroll.getBoundingClientRect();
+        const vh = window.innerHeight;
+        const p = Math.max(0, Math.min(1, (vh - r.top) / (vh + r.height)));
+        const ty = 487 * (1 - p);
+        txt.style.transform = `rotateX(28deg) translateY(${ty}px) translateZ(10px)`;
+        raf = null;
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+
+  /* ---------------- VISION — MediaPipe face + hand ---------------- */
+  __probeMark('pre-vision');
+  const VISION = {
+    video: document.getElementById('visCam'),
+    overlay: document.getElementById('visOverlay'),
+    wrap: document.getElementById('visCamWrap'),
+    off: document.getElementById('visCamOff'),
+    hint: document.getElementById('visHint'),
+    faceEl: document.getElementById('visFace'),
+    handsEl: document.getElementById('visHands'),
+    startBtn: document.getElementById('visStart'),
+    stopBtn: document.getElementById('visStop'),
+    stream: null, handLM: null, faceDM: null, running: false,
+  };
+  const gestStack = [];
+  function setVisState(k, v) { const el = VISION[k]; if (el) el.textContent = v; }
+  function setGesture(name, detail) {
+    if (VISION.hint) VISION.hint.textContent = 'GESTURE: ' + (name || '—') + (detail ? ' · ' + detail : '');
+    gestStack.push(name);
+    if (gestStack.length > 8) gestStack.shift();
+  }
+  function gestureAct(name) {
+    const deck = window.__taskDeck;
+    const input = document.getElementById('input');
+    switch (name) {
+      case 'OPEN_PALM': // pause / halt the running task
+        setGesture('OPEN PALM', 'halt');
+        if (window.__activeStreamAbort) { try { window.__activeStreamAbort.abort(); } catch (_) {} }
+        else if (deck) deck.ingest({ type: 'error', message: 'halted by open palm' });
+        break;
+      case 'PINCH': // confirm / send the directive
+        setGesture('PINCH', 'send');
+        if (input && document.activeElement !== input) input.focus();
+        if (input && input.value.trim()) {
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        } else if (deck) { deck.ingest({ type: 'error', message: 'pinch: type a directive first' }); }
+        break;
+      case 'THUMBS_UP': // approve pending confirmation
+        setGesture('THUMBS UP', 'approve');
+        if (deck && deck.approveConfirm()) {
+          /* approved */
+        } else { deck && deck.ingest({ type: 'error', message: 'no pending confirmation to approve' }); }
+        break;
+      case 'POINT': // select — focus prompt
+        setGesture('POINT', 'focus');
+        if (input) input.focus();
+        break;
+      case 'WAVE': // wake
+        setGesture('WAVE', 'wake');
+        const deckEl = document.getElementById('taskdeck');
+        if (deckEl) { deckEl.classList.add('on'); setTimeout(() => deckEl.classList.remove('on'), 1200); }
+        break;
+      default:
+        setGesture(name || '—', '');
+    }
+  }
+  // --- hand landmark → gesture classification ---
+  function classifyHand(lm) {
+    const P = (i) => ({ x: lm[i].x, y: lm[i].y });
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const WRIST = P(0);
+    const fingerUp = (tip, pip, mcp) => dist(tip, WRIST) > dist(pip, WRIST) && dist(pip, WRIST) > dist(mcp, WRIST) * 0.94;
+    const thumb = P(4), indexT = P(8), indexP = P(6), indexM = P(5);
+    const midT = P(12), midP = P(10), midM = P(9);
+    const ringT = P(16), ringP = P(14), ringM = P(13);
+    const pinkT = P(20), pinkP = P(18), pinkM = P(17);
+    const up = [
+      fingerUp(indexT, indexP, indexM),
+      fingerUp(midT, midP, midM),
+      fingerUp(ringT, ringP, ringM),
+      fingerUp(pinkT, pinkP, pinkM),
+    ].filter(Boolean).length;
+    const thumbOut = dist(thumb, WRIST) > dist(indexM, WRIST) * 1.05;
+    const pinch = dist(thumb, indexT) < 0.06;
+    // thumb-up: thumb vertical above wrist, others curled
+    if (up === 0 && thumbOut && lm[4].y < lm[3].y - 0.03 && Math.abs(lm[4].x - lm[0].x) < 0.15) return 'THUMBS_UP';
+    if (up === 4 && thumbOut) return 'OPEN_PALM';
+    if (pinch && up <= 1) return 'PINCH';
+    if (up === 1 && !thumbOut) return 'POINT';
+    if (up >= 3 && !thumbOut) return 'OPEN_PALM';
+    return null;
+  }
+  // WAVE: palm open + x-position oscillation over recent frames
+  function detectWave() {
+    if (gestStack.length < 6) return false;
+    const xs = gestStack.map(() => 0); // replaced by palm x tracking below
+    return false;
+  }
+  let lastPalmX = null;
+  function onHands(result) {
+    if (!result || !result.landmarks || !result.landmarks.length) {
+      setVisState('handsEl', '—');
+      lastPalmX = null;
+      return;
+    }
+    const hand = result.landmarks[0];
+    setVisState('handsEl', '1');
+    const g = classifyHand(hand);
+    if (g === 'OPEN_PALM') {
+      const x = hand[0].x;
+      if (lastPalmX != null && Math.abs(x - lastPalmX) > 0.28 && Date.now() - (VISION._lastWave || 0) > 1500) {
+        VISION._lastWave = Date.now();
+        gestureAct('WAVE');
+      }
+      lastPalmX = x;
+    } else {
+      lastPalmX = null;
+    }
+    if (g) gestureAct(g);
+  }
+  function onFaces(result) {
+    const n = result && result.detections ? result.detections.length : 0;
+    setVisState('faceEl', n ? String(n) : '—');
+  }
+  function drawLandmarks(result) {
+    const cv = VISION.overlay; if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    if (!result || !result.landmarks) return;
+    for (const lm of result.landmarks) {
+      ctx.strokeStyle = 'rgba(79,195,247,0.9)'; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      const edges = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+      for (const [a, b] of edges) {
+        const pa = lm[a], pb = lm[b];
+        ctx.moveTo((1 - pa.x) * W, pa.y * H); ctx.lineTo((1 - pb.x) * W, pb.y * H);
+      }
+      ctx.stroke();
+      for (const p of lm) {
+        ctx.fillStyle = 'rgba(127,224,255,0.95)';
+        ctx.beginPath(); ctx.arc((1 - p.x) * W, p.y * H, 2.4, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+  async function loadMediaPipe() {
+    if (window.__visBundle) return window.__visBundle;
+    const mod = await import('/assets/vision/vision_bundle.mjs');
+    const vision = mod.FilesetResolver ? mod : (await import('/assets/vision/vision_bundle.mjs'));
+    window.__visBundle = vision;
+    return vision;
+  }
+  function hasMediaPipeSupport() {
+    return typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+  }
+  VISION.startBtn && VISION.startBtn.addEventListener('click', startVision);
+  VISION.stopBtn && VISION.stopBtn.addEventListener('click', stopVision);
+  async function startVision() {
+    if (!hasMediaPipeSupport()) { setVisState('faceEl', 'NO CAMERA'); return; }
+    try {
+      VISION.stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 }, audio: false });
+      VISION.video.srcObject = VISION.stream;
+      await VISION.video.play();
+      if (VISION.off) VISION.off.style.display = 'none';
+      setVisState('faceEl', 'loading');
+      // load the self-hosted MediaPipe bundle + models
+      const vision = await loadMediaPipe();
+      const fileset = await vision.FilesetResolver.forVisionTasks('/assets/vision/');
+      const hlm = await vision.HandLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: '/assets/vision/hand_landmarker.task', delegate: 'GPU' },
+        runningMode: 'VIDEO', numHands: 2,
+      });
+      VISION.handLM = hlm;
+      try {
+        const fdm = await vision.FaceDetector.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: '/assets/vision/face_detector.tflite', delegate: 'GPU' },
+          runningMode: 'VIDEO',
+        });
+        VISION.faceDM = fdm;
+      } catch (_) { VISION.faceDM = null; }
+      VISION.running = true;
+      setVisState('faceEl', 'watching');
+      if (VISION.startBtn) VISION.startBtn.disabled = true;
+      if (VISION.stopBtn) VISION.stopBtn.disabled = false;
+      visionLoop();
+    } catch (e) {
+      setVisState('faceEl', 'CAMERA DENIED');
+      if (VISION.hint) VISION.hint.textContent = 'VISION: ' + (e && e.message ? e.message : String(e));
+    }
+  }
+  let visionRaf = null;
+  function visionLoop() {
+    if (!VISION.running) return;
+    const v = VISION.video;
+    if (v.readyState >= 2) {
+      const now = performance.now();
+      if (VISION.handLM) {
+        try {
+          const res = VISION.handLM.detectForVideo(v, now);
+          onHands(res);
+          drawLandmarks(res);
+        } catch (_) {}
+      }
+      if (VISION.faceDM) {
+        try {
+          const res = VISION.faceDM.detectForVideo(v, now);
+          onFaces(res);
+        } catch (_) {}
+      }
+    }
+    visionRaf = requestAnimationFrame(visionLoop);
+  }
+  function stopVision() {
+    VISION.running = false;
+    if (visionRaf) cancelAnimationFrame(visionRaf);
+    if (VISION.stream) { VISION.stream.getTracks().forEach(t => t.stop()); VISION.stream = null; }
+    VISION.video.srcObject = null;
+    if (VISION.off) VISION.off.style.display = 'grid';
+    setVisState('faceEl', '—'); setVisState('handsEl', '—');
+    if (VISION.startBtn) VISION.startBtn.disabled = false;
+    if (VISION.stopBtn) VISION.stopBtn.disabled = true;
+    const cv = VISION.overlay; if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+  }
+  if (VISION.stopBtn) VISION.stopBtn.disabled = true;
+  window.__vision = { start: startVision, stop: stopVision };
+};
+// v5.24 debug: mark each section as it completes so a mid-module throw is
+// visible from the console instead of silently dying.
+window.__v524Probe = {};
+const __probeMark = (k) => { try { window.__v524Probe[k] = true; } catch (_) {} };
+const __wrapped524 = () => {
+  try { __runV524(); __probeMark('all'); }
+  catch (e) { __probeMark('THREW:' + (e && e.message ? e.message : e)); throw e; }
+};
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', __wrapped524);
+} else {
+  __wrapped524();
+}
+__probeMark('registered');
 </script>
 
 <!-- ================= v5.14 Phase R0 — cross-device shell =================
@@ -3095,6 +3882,8 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   <a class="dms-item" data-route="/world" href="#/world"><span class="g">◎</span>WORLD MONITOR</a>
   <a class="dms-item" data-route="/portfolio" href="#/portfolio"><span class="g">▣</span>PORTFOLIO</a>
   <a class="dms-item" data-route="/media" href="#/media"><span class="g">♪</span>MEDIA</a>
+  <a class="dms-item" data-route="/motion" href="#/motion"><span class="g">◐</span>MOTION</a>
+  <a class="dms-item" data-route="/vision" href="#/vision"><span class="g">◉</span>VISION</a>
   <a class="dms-item" data-route="/markets" href="#/markets"><span class="g">▥</span>MARKETS</a>
   <a class="dms-item" data-route="/intelligence" href="#/intelligence"><span class="g">✦</span>INTELLIGENCE</a>
   <a class="dms-item" data-route="/alerts" href="#/alerts"><span class="g">◉</span>ALERTS<span class="dms-badge" id="dmsAlertBadge"></span></a>
@@ -3210,6 +3999,99 @@ document.getElementById('mapbtn').addEventListener('click', () => {
     <div class="dmv-head"><h2>MORE</h2><div class="dmv-sub">EVERY DESTINATION · SAME IA AS THE SIDEBAR · #/more</div></div>
     <div class="dm-card" id="moreList"></div>
   </section>
+
+  <!-- MOTION — the six Skiper effects ported to vanilla + the 3D core model -->
+  <section class="dmview" id="view-motion">
+    <div class="dmv-head"><h2>MOTION</h2><div class="dmv-sub">SKIPER EFFECTS · 3D CORE · #/motion</div></div>
+    <div class="motion-stack">
+      <div class="motion-block">
+        <div class="mb-tag">MODEL 3D — WIREFRAME CORE</div>
+        <div class="mb-title">THE DOURMOUSE CORE</div>
+        <div class="globe-wrap"><canvas id="globe3d" aria-hidden="true"></canvas></div>
+      </div>
+      <div class="motion-block">
+        <div class="mb-tag">EFFECT 1/6 — COUNT-UP</div>
+        <div class="mb-title">ANIMATED NUMBERS · SKIPER 37</div>
+        <div class="num-stage">
+          <div class="num-big" id="numA" data-target="2146000" data-prefix="$" data-suffix="">$0</div>
+          <div class="num-big" id="numB" data-target="2758" data-prefix="" data-suffix=" FACTS">0 FACTS</div>
+          <div class="num-big" id="numC" data-target="98.2" data-prefix="" data-suffix="%" data-decimals="1">0%</div>
+        </div>
+      </div>
+      <div class="motion-block">
+        <div class="mb-tag">EFFECT 2/6 — HOVER EXPAND</div>
+        <div class="mb-title">ACCORDION STACK · SKIPER 53</div>
+        <div class="hx-stack" id="hxStack"></div>
+      </div>
+      <div class="motion-block">
+        <div class="mb-tag">EFFECT 3/6 — CREATIVE CAROUSEL</div>
+        <div class="mb-title">3D FLIP DECK · SKIPER 50</div>
+        <div class="cf-stage" id="cfStageCreative"></div>
+        <div class="cf-nav" id="cfNavCreative"></div>
+      </div>
+      <div class="motion-block">
+        <div class="mb-tag">EFFECT 4/6 — COVERFLOW</div>
+        <div class="mb-title">DEPTH FAN · SKIPER 49</div>
+        <div class="cf-stage" id="cfStageCover"></div>
+        <div class="cf-nav" id="cfNavCover"></div>
+      </div>
+      <div class="motion-block">
+        <div class="mb-tag">EFFECT 5/6 — PROGRESSIVE BLUR</div>
+        <div class="mb-title">EDGE FADE · SKIPER 41</div>
+        <div class="pb-scroll" id="pbScroll"><div class="pb-txt" id="pbTxt"></div></div>
+        <div class="pb-edge top"></div>
+        <div class="pb-edge bot"></div>
+      </div>
+      <div class="motion-block">
+        <div class="mb-tag">EFFECT 6/6 — PERSPECTIVE SCROLL</div>
+        <div class="mb-title">3D TILT TEXT · SKIPER 28</div>
+        <div class="p3d-scroll" id="p3dScroll"><div class="p3d-pane"><div class="p3d-txt" id="p3dTxt">DOURMOUSE · ALL SYSTEMS · ONE CORE · ZERO COMPROMISE</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VISION — face + hand control -->
+  <section class="dmview" id="view-vision">
+    <div class="dmv-head"><h2>VISION</h2><div class="dmv-sub">FACE + HAND CONTROL · CAMERA GESTURES · #/vision</div></div>
+    <div class="vis-layout">
+      <div class="dm-card" style="padding:10px">
+        <div class="vis-cam-wrap" id="visCamWrap">
+          <video id="visCam" playsinline muted autoplay></video>
+          <canvas id="visOverlay" aria-hidden="true"></canvas>
+          <div class="vis-cam-off" id="visCamOff">CAMERA OFF — START TO ENABLE</div>
+          <div class="vis-hint" id="visHint">GESTURE: —</div>
+        </div>
+        <div class="vis-actions">
+          <button class="dm-btn big" id="visStart">START CAMERA</button>
+          <button class="dm-btn big ghost" id="visStop">STOP</button>
+        </div>
+      </div>
+      <div>
+        <div class="vis-status">
+          <div class="vis-card"><div class="vc-k">FACE</div><div class="vc-v" id="visFace">—</div></div>
+          <div class="vis-card"><div class="vc-k">HANDS</div><div class="vc-v" id="visHands">—</div></div>
+        </div>
+        <div class="dm-card" style="margin-top:10px">
+          <div class="dm-k">GESTURE MAP</div>
+          <table class="vis-gesture-table">
+            <tr><td>OPEN PALM</td><td>pause / halt the current task</td></tr>
+            <tr><td>PINCH (thumb+index)</td><td>confirm / send the directive</td></tr>
+            <tr><td>THUMBS UP</td><td>approve the pending confirmation</td></tr>
+            <tr><td>POINT (one finger)</td><td>select — focus the prompt box</td></tr>
+            <tr><td>WAVE</td><td>wake the system (dismiss idle)</td></tr>
+            <tr><td>FACE PRESENT</td><td>system stays awake; face gone = idle</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- v5.24 TASK DECK — live tabs of what the agent is doing (real SSE events) -->
+<div id="taskdeck" aria-live="polite">
+  <button class="td-close" id="tdClose" title="Dismiss">✕</button>
+  <div class="td-head" id="tdHead"></div>
+  <div class="td-body" id="tdBody"></div>
 </div>
 
 <!-- resume banner (mobile, optional, never annoying — spec §8) -->
@@ -3222,6 +4104,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   <a class="dmt-tab" data-route="/world" href="#/world"><span>◎</span>WORLD<span class="bar"></span></a>
   <a class="dmt-tab" data-route="/portfolio" href="#/portfolio"><span>▣</span>PORTFOLIO<span class="bar"></span></a>
   <a class="dmt-tab" data-route="/media" href="#/media"><span>♪</span>MEDIA<span class="bar"></span></a>
+  <a class="dmt-tab" data-route="/motion" href="#/motion"><span>◐</span>MOTION<span class="bar"></span></a>
   <a class="dmt-tab" data-route="/more" href="#/more"><span>☰</span>MORE<span class="bar"></span></a>
 </nav>
 <button class="dmt-fab" id="dmtFab" title="Command palette">⚡</button>
@@ -3245,7 +4128,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const GLYPH = { home:'▤', atlas:'◈', world:'◎', portfolio:'▣', media:'♪', markets:'▥', intelligence:'✦', alerts:'◉', settings:'⚙' };
+  const GLYPH = { home:'▤', atlas:'◈', world:'◎', portfolio:'▣', media:'♪', motion:'◐', vision:'◉', markets:'▥', intelligence:'✦', alerts:'◉', settings:'⚙' };
 
   // ---- device identity (local, per browser — drives the resume banner) --
   let DEVICE = localStorage.getItem('dm_device');
@@ -3257,9 +4140,10 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   // ---- routing: deep links map onto the same eight destinations ---------
   const ROUTES = { '':'home','/':'home','/home':'home','/atlas':'atlas','/atlas/portfolio':'atlas',
     '/atlas/research':'atlas','/atlas/risk':'atlas','/world':'world','/world/events':'world',
-    '/portfolio':'portfolio','/media':'media','/markets':'markets','/intelligence':'intelligence',
+    '/portfolio':'portfolio','/media':'media','/motion':'motion','/vision':'vision',
+    '/markets':'markets','/intelligence':'intelligence',
     '/alerts':'alerts','/settings':'settings','/more':'more' };
-  const VIEWS = ['atlas','world','portfolio','media','markets','intelligence','alerts','settings','more'];
+  const VIEWS = ['atlas','world','portfolio','media','motion','vision','markets','intelligence','alerts','settings','more'];
   const isMobile = () => window.innerWidth < 900;
 
   let state = { watchlist: [], alerts: [], muted: [], prefs: {}, recent: [], workspaces: [] };
@@ -3634,7 +4518,7 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   function renderMore() {
     const list = $('moreList');
     if (!list) return;
-    list.innerHTML = ['media', 'markets', 'intelligence', 'alerts', 'settings'].map(v =>
+    list.innerHTML = ['media', 'motion', 'vision', 'markets', 'intelligence', 'alerts', 'settings'].map(v =>
       `<a class="dm-row" href="#/${v}" style="text-decoration:none"><span class="g" style="font-size:14px">${GLYPH[v]}</span>` +
       `<div class="grow"><div class="n">${v.toUpperCase()}</div><div class="d">open ${v}</div></div><span style="color:var(--text-dim)">→</span></a>`
     ).join('') +

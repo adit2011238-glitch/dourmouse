@@ -135,6 +135,20 @@ class TestStatusAndRoster:
         assert "sheets" in s and "drive" in s
         assert "link-shared" in s["sheets"] and "link-shared" in s["drive"]
 
+    def test_email_identity_defaults_to_dourmouse(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_EMAIL_NAME", raising=False)
+        assert gs.email_display_name() == "Dourmouse"
+        monkeypatch.setenv("DOURMOUSE_EMAIL_NAME", "Adit's Assistant")
+        assert gs.email_display_name() == "Adit's Assistant"
+
+    def test_status_includes_identity_when_configured(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_GMAIL_USER", "sender@gmail.com")
+        monkeypatch.setenv("GOOGLE_GMAIL_APP_PASSWORD", "1234567890abcdef")
+        monkeypatch.delenv("DOURMOUSE_EMAIL_NAME", raising=False)
+        s = gs.status()
+        assert s["configured"] is True
+        assert s["identity"] == "Dourmouse <sender@gmail.com>"
+
     def test_docs_subagent_registered_with_tools(self):
         registry = build_general_registry()
         docs = registry.get_subagent("docs")
