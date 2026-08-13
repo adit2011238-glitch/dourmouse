@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE — Presentation</title>
+<style>
+  :root { --ink:#0f172a; --sub:#475569; --accent:#2563eb; --bg:#f8fafc; --card:#ffffff; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:28px 40px 12px; border-bottom:1px solid #e2e8f0; background:var(--card); display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:18px; letter-spacing:.5px; }
+  header .sub { color:var(--sub); font-size:13px; margin-top:2px; }
+  .stage { width:min(1060px, 92vw); margin:34px auto; position:relative; }
+  .slide { display:none; background:var(--card); border:1px solid #e2e8f0; border-radius:14px; padding:52px 56px; min-height:480px; box-shadow:0 10px 30px rgba(2,6,23,.06); }
+  .slide.active { display:block; animation:rise .28s ease-out; }
+  @keyframes rise { from { opacity:0; transform:translateY(8px);} to { opacity:1; transform:none;} }
+  .slide .kicker { color:var(--accent); font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; }
+  .slide h2 { font-size:30px; margin:14px 0 18px; line-height:1.15; }
+  .slide p, .slide li { color:var(--sub); font-size:16px; line-height:1.65; }
+  .slide ul { margin:10px 0 0 22px; }
+  .slide table { border-collapse:collapse; width:100%; margin-top:16px; font-size:14px; }
+  .slide th, .slide td { text-align:left; padding:8px 10px; border-bottom:1px solid #e2e8f0; }
+  .slide th { color:var(--accent); font-size:12px; letter-spacing:1px; text-transform:uppercase; }
+  .num { font-size:56px; font-weight:800; color:var(--accent); }
+  nav { display:flex; justify-content:center; align-items:center; gap:16px; margin:22px auto 60px; }
+  nav button { border:1px solid #cbd5e1; background:var(--card); color:var(--ink); border-radius:8px; padding:9px 18px; font-size:14px; cursor:pointer; }
+  nav button:hover { border-color:var(--accent); color:var(--accent); }
+  nav .dots { display:flex; gap:7px; }
+  nav .dot { width:9px; height:9px; border-radius:50%; background:#cbd5e1; }
+  nav .dot.on { background:var(--accent); }
+  kbd { background:#eef2ff; color:#3730a3; border-radius:4px; padding:1px 6px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>DOURMOUSE</h1><div class="sub">Self-hosted neural agent operating system</div></div>
+  <div class="sub" id="pg">1 / 7</div>
+</header>
+
+<div class="stage">
+  <section class="slide active">
+    <div class="kicker">What is it</div>
+    <h2>One directive box. A whole fleet of agents.</h2>
+    <p>DOURMOUSE turns a single natural-language instruction into a coordinated
+       run across dozens of purpose-built sub-agents — mail, web research,
+       markets, code, browser automation, calendar, memory, music, and more —
+       running entirely on your own hardware.</p>
+    <ul>
+      <li>Local-first: no cloud brain, no account on someone else's platform.</li>
+      <li>Every action visible: plan steps, tool runs, results, and latency stream live.</li>
+      <li>Every risky action gated: sends, writes, and submissions wait for your approval.</li>
+    </ul>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">The core loop</div>
+    <h2>From directive to done, transparently</h2>
+    <ul>
+      <li><b>Plan</b> — a deterministic planner ranks the roster and emits STEP 1/N → agent.</li>
+      <li><b>Execute</b> — the orchestrator runs a tool loop: real tools, real results.</li>
+      <li><b>Stream</b> — the task deck shows SEARCH / CODE / MAIL / DATA / REPLY as they happen.</li>
+      <li><b>Gate</b> — confirmation-gated tools pause for a human approval card.</li>
+      <li><b>Finish</b> — the reply lands with first-token timing; the session is stored.</li>
+    </ul>
+    <p style="margin-top:18px">If a step is genuinely impossible, the agent says so explicitly and finishes — it never fabricates a success.</p>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">The roster</div>
+    <h2>Specialists, coordinated</h2>
+    <table>
+      <tr><th>Agent</th><th>Does</th></tr>
+      <tr><td>mail</td><td>Inbox, Gmail search/read/send, Drive read — sends gated</td></tr>
+      <tr><td>docs</td><td>Sheets reads, Drive downloads, Docs + Slides write — gated</td></tr>
+      <tr><td>research_info / news / rnd</td><td>Keyless Wikipedia + web search, live Google News</td></tr>
+      <tr><td>markets / worldmonitor</td><td>Yahoo quotes &amp; movers, self-hosted World Pulse</td></tr>
+      <tr><td>code_* / dev_coding</td><td>Ollama, Claude Code, Codex, NVIDIA, DeepSeek backends</td></tr>
+      <tr><td>browser</td><td>Real headless Chrome: forms, sign-ups, sign-ins — gated</td></tr>
+      <tr><td>compute</td><td>LAN inference offload to the Dell with auto-fallback</td></tr>
+      <tr><td>memory</td><td>Obsidian vault + SQLite long-term store, daily self-review</td></tr>
+      <tr><td>music / tasks / scheduling</td><td>Spotify playback, task list, calendar slots</td></tr>
+    </table>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">Honesty contract</div>
+    <h2>No fabricated results. Ever.</h2>
+    <ul>
+      <li>Missing config → <kbd>NOT CONFIGURED</kbd> with the exact fix.</li>
+      <li>Offline backend → the real error (e.g. Yahoo HTTP 429), local AI takes over.</li>
+      <li>An impossible step → explicitly said, then finish.</li>
+      <li>Every write is confirmation-gated; every read states its scope.</li>
+    </ul>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">Architecture</div>
+    <h2>The Dell is infrastructure, not a second DOURMOUSE</h2>
+    <pre style="background:#0f172a;color:#e2e8f0;border-radius:10px;padding:18px 20px;font-size:13px;line-height:1.7;margin-top:14px;overflow:auto">
+USER ──► DOURMOUSE (main machine)
+              brain + UI + memory + integrations
+                    │
+          ┌─────────┴─────────┐
+          v                   v
+    LOCAL RESOURCES     COMPUTE NODE (Dell, optional)
+    Ollama / tools      Qwen3 1.7B · /v1/generate · /v1/chat
+                        auto-failover when offline
+    </pre>
+    <p style="margin-top:14px">Memory, the UI, the orchestrator, and integrations stay on the main machine. The Dell only serves inference over the LAN.</p>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">Numbers that are real</div>
+    <h2>This system, today</h2>
+    <div class="num">~30</div>
+    <p>roster agents and counting — every one reporting IDLE / COMPUTING / HOLD_AUTH / LIVE</p>
+    <div class="num" style="margin-top:22px">1493+</div>
+    <p>hermetic tests passing at the last full check — no network needed for the suite</p>
+    <div class="num" style="margin-top:22px">6</div>
+    <p>self-hosted World Pulse channels (disasters, cyber, conflict, macro, news, markets) — keyless, real feeds</p>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">What's left</div>
+    <h2>The honest list</h2>
+    <ul>
+      <li><b>Google Drive/Slides write</b> — the code path is real and tested; it needs one sign-in at <kbd>/login</kbd> with <kbd>GOOGLE_OAUTH_FULL_SCOPES=1</kbd>.</li>
+      <li><b>CAPTCHA / phone verification</b> — no tool can truthfully solve those.</li>
+      <li><b>Brand-new external accounts</b> — forms get filled; human verification stays human.</li>
+    </ul>
+    <p style="margin-top:18px">This deck is a local artifact. The same content is ready to ship to Google Slides the moment the sign-in lands.</p>
+  </section>
+</div>
+
+<nav>
+  <button id="prev">← PREV</button>
+  <div class="dots" id="dots"></div>
+  <button id="next">NEXT →</button>
+</nav>
+
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  const dots = document.getElementById('dots');
+  const pg = document.getElementById('pg');
+  let i = 0;
+  slides.forEach((_, n) => { const d = document.createElement('span'); d.className = 'dot' + (n === 0 ? ' on' : ''); dots.appendChild(d); });
+  const dotEls = [...dots.children];
+  function show(n) {
+    i = (n + slides.length) % slides.length;
+    slides.forEach((s, k) => s.classList.toggle('active', k === i));
+    dotEls.forEach((d, k) => d.classList.toggle('on', k === i));
+    pg.textContent = (i + 1) + ' / ' + slides.length;
+  }
+  document.getElementById('prev').onclick = () => show(i - 1);
+  document.getElementById('next').onclick = () => show(i + 1);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') show(i + 1);
+    if (e.key === 'ArrowLeft') show(i - 1);
+  });
+</script>
+</body>
+</html>

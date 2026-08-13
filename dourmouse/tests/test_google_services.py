@@ -75,6 +75,71 @@ class TestDriveCreateDoc:
         assert "drive_create_doc" in registry.gated_tool_names
 
 
+class TestSlidesCreate:
+    """v5.28 — the signed-in-user Slides WRITE tool (hermetic: fake token +
+    fake REST, no network; the real write path is OAuth + Slides API)."""
+
+    def test_not_configured_without_signed_in_user(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: None)
+        monkeypatch.setattr(gs, "_oauth_user_needs_reauth", lambda a: None)
+        out = gs.slides_create("Deck")
+        assert out.startswith("NOT CONFIGURED")
+        assert "Nothing was created" in out
+
+    def test_happy_path_builds_deck(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        calls = []
+
+        def fake_http_json(method, url, token, body=None):
+            calls.append((method, url, body))
+            if method == "POST" and url.endswith("/presentations"):
+                return {
+                    "presentationId": "deck1",
+                    "slides": [{"objectId": "p1"}],
+                }
+            return {}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.slides_create(
+            "Dourmouse Overview",
+            [{"title": "What is Dourmouse", "body": "A neural agent."},
+             {"title": "Capabilities", "body": "Mail, web, code."}],
+        )
+        assert "SLIDES DECK CREATED" in out
+        assert "deck1" in out
+        assert "2 slide(s)" in out
+        # create + two batchUpdates
+        assert calls[0][0] == "POST" and calls[0][1].endswith("/presentations")
+        batch = [c for c in calls if ":batchUpdate" in c[1]]
+        assert len(batch) == 2
+        # first batch deletes the default slide + inserts 2 layouts
+        assert batch[0][2]["requests"][0] == {"deleteObject": {"objectId": "p1"}}
+        inserts = [r for r in batch[0][2]["requests"] if "insertLayout" in r]
+        assert len(inserts) == 2
+        # second batch draws text boxes for each slide's title/body
+        assert any("createTextBox" in r for r in batch[1][2]["requests"])
+        assert any("insertText" in r for r in batch[1][2]["requests"])
+
+    def test_403_surfaces_scope_fix(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 403 on .../presentations: insufficient permissions")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.slides_create("Deck")
+        assert "403" in out
+        assert "GOOGLE_OAUTH_FULL_SCOPES" in out
+        assert "Nothing was created" in out
+
+    def test_roster_wiring_gated(self):
+        registry = build_general_registry()
+        sub = registry.get_subagent("docs")
+        spec = next(t for t in sub.tools if t.name == "slides_create")
+        assert spec.permission == Permission.REQUIRES_CONFIRMATION
+        assert "slides_create" in registry.gated_tool_names
+
+
 class _FakeResp:
     status = 200
 

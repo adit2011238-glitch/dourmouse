@@ -498,6 +498,198 @@ def drive_create_doc(title: str, content: str = "") -> str:
     )
 
 
+# -- v5.28: Google Slides (write, per-user OAuth) ------------------------ #
+
+_SLIDES_API = "https://slides.googleapis.com/v1/presentations"
+
+
+def _slides_create_oauth(
+    token: str, title: str, slides: list[dict[str, str]] | None = None
+) -> str:
+    """Create a Google Slides deck in the signed-in user's Drive (v5.28).
+
+    presentations.create (metadata) then one batchUpdate that deletes the
+    default blank slide and inserts TITLE_AND_BODY layouts, then a second
+    batchUpdate that draws real text boxes (createTextBox + insertText) on
+    each slide. Deterministic objectIds throughout — the deck's content is
+    real, never placeholder text. Requires the Google sign-in with Drive
+    write scope; identity-only 403s are surfaced with the exact fix.
+    """
+    name = (title or "").strip()[:120]
+    if not name:
+        return "ERROR: slides_create requires a title."
+    try:
+        meta = _http_json(
+            "POST",
+            _SLIDES_API,
+            token,
+            {"title": name},
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg:
+            raise RuntimeError(
+                msg
+                + " — Slides WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1 "
+                "in .env + a verified/testing-mode OAuth app). Nothing was created."
+            ) from exc
+        raise
+    pres_id = str(meta.get("presentationId") or "").strip()
+    if not pres_id:
+        return "ERROR: Slides did not return a presentation id — nothing was created."
+    # The create response is a full Presentation resource; the default
+    # blank slide is in ``slides[0].objectId`` (not a top-level pageId).
+    default_slide = (meta.get("slides") or [{}])[0]
+    page_id = str(default_slide.get("objectId") or "").strip()
+    slides = slides or []
+    requests: list[dict[str, Any]] = []
+    if page_id:
+        # The API ships a default blank slide; rebuild the deck from scratch
+        # so it contains ONLY the requested slides.
+        requests.append({"deleteObject": {"objectId": page_id}})
+    for i, slide in enumerate(slides):
+        sid = f"slide_{i + 1}"
+        requests.append(
+            {
+                "insertLayout": {
+                    "slideLayoutType": "TITLE_AND_BODY",
+                    "objectId": sid,
+                    "insertionIndex": i,
+                }
+            }
+        )
+    if not requests:
+        return (
+            f"SLIDES DECK CREATED: {name!r} (id {pres_id}) — no slides added. "
+            f"open at https://docs.google.com/presentation/d/{pres_id}"
+        )
+    try:
+        _http_json(
+            "POST",
+            f"{_SLIDES_API}/{pres_id}:batchUpdate",
+            token,
+            {"requests": requests},
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg:
+            raise RuntimeError(
+                msg
+                + " — Slides WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1). "
+                f"The empty deck {name!r} was created but its slides were not added."
+            ) from exc
+        raise
+    # Second batch: draw explicit title/body text boxes on each slide.
+    text_requests: list[dict[str, Any]] = []
+    for i, slide in enumerate(slides):
+        sid = f"slide_{i + 1}"
+        title_text = (slide.get("title") or "").strip()[:200]
+        body_text = (slide.get("body") or "").strip()[:1000]
+        if title_text:
+            tbox = f"{sid}_title_box"
+            text_requests.append(
+                {
+                    "createTextBox": {
+                        "objectId": tbox,
+                        "elementProperties": {
+                            "pageObjectId": sid,
+                            "size": {"width": {"magnitude": 685, "unit": "PT"},
+                                    "height": {"magnitude": 60, "unit": "PT"}},
+                            "transform": {
+                                "scaleX": 1, "scaleY": 1, "shearX": 0,
+                                "shearY": 0, "translateX": 55, "translateY": 45,
+                                "unit": "PT",
+                            },
+                        },
+                    }
+                }
+            )
+            text_requests.append(
+                {
+                    "insertText": {
+                        "objectId": tbox,
+                        "insertionIndex": 0,
+                        "text": title_text,
+                    }
+                }
+            )
+        if body_text:
+            bbox = f"{sid}_body_box"
+            text_requests.append(
+                {
+                    "createTextBox": {
+                        "objectId": bbox,
+                        "elementProperties": {
+                            "pageObjectId": sid,
+                            "size": {"width": {"magnitude": 685, "unit": "PT"},
+                                    "height": {"magnitude": 340, "unit": "PT"}},
+                            "transform": {
+                                "scaleX": 1, "scaleY": 1, "shearX": 0,
+                                "shearY": 0, "translateX": 55, "translateY": 120,
+                                "unit": "PT",
+                            },
+                        },
+                    }
+                }
+            )
+            text_requests.append(
+                {
+                    "insertText": {
+                        "objectId": bbox,
+                        "insertionIndex": 0,
+                        "text": body_text[:800],
+                    }
+                }
+            )
+    if text_requests:
+        try:
+            _http_json(
+                "POST",
+                f"{_SLIDES_API}/{pres_id}:batchUpdate",
+                token,
+                {"requests": text_requests},
+            )
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "403" in msg:
+                raise RuntimeError(
+                    msg
+                    + " — Slides WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1). "
+                    f"The deck {name!r} was created but its text could not be written."
+                ) from exc
+            raise
+    return (
+        f"SLIDES DECK CREATED: {name!r} (id {pres_id}) — "
+        f"{len(slides)} slide(s) · open at "
+        f"https://docs.google.com/presentation/d/{pres_id}"
+    )
+
+
+def slides_create(
+    title: str, slides: list[dict[str, str]] | None = None
+) -> str:
+    """Create a Google Slides presentation in the SIGNED-IN user's Drive
+    (v5.28, write). Real presentations.create + batchUpdate with the logged-in
+    Google user's token. Honest NOT CONFIGURED when no OAuth user is signed
+    in; confirmation-gated upstream (creates a real deck).
+    """
+    token = _oauth_access_token()
+    if token:
+        try:
+            return _slides_create_oauth(token, title, slides)
+        except RuntimeError as exc:
+            return f"SLIDES CREATE (reported honestly): {exc}"
+    reauth = _oauth_user_needs_reauth("SLIDES WRITE")
+    if reauth:
+        return reauth
+    return (
+        "NOT CONFIGURED: creating a Slides presentation needs the signed-in "
+        "Google user's OAuth session with Drive write scope. No user is "
+        "signed in — sign in at /login (with GOOGLE_OAUTH_FULL_SCOPES=1 in "
+        ".env so the session grants Drive), then retry. Nothing was created."
+    )
+
+
 def drive_search(query: str, max_results: int = 10) -> str:
     """Search the SIGNED-IN user's Google Drive (read-only, v5.18).
 

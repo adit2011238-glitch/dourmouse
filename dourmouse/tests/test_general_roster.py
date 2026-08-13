@@ -121,6 +121,8 @@ class TestRosterShape:
             "browser_creds_store",  # v5.25: storing credentials needs a human
             "browser_creds_forget",  # v5.25: removing credentials needs a human
             "email_own_send",  # v5.25: sending as the Dourmouse identity needs a human
+            "drive_create_doc",  # v5.27: creating a file in the user's Drive needs a human
+            "slides_create",  # v5.28: creating a deck in the user's Drive needs a human
         }
 
     def test_internet_tools_registered(self):

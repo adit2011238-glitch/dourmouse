@@ -1,0 +1,33 @@
+{
+  "title": "DOURMOUSE — Self-Hosted Neural Agent Operating System",
+  "slides": [
+    {
+      "title": "What is DOURMOUSE",
+      "body": "One directive box. A whole fleet of agents. DOURMOUSE turns a single natural-language instruction into a coordinated run across dozens of purpose-built sub-agents: mail, web research, markets, code, browser automation, calendar, memory, and music. Local-first: no cloud brain. Every action visible. Every risky action gated behind human confirmation."
+    },
+    {
+      "title": "The core loop",
+      "body": "1. Plan: a deterministic planner ranks the roster and emits STEP 1/N to an agent. 2. Execute: the orchestrator runs a real tool loop. 3. Stream: the task deck shows SEARCH/CODE/MAIL/DATA/REPLY as they happen. 4. Gate: confirmation-gated tools pause for a human approval card. 5. Finish: the reply lands with first-token timing; the session is stored. Impossible steps are said explicitly, never fabricated."
+    },
+    {
+      "title": "The roster",
+      "body": "mail: inbox + Gmail + Drive read. docs: Sheets reads, Drive downloads, Docs + Slides write. research_info/news/rnd: keyless Wikipedia, web search, Google News. markets/worldmonitor: Yahoo quotes, self-hosted World Pulse. code_*/dev_coding: Ollama, Claude Code, Codex, NVIDIA, DeepSeek. browser: real headless Chrome forms and sign-ins. compute: LAN inference offload with auto-fallback. memory: vault + SQLite store. music/tasks/scheduling: Spotify, tasks, calendar."
+    },
+    {
+      "title": "Honesty contract",
+      "body": "No fabricated results, ever. Missing config reports NOT CONFIGURED with the exact fix. Offline backends surface the real error and local AI takes over. Every write is confirmation-gated. Every read states its scope."
+    },
+    {
+      "title": "Architecture",
+      "body": "The main machine is the brain: UI, memory, orchestrator, integrations. The Dell is infrastructure only: Qwen3 1.7B over the LAN serving /v1/status, /v1/generate, /v1/chat, with automatic local fallback when offline."
+    },
+    {
+      "title": "Numbers that are real",
+      "body": "About 30 roster agents, all reporting IDLE/COMPUTING/HOLD_AUTH/LIVE. 1493+ hermetic tests passing at the last full check. Six self-hosted World Pulse channels - disasters, cyber, conflict, macro, news, markets - keyless and fed by real public feeds."
+    },
+    {
+      "title": "What's left",
+      "body": "Google Drive and Slides write: the code path is real and tested; it needs one sign-in at /login with GOOGLE_OAUTH_FULL_SCOPES=1. CAPTCHA and phone verification: no tool can truthfully solve those. Brand-new external accounts: forms get filled, human verification stays human."
+    }
+  ]
+}

@@ -1826,14 +1826,28 @@ def build_general_registry() -> DispatchRegistry:
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"DRIVE DOC CREATE FAILED: {type(exc).__name__}: {exc}"
 
+    def _slides_create_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import slides_create
+
+        try:
+            return slides_create(
+                arguments.get("title", ""),
+                arguments.get("slides"),
+            )
+        except RuntimeError as exc:
+            return f"SLIDES CREATE (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"SLIDES CREATE FAILED: {type(exc).__name__}: {exc}"
+
     registry.register_subagent(
         _subagent(
             "docs",
             "General",
-            "Google Sheets and Drive — reads link-shared Sheets, downloads "
-            "link-shared Drive items, and creates Google Docs in the "
-            "SIGNED-IN user's Drive (real write, requires confirmation + the "
-            "Google sign-in with Drive write scope).",
+            "Google Sheets, Drive, and Slides — reads link-shared Sheets, "
+            "downloads link-shared Drive items, creates Google Docs and "
+            "Slides presentations in the SIGNED-IN user's Drive (real write, "
+            "requires confirmation + the Google sign-in with Drive write "
+            "scope).",
             [
                 ToolSpec(
                     name="sheets_read",
@@ -1898,6 +1912,42 @@ def build_general_registry() -> DispatchRegistry:
                     confirm_prompt=lambda a: (
                         f"Create a Google Doc titled {a.get('title', '?')!r} "
                         f"in your Drive ({(a.get('content') or '')[:80]}...)?"
+                    ),
+                ),
+                ToolSpec(
+                    name="slides_create",
+                    description=(
+                        "Create a Google Slides presentation in the SIGNED-IN "
+                        "user's Drive with a title and a list of slides, each "
+                        "{title, body}. Returns the open link. REAL write — "
+                        "REQUIRES human confirmation. Needs the Google "
+                        "sign-in with Drive write scope "
+                        "(GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT CONFIGURED "
+                        "honestly without a signed-in user."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "slides": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {"type": "string"},
+                                        "body": {"type": "string"},
+                                    },
+                                },
+                                "description": "list of {title, body} slides",
+                            },
+                        },
+                        "required": ["title"],
+                    },
+                    handler=_slides_create_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Create a Slides deck titled {a.get('title', '?')!r} "
+                        f"({len(a.get('slides') or [])} slides) in your Drive?"
                     ),
                 ),
             ],
@@ -2829,19 +2879,6 @@ def build_general_registry() -> DispatchRegistry:
             return f"DRIVE READ (reported honestly): {exc}"
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"DRIVE READ FAILED: {type(exc).__name__}: {exc}"
-
-    def _drive_create_doc_h(arguments: dict[str, Any]) -> str:
-        from dourmouse.google_services import drive_create_doc
-
-        try:
-            return drive_create_doc(
-                arguments.get("title", ""),
-                arguments.get("content", ""),
-            )
-        except RuntimeError as exc:
-            return f"DRIVE DOC CREATE (reported honestly): {exc}"
-        except Exception as exc:  # noqa: BLE001 - network failures, readable
-            return f"DRIVE DOC CREATE FAILED: {type(exc).__name__}: {exc}"
 
     # ---- Browser agent (v5.25): real headless Chrome via Playwright --------
     def _browser_h(tool: str) -> Callable[[dict[str, Any]], str]:
