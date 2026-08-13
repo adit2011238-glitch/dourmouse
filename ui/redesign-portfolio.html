@@ -354,6 +354,7 @@ section{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:80px 
 /* thinking block — the Claude-style streaming reasoning */
 .think{background:rgba(var(--gold-rgb),.045);border:1px solid rgba(var(--gold-rgb),.28);border-radius:10px;overflow:hidden}
 .think .head{display:flex;align-items:center;gap:9px;padding:9px 14px;font-family:var(--font-hud);font-weight:700;font-size:11px;letter-spacing:.22em;color:var(--gold);text-transform:uppercase;border-bottom:1px solid rgba(var(--gold-rgb),.14)}
+.think .head .marker,.acts .head .marker{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;border:1px solid currentColor;border-radius:4px;padding:1px 6px;line-height:1.4}
 .think .head .hint{margin-left:auto;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.08em;color:var(--text-faint);text-transform:none}
 .think .body{font-family:var(--font-mono);font-size:12px;line-height:1.75;color:var(--text-dim);padding:12px 14px;white-space:pre-wrap}
 .think .body .cursor{display:inline-block;width:8px;height:13px;background:var(--gold);vertical-align:-2px;animation:blink 1s infinite;margin-left:3px}
@@ -363,7 +364,7 @@ section{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:80px 
 .acts .head{display:flex;align-items:center;gap:9px;padding:9px 14px;font-family:var(--font-hud);font-weight:700;font-size:11px;letter-spacing:.22em;color:var(--cyan-bright);text-transform:uppercase;border-bottom:1px solid var(--line)}
 .act{display:flex;align-items:center;gap:10px;padding:8px 14px;font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);border-top:1px dashed rgba(var(--cyan-rgb),.08)}
 .act:first-of-type{border-top:none}
-.act .ic{font-size:13px}
+.act .ic{font-size:9px;letter-spacing:.14em;color:var(--cyan);border:1px solid var(--line-strong);border-radius:4px;padding:2px 6px;font-family:var(--font-hud);font-weight:700;background:rgba(var(--cyan-rgb),.07)}
 .act .q{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .act .st{font-size:10px;letter-spacing:.1em;white-space:nowrap}
 .act.done .st{color:var(--green)}
@@ -770,38 +771,38 @@ footer .line .g{color:var(--gold)}
           <div class="conf">recognition 98% · wake locked</div></div>
         <div class="vmsg dm">
           <div class="think">
-            <div class="head">🧠 Thinking <span class="hint">streaming · visible before reply</span></div>
+            <div class="head"><span class="marker">T</span>Thinking <span class="hint">streaming · visible before reply</span></div>
             <div class="body">User asked for the gold monthly report by voice. I need the WGC central-bank net-purchase series, rerun weight_calibrator for GOLD, then verify the three golden regressions. Plan: pull data → calibrate → gates → compile.</div>
           </div>
           <div class="acts">
-            <div class="head">⚡ Actions · web + tools</div>
-            <div class="act done"><span class="ic">🔍</span><span class="q">Searching: “World Gold Council central bank net purchases 2026”</span><span class="st">✓ done</span></div>
-            <div class="act done"><span class="ic">⚙️</span><span class="q">weight_calibrator · GOLD</span><span class="st">✓ beta +0.144</span></div>
-            <div class="act done"><span class="ic">✅</span><span class="q">golden_regressions · 3/3</span><span class="st">✓ PASS</span></div>
+            <div class="head"><span class="marker">A</span>Actions · web + tools</div>
+            <div class="act done"><span class="ic">WEB</span><span class="q">Searching: “World Gold Council central bank net purchases 2026”</span><span class="st">✓ done</span></div>
+            <div class="act done"><span class="ic">RUN</span><span class="q">weight_calibrator · GOLD</span><span class="st">✓ beta +0.144</span></div>
+            <div class="act done"><span class="ic">GATE</span><span class="q">golden_regressions · 3/3</span><span class="st">✓ PASS</span></div>
           </div>
-          <div class="vreply">Compiled, sir. Central-bank net buying is up <b>41 tonnes</b> this quarter; GOLD weight recalibrated to <b>0.248</b>; all three golden regressions pass.<span class="tts">♫ voice reply · TTS</span></div>
+          <div class="vreply">Compiled, sir. Central-bank net buying is up <b>41 tonnes</b> this quarter; GOLD weight recalibrated to <b>0.248</b>; all three golden regressions pass.<span class="tts">VOICE REPLY · TTS</span></div>
         </div>
         <div class="vmsg you"><span class="vwho">YOU</span><span class="vtext">“and pull the USD/CAD 1m forecast”</span>
           <div class="conf">recognition 91%</div></div>
         <div class="vmsg dm">
           <div class="think">
-            <div class="head">🧠 Thinking <span class="hint">streaming · visible before reply</span></div>
+            <div class="head"><span class="marker">T</span>Thinking <span class="hint">streaming · visible before reply</span></div>
             <div class="body">Forecast request. Load USD/CAD daily to 2018, run the GARCH(1,1) + carry model, check the 20-day z-score. Quick: pull → model → 1m scenario grid.</div>
           </div>
           <div class="acts">
-            <div class="act done"><span class="ic">📊</span><span class="q">Backtest · usdjpy_drift_k1</span><span class="st">✓ OOS t 3.711</span></div>
-            <div class="act done"><span class="ic">🔍</span><span class="q">Searching: “USD/CAD · July employment situation impact”</span><span class="st">✓ done</span></div>
+            <div class="act done"><span class="ic">TEST</span><span class="q">Backtest · usdjpy_drift_k1</span><span class="st">✓ OOS t 3.711</span></div>
+            <div class="act done"><span class="ic">WEB</span><span class="q">Searching: “USD/CAD · July employment situation impact”</span><span class="st">✓ done</span></div>
           </div>
-          <div class="vreply">Model says <b>1.3949</b> short-term — stretched; expect a retrace toward 1.3990 before anything else. The forward curve already prices 1.3755 at 1y.<span class="tts">♫ voice reply · TTS</span></div>
+          <div class="vreply">Model says <b>1.3949</b> short-term — stretched; expect a retrace toward 1.3990 before anything else. The forward curve already prices 1.3755 at 1y.<span class="tts">VOICE REPLY · TTS</span></div>
         </div>
         <!-- live demo turn (appears when the orb is clicked) -->
         <div class="vmsg dm" id="vNewTurn" style="display:none">
-          <div class="think"><div class="head">🧠 Thinking <span class="hint">streaming · visible before reply</span></div>
+          <div class="think"><div class="head"><span class="marker">T</span>Thinking <span class="hint">streaming · visible before reply</span></div>
             <div class="body" id="vThinkBody"></div></div>
           <div class="acts" id="vActs">
-            <div class="act"><span class="ic">🔍</span><span class="q">Searching: “spot gold · today's fix”</span><span class="st">waiting</span></div>
-            <div class="act"><span class="ic">⚙️</span><span class="q">engine_api · /api/backtest</span><span class="st">waiting</span></div>
-            <div class="act"><span class="ic">✅</span><span class="q">gate · model_regression</span><span class="st">waiting</span></div>
+            <div class="act"><span class="ic">WEB</span><span class="q">Searching: “spot gold · today's fix”</span><span class="st">waiting</span></div>
+            <div class="act"><span class="ic">RUN</span><span class="q">engine_api · /api/backtest</span><span class="st">waiting</span></div>
+            <div class="act"><span class="ic">GATE</span><span class="q">gate · model_regression</span><span class="st">waiting</span></div>
           </div>
           <div class="vreply" id="vReply"></div>
         </div>
