@@ -6,7 +6,6 @@ fake local callable. The overriding contract: a dead node NEVER raises out
 of status()/generate()/chat(), and generate_with_fallback() always returns
 an honest result from one of the two paths.
 """
-
 from __future__ import annotations
 
 import json
@@ -205,3 +204,37 @@ class TestProbe:
         with rs._health_lock:
             rs._health_cache.update({"at": 0.0, "online": False, "payload": None})
         assert rs.server_available(force=True) is False
+
+
+class TestFastLaneHelpers:
+    """v5.30 — the server fast lane's gate helpers. The rule: a dead or
+    unconfigured node must NEVER add probe latency to a reply, so the lane
+    only engages on an EXPLICITLY configured URL + a FRESH cached probe."""
+
+    def test_server_url_configured_only_when_explicit(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_SERVER_URL", raising=False)
+        assert rs.server_url_configured() is False
+        monkeypatch.setenv("DOURMOUSE_SERVER_URL", "http://192.168.1.108:8000")
+        assert rs.server_url_configured() is True
+
+    def test_server_online_cached_never_probes_when_stale(self, monkeypatch):
+        """A stale cache returns False instantly without touching the network
+        — the lane stays local, costing zero probe latency."""
+        calls = []
+        monkeypatch.setattr(rs, "_request", lambda *a, **k: calls.append(a) or (200, {}))
+        with rs._health_lock:
+            rs._health_cache["at"] = 0  # ancient -> stale
+            rs._health_cache["online"] = True
+        assert rs.server_online_cached() is False
+        assert calls == []
+
+    def test_server_online_cached_reads_fresh_online(self, monkeypatch):
+        import time
+
+        with rs._health_lock:
+            rs._health_cache["at"] = time.monotonic()  # fresh
+            rs._health_cache["online"] = True
+        assert rs.server_online_cached() is True
+        with rs._health_lock:
+            rs._health_cache["online"] = False
+        assert rs.server_online_cached() is False

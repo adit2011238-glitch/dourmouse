@@ -58,6 +58,33 @@ def server_url() -> str:
     return raw.rstrip("/") or DEFAULT_SERVER_URL
 
 
+def server_url_configured() -> bool:
+    """True only when the operator EXPLICITLY set DOURMOUSE_SERVER_URL.
+
+    The fast lane must never probe the DEFAULT address on a machine that
+    never opted into the Dell: a silent 2s connect-timeout on every reply
+    would be a speed regression, not an improvement. Engaged routing is
+    opt-in via the env var (v5.30).
+    """
+    return bool(os.environ.get("DOURMOUSE_SERVER_URL", "").strip())
+
+
+def server_online_cached() -> bool:
+    """Online check that NEVER probes — reads only a FRESH cached probe.
+
+    Used by the fast lane so a pure-chat reply pays zero latency when the
+    node is down: if the last probe is stale or the node was offline, this
+    returns False instantly and the local fast model answers. The UI's
+    /api/connections poll keeps the cache warm; a genuinely dead Dell just
+    means the lane stays local.
+    """
+    now = time.monotonic()
+    with _health_lock:
+        if (now - _health_cache["at"]) < server_health_ttl():
+            return bool(_health_cache["online"])
+    return False
+
+
 def server_api_key() -> str:
     return os.environ.get("DOURMOUSE_SERVER_API_KEY", "").strip()
 

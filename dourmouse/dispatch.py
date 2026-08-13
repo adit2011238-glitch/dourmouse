@@ -49,6 +49,7 @@ from dourmouse.config import (
     OmniRouteConfig,
     fast_lane_enabled,
     fast_lane_model,
+    fast_lane_server_enabled,
     load_llm_config,
 )
 from dourmouse.governance import (
@@ -1029,6 +1030,12 @@ class DispatchContext:
     # Shared truth: the parent run's recent context, passed into nested runs
     # so delegated agents see what the parent already learned/decided.
     parent_context: str = ""
+    # v5.30: server fast lane. True when this run's first completion should
+    # go to the compute node (Dell) with automatic local fallback;
+    # ``server_fallback_model`` is the local fast model used when the node
+    # is down. The brain label stays honest: it reports the Dell model.
+    server_lane: bool = False
+    server_fallback_model: str = ""
 
     def delegates_used(self) -> int:
         return self.budget[0]
@@ -1165,8 +1172,27 @@ def run_dispatch_messages(
         and fast_lane_enabled()
         and _is_pure_chat(str(last_user), registry)
     )
+    # v5.30: when the compute node (Dell) is EXPLICITLY configured and a
+    # FRESH cached probe says online, the fast lane's single completion goes
+    # to the Dell (Qwen3 1.7B — smaller than the local fast model, so the
+    # first token lands sooner and the M3 stays free). server_online_cached
+    # NEVER probes, so a dead node costs zero extra latency: the lane just
+    # stays local. Any failure falls back to the local fast model inside the
+    # loop, and the brain label reports the Dell model only when the lane
+    # actually engaged. Only pure chat reaches the lane; agentic turns keep
+    # the resolved brain + full loop.
+    server_lane = False
     if fast_lane:
         model = fast_lane_model()
+        from dourmouse.remote_server import server_model, server_online_cached, server_url_configured
+
+        server_lane = (
+            fast_lane_server_enabled()
+            and server_url_configured()
+            and server_online_cached()
+        )
+        if server_lane:
+            model = f"server:{server_model()}"
     # The chosen brain is surfaced honestly so the UI can show which model
     # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
     # of the tree: nested delegate runs ride the parent's event sink, so a
@@ -1226,6 +1252,9 @@ def run_dispatch_messages(
         # keeps the full prompt so an agentic turn later in the session
         # still routes tools correctly.
         ctx.compact_system = True
+        if server_lane:
+            ctx.server_lane = True
+            ctx.server_fallback_model = fast_lane_model()
     stack.append(ctx)
     try:
         report = _run_dispatch_loop(messages, registry, max_turns, ctx)
@@ -1564,14 +1593,43 @@ def _run_dispatch_loop(
             bounded = [
                 {"role": "system", "content": _FAST_LANE_SYSTEM}
             ] + bounded[1:]
-        response = _call_with_retry(
-            client,
-            model=model,
-            messages=bounded,
-            tools=scoped_tools,
-            config=ctx.config,
-            on_delta=on_delta,
-        )
+        # v5.30: the server fast lane tries the Dell first; ANY failure
+        # (unreachable, timeout, 500, malformed) falls back to the local
+        # fast model — the node can never take the reply down.
+        if getattr(ctx, "server_lane", False):
+            try:
+                from dourmouse.remote_server import DourmouseServerClient
+
+                response = DourmouseServerClient().chat_completions_create(
+                    messages=bounded
+                )
+            except Exception:  # noqa: BLE001 - any Dell failure -> local
+                ctx.server_lane = False  # keep the rest of this run local
+                if event_sink is not None:
+                    _emit_event(
+                        event_sink,
+                        {
+                            "type": "assistant_text",
+                            "text": "[compute node offline — answered by the local fast model]",
+                        },
+                    )
+                response = _call_with_retry(
+                    client,
+                    model=ctx.server_fallback_model or model,
+                    messages=bounded,
+                    tools=scoped_tools,
+                    config=ctx.config,
+                    on_delta=on_delta,
+                )
+        else:
+            response = _call_with_retry(
+                client,
+                model=model,
+                messages=bounded,
+                tools=scoped_tools,
+                config=ctx.config,
+                on_delta=on_delta,
+            )
         message = response.choices[0].message
 
         # Record the call against the budget AFTER it succeeded, using real

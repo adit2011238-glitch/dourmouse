@@ -676,6 +676,80 @@ class TestModelOverride:
         assert call["model"] == "qwen3:4b"
         assert not call.get("tools")
 
+    def test_fast_lane_server_routes_to_dell_when_online(self, monkeypatch):
+        """v5.30: when the Dell is EXPLICITLY configured and a fresh cached
+        probe says online, the fast lane's completion goes to the Dell
+        (server:qwen3:1.7b) instead of the local fast model — the speed win."""
+        import time
+
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
+        monkeypatch.setenv("DOURMOUSE_SERVER_URL", "http://192.168.1.108:8000")
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE_SERVER", "1")
+        from dourmouse import remote_server as rs
+
+        with rs._health_lock:
+            rs._health_cache["at"] = time.monotonic()
+            rs._health_cache["online"] = True
+        # the Dell answers successfully
+        monkeypatch.setattr(
+            rs.DourmouseServerClient, "chat",
+            lambda self, messages, temperature=None: {
+                "success": True, "response": "4", "model": "qwen3:1.7b",
+                "node": "Node-01", "latency_ms": 300,
+            },
+        )
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="4"))])
+        run_dispatch("what is 2+2", registry, client=client)
+        # the Dell answered; the LOCAL fake client must NOT have been called
+        assert client.chat.completions.calls == []
+
+    def test_fast_lane_server_falls_back_to_local_on_failure(self, monkeypatch):
+        """v5.30: if the Dell is configured+online per cache but the actual
+        completion fails (node died mid-run, timeout, 500), the reply is
+        served by the LOCAL fast model — never a crash, never silence."""
+        import time
+
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
+        monkeypatch.setenv("DOURMOUSE_SERVER_URL", "http://192.168.1.108:8000")
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE_SERVER", "1")
+        from dourmouse import remote_server as rs
+
+        with rs._health_lock:
+            rs._health_cache["at"] = time.monotonic()
+            rs._health_cache["online"] = True
+        # the Dell client's chat path now fails (node went down)
+        monkeypatch.setattr(
+            rs.DourmouseServerClient, "chat",
+            lambda self, messages, temperature=None: {
+                "success": False, "error": "server unreachable: ConnectionRefusedError"
+            },
+        )
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="4"))])
+        run_dispatch("what is 2+2", registry, client=client)
+        # the LOCAL fake client answered, with the local fast model
+        assert client.chat.completions.calls and client.chat.completions.calls[0]["model"] == "qwen3:4b"
+
+    def test_fast_lane_server_skips_unconfigured_node(self, monkeypatch):
+        """v5.30: with no explicit DOURMOUSE_SERVER_URL the lane must stay
+        local — a silent 2s probe on every reply would be a regression."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
+        monkeypatch.delenv("DOURMOUSE_SERVER_URL", raising=False)
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="4"))])
+        run_dispatch("what is 2+2", registry, client=client)
+        assert client.chat.completions.calls[0]["model"] == "qwen3:4b"
+
     def test_fast_lane_sends_compact_system_prompt(self, monkeypatch):
         """The fast lane swaps the 2.2k-token roster prompt for the compact
         style-only prompt AT THE API BOUNDARY (prefill is the dominant

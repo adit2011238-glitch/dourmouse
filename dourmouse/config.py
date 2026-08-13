@@ -406,6 +406,17 @@ def fast_lane_model() -> str:
     return os.environ.get("DOURMOUSE_FAST_MODEL", "qwen3:4b").strip() or "qwen3:4b"
 
 
+def fast_lane_server_enabled(value: str | None = None) -> bool:
+    """DOURMOUSE_FAST_LANE_SERVER: route pure-chat fast-lane turns to the
+    compute node (Dell) when it is online, falling back to the local fast
+    model on ANY failure. Default on — the real gate is that the operator
+    explicitly set DOURMOUSE_SERVER_URL (a dead/unconfigured node must
+    never add probe latency to every reply).
+    """
+    raw = value if value is not None else os.environ.get("DOURMOUSE_FAST_LANE_SERVER", "1")
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
 def llm_backend() -> str:
     """The active backend name from DOURMOUSE_LLM_BACKEND
     (ollama|omniroute|nvidia|auto)."""
