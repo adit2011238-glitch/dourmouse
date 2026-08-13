@@ -101,9 +101,13 @@ NVIDIA NIM)`. Codex verified wired but rate-limited by OpenAI until ~Aug 22.
 9. **Multi-device + token auth** — `DOURMOUSE_HOST=0.0.0.0` +
    `DOURMOUSE_ACCESS_TOKEN` is ready; pair with the phone PWA for on-the-go
    directives.
-10. **Browser agent** — a subagent that drives a headless browser
-    (Playwright MCP already in the ATLAS `.mcp.json`) for form-filling and
-    research pages the keyless fetch can't handle.
+10. ~~**Browser agent**~~ — **DONE (v5.25)**: the `browser` subagent drives a
+    real headless Chrome (Playwright + system Google Chrome, no browser
+    download) for signup/login/form-filling: open/snapshot/fill/click/
+    submit/screenshot + a 0600 credential vault. Submitting, logging in and
+    storing credentials are confirmation-gated. The ATLAS `.mcp.json`
+    Playwright MCP reference remains for the ATLAS sidecar; the core app no
+    longer needs it.
 11. **Trading guardrail integration** — Dourmouse already carries
     JARVIS_* risk numbers; wire the ATLAS engine's daily-loss kill-switch
     into the live markets agent so the monitor becomes an action system.
