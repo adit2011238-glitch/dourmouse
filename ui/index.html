@@ -131,6 +131,34 @@
     transition: opacity .8s ease;
   }
   #boot.done { opacity: 0; pointer-events: none; }
+
+  /* Dubai emirate blueprint — scanner-sweep reveal behind the reactor.
+     The image is drawn top→bottom by a moving clip window while a glowing
+     scan bar rides the leading edge; the HUD tint keeps it in-palette and
+     the reactor assembly stays legible above it. */
+  .bootbp {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(rgba(6,8,15,0.55), rgba(6,8,15,0.72)),
+      url('assets/boot-blueprint.jpg') center / cover no-repeat;
+    filter: saturate(1.15) contrast(1.05);
+    clip-path: inset(0 0 100% 0);
+    animation: bpSweep 2.6s cubic-bezier(.4,0,.2,1) both;
+  }
+  .bp-scan {
+    position: absolute; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(var(--cyan-rgb), 0.9), transparent);
+    box-shadow: 0 0 18px rgba(var(--cyan-rgb), 0.8), 0 0 60px rgba(var(--cyan-rgb), 0.5);
+    opacity: 0;
+    animation: bpScan 2.6s cubic-bezier(.4,0,.2,1) both;
+  }
+  @keyframes bpSweep { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes bpScan {
+    0%   { top: -3%; opacity: 0; }
+    4%   { opacity: 1; }
+    96%  { opacity: 1; }
+    100% { top: 102%; opacity: 0; }
+  }
   .boot-inner { text-align: center; padding: 0 24px; }
   #bootring { width: 210px; height: 210px; margin-bottom: 16px; }
   #bootring circle { fill: none; }
@@ -1048,8 +1076,14 @@
 <div class="blueprint-grid" aria-hidden="true"></div>
 <canvas id="particles" aria-hidden="true"></canvas>
 <div id="hudframe" aria-hidden="true"></div>
-<!-- JARVIS: boot sequence — arc-reactor ignition, wordmark, sequential boot lines -->
+<!-- JARVIS: boot sequence — blueprint scan-reveal, arc-reactor ignition,
+     wordmark, sequential boot lines. The Dubai emirate blueprint is
+     revealed by a scanner sweep (top→bottom), then the reactor assembly
+     lights over it. -->
 <div id="boot">
+  <div class="bootbp" aria-hidden="true">
+    <div class="bp-scan"></div>
+  </div>
   <div class="boot-inner">
     <svg id="bootring" viewBox="0 0 200 200" aria-hidden="true">
       <!-- Rule 01 — boot in sequence: core dot, then rings draw outward,
