@@ -1241,6 +1241,42 @@
   .wp-item a { color: var(--cyan-bright); text-decoration: none; }
   .wp-item a:hover { color: var(--gold-bright); }
   .wp-sev { color: var(--gold-bright); }
+
+  /* ========= v5.31 ATLAS MOTION — Skiper-inspired, zero-dependency ======= */
+  /* skiper28 — perspective telemetry tape: a continuous 3D marquee of real
+     ATLAS telemetry (branch, commit, files, pair-days). The container owns
+     the 3D perspective; the tape slides horizontally, duplicated content
+     makes the loop seamless. */
+  .atlas-ticker { position: relative; overflow: hidden; border: 1px solid var(--line-strong);
+    background: rgba(11,15,26,.55); margin-bottom: 12px; padding: 9px 0;
+    transform: perspective(520px) rotateX(13deg); transform-origin: top center; }
+  .atlas-tape { display: flex; width: max-content; white-space: nowrap;
+    animation: atlasTapeX 30s linear infinite; will-change: transform; }
+  .atlas-tape span { font-family: var(--font-mono); font-size: 10px; letter-spacing: .16em;
+    color: var(--text-dim); padding: 0 30px; }
+  .atlas-tape span b { color: var(--cyan-bright); font-weight: 400; }
+  @keyframes atlasTapeX { to { transform: translateX(-50%); } }
+  /* skiper37 — animated count-up numbers (NumberFlow-style roll, vanilla).
+     Real ATLAS values roll from the previous number to the live one. */
+  .roll { font-family: var(--font-hud); color: var(--cyan-bright); letter-spacing: .05em; }
+  /* skiper53 — hover/tap expand: the full report text lives in the DOM,
+     clamped by max-height; hover (or a tap, which pins .expanded) grows it. */
+  .exclamp { max-height: 2.9em; overflow: hidden;
+    transition: max-height .4s cubic-bezier(.34,1.56,.64,1); }
+  .dm-card:hover .exclamp, .dm-card.expanded .exclamp { max-height: 400px; }
+  /* skiper41 — progressive blur: long run output fades out at the scroll
+     bottom instead of ending hard. */
+  .run-scroll { max-height: 104px; overflow-y: auto; padding-right: 4px;
+    -webkit-mask-image: linear-gradient(to bottom, #000 58%, transparent 98%);
+    mask-image: linear-gradient(to bottom, #000 58%, transparent 98%); }
+  /* skiper49 — coverflow-style pair chips: 3D tilt on hover, cards fan out. */
+  .pairchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .pairchip { font-family: var(--font-mono); font-size: 9px; letter-spacing: .09em;
+    color: var(--cyan-bright); border: 1px solid rgba(var(--cyan-rgb), .35);
+    padding: 4px 9px; cursor: default; transform-style: preserve-3d;
+    transition: transform .25s cubic-bezier(.34,1.56,.64,1), border-color .25s, color .25s; }
+  .pairchip:hover { transform: perspective(300px) rotateY(-16deg) translateZ(16px) scale(1.14);
+    border-color: rgba(var(--gold-rgb), .65); color: var(--gold-bright); }
 </style>
 </head>
 <body>
@@ -4181,12 +4217,14 @@ __probeMark('registered');
   <!-- ATLAS -->
   <section class="dmview" id="view-atlas">
     <div class="dmv-head"><h2>ATLAS</h2><div class="dmv-sub">QUANT RESEARCH CORE · REAL TELEMETRY · #/atlas</div></div>
+    <!-- v5.31 motion — skiper28: perspective telemetry tape (real data) -->
+    <div class="atlas-ticker" aria-hidden="true"><div class="atlas-tape" id="atlasTape"></div></div>
     <div class="dm-grid">
       <div class="dm-card"><div class="dm-k">ENGINE</div><div id="atlasStatus" class="dm-empty">LOADING…</div></div>
       <div class="dm-card"><div class="dm-k">FX BOOTSTRAP</div><div id="atlasBootstrap" class="dm-empty">LOADING…</div></div>
     </div>
     <div class="dm-grid">
-      <div class="dm-card"><div class="dm-k">LATEST REPORT</div><div id="atlasLatest" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card" id="atlasLatestCard"><div class="dm-k">LATEST REPORT <b>HOVER / TAP TO EXPAND</b></div><div id="atlasLatest" class="dm-empty">LOADING…</div></div>
       <div class="dm-card">
         <div class="dm-k">MANAGED RUN <b id="atlasRunState">—</b></div>
         <div id="atlasRun" class="dm-empty">LOADING…</div>
@@ -4674,6 +4712,12 @@ __probeMark('registered');
     });
     const refreshBtn = $('atlasRefreshBtn');
     if (refreshBtn) refreshBtn.addEventListener('click', () => renderAtlas());
+    // v5.31 — skiper53: tap pins the report card open (hover works on
+    // pointer:fine devices; this covers touch and click-pin on desktop).
+    const latestCard = $('atlasLatestCard');
+    if (latestCard) latestCard.addEventListener('click', () => {
+      latestCard.classList.toggle('expanded');
+    });
     const density = $('prefDensity');
     if (density) density.addEventListener('click', async () => {
       const on = !density.classList.contains('on');
@@ -4758,10 +4802,28 @@ __probeMark('registered');
   });
 
   // ---- ATLAS view -------------------------------------------------------
+  // v5.31 — skiper37: NumberFlow-style count-up rolls, vanilla, real values.
+  function fmtNum(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function rollNums(scope) {
+    if (!scope) return;
+    scope.querySelectorAll('[data-n]').forEach(el => {
+      const target = Math.max(0, Number(el.dataset.n) || 0);
+      const from = Number((el.textContent || '').replace(/[^\d]/g, '')) || 0;
+      if (from === target) { el.textContent = fmtNum(target); return; }
+      const t0 = performance.now(), dur = 700;
+      const step = (t) => {
+        const p = Math.min(1, (t - t0) / dur);
+        const e = 1 - Math.pow(1 - p, 3); // easeOutCubic
+        el.textContent = fmtNum(Math.round(from + (target - from) * e));
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
   async function renderAtlas() {
     const statusEl = $('atlasStatus'), bootEl = $('atlasBootstrap'),
           latestEl = $('atlasLatest'), runEl = $('atlasRun'), runState = $('atlasRunState'),
-          portEl = $('portfolioAtlas');
+          portEl = $('portfolioAtlas'), tapeEl = $('atlasTape');
     try {
       const r = await fetch('/api/atlas');
       const d = await r.json();
@@ -4771,32 +4833,53 @@ __probeMark('registered');
         if (portEl) { portEl.className = 'dm-empty'; portEl.innerHTML = msg; }
         return;
       }
-      const st = d.status || {};
+      const st = d.status || {}, bs = d.bootstrap || {};
+      // v5.31 — skiper28: feed the perspective tape with real telemetry.
+      if (tapeEl) {
+        const segs = [
+          ['BRANCH', st.branch || '—'],
+          ['COMMIT', st.last_commit || '—'],
+          ['DIRTY', String(st.dirty_files ?? 0)],
+          ['SOURCES', String(st.source_files ?? 0)],
+          ['TESTS', String(st.test_files ?? 0)],
+          ['PAIR-DAYS', String(bs.total_pair_days ?? 0)],
+          ['VERSION', d.version || '—'],
+        ];
+        const copy = segs.map(s => `<span><b>${esc(s[0])}</b> ${esc(s[1])}</span>`).join('');
+        tapeEl.innerHTML = copy + copy; // duplicated for the seamless loop
+      }
       if (statusEl) { statusEl.className = '';
         statusEl.innerHTML =
           `<div class="dm-row"><div class="grow"><div class="n">REPO</div><div class="d">${esc(d.repo || '')}</div></div></div>` +
           `<div class="dm-row"><div class="grow"><div class="n">VERSION</div><div class="d">${esc(d.version || '')}</div></div></div>` +
           `<div class="dm-row"><div class="grow"><div class="n">BRANCH</div><div class="d">${esc(st.branch || '—')} · last: ${esc(st.last_commit || '—')}</div></div></div>` +
-          `<div class="dm-row"><div class="grow"><div class="n">FILES</div><div class="d">${esc(String(st.source_files ?? '—'))} src · ${esc(String(st.test_files ?? '—'))} tests · ${esc(String(st.dirty_files ?? '—'))} dirty</div></div></div>`;
+          `<div class="dm-row"><div class="grow"><div class="n">FILES</div><div class="d"><b class="roll" data-n="${Number(st.source_files) || 0}">0</b> src · <b class="roll" data-n="${Number(st.test_files) || 0}">0</b> tests · <b class="roll" data-n="${Number(st.dirty_files) || 0}">0</b> dirty</div></div></div>`;
+        rollNums(statusEl); // skiper37 count-up
       }
-      const bs = d.bootstrap || {};
       if (bootEl) { bootEl.className = '';
         const days = bs.total_pair_days;
+        const pairs = Object.entries(bs.pair_days || {});
         bootEl.innerHTML =
-          `<div class="dm-row"><div class="grow"><div class="n">FX ARCHIVE DEPTH</div><div class="d">${esc(String(days ?? '—'))} pair-days total ${bs.done_marker ? '· DONE ✓' : ''}</div></div></div>` +
+          `<div class="dm-row"><div class="grow"><div class="n">FX ARCHIVE DEPTH</div><div class="d"><b class="roll" data-n="${Number(days) || 0}">0</b> pair-days total ${bs.done_marker ? '· DONE ✓' : ''}</div></div></div>` +
           (days ? `<div class="dm-progress" style="margin:4px 0"><i style="width:${Math.min(100, Math.round(100 * days / 7000))}%"></i></div>` : '') +
-          `<div class="dm-row"><div class="grow"><div class="n">PER PAIR</div><div class="d">${esc(JSON.stringify(bs.pair_days || {}))}</div></div></div>`;
+          (pairs.length
+            ? `<div class="dm-row"><div class="grow"><div class="n">PER PAIR</div><div class="d"><div class="pairchips">${pairs.map(([p, n]) => `<span class="pairchip">${esc(p)} ${n}d</span>`).join('')}</div></div></div></div>`
+            : `<div class="dm-row"><div class="grow"><div class="n">PER PAIR</div><div class="d">NO ARCHIVED BID-DAYS YET</div></div></div>`);
+        rollNums(bootEl); // skiper37 count-up
       }
       const rep = d.latest_report;
       if (latestEl) { latestEl.className = '';
+        // v5.31 — skiper53: FULL text lives in the DOM; .exclamp clamps it
+        // and hover/tap expands (the old slice(0,220) truncated forever).
         latestEl.innerHTML = rep && rep.date
-          ? `<div class="dm-row"><div class="grow"><div class="n">FX DAILY · ${esc(rep.date)}</div><div class="d">${esc((rep.summary || rep.headline || '').slice(0, 220)) || 'report written'}</div></div></div>`
+          ? `<div class="dm-row"><div class="grow"><div class="n">FX DAILY · ${esc(rep.date)}</div><div class="d exclamp">${esc(rep.summary || rep.headline || 'report written')}</div></div></div>`
           : `<div class="dm-empty" style="border:none;padding:8px">NO REPORT YET — RUN FX-DAILY</div>`;
       }
       const run = d.last_run || {};
       if (runEl) { runEl.className = '';
+        // v5.31 — skiper41: long output fades out (progressive blur mask).
         runEl.innerHTML = Object.keys(run).length
-          ? `<div class="dm-row"><div class="grow"><div class="n">${esc(run.command || 'last run')}</div><div class="d">${esc(JSON.stringify(run).slice(0, 160))}</div></div></div>`
+          ? `<div class="run-scroll"><div class="dm-row"><div class="grow"><div class="n">${esc(run.command || 'last run')}</div><div class="d">${esc(JSON.stringify(run).slice(0, 160))}</div></div></div></div>`
           : `<div class="dm-empty" style="border:none;padding:8px">NO MANAGED RUN THIS SESSION</div>`;
       }
       if (runState) runState.textContent = run.running ? 'RUNNING' : '';

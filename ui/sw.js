@@ -19,7 +19,7 @@
  * user) ever enter the cache. A signed-in user going offline sees the
  * shared bucket — honestly marked stale — never someone's personal data.
  */
-const CACHE = 'dourmouse-shell-v2';  // v5.22.3: manifest + icons joined the shell
+const CACHE = 'dourmouse-shell-v3';  // v5.31: ATLAS motion + compute-node card joined the shell
 // v5.22.3: the PWA manifest + icons join the shell so the INSTALLED app
 // opens instantly with its icon even offline.
 const SHELL = ['/', '/index.html', '/login.html', '/map', '/map.html',

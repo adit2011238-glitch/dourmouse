@@ -200,3 +200,48 @@ class TestComputeNodeCard:
         html = self._read()
         assert "○ OFFLINE" in html
         assert "LOCAL AI IN CHARGE" in html
+
+
+class TestAtlasMotion:
+    """v5.31 — the Skiper-inspired motion integrated into the ATLAS view
+    (perspective tape, count-up rolls, hover/tap expand, progressive blur,
+    coverflow pair chips), pinned so a refactor cannot drop them."""
+
+    def _read(self) -> str:
+        return (Path(__file__).resolve().parents[2] / "ui/index.html").read_text(
+            encoding="utf-8"
+        )
+
+    def test_perspective_telemetry_tape(self):
+        html = self._read()
+        assert 'class="atlas-ticker"' in html
+        assert 'id="atlasTape"' in html
+        assert "atlasTapeX" in html  # the marquee keyframes
+        assert "tapeEl.innerHTML = copy + copy" in html  # seamless loop
+
+    def test_count_up_rolls_on_real_values(self):
+        html = self._read()
+        assert "function rollNums" in html
+        assert 'class="roll" data-n=' in html
+        assert "rollNums(statusEl)" in html
+        assert "rollNums(bootEl)" in html
+
+    def test_hover_tap_expand_report(self):
+        html = self._read()
+        assert 'class="d exclamp"' in html  # full text clamped, not truncated
+        assert ".dm-card:hover .exclamp" in html
+        assert ".dm-card.expanded .exclamp" in html
+        assert "atlasLatestCard" in html
+        assert "classList.toggle('expanded')" in html
+
+    def test_progressive_blur_on_run_output(self):
+        html = self._read()
+        assert 'class="run-scroll"' in html
+        assert "mask-image: linear-gradient(to bottom, #000 58%, transparent 98%)" in html
+
+    def test_coverflow_pair_chips(self):
+        html = self._read()
+        assert 'class="pairchips"' in html
+        assert 'class="pairchip"' in html
+        assert "rotateY(-16deg)" in html
+        assert "pair_days" in html  # driven by real bootstrap data
