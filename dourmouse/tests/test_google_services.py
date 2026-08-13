@@ -12,7 +12,67 @@ import json
 import pytest
 
 from dourmouse import google_services as gs
+from dourmouse.dispatch import Permission
 from dourmouse.general_roster import build_general_registry
+
+
+class TestDriveCreateDoc:
+    """v5.27 — the signed-in-user Drive WRITE tool (hermetic: fake token +
+    fake REST, no network; the real write path is OAuth + Drive API)."""
+
+    def test_not_configured_without_signed_in_user(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: None)
+        monkeypatch.setattr(gs, "_oauth_user_needs_reauth", lambda a: None)
+        out = gs.drive_create_doc("Report")
+        assert out.startswith("NOT CONFIGURED")
+        assert "Nothing was created" in out
+
+    def test_happy_path_creates_and_writes(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        created = {}
+        patched = []
+
+        def fake_http_json(method, url, token, body=None):
+            if method == "POST" and url.endswith("/files"):
+                created["name"] = body["name"]
+                return {"id": "doc123", "name": body["name"]}
+            raise AssertionError(f"unexpected call {method} {url}")
+
+        def fake_http_raw(method, url, token, **kw):
+            patched.append((method, url, kw.get("data"), kw.get("content_type")))
+            return b"{}"
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        monkeypatch.setattr(gs, "_http_raw", fake_http_raw)
+        out = gs.drive_create_doc("Freebuff Report", "Freebuff is...")
+        assert "DRIVE DOC CREATED" in out
+        assert "doc123" in out
+        assert created["name"] == "Freebuff Report"
+        assert patched and patched[0][2] == b"Freebuff is..."
+        assert patched[0][3].startswith("text/plain")
+
+    def test_403_surfaces_scope_fix(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 403 on .../files: insufficient permissions")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.drive_create_doc("Report")
+        assert "403" in out
+        assert "GOOGLE_OAUTH_FULL_SCOPES" in out
+        assert "Nothing was created" in out
+
+    def test_roster_wiring_gated(self):
+        registry = build_general_registry()
+        # v5.27: drive_create_doc lives on the docs agent — the planner
+        # routes Drive directives to docs, and the registry forbids the same
+        # tool name on two agents, so the write tool is on docs (mail keeps
+        # the Drive read tools).
+        sub = registry.get_subagent("docs")
+        spec = next(t for t in sub.tools if t.name == "drive_create_doc")
+        assert spec.permission == Permission.REQUIRES_CONFIRMATION
+        assert "drive_create_doc" in registry.gated_tool_names
 
 
 class _FakeResp:

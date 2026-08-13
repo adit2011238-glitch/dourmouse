@@ -1813,12 +1813,27 @@ def build_general_registry() -> DispatchRegistry:
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"DRIVE DOWNLOAD FAILED: {type(exc).__name__}: {exc}"
 
+    def _drive_create_doc_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import drive_create_doc
+
+        try:
+            return drive_create_doc(
+                arguments.get("title", ""),
+                arguments.get("content", ""),
+            )
+        except RuntimeError as exc:
+            return f"DRIVE DOC CREATE (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DRIVE DOC CREATE FAILED: {type(exc).__name__}: {exc}"
+
     registry.register_subagent(
         _subagent(
             "docs",
             "General",
-            "Reads link-shared Google Sheets and downloads link-shared Drive "
-            "items. Read-only; no login needed for shared items.",
+            "Google Sheets and Drive — reads link-shared Sheets, downloads "
+            "link-shared Drive items, and creates Google Docs in the "
+            "SIGNED-IN user's Drive (real write, requires confirmation + the "
+            "Google sign-in with Drive write scope).",
             [
                 ToolSpec(
                     name="sheets_read",
@@ -1859,6 +1874,31 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["file_id"],
                     },
                     handler=_drive_download_h,
+                ),
+                ToolSpec(
+                    name="drive_create_doc",
+                    description=(
+                        "Create a Google Doc in the SIGNED-IN user's Google "
+                        "Drive with the given title and optional content, and "
+                        "return its open link. REAL write — REQUIRES human "
+                        "confirmation. Needs the Google sign-in with Drive "
+                        "write scope (GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT "
+                        "CONFIGURED honestly without a signed-in user."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "content": {"type": "string", "description": "optional text body for the doc"},
+                        },
+                        "required": ["title"],
+                    },
+                    handler=_drive_create_doc_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Create a Google Doc titled {a.get('title', '?')!r} "
+                        f"in your Drive ({(a.get('content') or '')[:80]}...)?"
+                    ),
                 ),
             ],
         )
@@ -2789,6 +2829,19 @@ def build_general_registry() -> DispatchRegistry:
             return f"DRIVE READ (reported honestly): {exc}"
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"DRIVE READ FAILED: {type(exc).__name__}: {exc}"
+
+    def _drive_create_doc_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import drive_create_doc
+
+        try:
+            return drive_create_doc(
+                arguments.get("title", ""),
+                arguments.get("content", ""),
+            )
+        except RuntimeError as exc:
+            return f"DRIVE DOC CREATE (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DRIVE DOC CREATE FAILED: {type(exc).__name__}: {exc}"
 
     # ---- Browser agent (v5.25): real headless Chrome via Playwright --------
     def _browser_h(tool: str) -> Callable[[dict[str, Any]], str]:

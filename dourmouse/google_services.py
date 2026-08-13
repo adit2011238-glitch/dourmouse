@@ -184,7 +184,13 @@ def _http_json(method: str, url: str, token: str, body: Any = None) -> Any:
 
 
 def _http_raw(
-    method: str, url: str, token: str, timeout: float = 20.0, max_bytes: int | None = None
+    method: str,
+    url: str,
+    token: str,
+    timeout: float = 20.0,
+    max_bytes: int | None = None,
+    data: bytes | None = None,
+    content_type: str | None = None,
 ) -> bytes:
     """One authed call returning RAW bytes (Drive export / alt=media content
     is text or binary, not JSON). Raises RuntimeError with the REAL Google
@@ -193,10 +199,15 @@ def _http_raw(
     ``max_bytes`` BOUNDS the read itself (reviewer-caught: Drive metadata's
     ``size`` field is not always present — a shortcut or an omitted field
     would otherwise let a huge file bypass the size check and be slurped
-    entirely into memory). Reads in chunks and aborts past the cap."""
-    request = urllib.request.Request(
-        url, headers={"Authorization": f"Bearer {token}"}, method=method
-    )
+    entirely into memory). Reads in chunks and aborts past the cap.
+
+    ``data`` + ``content_type`` (v5.27) support authed media uploads (the
+    Drive create-doc content PATCH).
+    """
+    headers = {"Authorization": f"Bearer {token}"}
+    if data is not None:
+        headers["Content-Type"] = content_type or "application/octet-stream"
+    request = urllib.request.Request(url, headers=headers, method=method, data=data)
     try:
         with urlopen(request, timeout=timeout) as resp:
             if max_bytes is None:
@@ -403,6 +414,87 @@ def _drive_read_oauth(token: str, file_id: str) -> str:
         f"{str(meta.get('modifiedTime') or '?')[:16]}\n"
         f"CONTENT ({_MAX_DRIVE_TEXT} char cap"
         f"{' — TRUNCATED' if truncated else ''}):\n{body[:_MAX_DRIVE_TEXT]}"
+    )
+
+
+def _drive_create_oauth(token: str, title: str, content: str) -> str:
+    """Create a Google Doc in the signed-in user's Drive (v5.27).
+
+    Two calls: files.create (metadata) then a media PATCH to write the
+    content. Requires Drive WRITE scope — drive.readonly 403s here and is
+    surfaced with the exact fix, never masked.
+    """
+    name = (title or "").strip()[:120]
+    if not name:
+        return "ERROR: drive_create_doc requires a title."
+    try:
+        meta = _http_json(
+            "POST",
+            f"{_DRIVE_API}/files",
+            token,
+            {"name": name, "mimeType": "application/vnd.google-apps.document"},
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg:
+            raise RuntimeError(
+                msg
+                + " — Drive WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1 "
+                "in .env + a verified/testing-mode OAuth app). Nothing was created."
+            ) from exc
+        raise
+    fid = str(meta.get("id") or "").strip()
+    if not fid:
+        return "ERROR: Drive did not return a file id — nothing was created."
+    body = (content or "").strip()
+    if body:
+        try:
+            _http_raw(
+                "PATCH",
+                f"https://www.googleapis.com/upload/drive/v3/files/{fid}?uploadType=media",
+                token,
+                data=body.encode("utf-8"),
+                content_type="text/plain; charset=utf-8",
+            )
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "403" in msg:
+                raise RuntimeError(
+                    msg
+                    + " — Drive WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1). "
+                    f"The empty doc {name!r} was created but its content was not written."
+                ) from exc
+            raise
+    return (
+        f"DRIVE DOC CREATED: {name!r} (id {fid}) — "
+        f"open at https://drive.google.com/open?id={fid} · "
+        f"{len(body):,} chars written."
+    )
+
+
+def drive_create_doc(title: str, content: str = "") -> str:
+    """Create a Google Doc in the SIGNED-IN user's Drive (v5.27, write).
+
+    Real files.create + media upload with the logged-in Google user's token
+    — the same per-user guarantee as drive_search/gmail_search. Honest
+    NOT CONFIGURED when no OAuth user is signed in (Drive has no legacy
+    shared write path), honest re-sign-in when the session is stale. Should
+    be confirmation-gated upstream: it creates a real file.
+    """
+    token = _oauth_access_token()
+    if token:
+        try:
+            return _drive_create_oauth(token, title, content)
+        except RuntimeError as exc:
+            return f"DRIVE DOC CREATE (reported honestly): {exc}"
+    reauth = _oauth_user_needs_reauth("DRIVE WRITE")
+    if reauth:
+        return reauth
+    return (
+        "NOT CONFIGURED: creating a Drive document needs the signed-in Google "
+        "user's OAuth session with Drive WRITE scope. No user is signed in — "
+        "sign in at /login (with GOOGLE_OAUTH_FULL_SCOPES=1 in .env so the "
+        "session grants Drive), then retry. Nothing was created."
     )
 
 

@@ -297,6 +297,9 @@ class TestPreloadedAgents:
         # v5.2x: the per-user Google scope surface added drive_search +
         # drive_read (same OAuth session as gmail).
         # v5.25: the Dourmouse own-mail identity surface (status + own send).
+        # v5.27: drive_create_doc moved to the docs agent (Drive directives
+        # route to docs; the registry forbids cross-agent tool-name
+        # collisions, so the write tool lives there, not on mail).
         assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send",
                 "drive_read", "drive_search",
                 "email_identity_status", "email_own_send"} == tools
