@@ -60,8 +60,41 @@ the local AI.
 
 ## 3. Autostart after Windows boot (reversible, no admin hacks)
 
-The clean mechanism is a Scheduled Task. From an **Administrator** PowerShell
-on the Dell:
+The clean mechanism is a Scheduled Task. Ready-to-run scripts are included
+in this folder — from an **Administrator** PowerShell on the Dell:
+
+```powershell
+# Install (validates the node paths, then registers DOURMOUSE-ComputeNode):
+powershell -ExecutionPolicy Bypass -File C:\dourmouse-node\install_autostart.ps1
+
+# Uninstall (fully reversible):
+powershell -ExecutionPolicy Bypass -File C:\dourmouse-node\remove_autostart.ps1
+```
+
+`install_autostart.ps1` registers `DOURMOUSE-ComputeNode` to run at startup
+as the logged-in user (`-RunLevel Limited`, no stored password), with
+auto-restart on failure (3 tries, 1 min apart) and **no execution-time
+limit** (the default 3-day task kill is disabled, so the server runs
+indefinitely — it is built for long-running CPU inference on 8 GB RAM). It
+refuses to run if the node is not deployed, and overwrites an existing task
+with `-Force`.
+
+Options:
+
+| Flag         | Meaning                                                            |
+|--------------|--------------------------------------------------------------------|
+| `-NodeDir`   | deployment folder (default `C:\dourmouse-node`)                    |
+| `-TaskName`  | task name (default `DOURMOUSE-ComputeNode`)                        |
+| `-OllamaExe` | also register `DOURMOUSE-Ollama` to run `ollama.exe serve` at boot  |
+|              | — only needed if Ollama does not autostart on its own               |
+| `-StartNow`  | start the server task immediately after registering                |
+| `-WhatIf`    | preview without changing anything                                  |
+
+`remove_autostart.ps1` unregisters the task(s); pass `-RemoveOllamaTask` to
+also remove the Ollama task, and `-RemoveNodeDir` to additionally delete the
+deployment folder (it refuses unless the folder contains `dell_server.py`).
+
+Manual equivalent (reference):
 
 ```powershell
 $action  = New-ScheduledTaskAction -Execute "C:\dourmouse-node\.venv\Scripts\python.exe" `
@@ -71,7 +104,7 @@ Register-ScheduledTask -TaskName "DOURMOUSE-ComputeNode" -Action $action -Trigge
   -Description "DOURMOUSE compute node (LAN inference)" -RunLevel Limited
 ```
 
-To undo (fully reversible):
+To undo manually (fully reversible):
 
 ```powershell
 Unregister-ScheduledTask -TaskName "DOURMOUSE-ComputeNode" -Confirm:$false
@@ -79,8 +112,10 @@ Unregister-ScheduledTask -TaskName "DOURMOUSE-ComputeNode" -Confirm:$false
 
 Notes:
 - `-RunLevel Limited` — runs as the logged-in user, no elevated rights needed.
-- If the Dell's Ollama itself does not autostart, add a second trigger/action
-  that runs Ollama first (start menu shortcut to `ollama.exe serve`).
+- If the Dell's Ollama itself does not autostart, run the installer with
+  `-OllamaExe "C:\Program Files\Ollama\ollama.exe"` — it registers a
+  separate `DOURMOUSE-Ollama` task (a task's actions run in sequence, so a
+  blocking `ollama.exe serve` must never share the server's task).
 - The server is single-process, no reload, low RAM — built for long-running
   CPU inference on 8 GB RAM.
 
