@@ -1189,6 +1189,11 @@
   .vis-card .vc-k { font-family: var(--font-mono); font-size: 9px; letter-spacing: .18em; color: var(--gold-bright); }
   .vis-card .vc-v { font-family: var(--font-hud); font-size: 15px; letter-spacing: .12em; color: var(--cyan-bright);
     margin-top: 6px; }
+  .vis-cursor { position: fixed; width: 26px; height: 26px; border: 2px solid var(--cyan-bright);
+    border-radius: 50%; pointer-events: none; z-index: 9999; display: none;
+    box-shadow: 0 0 12px rgba(var(--cyan-rgb), .7); }
+  .vis-cursor::after { content: ''; position: absolute; inset: 6px; border-radius: 50%;
+    background: rgba(var(--cyan-rgb), .85); }
   .vis-gesture-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
   .vis-gesture-table td { font-family: var(--font-mono); font-size: 10px; padding: 5px 2px;
     border-bottom: 1px solid rgba(var(--cyan-rgb), var(--a10)); color: var(--text-dim); }
@@ -3392,6 +3397,13 @@ const __runV524 = () => {
       deckAdd('TOOLS', '<span class="ok">APPROVED via vision gesture</span>');
       return true;
     },
+    denyConfirm() {
+      if (!lastConfirmId) return false;
+      fetch('/api/confirm', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ id: lastConfirmId, approved: false }) }).catch(() => {});
+      deckAdd('TOOLS', '<span class="warn">DENIED via vision gesture</span>');
+      return true;
+    },
     lastConfirmId: () => lastConfirmId,
   };
   const tdClose = document.getElementById('tdClose');
@@ -3686,9 +3698,29 @@ const __runV524 = () => {
     hint: document.getElementById('visHint'),
     faceEl: document.getElementById('visFace'),
     handsEl: document.getElementById('visHands'),
+    modeEl: document.getElementById('visMode'),
+    fingerEl: document.getElementById('visFingers'),
+    cursor: document.getElementById('visCursor'),
     startBtn: document.getElementById('visStart'),
     stopBtn: document.getElementById('visStop'),
     stream: null, handLM: null, faceDM: null, running: false,
+  };
+  /* ---- v5.29: advanced gesture engine ----
+     Robust per-finger geometry (rotation-invariant), a hysteresis state
+     machine (a gesture must hold N frames before firing, then cools down),
+     two-hand awareness (dominant hand acts, both open palms = emergency
+     stop), an index-fingertip POINTER that moves a real on-screen cursor
+     (pinch = click), continuous scroll while holding PEACE/THREE, a working
+     wave detector, and view cycling with ROCK. */
+  const GS = {
+    pending: null, count: 0, cooldown: {},
+    NEED: 4,            // consecutive frames a gesture must hold before firing
+    COOLDOWN_MS: 900,   // per-gesture re-fire guard
+    pointer: false,     // pointer (mouse) mode active
+    px: 0, py: 0,       // on-screen cursor position
+    lastPalmY: null,    // for continuous scroll velocity
+    lastWaveX: null, lastWaveT: 0, waveSamples: [],
+    mode: '',           // current continuous mode: 'POINTER' | 'SCROLL' | ''
   };
   const gestStack = [];
   function setVisState(k, v) { const el = VISION[k]; if (el) el.textContent = v; }
@@ -3697,21 +3729,38 @@ const __runV524 = () => {
     gestStack.push(name);
     if (gestStack.length > 8) gestStack.shift();
   }
+  function setMode(m) {
+    GS.mode = m || '';
+    setVisState('modeEl', GS.mode || '—');
+    const cur = VISION.cursor;
+    if (cur) cur.style.display = GS.mode === 'POINTER' ? 'block' : 'none';
+  }
   function gestureAct(name) {
     const deck = window.__taskDeck;
     const input = document.getElementById('input');
     switch (name) {
       case 'OPEN_PALM': // pause / halt the running task
         setGesture('OPEN PALM', 'halt');
+        setMode('');
         if (window.__activeStreamAbort) { try { window.__activeStreamAbort.abort(); } catch (_) {} }
         else if (deck) deck.ingest({ type: 'error', message: 'halted by open palm' });
         break;
-      case 'PINCH': // confirm / send the directive
+      case 'BOTH_PALMS': // emergency stop — abort everything + close the deck
+        setGesture('BOTH PALMS', 'emergency stop');
+        setMode('');
+        if (window.__activeStreamAbort) { try { window.__activeStreamAbort.abort(); } catch (_) {} }
+        if (deck) { deck.ingest({ type: 'error', message: 'emergency stop by both palms' }); deckShow(false); }
+        break;
+      case 'PINCH': // send directive (idle) OR click (pointer mode) — decided in onHands
         setGesture('PINCH', 'send');
         if (input && document.activeElement !== input) input.focus();
         if (input && input.value.trim()) {
           input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
         } else if (deck) { deck.ingest({ type: 'error', message: 'pinch: type a directive first' }); }
+        break;
+      case 'CLICK': // pointer-mode click at the cursor position
+        setGesture('PINCH', 'click');
+        doClickAt(GS.px, GS.py);
         break;
       case 'THUMBS_UP': // approve pending confirmation
         setGesture('THUMBS UP', 'approve');
@@ -3719,9 +3768,35 @@ const __runV524 = () => {
           /* approved */
         } else { deck && deck.ingest({ type: 'error', message: 'no pending confirmation to approve' }); }
         break;
-      case 'POINT': // select — focus prompt
-        setGesture('POINT', 'focus');
-        if (input) input.focus();
+      case 'THUMBS_DOWN': // deny pending confirmation
+        setGesture('THUMBS DOWN', 'deny');
+        if (deck && deck.denyConfirm && deck.denyConfirm()) {
+          /* denied */
+        } else { deck && deck.ingest({ type: 'error', message: 'no pending confirmation to deny' }); }
+        break;
+      case 'POINT': // enter pointer mode — index fingertip steers the cursor
+        setGesture('POINT', 'pointer');
+        setMode('POINTER');
+        break;
+      case 'PEACE': // hold: scroll down (continuous)
+        setGesture('PEACE', 'scroll down');
+        setMode('SCROLL');
+        break;
+      case 'THREE': // hold: scroll up (continuous)
+        setGesture('THREE', 'scroll up');
+        setMode('SCROLL');
+        break;
+      case 'ROCK': // next view — cycle the workspace routes
+        setGesture('ROCK', 'next view');
+        cycleView();
+        break;
+      case 'OK': // command palette
+        setGesture('OK', 'command palette');
+        if (window.openPalette) window.openPalette();
+        break;
+      case 'FIST': // dismiss the task deck
+        setGesture('FIST', 'dismiss');
+        deckShow(false);
         break;
       case 'WAVE': // wake
         setGesture('WAVE', 'wake');
@@ -3730,61 +3805,185 @@ const __runV524 = () => {
         break;
       default:
         setGesture(name || '—', '');
+        setMode('');
     }
   }
-  // --- hand landmark → gesture classification ---
-  function classifyHand(lm) {
-    const P = (i) => ({ x: lm[i].x, y: lm[i].y });
-    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    const WRIST = P(0);
-    const fingerUp = (tip, pip, mcp) => dist(tip, WRIST) > dist(pip, WRIST) && dist(pip, WRIST) > dist(mcp, WRIST) * 0.94;
-    const thumb = P(4), indexT = P(8), indexP = P(6), indexM = P(5);
-    const midT = P(12), midP = P(10), midM = P(9);
-    const ringT = P(16), ringP = P(14), ringM = P(13);
-    const pinkT = P(20), pinkP = P(18), pinkM = P(17);
-    const up = [
-      fingerUp(indexT, indexP, indexM),
-      fingerUp(midT, midP, midM),
-      fingerUp(ringT, ringP, ringM),
-      fingerUp(pinkT, pinkP, pinkM),
-    ].filter(Boolean).length;
-    const thumbOut = dist(thumb, WRIST) > dist(indexM, WRIST) * 1.05;
-    const pinch = dist(thumb, indexT) < 0.06;
-    // thumb-up: thumb vertical above wrist, others curled
-    if (up === 0 && thumbOut && lm[4].y < lm[3].y - 0.03 && Math.abs(lm[4].x - lm[0].x) < 0.15) return 'THUMBS_UP';
-    if (up === 4 && thumbOut) return 'OPEN_PALM';
-    if (pinch && up <= 1) return 'PINCH';
-    if (up === 1 && !thumbOut) return 'POINT';
-    if (up >= 3 && !thumbOut) return 'OPEN_PALM';
-    return null;
+  // --- rotation-invariant per-finger geometry (distances only, so the
+  // classifier never depends on camera angle or hand roll) ---
+  const FINGER_LM = {
+    index: { tip: 8, pip: 6, mcp: 5 },
+    middle: { tip: 12, pip: 10, mcp: 9 },
+    ring: { tip: 16, pip: 14, mcp: 13 },
+    pinky: { tip: 20, pip: 18, mcp: 17 },
+  };
+  const _pt = (lm, i) => ({ x: lm[i].x, y: lm[i].y });
+  const _dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  function fingerExt(lm, tip, pip, mcp) {
+    // Extended when the fingertip is clearly farther from the wrist than the
+    // PIP joint — curled fingers pull the tip inside the PIP distance.
+    const w = _pt(lm, 0);
+    const dTip = _dist(_pt(lm, tip), w);
+    const dPip = _dist(_pt(lm, pip), w);
+    return dTip > dPip * 1.10;
   }
-  // WAVE: palm open + x-position oscillation over recent frames
-  function detectWave() {
-    if (gestStack.length < 6) return false;
-    const xs = gestStack.map(() => 0); // replaced by palm x tracking below
-    return false;
+  function handState(lm) {
+    const ext = {};
+    for (const k of Object.keys(FINGER_LM)) {
+      const f = FINGER_LM[k];
+      ext[k] = fingerExt(lm, f.tip, f.pip, f.mcp);
+    }
+    const up = [ext.index, ext.middle, ext.ring, ext.pinky].filter(Boolean).length;
+    // Thumb out: thumb tip farther from the index MCP than the thumb IP is.
+    const thumbOut = _dist(_pt(lm, 4), _pt(lm, 5)) > _dist(_pt(lm, 3), _pt(lm, 5)) * 1.12;
+    // Pinch: thumb tip + index tip close, relative to the hand's own scale
+    // (wrist→middle-MCP distance), so it works at any camera distance.
+    const scale = Math.max(1e-4, _dist(_pt(lm, 0), _pt(lm, 9)));
+    const pinch = _dist(_pt(lm, 4), _pt(lm, 8)) < scale * 0.42;
+    const ok = pinch && ext.middle && ext.ring && ext.pinky;
+    const thumbsUp = up === 0 && thumbOut && lm[4].y < lm[3].y - 0.02 && Math.abs(lm[4].x - lm[0].x) < scale * 1.4;
+    const thumbsDown = up === 0 && thumbOut && lm[4].y > lm[3].y + 0.02 && Math.abs(lm[4].x - lm[0].x) < scale * 1.4;
+    const fist = up === 0 && !thumbsUp && !thumbsDown;
+    const point = up === 1 && ext.index;
+    const peace = up === 2 && ext.index && ext.middle && !ext.ring;
+    const three = up === 3 && ext.index && ext.middle && ext.ring;
+    const rock = up === 2 && ext.index && ext.pinky && !ext.middle && !ext.ring;
+    const open = up >= 4;
+    let g = null;
+    // Order matters: vertical-thumb checks win over fist; open palm wins over
+    // the near-thumb-index gap of a relaxed hand; PINCH (thumb tip + index
+    // tip touching) wins over FIST — a curled-index pinch is up=0, and its
+    // geometry is unmistakable. OK wins over the generic pinch it contains.
+    if (thumbsUp) g = 'THUMBS_UP';
+    else if (thumbsDown) g = 'THUMBS_DOWN';
+    else if (open) g = 'OPEN_PALM';
+    else if (ok) g = 'OK';
+    else if (pinch) g = 'PINCH';
+    else if (fist) g = 'FIST';
+    else if (point) g = 'POINT';
+    else if (peace) g = 'PEACE';
+    else if (three) g = 'THREE';
+    else if (rock) g = 'ROCK';
+    return { g, up, ext, thumbOut, pinch, ok, scale, tip: _pt(lm, 8) };
   }
-  let lastPalmX = null;
+  // --- hysteresis + cooldown state machine ---
+  function commitGesture(name) {
+    const now = Date.now();
+    if (GS.cooldown[name] && now - GS.cooldown[name] < GS.COOLDOWN_MS) return;
+    GS.cooldown[name] = now;
+    GS.pending = null; GS.count = 0;
+    gestureAct(name);
+  }
+  function feedGesture(name) {
+    if (!name) { GS.pending = null; GS.count = 0; return; }
+    if (GS.pending === name) {
+      GS.count++;
+      if (GS.count >= GS.NEED) commitGesture(name);
+    } else {
+      GS.pending = name; GS.count = 1;
+    }
+  }
+  // --- continuous scroll (velocity from palm movement) ---
+  function scrollByHand(hand, dir) {
+    const y = hand.y;
+    if (GS.lastPalmY == null) { GS.lastPalmY = y; return; }
+    const dy = y - GS.lastPalmY;
+    GS.lastPalmY = y;
+    if (Math.abs(dy) > 0.004) {
+      window.scrollBy(0, dy * -8000 * dir);
+    }
+  }
+  // --- on-screen pointer cursor + real click ---
+  function doClickAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (el && typeof el.click === 'function') {
+      try { el.click(); } catch (_) {}
+    }
+  }
+  function moveCursor(x, y) {
+    GS.px = x; GS.py = y;
+    const cur = VISION.cursor;
+    if (cur) { cur.style.left = x + 'px'; cur.style.top = y + 'px'; }
+  }
+  // --- working wave detector: palm x-position oscillation over ~1.2s ---
+  function detectWave(x) {
+    const now = Date.now();
+    if (now - GS.lastWaveT > 1300) GS.waveSamples = [];
+    GS.lastWaveT = now;
+    GS.waveSamples.push(x);
+    if (GS.waveSamples.length < 8) return false;
+    if (GS.waveSamples.length > 14) GS.waveSamples.shift();
+    let flips = 0, lastDir = 0;
+    for (let i = 1; i < GS.waveSamples.length; i++) {
+      const d = GS.waveSamples[i] - GS.waveSamples[i - 1];
+      if (Math.abs(d) < 0.03) continue;
+      const dir = d > 0 ? 1 : -1;
+      if (dir !== lastDir) { flips++; lastDir = dir; }
+    }
+    return flips >= 3;
+  }
+  const VIEW_CYCLE = ['/', '/atlas', '/world', '/media', '/motion', '/vision', '/browser', '/markets', '/intelligence', '/alerts', '/settings'];
+  function cycleView() {
+    const cur = (location.hash || '#/').replace(/^#/, '') || '/';
+    let i = VIEW_CYCLE.indexOf(cur);
+    if (i < 0) i = 0;
+    location.hash = '#' + VIEW_CYCLE[(i + 1) % VIEW_CYCLE.length];
+  }
+  // --- two-hand aware frame handling ---
   function onHands(result) {
     if (!result || !result.landmarks || !result.landmarks.length) {
       setVisState('handsEl', '—');
-      lastPalmX = null;
+      setVisState('fingerEl', '—');
+      setMode('');
+      GS.pending = null; GS.count = 0; GS.lastPalmY = null;
       return;
     }
-    const hand = result.landmarks[0];
-    setVisState('handsEl', '1');
-    const g = classifyHand(hand);
-    if (g === 'OPEN_PALM') {
-      const x = hand[0].x;
-      if (lastPalmX != null && Math.abs(x - lastPalmX) > 0.28 && Date.now() - (VISION._lastWave || 0) > 1500) {
-        VISION._lastWave = Date.now();
-        gestureAct('WAVE');
+    const hands = result.landmarks;
+    const handed = (result.handednesses && result.handednesses.length)
+      ? result.handednesses.map(h => (h[0] && h[0].categoryName) || '')
+      : [];
+    setVisState('handsEl', String(hands.length));
+    // dominant (right) hand drives actions when present; otherwise the first
+    const domIdx = handed.indexOf('Right') >= 0 ? handed.indexOf('Right') : 0;
+    const dom = hands[domIdx];
+    const s = handState(dom);
+    const fingerNames = ['I', 'M', 'R', 'P'];
+    setVisState('fingerEl', ['I','M','R','P'].map((n, i) =>
+      (['index','middle','ring','pinky'][i] && s.ext[['index','middle','ring','pinky'][i]] ? n : '·')).join(' '));
+    // both hands open = emergency stop (bypasses the hysteresis gate)
+    if (hands.length >= 2) {
+      const other = handState(hands[1 - domIdx]);
+      if (s.g === 'OPEN_PALM' && other.g === 'OPEN_PALM') {
+        commitGesture('BOTH_PALMS');
+        return;
       }
-      lastPalmX = x;
-    } else {
-      lastPalmX = null;
     }
-    if (g) gestureAct(g);
+    // continuous modes — run every frame, never gated
+    if (s.g === 'POINT') {
+      setMode('POINTER');
+      // mirror the camera: MediaPipe x is already camera-mirrored by the
+      // CSS transform, so map directly to window coords
+      const scale = Math.min(1, 0.9);
+      moveCursor((1 - s.tip.x) * window.innerWidth * scale, s.tip.y * window.innerHeight * scale);
+      if (s.pinch) { commitGesture('CLICK'); }
+      GS.pending = null; GS.count = 0; GS.lastPalmY = null;
+      return;
+    }
+    if (s.g === 'PEACE' || s.g === 'THREE') {
+      setMode('SCROLL');
+      scrollByHand(_pt(dom, 0), s.g === 'PEACE' ? 1 : -1);
+      GS.pending = null; GS.count = 0;
+      return;
+    }
+    // discrete gestures — through the hysteresis gate
+    setMode('');
+    GS.lastPalmY = null;
+    if (s.g === 'OPEN_PALM') {
+      // wave is a sub-gesture of the open palm
+      if (detectWave(_pt(dom, 0).x)) { commitGesture('WAVE'); GS.pending = null; GS.count = 0; return; }
+      feedGesture('OPEN_PALM');
+      return;
+    }
+    feedGesture(s.g);
   }
   function onFaces(result) {
     const n = result && result.detections ? result.detections.length : 0;
@@ -4107,6 +4306,7 @@ __probeMark('registered');
           <div class="vis-cam-off" id="visCamOff">CAMERA OFF — START TO ENABLE</div>
           <div class="vis-hint" id="visHint">GESTURE: —</div>
         </div>
+        <div class="vis-cursor" id="visCursor"></div>
         <div class="vis-actions">
           <button class="dm-btn big" id="visStart">START CAMERA</button>
           <button class="dm-btn big ghost" id="visStop">STOP</button>
@@ -4116,15 +4316,25 @@ __probeMark('registered');
         <div class="vis-status">
           <div class="vis-card"><div class="vc-k">FACE</div><div class="vc-v" id="visFace">—</div></div>
           <div class="vis-card"><div class="vc-k">HANDS</div><div class="vc-v" id="visHands">—</div></div>
+          <div class="vis-card"><div class="vc-k">MODE</div><div class="vc-v" id="visMode">—</div></div>
+          <div class="vis-card"><div class="vc-k">FINGERS</div><div class="vc-v" id="visFingers">—</div></div>
         </div>
         <div class="dm-card" style="margin-top:10px">
-          <div class="dm-k">GESTURE MAP</div>
+          <div class="dm-k">GESTURE MAP — v5.29 ADVANCED ENGINE</div>
           <table class="vis-gesture-table">
             <tr><td>OPEN PALM</td><td>pause / halt the current task</td></tr>
-            <tr><td>PINCH (thumb+index)</td><td>confirm / send the directive</td></tr>
+            <tr><td>BOTH PALMS (two hands)</td><td>EMERGENCY STOP — abort + close deck</td></tr>
+            <tr><td>PINCH (thumb+index)</td><td>send the directive</td></tr>
+            <tr><td>POINT (one finger)</td><td>POINTER MODE — fingertip = mouse cursor</td></tr>
+            <tr><td>POINT + PINCH</td><td>CLICK at the cursor</td></tr>
+            <tr><td>PEACE (index+middle)</td><td>hold to scroll DOWN (hand moves the wheel)</td></tr>
+            <tr><td>THREE (index+middle+ring)</td><td>hold to scroll UP</td></tr>
             <tr><td>THUMBS UP</td><td>approve the pending confirmation</td></tr>
-            <tr><td>POINT (one finger)</td><td>select — focus the prompt box</td></tr>
-            <tr><td>WAVE</td><td>wake the system (dismiss idle)</td></tr>
+            <tr><td>THUMBS DOWN</td><td>deny the pending confirmation</td></tr>
+            <tr><td>ROCK (index+pinky)</td><td>next view (cycle the workspaces)</td></tr>
+            <tr><td>OK (pinch + 3 up)</td><td>open the command palette</td></tr>
+            <tr><td>FIST</td><td>dismiss the task deck</td></tr>
+            <tr><td>WAVE (open palm, sway)</td><td>wake the system</td></tr>
             <tr><td>FACE PRESENT</td><td>system stays awake; face gone = idle</td></tr>
           </table>
         </div>
