@@ -52,12 +52,16 @@ GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 #: email step). Identity-only (openid/email/profile) works unverified. The
 #: restricted surface stays available behind GOOGLE_OAUTH_FULL_SCOPES=1 once
 #: the app is verified (or in Testing mode with the account as a test user).
+#: v5.29: drive.file added so the full-scope sign-in can CREATE Docs and
+#: Slides in the signed-in user's Drive (files the app creates — the minimal
+#: write scope; drive.readonly alone 403s drive_create_doc / slides_create).
 _IDENTITY_SCOPES = "openid email profile "
 _FULL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly "
     "https://www.googleapis.com/auth/gmail.send "
     "https://www.googleapis.com/auth/calendar.readonly "
-    "https://www.googleapis.com/auth/drive.readonly"
+    "https://www.googleapis.com/auth/drive.readonly "
+    "https://www.googleapis.com/auth/drive.file"
 )
 
 
