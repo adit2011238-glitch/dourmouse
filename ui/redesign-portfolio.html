@@ -6,6 +6,7 @@
 <title>DOURMOUSE // REDESIGN PORTFOLIO — JARVIS-LINEAGE v2.0</title>
 <style>
   /* Self-hosted type (fully local — repo invariant) */
+@font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/sekuya-regular.ttf') format('truetype');}
 @font-face{font-family:'Orbitron';font-style:normal;font-weight:500;font-display:swap;src:url('assets/fonts/orbitron-500-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
 @font-face{font-family:'Orbitron';font-style:normal;font-weight:700;font-display:swap;src:url('assets/fonts/orbitron-700-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
 @font-face{font-family:'Orbitron';font-style:normal;font-weight:900;font-display:swap;src:url('assets/fonts/orbitron-900-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
@@ -52,7 +53,7 @@
   --text:#DCE9F7;
   --text-dim:#7E93AC;
   --text-faint:#4A5C74;
-  --font-display:'Orbitron',sans-serif;
+  --font-display:'Sekuya','Orbitron',sans-serif;
   --font-hud:'Rajdhani',sans-serif;
   --font-body:'Space Grotesk',sans-serif;
   --font-mono:'Share Tech Mono',monospace;
@@ -629,7 +630,7 @@ footer .line .g{color:var(--gold)}
     <div class="ds-card">
       <h3>Type — the change you'll feel first</h3>
       <div class="specs">
-        <div class="spec orbitron"><span class="tag">Display · Orbitron 900</span><div class="sample">DOURMOUSE<span class="gold">.</span></div><div class="use">Wordmark + section heads. Tracking +0.14em. Not body text — ever.</div></div>
+        <div class="spec orbitron"><span class="tag">Display · Sekuya Regular</span><div class="sample" style="font-family:'Sekuya','Orbitron',sans-serif;font-weight:400">DOURMOUSE<span class="gold">.</span></div><div class="use">Wordmark + section heads. Tracking +0.14em. Not body text — ever.</div></div>
         <div class="spec rajdhani"><span class="tag">HUD · Rajdhani 700</span><div class="sample">CENTRAL DISPATCH</div><div class="use">The new voice: labels, nav, buttons, status. Squared, condensed, readable at 12px.</div></div>
         <div class="spec mono"><span class="tag">Mono · Share Tech Mono</span><div class="sample">SYSTEMS ONLINE <span style="color:var(--gold)">▮</span></div><div class="use">Terminal lines, readouts, tickers. The authentic Stark HUD terminal face.</div></div>
         <div class="spec body"><span class="tag">Body · Space Grotesk</span><div class="sample">Good morning, sir.</div><div class="use">Prose, directives, agent replies. Keeps chat human instead of blinking.</div></div>

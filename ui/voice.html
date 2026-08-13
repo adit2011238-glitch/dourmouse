@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DOURMOUSE // VOICE LAB</title>
 <style>
+  @font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/sekuya-regular.ttf') format('truetype');}
   @font-face{font-family:'Orbitron';font-style:normal;font-weight:700;font-display:swap;src:url('assets/fonts/orbitron-700-latin.woff2') format('woff2');}
   @font-face{font-family:'Orbitron';font-style:normal;font-weight:900;font-display:swap;src:url('assets/fonts/orbitron-900-latin.woff2') format('woff2');}
   @font-face{font-family:'Rajdhani';font-style:normal;font-weight:500;font-display:swap;src:url('assets/fonts/rajdhani-500-latin.woff2') format('woff2');}
@@ -47,9 +48,9 @@
     padding: 14px 24px; border-bottom: 1px solid var(--line);
     background: rgba(7,11,18,0.75);
   }
-  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-hud); font-size: 16px; letter-spacing: .16em; }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: 'Sekuya','Rajdhani',sans-serif; font-size: 16px; letter-spacing: .16em; }
   .brand .shield { width: 18px; height: 18px; color: var(--cyan); }
-  .brand b { color: var(--cyan); font-weight: 700; text-shadow: 0 0 14px rgba(var(--cyan-rgb),.55); }
+  .brand b { color: var(--cyan); font-weight: 400; text-shadow: 0 0 14px rgba(var(--cyan-rgb),.55); }
   .brand .dot { color: var(--gold); }
   .brand .sub { color: var(--dim); font-size: 11px; letter-spacing: .24em; font-family: var(--font-mono); }
   .topchips { display: flex; align-items: center; gap: 16px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; }

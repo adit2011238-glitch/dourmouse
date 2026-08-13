@@ -30,6 +30,7 @@
 @font-face{font-family:'Rajdhani';font-style:normal;font-weight:700;font-display:swap;src:url('assets/fonts/rajdhani-700-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
 @font-face{font-family:'Rajdhani';font-style:normal;font-weight:700;font-display:swap;src:url('assets/fonts/rajdhani-700-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
 @font-face{font-family:'Share Tech Mono';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/share-tech-mono-400-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+@font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/sekuya-regular.ttf') format('truetype');}
 @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/space-grotesk-400-vietnamese.woff2') format('woff2');unicode-range:U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;}
 @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/space-grotesk-400-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
 @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/space-grotesk-400-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
@@ -66,7 +67,7 @@
     --font-hud:      "Rajdhani","Avenir Next","Helvetica Neue",sans-serif;
     --font-mono:     "Share Tech Mono","JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
     --font-prose:    "Space Grotesk",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-    --font-wordmark: "Orbitron","Rajdhani","Avenir Next",sans-serif;
+    --font-wordmark: "Sekuya","Orbitron","Rajdhani","Avenir Next",sans-serif;
     /* ---- semantic aliases: readable near-white text, cyan as accent ---- */
     --text: #DCE9F7;
     --text-dim: #7E93AC;
@@ -166,7 +167,7 @@
   @keyframes letterIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
   .boot-word {
     font-family: var(--font-wordmark);
-    font-size: clamp(30px,5vw,46px); font-weight: 900; letter-spacing: 0.28em; margin-left: 0.28em;
+    font-size: clamp(30px,5vw,46px); font-weight: 400; letter-spacing: 0.28em; margin-left: 0.28em;
     color: var(--cyan-bright);
     text-shadow: 0 0 24px rgba(var(--cyan-rgb), var(--a60)), 0 0 70px rgba(var(--cyan-rgb), var(--a30));
   }
@@ -926,7 +927,7 @@
   /* header → slim statusbar */
   #telemetry { padding: 10px 20px; background: rgba(11,15,26,.78); }
   .brand-block .title {
-    font-family: var(--font-wordmark); font-weight: 900; font-size: 15px;
+    font-family: var(--font-wordmark); font-weight: 400; font-size: 15px;
     letter-spacing: .16em; color: var(--cyan-bright); text-shadow: 0 0 18px rgba(var(--cyan-rgb), var(--a45));
   }
   .brand-block .title::after { content: " // ARC CORE"; font-family: var(--font-mono); font-size: 9px;
@@ -973,14 +974,14 @@
   .fline.answer { font-family: var(--font-prose); font-size: 13.5px; line-height: 1.75; color: var(--text); }
   .fline.answer.final { border-left: 2px solid var(--cyan); background: linear-gradient(90deg, rgba(var(--cyan-rgb), .07), transparent 70%); }
   .fline.user { color: var(--text); }
-  .md-h1 { font-family: var(--font-wordmark); font-weight: 700; letter-spacing: .14em; }
+  .md-h1 { font-family: var(--font-wordmark); font-weight: 400; letter-spacing: .14em; }
   .tcard { border-radius: 9px; }
   .tcard .thead { font-family: var(--font-hud); font-weight: 700; letter-spacing: .1em; }
   .qchip { font-family: var(--font-hud); font-weight: 600; font-size: 10px; letter-spacing: .08em; border-radius: 6px; }
 
   /* right: HUD vitals */
   #right { background: rgba(11,15,26,.35); }
-  #integrity { font-family: var(--font-wordmark); font-weight: 700; font-size: 24px; letter-spacing: .1em;
+  #integrity { font-family: var(--font-wordmark); font-weight: 400; font-size: 24px; letter-spacing: .1em;
     color: var(--gold-bright); text-shadow: 0 0 18px rgba(var(--gold-rgb), var(--a45)); }
   .integ-sub { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .16em; color: rgba(var(--gold-rgb), var(--a60)); }
   .metric .mlabel { font-family: var(--font-hud); font-weight: 600; font-size: 10px; letter-spacing: .16em; }
@@ -988,7 +989,7 @@
   .repofact, .artifact, .msg, .job, .intervention { border-radius: 8px; }
   .rf-title, .job .jtask, .msg .mfrom { font-family: var(--font-hud); font-weight: 700; }
   .dm-card { border-radius: 10px; }
-  .dmv-head h2 { font-family: var(--font-wordmark); font-weight: 700; color: var(--cyan-bright); }
+  .dmv-head h2 { font-family: var(--font-wordmark); font-weight: 400; color: var(--cyan-bright); }
 
   /* Arc Core — LISTENING dial in the HUD (the boot dial's permanent home) */
   #integritypanel { display: flex; align-items: center; gap: 14px; }
@@ -1029,7 +1030,7 @@
 
   /* dmside rail → Arc Core glyphs + gold active lane */
   #dmside { background: rgba(9,12,20,.94); }
-  .dms-logo { font-family: var(--font-wordmark); font-weight: 900; letter-spacing: .24em; color: var(--cyan-bright);
+  .dms-logo { font-family: var(--font-wordmark); font-weight: 400; letter-spacing: .24em; color: var(--cyan-bright);
     text-shadow: 0 0 14px rgba(var(--cyan-rgb), var(--a45)); }
   .dms-logo .dot { color: var(--gold-bright); }
   .dms-item { font-family: var(--font-hud); font-weight: 600; font-size: 10.5px; letter-spacing: .14em; }
