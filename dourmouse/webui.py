@@ -563,6 +563,27 @@ def build_setup_status(server) -> dict[str, Any]:
             "detail": "server module unavailable",
             "hint": "set DOURMOUSE_SERVER_URL",
         }
+    # v5.27: the SELF-HOSTED world monitor (World Pulse).
+    try:
+        from dourmouse.world_pulse import world_pulse_status
+
+        wp = world_pulse_status()
+        items["world_pulse"] = {
+            "configured": wp.get("configured", False),
+            "detail": (
+                f"{wp.get('sources_up', 0)}/{wp.get('sources_total', 0)} sources · "
+                f"pulse {wp.get('pulse_score')} {wp.get('pulse_label')}"
+                if wp.get("online")
+                else "all sources offline"
+            ),
+            "hint": "self-hosted keyless monitor — no key needed",
+        }
+    except Exception:  # noqa: BLE001 -- a broken import never blocks setup
+        items["world_pulse"] = {
+            "configured": False,
+            "detail": "world_pulse module unavailable",
+            "hint": "",
+        }
     try:
         from dourmouse.voice import voice_status
 
@@ -1079,6 +1100,16 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.remote_server import server_status
 
             self._send_json(server_status())
+        elif path == "/api/world/pulse":
+            # v5.27: the SELF-HOSTED world monitor (World Pulse) snapshot.
+            from dourmouse.world_pulse import world_pulse_snapshot
+
+            self._send_json(world_pulse_snapshot())
+        elif path == "/api/world/sources":
+            # v5.27: per-source health of the self-hosted monitor.
+            from dourmouse.world_pulse import world_pulse_status
+
+            self._send_json(world_pulse_status())
         elif path == "/api/atlas":
             # v5.4: ATLAS quant-engine panel — real telemetry + last run.
             from dourmouse.atlas_cli import atlas_panel_snapshot

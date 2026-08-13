@@ -2162,14 +2162,90 @@ def build_general_registry() -> DispatchRegistry:
     # natural disasters, cyber threats, sanctions, forecasts, supply-chain.
     # Keyless: status + tool catalog. Keyed: generic call_tool to all 59 MCP
     # tools. Honest NOT CONFIGURED without WORLDMONITOR_API_KEY (Rule 2.2).
+    # v5.27: + world_pulse / world_pulse_details — Dourmouse's OWN self-
+    # hosted keyless monitor (dourmouse/world_pulse.py, no SDK, no key).
     from dourmouse.worldmonitor import build_worldmonitor_tool_specs
+
+    def _world_pulse_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.world_pulse import world_pulse_snapshot
+
+        try:
+            snap = world_pulse_snapshot()
+        except Exception as exc:  # noqa: BLE001 - snapshot must never raise
+            return f"WORLD PULSE FAILED: {type(exc).__name__}: {exc}"
+        lines = [
+            f"WORLD PULSE {snap.get('pulse_score')} {snap.get('pulse_label')} "
+            f"({snap.get('generated_at', '')[:16]} UTC)",
+        ]
+        for name, src in snap.get("sources", {}).items():
+            state = (
+                f"{src.get('count', 0)} items · {src.get('latency_ms', '?')}ms"
+                if src.get("ok")
+                else f"OFFLINE — {src.get('error', 'no error')}"
+            )
+            lines.append(f"- {name.upper()}: {state}")
+        lines.append("ITEMS:")
+        for kind, items in snap.get("items", {}).items():
+            for it in items[:3]:
+                sev = f"[{it.get('severity')}] " if it.get("severity") else ""
+                lines.append(f"- {kind.upper()} {sev}{it.get('title', '')}")
+        return "\n".join(lines)
+
+    def _world_pulse_details_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.world_pulse import world_pulse_details
+
+        try:
+            det = world_pulse_details(arguments.get("source", ""))
+        except Exception as exc:  # noqa: BLE001
+            return f"WORLD PULSE DETAILS FAILED: {type(exc).__name__}: {exc}"
+        if not det.get("ok"):
+            return f"WORLD PULSE DETAILS (reported honestly): {det.get('error')}"
+        lines = [
+            f"SOURCE {det['source'].upper()} — {det.get('label', '')}",
+            f"HEALTH: {det['health']}",
+        ]
+        for it in det.get("items", []):
+            sev = f"[{it.get('severity')}] " if it.get("severity") else ""
+            lines.append(f"- {sev}{it.get('title', '')} {it.get('link', '')}")
+        return "\n".join(lines)
 
     registry.register_subagent(
         _subagent(
             "worldmonitor",
             "Intelligence",
-            "World Monitor — real-time global intelligence: markets, country risk, conflicts, disasters, cyber, sanctions, forecasts.",
-            build_worldmonitor_tool_specs(),
+            "World Monitor — real-time global intelligence: markets, country risk, conflicts, disasters, cyber, sanctions, forecasts. Includes the SELF-HOSTED keyless World Pulse feed.",
+            build_worldmonitor_tool_specs()
+            + [
+                ToolSpec(
+                    name="world_pulse",
+                    description=(
+                        "Dourmouse's OWN world monitor: the self-hosted keyless "
+                        "snapshot of markets (Yahoo movers + key quotes), world "
+                        "news (Google News), disasters (GDACS), cyber advisories "
+                        "(CISA), conflict/humanitarian updates (ReliefWeb) and "
+                        "macro (World Bank), plus the internal pulse score. Real "
+                        "data, no API key, failure-isolated per source."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_world_pulse_h,
+                ),
+                ToolSpec(
+                    name="world_pulse_details",
+                    description=(
+                        "Drill into ONE World Pulse source for its raw items: "
+                        "markets, news, disasters, cyber, conflict, or macro. "
+                        "Returns the items with links plus the source's health."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string", "description": "markets|news|disasters|cyber|conflict|macro"}
+                        },
+                        "required": ["source"],
+                    },
+                    handler=_world_pulse_details_h,
+                ),
+            ],
         )
     )
 

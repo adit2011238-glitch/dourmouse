@@ -1211,6 +1211,31 @@
   .br-act { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
     padding: 4px 0; border-bottom: 1px solid rgba(var(--cyan-rgb), var(--a10)); }
   .br-act b { color: var(--cyan-bright); font-weight: 400; }
+
+  /* ================= v5.27 WORLD PULSE — self-hosted keyless monitor ===== */
+  .wp-hero { display: flex; align-items: center; gap: 18px; border: 1px solid var(--line-strong);
+    border-radius: 12px; padding: 16px 20px; background: rgba(11,15,26,.6); margin-bottom: 12px;
+    position: relative; }
+  .wp-score { display: flex; flex-direction: column; }
+  .wp-num { font-family: var(--font-hud); font-size: 34px; line-height: 1; color: var(--cyan-bright);
+    letter-spacing: .06em; }
+  .wp-lab { font-family: var(--font-mono); font-size: 10px; letter-spacing: .22em;
+    color: var(--gold-bright); margin-top: 4px; }
+  .wp-meta { flex: 1; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); line-height: 1.7; }
+  .wp-refresh { cursor: pointer; color: var(--cyan-bright); font-size: 20px; }
+  .wp-refresh:hover { color: var(--gold-bright); }
+  .wp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .wp-chip { font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; padding: 5px 11px;
+    border-radius: 20px; border: 1px solid var(--line); color: var(--text-dim); background: rgba(11,15,26,.5); }
+  .wp-chip.ok { color: var(--cyan-bright); border-color: rgba(var(--cyan-rgb), .5); }
+  .wp-chip.bad { color: #ff6b5e; border-color: rgba(255,107,94,.5); }
+  .wp-lists { margin-top: 14px; }
+  .wp-group { margin-bottom: 14px; }
+  .wp-item { font-family: var(--font-mono); font-size: 10px; line-height: 1.7; padding: 5px 0;
+    border-bottom: 1px solid rgba(var(--cyan-rgb), var(--a10)); color: var(--text-dim); }
+  .wp-item a { color: var(--cyan-bright); text-decoration: none; }
+  .wp-item a:hover { color: var(--gold-bright); }
+  .wp-sev { color: var(--gold-bright); }
 </style>
 </head>
 <body>
@@ -3929,12 +3954,18 @@ __probeMark('registered');
 
   <!-- WORLD MONITOR -->
   <section class="dmview" id="view-world">
-    <div class="dmv-head"><h2>WORLD MONITOR</h2><div class="dmv-sub">GLOBAL INTELLIGENCE BRIDGE · #/world</div></div>
+    <div class="dmv-head"><h2>WORLD MONITOR</h2><div class="dmv-sub">WORLD PULSE · SELF-HOSTED KEYLESS FEED · #/world</div></div>
+    <div class="wp-hero" id="wpHero">
+      <div class="wp-score"><span class="wp-num" id="wpScore">—</span><span class="wp-lab" id="wpLabel">LOADING</span></div>
+      <div class="wp-meta" id="wpMeta">self-hosted keyless monitor — markets · news · disasters · cyber · conflict · macro</div>
+      <div class="wp-refresh" id="wpRefresh" title="Refresh">⟳</div>
+    </div>
+    <div class="wp-chips" id="wpChips"></div>
     <div class="dm-grid">
       <div class="dm-card"><div class="dm-k">BRIDGE STATUS</div><div id="worldStatus" class="dm-empty">LOADING…</div></div>
       <div class="dm-card"><div class="dm-k">CONNECTIONS</div><div id="worldConnections" class="dm-empty">LOADING…</div></div>
     </div>
-    <div class="dm-card"><div class="dm-k">MAP · EVENTS · FEED</div><div class="dm-empty">The map → events → intelligence experience lands in Phase R1. What is real today: the World Monitor bridge below reports its API status and which data tools are configured — never a fabricated feed (Rule 2.2).</div></div>
+    <div class="wp-lists" id="wpLists"></div>
   </section>
 
   <!-- PORTFOLIO -->
@@ -4542,6 +4573,39 @@ __probeMark('registered');
     } catch (e) {
       if (statusEl) { statusEl.className = 'dm-empty'; statusEl.innerHTML = 'CONNECTIONS UNREACHABLE'; }
     }
+    renderWorldPulse();
+  }
+
+  // ---- World Pulse (v5.27) — the SELF-HOSTED keyless world monitor ------
+  const PULSE_ORDER = ['markets', 'news', 'disasters', 'cyber', 'conflict', 'macro'];
+  async function renderWorldPulse() {
+    try {
+      const d = await (await fetch('/api/world/pulse')).json();
+      const score = $('wpScore'), label = $('wpLabel'), meta = $('wpMeta'), chips = $('wpChips'), lists = $('wpLists');
+      if (score) score.textContent = d.pulse_score;
+      if (label) label.textContent = d.pulse_label || '';
+      if (meta) meta.textContent = 'generated ' + (d.generated_at || '').replace('T', ' ') + ' UTC · ' + (d.note || '');
+      if (chips) {
+        chips.innerHTML = PULSE_ORDER.map(name => {
+          const s = (d.sources || {})[name] || {};
+          const state = s.ok ? (s.count + ' · ' + s.latency_ms + 'ms') : 'OFFLINE';
+          return `<span class="wp-chip ${s.ok ? 'ok' : 'bad'}">${name.toUpperCase()} ${state}</span>`;
+        }).join('');
+      }
+      if (lists) {
+        lists.innerHTML = PULSE_ORDER.map(name => {
+          const items = (d.items || {})[name] || [];
+          const head = `<div class="dm-k">${name.toUpperCase()}</div>`;
+          if (!items.length) return `<div class="wp-group">${head}<div class="wp-item">— no items (source offline)</div></div>`;
+          const rows = items.map(it => {
+            const sev = it.severity ? `<span class="wp-sev">[${esc(it.severity)}]</span> ` : '';
+            const link = it.link ? `<a href="${esc(it.link)}" target="_blank" rel="noopener">↗</a>` : '';
+            return `<div class="wp-item">${sev}${esc(it.title)} ${link}${it.at ? ' <span style="opacity:.6">· ' + esc(String(it.at).slice(0, 16)) + '</span>' : ''}</div>`;
+          }).join('');
+          return `<div class="wp-group">${head}${rows}</div>`;
+        }).join('');
+      }
+    } catch (e) { /* pulse unavailable — the rest of the world view still works */ }
   }
 
   async function renderSettings() {
@@ -4755,6 +4819,8 @@ __probeMark('registered');
   window.addEventListener('hashchange', route);
   window.addEventListener('resize', () => { renderResume(); });
   wireActions(); wirePalette(); renderMore(); wireMedia(); wireBrowser();
+  { const r = $('wpRefresh'); if (r) r.addEventListener('click', () => { renderWorldPulse(); toast('pulse refreshed'); });
+    setInterval(() => { if (document.visibilityState === 'visible' && currentRoute === 'world') renderWorldPulse(); }, 60000); }
   loadPalette();
   route();
   fetchState(); renderAtlas(); renderWorld(); renderSettings();
