@@ -326,7 +326,13 @@
         showSignedIn(d.me);
       } else if (d.configured) {
         document.getElementById('ggoogleBtn').style.display = 'flex';
-        gmsg.textContent = 'One click — Google shows your account chooser, then you are in.';
+        // v5.23: identity-only by default — restricted scopes (Gmail/Calendar/
+        // Drive via OAuth) 500 on unverified apps, so the button now signs you
+        // in with your identity and the app-password path covers mail.
+        const scopes = d.scopes === 'full'
+          ? 'One click — Google shows your account chooser, then you are in (Gmail, Calendar and Drive included).'
+          : 'One click — Google shows your account chooser, then you are in. Gmail works via the app password; Calendar/Drive unlock when GOOGLE_OAUTH_FULL_SCOPES=1 is set on a verified app.';
+        gmsg.textContent = scopes;
         if (reason === 'denied') {
           gmsg.innerHTML = '<span class="warn">Sign-in was cancelled — no problem, nothing changed.</span>';
         }

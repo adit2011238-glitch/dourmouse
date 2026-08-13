@@ -92,9 +92,31 @@ def test_authorization_url_includes_pkce_and_scopes(google_env):
     assert "code_challenge_method=S256" in url
     assert "state=state-1" in url
     assert "access_type=offline" in url
+    # v5.23: identity-only by default — restricted scopes are withheld so an
+    # unverified app's consent screen stops 500ing after the email step.
+    assert "openid" in url and "email" in url and "profile" in url
+    assert "gmail.readonly" not in url
+    assert "calendar.readonly" not in url
+    assert "drive.readonly" not in url
+
+
+def test_authorization_url_full_scopes_opt_in(google_env, monkeypatch):
+    """GOOGLE_OAUTH_FULL_SCOPES=1 restores the restricted Gmail/Calendar/Drive
+    scopes (for a verified app, or Testing mode with the account as a test
+    user) — the flag is read live at URL-build time."""
+    monkeypatch.setenv("GOOGLE_OAUTH_FULL_SCOPES", "1")
+    url = google_auth.authorization_url("http://127.0.0.1:8765/cb", "state-1", "ch-1")
     assert "gmail.readonly" in url
     assert "calendar.readonly" in url
     assert "drive.readonly" in url
+    assert google_auth.status()["scopes"] == "full"
+
+
+def test_authorization_url_default_scopes_identity_only(google_env):
+    """Without the flag the consent URL requests identity only, and status()
+    says so honestly."""
+    assert "drive.readonly" not in google_auth.requested_scopes()
+    assert google_auth.status()["scopes"] == "identity-only"
 
 
 def test_google_configured_requires_both(monkeypatch):

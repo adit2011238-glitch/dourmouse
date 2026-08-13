@@ -46,13 +46,36 @@ GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 #: can honestly serve today (inbox read, send, calendar read, Drive read).
 #: v5.18 adds drive.readonly — the consent screen lists it once the user
 #: grants the drive-scoped sign-in.
-SCOPES = (
-    "openid email profile "
+#:
+#: v5.23: gmail.*/calendar.readonly/drive.readonly are RESTRICTED scopes —
+#: Google refuses to show them on an unverified app (consent 500s after the
+#: email step). Identity-only (openid/email/profile) works unverified. The
+#: restricted surface stays available behind GOOGLE_OAUTH_FULL_SCOPES=1 once
+#: the app is verified (or in Testing mode with the account as a test user).
+_IDENTITY_SCOPES = "openid email profile "
+_FULL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly "
     "https://www.googleapis.com/auth/gmail.send "
     "https://www.googleapis.com/auth/calendar.readonly "
     "https://www.googleapis.com/auth/drive.readonly"
 )
+
+
+def requested_scopes() -> str:
+    """The OAuth scope string for the consent URL.
+
+    Identity-only by default (works on an unverified app); the restricted
+    Gmail/Calendar/Drive scopes are appended only when the deploy opts in via
+    GOOGLE_OAUTH_FULL_SCOPES=1 (app verified, or Testing mode + test user).
+    """
+    extra = os.environ.get("GOOGLE_OAUTH_FULL_SCOPES", "").strip().lower()
+    if extra in ("1", "true", "yes", "on"):
+        return _IDENTITY_SCOPES + _FULL_SCOPES
+    return _IDENTITY_SCOPES
+
+
+#: Backwards-compatible module-level reference (tests + status() use it).
+SCOPES = requested_scopes()
 
 _SESSION_TTL = timedelta(days=30)
 _TOKEN_SKEW = timedelta(seconds=60)
@@ -79,10 +102,12 @@ def google_configured() -> bool:
 def status() -> dict[str, Any]:
     """Honest capability report for /api/auth/status (Rule 2.2)."""
     if google_configured():
+        full = requested_scopes() != _IDENTITY_SCOPES
         return {
             "configured": True,
             "detail": f"OAuth client {client_id()[:12]}…",
             "hint": "redirect URIs must be registered in Google Cloud Console",
+            "scopes": "full" if full else "identity-only",
         }
     return {
         "configured": False,
@@ -127,7 +152,7 @@ def authorization_url(
             "client_id": client_id(),
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "scope": SCOPES,
+            "scope": requested_scopes(),
             "state": state,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
