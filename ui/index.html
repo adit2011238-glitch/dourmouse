@@ -1401,6 +1401,17 @@
         </div>
         <div id="neurobody"><div class="iv-empty">NEURAL ORCHESTRATOR STANDBY</div></div>
       </div>
+      <!-- v5.31 — COMPUTE NODE: the Dell LAN inference node (Qwen3 1.7B).
+           The Dell is compute infrastructure, not DOURMOUSE — this card
+           shows its live health: node, model, latency. Auto-refreshes
+           every 10s; OFFLINE means the local AI stays in charge. -->
+      <div class="col-title">COMPUTE NODE <span id="srvbadge" class="jobcount"></span></div>
+      <div id="srvpanel">
+        <div class="repo-bar">
+          <button id="srvCheckBtn" class="vtbtn" title="Re-probe the compute node now">[CHECK]</button>
+        </div>
+        <div id="srvbody"><div class="iv-empty">COMPUTE NODE STANDBY</div></div>
+      </div>
       <!-- v5.7 — Spotify (v5.21: play-anything music section — search any
            song or play one of your playlists; the click IS the approval). -->
       <div class="col-title">SPOTIFY <span id="spotifybadge" class="jobcount"></span></div>
@@ -2723,6 +2734,42 @@ document.getElementById('mapbtn').addEventListener('click', () => {
   setInterval(pollAtlas, 6000);
   setInterval(pollMt5, 6000);
   setInterval(pollTv, 6000);
+  // ---- v5.31 COMPUTE NODE // /api/server panel (the Dell LAN node) ----
+  const srvBodyEl = document.getElementById('srvbody');
+  const srvBadgeEl = document.getElementById('srvbadge');
+  const srvCheckBtn = document.getElementById('srvCheckBtn');
+  function renderServer(d) {
+    if (!srvBodyEl) return;
+    if (!d) { srvBodyEl.innerHTML = '<div class="iv-empty">COMPUTE NODE STANDBY</div>'; return; }
+    const up = !!d.online;
+    const url = d.url || 'DOURMOUSE_SERVER_URL';
+    const lat = d.latency_ms != null ? d.latency_ms + 'ms' : '—';
+    if (srvBadgeEl) {
+      srvBadgeEl.textContent = up ? 'ONLINE' : 'OFFLINE';
+      srvBadgeEl.style.color = up ? 'var(--green)' : 'var(--amber)';
+    }
+    if (up) {
+      srvBodyEl.innerHTML =
+        '<div class="repofact"><div class="rf-title"><span style="color:var(--green)">● ONLINE</span> // ' + esc(d.node || 'Node-01') + '</div>' +
+        '<div class="rf-path">' + esc(d.model || '?') + ' · LATENCY ' + lat + '</div></div>' +
+        '<div class="repofact"><div class="rf-title">VERSION // ' + esc(d.version || '?') + ' · OLLAMA ' + (d.ollama ? 'UP' : 'DOWN') + '</div>' +
+        '<div class="rf-path">' + esc(url) + '</div></div>';
+    } else {
+      const why = d.error ? ' — ' + esc(d.error) : '';
+      srvBodyEl.innerHTML =
+        '<div class="repofact"><div class="rf-title"><span style="color:var(--amber)">○ OFFLINE</span> // LOCAL AI IN CHARGE</div>' +
+        '<div class="rf-path">' + esc(url) + why + '</div></div>' +
+        '<div class="repofact"><div class="rf-title">MODEL // ' + esc(d.model || '?') + '</div>' +
+        '<div class="rf-path">FAILOVER AUTO — THE FAST LANE ROUTES HERE WHEN ONLINE</div></div>';
+    }
+  }
+  async function pollServer() {
+    try { const r = await fetch('/api/server'); renderServer(await r.json()); }
+    catch (e) { /* transient */ }
+  }
+  pollServer();
+  setInterval(pollServer, 10000); // live latency, auto-refresh every 10s
+  if (srvCheckBtn) srvCheckBtn.addEventListener('click', pollServer);
   if (atlasDailyBtn) {
     atlasDailyBtn.addEventListener('click', async () => {
       atlasDailyBtn.disabled = true;

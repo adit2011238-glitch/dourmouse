@@ -162,3 +162,41 @@ class TestVisionAdvancedGestures:
         for label in ("BOTH PALMS", "POINTER MODE", "CLICK at the cursor",
                       "THUMBS DOWN", "command palette", "dismiss the task deck"):
             assert label in html, f"gesture map missing {label}"
+
+
+class TestComputeNodeCard:
+    """v5.31 — the home-dashboard COMPUTE NODE card (the Dell LAN node),
+    pinned so a refactor cannot drop the panel, the honest online/offline
+    states, or the 10s live-latency auto-refresh."""
+
+    def _read(self) -> str:
+        return (Path(__file__).resolve().parents[2] / "ui/index.html").read_text(
+            encoding="utf-8"
+        )
+
+    def test_panel_markup_present(self):
+        html = self._read()
+        assert 'id="srvpanel"' in html
+        assert 'id="srvbody"' in html
+        assert 'id="srvCheckBtn"' in html
+        assert 'id="srvbadge"' in html
+
+    def test_bound_to_real_api_endpoint(self):
+        html = self._read()
+        assert "fetch('/api/server')" in html
+        assert "renderServer(await r.json())" in html
+
+    def test_auto_refresh_every_10s(self):
+        html = self._read()
+        assert "setInterval(pollServer, 10000)" in html
+
+    def test_honest_online_state_shows_node_model_latency(self):
+        html = self._read()
+        assert "d.node" in html and "d.model" in html
+        assert "d.latency_ms" in html and "LATENCY" in html
+        assert "● ONLINE" in html
+
+    def test_honest_offline_state_keeps_local_ai(self):
+        html = self._read()
+        assert "○ OFFLINE" in html
+        assert "LOCAL AI IN CHARGE" in html
