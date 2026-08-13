@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // REDESIGN PORTFOLIO — JARVIS-LINEAGE v2.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   DOURMOUSE REDESIGN PORTFOLIO — JARVIS-LINEAGE v2.0
+   Self-contained. No build step. Open in any browser.
+   ============================================================ */
+:root{
+  --ground:#06080F;
+  --surface:#0B0F1A;
+  --panel:#0E1424;
+  --panel-2:#111A2E;
+  --line:rgba(79,195,247,.14);
+  --line-strong:rgba(79,195,247,.32);
+  --cyan:#4FC3F7;
+  --cyan-bright:#7FE0FF;
+  --cyan-rgb:79,195,247;
+  --gold:#F5A623;
+  --gold-bright:#FFC44D;
+  --gold-rgb:245,166,35;
+  --red:#EF5350;
+  --green:#3DDC84;
+  --text:#DCE9F7;
+  --text-dim:#7E93AC;
+  --text-faint:#4A5C74;
+  --font-display:'Orbitron',sans-serif;
+  --font-hud:'Rajdhani',sans-serif;
+  --font-body:'Space Grotesk',sans-serif;
+  --font-mono:'Share Tech Mono',monospace;
+  --r:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:
+    radial-gradient(1000px 480px at 78% -10%, rgba(var(--cyan-rgb),.10), transparent 60%),
+    radial-gradient(700px 420px at -6% 110%, rgba(var(--gold-rgb),.06), transparent 55%),
+    var(--ground);
+  color:var(--text);
+  font-family:var(--font-body);
+  min-height:100vh;
+}
+::selection{background:rgba(var(--cyan-rgb),.35);color:#fff}
+/* ---------- scanlines + grid backdrop ---------- */
+.scanlines{position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:repeating-linear-gradient(0deg,rgba(var(--cyan-rgb),.016) 0 1px,transparent 1px 3px);
+  mix-blend-mode:overlay}
+.blueprint{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.5;
+  background:
+    linear-gradient(rgba(var(--cyan-rgb),.05) 1px,transparent 1px) 0 0/100% 32px,
+    linear-gradient(90deg,rgba(var(--cyan-rgb),.05) 1px,transparent 1px) 0 0/32px 100%;
+  mask-image:radial-gradient(ellipse 90% 80% at 50% 40%,#000 25%,transparent 95%);
+  -webkit-mask-image:radial-gradient(ellipse 90% 80% at 50% 40%,#000 25%,transparent 95%)}
+
+/* ---------- top nav ---------- */
+nav{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:26px;
+  padding:14px 28px;background:rgba(6,8,15,.82);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line)}
+nav .brand{display:flex;align-items:center;gap:12px;font-family:var(--font-display);
+  font-size:15px;letter-spacing:.14em;color:var(--cyan-bright);white-space:nowrap}
+nav .brand .mark{width:26px;height:26px;border:1px solid var(--cyan);border-radius:50%;
+  display:grid;place-items:center;position:relative}
+nav .brand .mark::after{content:"";position:absolute;inset:5px;border-radius:50%;
+  border:1px solid var(--gold)}
+nav .brand small{color:var(--text-faint);font-family:var(--font-hud);letter-spacing:.22em;font-size:11px}
+nav .links{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+nav a{font-family:var(--font-hud);font-weight:600;font-size:13px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--text-dim);text-decoration:none;padding:7px 13px;
+  border-radius:6px;border:1px solid transparent;transition:.2s}
+nav a:hover{color:var(--cyan-bright);border-color:var(--line)}
+nav a.active{color:var(--cyan-bright);border-color:var(--line-strong);background:rgba(var(--cyan-rgb),.08)}
+
+/* ---------- hero ---------- */
+.hero{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:90px 28px 30px;text-align:center}
+.hero .kicker{font-family:var(--font-mono);font-size:13px;letter-spacing:.34em;color:var(--gold);
+  text-transform:uppercase;margin-bottom:18px}
+.hero .kicker::before,.hero .kicker::after{content:"—— ";color:var(--text-faint)}
+.hero h1{font-family:var(--font-display);font-weight:900;font-size:clamp(34px,6vw,64px);
+  letter-spacing:.12em;color:var(--cyan-bright);text-shadow:0 0 30px rgba(var(--cyan-rgb),.45)}
+.hero h1 .gold{color:var(--gold-bright);text-shadow:0 0 30px rgba(var(--gold-rgb),.5)}
+.hero p.sub{max-width:640px;margin:22px auto 0;color:var(--text-dim);font-size:16px;line-height:1.7}
+.hero p.sub b{color:var(--text)}
+.hero .meta{margin-top:26px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.hero .meta span{font-family:var(--font-mono);font-size:12px;letter-spacing:.14em;color:var(--text-dim);
+  border:1px solid var(--line);padding:6px 12px;border-radius:6px;background:rgba(var(--cyan-rgb),.05)}
+.hero .meta span i{color:var(--green);font-style:normal}
+
+/* ---------- sections ---------- */
+section{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:80px 28px}
+.shead{display:flex;align-items:baseline;gap:18px;margin-bottom:38px}
+.shead .num{font-family:var(--font-mono);font-size:15px;color:var(--gold)}
+.shead h2{font-family:var(--font-display);font-weight:700;font-size:26px;letter-spacing:.16em;
+  color:var(--cyan-bright);text-transform:uppercase}
+.shead h2 .amp{color:var(--gold)}
+.shead .rule{flex:1;height:1px;background:linear-gradient(90deg,var(--line-strong),transparent)}
+
+/* ---------- section 1: the boot ---------- */
+.boot-wrap{position:relative;border:1px solid var(--line-strong);border-radius:var(--r);
+  overflow:hidden;background:var(--surface);box-shadow:0 0 60px rgba(var(--cyan-rgb),.08)}
+.boot-top{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);
+  background:rgba(6,8,15,.6)}
+.boot-top .dot{width:10px;height:10px;border-radius:50%}
+.boot-top .dot.r{background:#FF5F57}.boot-top .dot.y{background:#FEBC2E}.boot-top .dot.g{background:#28C840}
+.boot-top .t{font-family:var(--font-mono);font-size:12px;color:var(--text-faint);margin-left:8px;letter-spacing:.1em}
+.boot-top .btn{margin-left:auto;font-family:var(--font-hud);font-weight:700;font-size:12px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--gold-bright);background:rgba(var(--gold-rgb),.1);
+  border:1px solid rgba(var(--gold-rgb),.4);padding:5px 12px;border-radius:6px;cursor:pointer;transition:.2s}
+.boot-top .btn:hover{background:rgba(var(--gold-rgb),.22)}
+.boot-stage{position:relative;height:430px;background:
+  radial-gradient(560px 380px at 50% 42%,rgba(var(--cyan-rgb),.10),transparent 70%),var(--surface);
+  overflow:hidden}
+.boot-stage .bg-grid{position:absolute;inset:0;background:
+  linear-gradient(rgba(var(--cyan-rgb),.07) 1px,transparent 1px) 0 0/100% 30px,
+  linear-gradient(90deg,rgba(var(--cyan-rgb),.07) 1px,transparent 1px) 0 0/30px 100%;
+  mask-image:radial-gradient(ellipse 80% 70% at 50% 45%,#000 30%,transparent 96%);
+  -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 45%,#000 30%,transparent 96%)}
+
+/* rings — the arc reactor pulse */
+.rings{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+.ring{position:absolute;top:50%;left:50%;border-radius:50%;border:1px solid var(--cyan);
+  transform:translate(-50%,-50%);opacity:0}
+@keyframes ringPulse{0%{width:40px;height:40px;opacity:.9;border-color:var(--cyan)}
+  60%{opacity:.35}100%{width:420px;height:420px;opacity:0;border-color:var(--gold)}}
+.boot-stage.playing .ring{animation:ringPulse 1.6s ease-out infinite}
+.boot-stage.playing .ring:nth-child(2){animation-delay:.45s}
+.boot-stage.playing .ring:nth-child(3){animation-delay:.9s}
+.boot-stage.playing .ring:nth-child(4){animation-delay:1.25s}
+
+/* wordmark */
+.boot-word{position:absolute;top:50%;left:50%;transform:translate(-50%,-52%);text-align:center}
+.boot-word h3{font-family:var(--font-display);font-weight:900;font-size:clamp(30px,5vw,52px);
+  letter-spacing:.28em;color:var(--cyan-bright);text-shadow:0 0 40px rgba(var(--cyan-rgb),.6);white-space:nowrap}
+.boot-word h3 .dot{color:var(--gold);text-shadow:0 0 30px rgba(var(--gold-rgb),.8)}
+.boot-word .core{font-family:var(--font-mono);font-size:11px;letter-spacing:.5em;color:var(--gold);
+  margin-top:14px;text-transform:uppercase;white-space:nowrap}
+@keyframes letterIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.boot-word h3 span{display:inline-block;opacity:0;animation:letterIn .5s ease forwards}
+
+/* status lines */
+.boot-lines{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);width:min(480px,86%);
+  font-family:var(--font-mono);font-size:12px;line-height:2;color:var(--text-dim);text-align:left}
+.boot-lines .l{white-space:nowrap;overflow:hidden;opacity:0}
+.boot-lines .l .ok{color:var(--green)}
+.boot-lines .l .warn{color:var(--gold)}
+@keyframes lineIn{from{opacity:0}to{opacity:1}}
+.boot-stage.playing .boot-lines .l{animation:lineIn .4s ease forwards}
+.boot-stage.playing .boot-lines .l:nth-child(1){animation-delay:2.2s}
+.boot-stage.playing .boot-lines .l:nth-child(2){animation-delay:3.1s}
+.boot-stage.playing .boot-lines .l:nth-child(3){animation-delay:4.0s}
+.boot-stage.playing .boot-lines .l:nth-child(4){animation-delay:4.9s}
+.boot-stage.playing .boot-lines .l:nth-child(5){animation-delay:5.8s}
+
+/* dial (from boot / LISTENING) */
+.dial{position:absolute;right:26px;bottom:26px;width:86px;height:86px;border-radius:50%;
+  display:grid;place-items:center;border:1px solid var(--line-strong)}
+.dial .spin{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;
+  border-top-color:var(--cyan);border-right-color:var(--gold);animation:spin 2.6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.dial .txt{font-family:var(--font-hud);font-weight:700;font-size:10px;letter-spacing:.2em;
+  color:var(--cyan-bright);text-transform:uppercase;text-align:center;line-height:1.4}
+.dial .txt small{display:block;color:var(--gold);font-size:9px;letter-spacing:.12em}
+.dial .core-dot{position:absolute;top:50%;left:50%;width:6px;height:6px;transform:translate(-50%,-50%);
+  border-radius:50%;background:var(--gold);box-shadow:0 0 12px var(--gold)}
+
+/* ---------- section 2: design system ---------- */
+.ds-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+@media(max-width:900px){.ds-grid{grid-template-columns:1fr}}
+.ds-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:26px}
+.ds-card h3{font-family:var(--font-hud);font-weight:700;font-size:15px;letter-spacing:.2em;
+  color:var(--cyan-bright);text-transform:uppercase;margin-bottom:20px;display:flex;align-items:center;gap:10px}
+.ds-card h3::before{content:"◈";color:var(--gold);font-size:13px}
+
+/* color chips */
+.chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.chip{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.chip .sw{height:56px}
+.chip .info{padding:10px 12px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);line-height:1.6}
+.chip .info b{display:block;color:var(--text);font-family:var(--font-hud);font-size:12px;letter-spacing:.1em}
+.chip.used .sw{position:relative}
+.chip.used .sw::after{content:"KEEP";position:absolute;top:6px;right:6px;font-family:var(--font-mono);
+  font-size:9px;letter-spacing:.16em;color:#000;background:var(--cyan-bright);padding:2px 6px;border-radius:3px}
+.chip.new .sw::after{content:"NEW";position:absolute;top:6px;right:6px;font-family:var(--font-mono);
+  font-size:9px;letter-spacing:.16em;color:#000;background:var(--gold-bright);padding:2px 6px;border-radius:3px}
+
+/* type specimens */
+.specs{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.specs{grid-template-columns:1fr}}
+.spec{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:18px 20px;cursor:pointer;
+  transition:.2s;position:relative}
+.spec:hover{border-color:var(--line-strong);transform:translateY(-2px)}
+.spec .tag{font-family:var(--font-mono);font-size:10px;letter-spacing:.2em;color:var(--gold);
+  text-transform:uppercase;margin-bottom:10px;display:block}
+.spec .sample{font-size:34px;line-height:1.15;color:var(--cyan-bright)}
+.spec .sample .gold{color:var(--gold-bright)}
+.spec .use{font-family:var(--font-hud);font-size:12.5px;color:var(--text-dim);margin-top:10px;letter-spacing:.04em}
+.spec.orbitron .sample{font-family:var(--font-display);font-weight:900;letter-spacing:.06em}
+.spec.rajdhani .sample{font-family:var(--font-hud);font-weight:700;letter-spacing:.02em}
+.spec.mono .sample{font-family:var(--font-mono);font-size:26px}
+.spec.body .sample{font-family:var(--font-body);font-weight:500;font-size:28px}
+
+/* ---------- section 3: the layout ---------- */
+.layout-notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:30px}
+.note{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px}
+.note .n{font-family:var(--font-mono);font-size:11px;color:var(--gold);letter-spacing:.18em}
+.note h4{font-family:var(--font-hud);font-weight:700;font-size:15px;letter-spacing:.1em;color:var(--text);
+  text-transform:uppercase;margin:6px 0 8px}
+.note p{font-size:13.5px;color:var(--text-dim);line-height:1.6}
+
+/* the app mockup */
+.app{position:relative;border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;
+  background:var(--ground);box-shadow:0 30px 90px rgba(0,0,0,.5);min-height:640px;display:flex;flex-direction:column}
+.app .statusbar{display:flex;align-items:center;gap:18px;padding:10px 18px;font-family:var(--font-mono);
+  font-size:11px;letter-spacing:.12em;color:var(--text-dim);border-bottom:1px solid var(--line);
+  background:rgba(6,8,15,.7)}
+.app .statusbar .live{display:flex;align-items:center;gap:7px;color:var(--green)}
+.app .statusbar .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 8px var(--green);animation:blink 1.8s infinite}
+@keyframes blink{50%{opacity:.35}}
+.app .statusbar .sep{width:1px;height:14px;background:var(--line)}
+.app .statusbar .right{margin-left:auto;color:var(--text-faint)}
+.app .statusbar .gold{color:var(--gold)}
+.app-body{display:grid;grid-template-columns:64px 1fr 260px;flex:1;min-height:0}
+@media(max-width:900px){.app-body{grid-template-columns:56px 1fr}}
+@media(max-width:640px){.app-body{grid-template-columns:1fr}.rail{display:none}}
+
+/* icon rail */
+.rail{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 0;
+  border-right:1px solid var(--line);background:rgba(6,8,15,.5)}
+.rail .ico{width:40px;height:40px;border-radius:9px;display:grid;place-items:center;color:var(--text-faint);
+  border:1px solid transparent;font-size:16px;cursor:pointer;transition:.2s;position:relative}
+.rail .ico:hover{color:var(--cyan-bright);background:rgba(var(--cyan-rgb),.08)}
+.rail .ico.on{color:var(--cyan-bright);border-color:var(--line-strong);background:rgba(var(--cyan-rgb),.1)}
+.rail .ico.on::before{content:"";position:absolute;left:-13px;top:50%;transform:translateY(-50%);
+  width:3px;height:20px;background:var(--gold);border-radius:0 2px 2px 0}
+.rail .ico .tip{position:absolute;left:52px;top:50%;transform:translateY(-50%);background:var(--panel-2);
+  border:1px solid var(--line-strong);color:var(--text);font-family:var(--font-hud);font-size:12px;
+  letter-spacing:.14em;text-transform:uppercase;padding:4px 9px;border-radius:5px;white-space:nowrap;
+  opacity:0;pointer-events:none;transition:.15s;z-index:20}
+.rail .ico:hover .tip{opacity:1}
+.rail .spacer{flex:1}
+
+/* main pane */
+.main{display:flex;flex-direction:column;min-width:0;position:relative}
+.main .pane-head{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.main .pane-head h4{font-family:var(--font-hud);font-weight:700;font-size:15px;letter-spacing:.22em;
+  color:var(--cyan-bright);text-transform:uppercase}
+.main .pane-head .crumbs{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);letter-spacing:.08em}
+.main .pane-head .hud-tag{margin-left:auto;font-family:var(--font-mono);font-size:10px;letter-spacing:.18em;
+  color:var(--gold);border:1px solid rgba(var(--gold-rgb),.4);padding:4px 9px;border-radius:4px;
+  background:rgba(var(--gold-rgb),.07)}
+.brain-stage{flex:1;position:relative;min-height:340px;overflow:hidden;
+  background:radial-gradient(520px 360px at 50% 50%,rgba(var(--cyan-rgb),.07),transparent 70%)}
+.brain-stage canvas{position:absolute;inset:0;width:100%;height:100%}
+.brain-label{position:absolute;top:14px;left:18px;font-family:var(--font-mono);font-size:10px;
+  letter-spacing:.22em;color:var(--text-faint);text-transform:uppercase}
+.brain-label b{color:var(--cyan-bright)}
+.brain-count{position:absolute;bottom:14px;left:18px;font-family:var(--font-mono);font-size:11px;
+  color:var(--text-dim);letter-spacing:.1em}
+.brain-count b{color:var(--gold)}
+
+/* command bar */
+.cmdbar{display:flex;align-items:center;gap:12px;padding:13px 18px;border-top:1px solid var(--line);
+  background:rgba(6,8,15,.75)}
+.cmdbar .mic{width:38px;height:38px;border-radius:50%;border:1px solid var(--line-strong);
+  display:grid;place-items:center;color:var(--gold);background:rgba(var(--gold-rgb),.08);font-size:15px}
+.cmdbar .field{flex:1;display:flex;align-items:center;gap:10px;background:var(--panel);
+  border:1px solid var(--line-strong);border-radius:9px;padding:11px 16px}
+.cmdbar .field .prompt{font-family:var(--font-mono);font-size:12px;color:var(--gold)}
+.cmdbar .field input{flex:1;background:none;border:none;outline:none;color:var(--text);
+  font-family:var(--font-body);font-size:14.5px}
+.cmdbar .field input::placeholder{color:var(--text-faint)}
+.cmdbar .field .sugs{display:flex;gap:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)}
+.cmdbar .field .sugs b{color:var(--text-dim);font-weight:400}
+.cmdbar .spark{width:38px;height:38px;border-radius:9px;border:1px solid var(--cyan);
+  display:grid;place-items:center;color:#0B0E14;background:linear-gradient(135deg,var(--cyan),var(--gold));
+  font-size:16px;box-shadow:0 0 18px rgba(var(--cyan-rgb),.4)}
+.cmdbar .sug-chip{font-family:var(--font-hud);font-size:12px;font-weight:600;color:var(--text-dim);
+  border:1px solid var(--line);padding:6px 11px;border-radius:6px;cursor:pointer;white-space:nowrap;
+  transition:.15s;display:none}
+.cmdbar .sug-chip:hover{color:var(--cyan-bright);border-color:var(--line-strong)}
+@media(min-width:760px){.cmdbar .sug-chip{display:inline-block}}
+
+/* HUD right pane */
+.hud{display:flex;flex-direction:column;gap:14px;padding:16px;border-left:1px solid var(--line);
+  background:rgba(6,8,15,.45)}
+@media(max-width:900px){.hud{display:none}}
+.hud h5{font-family:var(--font-hud);font-weight:700;font-size:12px;letter-spacing:.26em;color:var(--gold);
+  text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.hud h5::after{content:"";flex:1;height:1px;background:var(--line)}
+.hud-card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:14px}
+.hud-card h6{font-family:var(--font-hud);font-weight:700;font-size:11.5px;letter-spacing:.18em;
+  color:var(--text-dim);text-transform:uppercase;margin-bottom:12px;display:flex;justify-content:space-between}
+.hud-card h6 .val{color:var(--cyan-bright);font-family:var(--font-mono);font-size:11px}
+.hud-row{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11.5px;
+  color:var(--text-dim);padding:5px 0;border-bottom:1px dashed rgba(var(--cyan-rgb),.08)}
+.hud-row:last-child{border-bottom:none}
+.hud-row b{color:var(--text);font-weight:400}
+.hud-row .up{color:var(--green)}.hud-row .down{color:var(--red)}.hud-row .warn{color:var(--gold)}
+.dial-big{width:132px;height:132px;margin:6px auto;position:relative;border-radius:50%;
+  display:grid;place-items:center;border:1px solid var(--line-strong)}
+.dial-big .spin{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;
+  border-top-color:var(--cyan);border-right-color:var(--gold);animation:spin 3s linear infinite}
+.dial-big .spin.r2{inset:7px;border-top-color:var(--gold);border-right-color:transparent;
+  border-left-color:var(--cyan);animation-duration:2s;animation-direction:reverse}
+.dial-big .txt{font-family:var(--font-hud);font-weight:700;font-size:11px;letter-spacing:.26em;
+  color:var(--cyan-bright);text-transform:uppercase;text-align:center;line-height:1.5}
+.dial-big .txt small{display:block;color:var(--gold);font-size:9px;letter-spacing:.16em}
+.meter{height:5px;background:rgba(var(--cyan-rgb),.1);border-radius:3px;overflow:hidden;margin-top:10px}
+.meter i{display:block;height:100%;width:64%;background:linear-gradient(90deg,var(--cyan),var(--gold));
+  border-radius:3px;box-shadow:0 0 10px rgba(var(--cyan-rgb),.5)}
+
+/* ---------- section 4: direction cards ---------- */
+.dirs{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+@media(max-width:900px){.dirs{grid-template-columns:1fr}}
+.dir{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  transition:.25s;position:relative}
+.dir:hover{border-color:var(--line-strong);transform:translateY(-4px);box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.dir .head{padding:24px 26px 16px;border-bottom:1px solid var(--line)}
+.dir .head .tag{font-family:var(--font-mono);font-size:10px;letter-spacing:.24em;text-transform:uppercase}
+.dir.a .head .tag{color:var(--cyan)}
+.dir.b .head .tag{color:var(--gold)}
+.dir .head h3{font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:.14em;
+  color:var(--text);margin-top:8px;text-transform:uppercase}
+.dir .head p{color:var(--text-dim);font-size:13.5px;line-height:1.6;margin-top:10px}
+.dir .body{padding:22px 26px}
+.dir .swatch-line{display:flex;gap:8px;margin-bottom:20px}
+.dir .swatch-line i{width:100%;height:34px;border-radius:6px}
+.dir ul{list-style:none;display:grid;gap:9px}
+.dir li{font-size:13.5px;color:var(--text-dim);line-height:1.55;padding-left:20px;position:relative}
+.dir li::before{content:"▸";position:absolute;left:0;color:var(--gold)}
+.dir .pick{margin:22px 26px 26px;display:block;width:calc(100% - 52px);padding:13px;
+  font-family:var(--font-hud);font-weight:700;font-size:13px;letter-spacing:.2em;text-transform:uppercase;
+  border-radius:8px;cursor:pointer;transition:.2s;border:1px solid}
+.dir.a .pick{color:var(--cyan-bright);border-color:var(--cyan);background:rgba(var(--cyan-rgb),.08)}
+.dir.a .pick:hover{background:rgba(var(--cyan-rgb),.2)}
+.dir.b .pick{color:var(--gold-bright);border-color:var(--gold);background:rgba(var(--gold-rgb),.08)}
+.dir.b .pick:hover{background:rgba(var(--gold-rgb),.2)}
+
+/* footer */
+footer{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:50px 28px 70px;text-align:center}
+footer .line{font-family:var(--font-mono);font-size:12px;letter-spacing:.2em;color:var(--text-faint)}
+footer .line .g{color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+<div class="blueprint"></div>
+
+<nav>
+  <div class="brand"><span class="mark"></span>DOURMOUSE <small>DESIGN LAB</small></div>
+  <div class="links">
+    <a href="#boot">The Boot</a>
+    <a href="#system">Design System</a>
+    <a href="#layout">The Deck</a>
+    <a href="#directions">Directions</a>
+  </div>
+</nav>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="kicker">Redesign Portfolio · v2.0</div>
+  <h1>DOURMOUSE <span class="gold">//</span> JARVIS-LINEAGE</h1>
+  <p class="sub">A full redesign of the central agent dispatch — new type, new layout, new boot sequence — inspired by the Stark HUD lineage: <b>Rajdhani + Share Tech Mono</b> readouts, a <b>brain-graph command deck</b>, and an <b>arc-reactor startup</b>.</p>
+  <div class="meta">
+    <span>STATUS <i>● READY FOR REVIEW</i></span>
+    <span>TYPE <i>RAJDHANI · SHARE TECH MONO</i></span>
+    <span>ACCENT <i>CYAN + GOLD</i></span>
+    <span>LANE <i>3-NODE (DELL READY)</i></span>
+  </div>
+</header>
+
+<!-- ================= SECTION 1 : THE BOOT ================= -->
+<section id="boot">
+  <div class="shead"><span class="num">01</span><h2>Startup <span class="amp">//</span> Boot Sequence</h2><span class="rule"></span></div>
+  <div class="boot-wrap">
+    <div class="boot-top">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="t">dourmouse --boot --reactor</span>
+      <button class="btn" id="bootBtn">▶ Replay</button>
+    </div>
+    <div class="boot-stage" id="bootStage">
+      <div class="bg-grid"></div>
+      <div class="rings"><div class="ring"></div><div class="ring"></div><div class="ring"></div><div class="ring"></div></div>
+      <div class="boot-word">
+        <h3 id="bootWord"><span>D</span><span>O</span><span>U</span><span>R</span><span>M</span><span>O</span><span>U</span><span>S</span><span>E</span><span class="dot">.</span></h3>
+        <div class="core">CORE REACTOR · POWERING UP</div>
+      </div>
+      <div class="boot-lines">
+        <div class="l">SYS :: neural orchestrator <span class="ok">ONLINE</span></div>
+        <div class="l">CORE :: 29 agents mounted <span class="ok">READY</span></div>
+        <div class="l">LINK :: relay 100.98.97.23 <span class="ok">SYNCED</span></div>
+        <div class="l">MEM :: 2,758 facts recalled <span class="ok">OK</span></div>
+        <div class="l">MODE :: <span class="warn">GOOD MORNING, SIR.</span></div>
+      </div>
+      <div class="dial"><div class="spin"></div><div class="core-dot"></div><div class="txt">LISTENING<small>OPUS-4-8</small></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SECTION 2 : DESIGN SYSTEM ================= -->
+<section id="system">
+  <div class="shead"><span class="num">02</span><h2>Design <span class="amp">//</span> System</h2><span class="rule"></span></div>
+  <div class="ds-grid">
+    <div class="ds-card">
+      <h3>Colour</h3>
+      <div class="chips">
+        <div class="chip used"><div class="sw" style="background:#06080F"></div><div class="info"><b>GROUND</b>#06080F · never pure black</div></div>
+        <div class="chip used"><div class="sw" style="background:#0B0F1A"></div><div class="info"><b>SURFACE</b>#0B0F1A · panels</div></div>
+        <div class="chip used"><div class="sw" style="background:#4FC3F7"></div><div class="info"><b>CYAN</b>#4FC3F7 · identity · ~90% of marks</div></div>
+        <div class="chip new"><div class="sw" style="background:#7FE0FF"></div><div class="info"><b>CYAN BRIGHT</b>#7FE0FF · headlines, glow</div></div>
+        <div class="chip used"><div class="sw" style="background:#F5A623"></div><div class="info"><b>GOLD</b>#F5A623 · the reactor · attention</div></div>
+        <div class="chip new"><div class="sw" style="background:#FFC44D"></div><div class="info"><b>GOLD BRIGHT</b>#FFC44D · boot, wordmark dot</div></div>
+        <div class="chip used"><div class="sw" style="background:#EF5350"></div><div class="info"><b>RED</b>#EF5350 · threat + loss ONLY</div></div>
+        <div class="chip new"><div class="sw" style="background:#3DDC84"></div><div class="info"><b>GREEN</b>#3DDC84 · live / online state</div></div>
+        <div class="chip new"><div class="sw" style="background:#DCE9F7"></div><div class="info"><b>TEXT</b>#DCE9F7 · near-white, readable</div></div>
+        <div class="chip used"><div class="sw" style="background:#8A929E"></div><div class="info"><b>DEAD</b>#8A929E · unavailable channels</div></div>
+      </div>
+    </div>
+    <div class="ds-card">
+      <h3>Type — the change you'll feel first</h3>
+      <div class="specs">
+        <div class="spec orbitron"><span class="tag">Display · Orbitron 900</span><div class="sample">DOURMOUSE<span class="gold">.</span></div><div class="use">Wordmark + section heads. Tracking +0.14em. Not body text — ever.</div></div>
+        <div class="spec rajdhani"><span class="tag">HUD · Rajdhani 700</span><div class="sample">CENTRAL DISPATCH</div><div class="use">The new voice: labels, nav, buttons, status. Squared, condensed, readable at 12px.</div></div>
+        <div class="spec mono"><span class="tag">Mono · Share Tech Mono</span><div class="sample">SYSTEMS ONLINE <span style="color:var(--gold)">▮</span></div><div class="use">Terminal lines, readouts, tickers. The authentic Stark HUD terminal face.</div></div>
+        <div class="spec body"><span class="tag">Body · Space Grotesk</span><div class="sample">Good morning, sir.</div><div class="use">Prose, directives, agent replies. Keeps chat human instead of blinking.</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="ds-grid" style="margin-top:26px">
+    <div class="ds-card">
+      <h3>What changed vs today</h3>
+      <div class="note" style="margin-bottom:14px">
+        <h4>Today</h4>
+        <p>JetBrains Mono everywhere — even headers. One typeface, one weight, dense three-pane grid (268/1fr/300). Cyan text at 85% on near-black: low contrast, flat hierarchy, nothing breathes.</p>
+      </div>
+      <div class="note">
+        <h4>Tomorrow</h4>
+        <p>Four-role type system (display / HUD / mono / body). Near-white readable text with cyan as the *accent*, not the body. Icon rail + command deck layout. Gold reserved for the reactor and "sir" moments.</p>
+      </div>
+    </div>
+    <div class="ds-card">
+      <h3>Rules of the system</h3>
+      <div class="note" style="margin-bottom:14px"><span class="n">R1</span><h4>One hex per hue</h4><p>Depth from an 8-step alpha scale, never tints. Glow survives.</p></div>
+      <div class="note" style="margin-bottom:14px"><span class="n">R2</span><h4>Gold is the reactor</h4><p>Boot, wordmark dot, "sir" moments, in-flight. Nowhere else.</p></div>
+      <div class="note"><span class="n">R3</span><h4>Readability first</h4><p>Body text near-white; cyan only for marks, lines, and identity.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SECTION 3 : THE LAYOUT ================= -->
+<section id="layout">
+  <div class="shead"><span class="num">03</span><h2>The <span class="amp">//</span> Command Deck</h2><span class="rule"></span></div>
+  <div class="layout-notes">
+    <div class="note"><span class="n">A</span><h4>Icon rail</h4><p>Six fixed destinations — HOME, AGENTS, MARKETS, FILES, VOICE, SETTINGS. One-tap, tooltips on hover, gold indicator for the active lane.</p></div>
+    <div class="note"><span class="n">B</span><h4>Brain graph</h4><p>The whole system at a glance: agents as nodes, live connections as glowing edges. The AI WORKSHOP OS signature, rebuilt for trading ops.</p></div>
+    <div class="note"><span class="n">C</span><h4>HUD pane</h4><p>System vitals in Stark readout style — model, memory, relay, today's P&amp;L. The LISTENING dial returns, always spinning.</p></div>
+    <div class="note"><span class="n">D</span><h4>Command bar</h4><p>One input for everything. Mic + sparkle, suggestion chips, gold prompt glyph. Full-screen when focused.</p></div>
+  </div>
+
+  <div class="app">
+    <div class="statusbar">
+      <span class="live">SYSTEMS ONLINE</span>
+      <span class="sep"></span>
+      <span>CORE · 29/29 AGENTS</span>
+      <span class="sep"></span>
+      <span>MEM · 2,758 FACTS</span>
+      <span class="sep"></span>
+      <span>RELAY <span class="gold">● SYNCED</span></span>
+      <span class="right">DOURMOUSE-FINETUNED · 12:37:30 · <span class="gold">UAE +04</span></span>
+    </div>
+    <div class="app-body">
+      <div class="rail">
+        <div class="ico on" title="Home">⌂<span class="tip">Home</span></div>
+        <div class="ico" title="Agents">◈<span class="tip">Agents</span></div>
+        <div class="ico" title="Markets">⇅<span class="tip">Markets</span></div>
+        <div class="ico" title="Files">▤<span class="tip">Files</span></div>
+        <div class="ico" title="Voice">◉<span class="tip">Voice</span></div>
+        <div class="spacer"></div>
+        <div class="ico" title="Settings">⚙<span class="tip">Settings</span></div>
+      </div>
+      <div class="main">
+        <div class="pane-head">
+          <h4>Home · Live Operations</h4>
+          <span class="crumbs">/home /dispatch /2026-08-13</span>
+          <span class="hud-tag">REACTOR 98.2%</span>
+        </div>
+        <div class="brain-stage">
+          <canvas id="brain"></canvas>
+          <div class="brain-label">NEURAL <b>ORCHESTRATOR</b> · 29 ACTIVE NODES</div>
+          <div class="brain-count">EDGES <b>1,786</b> · MEMORY <b>2,758</b> FACTS · <span style="color:var(--gold)">LEARNING ●</span></div>
+        </div>
+        <div class="cmdbar">
+          <div class="mic">◉</div>
+          <div class="field">
+            <span class="prompt">▸</span>
+            <input placeholder="Ask · “run the gold monthly” · “good morning”">
+            <span class="sugs"><b>remind me</b> · <b>show markets</b> · <b>status</b></span>
+          </div>
+          <div class="spark">✦</div>
+          <div class="sug-chip">RUN GOLD MONTHLY</div>
+          <div class="sug-chip">PAPER FILL</div>
+        </div>
+      </div>
+      <div class="hud">
+        <h5>System Vitals</h5>
+        <div class="hud-card">
+          <h6>MODEL <span class="val">LOCKED</span></h6>
+          <div class="hud-row">Backend <b>dourmouse-finetuned</b></div>
+          <div class="hud-row">VRAM <b>4.0 GB</b></div>
+          <div class="hud-row">Gate <b class="up">PASS · 100%</b></div>
+        </div>
+        <div class="hud-card">
+          <h6>RELAY <span class="val">3 NODES</span></h6>
+          <div class="hud-row">Desktop <b class="up">● 100.98.97.23</b></div>
+          <div class="hud-row">MacBook <b class="up">● 100.84.156.49</b></div>
+          <div class="hud-row">Dell <b class="warn">○ enrolling</b></div>
+        </div>
+        <div class="hud-card">
+          <h6>LISTENING</h6>
+          <div class="dial-big"><div class="spin"></div><div class="spin r2"></div><div class="core-dot"></div>
+            <div class="txt">ACTIVE<small>OPUS-4-8</small></div></div>
+          <div class="meter"><i></i></div>
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-align:center;margin-top:8px">SENSOR 98.2% · FIDELITY HIGH</div>
+        </div>
+        <div class="hud-card">
+          <h6>TODAY <span class="val">UAE +04</span></h6>
+          <div class="hud-row">Session P&amp;L <b class="up">+$0.00 (paper)</b></div>
+          <div class="hud-row">Directives <b>3 / 5</b></div>
+          <div class="hud-row">Tasks <b class="warn">1 blocked · T11</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SECTION 4 : DIRECTIONS ================= -->
+<section id="directions">
+  <div class="shead"><span class="num">04</span><h2>Direction <span class="amp">//</span> Pick One</h2><span class="rule"></span></div>
+  <div class="dirs">
+    <div class="dir a">
+      <div class="head">
+        <span class="tag">Direction A · Recommended</span>
+        <h3>Arc Core</h3>
+        <p>What you just saw — cyan identity, gold reactor, brain-graph command deck. Closest to the Stark lineage in your references while keeping DOURMOUSE's cyan identity.</p>
+      </div>
+      <div class="body">
+        <div class="swatch-line"><i style="background:#06080F"></i><i style="background:#0B0F1A"></i><i style="background:#4FC3F7"></i><i style="background:#F5A623"></i><i style="background:#DCE9F7"></i></div>
+        <ul>
+          <li>Full boot sequence shipped (rings → wordmark → status lines → dial)</li>
+          <li>Four-role type system, readable body text</li>
+          <li>Brain graph canvas as the live home screen</li>
+          <li>HUD pane with Stark-style readouts + LISTENING dial</li>
+          <li>Dell compute node gets the same skin via shared CSS tokens</li>
+        </ul>
+      </div>
+      <button class="pick" data-dir="A">Select Direction A</button>
+    </div>
+    <div class="dir b">
+      <div class="head">
+        <span class="tag">Direction B · Alternative</span>
+        <h3>Cold Fusion</h3>
+        <p>The same deck layout and boot, but the gold reactor is demoted to a cooler teal-white identity — a more clinical, less theatrical Stark, closer to the MARK XXX still.</p>
+      </div>
+      <div class="body">
+        <div class="swatch-line"><i style="background:#04060B"></i><i style="background:#0A0F1C"></i><i style="background:#5AD7FF"></i><i style="background:#B8E9FF"></i><i style="background:#E8F2FF"></i></div>
+        <ul>
+          <li>Same boot + deck layout (cheap to switch: tokens only)</li>
+          <li>Teal-white accent, no gold — calmer, more "control room"</li>
+          <li>Higher-contrast panels, softer glow falloff</li>
+          <li>Ideal if gold reads too "Iron Man cosplay" for commercial</li>
+        </ul>
+      </div>
+      <button class="pick" data-dir="B">Select Direction B</button>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="line">DOURMOUSE <span class="g">//</span> DESIGN LAB — v2.0 PORTFOLIO · BUILT FOR REVIEW · ALL CSS TOKENS SHAREABLE ACROSS THE 3-NODE STACK</div>
+</footer>
+
+<script>
+/* ---------------- boot replay ---------------- */
+const stage = document.getElementById('bootStage');
+const btn = document.getElementById('bootBtn');
+const word = document.getElementById('bootWord');
+function playBoot(){
+  stage.classList.remove('playing');
+  void stage.offsetWidth;            // restart animations
+  // re-stagger the wordmark letters
+  word.querySelectorAll('span').forEach((s,i)=>{ s.style.animation='none'; void s.offsetWidth;
+    s.style.animation='letterIn .5s ease forwards'; s.style.animationDelay=(0.15*i+0.4)+'s'; });
+  stage.classList.add('playing');
+}
+btn.addEventListener('click', playBoot);
+// play once on load
+window.addEventListener('load', ()=>{ setTimeout(playBoot, 400); });
+
+/* ---------------- brain graph ---------------- */
+const cv = document.getElementById('brain');
+const ctx = cv.getContext('2d');
+let W,H,dpr;
+function sizeCanvas(){
+  dpr = window.devicePixelRatio||1;
+  const r = cv.getBoundingClientRect();
+  W = r.width; H = r.height;
+  cv.width = W*dpr; cv.height = H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+sizeCanvas(); window.addEventListener('resize', sizeCanvas);
+
+// deterministic node field (seeded so the same every visit)
+let nodes=[];
+(function seed(){
+  let s=1337;
+  const rnd=()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; };
+  const cx=W/2, cy=H/2;
+  const roles=['atlas','mt5','t212','forex','voice','mail','docs','sched','spotify','worker','gate','hub','engine'];
+  for(let i=0;i<29;i++){
+    const a=rnd()*Math.PI*2, rr=Math.sqrt(rnd())*Math.min(W,H)*0.42;
+    nodes.push({
+      x:cx+Math.cos(a)*rr, y:cy+Math.sin(a)*rr,
+      r:2.2+rnd()*4, vx:(rnd()-.5)*.25, vy:(rnd()-.5)*.25,
+      role:roles[i%roles.length], hub:i<4
+    });
+  }
+  // a couple of gold "reactor" nodes in the core
+  for(let i=0;i<3;i++){ const a=rnd()*Math.PI*2;
+    nodes.push({x:cx+Math.cos(a)*22,y:cy+Math.sin(a)*22,r:3.4,vx:0,vy:0,role:'core',hub:true}); }
+})();
+
+let t=0;
+function drawBrain(){
+  t+=0.004;
+  ctx.clearRect(0,0,W,H);
+  const cx=W/2, cy=H/2;
+  // edges: connect nodes within distance, hub-heavy
+  for(let i=0;i<nodes.length;i++){
+    for(let j=i+1;j<nodes.length;j++){
+      const a=nodes[i],b=nodes[j];
+      const dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy);
+      if(d<110){
+        const hub=(a.hub||b.hub)?1:0;
+        const alpha=hub?(0.30+0.15*Math.sin(t*3+d*0.02)):0.10;
+        ctx.strokeStyle=`rgba(79,195,247,${alpha})`;
+        ctx.lineWidth=hub?1.2:0.6;
+        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+      }
+    }
+  }
+  // nodes
+  for(const n of nodes){
+    const pul=n.hub? 0.5+0.5*Math.sin(t*4+n.x*0.05) : 0.5+0.5*Math.sin(t*2+n.y*0.05);
+    const col=n.role==='core'? '245,166,35' : '79,195,247';
+    ctx.fillStyle=`rgba(${col},${0.35+0.4*pul})`;
+    ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);ctx.fill();
+    if(n.hub){
+      ctx.strokeStyle=`rgba(${col},${0.25+0.2*pul})`;
+      ctx.lineWidth=1;
+      ctx.beginPath();ctx.arc(n.x,n.y,n.r+4+3*pul,0,Math.PI*2);ctx.stroke();
+    }
+  }
+  // center reactor core
+  const cr=10+3*Math.sin(t*2);
+  ctx.strokeStyle=`rgba(245,166,35,0.55)`;ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.arc(cx,cy,cr,0,Math.PI*2);ctx.stroke();
+  ctx.strokeStyle=`rgba(79,195,247,0.4)`;ctx.lineWidth=1;
+  ctx.beginPath();ctx.arc(cx,cy,cr+8+2*Math.sin(t*2.5),0,Math.PI*2);ctx.stroke();
+  ctx.fillStyle='rgba(255,196,77,0.9)';
+  ctx.beginPath();ctx.arc(cx,cy,2.6,0,Math.PI*2);ctx.fill();
+  // drift
+  for(const n of nodes){ n.x+=n.vx; n.y+=n.vy;
+    if(n.x<10||n.x>W-10)n.vx*=-1; if(n.y<10||n.y>H-10)n.vy*=-1; }
+  requestAnimationFrame(drawBrain);
+}
+drawBrain();
+
+/* ---------------- direction pick (review hook) ---------------- */
+document.querySelectorAll('.pick').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.pick').forEach(x=>x.textContent='SELECT');
+    b.textContent='SELECTED ✓ DIRECTION '+b.dataset.dir;
+    b.style.background=b.dataset.dir==='A'?'rgba(79,195,247,.25)':'rgba(245,166,35,.25)';
+  });
+});
+</script>
+</body>
+</html>
