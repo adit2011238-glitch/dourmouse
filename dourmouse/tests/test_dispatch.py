@@ -784,6 +784,7 @@ class TestEndToEndThroughGeneralRoster:
             "t212",  # v8.2: Trading 212 broker (demo/live, paper-first)
             "mt5",  # v8.3: MetaTrader 5 paper broker (demo, no subscriptions)
             "docs",  # v5.x: Google Sheets/Drive link-shared access
+            "browser",  # v5.25: real headless-Chrome agent (signup/login)
         }
 
     def test_trading_subagent_added_later_dispatchable(self):

@@ -1008,6 +1008,47 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.connections import check_connections
 
             self._send_json(check_connections())
+        elif path == "/api/browser/status":
+            # v5.25: browser-agent engine/state (never launches Chrome here).
+            from dourmouse.browser_agent import browser_status
+
+            self._send_json(browser_status())
+        elif path == "/api/browser/activity":
+            # v5.25: the browser agent's activity ring buffer.
+            from dourmouse.browser_agent import browser_activity
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                limit = int((qs.get("limit") or ["50"])[0])
+            except ValueError:
+                limit = 50
+            self._send_json({"activity": browser_activity(limit)})
+        elif path == "/api/browser/screenshot":
+            # v5.25: serve the latest browser-agent screenshot as PNG.
+            from dourmouse.browser_agent import latest_screenshot
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            name = (qs.get("name") or ["latest"])[0]
+            shot = latest_screenshot(name)
+            if shot is None:
+                self.send_error(404, "no browser screenshot yet — ask the agent to take one")
+                return
+            try:
+                body = shot.read_bytes()
+            except OSError:
+                self.send_error(404, "screenshot unreadable")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/api/email/identity":
+            # v5.25: Dourmouse's own mail identity (name, own address, SMTP).
+            from dourmouse.email_identity import identity_status
+
+            self._send_json(identity_status())
         elif path == "/api/atlas":
             # v5.4: ATLAS quant-engine panel — real telemetry + last run.
             from dourmouse.atlas_cli import atlas_panel_snapshot

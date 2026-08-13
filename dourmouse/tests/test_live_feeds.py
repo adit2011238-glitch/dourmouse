@@ -296,8 +296,10 @@ class TestPreloadedAgents:
         # v5.0: the mail agent grew Gmail search/read/send alongside IMAP;
         # v5.2x: the per-user Google scope surface added drive_search +
         # drive_read (same OAuth session as gmail).
+        # v5.25: the Dourmouse own-mail identity surface (status + own send).
         assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send",
-                "drive_read", "drive_search"} == tools
+                "drive_read", "drive_search",
+                "email_identity_status", "email_own_send"} == tools
 
     def test_tasks_agent_tools(self):
         registry = build_general_registry()

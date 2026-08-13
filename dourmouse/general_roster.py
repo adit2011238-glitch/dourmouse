@@ -43,7 +43,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from dourmouse.dispatch import (
     DispatchRegistry,
@@ -2660,6 +2660,40 @@ def build_general_registry() -> DispatchRegistry:
         except Exception as exc:  # noqa: BLE001 - network/SMTP failures, readable
             return f"GMAIL SEND FAILED: {type(exc).__name__}: {exc}"
 
+    def _email_identity_status_h() -> str:
+        from dourmouse.email_identity import identity_status
+
+        try:
+            s = identity_status()
+        except Exception as exc:  # noqa: BLE001 - env reads, never fatal
+            return f"EMAIL IDENTITY FAILED: {type(exc).__name__}: {exc}"
+        lines = [
+            f"IDENTITY: {s['name']}",
+            f"BASE ACCOUNT: {s['base_address'] or '(none configured)'}",
+            f"OWN ADDRESS: {s['own_address'] or '(none — set DOURMOUSE_EMAIL_ADDRESS or configure Gmail)'}",
+            f"SENDER MODE: {s['sender_mode']}",
+        ]
+        if s["smtp_identity"]:
+            m = s["smtp_identity"]
+            lines.append(f"DEDICATED SMTP: {m['from']} via {m['host']}:{m['port']} (tls={m['tls']})")
+        if s["alias_note"]:
+            lines.append(f"ALIAS NOTE: {s['alias_note']}")
+        return "\n".join(lines)
+
+    def _email_own_send_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.email_identity import email_send_via_smtp
+
+        try:
+            return email_send_via_smtp(
+                arguments.get("to", ""),
+                arguments.get("subject", ""),
+                arguments.get("body", ""),
+            )
+        except RuntimeError as exc:
+            return f"EMAIL OWN SEND (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network/SMTP failures, readable
+            return f"EMAIL OWN SEND FAILED: {type(exc).__name__}: {exc}"
+
     def _drive_search_h(arguments: dict[str, Any]) -> str:
         from dourmouse.google_services import drive_search
 
@@ -2679,6 +2713,299 @@ def build_general_registry() -> DispatchRegistry:
             return f"DRIVE READ (reported honestly): {exc}"
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"DRIVE READ FAILED: {type(exc).__name__}: {exc}"
+
+    # ---- Browser agent (v5.25): real headless Chrome via Playwright --------
+    def _browser_h(tool: str) -> Callable[[dict[str, Any]], str]:
+        def _handler(arguments: dict[str, Any]) -> str:
+            from dourmouse.browser_agent import (
+                browser_back,
+                browser_click,
+                browser_creds_forget,
+                browser_creds_list,
+                browser_creds_store,
+                browser_extract,
+                browser_fill,
+                browser_fill_form,
+                browser_open,
+                browser_press,
+                browser_screenshot,
+                browser_select,
+                browser_signin,
+                browser_snapshot,
+                browser_submit,
+                browser_wait,
+            )
+
+            _FN = {
+                "open": browser_open,
+                "snapshot": browser_snapshot,
+                "fill": browser_fill,
+                "fill_form": browser_fill_form,
+                "click": browser_click,
+                "select": browser_select,
+                "press": browser_press,
+                "submit": browser_submit,
+                "wait": browser_wait,
+                "back": browser_back,
+                "extract": browser_extract,
+                "screenshot": browser_screenshot,
+                "creds_store": browser_creds_store,
+                "creds_list": browser_creds_list,
+                "creds_forget": browser_creds_forget,
+                "signin": browser_signin,
+            }
+            try:
+                return _FN[tool](arguments)
+            except RuntimeError as exc:
+                return f"BROWSER (reported honestly): {exc}"
+            except Exception as exc:  # noqa: BLE001 - driver failures, readable
+                return f"BROWSER FAILED: {type(exc).__name__}: {exc}"
+
+        return _handler
+
+    _b_confirm = lambda a: (  # noqa: E731 - shared confirm prompt builder
+        f"{a.get('note', 'Submit the active form')} — site: "
+        f"{a.get('site', 'current page')}? (browser agent)"
+    )
+
+    registry.register_subagent(
+        _subagent(
+            "browser",
+            "General",
+            "Drives a real headless Chrome (Playwright + system Google Chrome) "
+            "to open pages, fill forms, sign up and log in. Submitting forms, "
+            "logging in, and storing credentials always require confirmation.",
+            [
+                ToolSpec(
+                    name="browser_open",
+                    description=(
+                        "Open a URL in the agent's real Chrome and report the "
+                        "page: URL, title, and interactive elements. Only "
+                        "http(s) URLs are ever opened. Use first, then drive "
+                        "the page with browser_fill / browser_click / "
+                        "browser_submit."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"url": {"type": "string"}},
+                        "required": ["url"],
+                    },
+                    handler=_browser_h("open"),
+                ),
+                ToolSpec(
+                    name="browser_snapshot",
+                    description=(
+                        "Read the CURRENT page state: URL, title, and every "
+                        "interactive element with its label/placeholder/value "
+                        "plus a text sample. Use before filling or clicking so "
+                        "you target real labels."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"max_elements": {"type": "integer", "default": 60}},
+                    },
+                    handler=_browser_h("snapshot"),
+                ),
+                ToolSpec(
+                    name="browser_fill",
+                    description=(
+                        "Fill ONE form field on the current page by its label, "
+                        "placeholder, button name, CSS selector (prefix 'css:'), "
+                        "or visible text."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string"},
+                            "value": {"type": "string"},
+                        },
+                        "required": ["target", "value"],
+                    },
+                    handler=_browser_h("fill"),
+                ),
+                ToolSpec(
+                    name="browser_fill_form",
+                    description=(
+                        "Fill MANY form fields at once for signup flows: an "
+                        "object of label -> value (labels from browser_snapshot). "
+                        "Nothing is submitted until browser_submit (which needs "
+                        "confirmation)."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"fields": {"type": "object", "description": "label -> value map"}},
+                        "required": ["fields"],
+                    },
+                    handler=_browser_h("fill_form"),
+                ),
+                ToolSpec(
+                    name="browser_click",
+                    description=(
+                        "Click an element on the current page by its label, "
+                        "button name, link text, CSS selector (prefix 'css:'), "
+                        "or visible text. Reports the resulting page."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"target": {"type": "string"}},
+                        "required": ["target"],
+                    },
+                    handler=_browser_h("click"),
+                ),
+                ToolSpec(
+                    name="browser_select",
+                    description=(
+                        "Choose an option in a <select> dropdown by its label "
+                        "and the option's value or label."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string"},
+                            "value": {"type": "string"},
+                        },
+                        "required": ["target", "value"],
+                    },
+                    handler=_browser_h("select"),
+                ),
+                ToolSpec(
+                    name="browser_press",
+                    description=(
+                        "Send a keyboard key to the page (Enter, Tab, Escape, "
+                        "ArrowDown...). Pressing Enter in a field submits the "
+                        "form — that is confirmation-gated like browser_submit."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"key": {"type": "string"}},
+                        "required": ["key"],
+                    },
+                    handler=_browser_h("press"),
+                ),
+                ToolSpec(
+                    name="browser_submit",
+                    description=(
+                        "Submit the active form (login, signup, search). "
+                        "REQUIRES human confirmation before anything is "
+                        "submitted; reports the resulting page."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"note": {"type": "string", "description": "what is being submitted"}},
+                    },
+                    handler=_browser_h("submit"),
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=_b_confirm,
+                ),
+                ToolSpec(
+                    name="browser_wait",
+                    description=(
+                        "Wait a fixed number of milliseconds for the page "
+                        "(animations, redirects, CAPTCHA-adjacent delays)."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"ms": {"type": "integer", "default": 1000}},
+                    },
+                    handler=_browser_h("wait"),
+                ),
+                ToolSpec(
+                    name="browser_back",
+                    description="Go back one page in the agent's Chrome.",
+                    parameters={"type": "object", "properties": {}},
+                    handler=_browser_h("back"),
+                ),
+                ToolSpec(
+                    name="browser_extract",
+                    description=(
+                        "Extract the visible text of an element (by label, CSS "
+                        "with 'css:' prefix, or text) — e.g. read an article "
+                        "behind a login, or pull a confirmation code off a page."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"target": {"type": "string"}},
+                        "required": ["target"],
+                    },
+                    handler=_browser_h("extract"),
+                ),
+                ToolSpec(
+                    name="browser_screenshot",
+                    description=(
+                        "Capture a PNG of the current page and save it to the "
+                        "app's data dir; view it at /api/browser/screenshot. "
+                        "Use to show the user what the agent sees."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"name": {"type": "string", "default": "latest"}},
+                    },
+                    handler=_browser_h("screenshot"),
+                ),
+                ToolSpec(
+                    name="browser_creds_store",
+                    description=(
+                        "Store login credentials for a site in the local 0600 "
+                        "vault so browser_signin can use them later. REQUIRES "
+                        "confirmation. Passwords are never shown again."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "site": {"type": "string", "description": "domain or https URL"},
+                            "username": {"type": "string"},
+                            "password": {"type": "string"},
+                        },
+                        "required": ["site", "username", "password"],
+                    },
+                    handler=_browser_h("creds_store"),
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=_b_confirm,
+                ),
+                ToolSpec(
+                    name="browser_creds_list",
+                    description=(
+                        "List which sites have stored credentials — usernames "
+                        "only, passwords are never shown."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_browser_h("creds_list"),
+                ),
+                ToolSpec(
+                    name="browser_creds_forget",
+                    description=(
+                        "Remove stored credentials for a site. REQUIRES "
+                        "confirmation."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"site": {"type": "string"}},
+                        "required": ["site"],
+                    },
+                    handler=_browser_h("creds_forget"),
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=_b_confirm,
+                ),
+                ToolSpec(
+                    name="browser_signin",
+                    description=(
+                        "Log in to a site using its stored credentials: opens "
+                        "the site, fills the username/password fields from the "
+                        "vault, submits, and reports where the page landed. "
+                        "REQUIRES confirmation — it performs a real login."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"site": {"type": "string", "description": "domain or https URL"}},
+                        "required": ["site"],
+                    },
+                    handler=_browser_h("signin"),
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=_b_confirm,
+                ),
+            ],
+        )
+    )
 
     registry.register_subagent(
         _subagent(
@@ -2795,6 +3122,44 @@ def build_general_registry() -> DispatchRegistry:
                     permission=Permission.REQUIRES_CONFIRMATION,
                     confirm_prompt=lambda a: (
                         f"Send Gmail to {a.get('to', '?')!r} with subject "
+                        f"{a.get('subject', '')!r}? (body: "
+                        f"{(a.get('body') or '')[:140]}...)"
+                    ),
+                ),
+                ToolSpec(
+                    name="email_identity_status",
+                    description=(
+                        "Report Dourmouse's own mail identity: display name, "
+                        "own address (default the +dourmouse receiving alias), "
+                        "and whether a dedicated SMTP mailbox is configured. "
+                        "Read-only."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=lambda a: _email_identity_status_h(),
+                ),
+                ToolSpec(
+                    name="email_own_send",
+                    description=(
+                        "Send an email FROM Dourmouse's OWN dedicated identity "
+                        "(the configured SMTP mailbox, e.g. you+dourmouse@... "
+                        "or a real dedicated address). ALWAYS requires "
+                        "confirmation; reports NOT CONFIGURED honestly when no "
+                        "dedicated mailbox is set up yet."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "to": {"type": "string"},
+                            "subject": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                        "required": ["to", "subject", "body"],
+                    },
+                    handler=_email_own_send_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Send mail FROM the Dourmouse identity to "
+                        f"{a.get('to', '?')!r} with subject "
                         f"{a.get('subject', '')!r}? (body: "
                         f"{(a.get('body') or '')[:140]}...)"
                     ),

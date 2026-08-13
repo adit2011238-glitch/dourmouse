@@ -95,6 +95,7 @@ class TestRosterShape:
             "mt5",  # v5.x: MetaTrader 5 broker ops
             "t212",  # v5.x: Trading 212 broker ops
             "docs",  # v5.x: Google Sheets/Drive link-shared access
+            "browser",  # v5.25: real headless-Chrome agent (signup/login)
         }
 
     def test_orchestrator_exposes_delegate_task(self):
@@ -114,6 +115,11 @@ class TestRosterShape:
             "gmail_send",  # v5.0: sending email always requires a human
             "spotify_playback_control",  # v5.7: changing playback needs a human
             "spotify_play",
+            "browser_submit",  # v5.25: submitting a form (login/signup) needs a human
+            "browser_signin",  # v5.25: logging in needs a human
+            "browser_creds_store",  # v5.25: storing credentials needs a human
+            "browser_creds_forget",  # v5.25: removing credentials needs a human
+            "email_own_send",  # v5.25: sending as the Dourmouse identity needs a human
         }
 
     def test_internet_tools_registered(self):

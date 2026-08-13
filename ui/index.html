@@ -1197,6 +1197,20 @@
   .dm-btn.big { padding: 10px 20px; font-size: 11px; }
   .vis-cam-off { position: absolute; inset: 0; display: grid; place-items: center;
     font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; color: var(--text-dim); }
+
+  /* ================= v5.25 BROWSER — Chrome agent + mail identity ========= */
+  .br-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 820px) { .br-layout { grid-template-columns: 1fr; } }
+  .br-refresh { float: right; cursor: pointer; color: var(--cyan-bright); }
+  .br-refresh:hover { color: var(--gold-bright); }
+  .br-shot { margin-top: 10px; border: 1px solid var(--line-strong); border-radius: 10px;
+    overflow: hidden; background: #000; }
+  #brShot { display: block; width: 100%; min-height: 120px; object-fit: contain; }
+  .br-note { font-family: var(--font-mono); font-size: 10px; line-height: 1.7;
+    color: var(--text-dim); margin-top: 6px; }
+  .br-act { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+    padding: 4px 0; border-bottom: 1px solid rgba(var(--cyan-rgb), var(--a10)); }
+  .br-act b { color: var(--cyan-bright); font-weight: 400; }
 </style>
 </head>
 <body>
@@ -3884,6 +3898,7 @@ __probeMark('registered');
   <a class="dms-item" data-route="/media" href="#/media"><span class="g">♪</span>MEDIA</a>
   <a class="dms-item" data-route="/motion" href="#/motion"><span class="g">◐</span>MOTION</a>
   <a class="dms-item" data-route="/vision" href="#/vision"><span class="g">◉</span>VISION</a>
+  <a class="dms-item" data-route="/browser" href="#/browser"><span class="g">⇲</span>BROWSER</a>
   <a class="dms-item" data-route="/markets" href="#/markets"><span class="g">▥</span>MARKETS</a>
   <a class="dms-item" data-route="/intelligence" href="#/intelligence"><span class="g">✦</span>INTELLIGENCE</a>
   <a class="dms-item" data-route="/alerts" href="#/alerts"><span class="g">◉</span>ALERTS<span class="dms-badge" id="dmsAlertBadge"></span></a>
@@ -4085,6 +4100,44 @@ __probeMark('registered');
       </div>
     </div>
   </section>
+
+  <!-- BROWSER — real headless-Chrome agent + Dourmouse's own mail identity -->
+  <section class="dmview" id="view-browser">
+    <div class="dmv-head"><h2>BROWSER</h2><div class="dmv-sub">REAL CHROME AGENT · SIGNUP + LOGIN · OWN MAIL IDENTITY · #/browser</div></div>
+    <div class="br-layout">
+      <div>
+        <div class="dm-card">
+          <div class="dm-k">BROWSER SESSION <span class="br-refresh" id="brRefresh" title="Refresh">⟳</span></div>
+          <div id="brStatus" class="dm-empty" style="border:none">LOADING…</div>
+        </div>
+        <div class="dm-card" style="margin-top:10px">
+          <div class="dm-k">LATEST SCREENSHOT — WHAT THE AGENT SEES</div>
+          <div class="br-shot" id="brShotWrap"><img id="brShot" alt="browser screenshot" src="/api/browser/screenshot"></div>
+          <div class="br-note" id="brShotNote"></div>
+        </div>
+        <div class="dm-card" style="margin-top:10px">
+          <div class="dm-k">ACTIVITY FEED</div>
+          <div id="brActivity" class="dm-empty" style="border:none">—</div>
+        </div>
+      </div>
+      <div>
+        <div class="dm-card">
+          <div class="dm-k">DOURMOUSE MAIL IDENTITY</div>
+          <div id="brMail" class="dm-empty" style="border:none">LOADING…</div>
+        </div>
+        <div class="dm-card" style="margin-top:10px">
+          <div class="dm-k">HOW IT WORKS</div>
+          <div class="br-note" style="margin-top:4px">
+            The BROWSER agent drives a real headless Chrome on this Mac to open pages, fill
+            forms, sign up for accounts and log in. It reports everything through the task
+            deck — watch the SEARCH/CODE/MAIL tabs when you send a directive. Submitting a
+            form, logging in, or storing credentials always asks for your confirmation
+            first. Screenshots of the agent's screen land here.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <!-- v5.24 TASK DECK — live tabs of what the agent is doing (real SSE events) -->
@@ -4128,7 +4181,7 @@ __probeMark('registered');
   'use strict';
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const GLYPH = { home:'▤', atlas:'◈', world:'◎', portfolio:'▣', media:'♪', motion:'◐', vision:'◉', markets:'▥', intelligence:'✦', alerts:'◉', settings:'⚙' };
+  const GLYPH = { home:'▤', atlas:'◈', world:'◎', portfolio:'▣', media:'♪', motion:'◐', vision:'◉', browser:'⇲', markets:'▥', intelligence:'✦', alerts:'◉', settings:'⚙' };
 
   // ---- device identity (local, per browser — drives the resume banner) --
   let DEVICE = localStorage.getItem('dm_device');
@@ -4141,9 +4194,10 @@ __probeMark('registered');
   const ROUTES = { '':'home','/':'home','/home':'home','/atlas':'atlas','/atlas/portfolio':'atlas',
     '/atlas/research':'atlas','/atlas/risk':'atlas','/world':'world','/world/events':'world',
     '/portfolio':'portfolio','/media':'media','/motion':'motion','/vision':'vision',
+    '/browser':'browser',
     '/markets':'markets','/intelligence':'intelligence',
     '/alerts':'alerts','/settings':'settings','/more':'more' };
-  const VIEWS = ['atlas','world','portfolio','media','motion','vision','markets','intelligence','alerts','settings','more'];
+  const VIEWS = ['atlas','world','portfolio','media','motion','vision','browser','markets','intelligence','alerts','settings','more'];
   const isMobile = () => window.innerWidth < 900;
 
   let state = { watchlist: [], alerts: [], muted: [], prefs: {}, recent: [], workspaces: [] };
@@ -4518,13 +4572,54 @@ __probeMark('registered');
   function renderMore() {
     const list = $('moreList');
     if (!list) return;
-    list.innerHTML = ['media', 'motion', 'vision', 'markets', 'intelligence', 'alerts', 'settings'].map(v =>
+    list.innerHTML = ['media', 'motion', 'vision', 'browser', 'markets', 'intelligence', 'alerts', 'settings'].map(v =>
       `<a class="dm-row" href="#/${v}" style="text-decoration:none"><span class="g" style="font-size:14px">${GLYPH[v]}</span>` +
       `<div class="grow"><div class="n">${v.toUpperCase()}</div><div class="d">open ${v}</div></div><span style="color:var(--text-dim)">→</span></a>`
     ).join('') +
     `<button class="dm-btn" style="width:100%;margin-top:12px" id="morePaletteBtn">⚡ COMMAND CENTRE</button>`;
     const pb = $('morePaletteBtn');
     if (pb) pb.addEventListener('click', openPalette);
+  }
+
+  // ---- BROWSER view (v5.25) — agent status, screenshot, activity, identity
+  async function renderBrowser() {
+    try {
+      const s = await (await fetch('/api/browser/status')).json();
+      const rows = [
+        `<div class="dm-row"><div class="grow"><div class="n">ENGINE</div><div class="d">${esc(s.engine || '?')}</div></div></div>`,
+        `<div class="dm-row"><div class="grow"><div class="n">MODE</div><div class="d">${s.headless ? 'headless (invisible)' : 'visible window'}</div></div></div>`,
+        `<div class="dm-row"><div class="grow"><div class="n">CREDENTIAL VAULT</div><div class="d">${(s.sites && s.sites.length) ? esc(s.sites.join(', ')) : 'empty — stored by the agent on request'}</div></div></div>`,
+      ];
+      if (s.launch_error) rows.push(`<div class="br-note">${esc(s.launch_error)}</div>`);
+      const st = $('brStatus');
+      st.innerHTML = rows.join(''); st.classList.remove('dm-empty');
+      const acts = (s.activity || []).slice().reverse();
+      $('brActivity').innerHTML = acts.length
+        ? acts.map(a => `<div class="br-act"><b>${esc((a.kind || '').toUpperCase())}</b> · ${esc((a.at || '').slice(11, 19))} — ${esc(a.text || '')}</div>`).join('')
+        : '— no activity yet — send a directive that uses the browser';
+      const shot = $('brShot');
+      if (shot) { shot.src = '/api/browser/screenshot?t=' + Date.now();
+        shot.onerror = () => { const n = $('brShotNote'); if (n) n.textContent = 'no screenshot yet — the agent saves one with browser_screenshot'; }; }
+    } catch (e) { const st = $('brStatus'); if (st) st.innerHTML = 'BROWSER STATUS UNAVAILABLE'; }
+    try {
+      const m = await (await fetch('/api/email/identity')).json();
+      const mailRows = [
+        `<div class="dm-row"><div class="grow"><div class="n">NAME</div><div class="d">${esc(m.name || '—')}</div></div></div>`,
+        `<div class="dm-row"><div class="grow"><div class="n">OWN ADDRESS</div><div class="d">${esc(m.own_address || '—')}</div></div></div>`,
+        `<div class="dm-row"><div class="grow"><div class="n">SENDER MODE</div><div class="d">${esc(m.sender_mode || '—')}</div></div></div>`,
+        ...(m.smtp_identity ? [`<div class="dm-row"><div class="grow"><div class="n">DEDICATED SMTP</div><div class="d">${esc(m.smtp_identity.from)} via ${esc(m.smtp_identity.host)}:${esc(m.smtp_identity.port)}</div></div></div>`] : []),
+        ...(m.alias_note ? [`<div class="br-note">${esc(m.alias_note)}</div>`] : []),
+      ];
+      const me = $('brMail');
+      me.innerHTML = mailRows.join(''); me.classList.remove('dm-empty');
+    } catch (e) { const me = $('brMail'); if (me) me.innerHTML = 'IDENTITY UNAVAILABLE'; }
+  }
+
+  function wireBrowser() {
+    const el = $('brRefresh');
+    if (el) el.addEventListener('click', renderBrowser);
+    window.addEventListener('hashchange', () => { if (currentRoute === 'browser') renderBrowser(); });
+    setInterval(() => { if (document.visibilityState === 'visible' && currentRoute === 'browser') renderBrowser(); }, 8000);
   }
 
   // ---- command palette (⌘K / ⚡) -----------------------------------------
@@ -4659,7 +4754,7 @@ __probeMark('registered');
   window.addEventListener('online', () => { setOffline(false); fetchState(); });
   window.addEventListener('hashchange', route);
   window.addEventListener('resize', () => { renderResume(); });
-  wireActions(); wirePalette(); renderMore(); wireMedia();
+  wireActions(); wirePalette(); renderMore(); wireMedia(); wireBrowser();
   loadPalette();
   route();
   fetchState(); renderAtlas(); renderWorld(); renderSettings();

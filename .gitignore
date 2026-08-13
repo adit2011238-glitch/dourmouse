@@ -22,6 +22,7 @@ htmlcov/
 
 # ── Runtime state (sessions, memory db, pids) ────────────────────────────
 workspace/
+data/
 *.log
 nohup.out
 .dourmouse-ui.pid

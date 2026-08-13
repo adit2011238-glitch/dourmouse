@@ -38,6 +38,8 @@ from email.utils import formataddr, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
+from dourmouse import email_identity
+
 #: Swappable in tests (hermetic HTTP, no network).
 urlopen = urllib.request.urlopen
 
@@ -895,6 +897,11 @@ def status() -> dict[str, Any]:
         ),
         "hint": "env vars OR dourmouse/local_secrets.py; 2-Step Verification -> App passwords",
         "identity": f"{email_display_name()} <{_user()}>" if gmail_configured() else None,
+        "own_address": (
+            email_identity.own_address()
+            if gmail_configured() and email_identity.own_address()
+            else None
+        ),
         "sheets": "link-shared sheets readable via the gviz endpoint (no login)",
         "drive": "link-shared files downloadable via uc?export=download (no login)",
     }
