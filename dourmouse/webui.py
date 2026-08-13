@@ -40,12 +40,22 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
+import traceback
 import urllib.parse
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
+
+
+def _log_traceback(tag: str) -> None:
+    """Write the active exception's traceback to stderr (captured by the
+    launchd runner into /tmp/dourmouse-ui.log) so an unexpected request
+    failure is diagnosable instead of a bare 500."""
+    print(f"[webui] {tag}", file=sys.stderr, flush=True)
+    traceback.print_exc(file=sys.stderr)
 
 from dourmouse.chat import ChatSession
 from dourmouse.config import (
@@ -2105,47 +2115,59 @@ class _Handler(BaseHTTPRequestHandler):
         except RuntimeError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=502)
             return
-        email = identity["email"]
-        store = self.server.auth
-        store.upsert_user(
-            email,
-            tokens,
-            name=identity.get("name", ""),
-            picture=identity.get("picture", ""),
-            sub=identity.get("sub", ""),
-        )
-        sid = store.create_session(email, identity.get("name", ""), identity.get("picture", ""))
-        claim = pending.get("claim")
-        if claim:
-            # v5.22.11: system-browser bridge — the consent page ran in the
-            # user's REAL browser (Google blocks WebKit webviews). Park the
-            # session under the single-use claim code; the app's webview
-            # adopts it via /api/auth/claim and lands on /. The browser is
-            # sent to a plain "you can close this tab" page.
-            with self.server.claim_lock:
-                self.server.claim_pending[claim] = {
-                    "sid": sid,
-                    "email": email,
-                    "name": identity.get("name", ""),
-                    "picture": identity.get("picture", ""),
-                    "created": datetime.now().isoformat(),
-                }
-            self.send_response(302)
-            self.send_header("Location", "/login?claimed=1")
-        else:
-            self.send_response(302)
-            self.send_header("Location", pending.get("redirect_to") or "/")
-            # Secure is intentionally omitted: the server is plain HTTP on
-            # loopback/LAN (browsers ignore Secure from http:// anyway). If
-            # DourMouse is ever served over HTTPS, add Secure here AND on the
-            # logout cookie below — HttpOnly + SameSite=Strict already apply.
-            self.send_header(
-                "Set-Cookie",
-                f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000",
+        # v5.22.13: the post-exchange half must NEVER surface as a bare 500.
+        # Any unexpected failure here is logged to stderr (captured by the
+        # launchd runner) and returned as a readable 502 JSON — Rule 2.2
+        # (honest error, not a raw traceback page).
+        try:
+            email = identity["email"]
+            store = self.server.auth
+            store.upsert_user(
+                email,
+                tokens,
+                name=identity.get("name", ""),
+                picture=identity.get("picture", ""),
+                sub=identity.get("sub", ""),
             )
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+            sid = store.create_session(email, identity.get("name", ""), identity.get("picture", ""))
+            claim = pending.get("claim")
+            if claim:
+                # v5.22.11: system-browser bridge — the consent page ran in the
+                # user's REAL browser (Google blocks WebKit webviews). Park the
+                # session under the single-use claim code; the app's webview
+                # adopts it via /api/auth/claim and lands on /. The browser is
+                # sent to a plain "you can close this tab" page.
+                with self.server.claim_lock:
+                    self.server.claim_pending[claim] = {
+                        "sid": sid,
+                        "email": email,
+                        "name": identity.get("name", ""),
+                        "picture": identity.get("picture", ""),
+                        "created": datetime.now().isoformat(),
+                    }
+                self.send_response(302)
+                self.send_header("Location", "/login?claimed=1")
+            else:
+                self.send_response(302)
+                self.send_header("Location", pending.get("redirect_to") or "/")
+                # Secure is intentionally omitted: the server is plain HTTP on
+                # loopback/LAN (browsers ignore Secure from http:// anyway). If
+                # DourMouse is ever served over HTTPS, add Secure here AND on
+                # the logout cookie below — HttpOnly + SameSite=Strict already
+                # apply.
+                self.send_header(
+                    "Set-Cookie",
+                    f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000",
+                )
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        except Exception as exc:  # noqa: BLE001 - log + honest 502, never a bare 500
+            _log_traceback(f"google callback post-exchange failed: {exc}")
+            self._send_json(
+                {"ok": False, "error": f"GOOGLE AUTH: session creation failed: {exc}"},
+                status=502,
+            )
 
     def _handle_auth_me(self) -> None:
         """GET /api/auth/me — the signed-in identity, or null."""
