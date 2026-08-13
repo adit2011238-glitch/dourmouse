@@ -3007,6 +3007,182 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    # ---- Compute node (v5.26): the Dell is infrastructure, not DOURMOUSE --
+    def _server_status_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.remote_server import server_status
+
+        try:
+            s = server_status()
+        except Exception as exc:  # noqa: BLE001 - status must never raise
+            return f"SERVER STATUS FAILED: {type(exc).__name__}: {exc}"
+        if not s.get("online"):
+            return (
+                f"COMPUTE NODE OFFLINE ({s.get('url')}) — {s.get('error') or 'no response'}. "
+                "Local AI remains in charge (automatic failover)."
+            )
+        return (
+            f"COMPUTE NODE ONLINE ({s.get('url')})\n"
+            f"NODE: {s.get('node') or '?'}\n"
+            f"MODEL: {s.get('model') or '?'}\n"
+            f"OLLAMA: {'up' if s.get('ollama') else 'down'}\n"
+            f"VERSION: {s.get('version') or '?'}\n"
+            f"LATENCY: {s.get('latency_ms') or '?'}ms"
+        )
+
+    def _server_generate_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.remote_server import DourmouseServerClient
+
+        try:
+            result = DourmouseServerClient().generate(
+                arguments.get("prompt", ""),
+                system=arguments.get("system"),
+                temperature=arguments.get("temperature"),
+                max_tokens=arguments.get("max_tokens"),
+            )
+        except Exception as exc:  # noqa: BLE001 - client never raises, belt+braces
+            return f"SERVER GENERATE FAILED: {type(exc).__name__}: {exc}"
+        if not result.get("success"):
+            return f"SERVER GENERATE (reported honestly): {result.get('error')}"
+        return (
+            f"COMPUTE NODE RESPONSE ({result.get('node') or '?'} · "
+            f"{result.get('model') or '?'} · {result.get('latency_ms') or '?'}ms):\n"
+            f"{result['response']}"
+        )
+
+    def _server_chat_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.remote_server import DourmouseServerClient
+
+        try:
+            result = DourmouseServerClient().chat(
+                arguments.get("messages", []),
+                temperature=arguments.get("temperature"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"SERVER CHAT FAILED: {type(exc).__name__}: {exc}"
+        if not result.get("success"):
+            return f"SERVER CHAT (reported honestly): {result.get('error')}"
+        return (
+            f"COMPUTE NODE RESPONSE ({result.get('node') or '?'} · "
+            f"{result.get('model') or '?'} · {result.get('latency_ms') or '?'}ms):\n"
+            f"{result['response']}"
+        )
+
+    def _server_offload_h(arguments: dict[str, Any]) -> str:
+        """Offload one inference to the compute node, falling back to the
+        LOCAL Ollama on any failure. This is the transparent failover seam:
+        the Dell offline never breaks a request, and the response says which
+        path served it (never a fabricated result)."""
+        from dourmouse.remote_server import generate_with_fallback, local_ollama_fallback
+
+        prompt = (arguments.get("prompt") or "").strip()
+        if not prompt:
+            return "ERROR: server_offload requires a prompt."
+        system = arguments.get("system")
+        temperature = arguments.get("temperature")
+        try:
+            result = generate_with_fallback(
+                prompt,
+                lambda p: local_ollama_fallback(p, system=system),
+                system=system,
+                temperature=temperature,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"SERVER OFFLOAD FAILED: {type(exc).__name__}: {exc}"
+        if not result.get("success"):
+            return f"SERVER OFFLOAD FAILED (both paths): {result.get('error')}"
+        via = "COMPUTE NODE" if result.get("via") == "server" else "LOCAL AI (Dell offline — failover)"
+        return (
+            f"OFFLOAD RESPONSE · {via} · {result.get('latency_ms') or '?'}ms:\n"
+            f"{result['response']}"
+        )
+
+    registry.register_subagent(
+        _subagent(
+            "compute",
+            "General",
+            "DOURMOUSE compute node (the Dell): LAN inference offload to "
+            "Qwen3 1.7B with automatic fallback to the local AI. The Dell "
+            "is infrastructure, never a second DOURMOUSE.",
+            [
+                ToolSpec(
+                    name="server_status",
+                    description=(
+                        "Report the DOURMOUSE compute node (Dell): online/offline, "
+                        "node name, model, Ollama status, version and response "
+                        "latency. Read-only, cached, never raises."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_server_status_h,
+                ),
+                ToolSpec(
+                    name="server_generate",
+                    description=(
+                        "Generate text on the DOURMOUSE compute node (Dell): "
+                        "send a prompt (+ optional system instruction, "
+                        "temperature, max_tokens) to the LAN Qwen3 1.7B node "
+                        "and return its response with latency. Reports the "
+                        "node offline honestly when unreachable — use "
+                        "server_offload instead when a local fallback is wanted."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "prompt": {"type": "string"},
+                            "system": {"type": "string"},
+                            "temperature": {"type": "number"},
+                            "max_tokens": {"type": "integer"},
+                        },
+                        "required": ["prompt"],
+                    },
+                    handler=_server_generate_h,
+                ),
+                ToolSpec(
+                    name="server_chat",
+                    description=(
+                        "Chat on the DOURMOUSE compute node (Dell): pass an "
+                        "OpenAI-format messages list to the LAN Qwen3 1.7B "
+                        "node and return its reply with latency. Honest error "
+                        "when the node is offline."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "messages": {
+                                "type": "array",
+                                "items": {"type": "object"},
+                                "description": "[{role: system|user|assistant, content}]",
+                            },
+                            "temperature": {"type": "number"},
+                        },
+                        "required": ["messages"],
+                    },
+                    handler=_server_chat_h,
+                ),
+                ToolSpec(
+                    name="server_offload",
+                    description=(
+                        "Offload one inference to the compute node with AUTOMATIC "
+                        "fallback: tries the Dell Qwen3 1.7B; on ANY failure "
+                        "(offline, timeout, error) it transparently uses the "
+                        "LOCAL Ollama and says which path served the answer. "
+                        "Use for heavy or local-AI-inference requests the main "
+                        "machine should not spend its own tokens on."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "prompt": {"type": "string"},
+                            "system": {"type": "string"},
+                            "temperature": {"type": "number"},
+                        },
+                        "required": ["prompt"],
+                    },
+                    handler=_server_offload_h,
+                ),
+            ],
+        )
+    )
+
     registry.register_subagent(
         _subagent(
             "mail",

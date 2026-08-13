@@ -538,6 +538,31 @@ def build_setup_status(server) -> dict[str, Any]:
         ),
         "hint": "DOURMOUSE_LLM_BACKEND=ollama|omniroute|nvidia in .env",
     }
+    # v5.26: the DOURMOUSE compute node (Dell) — compute infrastructure,
+    # never a second DOURMOUSE. Honest online/offline from /v1/status.
+    try:
+        from dourmouse.remote_server import server_status
+
+        srv = server_status()
+        items["server"] = {
+            "configured": True,  # env default exists; the node is optional
+            "detail": (
+                f"{(srv.get('node') or 'node')} · {(srv.get('model') or '?')} · "
+                f"{srv.get('latency_ms')}ms ONLINE"
+                if srv.get("online")
+                else "compute node OFFLINE — local AI stays in charge"
+            ),
+            "hint": (
+                "DOURMOUSE_SERVER_URL (default http://192.168.1.108:8000) — "
+                "failover to local AI is automatic"
+            ),
+        }
+    except Exception:  # noqa: BLE001 -- a broken import never blocks setup
+        items["server"] = {
+            "configured": False,
+            "detail": "server module unavailable",
+            "hint": "set DOURMOUSE_SERVER_URL",
+        }
     try:
         from dourmouse.voice import voice_status
 
@@ -1049,6 +1074,11 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.email_identity import identity_status
 
             self._send_json(identity_status())
+        elif path == "/api/server":
+            # v5.26: the DOURMOUSE compute node (Dell) health/latency report.
+            from dourmouse.remote_server import server_status
+
+            self._send_json(server_status())
         elif path == "/api/atlas":
             # v5.4: ATLAS quant-engine panel — real telemetry + last run.
             from dourmouse.atlas_cli import atlas_panel_snapshot

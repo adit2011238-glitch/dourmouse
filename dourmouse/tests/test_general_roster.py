@@ -96,6 +96,7 @@ class TestRosterShape:
             "t212",  # v5.x: Trading 212 broker ops
             "docs",  # v5.x: Google Sheets/Drive link-shared access
             "browser",  # v5.25: real headless-Chrome agent (signup/login)
+            "compute",  # v5.26: the Dell compute node (LAN inference + failover)
         }
 
     def test_orchestrator_exposes_delegate_task(self):
