@@ -6,6 +6,7 @@ hermetic posture as the rest of the suite (loopback = always authorized).
 """
 
 import json
+import re
 import threading
 import urllib.error
 import urllib.parse
@@ -243,7 +244,11 @@ def test_sw_served_with_js_content_type(server):
     with urllib.request.urlopen(server + "/sw.js") as resp:
         assert resp.headers.get("Content-Type") == "application/javascript"
         body = resp.read().decode()
-    assert "dourmouse-shell-v2" in body
+    # Version-agnostic on purpose: the shell cache name is bumped whenever the
+    # cached asset set changes (v2 -> v3 in v5.31), and pinning the exact
+    # number turned a routine bump into a red suite. What matters here is that
+    # the cache stays NAMED and VERSIONED, so an old shell can be evicted.
+    assert re.search(r"dourmouse-shell-v\d+", body)
     assert "X-Dourmouse-Stale" in body
     assert "X-Dourmouse-Scope" in body
 

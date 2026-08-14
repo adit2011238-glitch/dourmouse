@@ -32,6 +32,13 @@ GOOGLE_CLIENT_SECRET = "test-secret"
 def google_env(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID)
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", GOOGLE_CLIENT_SECRET)
+    # The default-scope tests assert identity-only behaviour, so the fixture
+    # must OWN the opt-in flag. Without this, a developer whose real .env sets
+    # GOOGLE_OAUTH_FULL_SCOPES=1 (as the production .env does) sees the
+    # identity-only assertions fail for an environmental reason that has
+    # nothing to do with the code under test. Tests that want full scopes set
+    # the flag themselves.
+    monkeypatch.delenv("GOOGLE_OAUTH_FULL_SCOPES", raising=False)
 
 
 @pytest.fixture()
@@ -839,7 +846,8 @@ def test_chat_request_with_user_session_streams(server, monkeypatch):
     def _no_llm(*args, **kwargs):
         raise ValueError("no LLM configured in tests")
 
-    monkeypatch.setattr(dispatch, "load_llm_config", _no_llm)
+    # dispatch now calls load_llm_config_with_fallback instead of load_llm_config
+    monkeypatch.setattr(dispatch, "load_llm_config_with_fallback", _no_llm)
     body = json.dumps({"prompt": "hello"}).encode()
     request = urllib.request.Request(
         base + "/api/chat",

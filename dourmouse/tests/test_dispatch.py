@@ -149,6 +149,66 @@ class TestOllamaNativeClient:
         assert captured["options"]["num_ctx"] == dispatch_module._OLLAMA_NUM_CTX
         assert captured["options"]["num_predict"] == dispatch_module._DEFAULT_MAX_TOKENS
 
+    def _capture(self, model: str, content: str = "hi"):
+        """Run one create() against ``model`` and return the sent payload."""
+        captured: dict = {}
+
+        def fake_post(payload):
+            captured.update(payload)
+            return json.dumps({"message": {"role": "assistant", "content": "ok"}, "done": True})
+
+        self._client(fake_post).chat.completions.create(
+            model=model, messages=[{"role": "user", "content": content}], stream=False,
+        )
+        return captured
+
+    def test_think_flag_kept_for_models_that_honour_it(self):
+        """qwen3:8b respects think:False (measured 4.4s median / 25 tokens), so
+        the flag stays and the prompt is left alone."""
+        sent = self._capture("qwen3:8b")
+        assert sent["think"] is False
+        assert sent["enable_thinking"] is False
+        assert sent["messages"][-1]["content"] == "hi"
+
+    def test_no_think_switch_used_for_models_that_ignore_the_flag(self):
+        """qwen3:4b IGNORES think:False and emits its reasoning as the answer
+        (measured 45.1s median / 360 tokens, vs 21.5s / 178 with /no_think).
+        For those models the dead flags are dropped and the documented soft
+        switch goes on the last user turn instead."""
+        sent = self._capture("qwen3:4b")
+        assert "think" not in sent
+        assert "enable_thinking" not in sent
+        assert sent["messages"][-1]["content"] == "hi /no_think"
+
+    def test_no_think_targets_only_the_last_user_turn(self):
+        captured: dict = {}
+
+        def fake_post(payload):
+            captured.update(payload)
+            return json.dumps({"message": {"role": "assistant", "content": "ok"}, "done": True})
+
+        self._client(fake_post).chat.completions.create(
+            model="qwen3:4b",
+            messages=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "reply"},
+                {"role": "user", "content": "second"},
+            ],
+            stream=False,
+        )
+        sent = captured["messages"]
+        assert sent[0]["content"] == "sys"
+        assert sent[1]["content"] == "first"  # earlier turns untouched
+        assert sent[-1]["content"] == "second /no_think"
+
+    def test_no_think_model_list_is_configurable(self, monkeypatch):
+        """A future Ollama build may fix qwen3:4b or break another model —
+        retuning must not need a code change."""
+        monkeypatch.setenv("DOURMOUSE_NO_THINK_MODELS", "qwen3:8b")
+        assert dispatch_module._ignores_think_flag("qwen3:8b")
+        assert not dispatch_module._ignores_think_flag("qwen3:4b")
+
     def test_stream_yields_delta_chunks(self):
         lines = "\n".join(
             json.dumps({"message": {"role": "assistant", "content": c}}) for c in ("Hel", "lo", " world")

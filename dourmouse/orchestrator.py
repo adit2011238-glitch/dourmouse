@@ -28,6 +28,7 @@ from dourmouse.config import (
     OmniRouteConfig,
     load_llm_config,
 )
+from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.research_agent import RESEARCH_TOOL_SPEC, call_research_tool
 
 _SYSTEM_PROMPT = (
@@ -69,7 +70,7 @@ def dispatch(
     NVIDIA API raises (auth errors, etc.) rather than masking failures.
     """
     if client is None:
-        config = config or load_llm_config()
+        config = config or load_llm_config_with_fallback()
         client = _build_client(config)
         model = config.model
     else:

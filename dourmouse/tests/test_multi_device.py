@@ -186,3 +186,51 @@ class TestBindConfig:
         # run_server is the seam; serve_forever would block. Just verify the
         # env resolution helper is what serve_forever uses.
         assert config_module.bind_host() == "127.0.0.1"
+
+
+class TestInsecureBindGuard:
+    """A network-bound server with no token authorizes EVERY request.
+
+    ``_authorized()`` short-circuits to True when the token is empty, so the
+    combination "non-loopback host + no token" exposes mail, the filesystem
+    and run_command to anyone who can reach the port. Binding must fail
+    rather than print a warning nobody reads.
+    """
+
+    def _serve(self, monkeypatch, host, token=None, override=None):
+        from dourmouse.dispatch import DispatchRegistry
+        from dourmouse.webui import run_server
+
+        monkeypatch.delenv("DOURMOUSE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("DOURMOUSE_ALLOW_INSECURE_BIND", raising=False)
+        if token is not None:
+            monkeypatch.setenv("DOURMOUSE_ACCESS_TOKEN", token)
+        if override is not None:
+            monkeypatch.setenv("DOURMOUSE_ALLOW_INSECURE_BIND", override)
+        return run_server(registry=DispatchRegistry(), host=host, port=0)
+
+    def test_non_loopback_without_token_refuses_to_bind(self, monkeypatch):
+        with pytest.raises(RuntimeError, match="DOURMOUSE_ACCESS_TOKEN"):
+            self._serve(monkeypatch, "0.0.0.0")
+
+    def test_non_loopback_with_token_binds(self, monkeypatch):
+        server = self._serve(monkeypatch, "0.0.0.0", token="a-long-random-token")
+        try:
+            assert server.access_token == "a-long-random-token"
+        finally:
+            server.server_close()
+
+    def test_loopback_without_token_still_binds(self, monkeypatch):
+        """The local/desktop-app posture must stay zero-config."""
+        server = self._serve(monkeypatch, "127.0.0.1")
+        try:
+            assert server.access_token == ""
+        finally:
+            server.server_close()
+
+    def test_explicit_override_binds_insecurely(self, monkeypatch):
+        server = self._serve(monkeypatch, "0.0.0.0", override="1")
+        try:
+            assert server.access_token == ""
+        finally:
+            server.server_close()

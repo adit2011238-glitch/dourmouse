@@ -1,4 +1,4 @@
-"""DourmouseServerClient — the Dell compute-node client (v5.26).
+"""DourmouseServerClient — the Dell compute-node client (v5.32).
 
 The Dell is compute infrastructure, not DOURMOUSE. This module is the ONLY
 thing on the main computer that talks to it:
@@ -11,19 +11,27 @@ Guarantees (Rule 2.1 / 2.2 — a dead node must never break the main app):
   they return an honest ``{"success": False, "error": ...}`` result. The
   only exceptions are programmer errors (bad argument types).
 - ``generate_with_fallback()`` is the failover seam: tries the Dell, and on
-  ANY failure transparently calls the local fallback callable. It never
-  raises and never reports a fabricated success.
-- The health probe is cheap (1.5 s timeout), cached for 30 s, and isolated
-  — a slow/offline Dell costs one short TCP timeout per TTL window.
+  ANY failure (unreachable, timeout, HTTP error, malformed/empty response)
+  transparently calls the local fallback callable. It never raises and
+  never reports a fabricated success.
+- ``server_enabled()`` is the master kill switch: ``DOURMOUSE_SERVER_ENABLED=0``
+  hard-disables ALL Dell traffic (fast lane, tools, status, offload) with
+  zero probes — the safest way to guarantee the main app never touches the
+  LAN. Default ON; the real engagement gate is ``server_url_configured()``.
+- The health probe is cheap (2 s connect timeout by default, env
+  ``DOURMOUSE_SERVER_CONNECT_TIMEOUT``), cached for 30 s, and isolated —
+  a slow/offline Dell costs one short TCP timeout per TTL window.
 - All HTTP is stdlib ``urllib`` — the client adds zero new dependencies.
 
 Config (env, all optional — never hard-coded per site):
-  DOURMOUSE_SERVER_URL      base URL, default http://192.168.1.108:8000
-  DOURMOUSE_SERVER_API_KEY  optional bearer key sent as X-API-Key
-  DOURMOUSE_SERVER_MODEL    model name (default qwen3:1.7b — informational,
-                            the Dell decides what it serves)
-  DOURMOUSE_SERVER_TIMEOUT  per-request read timeout seconds (default 90)
-  DOURMOUSE_SERVER_HEALTH_TTL  health cache seconds (default 30)
+  DOURMOUSE_SERVER_ENABLED        master kill switch (1/0, default 1)
+  DOURMOUSE_SERVER_URL            base URL, default http://192.168.1.108:8000
+  DOURMOUSE_SERVER_API_KEY        optional bearer key sent as X-API-Key
+  DOURMOUSE_SERVER_MODEL          model name (default qwen3:1.7b — informational,
+                                  the Dell decides what it serves)
+  DOURMOUSE_SERVER_TIMEOUT        per-request read timeout seconds (default 90)
+  DOURMOUSE_SERVER_CONNECT_TIMEOUT  health-probe connect timeout (default 2)
+  DOURMOUSE_SERVER_HEALTH_TTL     health cache seconds (default 30)
 """
 
 from __future__ import annotations
@@ -42,7 +50,8 @@ DEFAULT_SERVER_MODEL = "qwen3:1.7b"
 DEFAULT_TIMEOUT = 90.0
 DEFAULT_HEALTH_TTL = 30.0
 # Status probe budget: generous enough for a real LAN node on WiFi, short
-# enough that an absent node costs almost nothing per TTL window.
+# enough that an absent node costs almost nothing per TTL window. Overridable
+# via DOURMOUSE_SERVER_CONNECT_TIMEOUT.
 _CONNECT_TIMEOUT = 2.0
 
 _health_cache: dict[str, Any] = {
@@ -64,9 +73,23 @@ def server_url_configured() -> bool:
     The fast lane must never probe the DEFAULT address on a machine that
     never opted into the Dell: a silent 2s connect-timeout on every reply
     would be a speed regression, not an improvement. Engaged routing is
-    opt-in via the env var (v5.30).
+    opt-in via the env var (v5.30). ``server_enabled()`` is the separate
+    master kill switch on top of this.
     """
     return bool(os.environ.get("DOURMOUSE_SERVER_URL", "").strip())
+
+
+def server_enabled() -> bool:
+    """DOURMOUSE_SERVER_ENABLED: master kill switch for ALL Dell traffic.
+
+    Default ON — the real engagement gate remains ``server_url_configured()``
+    (an unconfigured node is never probed even when enabled). Set to
+    0/off/false to hard-disable the compute node everywhere at once: fast
+    lane, tools, status, offload. A disabled node is never probed, so the
+    switch costs zero latency.
+    """
+    raw = os.environ.get("DOURMOUSE_SERVER_ENABLED", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "")
 
 
 def server_online_cached() -> bool:
@@ -74,15 +97,110 @@ def server_online_cached() -> bool:
 
     Used by the fast lane so a pure-chat reply pays zero latency when the
     node is down: if the last probe is stale or the node was offline, this
-    returns False instantly and the local fast model answers. The UI's
-    /api/connections poll keeps the cache warm; a genuinely dead Dell just
-    means the lane stays local.
+    returns False instantly and the local fast model answers. Returns False
+    immediately when the node is disabled (master kill switch) — the lane
+    stays local without touching the network. The UI's /api/connections
+    poll keeps the cache warm; a genuinely dead Dell just means the lane
+    stays local.
     """
+    if not server_enabled():
+        return False
     now = time.monotonic()
     with _health_lock:
         if (now - _health_cache["at"]) < server_health_ttl():
             return bool(_health_cache["online"])
     return False
+
+
+_warmer_thread: threading.Thread | None = None
+_warmer_stop = threading.Event()
+_warmer_lock = threading.Lock()
+
+
+def health_cache_is_fresh() -> bool:
+    """Whether a probe result exists and is inside the TTL (no network I/O)."""
+    with _health_lock:
+        return (time.monotonic() - _health_cache["at"]) < server_health_ttl()
+
+
+def start_health_warmer() -> bool:
+    """Keep the health cache fresh on a background thread.
+
+    ``server_online_cached()`` deliberately never probes, so SOMETHING has to
+    populate the cache or the compute-node lane can never engage. That job used
+    to belong to the UI's /api/connections call — but that call lives inside the
+    World/Settings view renderers, which run ONCE at page load and are not on a
+    timer. With a 30s TTL, the practical effect was that the Dell served only
+    the chats sent within 30 seconds of loading the page, then went unused for
+    the rest of the session. Measured on this LAN the node answers ~3x faster
+    than the local fast model, so that was a large and completely silent loss.
+
+    This warmer re-probes every TTL/2 so the cache is essentially always fresh,
+    while the request path still never probes — the original zero-latency
+    property is preserved. Cost is one 2s-timeout LAN request per ~15s, and
+    only when a node is explicitly configured AND enabled.
+
+    Idempotent; returns True if a thread is running when it returns. Opt out
+    with DOURMOUSE_SERVER_WARMER=0.
+    """
+    if os.environ.get("DOURMOUSE_SERVER_WARMER", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        return False
+    if not (server_url_configured() and server_enabled()):
+        return False
+
+    global _warmer_thread
+    with _warmer_lock:
+        if _warmer_thread is not None and _warmer_thread.is_alive():
+            return True
+
+        _warmer_stop.clear()
+
+        def _loop() -> None:
+            while not _warmer_stop.is_set():
+                # A disabled or de-configured node ends the loop rather than
+                # spinning: re-enabling restarts the warmer through the same
+                # entry point.
+                if not (server_url_configured() and server_enabled()):
+                    return
+                try:
+                    DourmouseServerClient().status()
+                except Exception:
+                    # status() is already fail-safe; this is belt-and-braces so
+                    # a warmer crash can never take the app down.
+                    pass
+                # The refresh MUST outpace the TTL or the cache goes stale
+                # between passes and the lane drops out — the whole failure
+                # this warmer exists to fix. Half the TTL gives a full window
+                # of margin; the 1s floor only guards against a pathological
+                # TTL of 0 and still satisfies the invariant for any TTL >= 2s.
+                # wait() rather than sleep() so a stop is honoured immediately
+                # instead of after a full interval.
+                _warmer_stop.wait(max(server_health_ttl() / 2.0, 1.0))
+
+        _warmer_thread = threading.Thread(
+            target=_loop, name="dourmouse-server-health-warmer", daemon=True
+        )
+        _warmer_thread.start()
+        return True
+
+
+def stop_health_warmer(timeout: float = 2.0) -> None:
+    """Stop the warmer and wait for the thread to exit.
+
+    Without this a warmer is unstoppable for the life of the process, which
+    leaks a probing thread per start() — harmless in the app (one warmer, and
+    it is a daemon) but real in a test suite, where every test that starts one
+    leaves it running against a fixture server that has already shut down.
+    """
+    global _warmer_thread
+    _warmer_stop.set()
+    with _warmer_lock:
+        thread = _warmer_thread
+        _warmer_thread = None
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout)
 
 
 def server_api_key() -> str:
@@ -100,6 +218,20 @@ def server_timeout() -> float:
         return DEFAULT_TIMEOUT
 
 
+def server_connect_timeout() -> float:
+    """DOURMOUSE_SERVER_CONNECT_TIMEOUT: the health-probe connect budget.
+
+    Kept short so an absent node costs almost nothing per TTL window; the
+    generation/chat read timeout is the much longer ``server_timeout()``.
+    """
+    try:
+        return float(
+            os.environ.get("DOURMOUSE_SERVER_CONNECT_TIMEOUT", str(_CONNECT_TIMEOUT))
+        )
+    except ValueError:
+        return _CONNECT_TIMEOUT
+
+
 def server_health_ttl() -> float:
     try:
         return float(os.environ.get("DOURMOUSE_SERVER_HEALTH_TTL", str(DEFAULT_HEALTH_TTL)))
@@ -111,9 +243,11 @@ def _request(
     method: str,
     path: str,
     payload: dict[str, Any] | None = None,
-    timeout: float = _CONNECT_TIMEOUT,
+    timeout: float | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """One HTTP call to the Dell. Returns (status, json). Raises on failure."""
+    if timeout is None:
+        timeout = server_connect_timeout()
     url = server_url() + path
     headers = {"Accept": "application/json"}
     key = server_api_key()
@@ -145,9 +279,12 @@ def _request(
 def server_available(force: bool = False) -> bool:
     """Cached probe: is the Dell answering /v1/status (or legacy /status)?
 
-    Never raises, never takes longer than ~1.5 s per TTL window. ``force``
-    bypasses the cache (used right before an actual offload).
+    Never raises, never takes longer than ~the connect timeout per TTL
+    window. ``force`` bypasses the cache (used right before an actual
+    offload). Returns False without probing when disabled (kill switch).
     """
+    if not server_enabled():
+        return False
     now = time.monotonic()
     with _health_lock:
         if not force and (now - _health_cache["at"]) < server_health_ttl():
@@ -155,7 +292,7 @@ def server_available(force: bool = False) -> bool:
     online = False
     payload: dict[str, Any] | None = None
     try:
-        status, payload = _request("GET", "/v1/status", timeout=_CONNECT_TIMEOUT)
+        status, payload = _request("GET", "/v1/status", timeout=server_connect_timeout())
         online = status == 200 and isinstance(payload, dict) and payload.get("status") == "online"
     except Exception:  # noqa: BLE001 - probe must never raise
         online = False
@@ -171,10 +308,13 @@ def server_status() -> dict[str, Any]:
 
     Fast-offline path: when the node is KNOWN offline and the probe cache is
     still fresh, the result returns instantly without re-probing — so a dead
-    Dell costs one short probe per TTL window, never per UI poll.
+    Dell costs one short probe per TTL window, never per UI poll. A disabled
+    node (kill switch) returns instantly with ``enabled: False`` and never
+    probes.
     """
     base = {
         "configured": bool(os.environ.get("DOURMOUSE_SERVER_URL", "").strip()),
+        "enabled": server_enabled(),
         "url": server_url(),
         "online": False,
         "node": None,
@@ -184,6 +324,9 @@ def server_status() -> dict[str, Any]:
         "latency_ms": None,
         "error": None,
     }
+    if not server_enabled():
+        base["error"] = "compute node disabled (DOURMOUSE_SERVER_ENABLED=0)"
+        return base
     now = time.monotonic()
     with _health_lock:
         fresh_offline = (
@@ -195,7 +338,7 @@ def server_status() -> dict[str, Any]:
             return base
     started = time.perf_counter()
     try:
-        status, payload = _request("GET", "/v1/status", timeout=_CONNECT_TIMEOUT)
+        status, payload = _request("GET", "/v1/status", timeout=server_connect_timeout())
         latency_ms = int((time.perf_counter() - started) * 1000)
         if status == 200 and isinstance(payload, dict) and payload.get("status") == "online":
             base.update(
@@ -229,7 +372,8 @@ class DourmouseServerClient:
     ``status()`` -> dict. ``generate()`` / ``chat()`` -> dict with
     ``success`` (True/False) — check it. ``chat.completions.create(...)``
     exists for OpenAI-shaped call sites and RAISES ``ServerUnavailable`` on
-    failure (that is the opt-in contract).
+    failure (that is the opt-in contract). All surfaces return an honest
+    failure (never a probe, never a request) when the node is disabled.
     """
 
     def __init__(self, timeout: float | None = None) -> None:
@@ -248,6 +392,8 @@ class DourmouseServerClient:
     ) -> dict[str, Any]:
         if not prompt or not str(prompt).strip():
             return {"success": False, "error": "generate requires a prompt."}
+        if not server_enabled():
+            return {"success": False, "error": "compute node disabled (DOURMOUSE_SERVER_ENABLED=0)"}
         payload: dict[str, Any] = {"prompt": str(prompt)}
         if system:
             payload["system"] = str(system)
@@ -268,6 +414,8 @@ class DourmouseServerClient:
     def chat(self, messages: list[dict[str, Any]], temperature: float | None = None) -> dict[str, Any]:
         if not isinstance(messages, list) or not messages:
             return {"success": False, "error": "chat requires a non-empty messages list."}
+        if not server_enabled():
+            return {"success": False, "error": "compute node disabled (DOURMOUSE_SERVER_ENABLED=0)"}
         payload: dict[str, Any] = {"messages": messages[:64]}
         if temperature is not None:
             payload["temperature"] = temperature

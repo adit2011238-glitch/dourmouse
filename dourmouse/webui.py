@@ -64,6 +64,7 @@ from dourmouse.config import (
     OmniRouteConfig,
     load_llm_config,
 )
+from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.dispatch import DispatchRegistry, JobTracker
 from dourmouse.governance import RbacPolicy
 from dourmouse.learn import learn_enabled, open_default_store, record_feedback
@@ -386,7 +387,7 @@ def _resolve_server_config(config: Any | None) -> Any | None:
     if config is not None:
         return config
     try:
-        return load_llm_config()
+        return load_llm_config_with_fallback()
     except ValueError:
         return None
 
@@ -3110,10 +3111,33 @@ def run_server(
             "remote clients must present the token (Bearer or cookie)."
         )
     elif not access and host not in ("127.0.0.1", "localhost", "::1"):
+        # v5.32: REFUSE to bind instead of warning. An empty token makes
+        # _authorized() return True for every request, so a network-bound
+        # server with no token hands the full agent surface — Gmail, the
+        # filesystem, run_command — to anyone who can reach the port. The old
+        # behaviour printed this warning and started anyway, which means the
+        # one deployment that most needs the token (a LAN server) was the one
+        # where a scrolled-past log line was the only defence.
+        #
+        # The escape hatch is deliberately explicit and ugly: no operator sets
+        # it by accident, and it appears in `ps`/task manager for anyone
+        # auditing the box.
+        if os.environ.get(
+            "DOURMOUSE_ALLOW_INSECURE_BIND", ""
+        ).strip().lower() not in ("1", "true", "yes", "on"):
+            raise RuntimeError(
+                f"refusing to bind to {host} without DOURMOUSE_ACCESS_TOKEN: "
+                "every route would be open to anyone who can reach this port "
+                "(mail, files, shell). Set DOURMOUSE_ACCESS_TOKEN to a long "
+                "random value, or bind to 127.0.0.1 for local-only use. "
+                "To override anyway (NOT recommended, e.g. an isolated test "
+                "network), set DOURMOUSE_ALLOW_INSECURE_BIND=1."
+            )
         print(
-            "WARNING: DOURMOUSE_HOST is set to a non-loopback address but "
-            "DOURMOUSE_ACCESS_TOKEN is NOT set — anyone who can reach this "
-            "port can drive the dashboard. Set a token first."
+            f"WARNING: binding to {host} with NO DOURMOUSE_ACCESS_TOKEN and "
+            "DOURMOUSE_ALLOW_INSECURE_BIND=1 — every route on this port is "
+            "unauthenticated. Anyone who can reach it can drive mail, files "
+            "and shell."
         )
 
     server = ThreadingHTTPServer((host, port), _Handler)
@@ -3247,6 +3271,18 @@ def run_server(
     # or filesystem.
     if reporting:
         atlas_lab.start_auto_sync()
+        # v5.32: keep the compute-node health probe warm. The fast lane reads
+        # ONLY a cached probe (it never probes itself, by design), and the only
+        # thing populating that cache was the /api/connections call inside the
+        # World/Settings view renderers — which run once at page load, not on a
+        # timer. With a 30s TTL the Dell therefore served just the chats sent in
+        # the first 30 seconds after a page load and was silently unused after
+        # that, despite answering ~3x faster than the local fast model. Gated
+        # behind ``reporting`` like the other background threads so the test
+        # suite never opens a socket.
+        from dourmouse.remote_server import start_health_warmer
+
+        start_health_warmer()
     server.freebuff_watcher = None
     if freebuff_events:
         from dourmouse.freebuff_events import FreebuffEventWatcher

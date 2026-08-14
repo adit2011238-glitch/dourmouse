@@ -33,6 +33,7 @@ crashes and not fabricated success.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import threading
@@ -52,6 +53,7 @@ from dourmouse.config import (
     fast_lane_server_enabled,
     load_llm_config,
 )
+from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.governance import (
     BudgetTracker,
     DlpFilter,
@@ -443,9 +445,48 @@ class DispatchRegistry:
     def tool_specs(self) -> list[dict[str, Any]]:
         return [t.openai_spec() for t in self._tools.values()]
 
-    def describe_roster(self) -> str:
-        lines = [s.roster_line() for s in self._subagents.values()]
-        return "\n".join(lines) if lines else "(empty roster)"
+    def describe_roster(self, focus: set[str] | None = None) -> str:
+        """Roster text for the system message.
+
+        With ``focus`` unset every agent gets its full line (name, domain,
+        description, every tool) — the historical behaviour, unchanged.
+
+        With ``focus`` set, only the named agents get the full line; the rest
+        collapse to a single comma-joined name list. The lead still knows every
+        agent exists (so it can delegate or ask), but the 31-agent/161-tool
+        dump costs ~12.3k chars (~3.1k tokens) on EVERY turn while a typical
+        directive touches one or two agents. Prefill is the dominant cost on
+        fanless hardware, so this is the cheapest remaining latency lever
+        after ``_scoped_tool_specs`` (which already trims the schemas but not
+        this prose).
+        """
+        if not focus:
+            lines = [s.roster_line() for s in self._subagents.values()]
+            return "\n".join(lines) if lines else "(empty roster)"
+
+        # Never drop the orchestrator: its delegate_task tool is how the lead
+        # reaches anything that was collapsed.
+        keep = set(focus) | {"orchestrator"}
+        detailed: list[str] = []
+        collapsed: list[str] = []
+        for sub in self._subagents.values():
+            if sub.name in keep:
+                detailed.append(sub.roster_line())
+            else:
+                collapsed.append(sub.name)
+
+        if not detailed:
+            # A focus that matched nothing must not yield an empty roster.
+            lines = [s.roster_line() for s in self._subagents.values()]
+            return "\n".join(lines) if lines else "(empty roster)"
+
+        out = "\n".join(detailed)
+        if collapsed:
+            out += (
+                "\n- also available (ask or delegate_task to expand): "
+                + ", ".join(collapsed)
+            )
+        return out
 
 
 def _scoped_tool_specs(
@@ -555,6 +596,44 @@ _SYSTEM_PROMPT = (
 # and a proper context window instead of the 4096-token truncation default.
 _OLLAMA_NUM_CTX = 8192
 _OLLAMA_KEEP_ALIVE = "30m"
+
+#: Models whose chat template ignores the `think` / `enable_thinking` request
+#: flags and reason anyway. For these the reasoning is not tagged, so it lands
+#: in the user-visible answer AND consumes the num_predict budget. Substring
+#: match on the model name, so tags (":4b", ":4b-instruct-q4_0") all hit.
+#: Override with DOURMOUSE_NO_THINK_MODELS (comma-separated) when a future
+#: build fixes or breaks a model — no code change needed to re-tune this.
+_THINK_FLAG_IGNORED_DEFAULT = "qwen3:4b"
+
+
+def _no_think_models() -> tuple[str, ...]:
+    raw = os.environ.get("DOURMOUSE_NO_THINK_MODELS")
+    if raw is None:
+        raw = _THINK_FLAG_IGNORED_DEFAULT
+    return tuple(p.strip().lower() for p in raw.split(",") if p.strip())
+
+
+def _ignores_think_flag(model: str) -> bool:
+    name = (model or "").strip().lower()
+    return any(pat in name for pat in _no_think_models())
+
+
+#: The documented qwen3 soft switch. Appended to the LAST user message because
+#: the template only honours it on the active turn — a system-message
+#: placement was measured as NOT working (367 tok, reasoning still leaked).
+_NO_THINK_TOKEN = "/no_think"
+
+
+def _append_no_think(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = [dict(m) for m in messages]
+    for msg in reversed(out):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and _NO_THINK_TOKEN not in content:
+            msg["content"] = f"{content} {_NO_THINK_TOKEN}"
+        break
+    return out
 
 
 class _OllamaTcFunction:
@@ -705,9 +784,11 @@ class OllamaNativeClient:
         max_tokens: int | None,
         stream: bool,
     ) -> Any:
+        chosen = model or self._model
+        sent = self._translate_messages(messages)
         payload: dict[str, Any] = {
-            "model": model or self._model,
-            "messages": self._translate_messages(messages),
+            "model": chosen,
+            "messages": sent,
             "stream": bool(stream),
             "think": False,
             "enable_thinking": False,
@@ -717,6 +798,24 @@ class OllamaNativeClient:
                 "num_ctx": _OLLAMA_NUM_CTX,
             },
         }
+        # v5.32: `think: False` is NOT honoured by every qwen3 build. Measured
+        # on Ollama 0.32.9 (4 prompts, temperature 0, this machine):
+        #
+        #   qwen3:8b  think:False      4.4s median,  25 tok  — honoured
+        #   qwen3:4b  think:False     45.1s median, 360 tok  — IGNORED, and the
+        #                                                      reasoning is
+        #                                                      emitted as the
+        #                                                      visible answer
+        #   qwen3:4b  /no_think       21.5s median, 178 tok  — honoured
+        #
+        # Worse, sending think:False to qwen3:4b was consistently WORSE than
+        # sending no flag at all (461 vs 434 tokens). So for models in the
+        # ignore-list we drop the ineffective flags and use the documented
+        # `/no_think` soft switch instead, which the template does respect.
+        if _ignores_think_flag(chosen):
+            payload.pop("think", None)
+            payload.pop("enable_thinking", None)
+            payload["messages"] = _append_no_think(sent)
         if tools:
             payload["tools"] = tools
         if stream:
@@ -1062,13 +1161,20 @@ def current_dispatch_context(registry: DispatchRegistry) -> DispatchContext | No
     return stack[-1]
 
 
-def system_message(registry: DispatchRegistry) -> str:
+def system_message(
+    registry: DispatchRegistry, focus: set[str] | None = None
+) -> str:
     """The immutable system prompt for a registry (persona + roster).
 
     Shared by run_dispatch and chat.ChatSession so a conversation always
     carries the same instructions and tool list.
+
+    ``focus`` (optional) names the agents this turn actually plans to use.
+    When given, the roster shows those agents in full and collapses the rest
+    to a name list — same contract, far less prefill. Omitted, the prompt is
+    byte-identical to every earlier version.
     """
-    return _SYSTEM_PROMPT + "\n\nROSTER:\n" + registry.describe_roster()
+    return _SYSTEM_PROMPT + "\n\nROSTER:\n" + registry.describe_roster(focus)
 
 
 def run_dispatch_messages(
@@ -1137,7 +1243,7 @@ def run_dispatch_messages(
         "",
     )
     if client is None:
-        config = config or load_llm_config()
+        config = config or load_llm_config_with_fallback()
         client = _build_client(config)
         # v5.0 fast dispatch: the orchestrator (looping dispatch brain)
         # defaults to its per-agent model (qwen3:4b on the local backend) so
@@ -1512,6 +1618,16 @@ def _run_dispatch_loop(
         }
     scoped_tools = _scoped_tool_specs(registry, plan_agents) if plan_agents else []
 
+    # v5.32: the schemas are scoped above, but the ROSTER PROSE in the system
+    # message still described all 31 agents / 161 tools (~12.3k chars) on every
+    # turn, while a typical directive touches one or two. Now that plan_agents
+    # is known, precompute a focused system prompt — applied AT THE API
+    # BOUNDARY below, next to the fast lane, so the authoritative messages stay
+    # byte-identical for persistence and later turns.
+    focused_system = (
+        system_message(registry, plan_agents) if plan_agents else None
+    )
+
     for _ in range(max_turns):
         # Deterministic cost cap BEFORE each LLM call (spec: prevent runaway
         # execution loop costs). A tripped budget ends the run honestly.
@@ -1592,6 +1708,19 @@ def _run_dispatch_loop(
         ):
             bounded = [
                 {"role": "system", "content": _FAST_LANE_SYSTEM}
+            ] + bounded[1:]
+        # v5.32 roster focus: same boundary trick for AGENTIC turns. The fast
+        # lane above wins when both apply (it is the cheaper prompt), so this
+        # only fires for real directives, swapping the all-31-agent roster for
+        # one scoped to the planned agents (~60% fewer prompt chars).
+        elif (
+            focused_system
+            and bounded
+            and bounded[0].get("role") == "system"
+            and bounded[0].get("content") == system_message(registry)
+        ):
+            bounded = [
+                {"role": "system", "content": focused_system}
             ] + bounded[1:]
         # v5.30: the server fast lane tries the Dell first; ANY failure
         # (unreachable, timeout, 500, malformed) falls back to the local

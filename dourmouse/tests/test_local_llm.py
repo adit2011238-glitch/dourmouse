@@ -272,7 +272,9 @@ class TestDispatchDefaultBackend:
             calls.append("built")
             return type("_C", (), {})()  # never actually used — no LLM turn
 
-        monkeypatch.setattr(dispatch, "load_llm_config", _fake_resolver)
+        # dispatch now calls load_llm_config_with_fallback (which calls the real
+        # load_llm_config internally), so mock the fallback function instead.
+        monkeypatch.setattr(dispatch, "load_llm_config_with_fallback", _fake_resolver)
         monkeypatch.setattr(dispatch, "_build_client", _fake_build_client)
         # A registry whose only tool errors harmlessly: we just need the
         # default-config path to run and resolve through the resolver.
