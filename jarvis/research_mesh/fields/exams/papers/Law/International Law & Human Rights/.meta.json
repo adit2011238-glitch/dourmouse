@@ -1,0 +1,21 @@
+{
+  "domain": "Law",
+  "field": "International Law & Human Rights",
+  "tests": [],
+  "keys": [
+    {
+      "url": "https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf",
+      "file": "_archives/https-www-ustcivillaw-com-wp-content-upl-4c27fcc1c5.pdf",
+      "bytes": 1098037,
+      "sha256": "4c27fcc1c5110ccd2044c6a0429b7f80fd26c9a8461241c243c486e4bb2eef80",
+      "key": true,
+      "kind": "pdf"
+    }
+  ],
+  "links": [
+    {
+      "url": "https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf",
+      "label": "Philippine Bar Exam \u2014 Remedial Law (REM) questions with suggested answers, ustcivillaw"
+    }
+  ]
+}

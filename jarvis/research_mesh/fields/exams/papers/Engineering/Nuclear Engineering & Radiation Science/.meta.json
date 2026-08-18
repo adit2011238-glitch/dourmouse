@@ -1,0 +1,21 @@
+{
+  "domain": "Engineering",
+  "field": "Nuclear Engineering & Radiation Science",
+  "tests": [
+    {
+      "url": "https://nuclear.engr.utexas.edu/academics/graduate-program/ph-d-qualifying-exam",
+      "file": "_archives/https-nuclear-engr-utexas-edu-academics--9bbd510bab.html",
+      "bytes": 24912,
+      "sha256": "9bbd510bab0a38b090eba79d22f89c0513ede8c103b7c3ab2741991a307e1ccc",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://nuclear.engr.utexas.edu/academics/graduate-program/ph-d-qualifying-exam",
+      "label": "UT Austin \u2014 Nuclear & Radiation Engineering PhD Qualifying Exam"
+    }
+  ]
+}

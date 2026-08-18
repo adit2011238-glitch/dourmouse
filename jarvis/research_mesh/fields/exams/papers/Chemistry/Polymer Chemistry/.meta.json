@@ -1,0 +1,21 @@
+{
+  "domain": "Chemistry",
+  "field": "Polymer Chemistry",
+  "tests": [
+    {
+      "url": "https://gradprogram.chem.byu.edu/graduate-program/proficiency-exams",
+      "file": "_archives/https-gradprogram-chem-byu-edu-graduate--4d480d802e.html",
+      "bytes": 105203,
+      "sha256": "4d480d802ebfeed5c8980bc1c2bd52437f15e22c7c91c42f7a08c1e320e8e8d3",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://gradprogram.chem.byu.edu/graduate-program/proficiency-exams",
+      "label": "BYU Chemistry \u2014 Proficiency exams"
+    }
+  ]
+}

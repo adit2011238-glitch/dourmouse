@@ -1,0 +1,501 @@
+{
+  "domain": "Statistics & Probability",
+  "field": "Spatial & Environmental Statistics",
+  "tests": [
+    {
+      "url": "https://www.artsci.uc.edu/natural-sciences/math/academic-programs/phd-stats/statistics-phd-qualifying-preliminary-exams.html",
+      "file": "_archives/https-www-artsci-uc-edu-natural-sciences-729427af04.html",
+      "bytes": 428236,
+      "sha256": "729427af049209d1b14bd625c4a67786d905679c104f17962576e639e951774e",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/Syllabus%20Stats%20Qualifying%20Exam.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-5b2f52d959.pdf",
+      "bytes": 41882,
+      "sha256": "5b2f52d959f18352b2891dd882fe1b639d81a868db9e5369ac1d8f0361a3b0d1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/may-2026-qual-and-prelim-stat/statqual-may2026-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-ad7f615978.pdf",
+      "bytes": 445393,
+      "sha256": "ad7f6159787889e9c671c30410b7005ebc206a5a6b1524925c8cf97aca6b0e6a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/aug-2025-stat-qual-and-prelim/statqual-aug2025-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-9805b34ba2.pdf",
+      "bytes": 2632933,
+      "sha256": "9805b34ba2c54bc7919f9c607da5ce00b03a63bf8709f0567e3161cb169effc4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/may-2025-qual-prelim-stat/statqual-may2025-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-6277f26477.pdf",
+      "bytes": 1764876,
+      "sha256": "6277f264776c7a84fc011ab07470bc34db18c7766ac5c91e146ad8999ac4eefc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/aug-2024-qual-and-prelim-stat/statqual-aug2024_questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-069a3f0f53.pdf",
+      "bytes": 198089,
+      "sha256": "069a3f0f533fa6730a0631d99403102278dc6316c10e52352603a36ee99349d6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/may-2024-qual-and-prelim-stat/statqual-may2024_questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-c05e410496.pdf",
+      "bytes": 1003816,
+      "sha256": "c05e410496ea29e3e1e1a30c73d476e9d6eca8985e1646487120c733b355407d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/august-2023-qualifying-and-prelim-exams/STAT_Qualifying-082023%20(1).pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-b4f95bce0d.pdf",
+      "bytes": 508297,
+      "sha256": "b4f95bce0d6e119fbc2ef97d11f1550b2cb69bf1679463795290c39b5a8c12db",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/qualifying-and-prelims-spring-2023/STAT_Quali-052023.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-456e1bcdf6.pdf",
+      "bytes": 357731,
+      "sha256": "456e1bcdf6c8043973199edf19f1c695821f08c18339c86d22547cc7bf0b224d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2022-aug/QE%20Stat_Stat_Qual_final_version.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-8d8c919f2d.pdf",
+      "bytes": 526339,
+      "sha256": "8d8c919f2d89b889bf1eb710744b2f67980285e596ba39d3098b5944219fc96a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2022-may/QEstat-qualifying-052022.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-4f0dc53ef3.pdf",
+      "bytes": 371354,
+      "sha256": "4f0dc53ef3a9fa1a91cfc299f6e5d0717a959c804bd61eb2073ed7b1b85172fa",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2021-aug/QE%20Stat_STAT_Quali-082021_WEBSITE.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-76731d2dbf.pdf",
+      "bytes": 363773,
+      "sha256": "76731d2dbf967b41e48a18eda87dd2cdf0e7a7192a12f9d36aee92d4f86e28bd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2021-may/QE%20Stat_STAT_Quali-052021.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-7c705b06d2.pdf",
+      "bytes": 464327,
+      "sha256": "7c705b06d29d4b086fb44d38fe04a345778c591600300f21b4d75d69a5a48f81",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2021-jan/QE-STAT_Quali-012021.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-c644fe02a1.pdf",
+      "bytes": 371786,
+      "sha256": "c644fe02a1a6625d39e8fc262fcedfff0892ce59e1038b898de7ac8306ac047e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2020-aug/QE%20Stat-STAT_Quali_Aug2020.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-a9a2b85682.pdf",
+      "bytes": 643845,
+      "sha256": "a9a2b85682fa7e60db6193f245f1fc6cf36aa627894eefbb2dd70b75010be67e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2019-aug/QE-Stat-Quali_August_2019.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-d9836a5cbc.pdf",
+      "bytes": 358255,
+      "sha256": "d9836a5cbc1ac96f5b821fdd73c9a42bf84c770eada4aba426b6eba6a01401f1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/QP_19SS_QEStat_accessible.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-c9a2de6cdb.pdf",
+      "bytes": 528516,
+      "sha256": "c9a2de6cdbf5494a8c931cbf382132157d640d1787f7d12f8dd8e8ef14850bd3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/Qualifying%20Exam_Stat_Aug%202018.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-43d87d11ee.pdf",
+      "bytes": 210246,
+      "sha256": "43d87d11eebb9f3073e8d6cc312d166b4766a66a40f8866fd53c055c3ffbbf7a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/QE_Stat_Quali_May_2018_Version05012018.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-2186f1a2db.pdf",
+      "bytes": 333971,
+      "sha256": "2186f1a2dba759483c0f31794883209eadd30183a38a77cf45b92e3bb3de12ad",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/Statistics%20-%20Qualifying%20Exam%20Aug%202017.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-ab257b45e4.pdf",
+      "bytes": 568860,
+      "sha256": "ab257b45e4c2a61a6c0c7c9b35402daca98a5a65a9c1fc17ced436f4c1ff1abb",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/Statistics%20-%20Qualifying%20Exam%20May%202017.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-407087046b.pdf",
+      "bytes": 1428446,
+      "sha256": "407087046bacd6f789b4c0f7a87dc8ba54e90142e70267596ccc6b8453675afe",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/Stats_Qualifying_Exam_Aug_2016.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-33a22ae1b7.pdf",
+      "bytes": 114968,
+      "sha256": "33a22ae1b77120c01d9368c8766a920d57db84473dd91b56ad9ac29050e9541c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/Stats_Qualifying_Exam_May_2016.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-518eb34ec3.pdf",
+      "bytes": 254520,
+      "sha256": "518eb34ec39f6861c5c8ec230d1cf0d5e70c036629954c20ea17c65789ac3484",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/Statistics%20-%20Qualifying%20Exam%20Feb%202016.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-317e46489c.pdf",
+      "bytes": 677517,
+      "sha256": "317e46489ca6ff0264358814e9e6ddbe35270606ec85bba7aa28ab5deef89c87",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/Stats_Qualifying_Exam_Aug_2015.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-254c704ffb.pdf",
+      "bytes": 100138,
+      "sha256": "254c704ffb4a217e4f419507511f6cf096d2e9c148800f6fa2fe847056d88d50",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/Stats_Qualifying_Exam_April_2015.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-beb4eb63ed.pdf",
+      "bytes": 206350,
+      "sha256": "beb4eb63eda90804a9cb69a012fed5386187f344587863fc0d796e5e4d956d14",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/Stats_Qualifying_Exam_August_2014.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-4733980ac0.pdf",
+      "bytes": 284547,
+      "sha256": "4733980ac0e4b37767d7e5fc2f6cb4a57ec19e81c978852b1a8b9cd59bef1b93",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/Stats_Qualifying_Exam_April_2014.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-d39070c8aa.pdf",
+      "bytes": 142405,
+      "sha256": "d39070c8aa80b639889fbf8c92844a396a820d4d268d448b1051512dfe6c3990",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/statistics_qualifying_exam_081913.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-94c3f67773.pdf",
+      "bytes": 501714,
+      "sha256": "94c3f6777380c273d5a7e3447def2da3bf97ef92c1f14edcf2e8b5b6539c7f3f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/statistics_qualifying_exam_061112.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-cb48a41398.pdf",
+      "bytes": 190523,
+      "sha256": "cb48a41398abd42173df2746894a436a4d4bd0217d9e4d8ba1e359a396c3910b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/statistics-qualifying-and-preliminary-exams/old-stat-prelims/statistics_qualifying_exam_091411.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-f4a930e84c.pdf",
+      "bytes": 1097176,
+      "sha256": "f4a930e84cfe243157c213c28f3baf3dcc060d96f4cc169ce9fff7ea153f5442",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qual-math-syllabus.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-6ebe0e22c7.pdf",
+      "bytes": 75900,
+      "sha256": "6ebe0e22c76a47488bdb797f7456291d4e19a206a19fd0b5e07b54ae07d52571",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/QEXpp1.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-5b266e0594.pdf",
+      "bytes": 63520,
+      "sha256": "5b266e05945ec12eb3ba484ea902684087b26f31ceadbbb126406a5b64b4d69d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/may-2026-math-prelim-and-quals/advcalc-may2026-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-1d7fe87820.pdf",
+      "bytes": 112135,
+      "sha256": "1d7fe87820ad755bc0733bbe69f68f446ea27da61b3213c8df108843cbd24537",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/august-2025-math-prelim-and-quals/advcalc-aug2025-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-7f8c4a3857.pdf",
+      "bytes": 134968,
+      "sha256": "7f8c4a385734576e69468da3f02035c778a78bb3b16ed539e9af11bd636c365a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/may-2025-qual-prelim-math/advcalc-may2025-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-c9db10a7bb.pdf",
+      "bytes": 117709,
+      "sha256": "c9db10a7bbd8c48d509ba141ab6c8c444a572a008ae531e673e6869dab1900bf",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/august-2024-math-prelim-and-quals/advcalc-aug2024-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-a51e1ae6d3.pdf",
+      "bytes": 125597,
+      "sha256": "a51e1ae6d321d6f8590a4eb5aefcf1132966ce1263392003b2bc909bdb3544c1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/may-2024-qual-and-prelims-math/corrected-advcalc_may2024_questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-90ef2efa20.pdf",
+      "bytes": 124699,
+      "sha256": "90ef2efa2062118130c716dd69903d904cd6739dbda8b491ab68ee64f5d26658",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/may-2026-math-prelim-and-quals/linalg-may2026-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-8507359db7.pdf",
+      "bytes": 89463,
+      "sha256": "8507359db72d327e7dde1ac4e4546a10a989f6415c8257cca75241c57ccb34db",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/august-2025-math-prelim-and-quals/linalg-aug2025-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-29d2d024b8.pdf",
+      "bytes": 91177,
+      "sha256": "29d2d024b8add87a68aba5f8b0325b44fda799efd36cd4703aad5893524b2504",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/may-2025-qual-prelim-math/linalg-may2025-questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-9ac6443366.pdf",
+      "bytes": 106993,
+      "sha256": "9ac64433660d3f63be884e068fabd470572ad01c2ce11e4fe0b3dbce8516192a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/august-2024-math-prelim-and-quals/linalg-aug2024_questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-58e0ad93b7.pdf",
+      "bytes": 93653,
+      "sha256": "58e0ad93b7955389fb87d6c058baa6a2ec149b66d21ed1a540c48b12b4bf7cb8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/may-2024-qual-and-prelims-math/linalgebra-may2024_questions.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-5fdb1adcb8.pdf",
+      "bytes": 103682,
+      "sha256": "5fdb1adcb83987a7f32a4ea4af9c162b51bf6d2fc5b8dedb3b8556534f9262bf",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/august-2023-qualifying-and-prelim-exams/qe_aug2023%20(1).pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-1893027d24.pdf",
+      "bytes": 142825,
+      "sha256": "1893027d24311b5c2a7f1a8e6ca9149d2e219505011fa31d5c771b95498fb2c7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2022-aug/QE%20Math_2022-August-QEXv1.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-ef8db7aba4.pdf",
+      "bytes": 184388,
+      "sha256": "ef8db7aba474f956d3c38687242fc590bfe3537d20e7e6b3538855f8212d798e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2022-may/QEmath_2022-May-QEXv2.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-45af00cdc3.pdf",
+      "bytes": 217665,
+      "sha256": "45af00cdc3c630d4b1742aa01a6eb674c12545792f261c15b092d343c0c98ba5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2021-aug/QE%20Math_2021-Aug--QEXv3-REVISED%20FOR%20WEB-USE%20THIS.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-d5fc2292f0.pdf",
+      "bytes": 182256,
+      "sha256": "d5fc2292f05b866684061d54e070a03679980dad9e0ec50c1a47d2c647b40acd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2021-may/QE%20Math_2021-May--QEXv2.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-1046c567d1.pdf",
+      "bytes": 183374,
+      "sha256": "1046c567d16636332984fae0698262c49400524a809e92af94f2face6ada7296",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2020-aug/QE%20Math-2020-Aug--QEXv6.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-882c44d856.pdf",
+      "bytes": 165988,
+      "sha256": "882c44d85636147ecc96e8e776d80d649ca929f3ead99ec9710b6ef6c26280c1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/qp-2019-aug/QE-Math-2019-Aug--QEXv5.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-88e2d4b7d5.pdf",
+      "bytes": 231078,
+      "sha256": "88e2d4b7d5b4c6fa74124c8e8b2268c156f6db05c092ee413ffe77c4de1f4257",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/old-grad-files/qp-exams/QP_19SS_QEMath_accessible.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-3e5b67580a.pdf",
+      "bytes": 184665,
+      "sha256": "3e5b67580aa2e9b9ee5b019652771b3f77a102d9e3bca0e7121359ff230b4998",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/Qualifying%20Exam_Math_Aug%202018_QEXv5.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-c16851968e.pdf",
+      "bytes": 165612,
+      "sha256": "c16851968e045da1b65d617a970e55ce1d30cdd369796d22bd28b53594c20d05",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/QE_2018-May--QEXv3.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-b601a11079.pdf",
+      "bytes": 164719,
+      "sha256": "b601a11079eba20ac34bd5070b443eba0d4d6bb0b941ed3b8f2a0e691f3a50d0",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/QE%20Math%20Aug%202017.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-8f5eacb916.pdf",
+      "bytes": 188048,
+      "sha256": "8f5eacb9160bf3897815c7383cea638b6b90f9e267119ac4309b890f0899f9b4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/Math%20-%20Qualifying%20Exam%20May%202017.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-10aab0cc31.pdf",
+      "bytes": 1053568,
+      "sha256": "10aab0cc316362031e7636f364ed7197ae6c823aff103e838640044a97f7bd22",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/Math_Qual_Exam_Aug_2016.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-9335326136.pdf",
+      "bytes": 180216,
+      "sha256": "933532613697e1d5fc9e2cbb4e5e43d4964b4bcb6cace9704f2869db67741b81",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/Math_Qual_Exam_May_2016.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-4e8c901aad.pdf",
+      "bytes": 156489,
+      "sha256": "4e8c901aade238eaa394de90dc95ea1f3dbfc23587a2d41922b6eb4492889514",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/Math_Qual_Exam_August_2015.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-88f7b55a2b.pdf",
+      "bytes": 177288,
+      "sha256": "88f7b55a2ba69d6c1627322c47f9021da1e091194071852b1bc0c7110efa0764",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/PhD_Math_Qual_Exam_May_2015.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-1771a9696f.pdf",
+      "bytes": 50681,
+      "sha256": "1771a9696f195f9f5382834a479897023de54d9bda09432bdf14b4f0ca16130c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/PhD_Math_Qual_Exam_Aug_2014.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-59a0ad64dd.pdf",
+      "bytes": 47488,
+      "sha256": "59a0ad64ddcf67bcb75a30b36ff44b8708593d36fbe459f1fd4e6f80aba399b9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://uc.edu/content/dam/refresh/artsandsciences-62/departments/math/graduate-programs/mathematics-qualifying-and-preliminary-exams/old-math-prelims/math-quals/PhD_Qual_Exam_Adv_Calc_Linear_Alg_April_2014.pdf",
+      "file": "_archives/https-uc-edu-content-dam-refresh-artsand-9487530ddc.pdf",
+      "bytes": 44768,
+      "sha256": "9487530ddc65ff11f5ca901cca3b4603686469d51d9b07156e17af0756f1deb3",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.artsci.uc.edu/natural-sciences/math/academic-programs/phd-stats/statistics-phd-qualifying-preliminary-exams.html",
+      "label": "U. Cincinnati Statistics PhD quals"
+    }
+  ]
+}

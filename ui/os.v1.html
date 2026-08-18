@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dourmouse</title>
+<style>
+/* =====================================================================
+   DOURMOUSE — personal AI operating system
+
+   Design position: a working instrument, not a chat toy and not a sci-fi
+   HUD. Hierarchy comes from type, spacing and restraint. One accent, used
+   only where the system is telling you something.
+
+   Every value on screen is fetched from the running backend. Nothing here
+   is placeholder or decorative telemetry — if an endpoint has no answer,
+   the UI says so rather than inventing one.
+   ===================================================================== */
+
+:root {
+  --bg:        #0C0C0D;
+  --panel:     #121214;
+  --panel-2:   #17171A;
+  --raise:     #1D1D21;
+  --line:      #232327;
+  --line-2:    #2C2C31;
+
+  --ink:       #ECECEE;
+  --ink-2:     #A2A2A9;
+  --ink-3:     #8E8E96;
+
+  --accent:    #C6853F;
+  --accent-dim:#2A1F13;
+  --accent-ink:#141005;
+
+  --ok:        #4E9E6E;
+  --warn:      #C08A3E;
+  --bad:       #C4695E;
+
+  --r:  6px;
+  --r2: 10px;
+
+  --sans: "Inter var", Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --rail: 236px;
+  --dur: 160ms;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:#F7F7F6; --panel:#FFFFFF; --panel-2:#FAFAF9; --raise:#F0F0EE;
+    --line:#E5E5E2; --line-2:#D8D8D4;
+    --ink:#17171A; --ink-2:#5A5A60; --ink-3:#6B6B72;
+    --accent:#96601F; --accent-dim:#F6EEE2; --accent-ink:#FFFFFF;
+    --ok:#2E7D4F; --warn:#8A6220; --bad:#A5382C;
+  }
+}
+:root[data-theme="light"] {
+  --bg:#F7F7F6; --panel:#FFFFFF; --panel-2:#FAFAF9; --raise:#F0F0EE;
+  --line:#E5E5E2; --line-2:#D8D8D4;
+  --ink:#17171A; --ink-2:#5A5A60; --ink-3:#6B6B72;
+  --accent:#96601F; --accent-dim:#F6EEE2; --accent-ink:#FFFFFF;
+  --ok:#2E7D4F; --warn:#8A6220; --bad:#A5382C;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:var(--sans);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  font-feature-settings:"cv02","cv03","cv04","ss01";
+}
+button,input,textarea,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+::selection{background:var(--accent);color:var(--accent-ink)}
+
+/* ---------- shell ---------- */
+.app{display:grid;grid-template-columns:var(--rail) 1fr;grid-template-rows:auto 1fr;height:100dvh}
+.app.railoff{grid-template-columns:0 1fr}
+
+/* ---------- header ---------- */
+header{
+  grid-column:1/-1;display:flex;align-items:center;gap:14px;
+  padding:0 14px;height:46px;background:var(--panel);
+  border-bottom:1px solid var(--line);
+}
+.wordmark{
+  display:flex;align-items:center;gap:9px;font-size:13px;
+  font-weight:620;letter-spacing:.14em;text-transform:uppercase;
+}
+.mk{width:7px;height:7px;background:var(--accent);border-radius:1px;transform:rotate(45deg)}
+.iconbtn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:30px;height:30px;border:1px solid transparent;background:none;
+  border-radius:var(--r);cursor:pointer;color:var(--ink-2);
+}
+.iconbtn:hover{background:var(--raise);color:var(--ink)}
+.hspace{margin-left:auto}
+.hstats{display:flex;align-items:center;gap:4px}
+.stat{
+  display:flex;align-items:center;gap:7px;padding:5px 10px;
+  border:1px solid var(--line);background:var(--panel-2);
+  border-radius:var(--r);cursor:pointer;font-size:11.5px;color:var(--ink-2);
+  transition:border-color var(--dur),background var(--dur);
+  min-height:30px;white-space:nowrap;
+}
+.stat:hover{border-color:var(--line-2);background:var(--raise);color:var(--ink)}
+.stat b{color:var(--ink);font-weight:550;font-family:var(--mono);font-size:11px}
+.led{width:6px;height:6px;border-radius:50%;background:var(--ink-3);flex:none}
+.led.ok{background:var(--ok);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--ok) 18%,transparent)}
+.led.bad{background:var(--bad);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--bad) 18%,transparent)}
+.led.warn{background:var(--warn)}
+.led.live{animation:brk 1.4s ease-in-out infinite}
+@keyframes brk{0%,100%{opacity:1}50%{opacity:.32}}
+
+/* ---------- rail ---------- */
+.rail{
+  background:var(--panel);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden;
+}
+.app.railoff .rail{display:none}
+.railtop{padding:12px 12px 8px}
+.newbtn{
+  width:100%;min-height:34px;display:flex;align-items:center;gap:9px;
+  padding:8px 11px;border:1px solid var(--line-2);background:var(--panel-2);
+  border-radius:var(--r);cursor:pointer;font-size:13px;font-weight:520;
+  transition:border-color var(--dur),background var(--dur);
+}
+.newbtn:hover{border-color:var(--accent);background:var(--raise)}
+.newbtn kbd{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+
+.navsec{padding:6px 8px}
+.navlbl{
+  font-size:11px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-3);padding:8px 8px 5px;font-weight:600;
+}
+.nav{
+  width:100%;display:flex;align-items:center;gap:10px;min-height:32px;
+  padding:6px 9px;border:none;background:none;border-radius:var(--r);
+  cursor:pointer;text-align:left;color:var(--ink-2);font-size:13px;
+  transition:background var(--dur),color var(--dur);
+}
+.nav:hover{background:var(--raise);color:var(--ink)}
+.nav[aria-current="page"]{background:var(--accent-dim);color:var(--accent);font-weight:550}
+.nav .gl{width:14px;text-align:center;font-size:12px;flex:none;opacity:.85}
+.nav .tail{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+
+.convs{flex:1;overflow-y:auto;padding:2px 8px 8px;min-height:0}
+.conv{
+  width:100%;text-align:left;border:none;background:none;cursor:pointer;
+  padding:7px 9px;border-radius:var(--r);color:var(--ink-2);
+  display:block;transition:background var(--dur);
+}
+.conv:hover{background:var(--raise);color:var(--ink)}
+.conv .t{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conv .m{font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+.railfoot{border-top:1px solid var(--line);padding:9px 10px;font-size:11px;color:var(--ink-3)}
+.railfoot .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- main ---------- */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.scroll{flex:1;overflow-y:auto;min-height:0}
+.col{max-width:780px;margin:0 auto;padding:26px 26px 10px}
+
+/* ---------- welcome ---------- */
+.welcome{max-width:780px;margin:0 auto;padding:10vh 26px 0}
+.welcome h1{font-size:25px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px}
+.welcome .sub{color:var(--ink-2);margin:0 0 26px;font-size:14.5px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:8px}
+.card{
+  text-align:left;padding:13px 14px;border:1px solid var(--line);
+  background:var(--panel);border-radius:var(--r2);cursor:pointer;
+  transition:border-color var(--dur),background var(--dur),transform var(--dur);
+  min-height:44px;
+}
+.card:hover{border-color:var(--accent);background:var(--panel-2);transform:translateY(-1px)}
+.card .h{font-size:13px;font-weight:550;margin-bottom:3px}
+.card .d{font-size:11.5px;color:var(--ink-3)}
+
+/* ---------- turns ---------- */
+.turn{margin-bottom:26px;animation:rise 220ms cubic-bezier(.2,.7,.3,1)}
+@keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.who-row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.who-row .nm{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.you .body{
+  border-left:2px solid var(--line-2);padding:2px 0 2px 13px;
+  color:var(--ink);white-space:pre-wrap;word-break:break-word;font-size:14.5px;
+}
+.msg{font-size:14.8px;line-height:1.68;color:var(--ink)}
+.msg p{margin:0 0 12px}
+.msg p:last-child{margin-bottom:0}
+.msg ul,.msg ol{margin:10px 0;padding-left:20px}
+.msg li{margin-bottom:4px}
+.msg li::marker{color:var(--accent)}
+.msg strong{font-weight:620}
+.msg a{color:var(--accent);text-underline-offset:2px}
+.msg h1,.msg h2,.msg h3{font-size:15px;font-weight:620;margin:16px 0 7px;letter-spacing:-.01em}
+.msg code{font-family:var(--mono);font-size:12.5px;background:var(--raise);border:1px solid var(--line);padding:1px 5px;border-radius:4px}
+.msg pre{
+  font-family:var(--mono);font-size:12.5px;line-height:1.55;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r2);padding:12px 14px;
+  overflow-x:auto;margin:12px 0;position:relative;
+}
+.msg pre code{background:none;border:none;padding:0}
+.msg table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;display:block;overflow-x:auto}
+.msg th,.msg td{border:1px solid var(--line);padding:7px 10px;text-align:left}
+.msg th{background:var(--raise);font-weight:600}
+.caret{display:inline-block;width:6px;height:1.02em;margin-left:2px;vertical-align:text-bottom;background:var(--accent);animation:brk 1s steps(2,start) infinite}
+
+.acts{display:flex;flex-direction:column;gap:4px;margin-bottom:9px}
+.act{
+  display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--ink-3);
+  padding:4px 9px;border:1px solid var(--line);background:var(--panel);
+  border-radius:5px;width:fit-content;max-width:100%;
+  animation:rise 200ms ease-out;
+}
+.act .nm{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+.act.bad{border-color:var(--bad);color:var(--bad)}
+.act .spin{width:8px;height:8px;border:1.5px solid var(--line-2);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+.rowacts{display:flex;gap:5px;margin-top:11px;opacity:0;transition:opacity var(--dur)}
+.turn:hover .rowacts,.rowacts:focus-within{opacity:1}
+.tinybtn{
+  border:1px solid var(--line);background:var(--panel);color:var(--ink-3);
+  border-radius:5px;padding:4px 9px;font-size:11px;cursor:pointer;min-height:28px;
+}
+.tinybtn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ---------- approval ---------- */
+.approve{
+  border:1px solid var(--warn);border-left:2px solid var(--warn);
+  background:var(--panel);border-radius:var(--r2);padding:14px 16px;margin:0 0 16px;
+}
+.approve .t{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--warn);font-weight:650;margin-bottom:7px}
+.approve .p{font-size:14px;color:var(--ink);margin-bottom:13px;word-break:break-word;white-space:pre-wrap}
+.approve .r{display:flex;gap:7px;flex-wrap:wrap}
+.btn{min-height:36px;padding:8px 15px;border-radius:var(--r);border:1px solid var(--line-2);background:var(--panel-2);cursor:pointer;font-size:13px;font-weight:550}
+.btn:hover{border-color:var(--accent)}
+.btn.go{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.approve.done{border-color:var(--line);border-left-color:var(--ink-3)}
+.approve.done .t{color:var(--ink-3)}
+
+.errbox{border:1px solid var(--bad);border-left:2px solid var(--bad);background:var(--panel);border-radius:var(--r2);padding:13px 15px;margin-bottom:16px;font-size:13.5px}
+.errbox .t{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--bad);font-weight:650;margin-bottom:5px}
+.errbox .f{color:var(--ink-2);margin-top:7px;font-size:12.5px}
+
+/* ---------- composer ---------- */
+.dock{border-top:1px solid var(--line);background:var(--panel);padding:12px 26px 16px}
+.dockcol{max-width:780px;margin:0 auto}
+.queue{display:flex;flex-direction:column;gap:5px;margin-bottom:8px}
+.qitem{
+  display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink-2);
+  border:1px dashed var(--line-2);background:var(--panel-2);border-radius:var(--r);
+  padding:7px 11px;animation:rise 180ms ease-out;
+}
+.qitem .qn{font-family:var(--mono);font-size:11px;color:var(--accent);flex:none}
+.qitem .qt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qitem button{border:none;background:none;color:var(--ink-3);cursor:pointer;font-size:14px;min-height:28px;min-width:28px;border-radius:4px}
+.qitem button:hover{color:var(--bad);background:var(--raise)}
+
+.box{border:1px solid var(--line-2);background:var(--panel-2);border-radius:var(--r2);transition:border-color var(--dur)}
+.box:focus-within{border-color:var(--accent)}
+#ta{
+  width:100%;border:none;background:none;outline:none;resize:none;
+  font-size:14.5px;line-height:1.55;padding:13px 15px 4px;
+  max-height:210px;min-height:46px;display:block;
+}
+.boxfoot{display:flex;align-items:center;gap:8px;padding:6px 8px 8px 13px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-3);
+  border:1px solid var(--line);background:var(--panel);border-radius:99px;
+  padding:4px 10px;min-height:28px;cursor:default;font-family:var(--mono);
+}
+.chip.act{cursor:pointer}
+.chip.act:hover{border-color:var(--accent);color:var(--accent)}
+#go{
+  margin-left:auto;min-height:34px;min-width:34px;padding:0 14px;border:none;
+  border-radius:var(--r);background:var(--accent);color:var(--accent-ink);
+  font-weight:620;cursor:pointer;font-size:13px;
+}
+#go:disabled{opacity:.4;cursor:not-allowed}
+.hint{font-size:11px;color:var(--ink-3);margin-top:7px;display:flex;gap:12px;flex-wrap:wrap}
+.hint kbd{font-family:var(--mono);font-size:11px;color:var(--ink-2);border:1px solid var(--line);border-radius:3px;padding:0 4px}
+
+/* ---------- panel ---------- */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity var(--dur);z-index:60}
+.scrim.on{opacity:1;pointer-events:auto}
+.panel{
+  position:fixed;top:0;right:0;bottom:0;width:min(430px,100vw);
+  background:var(--panel);border-left:1px solid var(--line);z-index:61;
+  transform:translateX(101%);transition:transform 220ms cubic-bezier(.2,.7,.3,1);
+  display:flex;flex-direction:column;
+}
+.panel.on{transform:none}
+.panelhead{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.panelhead h2{font-size:12px;font-weight:640;letter-spacing:.12em;text-transform:uppercase;margin:0}
+.panelbody{flex:1;overflow-y:auto;padding:16px}
+.kv{display:grid;grid-template-columns:112px 1fr;gap:9px 12px;font-size:13px;margin-bottom:18px}
+.kv dt{color:var(--ink-3);font-size:11.5px;letter-spacing:.04em}
+.kv dd{margin:0;font-family:var(--mono);font-size:12.5px;word-break:break-word}
+.sec{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);font-weight:650;margin:22px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.sec:first-child{margin-top:0}
+.item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:none}
+.item .g{flex:1;min-width:0}
+.item .n{font-size:13px;font-weight:550}
+.item .d{font-size:11.5px;color:var(--ink-3);word-break:break-word;margin-top:1px}
+.item .s{font-size:11px;font-family:var(--mono);color:var(--ink-3);flex:none;display:flex;align-items:center;gap:6px}
+.note{font-size:12.5px;color:var(--ink-3);line-height:1.55}
+.bar{height:3px;background:var(--raise);border-radius:2px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--accent)}
+
+/* ---------- responsive ---------- */
+@media (max-width:900px){
+  /* Touch ergonomics. Desktop keeps its density deliberately — 44px is a
+     finger target, not a mouse one — but every control a thumb can reach
+     gets the floor, and nothing may push the page sideways. */
+  html,body{overflow-x:hidden;max-width:100vw}
+  .app{max-width:100vw;overflow-x:hidden}
+  button,.nav,.conv,.stat,.iconbtn,.chip,.tinybtn,.card,.newbtn,#go{min-height:44px}
+  .iconbtn{min-width:44px}
+  .stat{padding:8px 12px}
+  .nav,.conv{padding:10px 11px}
+  .hint,.qitem,.act,.conv .m,.nav .tail,.railfoot{font-size:12px}
+  #ta{font-size:16px}          /* below 16px iOS zooms the page on focus */
+  .msg,.you .body{font-size:15px}
+
+  .app{grid-template-columns:1fr}
+  .rail{position:fixed;top:46px;bottom:0;left:0;width:min(84vw,290px);z-index:50;transform:translateX(-101%);transition:transform 200ms}
+  .app:not(.railoff) .rail{display:flex}
+  .rail.on{transform:none}
+  .col,.welcome{padding-left:16px;padding-right:16px}
+  .dock{padding:10px 16px calc(12px + env(safe-area-inset-bottom))}
+  .hstats .stat span.lbl{display:none}
+  .panel{width:100vw}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <header>
+    <button class="iconbtn" id="railtoggle" aria-label="Toggle sidebar" title="Toggle sidebar (⌘B)">☰</button>
+    <div class="wordmark"><span class="mk" aria-hidden="true"></span>Dourmouse</div>
+    <div class="hspace"></div>
+    <div class="hstats">
+      <button class="stat" id="s-sys"  title="System status"><span class="led" id="l-sys"></span><span class="lbl">System</span></button>
+      <button class="stat" id="s-node" title="Compute node"><span class="led" id="l-node"></span><b id="t-node">—</b></button>
+      <button class="stat" id="s-model" title="Active model"><b id="t-model">—</b></button>
+    </div>
+  </header>
+
+  <nav class="rail" id="rail" aria-label="Navigation">
+    <div class="railtop">
+      <button class="newbtn" id="newchat"><span aria-hidden="true">＋</span>New conversation<kbd>⌘N</kbd></button>
+    </div>
+
+    <div class="navsec">
+      <div class="navlbl">Intelligence</div>
+      <button class="nav" data-panel="compute"><span class="gl" aria-hidden="true">◈</span>Compute<span class="tail" id="n-node">—</span></button>
+      <button class="nav" data-panel="tools"><span class="gl" aria-hidden="true">▦</span>Tools<span class="tail" id="n-tools">—</span></button>
+      <button class="nav" data-panel="memory"><span class="gl" aria-hidden="true">◍</span>Memory<span class="tail" id="n-mem">—</span></button>
+      <button class="nav" data-panel="connections"><span class="gl" aria-hidden="true">⌗</span>Connections<span class="tail" id="n-conn">—</span></button>
+    </div>
+
+    <div class="navlbl">Conversations</div>
+    <div class="convs" id="convs"><div class="note" style="padding:6px 9px">Loading…</div></div>
+
+    <div class="navsec">
+      <button class="nav" data-panel="settings"><span class="gl" aria-hidden="true">⚙</span>Settings</button>
+      <button class="nav" data-panel="diagnostics"><span class="gl" aria-hidden="true">◎</span>Diagnostics</button>
+    </div>
+
+    <div class="railfoot"><div class="who" id="who">…</div></div>
+  </nav>
+
+  <main class="main">
+    <div class="scroll" id="scroll">
+      <div class="welcome" id="welcome"></div>
+      <div class="col" id="thread" hidden></div>
+    </div>
+
+    <div class="dock">
+      <div class="dockcol">
+        <div class="queue" id="queue"></div>
+        <div class="box">
+          <textarea id="ta" rows="1" placeholder="Ask Dourmouse anything…" spellcheck="true"></textarea>
+          <div class="boxfoot">
+            <span class="chip" id="c-route" title="Where this request will run">—</span>
+            <span class="chip act" id="c-mode" title="Restrict this request to one agent">All agents</span>
+            <button id="go">Send</button>
+          </div>
+        </div>
+        <div class="hint">
+          <span><kbd>Enter</kbd> send · <kbd>⇧Enter</kbd> newline</span>
+          <span id="qhint"></span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="panel" id="panel" aria-hidden="true" role="dialog" aria-label="Details">
+  <div class="panelhead">
+    <h2 id="panelTitle">—</h2>
+    <button class="iconbtn" id="panelClose" style="margin-left:auto" aria-label="Close">✕</button>
+  </div>
+  <div class="panelbody" id="panelBody"></div>
+</aside>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const api = async (p, o) => {
+  const r = await fetch(p, o);
+  if (!r.ok) throw new Error(p + " → HTTP " + r.status);
+  return r.json();
+};
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* Live system state, populated only from the backend. */
+const sys = { server:null, backend:null, connections:null, memory:null, roster:null, version:null, me:null, telemetry:null };
+let busy = false, started = false, focusAgent = "";
+const queue = [];
+
+/* ---------------- markdown (escape first, then a fixed grammar) --------- */
+function md(src){
+  const parts = esc(src).split(/```/);
+  let out = "";
+  parts.forEach((chunk,i) => {
+    if (i % 2) { out += `<pre><code>${chunk.replace(/^[\w-]*\n/,"")}</code></pre>`; return; }
+    let t = chunk
+      .replace(/`([^`\n]+)`/g,"<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    const lines = t.split("\n"); let html="", list=null, tbl=null;
+    const closeList = () => { if(list){ html+=`</${list}>`; list=null; } };
+    const closeTbl  = () => { if(tbl){ html+="</tbody></table>"; tbl=null; } };
+    for (const raw of lines){
+      const line = raw;
+      const h  = line.match(/^(#{1,3})\s+(.*)$/);
+      const ul = line.match(/^\s*[-*]\s+(.*)$/);
+      const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+      const tr = line.match(/^\s*\|(.+)\|\s*$/);
+      if (tr){
+        const cells = tr[1].split("|").map(c=>c.trim());
+        if (cells.every(c=>/^:?-{2,}:?$/.test(c))) continue;   // separator row
+        closeList();
+        if(!tbl){ html += "<table><thead><tr>" + cells.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>"; tbl=1; }
+        else html += "<tr>" + cells.map(c=>`<td>${c}</td>`).join("") + "</tr>";
+        continue;
+      }
+      closeTbl();
+      if (h){ closeList(); html += `<h3>${h[2]}</h3>`; }
+      else if (ul){ if(list!=="ul"){closeList();html+="<ul>";list="ul";} html+=`<li>${ul[1]}</li>`; }
+      else if (ol){ if(list!=="ol"){closeList();html+="<ol>";list="ol";} html+=`<li>${ol[1]}</li>`; }
+      else { closeList(); if(line.trim()) html += `<p>${line}</p>`; }
+    }
+    closeList(); closeTbl(); out += html;
+  });
+  return out;
+}
+
+/* ---------------- system state ---------------- */
+function ledClass(ok){ return "led " + (ok===true?"ok":ok===false?"bad":""); }
+
+async function refresh(){
+  const grab = async (k,p) => { try { sys[k] = await api(p); } catch { sys[k] = null; } };
+  await Promise.all([
+    grab("server","/api/server"), grab("backend","/api/backend"),
+    grab("connections","/api/connections"), grab("memory","/api/memory"),
+    grab("roster","/api/roster"), grab("version","/api/version"),
+    grab("me","/api/auth/me"), grab("telemetry","/api/telemetry"),
+  ]);
+  paintStatus();
+}
+
+/* What will actually serve the NEXT request is decided server-side per turn:
+   the compute node takes short fast-lane turns, the configured backend takes
+   the rest. The UI cannot know which in advance, so it must not claim one.
+   Show the configured backend (true for any turn that is not fast-laned) and
+   report the real model from the 'brain' event once the turn starts. */
+function routeLabel(){
+  const b = sys.backend || {};
+  const m = (b.model||"").split("/").pop() || "—";
+  const s = sys.server || {};
+  return {
+    where: b.backend ? b.backend.toUpperCase() : "LOCAL",
+    model: m,
+    nodeReady: s.online === true,
+    nodeModel: s.model || "",
+  };
+}
+
+function paintStatus(){
+  const s = sys.server || {}, b = sys.backend || {};
+  const anyBackend = !!(b.model);
+  $("l-sys").className  = ledClass(anyBackend);
+  $("l-node").className = ledClass(s.online === true ? true : s.online === false ? false : null);
+  $("t-node").textContent  = s.online ? (s.node || "NODE") : "OFFLINE";
+  $("n-node").textContent  = s.online ? `${s.latency_ms ?? "?"}ms` : "offline";
+  const r = routeLabel();
+  $("t-model").textContent = r.model;
+  $("c-route").textContent = r.nodeReady
+    ? `${r.where.toLowerCase()} · ${r.model} · node ready`
+    : `${r.where.toLowerCase()} · ${r.model}`;
+  $("c-route").title = r.nodeReady
+    ? `Most turns run on ${r.model}. Short turns may be routed to the compute node (${r.nodeModel}).`
+    : `Turns run on ${r.model}. The compute node is offline.`;
+
+  const conns = sys.connections || {};
+  const okN = Object.values(conns).filter(c=>c && c.ok).length;
+  $("n-conn").textContent = Object.keys(conns).length ? `${okN}/${Object.keys(conns).length}` : "—";
+  const mem = sys.memory || {};
+  $("n-mem").textContent = mem.count != null ? `${mem.count}` : "—";
+  const rost = (sys.roster && sys.roster.subagents) || [];
+  const toolCount = rost.reduce((n,a)=>n + ((a.tools||[]).length), 0);
+  $("n-tools").textContent = toolCount ? String(toolCount) : "—";
+  const me = sys.me || {};
+  $("who").textContent = me.me ? me.me : "Not signed in to Google";
+}
+
+async function loadConvs(){
+  try{
+    const d = await api("/api/sessions/recent");
+    const list = d.sessions || [];
+    const box = $("convs"); box.innerHTML = "";
+    if(!list.length){ box.innerHTML = '<div class="note" style="padding:6px 9px">No conversations yet</div>'; return; }
+    list.forEach(s => {
+      const b = document.createElement("button"); b.className="conv";
+      const t = document.createElement("div"); t.className="t";
+      t.textContent = s.first_user || s.name || "(untitled)";
+      const m = document.createElement("div"); m.className="m";
+      m.textContent = `${s.turns ?? "?"} turns`;
+      b.append(t,m);
+      b.title = s.last_answer ? String(s.last_answer).slice(0,180) : "";
+      box.appendChild(b);
+    });
+  }catch{ $("convs").innerHTML = '<div class="note" style="padding:6px 9px">History unavailable</div>'; }
+}
+
+/* ---------------- panels (real data only) ---------------- */
+const PANELS = {
+  compute(){
+    const s = sys.server || {}, b = sys.backend || {}, r = routeLabel();
+    const rows = [
+      ["Status", s.online ? "Online" : (s.url ? "Offline" : "Not configured")],
+      ["Node", s.node || "—"], ["Model", s.model || "—"],
+      ["Endpoint", s.url || "—"],
+      ["Latency", s.latency_ms != null ? s.latency_ms + " ms" : "—"],
+      ["Ollama on node", s.ollama === true ? "Ready" : s.ollama === false ? "No" : "—"],
+      ["Node version", s.version || "—"],
+      ["Kill switch", s.enabled === false ? "DISABLED" : "Enabled"],
+    ];
+    let h = `<div class="sec">Remote compute</div>
+      <div class="item"><span class="${ledClass(s.online===true)}"></span>
+        <div class="g"><div class="n">${s.online?"Dell compute node online":"Remote compute unavailable"}</div>
+        <div class="d">${s.online?"Requests route here first.":"Dourmouse falls back to the configured backend below."}</div></div></div>
+      <dl class="kv">${rows.map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
+      <div class="sec">Fallback backend</div>
+      <dl class="kv">
+        <dt>Backend</dt><dd>${esc(b.backend||"—")}</dd>
+        <dt>Model</dt><dd>${esc(b.model||"—")}</dd>
+        <dt>Endpoint</dt><dd>${esc(b.base_url||"—")}</dd>
+      </dl>
+      <div class="sec">Routing</div>
+      <div class="note">Short conversational turns are eligible for the compute node
+      (<code>${esc(s.model||"—")}</code>). Everything else runs on
+      <code>${esc(r.model)}</code>. Each reply reports which one actually served it.</div>`;
+    if (s.error) h += `<div class="sec">Last error</div><div class="note">${esc(s.error)}</div>`;
+    return h;
+  },
+  tools(){
+    const rost = (sys.roster && sys.roster.subagents) || [];
+    if(!rost.length) return `<div class="note">Roster unavailable.</div>`;
+    const conns = sys.connections || {};
+    return `<div class="sec">${rost.length} agents · ${rost.reduce((n,a)=>n+(a.tools||[]).length,0)} tools</div>` +
+      rost.map(a => {
+        const c = conns[a.name];
+        const st = c ? (c.ok?"ok":"bad") : "";
+        const gated = (a.tools||[]).filter(t=>t.permission && t.permission!=="regular").length;
+        return `<div class="item"><span class="led ${st}"></span><div class="g">
+          <div class="n">${esc(a.name)}</div>
+          <div class="d">${esc(a.description||"")}</div>
+          ${c?`<div class="d">${esc(c.detail||"")}</div>`:""}
+        </div><div class="s">${(a.tools||[]).length}${gated?` · ${gated}🔒`:""}</div></div>`;
+      }).join("");
+  },
+  memory(){
+    const m = sys.memory || {};
+    return `<div class="sec">Long-term memory</div>
+      <div class="item"><span class="${ledClass(m.active===true)}"></span><div class="g">
+        <div class="n">${m.active?"Learning on":"Learning off"}</div>
+        <div class="d">${esc(m.gate||"")}</div></div>
+        <div class="s">${m.count ?? "—"} facts</div></div>
+      <div class="note" style="margin-top:14px">Dourmouse stores durable facts across sessions and recalls them when relevant. Conversation history is listed in the sidebar.</div>`;
+  },
+  connections(){
+    const c = sys.connections || {};
+    const keys = Object.keys(c);
+    if(!keys.length) return `<div class="note">Connections unavailable.</div>`;
+    const on = keys.filter(k=>c[k].ok), off = keys.filter(k=>!c[k].ok);
+    const row = k => `<div class="item"><span class="${ledClass(!!c[k].ok)}"></span><div class="g">
+        <div class="n">${esc(k)}</div><div class="d">${esc(c[k].detail||"")}</div>
+        ${!c[k].ok && c[k].hint?`<div class="d">Fix: ${esc(c[k].hint)}</div>`:""}
+      </div></div>`;
+    return `<div class="sec">Connected · ${on.length}</div>${on.map(row).join("")}
+            <div class="sec">Not connected · ${off.length}</div>${off.map(row).join("")}`;
+  },
+  settings(){
+    const b = sys.backend||{}, s = sys.server||{}, me = sys.me||{};
+    const theme = document.documentElement.getAttribute("data-theme") || "system";
+    return `<div class="sec">Appearance</div>
+      <div class="item"><div class="g"><div class="n">Theme</div><div class="d">Currently: ${theme}</div></div>
+        <div class="s"><button class="tinybtn" id="setTheme">Switch</button></div></div>
+      <div class="sec">Intelligence</div>
+      <dl class="kv"><dt>Backend</dt><dd>${esc(b.backend||"—")}</dd>
+        <dt>Model</dt><dd>${esc(b.model||"—")}</dd>
+        <dt>Remote node</dt><dd>${s.online?esc(s.model||""):"offline"}</dd></dl>
+      <div class="sec">Account</div>
+      <dl class="kv"><dt>Google</dt><dd>${me.me?esc(me.me):"not signed in"}</dd></dl>
+      ${me.me?"":'<div class="note"><a href="/login">Sign in to Google</a> to enable mail, calendar and Drive.</div>'}
+      <div class="sec">Interfaces</div>
+      <div class="note">This is the OS interface. The original operator HUD is at <a href="/">/</a>; the simple chat view is at <a href="/app">/app</a>.</div>
+      <div class="note" style="margin-top:12px">Secrets are never displayed here. Configure them in <code>.env</code> on the host.</div>`;
+  },
+  diagnostics(){
+    const v = sys.version||{}, t = sys.telemetry||{};
+    let h = `<div class="sec">Version</div><dl class="kv">
+        <dt>Dourmouse</dt><dd>${esc(v.current||"—")}</dd>
+        <dt>Channel</dt><dd>${esc(v.channel||"—")}</dd></dl>`;
+    h += `<div class="sec">Host</div>`;
+    if (t && !t.unavailable){
+      h += `<dl class="kv">
+        <dt>Host</dt><dd>${esc(t.host||"—")}</dd>
+        <dt>CPU</dt><dd>${t.cpu_pct!=null?t.cpu_pct+"%":"—"}</dd>
+        <dt>Memory</dt><dd>${t.mem_used_gb!=null?`${t.mem_used_gb} / ${t.mem_total_gb} GB`:"—"}</dd>
+        ${t.load?`<dt>Load</dt><dd>${t.load.join(", ")}</dd>`:""}
+      </dl>`;
+      if(t.mem_pct!=null) h += `<div class="bar"><i style="width:${Math.min(100,t.mem_pct)}%"></i></div>`;
+    } else {
+      h += `<div class="note">Host telemetry unavailable${t.detail?` — ${esc(t.detail)}`:""}.</div>`;
+    }
+    return h;
+  },
+};
+
+function openPanel(name){
+  const body = $("panelBody");
+  $("panelTitle").textContent = name;
+  body.innerHTML = (PANELS[name]||(()=>"<div class='note'>—</div>"))();
+  $("panel").classList.add("on"); $("panel").setAttribute("aria-hidden","false");
+  $("scrim").classList.add("on");
+  const th = $("setTheme");
+  if (th) th.onclick = () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    const dark = cur ? cur==="dark" : !matchMedia("(prefers-color-scheme: light)").matches;
+    const next = dark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("dm-theme", next);
+    openPanel("settings");
+  };
+  $("panelClose").focus();
+}
+function closePanel(){
+  $("panel").classList.remove("on"); $("panel").setAttribute("aria-hidden","true");
+  $("scrim").classList.remove("on");
+}
+$("panelClose").onclick = closePanel;
+$("scrim").onclick = () => { closePanel(); $("rail").classList.remove("on"); };
+document.querySelectorAll(".nav[data-panel]").forEach(b => b.onclick = () => openPanel(b.dataset.panel));
+$("s-node").onclick = () => openPanel("compute");
+$("s-model").onclick = () => openPanel("compute");
+$("s-sys").onclick = () => openPanel("diagnostics");
+
+/* ---------------- welcome ---------------- */
+const STARTERS = [
+  ["Summarise my unread email","Reads your inbox via Gmail"],
+  ["What's on my calendar this week?","Google Calendar"],
+  ["Research the latest open-weight models","Live web search, with sources"],
+  ["Write and run a Python script","Executes and reports the real output"],
+];
+function paintWelcome(){
+  const w = $("welcome");
+  w.innerHTML = `<h1>Good to see you.</h1>
+    <p class="sub">Ask anything. Dourmouse routes across mail, calendar, Drive, the web, code execution and your compute node.</p>
+    <div class="grid2"></div>`;
+  const g = w.querySelector(".grid2");
+  STARTERS.forEach(([h,d]) => {
+    const b = document.createElement("button"); b.className="card";
+    b.innerHTML = `<div class="h"></div><div class="d"></div>`;
+    b.querySelector(".h").textContent = h; b.querySelector(".d").textContent = d;
+    b.onclick = () => { $("ta").value = h; $("ta").focus(); submit(); };
+    g.appendChild(b);
+  });
+}
+
+/* ---------------- composer ---------------- */
+const ta = $("ta"), go = $("go");
+function autosize(){ ta.style.height="auto"; ta.style.height = Math.min(ta.scrollHeight,210)+"px"; }
+ta.addEventListener("input", () => {
+  autosize();
+  go.textContent = busy ? "Queue" : "Send";
+});
+ta.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); submit(); }
+});
+go.onclick = () => submit();
+
+$("c-mode").onclick = () => {
+  const names = ["", "research_info", "dev_coding"];
+  const labels = ["All agents","Research only","Code only"];
+  const i = (names.indexOf(focusAgent) + 1) % names.length;
+  focusAgent = names[i];
+  $("c-mode").textContent = labels[i];
+};
+
+$("newchat").onclick = () => { $("thread").innerHTML=""; started=false; $("thread").hidden=true; $("welcome").hidden=false; ta.focus(); };
+$("railtoggle").onclick = () => {
+  if (matchMedia("(max-width:900px)").matches){ $("rail").classList.toggle("on"); $("scrim").classList.toggle("on"); }
+  else $("app").classList.toggle("railoff");
+};
+addEventListener("keydown", e => {
+  if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="b"){ e.preventDefault(); $("railtoggle").click(); }
+  if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="n"){ e.preventDefault(); $("newchat").click(); }
+  if (e.key === "Escape"){ closePanel(); $("rail").classList.remove("on"); }
+});
+
+/* ---------------- queue ---------------- */
+function paintQueue(){
+  const box = $("queue"); box.innerHTML = "";
+  queue.forEach((text,i) => {
+    const row = document.createElement("div"); row.className="qitem";
+    const n = document.createElement("span"); n.className="qn"; n.textContent = `${i+1}`;
+    const t = document.createElement("span"); t.className="qt"; t.textContent = text;
+    const x = document.createElement("button"); x.type="button";
+    x.setAttribute("aria-label","Remove queued message"); x.textContent="✕";
+    x.onclick = () => { queue.splice(i,1); paintQueue(); };
+    row.append(n,t,x); box.appendChild(row);
+  });
+  $("qhint").textContent = queue.length
+    ? `${queue.length} queued — sends automatically when the current reply finishes`
+    : (busy ? "Send while busy to queue" : "");
+}
+
+/* ---------------- rendering ---------------- */
+const scroll = $("scroll"), thread = $("thread");
+const near = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 150;
+const bottom = () => { scroll.scrollTop = scroll.scrollHeight; };
+
+function addYou(text){
+  if(!started){ started=true; $("welcome").hidden=true; thread.hidden=false; }
+  const t = document.createElement("div"); t.className="turn you";
+  t.innerHTML = `<div class="who-row"><span class="nm">You</span></div><div class="body"></div>`;
+  t.querySelector(".body").textContent = text;
+  thread.appendChild(t); bottom();
+}
+function addReply(){
+  const t = document.createElement("div"); t.className="turn";
+  t.innerHTML = `<div class="who-row"><span class="nm">Dourmouse</span><span class="nm" id="_st"></span></div>
+    <div class="acts"></div><div class="msg"></div><div class="rowacts"></div>`;
+  thread.appendChild(t); bottom();
+  return { turn:t, st:t.querySelector("#_st"), acts:t.querySelector(".acts"),
+           msg:t.querySelector(".msg"), row:t.querySelector(".rowacts") };
+}
+function act(acts,label,name,bad,spin){
+  const a=document.createElement("div"); a.className="act"+(bad?" bad":"");
+  if(spin){ const s=document.createElement("span"); s.className="spin"; a.appendChild(s); }
+  const l=document.createElement("span"); l.textContent=label; a.appendChild(l);
+  if(name){ const n=document.createElement("span"); n.className="nm"; n.textContent=name; a.appendChild(n); }
+  acts.appendChild(a); if(near()) bottom(); return a;
+}
+function addApproval(node, evt){
+  const box=document.createElement("div"); box.className="approve";
+  box.innerHTML = `<div class="t">Approval required</div><div class="p"></div>
+    <div class="r"><button class="btn go">Approve</button><button class="btn">Decline</button></div>`;
+  box.querySelector(".p").textContent = evt.prompt || "This action needs your approval.";
+  node.msg.parentNode.insertBefore(box, node.msg);
+  const [yes,no] = box.querySelectorAll("button");
+  let settled=false;
+  const decide = async (ok) => {
+    if(settled) return; settled=true;
+    box.classList.add("done");
+    box.querySelector(".t").textContent = ok?"Approved":"Declined";
+    box.querySelector(".r").remove();
+    try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id:evt.id,approved:ok})}); }catch{}
+  };
+  yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
+  yes.scrollIntoView({block:"nearest"}); yes.focus();
+}
+function setBusy(on,label){
+  busy=on;
+  // Deliberately NOT disabled while busy: the button becomes the queue
+  // action. Disabling it made the send control dead exactly when queuing
+  // is most useful, so a click did nothing and only Enter worked.
+  go.disabled = false;
+  go.textContent = on ? "Queue" : "Send";
+  go.title = on ? "Queue this message — it sends when the current reply finishes" : "Send";
+  $("l-sys").classList.toggle("live",on);
+  paintQueue();
+  if(!on) return;
+  if(label) $("t-model").textContent = label;
+}
+
+/* ---------------- send ---------------- */
+async function submit(){
+  const text = ta.value.trim();
+  if(!text) return;
+  if(busy){ queue.push(text); ta.value=""; autosize(); paintQueue(); return; }
+  ta.value=""; autosize();
+  await run(text);
+  // Drain everything that arrived while we were generating, in order.
+  while(queue.length){
+    const next = queue.shift();
+    paintQueue();
+    await run(next);
+  }
+}
+
+async function run(text){
+  addYou(text);
+  setBusy(true);
+  const node = addReply();
+  node.st.textContent = "thinking";
+  const r = routeLabel();
+  // Placeholder until the server tells us the truth via the 'brain' event.
+  const routeChip = act(node.acts, "Routing", "…", false, true);
+  let buf="", caret=document.createElement("span"); caret.className="caret";
+  node.msg.appendChild(caret);
+  const paint=()=>{ node.msg.innerHTML=md(buf); node.msg.appendChild(caret); if(near()) bottom(); };
+
+  try{
+    const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({prompt:text, focus_agent: focusAgent||undefined})});
+    if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
+    const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
+    for(;;){
+      const {value,done}=await rd.read(); if(done) break;
+      carry+=dec.decode(value,{stream:true});
+      const parts=carry.split("\n"); carry=parts.pop()||"";
+      for(const line of parts){
+        if(!line.startsWith("data:")) continue;
+        let e; try{ e=JSON.parse(line.slice(5)); }catch{ continue; }
+        switch(e.type){
+          case "brain": {
+            // The authoritative statement of which intelligence took this
+            // turn. A model name prefixed "server:" means the compute node.
+            const raw = e.model || "";
+            const onNode = raw.startsWith("server:");
+            const shown = raw.replace(/^server:/, "").split("/").pop() || "unknown";
+            const nm = routeChip.querySelector(".nm");
+            if (nm) nm.textContent = onNode ? `${(sys.server&&sys.server.node)||"node"} · ${shown}` : shown;
+            routeChip.firstElementChild &&
+              (routeChip.children[1].textContent = onNode ? "Running on compute node" : "Running on");
+            node.st.textContent = "generating";
+            break;
+          }
+          case "plan": act(node.acts,"Planning",""); break;
+          case "tool_use": case "function":
+            node.st.textContent="working"; act(node.acts,"Using",e.name||e.tool||"tool",false,true); break;
+          case "tool_result": case "result":
+            act(node.acts,"Result",e.name||e.tool||""); break;
+          case "confirmation_requested":
+            node.st.textContent="waiting for you"; addApproval(node,e); break;
+          case "assistant_delta": buf+=e.text||""; paint(); break;
+          case "assistant_text": if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
+          case "error": act(node.acts,"Error",e.message||"unknown",true); break;
+          case "done": if(e.final_text&&e.final_text.length>buf.length) buf=e.final_text; break;
+        }
+      }
+    }
+  }catch(err){
+    const s = sys.server||{};
+    const box=document.createElement("div"); box.className="errbox";
+    box.innerHTML=`<div class="t">Request failed</div><div></div><div class="f"></div>`;
+    box.children[1].textContent = String(err.message||err);
+    box.querySelector(".f").textContent = s.online
+      ? "Dourmouse is reachable but the request did not complete. Try again, or check Diagnostics."
+      : "The compute node is offline and the fallback did not answer. Check Compute for details.";
+    node.msg.parentNode.insertBefore(box,node.msg);
+  }finally{
+    caret.remove();
+    node.msg.innerHTML = md(buf) || "<p><em>No reply.</em></p>";
+    node.st.textContent="";
+    node.acts.querySelectorAll(".spin").forEach(s=>s.remove());
+    // message actions
+    const copy=document.createElement("button"); copy.className="tinybtn"; copy.textContent="Copy";
+    copy.onclick=async()=>{ try{ await navigator.clipboard.writeText(buf); copy.textContent="Copied"; setTimeout(()=>copy.textContent="Copy",1200);}catch{ copy.textContent="Copy failed"; } };
+    const again=document.createElement("button"); again.className="tinybtn"; again.textContent="Regenerate";
+    again.onclick=()=>{ if(!busy) run(text); };
+    node.row.append(copy,again);
+    setBusy(false);
+    bottom(); ta.focus();
+    refresh(); loadConvs();
+  }
+}
+
+/* ---------------- boot ---------------- */
+const savedTheme = localStorage.getItem("dm-theme");
+if(savedTheme) document.documentElement.setAttribute("data-theme",savedTheme);
+paintWelcome(); paintQueue();
+refresh(); loadConvs();
+setInterval(refresh, 30000);   // one light poll; no per-second chatter
+ta.focus();
+})();
+</script>
+</body>
+</html>

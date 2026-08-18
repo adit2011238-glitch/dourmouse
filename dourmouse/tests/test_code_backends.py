@@ -317,3 +317,129 @@ class TestCodingSubagents:
         out = tool.handler({"task": "write code"})
         assert "NOT CONFIGURED" in out
         assert "CODE NVIDIA" in out
+
+
+# --------------------------------------------------------------------------- #
+# v8.7 — Codex routes through the CLI, and Claude reports sign-in honestly
+# --------------------------------------------------------------------------- #
+
+class TestCodexCliFirst:
+    """``code_codex`` must use the SAME thing its status light measures.
+
+    The CODEX connection probe reports on the Codex CLI + ~/.codex/auth.json
+    (the user's ChatGPT login). The backend previously went straight to the
+    OpenAI API, so a user who ran ``codex login`` saw a green light and
+    still got "needs CODEX_API_KEY". These pin the CLI as the primary path.
+    """
+
+    def test_codex_prefers_cli_over_api_key(self, monkeypatch):
+        """With a CLI present, the API key path is NOT used."""
+        seen: dict[str, object] = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "def fib(n): ..."
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return _Proc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_codex_cli", lambda: "/usr/bin/codex"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        # A key IS set — if the API path were taken this would still pass,
+        # so assert on the argv to prove the CLI actually ran.
+        monkeypatch.setenv("CODEX_API_KEY", "sk-should-not-be-used")
+        out = code_backends.run_code_task("codex", "write fib")
+        assert out == "def fib(n): ..."
+        assert seen["argv"][:2] == ["/usr/bin/codex", "exec"]
+        assert "--skip-git-repo-check" in seen["argv"]
+
+    def test_codex_falls_back_to_api_when_no_cli(self, monkeypatch):
+        """No CLI + a key set → the OpenAI-compatible path still works."""
+        completions = _install_fake_openai(monkeypatch)
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_codex_cli", lambda: None
+        )
+        monkeypatch.setenv("CODEX_API_KEY", "sk-test")
+        out = code_backends.run_code_task("codex", "write add")
+        assert "def add" in out
+        assert completions.last_kwargs is not None
+
+    def test_codex_unconfigured_error_names_both_routes(self, monkeypatch):
+        """No CLI and no key → the error must mention the CLI login too.
+
+        Naming only the API key contradicts the CODEX status light, which
+        reports on the CLI — that mismatch is the bug this pins shut.
+        """
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_codex_cli", lambda: None
+        )
+        monkeypatch.delenv("CODEX_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with pytest.raises(RuntimeError) as exc:
+            code_backends.run_code_task("codex", "write add")
+        msg = str(exc.value)
+        assert "NOT CONFIGURED" in msg
+        assert "codex login" in msg
+        assert "CODEX_API_KEY" in msg
+
+    def test_codex_auth_failure_suggests_login(self, monkeypatch):
+        """A non-zero exit with no stderr points at sign-in, not a shrug."""
+
+        class _Proc:
+            returncode = 1
+            stdout = ""
+            stderr = ""
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_codex_cli", lambda: "/usr/bin/codex"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", lambda *a, **k: _Proc())
+        with pytest.raises(RuntimeError) as exc:
+            code_backends.run_code_task("codex", "write add")
+        assert "codex login" in str(exc.value)
+
+
+class TestClaudeSignInError:
+    def test_empty_stderr_exit_names_sign_in(self, monkeypatch):
+        """`claude -p` exits 1 with empty stderr when not signed in.
+
+        "exited 1: (no stderr)" is useless to the user; the message must
+        name the likely cause WITHOUT asserting it as verified fact.
+        """
+
+        class _Proc:
+            returncode = 1
+            stdout = ""
+            stderr = ""
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", lambda *a, **k: _Proc())
+        with pytest.raises(RuntimeError) as exc:
+            code_backends.run_code_task("claude", "write add")
+        msg = str(exc.value)
+        assert "NOT SIGNED IN" in msg
+        assert "/login" in msg
+
+    def test_real_stderr_is_preserved_verbatim(self, monkeypatch):
+        """A genuine error must NOT be replaced by the sign-in guess."""
+
+        class _Proc:
+            returncode = 2
+            stdout = ""
+            stderr = "rate limit exceeded"
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", lambda *a, **k: _Proc())
+        with pytest.raises(RuntimeError) as exc:
+            code_backends.run_code_task("claude", "write add")
+        msg = str(exc.value)
+        assert "rate limit exceeded" in msg
+        assert "NOT SIGNED IN" not in msg

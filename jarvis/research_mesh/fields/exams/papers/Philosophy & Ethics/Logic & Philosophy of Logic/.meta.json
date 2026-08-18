@@ -1,0 +1,21 @@
+{
+  "domain": "Philosophy & Ethics",
+  "field": "Logic & Philosophy of Logic",
+  "tests": [
+    {
+      "url": "https://www.memphis.edu/philosophy/graduate/pdfs/modern_qual-comp_guidelines.pdf",
+      "file": "_archives/https-www-memphis-edu-philosophy-graduat-0f1801d7be.pdf",
+      "bytes": 29501,
+      "sha256": "0f1801d7beaeafeaf4b478123d599b3e58fb300523ac0ca5395d2256e62acb83",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.memphis.edu/philosophy/graduate/pdfs/modern_qual-comp_guidelines.pdf",
+      "label": "U. Memphis \u2014 Modern Philosophy Qual/Comp guidelines"
+    }
+  ]
+}

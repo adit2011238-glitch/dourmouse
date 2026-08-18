@@ -1,0 +1,21 @@
+{
+  "domain": "Theoretical Computer Science",
+  "field": "Automata & Formal Languages",
+  "tests": [
+    {
+      "url": "https://computing.unl.edu/engineering/school-of-computing/sites/unl.edu.engineering.school-of-computing/files/media/file/Qualifying_Exam_Process_2024.pdf",
+      "file": "_archives/https-computing-unl-edu-engineering-scho-b4f1b36f0e.pdf",
+      "bytes": 57586,
+      "sha256": "b4f1b36f0e55f87070eb19360af3016acbf6031fb54986e01712260066d0b991",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://computing.unl.edu/engineering/school-of-computing/sites/unl.edu.engineering.school-of-computing/files/media/file/Qualifying_Exam_Process_2024.pdf",
+      "label": "UNL CS Qualifying Exam process (automata)"
+    }
+  ]
+}

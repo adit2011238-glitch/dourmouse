@@ -1,0 +1,109 @@
+{
+  "domain": "Genomics & Systems Biology",
+  "field": "Metagenomics & Microbiome Science",
+  "tests": [
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/resources/past-written-qualifying-exams.html",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-7e132293c3.html",
+      "bytes": 38920,
+      "sha256": "7e132293c36e67001d8d0ad51a9acad6c96f09b5fe2c24b740c0eabb55201e15",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-a7dfa7708c.pdf",
+      "bytes": 435121,
+      "sha256": "a7dfa7708c3f615f2aee19fa85aebf35b70aad433e2d1d9fa0ba665d5d18ee86",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-a28901da3d.pdf",
+      "bytes": 104196,
+      "sha256": "a28901da3d8daf41b3e3fd0f4053f17068ff73860dae274d9e598f295f06f815",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf",
+      "file": "_archives/https-biomed-emory-edu-includes-document-13e0b02bac.pdf",
+      "bytes": 283035,
+      "sha256": "13e0b02bac4ef8e5eaec1e2fe83dac8674d384937869bf86d549c17423e262d7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/gmb-2016-written-qualifying-exam.pdf",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-33490ce270.pdf",
+      "bytes": 414874,
+      "sha256": "33490ce27037f61102ebc5f199ee43e778dbfa8a3f2f24768b5c8939dd57948d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/gmb-2017-written-qualifying-exam.pdf",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-279b34bde1.pdf",
+      "bytes": 1350788,
+      "sha256": "279b34bde1e7b2c94f49fb747a6af99b8a408395ee0705cd9fccf4382e3b3231",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/gmb-2018-written-qualifying-exam.pdf",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-05d701fb99.pdf",
+      "bytes": 396398,
+      "sha256": "05d701fb993960a0f39e3c280769e76c6e101a8da10c41166f2b1d1f0c87c667",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/gmb-2019-written-qualifying-exam.pdf",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-901257714c.pdf",
+      "bytes": 285567,
+      "sha256": "901257714c3927c8f1a5644534a8bd7ec46c1ed54ae5c3b33d1c94c4e70f9c43",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/gmb-2020-written-qualifying-exam.pdf",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-47cb6f945d.pdf",
+      "bytes": 669070,
+      "sha256": "47cb6f945db76bf283059f2504bc208f41888eeaf69757fbaf3f9552ce839bdd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/gmb-2021-written-qualifying-exam.pdf",
+      "file": "_archives/https-biomed-emory-edu-program-sites-gmb-8ba2a3aabb.pdf",
+      "bytes": 1521375,
+      "sha256": "8ba2a3aabbe83d1890dfd3a79a24300c3877652ccf29a58e37a041171b51a35b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf",
+      "file": "_archives/https-biomed-emory-edu-includes-document-c8d7bcffb1.pdf",
+      "bytes": 223032,
+      "sha256": "c8d7bcffb107c21fca09b1a5c86289d40b3a81eb69e61d1bb8028888b17ba3ca",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://staging.web.emory.edu/gdbbs-internal/documents/wellness-support-resources.pdf",
+      "file": "_archives/https-staging-web-emory-edu-gdbbs-intern-d59a36d5f9.html",
+      "bytes": 9300,
+      "sha256": "d59a36d5f98a917c605cc2ed07aca8ee17906a2afa1f49633387fc145735e9b0",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/resources/past-written-qualifying-exams.html",
+      "label": "Emory GDBBS \u2014 Genetics & Molecular Biology written quals"
+    }
+  ]
+}

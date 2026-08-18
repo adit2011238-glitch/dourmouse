@@ -1,0 +1,21 @@
+{
+  "domain": "Systems & Networking",
+  "field": "Computer Networks & Protocols",
+  "tests": [
+    {
+      "url": "https://ece.illinois.edu/academics/grad/msphd-manual/qual",
+      "file": "_archives/https-ece-illinois-edu-academics-grad-ms-e78d4767a8.html",
+      "bytes": 76133,
+      "sha256": "e78d4767a82849abe9476b11f6e0b0de407770dc14f9f9395a07fb06e31fd614",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://ece.illinois.edu/academics/grad/msphd-manual/qual",
+      "label": "UIUC ECE \u2014 PhD Qualifying Exam areas"
+    }
+  ]
+}

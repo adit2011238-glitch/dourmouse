@@ -1,0 +1,21 @@
+{
+  "domain": "Chemistry",
+  "field": "Medicinal Chemistry",
+  "tests": [
+    {
+      "url": "https://www.k-state.edu/chem/student-success/graduate_students/courses/phd/",
+      "file": "_archives/https-www-k-state-edu-chem-student-succe-f5d75ab09b.html",
+      "bytes": 68152,
+      "sha256": "f5d75ab09b4314bb8fd665314de4f51971359cd952894ccec64fc8ff75a331e0",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.k-state.edu/chem/student-success/graduate_students/courses/phd/",
+      "label": "K-State Chemistry \u2014 Cumulative exams (Organic group)"
+    }
+  ]
+}

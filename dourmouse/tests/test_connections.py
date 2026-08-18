@@ -90,11 +90,39 @@ class TestEnvGates:
 
 
 class TestClaudeCodexDiscovery:
-    def test_claude_uses_cli_version(self, monkeypatch):
+    def test_claude_requires_cli_and_confirmed_signin(self, monkeypatch):
+        """Presence alone used to report ok=True — and the CLI would then
+        answer every request with "Not logged in · Please run /login".
+        A green tick the operator only discovers is wrong mid-task is worse
+        than an amber one, so an unconfirmed sign-in is not ok."""
         monkeypatch.setattr(conn, "_cli_version", lambda name: "2.1.220" if name == "claude" else None)
+
+        monkeypatch.setattr(conn, "_claude_signin", lambda: "unknown")
+        report = conn.check_connections()
+        assert report["claude"]["ok"] is False
+        assert "2.1.220" in report["claude"]["detail"]
+        assert "not verified" in report["claude"]["detail"]
+        assert "/login" in report["claude"]["hint"]
+
+        monkeypatch.setattr(conn, "_claude_signin", lambda: "yes")
         report = conn.check_connections()
         assert report["claude"]["ok"] is True
-        assert "2.1.220" in report["claude"]["detail"]
+        assert "signed in" in report["claude"]["detail"]
+
+    def test_claude_missing_cli_says_so(self, monkeypatch):
+        monkeypatch.setattr(conn, "_cli_version", lambda name: None)
+        report = conn.check_connections()
+        assert report["claude"]["ok"] is False
+        assert "not on PATH" in report["claude"]["detail"]
+        assert "npm i -g" in report["claude"]["hint"]
+
+    def test_claude_signin_never_guesses_from_projects_dir(self, tmp_path, monkeypatch):
+        """A populated ~/.claude/projects is NOT evidence of a session — an
+        earlier fix used it and went straight back to a false green."""
+        home = tmp_path / ".claude"
+        (home / "projects" / "some-project").mkdir(parents=True)
+        monkeypatch.setattr(conn.Path, "expanduser", lambda self: home)
+        assert conn._claude_signin() == "unknown"
 
     def test_codex_requires_cli_and_login(self, monkeypatch):
         monkeypatch.setattr(

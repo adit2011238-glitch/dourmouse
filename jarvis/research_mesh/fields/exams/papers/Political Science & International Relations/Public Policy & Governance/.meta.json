@@ -1,0 +1,261 @@
+{
+  "domain": "Political Science & International Relations",
+  "field": "Public Policy & Governance",
+  "tests": [
+    {
+      "url": "https://polisci.columbia.edu/content/study-resources-comprehensive-exams",
+      "file": "_archives/https-polisci-columbia-edu-content-study-3c3dc4f913.html",
+      "bytes": 64406,
+      "sha256": "3c3dc4f9139c211e8f0f96eb31a25145b36f0c5fce7e7d51444916be403af042",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/polisci.columbia.edu/files/content/pdfs/Comps/AP/APComps_Aug2025_NO_NAMES.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-polisci-7bfc67940e.pdf",
+      "bytes": 206024,
+      "sha256": "7bfc67940ec846b193557a664b5478d6a0a308bd34a54ea5514a06fbabcc85c8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/polisci.columbia.edu/files/content/pdfs/Comps/APComps_Jan2025_NONAMES.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-polisci-fbf5a0be83.pdf",
+      "bytes": 182277,
+      "sha256": "fbf5a0be835643b3dd4b7162838215d18cd11aef9662b76ea0e946110e812bf5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/AP/APComps_Aug2022_with_out_names.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-8ced25f03a.pdf",
+      "bytes": 139729,
+      "sha256": "8ced25f03a60a58ef29e86ce57adad7a744163c226df9a5f8ec02d57125512a9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/AP/Final AP August 2021 Comps Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-5f32937825.pdf",
+      "bytes": 131676,
+      "sha256": "5f32937825ff7a6d7021820d583c701fc2e27e0d5ee21ed0063f978cbeb4dc6b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/AP/August 2020 AP Comps Exam Final.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-f924ca2f74.pdf",
+      "bytes": 124126,
+      "sha256": "f924ca2f74079f0b231ac9ed4b99c883e47269ef45518a6948fc98bdb026b36a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/AP/AP January 2020 Final Comps Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-896ca37743.pdf",
+      "bytes": 123824,
+      "sha256": "896ca377438d4432038749846b060222184f69b1ddea6be5d6e06e83078aa50b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/AP/Final AP August 2019 Comps Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-ba61123f36.pdf",
+      "bytes": 140889,
+      "sha256": "ba61123f363f9dc3a5fedbf0bb222a1a68b102498235f99f1efcd5c938652f9f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/AP/AP Aug 2018 Final Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-defbe3251e.pdf",
+      "bytes": 50063,
+      "sha256": "defbe3251ed3725e0528f31165d8d6eb29be9ed12ff504a44c723104af6e1cef",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/APComps FinalVersion August2017.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-aff93b3765.pdf",
+      "bytes": 81749,
+      "sha256": "aff93b3765dd05ac66fbcc38bbd7997c250379e69b305c4b1ae149d0dea42b58",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/Comps_January17_AP.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-c22b4c5180.pdf",
+      "bytes": 100909,
+      "sha256": "c22b4c5180a28c8708aabe4310195cd743d06fc9e2a96e1fd1912a6435ec30fd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/AP/CompExam_August15_AP.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-970db3c1fa.pdf",
+      "bytes": 22809,
+      "sha256": "970db3c1fac3f582ec9206cbe2f188f7c316a5f0756fa4c600290fc965b927fd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/AP/Comps_April15_AP.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-e232259b8f.pdf",
+      "bytes": 91115,
+      "sha256": "e232259b8f8260d797b01125f9bc21a36c1f65c20cf3a107d06d362eecdd2469",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/polisci.columbia.edu/files/content/pdfs/Comps/CP/Comps%20Jan%2026%20Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-polisci-6076487164.pdf",
+      "bytes": 143922,
+      "sha256": "607648716457d10d00f98400e5ee591ae29f079dd8467b2be76242f688194009",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/polisci.columbia.edu/files/content/pdfs/Comps/CP/CP%20Exam_No%20Names.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-polisci-6716818350.pdf",
+      "bytes": 122543,
+      "sha256": "671681835088a8eee22c58843eab29cbbcabe091cd582a0ae3ecbb0303e7d14c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/polisci.columbia.edu/files/content/pdfs/Comps/Comparative%20Politics%20Comprehensive%20Examination_Jan%2025.docx%20(2).pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-polisci-d42d4b69d2.pdf",
+      "bytes": 94246,
+      "sha256": "d42d4b69d2683f176544523f6184a11c8561931ab8fe1b393be1ef41d742564e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/2024_08 Comparative Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-228ac52a1f.pdf",
+      "bytes": 108770,
+      "sha256": "228ac52a1f8673c9660504a7a471a9e62e991ab0fcae982bf50f4bb0c10ea6e9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/CP August Comps Final.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-ceacf8e7c5.pdf",
+      "bytes": 121763,
+      "sha256": "ceacf8e7c5204bb400288ba88abeee5a84992423929104b21f90282186793198",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/Final CP Comps Exam January 2022.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-80015b2fc8.pdf",
+      "bytes": 16554,
+      "sha256": "80015b2fc881e8662a16cc6ec7704fc35a5d07ece2546443892f3820557af3a5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/CP August 2021 Comps Exam Final.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-fa515bf7ed.pdf",
+      "bytes": 443431,
+      "sha256": "fa515bf7ed870e5f1493f70d22c39201c329f104b2925a52f0c794f3c9f0df89",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/CP January 2021 Comps Final Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-5926f0de2c.pdf",
+      "bytes": 311835,
+      "sha256": "5926f0de2c6cfacc27dd2e4a378627b236c7868fca3eca4cd23fb69b18a9a986",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/August 2020 CP Comps Exam Final.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-da4f765a7b.pdf",
+      "bytes": 148583,
+      "sha256": "da4f765a7bb5d3259b0a620a9a40c0adb022d7f2fb51985a1f285ecba9f4e00a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/January 2020 CP Comps Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-e0057149fa.pdf",
+      "bytes": 78438,
+      "sha256": "e0057149fa1f6f886f4fc837b79f7d2357be47bf422863e524b8f14eaedacb65",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/Final August 2019 CP Comps Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-5661704f74.pdf",
+      "bytes": 47695,
+      "sha256": "5661704f743f9280b2199b8c753332e5c42deb6fac61dc7829b573f6ff055b62",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/2019 CP Final Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-06c7e85643.pdf",
+      "bytes": 26025,
+      "sha256": "06c7e856438867ef989bcff1bbe04744afc8ad55d4b9b0a1e05e6b4214c52d64",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/CP Final Version Exam.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-0d540f3957.pdf",
+      "bytes": 22422,
+      "sha256": "0d540f3957c145e38b16e1be6aef8350375e91eba07b7de4407131d4bfadc6c1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP Exam January 2018.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-0592e13a16.pdf",
+      "bytes": 46186,
+      "sha256": "0592e13a16955ee2514a0d0a439ca073be219d42d46035578c1b54f08ca7fac3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP Exam August 2017.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-ab1533da3e.pdf",
+      "bytes": 49351,
+      "sha256": "ab1533da3e734bd10e1ffa224231acfed9cac8540753687a32b0edc70c4770a6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP Comp January 2017.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-477f89520f.pdf",
+      "bytes": 314379,
+      "sha256": "477f89520f273e5f2c6f5ed815536217b33ac245b0e536e0cfb74ae8a5c3fdca",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/CompExam_August15_CP.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-367df493af.pdf",
+      "bytes": 419620,
+      "sha256": "367df493afa9ff2ba3d3844af05dabde37af52d42e2312be19bbd86d2eb46575",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://polisci.columbia.edu/sites/default/files/content/pdfs/Comps/CP/Comps_January15_CP.pdf",
+      "file": "_archives/https-polisci-columbia-edu-sites-default-2ec35616d1.pdf",
+      "bytes": 219167,
+      "sha256": "2ec35616d1b930b33cfabbfd7b774475d00e7f9b9ed986e6354cb6fc6e1fbb0c",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://polisci.columbia.edu/content/study-resources-comprehensive-exams",
+      "label": "Columbia \u2014 Comprehensive Exam study resources (reading lists)"
+    }
+  ]
+}

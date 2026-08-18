@@ -112,13 +112,26 @@ class TestSlidesCreate:
         assert calls[0][0] == "POST" and calls[0][1].endswith("/presentations")
         batch = [c for c in calls if ":batchUpdate" in c[1]]
         assert len(batch) == 2
-        # first batch deletes the default slide + inserts 2 layouts
+        # First batch deletes the default slide + creates 2 slides.
+        #
+        # This assertion previously required "insertLayout", and the second
+        # required "createTextBox". Neither is a Slides API request type, so
+        # the test passed against code the API rejected outright — the deck
+        # feature never once worked, and this test is why nobody noticed.
+        # Pinning the real names is the point.
         assert batch[0][2]["requests"][0] == {"deleteObject": {"objectId": "p1"}}
-        inserts = [r for r in batch[0][2]["requests"] if "insertLayout" in r]
-        assert len(inserts) == 2
-        # second batch draws text boxes for each slide's title/body
-        assert any("createTextBox" in r for r in batch[1][2]["requests"])
+        creates = [r for r in batch[0][2]["requests"] if "createSlide" in r]
+        assert len(creates) == 2
+        assert all(
+            r["createSlide"]["slideLayoutReference"]["predefinedLayout"] == "BLANK"
+            for r in creates
+        )
+        # Second batch draws real text boxes: createShape(TEXT_BOX) + insertText.
+        shapes = [r for r in batch[1][2]["requests"] if "createShape" in r]
+        assert shapes
+        assert all(r["createShape"]["shapeType"] == "TEXT_BOX" for r in shapes)
         assert any("insertText" in r for r in batch[1][2]["requests"])
+        assert not any("createTextBox" in r for r in batch[1][2]["requests"])
 
     def test_403_surfaces_scope_fix(self, monkeypatch):
         monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")

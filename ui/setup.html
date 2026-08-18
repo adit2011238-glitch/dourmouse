@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DOURMOUSE // SETUP</title>
+<style>
+/* First-run setup. Shares the console's tokens so the app does not change
+   identity between setup and use. */
+:root{
+  --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
+  --amber:#f2b73d; --amber-ink:#08111c;
+  --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6; --blue-deep:#6f97b3;
+  --line:rgba(120,175,210,.18); --line-2:rgba(120,175,210,.30);
+  --amber-line:rgba(242,183,61,.35); --amber-soft:rgba(242,183,61,.14);
+  --ok:#5fbf8a; --bad:#e0685c;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--blue);font-family:var(--mono);
+  font-size:13px;line-height:1.65;-webkit-font-smoothing:antialiased;
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.wrap{width:100%;max-width:620px;display:flex;flex-direction:column;gap:18px}
+
+.head{display:flex;align-items:center;gap:12px}
+.mk{width:36px;height:36px;color:var(--amber);flex:none}
+.mk svg{width:100%;height:100%;display:block}
+.brand{font-family:var(--display);font-size:17px;letter-spacing:.22em;color:var(--amber)}
+.steps{display:flex;gap:6px;margin-left:auto}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--line-2)}
+.dot.on{background:var(--amber)}
+
+.card{border:1px solid var(--line);background:var(--panel);padding:22px}
+h1{font-family:var(--display);font-size:19px;letter-spacing:.10em;color:var(--blue-hi);
+  margin:0 0 10px}
+p{margin:0 0 12px;color:var(--blue-dim)}
+p:last-child{margin-bottom:0}
+.sec{font-size:9.5px;letter-spacing:.22em;color:var(--blue-deep);margin:18px 0 9px;
+  text-transform:uppercase}
+
+.opt{width:100%;text-align:left;border:1px solid var(--line-2);background:var(--panel2);
+  color:inherit;font:inherit;padding:14px 15px;cursor:pointer;display:flex;gap:12px;
+  align-items:flex-start;margin-bottom:9px;transition:border-color .15s ease}
+.opt:hover,.opt:focus-visible{border-color:var(--amber);outline:none}
+.opt[aria-pressed="true"]{border-color:var(--amber);background:var(--amber-soft)}
+.opt .ic{width:9px;height:9px;border-radius:50%;flex:none;margin-top:6px;background:var(--blue-deep)}
+.opt.ready .ic{background:var(--ok)}
+.opt.down .ic{background:var(--bad)}
+.opt .t{font-size:12.5px;color:var(--blue-hi);letter-spacing:.06em}
+.opt .d{font-size:10.5px;color:var(--blue-dim);line-height:1.6;margin-top:3px}
+
+.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:10px}
+input[type=text],input[type=password]{flex:1 1 240px;min-width:0;background:var(--bg);
+  border:1px solid var(--line-2);color:var(--blue-hi);font:inherit;font-size:12px;
+  padding:10px 12px;outline:none}
+input:focus{border-color:var(--amber)}
+button.go{background:var(--amber);color:var(--amber-ink);border:none;padding:11px 20px;
+  font:inherit;font-size:11px;letter-spacing:.16em;cursor:pointer;min-height:40px}
+button.go:disabled{opacity:.45;cursor:not-allowed}
+button.ghost{background:none;border:1px solid var(--line-2);color:var(--blue-dim);
+  padding:10px 16px;font:inherit;font-size:10.5px;letter-spacing:.14em;cursor:pointer;min-height:40px}
+button.ghost:hover{border-color:var(--amber);color:var(--amber)}
+.actions{display:flex;gap:9px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
+
+.guide{border-left:2px solid var(--amber);padding:12px 14px;background:var(--panel2);margin-top:12px}
+.guide ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:7px}
+.guide li{color:var(--blue-dim);font-size:11.5px}
+.guide a{color:var(--amber)}
+.msg{font-size:11px;margin-top:9px;min-height:1.3em}
+.msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)}
+.note{font-size:10.5px;color:var(--blue-deep);line-height:1.6;margin-top:12px}
+code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:11px}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <span class="mk"><svg viewBox="0 0 200 200" fill="none" aria-hidden="true">
+      <circle cx="100" cy="100" r="85" stroke="currentColor" stroke-width="7"/>
+      <path d="M100 34 L146 166 H128 L100 84 L72 166 H54 Z" fill="currentColor"/>
+      <path d="M30 150 L74 108 L100 132 L140 74 L168 52" stroke="currentColor"
+            stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M148 46 L176 44 L166 70 Z" fill="currentColor"/>
+    </svg></span>
+    <span class="brand">DOURMOUSE</span>
+    <span class="steps"><i class="dot on" id="d1"></i><i class="dot" id="d2"></i><i class="dot" id="d3"></i></span>
+  </div>
+
+  <!-- STEP 1 — welcome, and an honest statement of reach -->
+  <div class="card" id="s1">
+    <h1>Welcome</h1>
+    <p>Dourmouse is an assistant that runs on your own machine. Before it can
+       answer anything, it needs to know which intelligence to use.</p>
+    <p>You should know what it can reach: with your permission it can read and
+       write files, run commands, and send mail as you. Anything destructive
+       asks first, every time.</p>
+    <div class="actions">
+      <button class="go" onclick="show(2)">GET STARTED</button>
+    </div>
+  </div>
+
+  <!-- STEP 2 — choose a brain -->
+  <div class="card hide" id="s2">
+    <h1>Choose your brain</h1>
+    <p>Local runs entirely on this machine and needs no key. The cloud option
+       is faster and free to start.</p>
+
+    <button class="opt" id="optOllama" aria-pressed="false" onclick="pick('ollama')">
+      <span class="ic"></span>
+      <span><span class="t">Local — Ollama</span>
+      <span class="d" id="ollamaDetail">checking…</span></span>
+    </button>
+
+    <button class="opt" id="optNvidia" aria-pressed="false" onclick="pick('nvidia')">
+      <span class="ic"></span>
+      <span><span class="t">NVIDIA cloud — much faster</span>
+      <span class="d">Free to start. Takes about two minutes to set up.</span></span>
+    </button>
+
+    <button class="opt" id="optNode" aria-pressed="false" onclick="pick('node')">
+      <span class="ic"></span>
+      <span><span class="t">A computer I already run</span>
+      <span class="d">Point Dourmouse at your own machine on your network.</span></span>
+    </button>
+
+    <!-- guided NVIDIA walkthrough -->
+    <div id="nvBox" class="hide">
+      <div class="guide">
+        <ol>
+          <li>Open <a href="#" id="nvLink" target="_blank" rel="noopener">build.nvidia.com</a> — it opens in your browser.</li>
+          <li>Sign up with an email. No card is needed.</li>
+          <li>Pick any model, then press <b>Get API Key</b>.</li>
+          <li>Copy the whole key — it starts with <code>nvapi-</code>.</li>
+          <li>Paste it below. We check it works before saving.</li>
+        </ol>
+      </div>
+      <div class="row">
+        <input type="password" id="nvKey" placeholder="nvapi-…" autocomplete="off" spellcheck="false">
+        <button class="ghost" onclick="checkKey()">CHECK KEY</button>
+      </div>
+      <div class="msg" id="nvMsg"></div>
+    </div>
+
+    <!-- own node -->
+    <div id="nodeBox" class="hide">
+      <div class="row">
+        <input type="text" id="nodeUrl" placeholder="192.168.1.108:8000" autocomplete="off" spellcheck="false">
+        <button class="ghost" onclick="checkNode()">TEST</button>
+      </div>
+      <div class="msg" id="nodeMsg"></div>
+    </div>
+
+    <div class="actions">
+      <button class="ghost" onclick="show(1)">BACK</button>
+      <button class="go" id="contBtn" onclick="finish()" disabled>CONTINUE</button>
+    </div>
+    <div class="note" id="whyDisabled"></div>
+  </div>
+
+  <!-- STEP 3 — done -->
+  <div class="card hide" id="s3">
+    <h1>Ready</h1>
+    <p id="doneDetail"></p>
+    <div class="sec">Saved to</div>
+    <p><code id="cfgPath"></code></p>
+    <p class="note">This file holds your key. It stays on this machine — it is
+       never bundled into a build or uploaded. You can change any of this later
+       in Settings.</p>
+    <p class="note" id="restartNote">Dourmouse needs to restart so the new
+      setting takes effect — the backend is chosen when the app starts.</p>
+    <div class="actions">
+      <button class="go" id="openBtn" onclick="restartAndOpen()">RESTART AND OPEN</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let choice = null, status = null, keyOk = false, nodeOk = false, nodeUrlOk = "";
+
+function show(n){
+  [1,2,3].forEach(i => $("s"+i).classList.toggle("hide", i !== n));
+  [1,2,3].forEach(i => $("d"+i).classList.toggle("on", i <= n));
+  window.scrollTo(0,0);
+}
+async function api(path, body){
+  const opt = body ? {method:"POST", headers:{"Content-Type":"application/json"},
+                      body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function pick(which){
+  choice = which;
+  ["Ollama","Nvidia","Node"].forEach(n =>
+    $("opt"+n).setAttribute("aria-pressed", String(which === n.toLowerCase())));
+  $("nvBox").classList.toggle("hide", which !== "nvidia");
+  $("nodeBox").classList.toggle("hide", which !== "node");
+  refresh();
+}
+/* The continue button is enabled only when the chosen path is actually
+   proven to work — a validated key, a reachable node, or a live Ollama.
+   Letting someone finish setup on an unverified choice reproduces exactly
+   the silent-dead-app problem this screen exists to fix. */
+function refresh(){
+  let ready = false, why = "";
+  if(choice === "ollama"){
+    ready = !!(status && status.ollama && status.ollama.ok);
+    if(!ready) why = "Ollama is not running yet. Install it, run a model, then press Re-check.";
+  } else if(choice === "nvidia"){
+    ready = keyOk;
+    if(!ready) why = "Paste your key and press Check key.";
+  } else if(choice === "node"){
+    ready = nodeOk;
+    if(!ready) why = "Enter your machine's address and press Test.";
+  } else {
+    why = "Pick one to continue.";
+  }
+  $("contBtn").disabled = !ready;
+  $("whyDisabled").textContent = why;
+}
+async function checkKey(){
+  const m = $("nvMsg"); m.className = "msg"; m.textContent = "checking…";
+  try{
+    const r = await api("/api/setup/validate-key", {api_key: $("nvKey").value});
+    keyOk = !!r.ok;
+    m.className = "msg " + (r.ok ? "ok" : "bad");
+    m.textContent = (r.ok ? "✓ " : "✗ ") + (r.detail || "") + (r.hint ? " — " + r.hint : "");
+  }catch(e){ keyOk = false; m.className = "msg bad"; m.textContent = "✗ " + e.message; }
+  refresh();
+}
+async function checkNode(){
+  const m = $("nodeMsg"); m.className = "msg"; m.textContent = "testing…";
+  try{
+    const r = await api("/api/setup/probe-node", {url: $("nodeUrl").value});
+    nodeOk = !!r.ok; nodeUrlOk = $("nodeUrl").value;
+    m.className = "msg " + (r.ok ? "ok" : "bad");
+    m.textContent = (r.ok ? "✓ " : "✗ ") + (r.detail || "");
+  }catch(e){ nodeOk = false; m.className = "msg bad"; m.textContent = "✗ " + e.message; }
+  refresh();
+}
+/* Restart, then open. Saving config is not enough on its own: the backend
+   client is built once at startup, so an app that booted unconfigured keeps
+   using whatever it picked then. Without this the user finishes setup, sees
+   the console, types a question and gets nothing — which is exactly the
+   failure this whole screen exists to prevent. */
+async function restartAndOpen(){
+  const btn = $("openBtn"), note = $("restartNote");
+  btn.disabled = true; btn.textContent = "RESTARTING…";
+  try{
+    const r = await api("/api/setup/restart", {});
+    if(!r.ok){
+      note.textContent = r.detail || "Please close and reopen Dourmouse to apply.";
+      btn.disabled = false; btn.textContent = "OPEN ANYWAY";
+      btn.onclick = () => location.href = "/";
+      return;
+    }
+    /* The app is exiting and relaunching; its new instance re-binds the same
+       port. Poll until it answers rather than guessing at a delay. */
+    note.textContent = "Restarting Dourmouse…";
+    for(let i = 0; i < 30; i++){
+      await new Promise(r => setTimeout(r, 1000));
+      try{
+        const res = await fetch("/api/setup/status", {cache:"no-store"});
+        if(res.ok){ location.href = "/"; return; }
+      }catch(e){ /* expected while the process is down */ }
+    }
+    note.textContent = "Dourmouse is restarting — reopen it from your desktop icon.";
+    btn.textContent = "CLOSE";
+  }catch(e){
+    note.textContent = "Close and reopen Dourmouse to apply your settings.";
+    btn.disabled = false; btn.textContent = "OPEN ANYWAY";
+    btn.onclick = () => location.href = "/";
+  }
+}
+
+async function finish(){
+  const values = {};
+  if(choice === "ollama"){ values.DOURMOUSE_LLM_BACKEND = "ollama"; }
+  else if(choice === "nvidia"){ values.DOURMOUSE_LLM_BACKEND = "nvidia";
+                                values.NVIDIA_API_KEY = $("nvKey").value.trim(); }
+  else if(choice === "node"){ values.DOURMOUSE_LLM_BACKEND = "ollama";
+                              values.DOURMOUSE_SERVER_URL = nodeUrlOk.trim(); }
+  try{
+    const r = await api("/api/setup/save", {values});
+    if(!r.ok){ alert("Could not save: " + (r.detail || "unknown")); return; }
+    $("cfgPath").textContent = r.path || "";
+    $("doneDetail").textContent = choice === "ollama"
+      ? "Dourmouse will run locally on this machine. Nothing you type leaves it."
+      : choice === "nvidia"
+        ? "Your key is saved and working. Dourmouse will use NVIDIA for speed."
+        : "Connected to your machine. Dourmouse will send work there.";
+    show(3);
+  }catch(e){ alert("Could not save: " + e.message); }
+}
+(async () => {
+  try{
+    status = await api("/api/setup/status");
+    const o = status.ollama || {};
+    $("ollamaDetail").textContent = o.ok
+      ? (o.detail || "ready") + " — works now, no key needed"
+      : (o.detail || "not detected") + (o.hint ? " · " + o.hint : "");
+    $("optOllama").classList.toggle("ready", !!o.ok);
+    $("optOllama").classList.toggle("down", !o.ok);
+    $("nvLink").href = status.nvidia_signup_url || "https://build.nvidia.com";
+    if(o.ok) pick("ollama");
+  }catch(e){
+    $("ollamaDetail").textContent = "could not check — " + e.message;
+  }
+  refresh();
+})();
+</script>
+</body>
+</html>

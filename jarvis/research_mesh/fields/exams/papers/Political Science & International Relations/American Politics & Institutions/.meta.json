@@ -1,0 +1,21 @@
+{
+  "domain": "Political Science & International Relations",
+  "field": "American Politics & Institutions",
+  "tests": [
+    {
+      "url": "https://political-science.uchicago.edu/graduate-study/graduate-degree-requirements/comprehensive-exams/american-politics",
+      "file": "_archives/https-political-science-uchicago-edu-gra-7f73535b6f.html",
+      "bytes": 114355,
+      "sha256": "7f73535b6f66713f13f50867f53c941fd00a46e4649c3b058d16bfaf59c52fa1",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://political-science.uchicago.edu/graduate-study/graduate-degree-requirements/comprehensive-exams/american-politics",
+      "label": "U. Chicago \u2014 American Politics comps (100 readings)"
+    }
+  ]
+}

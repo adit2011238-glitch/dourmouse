@@ -80,6 +80,28 @@ def _cli_version(name: str) -> str | None:
     return text.splitlines()[0][:80] if text else None
 
 
+def _claude_signin() -> str:
+    """'yes' | 'unknown' — never a confident 'no'.
+
+    Presence on PATH was the old test and produced a green tick for a CLI
+    that answers "Not logged in · Please run /login". The obvious fix — look
+    for a credentials file — is ALSO wrong: on Windows the session lives in
+    the Credential Manager, so no file exists even when signed in, and an
+    earlier attempt here read a non-empty ``projects/`` directory as proof
+    and went straight back to a false green.
+
+    There is no cheap, portable, reliable signal. So this reports 'yes' only
+    on hard evidence (a credentials file) and 'unknown' otherwise, and the
+    caller says so plainly rather than inventing a verdict in either
+    direction.
+    """
+    home = Path("~/.claude").expanduser()
+    for name in (".credentials.json", "credentials.json"):
+        if (home / name).exists():
+            return "yes"
+    return "unknown"
+
+
 def _codex_auth_mode() -> str:
     """'chatgpt' / 'apikey' from ~/.codex/auth.json, or 'none'.
 
@@ -167,10 +189,23 @@ def check_connections() -> dict[str, dict[str, Any]]:
         }
 
     claude = _cli_version("claude")
+    signin = _claude_signin() if claude else "unknown"
+    if claude and signin == "yes":
+        claude_detail = f"Claude Code CLI {claude} · signed in"
+    elif claude:
+        claude_detail = f"Claude Code CLI {claude} · sign-in not verified"
+    else:
+        claude_detail = "claude CLI not on PATH"
     out["claude"] = {
-        "ok": claude is not None,
-        "detail": f"Claude Code CLI {claude}" if claude else "claude CLI not on PATH",
-        "hint": "npm i -g @anthropic-ai/claude-code",
+        "ok": bool(claude) and signin == "yes",
+        "detail": claude_detail,
+        "hint": (
+            "installed; sign-in could not be confirmed (Windows keeps it in the "
+            "Credential Manager). Run 'claude' once on the host and complete "
+            "/login — it will work here once signed in."
+            if claude
+            else "npm i -g @anthropic-ai/claude-code"
+        ),
     }
 
     codex = _cli_version("codex")

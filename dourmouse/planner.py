@@ -125,6 +125,17 @@ _DOMAIN_ROUTE: dict[str, str] = {
     "terminal": "system",  # "run a terminal command" must reach the agent
     # that owns run_command, never tie-break to a description overlap
     # (atlas_cmd's "Command Center — run the research pipeline" collides).
+    # v8.11: "disk"/"cpu" — system_info is the ONLY tool that answers "how
+    # much free disk space" or "what's my CPU count", but on their own
+    # these queries scored 1-2 (below the >=3 scoping threshold), so the
+    # tool never got offered and the model just declined the whole
+    # question. Both words are unambiguous: no other agent's name or tools
+    # mention disk or cpu. Deliberately NOT here: "memory" — there is a
+    # real `memory` agent (recall/search_vault) with that exact name, and
+    # routing "memory" to `system` would steal actual memory-recall
+    # queries; "space" — too generic ("personal space", "workspace").
+    "disk": "system",
+    "cpu": "system",
     # NOT here: "web" — too broad. "build a web app" would steal a coding
     # request to research_info; "search the web" already routes via the
     # search verb + research_info's web_search tool stem (reviewer-caught).
@@ -228,6 +239,23 @@ def find_agents_for_query(
     # ("draft an email" boosts comms AND mail); normal scoring then decides
     # the winner. Deterministic: no iteration-order dependence.
     domain_targets = {_DOMAIN_ROUTE[w] for w in tokens if w in _DOMAIN_ROUTE}
+    # v8.11: "search"+"web" together, credited only to whichever agent owns
+    # a tool literally named ``web_search`` (research_info). Closing the
+    # "free" in "freebuff" substring bug (see name_hits below) also closed
+    # an accidental twin: "search" is a literal substring of "research_info"
+    # too, and this test suite's OWN foundational test
+    # (test_map.py::test_web_search_ranks_research_info_first, "search the
+    # web for facts") turned out to depend on that accident — without it,
+    # "search" alone is a 3-4-way tie with every other agent that owns ANY
+    # search-shaped tool (memory's search_vault, atlas's repo_search, rnd's
+    # research_web_search, ...), since the capability-verb credit (below)
+    # is a flat +1 per agent with no regard for fit. This makes the
+    # existing code comment on `_DOMAIN_ROUTE` true instead of aspirational
+    # — it already claimed "search the web" routes via the tool stem, this
+    # is what actually makes that so. Gated on BOTH words together and on
+    # the exact tool name, so it cannot fire for "build a web app" (no
+    # "search" token) or credit any other agent.
+    compound_web_search = tokens >= {"search", "web"}
     # Learned evidence (v5.6), computed ONCE per query (not per agent): the
     # neural orchestrator's routing head adds positive evidence only —
     # 0.5 * max(0, logit). Its max boost (~2) sits BELOW the deterministic
@@ -245,7 +273,16 @@ def find_agents_for_query(
             [sub.name, sub.description]
             + [t.name + " " + t.description for t in sub.tools]
         ).lower()
-        name_hits = sum(1 for t in tokens if t in sub.name)
+        # v8.11: WORD match, not substring. `t in sub.name` let "free" (from
+        # "free disk space") false-positive-match "freebuff" — a raw
+        # containment check, not a word check. That false +3 outscored
+        # system's real (but low) match, so the model got freebuff's tools
+        # instead of system's for a disk-space question — traced live to
+        # the model then guessing the agent name "system" as a bare tool
+        # name and getting "unknown tool", then reporting it can't check
+        # disk space when the tool that does was simply never offered.
+        name_stems = set(re.split(r"[^a-z0-9]+", sub.name.lower()))
+        name_hits = sum(1 for t in tokens if t in name_stems)
         hay_hits = sum(1 for t in tokens if t in haystack)
         tool_hits = sum(1 for t in sub.tools if t.name in mentions)
         # Capability credit: +1 per DISTINCT intent verb the agent's tools
@@ -272,6 +309,8 @@ def find_agents_for_query(
         # by a domain word (reviewer-caught).
         if sub.name in domain_targets:
             score += 4
+        if compound_web_search and any(t.name == "web_search" for t in sub.tools):
+            score += 3
         if nn is not None and sub.name in nn:
             score += _ROUTE_LAMBDA * max(0.0, nn[sub.name])
         if score > 0:

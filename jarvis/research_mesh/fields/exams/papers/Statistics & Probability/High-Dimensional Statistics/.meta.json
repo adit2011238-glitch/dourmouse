@@ -1,0 +1,262 @@
+{
+  "domain": "Statistics & Probability",
+  "field": "High-Dimensional Statistics",
+  "tests": [
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/previousPhDexams.html",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-previ-5491722fa6.html",
+      "bytes": 5322,
+      "sha256": "5491722fa6459403d6c134afc41aac6da56e1e87a91ce73acae52d0ae1a7c4d5",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/QE2025.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-qe202-de52bd883c.pdf",
+      "bytes": 658998,
+      "sha256": "de52bd883c7f24ed38e9f472ae30a929a90cb2e85498fbe7a28ca68385f079cd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/QualsProblems_Aug2024.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-quals-957ec90448.pdf",
+      "bytes": 157288,
+      "sha256": "957ec90448d17dad162c5b589b62c50ddaaa75cb464b85422ec7a5c0254aefae",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-r-cod-43d4060d2f.pdf",
+      "bytes": 201627,
+      "sha256": "43d4060d2f46ab659ba5de363b4a4e41358c97b9deb62498ce194494a32f4a59",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/2023_August_Qualifying_Exam_Day2.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-2023--9a3111af7f.pdf",
+      "bytes": 143931,
+      "sha256": "9a3111af7f9f043fb5b756a5aaca2f4fcadfe4ba5123a38af8415ac76a1db47e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/2023_August_Qualifying_Exam_Day1.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-2023--f7c734d8b0.pdf",
+      "bytes": 114868,
+      "sha256": "f7c734d8b0698f078c532ec64855d8103cc04dcf59a1dabf8ebd0eaf8c6a2d85",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/PhD_Quals_Questions_August2022_Part2.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-phd-q-5993ebd76e.pdf",
+      "bytes": 136889,
+      "sha256": "5993ebd76e67069773c26a41f2429ec81fc19a1b58bba77303560691a473dbf7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/PhD_Quals_Questions_August2022_Part1.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-phd-q-dbbef454d4.pdf",
+      "bytes": 134696,
+      "sha256": "dbbef454d4a50430a2e076c595c301ebdf3951cc01d33d7cb2685b1b11cca372",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/PhD_Quals_Questions_May2021_Part2.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-phd-q-442b163bce.pdf",
+      "bytes": 177943,
+      "sha256": "442b163bced0d8db406feb9a9dfd53739be59602c8448a8a29cdf73a15c76ef7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/PhD_Quals_Questions_May2021_Part1.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-phd-q-6b88d77123.pdf",
+      "bytes": 245553,
+      "sha256": "6b88d77123952571eb43e2fdd5a64baff4b4fc7609722241ac5c87f97a4140f9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/PhD_Quals_Questions_August2020_Part2.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-phd-q-4a1f555d47.pdf",
+      "bytes": 137206,
+      "sha256": "4a1f555d4773d117a3c7d4f7f8e556c9db96c801437c1872e370f3209c055e79",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/PhD_Quals_Questions_August2020_Part1.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-phd-q-3d49f11709.pdf",
+      "bytes": 165786,
+      "sha256": "3d49f11709a21cd18ac63777407fccbc05365df876ef7f58deb7fe453a538c47",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/PhD_Quals_Questions_May2019.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-phd-q-7f27053c3a.pdf",
+      "bytes": 197801,
+      "sha256": "7f27053c3a9d96fc82e20e8ab38b5e4d85ac347d107255402d982c4c30268190",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/PhD_Quals_Questions_May2018.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-phd-q-e4d2a1e65d.pdf",
+      "bytes": 94620,
+      "sha256": "e4d2a1e65d58370055cb917a0901cfd4e4cde12f382ef9ceb9db1c05c224dc2b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/QualsMay2017.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-quals-63eacb2b46.pdf",
+      "bytes": 162445,
+      "sha256": "63eacb2b463a0c27bc0c1741f03f30ac9bc135d5697be0b88fc2787ebe73ed73",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/QualMay2015.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-qualm-27de72171a.pdf",
+      "bytes": 261086,
+      "sha256": "27de72171afbd7aab155f71c414037914ab412287a4836af79a0bc1865d7f227",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/QualsProblems_Jan2015.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-quals-5c45dbf20f.pdf",
+      "bytes": 148543,
+      "sha256": "5c45dbf20fba9a6148f2c6979d5d4434328df56f4b2dbcc0e614351c827a23e9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/QualsProblems_May2014cr.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-quals-cf5f49e2f4.pdf",
+      "bytes": 150942,
+      "sha256": "cf5f49e2f4e1552acf1edafa0fed71a4d1b73ab3ba1af17b1220a07e4145e2bf",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-7ba5f96ceb.pdf",
+      "bytes": 5000000,
+      "sha256": "7ba5f96ceb1df0931d38f2851dfa885b0ce9b0ab70f552ddef71800394631a5a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/QualsProblems_May2013.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-quals-24c84fcefd.pdf",
+      "bytes": 159000,
+      "sha256": "24c84fcefda2f3b6c0cb24ce060f4b588648165c428ae3b8dac352d34f5ee493",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/may2013_qual_solutions_1.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-d53641e4e1.pdf",
+      "bytes": 1159111,
+      "sha256": "d53641e4e16ce4558555746856b4f3ad80aece489a9a432612b3d6dc882f3152",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/may2013_qual_solutions_2.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-f76cfbaaf3.pdf",
+      "bytes": 1387768,
+      "sha256": "f76cfbaaf3a260d1291a8573494b5580a03e05c35444943955cca9751b0c20de",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/jan2013exam.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-jan20-fcd7c099e4.pdf",
+      "bytes": 760615,
+      "sha256": "fcd7c099e48c43cdf33d28d78a50920bcbbc309142df178fd95151122b5f53ef",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/jan2013soln.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-jan20-85cf2e2aa7.pdf",
+      "bytes": 3527612,
+      "sha256": "85cf2e2aa7836f3c4b01ca55f4424555e15cd01331fd7fd8218c76b1e4ce731f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/may2011exam.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-fbc23d9116.pdf",
+      "bytes": 81696,
+      "sha256": "fbc23d9116bd6672e365f9acc1f7787ec2f36a0b08ddc19962718a0ebf12614f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/may2011formulas.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-f8d7d508c7.pdf",
+      "bytes": 48715,
+      "sha256": "f8d7d508c709b1a2b00c58f6258fc5d58cb06c6a316ae231a23a952549e97b75",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/may2011solnpt1.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-640cc195ac.pdf",
+      "bytes": 1300140,
+      "sha256": "640cc195acfd4db20c90045060753546be25eead7b60c36613728c0f7f363043",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/may2011solnpt2.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-18e4295b7a.pdf",
+      "bytes": 2390566,
+      "sha256": "18e4295b7ac4e08954c5f2a9f312788af0638bfb831ac6b12cf654c4a5fb40b7",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/May2017fullsolutions.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-fa79de5610.pdf",
+      "bytes": 4302499,
+      "sha256": "fa79de56108fdd0c25045fa02140c8e4f094a02446fa31cbd764fbfbcb7d6e79",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-may20-3b94d9075f.pdf",
+      "bytes": 3183642,
+      "sha256": "3b94d9075f910ef4b88642fb421afd2151033ddf0539e28e1b6ab9531d50876c",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/QualsSolutions_Jan2015.pdf",
+      "file": "_archives/https-people-stat-sc-edu-hitchcock-quals-6791966c69.pdf",
+      "bytes": 3728110,
+      "sha256": "6791966c69db0de9efa60d6ed678920868d5d556c0e23257bcd92f0f9f62ff5a",
+      "key": true,
+      "kind": "pdf"
+    }
+  ],
+  "links": [
+    {
+      "url": "https://people.stat.sc.edu/Hitchcock/previousPhDexams.html",
+      "label": "U. South Carolina Statistics PhD quals"
+    }
+  ]
+}

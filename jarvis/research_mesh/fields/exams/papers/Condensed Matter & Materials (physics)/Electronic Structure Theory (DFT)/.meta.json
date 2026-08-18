@@ -1,0 +1,261 @@
+{
+  "domain": "Condensed Matter & Materials (physics)",
+  "field": "Electronic Structure Theory (DFT)",
+  "tests": [
+    {
+      "url": "https://phy.princeton.edu/academics/graduate-program/degree-requirements/preliminary-exams",
+      "file": "_archives/https-phy-princeton-edu-academics-gradua-d9807653b7.html",
+      "bytes": 60646,
+      "sha256": "d9807653b76cbc83a8684acd2daf49ce0c9163c07c06ef9432971a10c3282c92",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J98.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-2ddc2d431d.pdf",
+      "bytes": 173008,
+      "sha256": "2ddc2d431dd98d4f10cf84e84a5ef34769302c47db4047508a98c978e454dc34",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M98.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-0927210ce5.pdf",
+      "bytes": 172580,
+      "sha256": "0927210ce53672a4cc18c0d3928ff96a5604015e64dba455b15d6e3277aa16b2",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J99.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-0602796095.pdf",
+      "bytes": 157591,
+      "sha256": "0602796095ff2fe16df7b255872dc22cff8df602f6612443984b8b459e8cdc18",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M99.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-49cc4b105a.pdf",
+      "bytes": 162909,
+      "sha256": "49cc4b105a70b7c660c422f0db6f01b5a40ee09fe600e89444cfb4d237a390a9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J00.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-792dc0819b.pdf",
+      "bytes": 172125,
+      "sha256": "792dc0819b8d7570c5c76a9a579a7637692f49529a58da9dca784063bc2552d9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M00.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-08f61598aa.pdf",
+      "bytes": 187144,
+      "sha256": "08f61598aa48082377d8d2cc97060199c6db8dc6f2ec220b402b2ed409b4d7d8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J01.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-4e3a2e152c.pdf",
+      "bytes": 173092,
+      "sha256": "4e3a2e152c99d76faeea08e6631e82f2d850336867c4f004cf1aa31707ad20ae",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M01.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-adafbc3931.pdf",
+      "bytes": 199434,
+      "sha256": "adafbc393142ae5d49fceaf83ec804c177dc08aaf80d26bab27eeb089d1b277b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J02.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-50b96cb568.pdf",
+      "bytes": 230373,
+      "sha256": "50b96cb5686d7c5e49aeb90d245db375114a1837897cbd4fac94ab231b7eb6b1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M02.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-c5b9cd696b.pdf",
+      "bytes": 186543,
+      "sha256": "c5b9cd696bae20416049de806a731d7966d32c6760237be061d2bc68c4086587",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J03.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-438bb41b2a.pdf",
+      "bytes": 204115,
+      "sha256": "438bb41b2ae84e6e14184cf2c0d7e3efe2aa90dd31c8d7b1f204c75e19f8ba31",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M03.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-b6c8abf126.pdf",
+      "bytes": 207005,
+      "sha256": "b6c8abf1262593c82f9d8e382344b4a3702d59ad47cee4888ab62f81988c8794",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J04.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-857f19799e.pdf",
+      "bytes": 185382,
+      "sha256": "857f19799eabbc726cdf72766cf81cc5e4202a86cd482920d3adcd613f5ce85e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M04.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-dcf8214a2c.pdf",
+      "bytes": 169984,
+      "sha256": "dcf8214a2cb9ee75ebd4104476278a33721ac46813353270451022de651977ea",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/academics/graduate-program/prelims/PrelimJ05.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-813c5e18b4.pdf",
+      "bytes": 171709,
+      "sha256": "813c5e18b44b4e60b1d954daabb873bef6b34a340fb1576ed1123dbd35770eec",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM05.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-708e2a588c.pdf",
+      "bytes": 118166,
+      "sha256": "708e2a588ce7fdf2efba64fd1e500d2ba9fa3d06c19baf668ddf8c6894fc6f71",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimJ06.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-e0d4015e6d.pdf",
+      "bytes": 152705,
+      "sha256": "e0d4015e6d44f94408cedbb50686fb5294e5bb621bc73eddb80ee3df1f84f11f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM06.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-3aea92027a.pdf",
+      "bytes": 123833,
+      "sha256": "3aea92027ab2f880ff8ea41f67ace00b2747b98955a0035a171187925819feae",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimJ07.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-c9b4858eb9.pdf",
+      "bytes": 142909,
+      "sha256": "c9b4858eb96ab4d6bf903b0f12288f12e1103b265c911c95dfedaed3411efd04",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM07.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-646192b834.pdf",
+      "bytes": 136995,
+      "sha256": "646192b834d1e7dffb1c9da8ef561b09c8dd4d33c51c21e7a13f6a55fae35711",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimJ08.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-52c45be7ee.pdf",
+      "bytes": 124900,
+      "sha256": "52c45be7ee900c6f8e8b044586a3f4728d163881923668ad53a2efdc7ef6bb16",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM08.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-a5137aae49.pdf",
+      "bytes": 126722,
+      "sha256": "a5137aae49a839a64384569785c559bcb4e53b01565732c7d05ea20faa8ff8f4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimJ09.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-858c513645.pdf",
+      "bytes": 125316,
+      "sha256": "858c513645607f07c5a69eada320fe9b9f6491db48e8004adca0d82e534f5188",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM09.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-40a70ac281.pdf",
+      "bytes": 348833,
+      "sha256": "40a70ac28161f81538c6de1ccb78e3b95be0866cf53c069096653eb8b72410d1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimJ10.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-8cf534cb10.pdf",
+      "bytes": 142109,
+      "sha256": "8cf534cb10a85e89f016d0fc9fdbc66f2eeedde9e59523fdbc4cac75cea5e5f5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM10.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-78802a1808.pdf",
+      "bytes": 750929,
+      "sha256": "78802a18083d0f607c08fb2d0d32fd32d6b973c32e7141f51bc9e7b530e4bd78",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimJ11.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-a805bdf177.pdf",
+      "bytes": 525400,
+      "sha256": "a805bdf177d099afbe204f8907821313f286a239dc210aa57580ddeac15c3674",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/January-2012.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-c094d33719.pdf",
+      "bytes": 402774,
+      "sha256": "c094d3371914817cf2ff3e9053a6308cb41d10e0701e88f50e662b29e0682d97",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/May-2012.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-219556efa8.pdf",
+      "bytes": 390547,
+      "sha256": "219556efa826e3021ab3df24a9e6060fea53902815b1cd35f866ce70c40de756",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/Jan2013-Prelims.pdf",
+      "file": "_archives/https-phy-princeton-edu-sites-phy2020-fi-5d5b64526e.pdf",
+      "bytes": 480826,
+      "sha256": "5d5b64526e6c3937a4eb81eab0c492a53ddf33bf31d4a2d74fc85a89e459a9ab",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://phy.princeton.edu/academics/graduate-program/degree-requirements/preliminary-exams",
+      "label": "Princeton Physics \u2014 Prelims"
+    }
+  ]
+}

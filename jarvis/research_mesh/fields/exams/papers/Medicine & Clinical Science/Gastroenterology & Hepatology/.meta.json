@@ -1,0 +1,21 @@
+{
+  "domain": "Medicine & Clinical Science",
+  "field": "Gastroenterology & Hepatology",
+  "tests": [
+    {
+      "url": "https://www.publichealth.pitt.edu/sites/default/files/assets/Hugen/qualifying_exam_study_guide.pdf",
+      "file": "_archives/https-www-publichealth-pitt-edu-sites-de-3989994bf3.pdf",
+      "bytes": 4011567,
+      "sha256": "3989994bf3df22ee9eabf628ce0b0855dcd8f5f266f3fa8d807ffa0ff0179bf3",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.publichealth.pitt.edu/sites/default/files/assets/Hugen/qualifying_exam_study_guide.pdf",
+      "label": "No public clinical quals \u2014 nearest verified: U. Pittsburgh Public Health PhD QE study guide"
+    }
+  ]
+}

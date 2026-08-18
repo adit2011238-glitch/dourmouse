@@ -36,11 +36,38 @@ _UA = (
 )
 _TIMEOUT = 15
 _NEWS_FEED = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
-_YAHOO_QUOTE = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d"
-_YAHOO_SCREENER = (
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
+_NEWS_SEARCH = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
+# v8.9: Yahoo rate-limits per source IP, and it had blocked query1 outright
+# from the compute host — every quote came back HTTP 429 there while the
+# SAME url answered fine from another machine. query2 is a separate edge
+# that was still serving, so both hosts are tried in order rather than
+# hard-coding one. Verified live from the host: query1 429, query2 200.
+_YAHOO_HOSTS = ("query2.finance.yahoo.com", "query1.finance.yahoo.com")
+_YAHOO_QUOTE_PATH = "/v8/finance/chart/{sym}?interval=1d&range=1d"
+_YAHOO_SCREENER_PATH = (
+    "/v1/finance/screener/predefined/saved"
     "?formatted=true&count={count}&scrIds={scr_id}"
 )
+#: Kept for callers/tests that reference the single-URL form.
+_YAHOO_QUOTE = "https://" + _YAHOO_HOSTS[0] + _YAHOO_QUOTE_PATH
+_YAHOO_SCREENER = "https://" + _YAHOO_HOSTS[0] + _YAHOO_SCREENER_PATH
+
+
+def _yahoo_json(path: str) -> dict[str, Any]:
+    """Fetch a Yahoo JSON path, trying each edge host before giving up.
+
+    A 429 from one host does not mean the data is unavailable — it means
+    that edge is throttling this IP. Falling through to the next host keeps
+    the markets channel alive instead of reporting the whole source dead.
+    The LAST error is raised so the message names a real failure.
+    """
+    last: Exception | None = None
+    for host in _YAHOO_HOSTS:
+        try:
+            return _json("https://" + host + path)
+        except Exception as exc:  # noqa: BLE001 - try the next edge
+            last = exc
+    raise RuntimeError(str(last) if last else "no Yahoo host reachable")
 _SCR_IDS = {"gainers": "day_gainers", "losers": "day_losers"}
 
 _IMAP_HOST = "DOURMOUSE_IMAP_HOST"
@@ -87,17 +114,16 @@ def _json(url: str) -> dict[str, Any]:
 # News — Google News RSS (keyless)
 # --------------------------------------------------------------------------- #
 
-def news_headlines(max_results: int = 10) -> list[dict[str, str]]:
-    """Return real top headlines as {title, source, published} (newest first).
+def _parse_rss_items(raw: str, max_results: int, *, what: str) -> list[dict[str, str]]:
+    """Parse a Google News RSS body into {title, source, published} rows.
 
-    Raises RuntimeError on any fetch/parse failure — never fabricates.
+    Shared by the top-headlines feed and the topic search, which return the
+    same document shape from different endpoints.
     """
-    max_results = max(1, min(int(max_results), 25))
-    raw = _http_get(_NEWS_FEED)
     try:
         root = ET.fromstring(raw)
     except ET.ParseError as exc:
-        raise RuntimeError(f"could not parse news feed: {exc}") from exc
+        raise RuntimeError(f"could not parse {what}: {exc}") from exc
     items: list[dict[str, str]] = []
     for item in root.iter("item"):
         title = ""
@@ -115,8 +141,42 @@ def news_headlines(max_results: int = 10) -> list[dict[str, str]]:
             items.append({"title": title, "source": source, "published": published})
         if len(items) >= max_results:
             break
+    return items
+
+
+def news_headlines(max_results: int = 10) -> list[dict[str, str]]:
+    """Return real top headlines as {title, source, published} (newest first).
+
+    Raises RuntimeError on any fetch/parse failure — never fabricates.
+    """
+    max_results = max(1, min(int(max_results), 25))
+    raw = _http_get(_NEWS_FEED)
+    items = _parse_rss_items(raw, max_results, what="news feed")
     if not items:
         raise RuntimeError("news feed returned no items")
+    return items
+
+
+def news_search(query: str, max_results: int = 10) -> list[dict[str, str]]:
+    """Search current news for `query` — keyless, via Google News RSS.
+
+    Exists because the roster had no tool for "what happened in X": live
+    questions about sport, politics, or any unfolding event had nowhere
+    correct to go, so the model routed them into stock_quote, which asked
+    Yahoo Finance for a ticker named BANGLADESH and surfaced the 404. A
+    dated, sourced headline is the honest answer to those questions.
+
+    Raises RuntimeError on any fetch/parse failure — never fabricates.
+    """
+    query = (query or "").strip()
+    if not query:
+        raise RuntimeError("news_search requires a non-empty query")
+    max_results = max(1, min(int(max_results), 25))
+    url = _NEWS_SEARCH.format(q=urllib.parse.quote(query))
+    raw = _http_get(url)
+    items = _parse_rss_items(raw, max_results, what="news search feed")
+    if not items:
+        raise RuntimeError(f"no news results for {query!r}")
     return items
 
 
@@ -132,9 +192,13 @@ def stock_quote(symbol: str) -> dict[str, Any]:
     failures — never a made-up price.
     """
     sym = (symbol or "").strip().upper()
-    if not sym or not re.fullmatch(r"[A-Z0-9.\-^]{1,12}", sym):
+    # v8.9: '=' added. Yahoo uses it for futures and FX pairs (CL=F crude,
+    # GC=F gold, EURUSD=X), so the old pattern rejected the exact symbols
+    # the world monitor asks for with "invalid symbol" — a validation bug
+    # that looked like a data outage.
+    if not sym or not re.fullmatch(r"[A-Z0-9.\-^=]{1,12}", sym):
         raise RuntimeError(f"invalid symbol {symbol!r}")
-    data = _json(_YAHOO_QUOTE.format(sym=sym))
+    data = _yahoo_json(_YAHOO_QUOTE_PATH.format(sym=urllib.parse.quote(sym)))
     result = (data.get("chart") or {}).get("result") or []
     if not result:
         raise RuntimeError(f"no quote for {sym} (symbol unknown?)")
@@ -165,7 +229,7 @@ def market_movers(direction: str = "gainers", count: int = 10) -> list[dict[str,
     if scr is None:
         raise RuntimeError(f"direction must be 'gainers' or 'losers', got {direction!r}")
     count = max(1, min(int(count), 25))
-    data = _json(_YAHOO_SCREENER.format(count=count, scr_id=scr))
+    data = _yahoo_json(_YAHOO_SCREENER_PATH.format(count=count, scr_id=scr))
     result = (data.get("finance") or {}).get("result") or []
     quotes = result[0].get("quotes") if result else None
     if not quotes:

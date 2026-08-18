@@ -22,6 +22,7 @@ for users who want it.
 from __future__ import annotations
 
 import os
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -31,9 +32,51 @@ from dotenv import load_dotenv
 
 from .guardrails import GuardrailConfig
 
-# Load .env from the project root regardless of the caller's cwd. Real
-# secrets live only here (or the shell env) — never hardcoded (Rule 2.6).
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+def user_config_dir() -> Path:
+    """Where an INSTALLED Dourmouse keeps its configuration.
+
+    v8.9. The packaged app must not read config from beside the package:
+    in a frozen build that path is inside the read-only bundle, and the
+    bundle deliberately ships no ``.env`` (shipping one would hand the
+    builder's own API keys to everyone who installs it). Config therefore
+    lives in a per-user directory that survives updates and uninstalls.
+    """
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "Dourmouse"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Dourmouse"
+    return Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "dourmouse"
+
+
+def user_env_path() -> Path:
+    return user_config_dir() / ".env"
+
+
+def is_configured() -> bool:
+    """True when SOME working backend is reachable.
+
+    Deliberately not "a key exists": a local Ollama install is a complete,
+    valid configuration with no key at all, and first-run setup treats it
+    as the default. Used to decide whether to show the setup wizard.
+    """
+    if os.environ.get("NVIDIA_API_KEY", "").strip():
+        return True
+    if os.environ.get("DOURMOUSE_SERVER_URL", "").strip():
+        return True
+    backend = os.environ.get("DOURMOUSE_LLM_BACKEND", "").strip().lower()
+    if backend == "ollama":
+        return True
+    return False
+
+
+# Load config in precedence order: the USER config dir first (an installed
+# app), then the project root (a source checkout / dev machine). Real
+# secrets live only in these files or the shell env — never hardcoded
+# (Rule 2.6). override=False so the first file found wins and a dev
+# checkout never silently overrides an installed user's settings.
+load_dotenv(user_env_path(), override=False)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 
 def _migrate_legacy_env() -> None:
@@ -414,6 +457,17 @@ def fast_lane_server_enabled(value: str | None = None) -> bool:
     never add probe latency to every reply).
     """
     raw = value if value is not None else os.environ.get("DOURMOUSE_FAST_LANE_SERVER", "1")
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def brief_mode_enabled(value: str | None = None) -> bool:
+    """DOURMOUSE_BRIEF: hold LOOKUP-shaped turns to a short answer.
+
+    A lookup ("what is X", "how do I Y", "how much free disk space") is
+    answered correctly today and then padded with sections the question
+    never asked for. Default on. Set to 0/off to restore the old length.
+    """
+    raw = value if value is not None else os.environ.get("DOURMOUSE_BRIEF", "1")
     return raw.strip().lower() not in ("0", "false", "no", "off", "")
 
 

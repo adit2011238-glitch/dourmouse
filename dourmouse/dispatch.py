@@ -38,6 +38,7 @@ import re
 import sys
 import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -48,6 +49,7 @@ from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
     OmniRouteConfig,
+    brief_mode_enabled,
     fast_lane_enabled,
     fast_lane_model,
     fast_lane_server_enabled,
@@ -179,7 +181,80 @@ def _bounded_context(
     return out
 
 
+def _usage_of(response: Any) -> dict[str, int]:
+    """Pull token counts off a completion, tolerating shapes that lack them.
+
+    Streaming responses and some local backends omit usage entirely, so this
+    returns whatever is present rather than assuming the field exists.
+    """
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    out: dict[str, int] = {}
+    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = getattr(usage, field, None)
+        if isinstance(value, int):
+            out[field] = value
+    return out
+
+
 def _call_with_retry(
+    client: Any,
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    config: NvidiaConfig | None,
+    call_log: list[dict[str, Any]] | None = None,
+    on_delta: Callable[[str], None] | None = None,
+) -> Any:
+    """LLM call with bounded retry + backoff, optional fallback, and timing.
+
+    Every model call in the process funnels through here, so this is the one
+    place that can measure inference latency without touching call sites. The
+    timing wraps the whole retry sequence deliberately: what a user waits for
+    is the total, including backoff and any fallback attempt, not the duration
+    of the one attempt that happened to succeed.
+    """
+    start = time.perf_counter()
+    ok = True
+    try:
+        response = _call_with_retry_inner(
+            client,
+            model=model,
+            messages=messages,
+            tools=tools,
+            config=config,
+            call_log=call_log,
+            on_delta=on_delta,
+        )
+        return response
+    except BaseException:
+        ok = False
+        response = None
+        raise
+    finally:
+        try:
+            from dourmouse import obs
+
+            obs.log_perf(
+                op="inference",
+                duration_ms=(time.perf_counter() - start) * 1000.0,
+                extra={
+                    "model": model,
+                    "ok": ok,
+                    "streamed": on_delta is not None,
+                    "n_messages": len(messages),
+                    "n_tools": len(tools),
+                    "attempts": len(call_log) if call_log is not None else None,
+                    **(_usage_of(response) if response is not None else {}),
+                },
+            )
+        except Exception:  # noqa: BLE001 - measurement must never break a call
+            pass
+
+
+def _call_with_retry_inner(
     client: Any,
     *,
     model: str,
@@ -1003,7 +1078,49 @@ def _execute_tool(
             )
         if not approved:
             return f"DECLINED BY USER: {prompt_text}"
-    result = spec.handler(arguments)
+    # Tool-boundary containment. A handler is the seam between the model and
+    # real infrastructure, and anything can come back through it: a 404, a
+    # dead socket, a parser hitting an unexpected shape, an outright bug. An
+    # exception escaping here aborts the whole dispatch turn, so the user
+    # loses the conversation over one failed tool. Catch broadly, record the
+    # traceback where a developer can find it, and hand the model a sentence
+    # it can reason about and relay. KeyboardInterrupt/SystemExit are not
+    # caught — those must still stop the process.
+    start = time.perf_counter()
+    try:
+        result = spec.handler(arguments)
+    except Exception as exc:  # noqa: BLE001 - deliberate boundary catch
+        from dourmouse import net_errors, obs
+
+        obs.log_error(
+            source=f"tool:{spec.name}",
+            kind=net_errors.classify(exc).value,
+            what=spec.name,
+            detail=traceback.format_exc(),
+            status=net_errors.http_status(exc),
+            extra={"arguments": arguments},
+        )
+        obs.log_agent_call(
+            tool=spec.name,
+            ok=False,
+            duration_ms=(time.perf_counter() - start) * 1000.0,
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+        # Keep the long-standing "ERROR: tool 'x' failed:" prefix — callers
+        # and the DLP boundary below key off an ERROR prefix, and the model
+        # is trained on it. What changes is the tail: transport noise is
+        # replaced by a sentence, while a genuine diagnostic survives.
+        return (
+            f"ERROR: tool '{spec.name}' failed: "
+            + net_errors.friendly(exc, what=f"a result from {spec.name}")
+        )
+    obs_duration_ms = (time.perf_counter() - start) * 1000.0
+    try:
+        from dourmouse import obs
+
+        obs.log_agent_call(tool=spec.name, ok=True, duration_ms=obs_duration_ms)
+    except Exception:  # noqa: BLE001 - observability must never break dispatch
+        pass
     # Institutional contract enforcement (spec: structured output): when the
     # tool declares an output_schema, validate the REAL result and surface a
     # violation honestly — never silently pass a malformed handoff.
@@ -1135,6 +1252,18 @@ class DispatchContext:
     # is down. The brain label stays honest: it reports the Dell model.
     server_lane: bool = False
     server_fallback_model: str = ""
+    # v8.10: this turn is a LOOKUP — the API boundary marks the user turn
+    # with the brevity rule. Set once in dispatch() from the deterministic
+    # prompt shape, and inherited by nested runs so a delegate answering a
+    # lookup does not write the essay on the parent's behalf.
+    brief: bool = False
+    # v8.12: hard-scopes this run to exactly one subagent — see the
+    # forced_agent docstring on run_dispatch_messages for why. NOT
+    # inherited by further nesting (unlike brief): a forced-agent run's
+    # own delegate_task is already absent from its scoped tools (it only
+    # owns whichever ONE agent it was forced to), so there is nothing to
+    # propagate.
+    forced_agent: str | None = None
 
     def delegates_used(self) -> int:
         return self.budget[0]
@@ -1177,6 +1306,31 @@ def system_message(
     return _SYSTEM_PROMPT + "\n\nROSTER:\n" + registry.describe_roster(focus)
 
 
+def _fast_lane_model_is_servable(client: Any) -> bool:
+    """Whether DOURMOUSE_FAST_MODEL can actually be served by `client`.
+
+    The fast lane swaps in a small *local* model name (default qwen3:4b) to
+    get the first token out sooner. That is only meaningful when the client
+    is the local Ollama daemon. Against a hosted backend the name is simply
+    unknown, and the request comes back "404 page not found" — which is what
+    every short question did on a machine configured for NVIDIA, because the
+    swap happened unconditionally.
+
+    A hosted backend does not need the lane anyway: the measured p50 there is
+    ~1.1s, faster than the local small model. So when the client is not
+    local, keep the primary model and let the lane's other savings (the
+    compact system prompt) still apply.
+    """
+    if isinstance(client, OllamaNativeClient):
+        return True
+    base_url = str(getattr(client, "base_url", "") or "").lower()
+    if not base_url:
+        # An unrecognised or test double: assume the historical behaviour so
+        # engine tests that assert the swap keep passing.
+        return True
+    return "127.0.0.1" in base_url or "localhost" in base_url or ":11434" in base_url
+
+
 def run_dispatch_messages(
     messages: list[dict[str, Any]],
     registry: DispatchRegistry,
@@ -1197,6 +1351,7 @@ def run_dispatch_messages(
     model: str | None = None,
     experience_sink: Callable[[dict[str, Any]], None] | None = None,
     session_stem: str | None = None,
+    forced_agent: str | None = None,
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -1231,6 +1386,24 @@ def run_dispatch_messages(
     the record to a session so operator 👍/👎 ratings can reweight it. The
     sink is a pure observer like ``event_sink``: it must never break
     execution, and nested delegate runs never log (only depth 0 does).
+
+    v8.12: ``forced_agent`` hard-scopes this run to exactly one subagent's
+    tools, bypassing build_plan/find_agents_for_query entirely. Only
+    delegate_task's own ROUTING DIRECTIVE nested runs pass it — the
+    directive text already says "using ONLY the 'X' subagent", so asking
+    the general planner to re-derive that from the sentence is redundant
+    and, worse, fragile: a task description with commas in it (a plain
+    list of features to cover) can fool build_plan's multi-step fallback
+    splitter into cutting the directive into nonsense fragments routed to
+    the WRONG agents — traced live, "using ONLY the 'research_info'
+    subagent... covering features, performance, ease of use, hardware
+    requirements..." got split on those commas into fragments scored
+    against 'tasks' and 'dev_coding', so research_info's own web_search
+    tool was never even offered. The nested run then had nothing but
+    delegate_task available (orchestrator's own tool, never scoped out)
+    and recursed into itself until the depth-3 guard refused it, returning
+    no answer after 145s. forced_agent makes the explicit directive
+    authoritative instead of re-guessed.
     """
     # v3.1 per-agent models: an explicit ``model`` override (e.g. a nested
     # delegate resolved to its target subagent's model) wins over the
@@ -1288,7 +1461,7 @@ def run_dispatch_messages(
     # actually engaged. Only pure chat reaches the lane; agentic turns keep
     # the resolved brain + full loop.
     server_lane = False
-    if fast_lane:
+    if fast_lane and _fast_lane_model_is_servable(client):
         model = fast_lane_model()
         from dourmouse.remote_server import server_model, server_online_cached, server_url_configured
 
@@ -1341,6 +1514,7 @@ def run_dispatch_messages(
         dlp=dlp,
         rbac=rbac,
         parent_context=_build_parent_context(messages),
+        forced_agent=forced_agent,
     )
     # INVARIANT: at most ONE in-flight run per registry at any instant. The
     # webui guarantees this by serializing chat under session_lock, and
@@ -1350,6 +1524,13 @@ def run_dispatch_messages(
     if stack is None:
         stack = []
         registry._ctx_stack = stack
+    # v8.10 brevity: a lookup-shaped prompt answers short. A nested run also
+    # inherits the parent's brief flag — a delegate writing three paragraphs
+    # back into a brief parent turn just moves the essay one level down.
+    if brief_mode_enabled():
+        ctx.brief = _is_brief_intent(str(last_user)) or (
+            bool(stack) and stack[-1].brief
+        )
     if fast_lane:
         # The lane still runs the loop (pure-chat exits after ONE call since
         # tools are empty), but the API boundary sees the compact system
@@ -1529,6 +1710,102 @@ _FAST_LANE_SYSTEM = (
 )
 
 
+# v8.10 "stop the essays". Measured on the live desktop against the 120B
+# brain: tool lookups already answer in 16-18 words, but a QUESTION-shaped
+# turn pads a correct one-line answer out to an article — "how do I list
+# files in a folder on windows" returned 187 words across four headed
+# sections (File Explorer / cmd / PowerShell / the list_path tool), and
+# "explain what a virtual environment is" returned 113. Both wanted two
+# sentences. The system prompt's rule 8 already says "concise" -- buried in
+# a 2.2k-token prompt, that reads as advice and produced those numbers.
+#
+# The rule rides the LAST USER MESSAGE, not the system prompt — the same placement
+# and the same reason as _NO_THINK_TOKEN above, measured the same way. Two
+# earlier placements were tried and rejected on this box:
+#   * appended to the system prompt: obeyed only sometimes (two identical
+#     runs of six lookups gave medians of 32 and 94 words);
+#   * as its own trailing system message: the model treated the rule as a
+#     TASK and deliberated about it in the answer — "We need to answer: what
+#     is a REST API. Follow constraints: LOOKUP, at most 3 sentences..."
+#     shipped as 171 words of visible reasoning.
+# Hence one short clause in parentheses: a constraint on the reply, with
+# nothing in it worth planning about.
+# NO NUMBERS IN THIS STRING. A word/sentence budget reads as a puzzle to a
+# reasoning-tuned model: given "under 60 words" this brain wrote the answer,
+# then counted it out loud in the reply -- "Word count: Let's count. A(1)
+# REST2 API3 ..." -- 202 words of visible arithmetic. Qualitative wording
+# asks for the same thing with nothing to verify.
+_BRIEF_MARKER = "(Be brief: answer directly in a sentence or two, no headings or lists.)"
+
+
+def _append_brief(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Copy of ``messages`` with the brevity marker on the last user turn.
+
+    Mirrors ``_append_no_think`` exactly, including the copy-don't-mutate
+    discipline: this runs at the API boundary, and the authoritative list
+    stays clean so the marker is never persisted into the session history.
+    """
+    out = [dict(m) for m in messages]
+    for msg in reversed(out):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and _BRIEF_MARKER not in content:
+            msg["content"] = f"{content}\n\n{_BRIEF_MARKER}"
+        break
+    return out
+
+
+# Prompt shapes that ARE lookups: a question wanting one fact or one method.
+_BRIEF_CUES = (
+    "what is", "what's", "whats", "what are", "who is", "who's",
+    "when is", "when was", "when did", "where is", "where's", "which",
+    "how do i", "how do you", "how to", "how does", "how much", "how many",
+    "how long", "is it", "are there", "can i", "do i", "does it",
+    "define", "meaning of", "definition of", "capital of",
+    # Bare "explain X" is a lookup; "explain in detail" / "explain why" keep
+    # their room via _VERBOSE_CUES, which is checked first.
+    "explain", "what does", "what do",
+)
+
+# Shapes that want ROOM, checked first — they override the cues above so a
+# request that asks for length is never squeezed. "explain" is deliberately
+# NOT here: an unqualified "explain X" is a lookup; "explain X in detail"
+# matches "in detail" below and keeps its room.
+_VERBOSE_CUES = (
+    "write", "draft", "compose", "essay", "article", "blog", "post",
+    "report", "summary of the", "in detail", "detailed", "thorough",
+    "comprehensive", "step by step", "step-by-step", "walk me through",
+    "tutorial", "guide me", "compare", "comparison", "pros and cons",
+    "trade-off", "tradeoff", "analyse", "analyze", "analysis", "review",
+    "brainstorm", "ideas for", "options for", "plan for", "outline",
+    "list all", "list every", "everything about", "deep dive",
+    "research", "investigate", "explain in", "why did", "why does",
+    "elaborate", "expand on", "more detail", "long", "full",
+)
+
+
+def _is_brief_intent(prompt: str) -> bool:
+    """Deterministic lookup-shape test (Rule 2.8 — keywords, never an LLM
+    judgement, so the same prompt classifies the same way twice).
+
+    True only for a SHORT question that asks for one fact or one method.
+    Anything that asks for length, or any prompt long enough to be carrying
+    real detail of its own, is left alone — the failure mode to avoid is
+    truncating work the user actually wanted, not missing one essay.
+    """
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    words = text.split()
+    # A long prompt carries its own detail and usually wants a real answer.
+    if len(words) > 25:
+        return False
+    if any(cue in text for cue in _VERBOSE_CUES):
+        return False
+    return any(cue in text for cue in _BRIEF_CUES)
+
+
 def _is_pure_chat(prompt: str, registry: Any) -> bool:
     """Deterministic pure-chat check: no plan AND no agent match (score >= 3),
     plus a knowledge-question exemption so stable facts answer on the fast
@@ -1594,28 +1871,41 @@ def _run_dispatch_loop(
         (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
         "",
     )
-    plan = build_plan(str(last_user), registry)
-    if plan:
-        plan_entry: dict[str, Any] = {"type": "plan", "steps": plan, "total": len(plan)}
-        transcript.append(plan_entry)
-        _emit_event(event_sink, plan_entry)
-    # v4.1: scope the tool schemas to the plan's agents instead of shipping
-    # all 60. Plain questions send no tools at all — the biggest single
-    # latency lever (see _scoped_tool_specs).
-    plan_agents = {step["subagent"] for step in (plan or [])}
-    # v5.2: a SINGLE-step directive ("how much is BTC worth", "check my
-    # inbox", "draft an email") has no plan, but it is still an AGENTIC
-    # request — the model must see the target agent's tools or it answers
-    # blind. When no plan exists, scope the tools of the best-matching
-    # subagent(s) instead of sending zero schemas, so real directives can
-    # actually execute. Pure chat (no agent match) still sends nothing.
-    if not plan_agents:
-        from dourmouse.planner import find_agents_for_query
+    # v8.12: forced_agent (delegate_task's own ROUTING DIRECTIVE nested runs)
+    # bypasses build_plan entirely — the directive already says "using ONLY
+    # the 'X' subagent", so re-deriving that from the sentence is redundant
+    # and, worse, fragile against punctuation in the task description (see
+    # the forced_agent docstring on run_dispatch_messages for the traced
+    # live failure). No PLAN event either: a one-agent forced scope has
+    # nothing plan-shaped to show.
+    plan: list[dict[str, Any]] | None
+    if ctx.forced_agent:
+        plan = None
+        plan_agents = {ctx.forced_agent}
+    else:
+        plan = build_plan(str(last_user), registry)
+        if plan:
+            plan_entry: dict[str, Any] = {"type": "plan", "steps": plan, "total": len(plan)}
+            transcript.append(plan_entry)
+            _emit_event(event_sink, plan_entry)
+        # v4.1: scope the tool schemas to the plan's agents instead of
+        # shipping all 60. Plain questions send no tools at all — the
+        # biggest single latency lever (see _scoped_tool_specs).
+        plan_agents = {step["subagent"] for step in (plan or [])}
+        # v5.2: a SINGLE-step directive ("how much is BTC worth", "check my
+        # inbox", "draft an email") has no plan, but it is still an AGENTIC
+        # request — the model must see the target agent's tools or it
+        # answers blind. When no plan exists, scope the tools of the
+        # best-matching subagent(s) instead of sending zero schemas, so real
+        # directives can actually execute. Pure chat (no agent match) still
+        # sends nothing.
+        if not plan_agents:
+            from dourmouse.planner import find_agents_for_query
 
-        matches = find_agents_for_query(registry, last_user, limit=2)
-        plan_agents = {
-            m["name"] for m in matches if m["score"] >= 3
-        }
+            matches = find_agents_for_query(registry, last_user, limit=2)
+            plan_agents = {
+                m["name"] for m in matches if m["score"] >= 3
+            }
     scoped_tools = _scoped_tool_specs(registry, plan_agents) if plan_agents else []
 
     # v5.32: the schemas are scoped above, but the ROSTER PROSE in the system
@@ -1722,6 +2012,16 @@ def _run_dispatch_loop(
             bounded = [
                 {"role": "system", "content": focused_system}
             ] + bounded[1:]
+        # v8.10 brevity: mark the last user turn at the API boundary only —
+        # the authoritative persisted ``messages`` never sees the marker.
+        # Prompt only, deliberately NO token cap: this brain spends tokens on
+        # reasoning before it emits content (the same property _NO_THINK_TOKEN
+        # exists for), so a tight max_tokens does not shorten the answer, it
+        # truncates it — measured as a reply cut mid-clause at "using standard
+        # HTTP verbs (GET," and, on a tool turn, as raw deliberation shipped as
+        # the answer. The standard cap still applies as it always did.
+        if getattr(ctx, "brief", False) and bounded:
+            bounded = _append_brief(bounded)
         # v5.30: the server fast lane tries the Dell first; ANY failure
         # (unreachable, timeout, 500, malformed) falls back to the local
         # fast model — the node can never take the reply down.
@@ -1872,9 +2172,29 @@ def _run_dispatch_loop(
             _emit_event(event_sink, use_entry)
             spec = registry.lookup(name)
             if spec is None:
-                result_text = (
-                    f"ERROR: unknown tool '{name}' — not in the registered roster."
-                )
+                # v8.11 capability-denial guard: rule 10 of the system
+                # prompt names AGENTS ("system", "dev_coding", ...) in the
+                # same voice as tools, so an under-scoped turn regularly
+                # calls the agent name itself as a bare tool. Observed live:
+                # the model tried `system {"command":"df -h"}`, got the
+                # generic unknown-tool error three times unchanged, then
+                # gave up and told the user it lacked a capability it had —
+                # the tool just was not the one it typed. Naming the real
+                # tools inline lets it self-correct in the SAME turn instead
+                # of retrying the same wrong name or surrendering.
+                agent = registry.get_subagent(name)
+                if agent is not None:
+                    real_tools = ", ".join(t.name for t in agent.tools) or "none"
+                    result_text = (
+                        f"ERROR: '{name}' is an AGENT, not a tool — you cannot "
+                        f"call it directly. Either call one of its real tools "
+                        f"({real_tools}), or use delegate_task with "
+                        f"subagent='{name}'."
+                    )
+                else:
+                    result_text = (
+                        f"ERROR: unknown tool '{name}' — not in the registered roster."
+                    )
             elif rbac is not None and not rbac.allows(name):
                 # Deterministic RBAC refusal BEFORE anything executes (spec:
                 # role-based access control).

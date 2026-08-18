@@ -262,14 +262,32 @@ class TestHttpEndpoints:
         conn.close()
 
     def test_ui_html_served(self, server):
+        """v8.7: "/" serves the CONSOLE (the new default surface)."""
         srv, port = server
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request("GET", "/")
         resp = conn.getresponse()
         assert resp.status == 200
         body = resp.read().decode()
-        assert "DOURMOUSE // CENTRAL AGENT DISPATCH" in body
+        assert "DOURMOUSE // CONSOLE" in body
         conn.close()
+
+    def test_hud_still_served_at_index_html(self, server):
+        """The HUD was NOT removed — only demoted from the default route.
+
+        /index.html must keep serving it, because the deeplink redirect
+        targets that exact path and the #/atlas, #/world, #/portfolio hash
+        router lives only in the HUD.
+        """
+        srv, port = server
+        for path in ("/index.html", "/dispatch"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            assert resp.status == 200, path
+            body = resp.read().decode()
+            assert "DOURMOUSE // CENTRAL AGENT DISPATCH" in body, path
+            conn.close()
 
     def test_traversal_is_blocked(self, server):
         srv, port = server
@@ -795,12 +813,21 @@ class TestPwaEndpoints:
             assert body[:8] == b"\x89PNG\r\n\x1a\n"
 
     def test_index_has_pwa_head_tags(self, server):
+        """Whatever "/" serves must be installable.
+
+        v8.7: this caught a real regression — promoting the console to the
+        default route dropped the manifest/apple-touch tags with it, which
+        would have silently killed "Add to Home Screen" and the standalone
+        window. Asserted on "/" (not a fixed file) so the NEXT change of
+        default surface has to carry the install metadata too.
+        """
         status, ctype, body = self._get(server, "/")
         assert status == 200
         html = body.decode("utf-8", errors="replace")
         assert 'rel="manifest"' in html
         assert "apple-touch-icon" in html
         assert "apple-mobile-web-app-capable" in html
+        assert "/sw.js" in html, "the default surface must register the SW"
 
 
 class TestSystemBrowserClaimFlow:
@@ -936,3 +963,87 @@ class TestSystemBrowserClaimFlow:
         assert "startClaimPoll" in html
         # The plain-browser path (no webview) must still redirect directly.
         assert "IN_WEBVIEW" in html
+
+
+class TestDeeplinkTargetsHashRouter:
+    """v8.7: the deeplink 302 must land on the UI that has a hash router.
+
+    /api/deeplink?to=atlas returns a 302 to an SPA hash route. The router
+    that resolves #/atlas, #/world, #/portfolio etc lives ONLY in the HUD
+    (ui/index.html); ui/console.html has no hash routing at all. When the
+    console became the default at "/", a Location of "/" + "#/atlas" would
+    still have returned 200 and simply dropped the user on the console home
+    screen — a SILENT failure with no error anywhere. These pin the target.
+    """
+
+    def _get_no_redirect(self, server, path):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        status = resp.status
+        location = resp.getheader("Location")
+        resp.read()
+        conn.close()
+        return status, location
+
+    def test_deeplink_redirects_to_the_hud_not_root(self, server):
+        status, location = self._get_no_redirect(server, "/api/deeplink?to=atlas")
+        assert status == 302
+        assert location is not None
+        assert location.startswith("/index.html#"), location
+        assert not location.startswith("/#"), (
+            "a bare '/' now serves the console, which has no hash router — "
+            "this deeplink would silently do nothing"
+        )
+
+    def test_deeplink_hash_is_preserved(self, server):
+        status, location = self._get_no_redirect(server, "/api/deeplink?to=atlas")
+        assert status == 302
+        assert location.endswith("#/atlas"), location
+
+
+class TestFirstRunSetup:
+    """v8.9: setup must never report a broken configuration as working.
+
+    The original validator hit GET /v1/models, which NVIDIA serves WITHOUT
+    checking auth — an obviously fake key returned HTTP 200 and setup told
+    the user "key works". These pin the honest behaviour.
+    """
+
+    def test_malformed_key_rejected_without_network(self):
+        from dourmouse.firstrun import validate_nvidia_key
+
+        r = validate_nvidia_key("not-a-key")
+        assert r["ok"] is False
+        assert "nvapi-" in (r.get("hint") or "")
+
+    def test_empty_key_rejected(self):
+        from dourmouse.firstrun import validate_nvidia_key
+
+        assert validate_nvidia_key("")["ok"] is False
+
+    def test_validation_uses_an_authenticating_endpoint(self):
+        """Guard the regression directly: /v1/models does NOT check keys."""
+        from dourmouse import firstrun
+
+        assert "chat/completions" in firstrun._NVIDIA_CHAT
+        assert not hasattr(firstrun, "_NVIDIA_MODELS"), (
+            "validating against /v1/models reports fake keys as valid"
+        )
+
+    def test_save_config_rejects_unknown_keys(self):
+        """An allowlist stops a malformed payload writing arbitrary env vars."""
+        from dourmouse.firstrun import save_config
+
+        r = save_config({"EVIL_VAR": "x", "PATH": "/tmp"})
+        assert r["ok"] is False
+
+    def test_item_config_dir_is_outside_the_bundle(self):
+        """Config must survive reinstall — never live beside the package."""
+        from pathlib import Path
+
+        from dourmouse.config import user_config_dir
+
+        pkg = Path(__file__).resolve().parent.parent
+        assert pkg not in user_config_dir().parents

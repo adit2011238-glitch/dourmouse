@@ -40,6 +40,11 @@ whisper_models/
 *.onnx
 
 # ── OS junk ──────────────────────────────────────────────────────────────
-.DS_Store  # AppleDouble sidecar files (exFAT drives create these next to every file)
-  ._*
-  sync_log.txt
+# AppleDouble sidecar files (exFAT/network drives create these next to
+# every file) — a gitignore pattern comment must be on its own line; an
+# inline "pattern  # comment" is taken as literal pattern text, not a
+# comment, so this was previously silent-broken twice over (also had a
+# leading-whitespace typo that made the pattern itself never match).
+.DS_Store
+._*
+sync_log.txt

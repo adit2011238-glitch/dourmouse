@@ -307,6 +307,75 @@ class TestSchemaValidation:
     def test_extra_arguments_tolerated(self):
         assert validate_tool_arguments(self.SCHEMA, {"query": "x", "bogus": True}) is None
 
+
+class TestNumericStringCoercion:
+    """v8.12: observed live — web_search's max_results sent as the JSON
+    string "10" instead of the integer 10, rejected 3x verbatim before the
+    model gave up and dropped the argument. A numeric-looking string is a
+    known tool-calling quirk, not malformed input, so it is coerced and
+    re-checked rather than rejected outright. Genuinely non-numeric strings
+    ("many", "abc") must still be rejected exactly as before."""
+
+    INT_SCHEMA = {
+        "type": "object",
+        "properties": {"max_results": {"type": "integer"}},
+        "required": [],
+    }
+    NUM_SCHEMA = {
+        "type": "object",
+        "properties": {"amount": {"type": "number"}},
+        "required": [],
+    }
+
+    def test_numeric_string_for_integer_field_is_accepted(self):
+        assert validate_tool_arguments(self.INT_SCHEMA, {"max_results": "10"}) is None
+
+    def test_numeric_string_is_coerced_to_a_real_int_in_place(self):
+        """The handler receives what it actually asked for, not the
+        original string — the whole point is the handler never has to
+        special-case this."""
+        args = {"max_results": "10"}
+        assert validate_tool_arguments(self.INT_SCHEMA, args) is None
+        assert args["max_results"] == 10
+        assert isinstance(args["max_results"], int)
+
+    def test_negative_numeric_string_is_accepted(self):
+        args = {"max_results": "-3"}
+        assert validate_tool_arguments(self.INT_SCHEMA, args) is None
+        assert args["max_results"] == -3
+
+    def test_float_shaped_string_is_rejected_for_an_integer_field(self):
+        """"3.5" must not be silently truncated into a real integer — a
+        wrong-shaped value stays rejected, exactly as before."""
+        err = validate_tool_arguments(self.INT_SCHEMA, {"max_results": "3.5"})
+        assert err is not None
+
+    def test_non_numeric_string_is_still_rejected(self):
+        err = validate_tool_arguments(self.INT_SCHEMA, {"max_results": "many"})
+        assert err is not None
+        assert "max_results" in err and "integer" in err
+
+    def test_numeric_string_for_number_field_is_coerced_to_float(self):
+        args = {"amount": "3.5"}
+        assert validate_tool_arguments(self.NUM_SCHEMA, args) is None
+        assert args["amount"] == 3.5
+        assert isinstance(args["amount"], float)
+
+    def test_a_real_int_is_never_touched(self):
+        """The already-correct, common path must be a no-op — no needless
+        float/int churn on a value that was already right."""
+        args = {"max_results": 10}
+        assert validate_tool_arguments(self.INT_SCHEMA, args) is None
+        assert args["max_results"] == 10
+        assert type(args["max_results"]) is int
+
+    def test_boolean_is_not_coerced_as_a_numeric_string(self):
+        """Coercion is gated on ``isinstance(value, str)``, and Python's
+        bool is an int subclass but never a str -- guards against a future
+        refactor accidentally routing True/False through this path."""
+        err = validate_tool_arguments(self.INT_SCHEMA, {"max_results": True})
+        assert err is not None
+
     def test_validate_against_schema_output(self):
         schema = {"type": "object", "properties": {"symbols": {"type": "array"}}, "required": ["symbols"]}
         assert validate_against_schema({"symbols": ["SPY"]}, schema) is None

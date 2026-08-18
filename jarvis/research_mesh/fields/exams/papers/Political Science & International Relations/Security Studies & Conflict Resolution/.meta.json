@@ -1,0 +1,21 @@
+{
+  "domain": "Political Science & International Relations",
+  "field": "Security Studies & Conflict Resolution",
+  "tests": [
+    {
+      "url": "https://government.georgetown.edu/ph-d-in-government/program-details/exam-reading/",
+      "file": "_archives/https-government-georgetown-edu-ph-d-in--a728c43713.html",
+      "bytes": 226347,
+      "sha256": "a728c43713356909be0f67e45120a506db0df7389f8239c7c83e95c0418946e2",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://government.georgetown.edu/ph-d-in-government/program-details/exam-reading/",
+      "label": "Georgetown \u2014 Comprehensive exam reading lists"
+    }
+  ]
+}

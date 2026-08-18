@@ -28,6 +28,7 @@ stalled feed cannot stall the whole monitor.
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import os
 import re
 import threading
@@ -42,7 +43,7 @@ from dourmouse import live_feeds
 
 _SOURCE_TIMEOUT = 8.0
 _MAX_ITEMS_PER_SOURCE = 8
-_SOURCE_COUNT = 6
+_SOURCE_COUNT = 8
 
 #: Cached snapshot: {at, snapshot}. A monitor refresh is bounded by the TTL.
 _cache_lock = threading.Lock()
@@ -70,17 +71,75 @@ def _http_get(url: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _item(title: str, summary: str = "", link: str = "", at: str = "", severity: str = "") -> dict[str, str]:
-    return {
+def _item(
+    title: str,
+    summary: str = "",
+    link: str = "",
+    at: str = "",
+    severity: str = "",
+    lat: float | None = None,
+    lon: float | None = None,
+    country: str = "",
+) -> dict[str, Any]:
+    """One feed item.
+
+    v8.9: ``lat``/``lon``/``country`` are OPTIONAL and omitted entirely when
+    a source has no location. That is deliberate — a consumer (the map) must
+    be able to tell "this happened at this point" from "this has no place",
+    and a placeholder 0/0 would silently plot every unlocated advisory off
+    the coast of Africa. Absent means absent.
+    """
+    out: dict[str, Any] = {
         "title": (title or "").strip()[:200],
         "summary": (summary or "").strip()[:300],
         "link": (link or "").strip(),
         "at": at,
         "severity": severity,
     }
+    if lat is not None and lon is not None:
+        out["lat"] = lat
+        out["lon"] = lon
+    if country:
+        out["country"] = country.strip()[:80]
+    return out
 
 
-def _rss_items(raw: str, max_items: int, pick: Callable[[ET.Element], dict[str, str]]) -> list[dict[str, str]]:
+def _parse_point(node: ET.Element) -> tuple[float | None, float | None]:
+    """Pull coordinates out of an RSS item's geo tags.
+
+    GDACS publishes BOTH ``georss:point`` ("lat lon" in one string) and the
+    older ``geo:lat`` / ``geo:long`` pair. Read either. Namespaces are
+    stripped before matching because the feeds are inconsistent about
+    prefixes. Malformed values return None rather than raising — one bad
+    entry must not cost the whole channel.
+    """
+    lat = lon = None
+    for child in node:
+        tag = child.tag.rsplit("}", 1)[-1].lower()
+        text = (child.text or "").strip()
+        if not text:
+            continue
+        try:
+            if tag == "point":
+                parts = text.replace(",", " ").split()
+                if len(parts) >= 2:
+                    lat, lon = float(parts[0]), float(parts[1])
+            elif tag == "lat":
+                lat = float(text)
+            elif tag in ("long", "lon"):
+                lon = float(text)
+        except (TypeError, ValueError):
+            continue
+    # Reject anything outside the real coordinate space instead of passing
+    # a nonsense point downstream.
+    if lat is None or lon is None or not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        return None, None
+    return lat, lon
+
+
+def _rss_items(
+    raw: str, max_items: int, pick: Callable[[ET.Element], dict[str, Any]]
+) -> list[dict[str, Any]]:
     try:
         root = ET.fromstring(raw)
     except ET.ParseError as exc:
@@ -95,8 +154,141 @@ def _rss_items(raw: str, max_items: int, pick: Callable[[ET.Element], dict[str, 
     return out
 
 
-def _fetch_markets() -> list[dict[str, str]]:
-    items: list[dict[str, str]] = []
+def _fetch_quakes() -> list[dict[str, Any]]:
+    """USGS magnitude 2.5+ in the last 24h — keyless GeoJSON with real points.
+
+    Added alongside GDACS rather than replacing it: GDACS covers floods,
+    cyclones and wildfires too, while USGS is the authoritative seismic
+    source and gives cleaner coordinates and magnitudes.
+    """
+    raw = _http_get(
+        "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson"
+    )
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"unparseable USGS GeoJSON: {exc}") from exc
+    feats = data.get("features") or []
+    if not feats:
+        raise RuntimeError("USGS returned no features")
+    # Strongest first — a magnitude 6 matters more than twenty magnitude 2s.
+    feats.sort(key=lambda f: (f.get("properties") or {}).get("mag") or 0, reverse=True)
+    out: list[dict[str, Any]] = []
+    for f in feats[:_MAX_ITEMS_PER_SOURCE]:
+        p = f.get("properties") or {}
+        coords = (f.get("geometry") or {}).get("coordinates") or []
+        mag = p.get("mag")
+        if len(coords) < 2 or mag is None:
+            continue
+        # USGS GeoJSON is [lon, lat, depth] — the reverse of the RSS feeds.
+        lon, lat = float(coords[0]), float(coords[1])
+        if mag >= 6:
+            sev = "critical"
+        elif mag >= 5:
+            sev = "high"
+        elif mag >= 4:
+            sev = "watch"
+        else:
+            sev = "info"
+        depth = coords[2] if len(coords) > 2 else None
+        out.append(_item(
+            f"M{mag} {p.get('place') or 'unknown location'}",
+            summary=(f"depth {depth:.0f} km · " if isinstance(depth, (int, float)) else "")
+                    + "USGS",
+            link=p.get("url") or "",
+            severity=sev, lat=lat, lon=lon,
+        ))
+    if not out:
+        raise RuntimeError("USGS features carried no usable coordinates")
+    return out
+
+
+def _fetch_flights() -> list[dict[str, Any]]:
+    """Live aircraft from OpenSky — keyless, real positions.
+
+    OpenSky returns thousands of aircraft; the monitor keeps a small sample
+    for the feed while the map endpoint reads the full set separately. The
+    anonymous tier is rate-limited, so a 429 here is normal and is reported
+    as such rather than retried in a loop.
+    """
+    raw = _http_get("https://opensky-network.org/api/states/all?lamin=35&lomin=-11&lamax=60&lomax=31")
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"unparseable OpenSky response: {exc}") from exc
+    states = data.get("states") or []
+    if not states:
+        raise RuntimeError("OpenSky returned no aircraft")
+    out: list[dict[str, Any]] = []
+    for s in states:
+        # Index map per OpenSky's documented state vector.
+        try:
+            callsign = (s[1] or "").strip()
+            origin = s[2] or ""
+            lon, lat = s[5], s[6]
+            alt = s[7]
+        except (IndexError, TypeError):
+            continue
+        if lat is None or lon is None or not callsign:
+            continue
+        out.append(_item(
+            f"{callsign} {origin}",
+            summary=(f"altitude {alt:,.0f} m" if isinstance(alt, (int, float)) else "on ground"),
+            severity="info", lat=float(lat), lon=float(lon), country=origin,
+        ))
+        if len(out) >= _MAX_ITEMS_PER_SOURCE:
+            break
+    if not out:
+        raise RuntimeError("OpenSky states carried no usable positions")
+    return out
+
+
+def _fetch_crypto_fx() -> tuple[list[dict[str, Any]], list[str]]:
+    """Keyless crypto + FX, from providers that are NOT Yahoo.
+
+    v8.9: Yahoo rate-limits by source IP and had blocked this host on every
+    edge, which took the whole markets channel down with it. These two
+    providers were verified reachable from the compute host at the same
+    moment Yahoo was returning 429, so they keep the channel alive on its
+    own legs rather than as a Yahoo retry.
+    """
+    items: list[dict[str, Any]] = []
+    failures: list[str] = []
+
+    # Binance: 24h ticker, gives price AND change percent in one call.
+    for sym, label in (("BTCUSDT", "BTC/USD"), ("ETHUSDT", "ETH/USD")):
+        try:
+            d = json.loads(_http_get(
+                f"https://api.binance.com/api/v3/ticker/24hr?symbol={sym}"
+            ))
+            price = float(d["lastPrice"])
+            pct = float(d["priceChangePercent"])
+            items.append(_item(
+                f"{label} {price:,.2f}",
+                summary=f"{pct:+.2f}% over 24h (Binance)",
+                severity="up" if pct > 0 else ("down" if pct < 0 else "flat"),
+            ))
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{label}: {str(exc)[:70]}")
+
+    # Frankfurter: ECB reference rates, keyless and unthrottled.
+    try:
+        d = json.loads(_http_get("https://api.frankfurter.app/latest?from=EUR&to=USD,GBP,JPY"))
+        rates = d.get("rates") or {}
+        for cur, val in list(rates.items())[:3]:
+            items.append(_item(
+                f"EUR/{cur} {val}",
+                summary=f"ECB reference rate, {d.get('date', 'latest')}",
+                severity="quote",
+            ))
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"fx: {str(exc)[:70]}")
+
+    return items, failures
+
+
+def _fetch_markets() -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
     failures: list[str] = []
     for direction in ("gainers", "losers"):
         try:
@@ -128,10 +320,30 @@ def _fetch_markets() -> list[dict[str, str]]:
             )
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{sym}: {str(exc)[:80]}")
+
+    # v8.9: crypto + FX from non-Yahoo providers. Added AFTER the Yahoo
+    # attempts so equity data still leads when Yahoo is reachable, but the
+    # channel no longer dies with it.
+    extra, extra_fail = _fetch_crypto_fx()
+    items.extend(extra)
+    failures.extend(extra_fail)
+
     if not items:
         # Honest: nothing real came back (provider blocked/rate-limited) —
         # the source is OFFLINE, not "ok with warn placeholders".
-        raise RuntimeError("Yahoo Finance unreachable: " + "; ".join(failures[:4]))
+        raise RuntimeError("no market provider reachable: " + "; ".join(failures[:4]))
+    if failures:
+        # Partial is reported as partial. A channel that quietly drops
+        # equities and shows only crypto would read as a complete market
+        # picture, which it is not.
+        items.append(_item(
+            "EQUITIES UNAVAILABLE",
+            summary=(
+                "Yahoo is rate-limiting this host (HTTP 429); crypto and FX "
+                "below are live. No keyless equity source is configured."
+            ),
+            severity="warn",
+        ))
     return items[: _MAX_ITEMS_PER_SOURCE]
 
 
@@ -172,12 +384,12 @@ def _pick_news(node: ET.Element) -> dict[str, str]:
     return _item(title, summary=f"via {source}" if source else "", link=link, at=published)
 
 
-def _fetch_disasters() -> list[dict[str, str]]:
+def _fetch_disasters() -> list[dict[str, Any]]:
     raw = _http_get("https://www.gdacs.org/xml/rss.xml")
     out: list[dict[str, str]] = []
 
-    def _pick(node: ET.Element) -> dict[str, str]:
-        title = summary = link = published = ""
+    def _pick(node: ET.Element) -> dict[str, Any]:
+        title = summary = link = published = country = ""
         for child in node:
             tag = child.tag.rsplit("}", 1)[-1]
             text = (child.text or "").strip()
@@ -189,6 +401,8 @@ def _fetch_disasters() -> list[dict[str, str]]:
                 link = text
             elif tag == "pubDate":
                 published = text
+            elif tag == "country":
+                country = text
         lowered = (title + " " + summary).lower()
         if "alertlevel: red" in lowered or "alertlevel red" in lowered:
             sev = "critical"
@@ -198,7 +412,13 @@ def _fetch_disasters() -> list[dict[str, str]]:
             sev = "info"
         else:
             sev = "watch"
-        return _item(title, summary=summary, link=link, at=published, severity=sev)
+        # v8.9: GDACS ships georss:point on essentially every alert. Reading
+        # it is what makes the map possible; it was being discarded.
+        lat, lon = _parse_point(node)
+        return _item(
+            title, summary=summary, link=link, at=published, severity=sev,
+            lat=lat, lon=lon, country=country,
+        )
 
     for it in _rss_items(raw, _MAX_ITEMS_PER_SOURCE, _pick):
         out.append(it)
@@ -316,13 +536,17 @@ def _wb_parse(raw: str) -> tuple[str, str] | None:
 # Registry + aggregation
 # --------------------------------------------------------------------------- #
 
-_SOURCES: dict[str, tuple[str, Callable[[], list[dict[str, str]]]]] = {
-    "markets": ("Yahoo Finance — movers + key quotes", _fetch_markets),
+_SOURCES: dict[str, tuple[str, Callable[[], list[dict[str, Any]]]]] = {
+    "markets": ("Markets — crypto, FX, and equity quotes when reachable", _fetch_markets),
     "news": ("Google News RSS — world / Europe / APAC", _fetch_news),
     "disasters": ("GDACS — earthquakes, floods, cyclones, wildfires", _fetch_disasters),
     "cyber": ("CISA — cybersecurity advisories", _fetch_cyber),
     "conflict": ("ReliefWeb — humanitarian + conflict updates", _fetch_conflict),
     "macro": ("World Bank — GDP growth + inflation", _fetch_macro),
+    # v8.9 geo channels — both keyless, both carry real coordinates and so
+    # are the ones the map can actually plot.
+    "quakes": ("USGS — magnitude 2.5+ earthquakes, last 24h", _fetch_quakes),
+    "flights": ("OpenSky — live aircraft positions", _fetch_flights),
 }
 
 
@@ -402,6 +626,43 @@ def world_pulse_snapshot(force: bool = False) -> dict[str, Any]:
         _cache["at"] = time.monotonic()
         _cache["snapshot"] = snapshot
     return snapshot
+
+
+def world_pulse_geo() -> dict[str, Any]:
+    """Every locatable item, grouped by channel, for the map.
+
+    v8.9. Deliberately reports which channels are mappable and which are
+    not, instead of silently returning a short list: a map that shows three
+    layers when the operator believes it shows eight is worse than one that
+    says "cyber has no coordinates". ``unmappable`` names those channels and
+    why, so the UI can state it rather than imply full coverage.
+    """
+    snap = world_pulse_snapshot()
+    items = snap.get("items") or {}
+    layers: dict[str, list[dict[str, Any]]] = {}
+    unmappable: dict[str, str] = {}
+    for chan, lst in items.items():
+        located = [i for i in (lst or []) if isinstance(i, dict) and "lat" in i and "lon" in i]
+        if located:
+            layers[chan] = located
+        else:
+            src = (snap.get("sources") or {}).get(chan) or {}
+            unmappable[chan] = (
+                src.get("error") or "source carries no coordinates"
+            )[:160]
+    return {
+        "generated_at": snap.get("generated_at"),
+        "pulse_score": snap.get("pulse_score"),
+        "pulse_label": snap.get("pulse_label"),
+        "layers": layers,
+        "counts": {k: len(v) for k, v in layers.items()},
+        "unmappable": unmappable,
+        "note": (
+            "Only channels with real coordinates are plotted. Channels listed "
+            "under 'unmappable' are omitted rather than given placeholder "
+            "positions."
+        ),
+    }
 
 
 def world_pulse_details(source: str) -> dict[str, Any]:

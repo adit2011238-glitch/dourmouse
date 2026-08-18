@@ -1,0 +1,21 @@
+{
+  "domain": "Engineering",
+  "field": "Industrial Control Engineering",
+  "tests": [
+    {
+      "url": "https://www.me.byu.edu/https:/brightspotcdn.byu.edu/f8/62/b5c031444c5b9d40f25924fbff43/controls-infosheet-and-sample-problems-0.pdf",
+      "file": "_archives/https-www-me-byu-edu-https-brightspotcdn-1685868acc.pdf",
+      "bytes": 1270511,
+      "sha256": "1685868acc19f92702b2cf87a70ed8c2fc3874f87e79152449d9d53affe84f9d",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.me.byu.edu/https:/brightspotcdn.byu.edu/f8/62/b5c031444c5b9d40f25924fbff43/controls-infosheet-and-sample-problems-0.pdf",
+      "label": "BYU \u2014 Controls and System Dynamics quals"
+    }
+  ]
+}

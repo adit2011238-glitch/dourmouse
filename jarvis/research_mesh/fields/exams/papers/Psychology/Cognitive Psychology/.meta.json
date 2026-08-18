@@ -1,0 +1,29 @@
+{
+  "domain": "Psychology",
+  "field": "Cognitive Psychology",
+  "tests": [
+    {
+      "url": "https://www.utsc.utoronto.ca/psych/comprehensive-exam",
+      "file": "_archives/https-www-utsc-utoronto-ca-psych-compreh-fa9191776b.html",
+      "bytes": 85670,
+      "sha256": "fa9191776bc1bf667c65fa78ed0ea844a62b5180cd2c382a7020d134e39e9abf",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www.utsc.utoronto.ca/psych/sites/utsc.utoronto.ca.psych/files/docs/Written%20Comprehensive%20Rating%20Scale.pdf",
+      "file": "_archives/https-www-utsc-utoronto-ca-psych-sites-u-84cd09295d.pdf",
+      "bytes": 199906,
+      "sha256": "84cd09295dea93fd7358bd126b23078a95e01a9be7025c4ac2198144f268cf92",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.utsc.utoronto.ca/psych/comprehensive-exam",
+      "label": "UTSC \u2014 Psychology Comprehensive Exam (format)"
+    }
+  ]
+}

@@ -51,11 +51,12 @@ def finetune():
     model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    # Use float32 on CPU (float16 requires GPU). TinyLlama 1.1B fits in ~2GB.
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        load_in_8bit=True,
-        device_map="auto",
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32 if device == "cpu" else torch.float16,
+        device_map="cpu" if device == "cpu" else "auto",
     )
 
     # LoRA config: tiny adapter for a 1.1B model

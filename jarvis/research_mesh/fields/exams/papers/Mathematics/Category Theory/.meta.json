@@ -1,0 +1,261 @@
+{
+  "domain": "Mathematics",
+  "field": "Category Theory",
+  "tests": [
+    {
+      "url": "https://ww3.math.ucla.edu/past-qualifying-exams/",
+      "file": "_archives/https-ww3-math-ucla-edu-past-qualifying--8b4cbcc585.html",
+      "bytes": 170373,
+      "sha256": "8b4cbcc5854f5a5f0a52c0fb697254a6ef8995c395a76b2ed1461c2425788d51",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-01F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-9969e11d6a.pdf",
+      "bytes": 70124,
+      "sha256": "9969e11d6a7d67d35b9bd64acd6c6897b4520d6b14c5710b8daacd42ddb0ca46",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-02F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-021bcd5f3b.pdf",
+      "bytes": 60466,
+      "sha256": "021bcd5f3bcba9cfbbec53013ea4df0a78e10d8713381ac50c1f58636a5c5da9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-02S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-44ebf2b83c.pdf",
+      "bytes": 57444,
+      "sha256": "44ebf2b83cf4410f616552e554c6114ef95031efcedbaeba4e9f6303a94d0b5b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-02W.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-536b760085.pdf",
+      "bytes": 65796,
+      "sha256": "536b760085cd870f309252033e841029e6f5874313587dfe0ca074debe52bd8c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-03F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-d8e1b77dcf.pdf",
+      "bytes": 68131,
+      "sha256": "d8e1b77dcfe98773b0f6b3e101dc11f6a51991c7feea47447cdf113b79e90fc8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-03S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-e2f02875f1.pdf",
+      "bytes": 55652,
+      "sha256": "e2f02875f1edf761618d3f440adad95da5d280d2f69740db8a818bad49112cca",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-04F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-5f2211c91f.pdf",
+      "bytes": 56121,
+      "sha256": "5f2211c91fd7322251a41a94c691a557249b46f75a08886e52a586b76bc7f714",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-04S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-12108a3585.pdf",
+      "bytes": 63973,
+      "sha256": "12108a358568c3ef3b1ee6ac34175277b5e2ec6ef77d7991957f48605683a5a1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-05F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-a292879dcd.pdf",
+      "bytes": 73428,
+      "sha256": "a292879dcd55e0da7af57815e76230cc53d48df68db3d2fda87cc68761ec78af",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-05S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-3c5f162af4.pdf",
+      "bytes": 59144,
+      "sha256": "3c5f162af4adc27e9abde9f0ea4d90869e382eea29c8217ac8d18aaa77f0c9e2",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-06S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-d15b3f3609.pdf",
+      "bytes": 63129,
+      "sha256": "d15b3f36094e08f1a5cf0cdaf6fa3bc3df5c844ff5fdbdb74fbfcc699e4a5da6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-06W.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-46bf4f98cf.pdf",
+      "bytes": 51130,
+      "sha256": "46bf4f98cf225e270e8ba2024e63fdd1ee5aae87b72de70318831109d51da455",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-07F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-5cf191593b.pdf",
+      "bytes": 76043,
+      "sha256": "5cf191593b5dadd61815b7478be8abae6f4b7a7184cb5847768bcda83cf81510",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-07S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-653358648e.pdf",
+      "bytes": 78022,
+      "sha256": "653358648e32f66970f6b8e0ffb3223bf602a1d4af3543103862541c96769bc6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-08F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-9c42c87fa1.pdf",
+      "bytes": 51075,
+      "sha256": "9c42c87fa13f901229b1ef53cfa5cf6f545e81a2f34f94a2cc0621c179bf6eaa",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-08S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-054099c862.pdf",
+      "bytes": 68286,
+      "sha256": "054099c862ec18ec980fd572f527076e692f756d4726f4c4c91e69b62045f8db",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-09F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-6f35d68307.pdf",
+      "bytes": 94873,
+      "sha256": "6f35d6830788eca6ee9b817467b16107814d1b53422983be6003f4a9ebf6e72e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-09S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-2612c758fc.pdf",
+      "bytes": 78356,
+      "sha256": "2612c758fc0b619b686c5b7dbb4854b59565e5cb42725aa2356b97a5adb8ae51",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-10F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-77d246d3e0.pdf",
+      "bytes": 100250,
+      "sha256": "77d246d3e0f96ad10c716201c4cdccc45360e09286bc5c5502ed82820b0a1b88",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-10S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-0f2da10d3f.pdf",
+      "bytes": 53091,
+      "sha256": "0f2da10d3f1c9a7e6dd51c605c31bf4f4b284fe8143c13dfdbc75e014b3297b7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-11F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-fbed6b9766.pdf",
+      "bytes": 97629,
+      "sha256": "fbed6b9766c776bded122bac9748e50e824f2771a0f07c65a2f4d6e7f5e0824f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-11S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-cca45a7779.pdf",
+      "bytes": 119415,
+      "sha256": "cca45a7779442ba12f4ab3159341f54e0e0bc782527853affb997b1aea98b3dc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-12F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-375052aec5.pdf",
+      "bytes": 113548,
+      "sha256": "375052aec58513ccc519311cb4c2c287084aa2bcae023fc5238e427bb4231662",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-12S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-b54eb6fc28.pdf",
+      "bytes": 40710,
+      "sha256": "b54eb6fc28a3e0f9d36be67df3f30b31efa350b4cfd11ce64e9ec655f89cc8dd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-13F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-d6dd1e0314.pdf",
+      "bytes": 64632,
+      "sha256": "d6dd1e031483f602b78b236f39cc25772f799f9acca06f250669ea9c03b79a67",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-13S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-97ca3417ea.pdf",
+      "bytes": 133659,
+      "sha256": "97ca3417ea4a4a17b91569bb0bb475918d273194935de9644ca9177df129cc98",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-14F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-ca2ee77f5c.pdf",
+      "bytes": 105155,
+      "sha256": "ca2ee77f5cffa9150847409991c752a08b65bb53f242e450bae4f920a8b6ec34",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-14S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-dcf557b5fd.pdf",
+      "bytes": 114746,
+      "sha256": "dcf557b5fdd81008da3acf51dd5b1959f5db723779431a8db2ffc8d5460f3ae2",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-15F.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-a4d3bc966c.pdf",
+      "bytes": 92717,
+      "sha256": "a4d3bc966cdb53d582b6ea081edccdb3b32323d808f37f54c70133b3d25f6b3d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://ww3.math.ucla.edu/wp-content/uploads/2021/09/basic-15S.pdf",
+      "file": "_archives/https-ww3-math-ucla-edu-wp-content-uploa-c2e008ccb6.pdf",
+      "bytes": 138797,
+      "sha256": "c2e008ccb6fc8215061be2fcac0eb53c1d5543eaaed4477c808ef89bc9a7591c",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://ww3.math.ucla.edu/past-qualifying-exams/",
+      "label": "UCLA Algebra quals (category theory)"
+    }
+  ]
+}

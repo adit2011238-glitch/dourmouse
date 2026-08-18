@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import imaplib
 import json
+import re
 import os
 import smtplib
 import urllib.error
@@ -510,7 +511,7 @@ def _slides_create_oauth(
 
     presentations.create (metadata) then one batchUpdate that deletes the
     default blank slide and inserts TITLE_AND_BODY layouts, then a second
-    batchUpdate that draws real text boxes (createTextBox + insertText) on
+    batchUpdate that draws real text boxes (createShape TEXT_BOX + insertText) on
     each slide. Deterministic objectIds throughout — the deck's content is
     real, never placeholder text. Requires the Google sign-in with Drive
     write scope; identity-only 403s are surfaced with the exact fix.
@@ -549,12 +550,20 @@ def _slides_create_oauth(
         requests.append({"deleteObject": {"objectId": page_id}})
     for i, slide in enumerate(slides):
         sid = f"slide_{i + 1}"
+        # createSlide, not insertLayout: the latter is not a Slides API
+        # request type at all, so every deck this function ever built failed
+        # with "Unknown name insertLayout" after the presentation had already
+        # been created — leaving an empty deck behind.
+        #
+        # BLANK rather than TITLE_AND_BODY because the second batch draws its
+        # own title/body text boxes; a placeholder layout would leave empty
+        # "Click to add title" frames sitting under them.
         requests.append(
             {
-                "insertLayout": {
-                    "slideLayoutType": "TITLE_AND_BODY",
+                "createSlide": {
                     "objectId": sid,
                     "insertionIndex": i,
+                    "slideLayoutReference": {"predefinedLayout": "BLANK"},
                 }
             }
         )
@@ -589,8 +598,9 @@ def _slides_create_oauth(
             tbox = f"{sid}_title_box"
             text_requests.append(
                 {
-                    "createTextBox": {
+                    "createShape": {
                         "objectId": tbox,
+                        "shapeType": "TEXT_BOX",
                         "elementProperties": {
                             "pageObjectId": sid,
                             "size": {"width": {"magnitude": 685, "unit": "PT"},
@@ -617,8 +627,9 @@ def _slides_create_oauth(
             bbox = f"{sid}_body_box"
             text_requests.append(
                 {
-                    "createTextBox": {
+                    "createShape": {
                         "objectId": bbox,
+                        "shapeType": "TEXT_BOX",
                         "elementProperties": {
                             "pageObjectId": sid,
                             "size": {"width": {"magnitude": 685, "unit": "PT"},
@@ -687,6 +698,92 @@ def slides_create(
         "Google user's OAuth session with Drive write scope. No user is "
         "signed in — sign in at /login (with GOOGLE_OAUTH_FULL_SCOPES=1 in "
         ".env so the session grants Drive), then retry. Nothing was created."
+    )
+
+
+def _drive_share_oauth(
+    token: str, file_id: str, email: str, role: str, notify: bool
+) -> str:
+    """Grant `email` access to `file_id` via the Drive permissions API.
+
+    Sharing is a real, outward-facing act: it puts the user's document in
+    someone else's Drive and, when `notify` is set, sends them mail. So the
+    caller upstream gates it, and this layer refuses anything it cannot do
+    honestly rather than half-succeeding.
+
+    drive.file scope covers files this app created; a doc the user made by
+    hand in the browser is outside that scope and 404s here, which is
+    surfaced as exactly that rather than as a generic failure.
+    """
+    fid = (file_id or "").strip()
+    addr = (email or "").strip()
+    if not fid:
+        return "ERROR: drive_share requires a file_id."
+    # Deliberately structural, not a full RFC check: a local part, one @, and
+    # a dotted domain. "@nope" contains an @ and no spaces but is not an
+    # address, and a share sent to a malformed target fails confusingly at
+    # best. Reject here, before anything leaves.
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", addr):
+        return f"ERROR: {addr!r} is not a valid email address. Nothing was shared."
+    role = (role or "reader").strip().lower()
+    if role not in ("reader", "commenter", "writer"):
+        return (
+            f"ERROR: role must be reader, commenter or writer (got {role!r}). "
+            "Nothing was shared."
+        )
+    try:
+        _http_json(
+            "POST",
+            f"{_DRIVE_API}/files/{fid}/permissions"
+            f"?sendNotificationEmail={'true' if notify else 'false'}",
+            token,
+            {"type": "user", "role": role, "emailAddress": addr},
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "404" in msg:
+            raise RuntimeError(
+                msg
+                + f" — file {fid} is not visible to this app. The drive.file scope "
+                "only covers files DOURMOUSE created; a file made by hand in the "
+                "browser cannot be shared this way. Nothing was shared."
+            ) from exc
+        if "403" in msg:
+            raise RuntimeError(
+                msg
+                + " — sharing needs Drive WRITE (GOOGLE_OAUTH_FULL_SCOPES=1). "
+                "Nothing was shared."
+            ) from exc
+        raise
+    return (
+        f"DRIVE SHARED: {addr} now has {role} access to {fid} "
+        f"({'notification email sent' if notify else 'no notification sent'}) — "
+        f"https://drive.google.com/open?id={fid}"
+    )
+
+
+def drive_share(
+    file_id: str, email: str, role: str = "reader", notify: bool = True
+) -> str:
+    """Share a DOURMOUSE-created Drive file with someone (write, per-user OAuth).
+
+    Honest NOT CONFIGURED when no OAuth user is signed in. Should be
+    confirmation-gated upstream: it grants a real person real access to a
+    real document, and optionally emails them about it.
+    """
+    token = _oauth_access_token()
+    if token:
+        try:
+            return _drive_share_oauth(token, file_id, email, role, notify)
+        except RuntimeError as exc:
+            return f"DRIVE SHARE (reported honestly): {exc}"
+    reauth = _oauth_user_needs_reauth("DRIVE SHARE")
+    if reauth:
+        return reauth
+    return (
+        "NOT CONFIGURED: sharing a Drive file needs the signed-in Google user's "
+        "OAuth session with Drive write scope. No user is signed in — sign in at "
+        "/login, then retry. Nothing was shared."
     )
 
 
@@ -915,6 +1012,134 @@ def gmail_read(message_id: str) -> str:
             conn.logout()
         except Exception:  # noqa: BLE001,S110 - logout must never mask a read
             pass
+
+
+_MSG_ID_RE = re.compile(r"^[A-Za-z0-9_-]{5,80}$")
+
+
+def _gmail_modify(token: str, msg_id: str, action: str, payload: Any = None) -> dict:
+    """One Gmail message mutation. Raises RuntimeError with the real cause."""
+    url = f"{_GMAIL_API}/messages/{msg_id}"
+    url = url if action == "" else f"{url}/{action}"
+    try:
+        return _http_json("POST", url, token, payload if payload is not None else {})
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg or "insufficientPermissions" in msg:
+            raise RuntimeError(
+                msg
+                + " — this needs the gmail.modify scope. Sign in again at /login "
+                "to grant it. Nothing was changed."
+            ) from exc
+        if "404" in msg:
+            raise RuntimeError(
+                msg + f" — no message with id {msg_id!r}. Nothing was changed."
+            ) from exc
+        raise
+
+
+def _describe(token: str, msg_id: str) -> str:
+    """Subject + sender for the audit line, so the result names what moved.
+
+    Best-effort: a mutation that worked must not be reported as failed just
+    because the follow-up description could not be fetched.
+    """
+    try:
+        meta = _http_json(
+            "GET",
+            f"{_GMAIL_API}/messages/{msg_id}?format=metadata"
+            "&metadataHeaders=Subject&metadataHeaders=From",
+            token,
+        )
+    except RuntimeError:
+        return msg_id
+    headers = {
+        h.get("name", "").lower(): h.get("value", "")
+        for h in (meta.get("payload") or {}).get("headers", [])
+    }
+    subject = headers.get("subject", "(no subject)")[:80]
+    sender = headers.get("from", "")[:60]
+    return f"{subject!r}" + (f" from {sender}" if sender else "")
+
+
+def gmail_archive(message_id: str) -> str:
+    """Remove a message from the inbox, keeping it in All Mail (reversible).
+
+    The gentlest of the three: nothing is deleted, the mail stays searchable
+    forever, and re-adding the INBOX label puts it straight back. Should be
+    confirmation-gated upstream — it still changes what the user sees.
+    """
+    mid = (message_id or "").strip()
+    if not _MSG_ID_RE.match(mid):
+        return f"ERROR: {message_id!r} is not a valid Gmail message id. Nothing was changed."
+    token = _oauth_access_token()
+    if not token:
+        reauth = _oauth_user_needs_reauth("ARCHIVE")
+        return reauth or (
+            "NOT CONFIGURED: archiving needs the signed-in Google user's OAuth "
+            "session with the gmail.modify scope. No user is signed in — sign in "
+            "at /login, then retry. Nothing was changed."
+        )
+    what = _describe(token, mid)
+    try:
+        _gmail_modify(token, mid, "modify", {"removeLabelIds": ["INBOX"]})
+    except RuntimeError as exc:
+        return f"GMAIL ARCHIVE (reported honestly): {exc}"
+    return (
+        f"GMAIL ARCHIVED: {what} left the inbox (id {mid}). It is still in All "
+        "Mail and fully searchable; nothing was deleted."
+    )
+
+
+def gmail_trash(message_id: str) -> str:
+    """Move a message to Trash — recoverable for 30 days.
+
+    Deliberately trash, not delete: Gmail's DELETE endpoint destroys a message
+    immediately with no Trash stop and no recovery. An assistant acting on a
+    misread instruction should not be able to do that, and trash covers the
+    real need. Emptying the Trash stays a human job in Gmail's own UI.
+
+    Must be confirmation-gated upstream.
+    """
+    mid = (message_id or "").strip()
+    if not _MSG_ID_RE.match(mid):
+        return f"ERROR: {message_id!r} is not a valid Gmail message id. Nothing was changed."
+    token = _oauth_access_token()
+    if not token:
+        reauth = _oauth_user_needs_reauth("TRASH")
+        return reauth or (
+            "NOT CONFIGURED: moving mail to Trash needs the signed-in Google "
+            "user's OAuth session with the gmail.modify scope. No user is signed "
+            "in — sign in at /login, then retry. Nothing was changed."
+        )
+    what = _describe(token, mid)
+    try:
+        _gmail_modify(token, mid, "trash")
+    except RuntimeError as exc:
+        return f"GMAIL TRASH (reported honestly): {exc}"
+    return (
+        f"GMAIL TRASHED: {what} moved to Trash (id {mid}). Recoverable for 30 "
+        "days — use gmail_untrash to put it back."
+    )
+
+
+def gmail_untrash(message_id: str) -> str:
+    """Restore a message from Trash. The undo for gmail_trash."""
+    mid = (message_id or "").strip()
+    if not _MSG_ID_RE.match(mid):
+        return f"ERROR: {message_id!r} is not a valid Gmail message id. Nothing was changed."
+    token = _oauth_access_token()
+    if not token:
+        reauth = _oauth_user_needs_reauth("UNTRASH")
+        return reauth or (
+            "NOT CONFIGURED: restoring mail needs the signed-in Google user's "
+            "OAuth session with the gmail.modify scope. Nothing was changed."
+        )
+    try:
+        _gmail_modify(token, mid, "untrash")
+    except RuntimeError as exc:
+        return f"GMAIL UNTRASH (reported honestly): {exc}"
+    return f"GMAIL RESTORED: message {mid} is back out of Trash."
 
 
 def gmail_send(to: str, subject: str, body: str) -> str:

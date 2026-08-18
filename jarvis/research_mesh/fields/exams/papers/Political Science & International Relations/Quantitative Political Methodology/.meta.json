@@ -1,0 +1,1269 @@
+{
+  "domain": "Political Science & International Relations",
+  "field": "Quantitative Political Methodology",
+  "tests": [
+    {
+      "url": "https://politicalscience.yale.edu/academics/graduate-program/field-reading-lists-requirements-and-exams",
+      "file": "_archives/https-politicalscience-yale-edu-academic-5e287a3ae1.html",
+      "bytes": 31039,
+      "sha256": "5e287a3ae1dcc3d515de0b668ff767a8e741a19b9919c7b9b20c8e90f229222e",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics-2019-05.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-a580440197.pdf",
+      "bytes": 267309,
+      "sha256": "a580440197ad4cdd0550cf4e1ab5a0732c058550667f92ea53664bfd324fe01c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2024-01-17-american-politics-grad-course-offerings-and-subfield-requirements.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f7c1de3247.pdf",
+      "bytes": 98247,
+      "sha256": "f7c1de3247ebbbff3e0ef5195df3eafe71716c0bf7631e8fcd737ed7a054c4a7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_reading_list-2020-04_revised.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-926b96f630.pdf",
+      "bytes": 116315,
+      "sha256": "926b96f6309355e842927425b072d4173c015082c48594196a6cf5dd1d17254d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2023-10-02-comparative-politics-grad-course-offerings-and-subfield-requirements.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f1f1977dd5.pdf",
+      "bytes": 81239,
+      "sha256": "f1f1977dd5685509e06cacbb807f77d1cb42caa9ba4d88f6d01deaa01108ae9d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2025-12-18-ir-grad-course-offerings-and-subfield-reqs_december-2025.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-78ff36f1ad.pdf",
+      "bytes": 80575,
+      "sha256": "78ff36f1ad8b689a1772fa964be33ca934f74671f5c2f3bf43c3d53e55bc5117",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2021-05-04-political_economy_reading_list_revised_may_2_2021-02.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-ae1301f5f0.pdf",
+      "bytes": 193979,
+      "sha256": "ae1301f5f0bb5f5fa7fa9796197a25781f09499d849a60ba87584d3c245ab73d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2023-01-31-political_theory_reading_list_2021.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-ae5d5dbb1b.pdf",
+      "bytes": 101049,
+      "sha256": "ae5d5dbb1b8c4c5ec5b4527626b85bbd801afac3efd1af797323b3a96920ffba",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/political_theory_grad_course_offerings_and_subfield_requirements_august_28_2025.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-367cd2381c.pdf",
+      "bytes": 81342,
+      "sha256": "367cd2381cb63b7bff4601a341dffe5c061375889517b6c5ffca8b4fd73c4dd5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/qualitative_and_archival_methods-reading_list-2016-06-03.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-29cb904a4c.pdf",
+      "bytes": 188477,
+      "sha256": "29cb904a4cfa59b1f5fff1dd078e31cd245f8c306965377f870ccb80cd6a9af7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/qualitative-methods-grad-course-offerings-and-subfield-requirements-2026-01-27.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-c26f83d2fb.pdf",
+      "bytes": 181631,
+      "sha256": "c26f83d2fb891997e8c59f7ae01f2d6a6ed4ea4a70760ef93dd5d0f137379cfc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2021-06-02-quantitative_empirical_methods_reading_list.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-a40d349a5a.pdf",
+      "bytes": 82627,
+      "sha256": "a40d349a5a28b86598ea0f886892ec85870b41e75a27c9e96d68f18d9d6e5f32",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2025-08-29-quantitative-empirical-methods-grad-course-offerings-and-subfield-requirements.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-b592fdc304.pdf",
+      "bytes": 108983,
+      "sha256": "b592fdc30443b67d51be13cbd48144ba96e352474e7e104a65ee4dba1446b68c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam_2026-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-1ca98d8bda.pdf",
+      "bytes": 686404,
+      "sha256": "1ca98d8bda77ffbf5cf47586c0e3a21ce17a2093149dbd923f35cf2f506c2235",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2025-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-c286ba8cdc.pdf",
+      "bytes": 370174,
+      "sha256": "c286ba8cdc53753173147067ede8a06869699882584ef1352ebe5ee8832aafdd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2024-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-82090ab425.pdf",
+      "bytes": 142647,
+      "sha256": "82090ab4254b42a4481a1aa0ce3e2a0ec76730d08893f1d8167d277384c7f40c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2023-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-4f66261dd1.pdf",
+      "bytes": 181543,
+      "sha256": "4f66261dd17c71163fbcc0168963dd16b0906c3e5a1f0b302f226ec4f2a91724",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2023-01_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-04bbdbe098.pdf",
+      "bytes": 132814,
+      "sha256": "04bbdbe098323d54725065cf67c8c6145294c0ae95d8c562519f0e8df20ae8ea",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2022-01_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-456917343d.pdf",
+      "bytes": 192259,
+      "sha256": "456917343d7c2133f3d07cfa146b351e73ab68df8ad2eb28048f99a555f81b9c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2021-08_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-42490f3d96.pdf",
+      "bytes": 145310,
+      "sha256": "42490f3d96c85685eb898dc6b8bc6b12788b160460a24411cbeee0dbbf0f4383",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2020-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-c31b40780a.pdf",
+      "bytes": 116826,
+      "sha256": "c31b40780a2a722c222e739c906aa31796ea2a7605de2b0452c31bffd98b2f06",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2019-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-a943cf14b0.pdf",
+      "bytes": 88701,
+      "sha256": "a943cf14b0b2ec7807689c186f44abc075379130072b4b47944fb0334a7b9f9e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2019-01-ampols_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-4168f65bc9.pdf",
+      "bytes": 49645,
+      "sha256": "4168f65bc9b5db5aff7d816b87772cc5748de7f0af3bd98885da477d43c40786",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2018.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d0ed7811a8.pdf",
+      "bytes": 70585,
+      "sha256": "d0ed7811a8e7855b21db9ff431e24772a04117e4bc0f3ef12f49642439535b16",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2017.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-76fbd29246.pdf",
+      "bytes": 75653,
+      "sha256": "76fbd292467fc5a8168c53a7a1714d78f6a6c1ee6421da901fa3aee1c2c9e3f5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2016-10-12.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-ea29580bb7.pdf",
+      "bytes": 60681,
+      "sha256": "ea29580bb73cd5e486fab0c52e867d20e6117bef30df07a6cfef1dc5c7222216",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/american_politics-2016-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-0c8052a2b5.pdf",
+      "bytes": 100116,
+      "sha256": "0c8052a2b54bc1391f96cfd724a80679e82be398b2bda2e3372a64154a1f9861",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2015.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-62a0c5d1e8.pdf",
+      "bytes": 125583,
+      "sha256": "62a0c5d1e8bc5bef4d900c70b1d4e63cdd4b8a70af4bda7ecd0ba6b5d94480d4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/americanpolitics_15.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-4226051e96.pdf",
+      "bytes": 88190,
+      "sha256": "4226051e96f448190656a174f777b9e45b05837daa5ce83c942dda3b238fcff3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2014.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-1f6b9f178b.pdf",
+      "bytes": 70351,
+      "sha256": "1f6b9f178b3f2fb2cfd2c6b75c0a93b53f76822efa4295055e5f6d2f87509115",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2012.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-6b14282d88.pdf",
+      "bytes": 21857,
+      "sha256": "6b14282d88fb699ec2724de459fb53a97d5d0e921edb35937fe9a396dc724137",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-0f4715f503.pdf",
+      "bytes": 16590,
+      "sha256": "0f4715f5037dfd29cce131bb03677598b3bcb588644254c3ef37cd7bc5cb971e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2010.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-5f55c0eabf.pdf",
+      "bytes": 20134,
+      "sha256": "5f55c0eabf115110316fb469255d7aa948ad169b28bd91b6011066fc0ab8f724",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2009.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d00959e638.pdf",
+      "bytes": 23877,
+      "sha256": "d00959e638ff17c4618a65f8917b439fdffb4fc272d764a2321ba14ec03e1e84",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_jan_2009.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-91372b1b9d.pdf",
+      "bytes": 24393,
+      "sha256": "91372b1b9dd9230fa1b488d6f17273243dee1efc3eb700698ff02fcc3843ec1f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_aug_2008.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-929a0b3f18.pdf",
+      "bytes": 24263,
+      "sha256": "929a0b3f1898e51c247b90d2fa80a3cfd54beb31080242510a916f94154fb0aa",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ampols_jan_2008.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-a78bdcadd0.pdf",
+      "bytes": 21865,
+      "sha256": "a78bdcadd0961d67396889b61e152b5b98eb23eae2ff6f34c1ad7c250a64c9e5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2025.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-bad48810b2.pdf",
+      "bytes": 350023,
+      "sha256": "bad48810b2884531d2242e3a5d1b393a4c14f1599b6f50ff98afa01fef0fbbbe",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2025-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-a9e4e66565.pdf",
+      "bytes": 136794,
+      "sha256": "a9e4e66565fcdba9c54ab6a10e2b26c4b2fa4ce82a2379c54b8ceba674567207",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2024-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-991d06aea1.pdf",
+      "bytes": 106087,
+      "sha256": "991d06aea1f0b5f5e71c94d6bc01e201ce614b6257aca758a2a31e0c19507d8b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2023-11-13.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-32778ba7e7.pdf",
+      "bytes": 49414,
+      "sha256": "32778ba7e7398375b03adf70c8fd0d079b56fc2eaf7d5ffb577032d7aa9b4cc5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2022-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-26b5a9afeb.pdf",
+      "bytes": 46062,
+      "sha256": "26b5a9afeb0785ca4d3ddf8b8702665e22b5e2e675b36e07508d90be997a5807",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2021-08_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-24ab70a939.pdf",
+      "bytes": 81983,
+      "sha256": "24ab70a939304b0eb582b6250919c532f98ae0e6d12d75ce5a11743d351bdf8d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2020.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-2c65c048f8.pdf",
+      "bytes": 55537,
+      "sha256": "2c65c048f87a2da8bfe7be281d29c6a6f92371f5d9846921e33a5b033beb36a2",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2019-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-ca3d4dcdbf.pdf",
+      "bytes": 116405,
+      "sha256": "ca3d4dcdbf49647ce6bf62c492a13552639a65b6b3858a6bbed2023768b78ffd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2018.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-dd962d3596.pdf",
+      "bytes": 15601,
+      "sha256": "dd962d359655f0badfb80bbcef130753386c0f1896ad75d64fdf50f600c78cef",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2018-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-ba16dba096.pdf",
+      "bytes": 82967,
+      "sha256": "ba16dba0966ea2e14acae1aff404445956c007ef08412763b169db35d0619ffc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2017-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-2b6bd574b4.pdf",
+      "bytes": 82357,
+      "sha256": "2b6bd574b4b528cd1ee7ea61687fab13bc17d587c4c33997501b395517a04a3a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_politics_field_exam-2016-10-12.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-42e2447bce.pdf",
+      "bytes": 63426,
+      "sha256": "42e2447bceb80db8702ca802b7fbb52a7b669c2f2beb53be0c96a09d58647e1e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2015.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-64d27b1ea0.pdf",
+      "bytes": 113032,
+      "sha256": "64d27b1ea0f72c1372c44d8c127c0ba581d97f85ceb9d502b5e0af888588fa50",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_2014_jan.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-76bbe36351.pdf",
+      "bytes": 37104,
+      "sha256": "76bbe363514eee09c9574d7113f582f536c83df467e275aecf857dc290710eb5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_2013_aug.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d00c9d3917.pdf",
+      "bytes": 8538,
+      "sha256": "d00c9d391706cbdd9da6fd03eb09b62cc93d7c14659c7212d1a62390f44239dd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_dec_2014.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-920df60c38.pdf",
+      "bytes": 8474,
+      "sha256": "920df60c38b60216cfbd2d28541c004ff029239e00ac9504f48670c33d3a6319",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_jan_2013.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-fdd1a77800.pdf",
+      "bytes": 67996,
+      "sha256": "fdd1a77800565286acda712980406e160112db893b59b4c076c0f6803324d632",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2012.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-198c88e6ad.pdf",
+      "bytes": 66098,
+      "sha256": "198c88e6ad71b84f217bdfffb080b3a3fc913189cbde1244ebcf42f3aaed7953",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_jan_2012.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-4467d1fb87.pdf",
+      "bytes": 60324,
+      "sha256": "4467d1fb8770bccfc0a4ec6e9e9daea72efe8baede98ac1611f56c4929912e54",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-73a1010c56.pdf",
+      "bytes": 77485,
+      "sha256": "73a1010c560abd3ba3d0e15061c0f46aa57befff63e5305280fa6f6edce4f1ac",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_jan_2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-635c3d3071.pdf",
+      "bytes": 66625,
+      "sha256": "635c3d307115c39e006f4395a1852cadf5ac770f125a2e59c7e7c93a61745405",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2010.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-8ba5b5bf17.pdf",
+      "bytes": 11951,
+      "sha256": "8ba5b5bf17176830fe1b3de667609f7c0cc21a2f8a8951bb901e0ff5982a83c4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2009.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-7359c8717e.pdf",
+      "bytes": 11983,
+      "sha256": "7359c8717eb483113051e119e6a04a22df8090e5fd13f775d19f90a599621a8d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_jan_2008.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-1d1b152b08.pdf",
+      "bytes": 13749,
+      "sha256": "1d1b152b08e847930ecba19b1269731e493046dfdd5bbef54990f5e6bd6b6c84",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/comparative_aug_2008.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-b9138b86a2.pdf",
+      "bytes": 12421,
+      "sha256": "b9138b86a27eb9059dc23fc9357162a87630b02e0c32e900ab5abd2219c184c6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2026-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d1d8e08698.pdf",
+      "bytes": 379837,
+      "sha256": "d1d8e08698e88cea4d3651cf23e9873fd030ee003cc1b5f0649d5ffd1adbf8b4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2025-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-205e7805da.pdf",
+      "bytes": 64098,
+      "sha256": "205e7805da446b99b02e49dbebb053f3fa12600294362ef2377879d4d8e3ab73",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2024-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-3b4203ddbf.pdf",
+      "bytes": 51757,
+      "sha256": "3b4203ddbf69884ffdc43db650677116b08966ea6dbd193fbd175b109d92a53a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2024-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-11a5c35e71.pdf",
+      "bytes": 25693,
+      "sha256": "11a5c35e71c78a96bed66f9a7637046eb186ab9ba92e1bb81914bddc8eebe581",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2023-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-a3b1446cb2.pdf",
+      "bytes": 51870,
+      "sha256": "a3b1446cb2cbaf7dcc0ad124aeb712850b027ae3bb59b5ded378085480db28a5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2022-08_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-1f1e9b9abb.pdf",
+      "bytes": 35308,
+      "sha256": "1f1e9b9abbfe76c16c5aeaac4a2d621f299a5e68dd71f93b10c013b671faab31",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2020-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-17b1ea227d.pdf",
+      "bytes": 38099,
+      "sha256": "17b1ea227deda7d29375fb603f5c3bffcbaaf8b142ac22e27b363069cbbf9c46",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2020-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-4e556db9b7.pdf",
+      "bytes": 49408,
+      "sha256": "4e556db9b718719c637c4fccd5ad143b063d2ce03b756925b5c58ef004f52141",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2019-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d9ac52dbbb.pdf",
+      "bytes": 37664,
+      "sha256": "d9ac52dbbbe6a695a25aa6436b73f3ebc28e8d5091987cf5af80fee85f7200b7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2019-01-ir_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-1d8e4c3b51.pdf",
+      "bytes": 38065,
+      "sha256": "1d8e4c3b51c83de411cdd8a59e5ca7032d31dbc3d52893555473bd10b6b4c254",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_aug2018.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-1c12cbb80b.pdf",
+      "bytes": 39521,
+      "sha256": "1c12cbb80b2c85a38043faef64074b4c27afec1a062431379c116fe27cdec787",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_exam_jan_2018.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d5ea47048b.pdf",
+      "bytes": 41696,
+      "sha256": "d5ea47048bf2550bfe14c0431bc9618eb465807ca83fd504b35dad982c8c88d0",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_exam_aug_2017.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f3c8957243.pdf",
+      "bytes": 53785,
+      "sha256": "f3c8957243eb409452d9d588162eed87feaeae313660d51afdbfb57cd2a66a2a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_exam_aug_2016.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-40b582d6d1.pdf",
+      "bytes": 44752,
+      "sha256": "40b582d6d1167ba3b6079a557fc267a55e5b303d00b52003736199ff479f5244",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_aug2015.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-1e88caad58.pdf",
+      "bytes": 11184,
+      "sha256": "1e88caad5850e81777d1dd77562d17233f1e186bfa206540100ab3bac1c8309c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/international_relations-2015-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-069291b7ea.pdf",
+      "bytes": 11877,
+      "sha256": "069291b7ea71e276371b24ee0030e9fb0c77d5779ba5e6f679ece683b1db8e3d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_aug2014.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-256f6f16f2.pdf",
+      "bytes": 9358,
+      "sha256": "256f6f16f204f6b613d2fc1188e573f9cab5e56156099e023ca7422bd3056ff0",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_jan2014.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f9a12e317c.pdf",
+      "bytes": 8029,
+      "sha256": "f9a12e317c458c8b4bb9f0989290a68bd03002a8a6b771a736ccf35c5bb27aa1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_aug2013.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-86255074ce.pdf",
+      "bytes": 7908,
+      "sha256": "86255074cea7f1d0779c1d1243d5c9dc6fec205ea009b700af6e338b38392fd4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_jan2013.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-a6edd872a6.pdf",
+      "bytes": 12493,
+      "sha256": "a6edd872a6cc1978c9a2fc39283289d1c5b55998bf8ac920b677163fae7fe870",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_aug2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-fad00f8eaa.pdf",
+      "bytes": 13052,
+      "sha256": "fad00f8eaaa96beed7bf9472ff6f6657d6f08ba32bd63f9a32e13b1ab2999df1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_aug2010.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-fb8cb0ef7f.pdf",
+      "bytes": 54685,
+      "sha256": "fb8cb0ef7f4845f6d2247baef61e42678c755341f63f917a63685e878a7dd0dd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_jan2010.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-bd3180559b.pdf",
+      "bytes": 58356,
+      "sha256": "bd3180559b3680f851bc9b6af84fbac94d100e4cc7aa2413501d8f792d89c66a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_aug2009.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-b6731efba3.pdf",
+      "bytes": 11635,
+      "sha256": "b6731efba3fdb3ee0ee7756b5eeb44061a95797df1326b56b360d79b8f077607",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/ir_aug2008.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-babd26af58.pdf",
+      "bytes": 11886,
+      "sha256": "babd26af58435ffb9c2bd01a3f270fcd16861b19290677cf79a9b7dd93d81b6c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2025.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-31e0af4b5c.pdf",
+      "bytes": 342926,
+      "sha256": "31e0af4b5c3aa75e9ee3f948097c5b0b1d8e20438a22b4b28dfd68f9332d4614",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomyexam-aug2024.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-cd87c28c4b.pdf",
+      "bytes": 145210,
+      "sha256": "cd87c28c4bad87036e21fa8f074c873422c4d9acf53f03b0fbf8869a1cddda06",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomyexam-jan2024.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-51c5f91e7b.pdf",
+      "bytes": 245207,
+      "sha256": "51c5f91e7b14fd33d85f9783d471d57087cb808f924b3ec7a35e47678844aad6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomyexam-aug2023.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f1c3bb7945.pdf",
+      "bytes": 309070,
+      "sha256": "f1c3bb7945fb067c9b2f8ab01a2b6fcbc2bb172885bca4c49f0e20e641e37fb1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_exam-aug2022.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-b867b0e1e8.pdf",
+      "bytes": 311657,
+      "sha256": "b867b0e1e8779332ddedf54123c0ca7b7520c6882e6a05355204aaced45acef3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2020.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-da8506beeb.pdf",
+      "bytes": 67787,
+      "sha256": "da8506beebc14799fa815db24c10e63d235a2f15c74ab2633ff4b9140db5f4f1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomyexam-jan2020.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f99f64ac43.pdf",
+      "bytes": 79474,
+      "sha256": "f99f64ac43d4ae0a5eb38d9b33ce26db34d925ec44356114b388fa8e5efd6f78",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomyexam-aug2019.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-bbb8340611.pdf",
+      "bytes": 42105,
+      "sha256": "bbb834061193869b501aec7e9a3af94f467306ab38f99447f87884f124f679c9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2018.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-4f6cfe57da.pdf",
+      "bytes": 30811,
+      "sha256": "4f6cfe57da235894b5f707bfe1baa6f4bc3c0b30adb7e07aa677c713f4dba518",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomyexam-aug2017.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-0b1410b5d7.pdf",
+      "bytes": 10369,
+      "sha256": "0b1410b5d78be78c3756f93751e914fd6c19d9f27bc9738e92d32d4772a172c8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomyexam-aug2016.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-b519be1338.pdf",
+      "bytes": 10367,
+      "sha256": "b519be13381a2a04c5f16920683a91b279bff46be8b26fa8585eb32d5da51c7e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2015.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-6af940384c.pdf",
+      "bytes": 36505,
+      "sha256": "6af940384cc2d2af0d8affc9d065872228f23ffd4a87414a7372543990e06053",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2014.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-96cd54ead4.pdf",
+      "bytes": 39178,
+      "sha256": "96cd54ead484a3935447b50b1b8a9e81239b8264bbb7c22f8e53c3366aa9a79a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_jan2012.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-c4cafc5c2a.pdf",
+      "bytes": 53494,
+      "sha256": "c4cafc5c2a3d1b5d57e9671adac82747f658165533f8a694bb99fadf557922ce",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d2e015a0d1.pdf",
+      "bytes": 10898,
+      "sha256": "d2e015a0d125a10c47c690bd162ccd00d62163b987487ed3a1bf4f72af154cdc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2009_.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-6b4710580b.pdf",
+      "bytes": 13289,
+      "sha256": "6b4710580b9824da1e168bbd8859aa2958dee2d3456e445cdb4242c3650a8dcc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_jan2009.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-8f4d0ac30f.pdf",
+      "bytes": 14512,
+      "sha256": "8f4d0ac30f5db66ad76af45ed6330b95bb27db1fafd1743ade0b5231f6a77e14",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2008.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-87e71685b5.pdf",
+      "bytes": 11430,
+      "sha256": "87e71685b599333517f926e6912bb6cf7fe3ae272b47fb55a941663b2afe2b74",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaleconomy_jan2008.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-87b0b7a3da.pdf",
+      "bytes": 15860,
+      "sha256": "87b0b7a3da85276985e7ce06466e562b5964d035f46187c1fcbd070390a2e65b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_jan2026.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-ec442ddeb9.pdf",
+      "bytes": 42718,
+      "sha256": "ec442ddeb932567ae22c20b07ac96af7d4b3723f9f3b359bcf5ffb0176926c30",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_aug2025.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-bb052f9a5c.pdf",
+      "bytes": 304714,
+      "sha256": "bb052f9a5c5fbf41b9b2cbf0c8147ddb458970fd8d487d9e54beaf6e023c1841",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheoryexam-aug2024-2024-04-28.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-0096b7f411.pdf",
+      "bytes": 39823,
+      "sha256": "0096b7f411071bce056aba2055d05a46f1a4d63bf90e95dbaf97ab03a1b24bbc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheoryexam-aug2023-2023-11-13.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d03ac0c990.pdf",
+      "bytes": 87978,
+      "sha256": "d03ac0c99006301f9019c6bd22c6093ddf99f4d0cdebb53dd297c0e25890f565",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheoryexam-aug-2022_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-500bdef9c0.pdf",
+      "bytes": 147302,
+      "sha256": "500bdef9c0e1cb5307c9a0d3404e8e48ae1733507feea59cc3a4157876f7c76a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_aug2020.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f01de53b7f.pdf",
+      "bytes": 64569,
+      "sha256": "f01de53b7f2b74e2f832012a950124a168c5a19eda7916d4226662cf79b3cafd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheoryexam-aug2019-2020-01-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-dd6abf5ed5.pdf",
+      "bytes": 65018,
+      "sha256": "dd6abf5ed5b9d6311c8c0a79ac0c98a91115dc1036bbd15889e48e8b00aa623a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_aug2018.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-6d11c1c64b.pdf",
+      "bytes": 50429,
+      "sha256": "6d11c1c64bc533b7acac6a550304609fbee15fc53957a320e4737267268e24a1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheoryexam-aug2017-2018-05-25.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-6adbeacefa.pdf",
+      "bytes": 85106,
+      "sha256": "6adbeacefa6a12a9069e9656cfe744d6485dba8eabc8e603d7b5bd9396a8c8f6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheoryexam-aug2016-20170803.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-9d5fc55b0a.pdf",
+      "bytes": 95164,
+      "sha256": "9d5fc55b0a2d867f567ba1de7b7125717a0f4a81aec28f0a02672118328263a6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_august_2015.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-9fc7a80bef.pdf",
+      "bytes": 64627,
+      "sha256": "9fc7a80bef191dc87d8c9f4c95eb814c7b9ad7fb9d190558e3e3288e4a4c23a0",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/political_theory-2015-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-613077d5e7.pdf",
+      "bytes": 55592,
+      "sha256": "613077d5e7040a870f765dca618effa8d05032b1098c9cce0bbd343a77308d3f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_jan2014.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-2bb76a4adf.pdf",
+      "bytes": 25029,
+      "sha256": "2bb76a4adf731110355a6a7f2bd0e546bd53e10dd782a1c4d83b42780934f187",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_august_2014.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-155623c5fa.pdf",
+      "bytes": 39036,
+      "sha256": "155623c5fa1dcce2eabf86d1f237786309c4c62c31617168b2b71a7f920c6f4a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_jan2013.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-4a3af3813f.pdf",
+      "bytes": 48394,
+      "sha256": "4a3af3813f5bdc295e24e84ecc31c693ce8af9efe9f5fd73c592a7bb1efc2d70",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_aug2013.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-3bdb9566cd.pdf",
+      "bytes": 26406,
+      "sha256": "3bdb9566cd43759ed849f757b0ad3c854d8d832a61428d43567786dcb9857813",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_jan2012.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-8a1aad1e39.pdf",
+      "bytes": 111266,
+      "sha256": "8a1aad1e390902cdfe92f73ae6379c543d08a9885d766c43db76fcd21d845422",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_aug2012.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-8c44ee3165.pdf",
+      "bytes": 38957,
+      "sha256": "8c44ee3165b46bcf9879dda05ba05ebe104f23473375a8de8a0a29e176b99ac3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_jan2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-c28b9f152c.pdf",
+      "bytes": 15675,
+      "sha256": "c28b9f152cb4e1cd3e73c12861d8beaa452a9c6b97d75843b06df0179aa70838",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_aug2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-37cac6d7bc.pdf",
+      "bytes": 11232,
+      "sha256": "37cac6d7bc035da24e0da97171c5ee2217d4a086306cd73baffc605c606d316e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/politicaltheory_aug2010.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-070c9a82d4.pdf",
+      "bytes": 89087,
+      "sha256": "070c9a82d488037b85c3c2c2b374f2d737ef7cde3e408dc8f5adc4ca10e69b1d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quant_exam_aug_2025.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-7604249905.pdf",
+      "bytes": 881191,
+      "sha256": "7604249905b962c0da4b3faa5f0355cd550f265dd78cd5ae3bb36acc8e274568",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quant_exam_jan_2025.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-fcd65fc6c4.pdf",
+      "bytes": 192189,
+      "sha256": "fcd65fc6c48b00cb36668b7841826e9e89c73372786d73cfbda7b0445df2e05f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quant_exam_aug_2024.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-230c21432e.pdf",
+      "bytes": 248520,
+      "sha256": "230c21432edf065d40cba4da9eed426b2c6d6fe13e320b236a8717716b2a68f9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quant_exam_jan_2024.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d7ceecfdf4.pdf",
+      "bytes": 212402,
+      "sha256": "d7ceecfdf46a94f697b5a1526d41505afdedf9ca6065823db7ed87f618849fc3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quant_exam_aug_2023-002.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-0271f26f36.pdf",
+      "bytes": 262640,
+      "sha256": "0271f26f365c1f953789fae4666a2222bb863c792f6cf66ba20c0232ecee61ae",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quant_exam_jan_2023.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f0400c2bb2.pdf",
+      "bytes": 211883,
+      "sha256": "f0400c2bb28b9f6a3cc902ee2de893ce0f27f5c796c66f6c06eae91dad552c40",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quant_exam_aug_2022-2022-12-09.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-cf64231f2f.pdf",
+      "bytes": 260607,
+      "sha256": "cf64231f2fb52c473d50821b2cf637d5430148362e28000659a3a7429b94e480",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quantitative_empirical_methods_exam-2022-01_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-f67959cdfd.pdf",
+      "bytes": 264186,
+      "sha256": "f67959cdfdc3d0325d77660ee07bb7d75220016ee199e31d963dc20f1fc0a778",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quantitative_empirical_methods_exam-2021-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-48833bd3f3.pdf",
+      "bytes": 162935,
+      "sha256": "48833bd3f313d1faec16a051c26277a39b9e370b560075a9b7b7674996cf8b0d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2021-07-09-quant_exam_august_2020.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-e25180a912.pdf",
+      "bytes": 232354,
+      "sha256": "e25180a912af5867130300916483eca250c4675c8bfa58136a32968d95bf1a65",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quant_exam_august_2019.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-d8dbabf36e.pdf",
+      "bytes": 176890,
+      "sha256": "d8dbabf36e98b0e4951e58c9fc296109ac1d7f51bfca3813ac040ae22dbd537e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/2019-01-earm_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-206f674bb0.pdf",
+      "bytes": 190727,
+      "sha256": "206f674bb09a2993fd5a054deff1483e569637718e7ba9e982a5e04caf94ecaf",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_aug2018.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-acb99ec91a.pdf",
+      "bytes": 56483,
+      "sha256": "acb99ec91a95081d1442f36c9854c38310f9c1fa2c39b41359d6da1d476feb82",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quantitative_empirical_methods_exam-2018-01.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-a56749ca4d.pdf",
+      "bytes": 145953,
+      "sha256": "a56749ca4d64ac390377991640f0a6ec897d58445c29afdede1f703d10f38907",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quantitative_empirical_methods_exam-2017-08.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-421783bcbf.pdf",
+      "bytes": 140237,
+      "sha256": "421783bcbf7e9631ba366bc0a457a5ae200c046b4248ed9a08cc61a6869ebf61",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quantitative_empirical_methods_exam-2017-08-11.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-aa7b833796.pdf",
+      "bytes": 139239,
+      "sha256": "aa7b833796602ba1e07b57e50fb2ac4245982becc0c50af40c755dd7ff372d36",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/quantitative_empirical_methods_exam-2016-10-12.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-14310a565a.pdf",
+      "bytes": 129067,
+      "sha256": "14310a565a4eae85a54bee6d3d0eb57dc1b054f37ab9ceca1c65317aa34e9094",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_aug2015.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-3f8b241e8f.pdf",
+      "bytes": 138195,
+      "sha256": "3f8b241e8f81876b570f02fc142926029e5d054c1b43e767edb9bd98ff2e5d80",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_jan2015.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-52ff1e8115.pdf",
+      "bytes": 145205,
+      "sha256": "52ff1e8115ea0ed9e166e7b4f9498e867c87c4b1ee785f93830dba3cbe2c754f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_aug2014_0.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-6f9296ee5b.pdf",
+      "bytes": 144632,
+      "sha256": "6f9296ee5b4b17bfd200feb115c39a252effb503bc5acce1ea19f6f5282eab3e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_jan2014.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-883ea79e07.pdf",
+      "bytes": 151839,
+      "sha256": "883ea79e071b57493c7a10eb65b1e933a0193ebecfbae5616c387e20a645916a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_aug2013.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-e33e8bbf5a.pdf",
+      "bytes": 163322,
+      "sha256": "e33e8bbf5ad068163d50bcc78bd665db6271c0ece63e37c5256fca6d93d64b45",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_jan2013.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-cdfc48548f.pdf",
+      "bytes": 170750,
+      "sha256": "cdfc48548fd65aa264b0ba83a0f118e8325f6768aab653fc8966b7afae965585",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_aug2012.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-8ae5e01941.pdf",
+      "bytes": 113038,
+      "sha256": "8ae5e019410a7701b778f2f229716c8e0099d0e9e1071864a0545fdf06692998",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_jan2012.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-290db56591.pdf",
+      "bytes": 110152,
+      "sha256": "290db5659179dbe8852aca8ce2a0b5e32f28a6955ac5ca0ae0bc1d273965e329",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_aug2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-8bbf0526c9.pdf",
+      "bytes": 118629,
+      "sha256": "8bbf0526c911c50226878c0a09872ba4d41c8effe7544d97bd424fb75e80ce06",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_jan2011.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-29800854e1.pdf",
+      "bytes": 112186,
+      "sha256": "29800854e160df51208c2589183dd5c67eaeee90de0b8cdfb3bb636ebdacdc37",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_aug2010.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-97b7a1909e.pdf",
+      "bytes": 322739,
+      "sha256": "97b7a1909e6fd68c1602c108ec6d0cd0af623d60c8a4abe02501ea95dff614fc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_aug2009.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-1c6f57eaeb.pdf",
+      "bytes": 26707,
+      "sha256": "1c6f57eaebdbc1e340894035b8b7181d692e3300b6acd6c9eed9f86beca69f54",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://politicalscience.yale.edu/sites/default/files/earm_jan2008.pdf",
+      "file": "_archives/https-politicalscience-yale-edu-sites-de-0b8dd15ebd.pdf",
+      "bytes": 20831,
+      "sha256": "0b8dd15ebd2de84aa1e95ab77ece39c84edf7de46e3cf38768b2811b5711953e",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://politicalscience.yale.edu/academics/graduate-program/field-reading-lists-requirements-and-exams",
+      "label": "Yale \u2014 Quantitative methods field list"
+    }
+  ]
+}

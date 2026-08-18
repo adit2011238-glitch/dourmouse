@@ -1,0 +1,21 @@
+{
+  "domain": "Robotics & Control",
+  "field": "Aerial Robotics & UAV Control",
+  "tests": [
+    {
+      "url": "https://me.sabanciuniv.edu/en/graduate/phd-qualifying-written-exam",
+      "file": "_archives/https-me-sabanciuniv-edu-en-graduate-phd-02c2427032.html",
+      "bytes": 37398,
+      "sha256": "02c24270325ef8b686964b709563599591f0d3c06250b411507b09b30a028cea",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://me.sabanciuniv.edu/en/graduate/phd-qualifying-written-exam",
+      "label": "Sabanci \u2014 Mechatronics PhD Qualifying Written Exam"
+    }
+  ]
+}

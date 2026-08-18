@@ -1,0 +1,671 @@
+{
+ "domains": {
+  "Mathematics": {
+   "primary": {
+    "label": "UCLA Math — Past Qualifying Exams (area archives)",
+    "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+   },
+   "per_field": {
+    "Algebra (abstract & commutative)": {
+     "label": "UCLA Algebra quals",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Algebraic Geometry": {
+     "label": "UCLA Algebra quals (alg-geom questions)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Number Theory (analytic & algebraic)": {
+     "label": "UCLA Algebra quals (number theory)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Topology (algebraic & geometric)": {
+     "label": "UCLA Geometry/Topology quals",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Differential Geometry": {
+     "label": "UCLA Geometry/Topology quals (DG)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Lie Theory & Representation Theory": {
+     "label": "UCLA Algebra quals (Lie theory)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Functional Analysis": {
+     "label": "UCLA Analysis quals",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Real & Complex Analysis": {
+     "label": "UCLA Analysis quals",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Harmonic Analysis": {
+     "label": "UCLA Analysis quals (harmonic)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Partial Differential Equations": {
+     "label": "UCLA Applied Differential Equations quals",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Dynamical Systems & Chaos Theory": {
+     "label": "UCLA Applied Differential Equations quals (dynamics)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Ergodic Theory": {
+     "label": "UCLA Analysis quals (ergodic)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Operator Algebras": {
+     "label": "UCLA Analysis quals (operator algebras)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Category Theory": {
+     "label": "UCLA Algebra quals (category theory)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Homological Algebra": {
+     "label": "UCLA Algebra quals (homological)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Combinatorics (extremal & additive)": {
+     "label": "UCLA Algebra quals (combinatorics)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Graph Theory": {
+     "label": "UCLA Algebra quals (graph theory)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Set Theory & Foundations": {
+     "label": "UCLA Logic quals",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Model Theory": {
+     "label": "UCLA Logic quals (model theory)",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    },
+    "Mathematical Logic": {
+     "label": "UCLA Logic quals",
+     "url": "https://ww3.math.ucla.edu/past-qualifying-exams/"
+    }
+   }
+  },
+  "Applied Mathematics": {
+   "primary": {
+    "label": "U. Oregon Math — Applied Math quals archive",
+    "url": "https://blogs.uoregon.edu/mathresources/qualifying-exam-archives/"
+   },
+   "per_field": {}
+  },
+  "Statistics & Probability": {
+   "primary": {
+    "label": "U. South Carolina — Statistics PhD Qualifying Exams",
+    "url": "https://people.stat.sc.edu/Hitchcock/previousPhDexams.html"
+   },
+   "per_field": {
+    "Probability Theory": {
+     "label": "UMD Probability PhD quals",
+     "url": "https://www-math.umd.edu/quals.html"
+    },
+    "Stochastic Processes": {
+     "label": "U. Oregon Probability quals",
+     "url": "https://blogs.uoregon.edu/mathresources/qualifying-exam-archives/"
+    },
+    "Statistical Computing & MCMC": {
+     "label": "U. Iowa PhD Qualifying/MS Comprehensive archive",
+     "url": "https://math.uiowa.edu/graduate/phd-qualifying-ms-comprehensive-exam-archives"
+    },
+    "Spatial & Environmental Statistics": {
+     "label": "U. Cincinnati Statistics PhD quals",
+     "url": "https://www.artsci.uc.edu/natural-sciences/math/academic-programs/phd-stats/statistics-phd-qualifying-preliminary-exams.html"
+    },
+    "High-Dimensional Statistics": {
+     "label": "U. South Carolina Statistics PhD quals",
+     "url": "https://people.stat.sc.edu/Hitchcock/previousPhDexams.html"
+    }
+   }
+  },
+  "Theoretical Computer Science": {
+   "primary": {
+    "label": "UIUC — TCS Qualifying Exam archive (Sariel)",
+    "url": "https://publish.illinois.edu/theory-cs/resources/qualifying-exam/"
+   },
+   "per_field": {
+    "Algorithms & Data Structures": {
+     "label": "UIUC TCS quals (algorithms)",
+     "url": "https://publish.illinois.edu/theory-cs/resources/qualifying-exam/"
+    },
+    "Computational Complexity": {
+     "label": "UIUC TCS quals (complexity)",
+     "url": "https://publish.illinois.edu/theory-cs/resources/qualifying-exam/"
+    },
+    "Graph Algorithms": {
+     "label": "UIUC TCS quals (graph algorithms)",
+     "url": "https://publish.illinois.edu/theory-cs/resources/qualifying-exam/"
+    },
+    "Computational Geometry": {
+     "label": "UIUC TCS quals (computational geometry)",
+     "url": "https://publish.illinois.edu/theory-cs/resources/qualifying-exam/"
+    },
+    "Automata & Formal Languages": {
+     "label": "UNL CS Qualifying Exam process (automata)",
+     "url": "https://computing.unl.edu/engineering/school-of-computing/sites/unl.edu.engineering.school-of-computing/files/media/file/Qualifying_Exam_Process_2024.pdf"
+    },
+    "Quantum Computing & Information": {
+     "label": "Berkeley EECS prelims (Theory area)",
+     "url": "https://eecs.berkeley.edu/book/phd/exam-prep/"
+    }
+   }
+  },
+  "Artificial Intelligence & Machine Learning": {
+   "primary": {
+    "label": "GaTech — Machine Learning past qualifying exams",
+    "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams"
+   },
+   "per_field": {
+    "Reinforcement Learning": {
+     "label": "Stanford CS — Statistical Machine Learning qual",
+     "url": "https://www.cs.stanford.edu/phd-program-requirements-qualifying-exams"
+    },
+    "Deep Learning Theory": {
+     "label": "UIUC Siebel — AI Qualifying Exam guidelines",
+     "url": "https://siebelschool.illinois.edu/academics/graduate/phd-program/qualifying-exam/ai"
+    },
+    "Interpretability & Explainable AI": {
+     "label": "GaTech — Machine Learning quals",
+     "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams"
+    },
+    "Adversarial ML & Robustness": {
+     "label": "GaTech — Machine Learning quals",
+     "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams"
+    },
+    "Recommender Systems": {
+     "label": "GaTech — Intelligent Systems quals",
+     "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams"
+    },
+    "Causal Machine Learning": {
+     "label": "Stanford CS — Statistical Machine Learning qual",
+     "url": "https://www.cs.stanford.edu/phd-program-requirements-qualifying-exams"
+    }
+   }
+  },
+  "Computer Vision & Graphics": {
+   "primary": {
+    "label": "GaTech — Graphics and Visualization quals",
+    "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams"
+   },
+   "per_field": {
+    "Computer Graphics Rendering": {
+     "label": "GaTech — Graphics and Visualization quals",
+     "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams"
+    },
+    "Geometric Modeling & Animation": {
+     "label": "GaTech — Graphics and Visualization quals",
+     "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams"
+    }
+   }
+  },
+  "Natural Language Processing": {
+   "primary": {
+    "label": "Stanford CS — NLP Qualifying Exam",
+    "url": "https://www.cs.stanford.edu/phd-program-requirements-qualifying-exams"
+   },
+   "per_field": {}
+  },
+  "Robotics & Control": {
+   "primary": {
+    "label": "BYU — Controls and System Dynamics PhD Qualifying Exam (sample problems)",
+    "url": "https://www.me.byu.edu/https:/brightspotcdn.byu.edu/f8/62/b5c031444c5b9d40f25924fbff43/controls-infosheet-and-sample-problems-0.pdf"
+   },
+   "per_field": {
+    "Model Predictive Control": {
+     "label": "BU — Systems Engineering Qualifying Exam May 2024 (PDF)",
+     "url": "https://www.bu.edu/eng/files/2024/09/May-2024-SE-Qual-Exam-Assembled.pdf"
+    },
+    "Optimal Control Theory": {
+     "label": "BU — Systems Engineering Qualifying Exam May 2024 (PDF)",
+     "url": "https://www.bu.edu/eng/files/2024/09/May-2024-SE-Qual-Exam-Assembled.pdf"
+    },
+    "Nonlinear & Adaptive Control": {
+     "label": "BYU controls quals sample problems",
+     "url": "https://www.me.byu.edu/https:/brightspotcdn.byu.edu/f8/62/b5c031444c5b9d40f25924fbff43/controls-infosheet-and-sample-problems-0.pdf"
+    },
+    "Robot Perception & SLAM": {
+     "label": "Berkeley EECS — Control, Intelligent Systems & Robotics prelims",
+     "url": "https://eecs.berkeley.edu/book/phd/exam-prep/"
+    },
+    "Manipulation & Grasping": {
+     "label": "Berkeley EECS — CIR prelims",
+     "url": "https://eecs.berkeley.edu/book/phd/exam-prep/"
+    },
+    "Learning for Control (RL in robotics)": {
+     "label": "GaTech — example QE: Automation, Robotics and Control",
+     "url": "https://www.me.gatech.edu/sites/default/files/2021-09/Appendix%20-%20Example%20Exams.pdf"
+    },
+    "Aerial Robotics & UAV Control": {
+     "label": "Sabanci — Mechatronics PhD Qualifying Written Exam",
+     "url": "https://me.sabanciuniv.edu/en/graduate/phd-qualifying-written-exam"
+    }
+   }
+  },
+  "Systems & Networking": {
+   "primary": {
+    "label": "Berkeley EECS — Systems-area prelims",
+    "url": "https://eecs.berkeley.edu/book/phd/exam-prep/"
+   },
+   "per_field": {
+    "Computer Networks & Protocols": {
+     "label": "UIUC ECE — PhD Qualifying Exam areas",
+     "url": "https://ece.illinois.edu/academics/grad/msphd-manual/qual"
+    }
+   }
+  },
+  "Security & Privacy": {
+   "primary": {
+    "label": "Berkeley EECS — prelims (Security area)",
+    "url": "https://eecs.berkeley.edu/book/phd/exam-prep/"
+   },
+   "per_field": {}
+  },
+  "Databases & Data Systems": {
+   "primary": {
+    "label": "Berkeley EECS — prelims (Systems/DB area)",
+    "url": "https://eecs.berkeley.edu/book/phd/exam-prep/"
+   },
+   "per_field": {}
+  },
+  "Programming Languages & Software Engineering": {
+   "primary": {
+    "label": "Berkeley EECS — Programming Languages prelims",
+    "url": "https://eecs.berkeley.edu/book/phd/exam-prep/"
+   },
+   "per_field": {}
+  },
+  "Human-Computer Interaction": {
+   "primary": {
+    "label": "GaTech — Human-Computer Interaction quals",
+    "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams"
+   },
+   "per_field": {}
+  },
+  "Theoretical & Particle Physics": {
+   "primary": {
+    "label": "Yale Physics — Qualifying Exam past exams (2023-24, with solutions)",
+    "url": "https://physics.yale.edu/academics/graduate-studies/graduate-student-handbook/qualifying-exam-past-exams"
+   },
+   "per_field": {
+    "Quantum Field Theory": {
+     "label": "MIT Physics — General Exam sample papers with solutions",
+     "url": "https://physrefs.mit.edu/general-exam-preparation/"
+    },
+    "Standard Model Phenomenology": {
+     "label": "Yale Physics quals (parts with solutions)",
+     "url": "https://physics.yale.edu/academics/graduate-studies/graduate-student-handbook/qualifying-exam-past-exams"
+    },
+    "Statistical Mechanics & Phase Transitions": {
+     "label": "Princeton Physics — Prelims (thermo/statistical mechanics)",
+     "url": "https://phy.princeton.edu/academics/graduate-program/degree-requirements/preliminary-exams"
+    },
+    "Nuclear Physics": {
+     "label": "Howard University Physics — Qualifying Exam problem books",
+     "url": "https://physics.howard.edu/graduate/qualifying-exam"
+    },
+    "Gravitational Waves": {
+     "label": "MIT Physics — General Exam sample papers",
+     "url": "https://physrefs.mit.edu/general-exam-preparation/"
+    },
+    "Astroparticle Physics": {
+     "label": "Yale Physics quals",
+     "url": "https://physics.yale.edu/academics/graduate-studies/graduate-student-handbook/qualifying-exam-past-exams"
+    }
+   }
+  },
+  "Condensed Matter & Materials (physics)": {
+   "primary": {
+    "label": "Yale Physics quals — condensed matter section",
+    "url": "https://physics.yale.edu/academics/graduate-studies/graduate-student-handbook/qualifying-exam-past-exams"
+   },
+   "per_field": {
+    "Electronic Structure Theory (DFT)": {
+     "label": "Princeton Physics — Prelims",
+     "url": "https://phy.princeton.edu/academics/graduate-program/degree-requirements/preliminary-exams"
+    },
+    "Superconductivity": {
+     "label": "Yale Physics quals",
+     "url": "https://physics.yale.edu/academics/graduate-studies/graduate-student-handbook/qualifying-exam-past-exams"
+    }
+   }
+  },
+  "Astrophysics & Cosmology": {
+   "primary": {
+    "label": "astrobetter — Physics & Astronomy quals directory",
+    "url": "http://www.astrobetter.com/wiki/Qualifying%2BExams%2Bin%2BPhysics%2Band%2BAstronomy%2BGraduate%2BPrograms"
+   },
+   "per_field": {}
+  },
+  "Chemistry": {
+   "primary": {
+    "label": "Missouri S&T — Chemistry Qualifier Examinations (Organic/Inorganic/Physical/Analytical)",
+    "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/"
+   },
+   "per_field": {
+    "Organic Synthesis & Methods": {
+     "label": "Missouri S&T — Organic qualifier",
+     "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/"
+    },
+    "Physical Organic Chemistry": {
+     "label": "Missouri S&T — Organic qualifier",
+     "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/"
+    },
+    "Inorganic Chemistry": {
+     "label": "Missouri S&T — Inorganic qualifier",
+     "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/"
+    },
+    "Physical Chemistry & Thermodynamics": {
+     "label": "Missouri S&T — Physical qualifier",
+     "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/"
+    },
+    "Quantum Chemistry": {
+     "label": "Missouri S&T — Physical qualifier (quantum)",
+     "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/"
+    },
+    "Analytical Chemistry & Spectroscopy": {
+     "label": "Missouri S&T — Analytical qualifier",
+     "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/"
+    },
+    "Chemical Biology": {
+     "label": "GWU Chemistry — Placement exams (4 areas)",
+     "url": "https://chemistry.columbian.gwu.edu/exams-dissertation"
+    },
+    "Medicinal Chemistry": {
+     "label": "K-State Chemistry — Cumulative exams (Organic group)",
+     "url": "https://www.k-state.edu/chem/student-success/graduate_students/courses/phd/"
+    },
+    "Polymer Chemistry": {
+     "label": "BYU Chemistry — Proficiency exams",
+     "url": "https://gradprogram.chem.byu.edu/graduate-program/proficiency-exams"
+    }
+   }
+  },
+  "Molecular & Cellular Biology": {
+   "primary": {
+    "label": "Emory GDBBS — Past Written Qualifying Exams (GMB 2016/2017...)",
+    "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/resources/past-written-qualifying-exams.html"
+   },
+   "per_field": {}
+  },
+  "Genomics & Systems Biology": {
+   "primary": {
+    "label": "Emory GDBBS — Genetics & Molecular Biology written quals",
+    "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/resources/past-written-qualifying-exams.html"
+   },
+   "per_field": {}
+  },
+  "Neuroscience & Cognitive Science": {
+   "primary": {
+    "label": "Vanderbilt Brain Institute — PhD Qualifying Exam (format)",
+    "url": "https://medschool.vanderbilt.edu/brain-institute/neuroscience-ph-d-program/phd-qualifying-exam/"
+   },
+   "per_field": {
+    "Computational Neuroscience": {
+     "label": "Harvard PIN — Preliminary Qualifying Examination (format)",
+     "url": "https://pinphd.hms.harvard.edu/training/curriculum/pqe"
+    },
+    "Decision Neuroscience": {
+     "label": "UCSF Neuroscience — Qualifying Exam (format)",
+     "url": "https://neurograd.ucsf.edu/node/36526"
+    }
+   }
+  },
+  "Medicine & Clinical Science": {
+   "primary": {
+    "label": "No public clinical quals — nearest verified: U. Pittsburgh Public Health PhD QE study guide",
+    "url": "https://www.publichealth.pitt.edu/sites/default/files/assets/Hugen/qualifying_exam_study_guide.pdf"
+   },
+   "per_field": {}
+  },
+  "Pharmacology & Drug Discovery": {
+   "primary": {
+    "label": "No public pharm quals — nearest verified: Missouri S&T chemistry qualifiers",
+    "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/"
+   },
+   "per_field": {}
+  },
+  "Earth Science & Climate": {
+   "primary": {
+    "label": "UMD MEES — Environmental Science PhD Comprehensive Exam (format)",
+    "url": "https://www.mees.umd.edu/env-sci-comp-exam"
+   },
+   "per_field": {}
+  },
+  "Environmental Science & Ecology": {
+   "primary": {
+    "label": "U. Nevada Reno — Ecology/Evol/Bio comp exam study questions",
+    "url": "https://www.unr.edu/eecb/current-students/handbook/comp-exam"
+   },
+   "per_field": {
+    "Ecosystem Functioning & Nutrient Cycling": {
+     "label": "BahlaiLab — Candidacy exams (GitHub, real written questions)",
+     "url": "https://github.com/BahlaiLab/Candidacy_exams"
+    },
+    "Community Ecology": {
+     "label": "U. Nevada Reno — comp exam study questions",
+     "url": "https://www.unr.edu/eecb/current-students/handbook/comp-exam"
+    }
+   }
+  },
+  "Economics": {
+   "primary": {
+    "label": "UC Davis Economics — Past Preliminary Exams (some with answer keys)",
+    "url": "https://economics.ucdavis.edu/past-preliminary-exams"
+   },
+   "per_field": {
+    "Microeconomic Theory": {
+     "label": "UC Davis — Micro prelims",
+     "url": "https://economics.ucdavis.edu/past-preliminary-exams"
+    },
+    "Macroeconomics & Monetary Policy": {
+     "label": "UC Davis — Macro prelims",
+     "url": "https://economics.ucdavis.edu/past-preliminary-exams"
+    },
+    "Econometrics": {
+     "label": "UC Davis — Econometrics prelims",
+     "url": "https://economics.ucdavis.edu/past-preliminary-exams"
+    },
+    "Market Design & Mechanism Design": {
+     "label": "Stanford/Chicago micro comps (public links, XJMR)",
+     "url": "https://www.econjobrumors.com/topic/links-for-micro-comprehensive-exams-and-solutions"
+    }
+   }
+  },
+  "Finance & Quantitative Methods": {
+   "primary": {
+    "label": "METU — PhD Qualifying Exam in Financial Mathematics",
+    "url": "https://iam.metu.edu.tr/en/phd-qualifying-exam-financial-mathematics"
+   },
+   "per_field": {
+    "Quantitative Asset Pricing": {
+     "label": "Duke Fuqua — Finance IV (Asset Pricing) Qualifying Exam",
+     "url": "https://areas.fuqua.duke.edu/finance/phd-overview/curriculum-program-requirements/"
+    },
+    "Derivatives & Options Theory": {
+     "label": "METU — Financial Mathematics quals",
+     "url": "https://iam.metu.edu.tr/en/phd-qualifying-exam-financial-mathematics"
+    },
+    "Stochastic Calculus & Mathematical Finance": {
+     "label": "METU — Financial Mathematics quals",
+     "url": "https://iam.metu.edu.tr/en/phd-qualifying-exam-financial-mathematics"
+    }
+   }
+  },
+  "Political Science & International Relations": {
+   "primary": {
+    "label": "Columbia — Comprehensive Exam study resources (reading lists)",
+    "url": "https://polisci.columbia.edu/content/study-resources-comprehensive-exams"
+   },
+   "per_field": {
+    "Comparative Politics": {
+     "label": "Columbia — Comparative politics comps handbook",
+     "url": "https://polisci.columbia.edu/content/study-resources-comprehensive-exams"
+    },
+    "International Relations Theory": {
+     "label": "Columbia — IR comps (GR8804)",
+     "url": "https://polisci.columbia.edu/content/study-resources-comprehensive-exams"
+    },
+    "Political Theory": {
+     "label": "Columbia — Political theory comps reading list",
+     "url": "https://polisci.columbia.edu/content/study-resources-comprehensive-exams"
+    },
+    "American Politics & Institutions": {
+     "label": "U. Chicago — American Politics comps (100 readings)",
+     "url": "https://political-science.uchicago.edu/graduate-study/graduate-degree-requirements/comprehensive-exams/american-politics"
+    },
+    "Political Economy": {
+     "label": "Yale — International Political Economy field list",
+     "url": "https://politicalscience.yale.edu/academics/graduate-program/field-reading-lists-requirements-and-exams"
+    },
+    "Quantitative Political Methodology": {
+     "label": "Yale — Quantitative methods field list",
+     "url": "https://politicalscience.yale.edu/academics/graduate-program/field-reading-lists-requirements-and-exams"
+    },
+    "Security Studies & Conflict Resolution": {
+     "label": "Georgetown — Comprehensive exam reading lists",
+     "url": "https://government.georgetown.edu/ph-d-in-government/program-details/exam-reading/"
+    }
+   }
+  },
+  "Sociology & Anthropology": {
+   "primary": {
+    "label": "No public archive found — nearest: U. Rhode Island PhD comprehensive exams (format)",
+    "url": "https://web.uri.edu/english/ph-d-overview/phd-comprehensive-exams/"
+   },
+   "per_field": {}
+  },
+  "Psychology": {
+   "primary": {
+    "label": "Fordham — Clinical Psychology PhD Comprehensive Examination (format)",
+    "url": "https://www.fordham.edu/academics/departments/psychology/graduate-program/phd-in-clinical-psychology/doctoral-comprehensive-examination/"
+   },
+   "per_field": {
+    "Clinical Psychology & Psychopathology": {
+     "label": "Ohio University — Clinical PhD Comprehensive Examination (format)",
+     "url": "https://www.ohio.edu/cas/psychology/graduate/clinical/manual/general-requirements/comprehensive-examination"
+    },
+    "Cognitive Psychology": {
+     "label": "UTSC — Psychology Comprehensive Exam (format)",
+     "url": "https://www.utsc.utoronto.ca/psych/comprehensive-exam"
+    }
+   }
+  },
+  "Law": {
+   "primary": {
+    "label": "Philippine Bar Exam — Remedial Law (REM) questions with suggested answers, ustcivillaw",
+    "url": "https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf"
+   },
+   "per_field": {}
+  },
+  "Linguistics": {
+   "primary": {
+    "label": "U. Memphis — Applied Linguistics PhD Comprehensive Exams",
+    "url": "https://www.memphis.edu/english/pdfs/grad-advising-pdfs/al_phd_comps.pdf"
+   },
+   "per_field": {
+    "Phonetics & Phonology": {
+     "label": "U. Colorado — Linguistics Comprehensive Exam (format)",
+     "url": "https://www.colorado.edu/linguistics/current-students/graduates/professional-ma-tesol/comprehensive-exam"
+    },
+    "Syntax & Formal Grammar": {
+     "label": "UPRM — Comprehensive Exam Study Guide (sample questions)",
+     "url": "https://www.uprm.edu/english/wp-content/uploads/sites/124/2023/05/MAEE-Comprehensive-Exams-Study-Guide-Rev.-May-2023.pdf"
+    }
+   }
+  },
+  "Philosophy & Ethics": {
+   "primary": {
+    "label": "U. Oklahoma — Qualifying Exam: Ancient Philosophy 2019 (real paper, PDF)",
+    "url": "https://www.ou.edu/content/dam/cas/philosophy/docs/graduate-students/exams/qualifying/2019qualifyingexamancient.pdf"
+   },
+   "per_field": {
+    "Epistemology": {
+     "label": "Cambridge — Part II Past Papers (Metaphysics & Mind era)",
+     "url": "https://www.phil.cam.ac.uk/curr-students/ugrads-exam-folder/II-past-exam-papers"
+    },
+    "Metaphysics": {
+     "label": "Cambridge — Part II Past Paper 1: Metaphysics",
+     "url": "https://www.phil.cam.ac.uk/curr-students/ugrads-exam-folder/II-past-exam-papers"
+    },
+    "Philosophy of Mind": {
+     "label": "Cambridge — Part II Past Paper 2: Philosophy of Mind",
+     "url": "https://www.phil.cam.ac.uk/curr-students/ugrads-exam-folder/II-past-exam-papers"
+    },
+    "Ethics & Moral Theory": {
+     "label": "Cambridge — Part II Past Paper 3: Ethics",
+     "url": "https://www.phil.cam.ac.uk/curr-students/ugrads-exam-folder/II-past-exam-papers"
+    },
+    "Logic & Philosophy of Logic": {
+     "label": "U. Memphis — Modern Philosophy Qual/Comp guidelines",
+     "url": "https://www.memphis.edu/philosophy/graduate/pdfs/modern_qual-comp_guidelines.pdf"
+    },
+    "Political Philosophy": {
+     "label": "U. Georgia — Qualifying Papers (6000-8000 words)",
+     "url": "https://www.phil.uga.edu/qualifying-papers-written-preliminary-comprehensive-examinations"
+    }
+   }
+  },
+  "Business & Management": {
+   "primary": {
+    "label": "No public mgmt comps — nearest verified: Duke Fuqua Finance quals",
+    "url": "https://areas.fuqua.duke.edu/finance/phd-overview/curriculum-program-requirements/"
+   },
+   "per_field": {}
+  },
+  "Education & Learning Science": {
+   "primary": {
+    "label": "No public education PhD comps found",
+    "url": ""
+   },
+   "per_field": {}
+  },
+  "Engineering": {
+   "primary": {
+    "label": "UNC Charlotte — ME PhD Qualifying Exam (2 real sample exams)",
+    "url": "https://mees.charlotte.edu/academic-programs/phd-mechanical-engineering/qualifying-exam/"
+   },
+   "per_field": {
+    "Mechanical Engineering & Solid Mechanics": {
+     "label": "UNC Charlotte — ME PhD Qualifying Exam sample exams",
+     "url": "https://mees.charlotte.edu/academic-programs/phd-mechanical-engineering/qualifying-exam/"
+    },
+    "Acoustics & Noise Engineering": {
+     "label": "UT Austin ME — Acoustics qualifying exams",
+     "url": "https://www.me.utexas.edu/academics/graduate-program/qualifying-exams"
+    },
+    "Materials Engineering & Processing": {
+     "label": "GaTech MSE — Graduate Comprehensive Exams (6 of 18, 4h)",
+     "url": "https://www.mse.gatech.edu/graduate/quals"
+    },
+    "Fluid Mechanics & Turbomachinery": {
+     "label": "UMBC ME — Qualifying Exam Topics List (PDF)",
+     "url": "https://me.umbc.edu/files/2014/10/Mechanical-Engineering-PhD-Qualifying-Examination-Topics-List.pdf"
+    },
+    "Thermodynamics & Heat Transfer": {
+     "label": "UMBC ME — Qualifying Exam Topics List (PDF)",
+     "url": "https://me.umbc.edu/files/2014/10/Mechanical-Engineering-PhD-Qualifying-Examination-Topics-List.pdf"
+    },
+    "Industrial Control Engineering": {
+     "label": "BYU — Controls and System Dynamics quals",
+     "url": "https://www.me.byu.edu/https:/brightspotcdn.byu.edu/f8/62/b5c031444c5b9d40f25924fbff43/controls-infosheet-and-sample-problems-0.pdf"
+    },
+    "Nuclear Engineering & Radiation Science": {
+     "label": "UT Austin — Nuclear & Radiation Engineering PhD Qualifying Exam",
+     "url": "https://nuclear.engr.utexas.edu/academics/graduate-program/ph-d-qualifying-exam"
+    }
+   }
+  },
+  "Energy & Sustainability": {
+   "primary": {
+    "label": "No public energy comps — nearest verified: UT Austin ME quals",
+    "url": "https://www.me.utexas.edu/academics/graduate-program/qualifying-exams"
+   },
+   "per_field": {}
+  }
+ }
+}

@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Dourmouse</title>
+<style>
+/* ===================================================================== *
+   Dourmouse — consumer interface
+
+   A different product thesis from the HUD: this is an assistant you talk
+   to, so the conversation is the interface and everything else defers to
+   it. Calm surfaces, real reading sizes, one obvious action per screen.
+
+   The identity survives as accent, not atmosphere: the amber stays, the
+   ambient glow and 6px telemetry do not.
+   ===================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  --bg:          #FAF9F7;
+  --surface:     #FFFFFF;
+  --surface-2:   #F2F1EE;
+  --line:        #E4E2DD;
+  --line-soft:   #EFEEEA;
+
+  --ink:         #1A1917;
+  --ink-2:       #56534D;
+  --ink-3:       #6F6B63;
+
+  --accent:      #B25E09;
+  --accent-ink:  #FFFFFF;
+  --accent-soft: #FDF3E7;
+
+  --ok:          #1B6B47;
+  --warn:        #96591B;
+  --danger:      #A32B21;
+
+  --radius:      12px;
+  --radius-sm:   8px;
+  --shadow:      0 1px 2px rgba(26,25,23,.05), 0 8px 24px -18px rgba(26,25,23,.35);
+
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --rail: 248px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:          #14140F;
+    --surface:     #1C1C18;
+    --surface-2:   #242420;
+    --line:        #33332C;
+    --line-soft:   #29291F;
+
+    --ink:         #F2F0EA;
+    --ink-2:       #B8B4AA;
+    --ink-3:       #9C988E;
+
+    --accent:      #E9A24A;
+    --accent-ink:  #1A1710;
+    --accent-soft: #2A2318;
+
+    --ok:          #6FCB9B;
+    --warn:        #E0B25E;
+    --danger:      #F08A7E;
+
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"] {
+  --bg:          #14140F;
+  --surface:     #1C1C18;
+  --surface-2:   #242420;
+  --line:        #33332C;
+  --line-soft:   #29291F;
+  --ink:         #F2F0EA;
+  --ink-2:       #B8B4AA;
+  --ink-3:       #9C988E;
+  --accent:      #E9A24A;
+  --accent-ink:  #1A1710;
+  --accent-soft: #2A2318;
+  --ok:          #6FCB9B;
+  --warn:        #E0B25E;
+  --danger:      #F08A7E;
+  --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -18px rgba(0,0,0,.8);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* ---------- shell ---------- */
+.shell { display: grid; grid-template-columns: var(--rail) 1fr; height: 100dvh; }
+
+.rail {
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 18px 18px 14px;
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
+.brand h1 { font-size: 17px; font-weight: 650; letter-spacing: -.01em; margin: 0; }
+
+.newchat {
+  margin: 0 12px 14px;
+  padding: 11px 14px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  font-weight: 550;
+  display: flex; align-items: center; gap: 9px;
+}
+.newchat:hover { border-color: var(--accent); color: var(--accent); }
+
+.modes { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 3px; }
+.mode {
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 10px 12px; min-height: 44px;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: none; cursor: pointer; text-align: left; width: 100%;
+}
+.mode:hover { background: var(--surface-2); }
+.mode[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.mode .ic { flex: none; width: 20px; text-align: center; font-size: 15px; margin-top: 1px; }
+.mode .lbl { font-weight: 600; font-size: 15px; display: block; }
+.mode .sub { font-size: 12.5px; color: var(--ink-3); display: block; line-height: 1.35; }
+.mode[aria-selected="true"] .lbl { color: var(--accent); }
+
+.rail-foot { margin-top: auto; padding: 12px; border-top: 1px solid var(--line); }
+.who { font-size: 12.5px; color: var(--ink-3); padding: 4px 6px 10px; word-break: break-all; }
+.who b { color: var(--ink-2); font-weight: 600; }
+.railbtns { display: flex; gap: 6px; }
+.mini {
+  flex: 1; min-height: 44px; padding: 8px;
+  border: 1px solid var(--line); background: var(--surface-2);
+  border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 13px; color: var(--ink-2);
+}
+.mini:hover { border-color: var(--accent); color: var(--accent); }
+
+/* The scrim only exists for the mobile drawer. It sits between the rail and
+   main in the DOM, so leaving it displayed on desktop makes it a grid item
+   and it takes the column main should occupy. */
+.scrim { display: none; }
+
+/* ---------- main ---------- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 22px; border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.menubtn { display: none; }
+.topbar h2 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+.topbar .hint { font-size: 13px; color: var(--ink-3); }
+.status { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-3); }
+.led { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
+.led.on { background: var(--ok); }
+.led.busy { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+
+.scroll { flex: 1; overflow-y: auto; min-height: 0; scroll-behavior: smooth; }
+.thread { max-width: 760px; margin: 0 auto; padding: 28px 22px 8px; }
+
+/* ---------- empty state ---------- */
+.empty { max-width: 760px; margin: 0 auto; padding: 8vh 22px 0; }
+.empty h3 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin: 0 0 8px; }
+.empty p { color: var(--ink-2); margin: 0 0 24px; font-size: 16px; }
+.starters { display: grid; gap: 8px; }
+.starter {
+  text-align: left; padding: 14px 16px; min-height: 44px;
+  border: 1px solid var(--line); background: var(--surface);
+  border-radius: var(--radius); cursor: pointer; font-size: 15px;
+  box-shadow: var(--shadow);
+}
+.starter:hover { border-color: var(--accent); }
+.starter b { display: block; font-weight: 600; margin-bottom: 2px; }
+.starter span { color: var(--ink-3); font-size: 13px; }
+
+/* ---------- turns ---------- */
+.turn { margin-bottom: 22px; }
+.turn.user { display: flex; justify-content: flex-end; }
+.bubble {
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+  padding: 11px 15px; border-radius: 14px 14px 4px 14px;
+  max-width: 88%; white-space: pre-wrap; word-break: break-word;
+}
+.answer { font-size: 16px; line-height: 1.65; }
+.answer p { margin: 0 0 12px; }
+.answer p:last-child { margin-bottom: 0; }
+.answer ul, .answer ol { margin: 10px 0; padding-left: 22px; }
+.answer li { margin-bottom: 5px; }
+.answer li::marker { color: var(--accent); }
+.answer strong { font-weight: 650; }
+.answer a { color: var(--accent); }
+.answer code {
+  font-family: var(--mono); font-size: 14px;
+  background: var(--surface-2); border: 1px solid var(--line-soft);
+  padding: 1px 5px; border-radius: 4px;
+}
+.answer pre {
+  font-family: var(--mono); font-size: 13.5px; line-height: 1.5;
+  background: var(--surface-2); border: 1px solid var(--line);
+  padding: 13px 15px; border-radius: var(--radius-sm);
+  overflow-x: auto; margin: 12px 0;
+}
+.answer pre code { background: none; border: none; padding: 0; }
+.caret {
+  display: inline-block; width: 7px; height: 1.05em; margin-left: 2px;
+  vertical-align: text-bottom; background: var(--accent);
+  animation: blink 1s steps(2,start) infinite;
+}
+@keyframes blink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }
+
+/* ---------- activity ---------- */
+.acts { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.act {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--ink-3);
+  background: var(--surface-2); border: 1px solid var(--line-soft);
+  border-radius: 999px; padding: 5px 12px; width: fit-content; max-width: 100%;
+}
+.act .nm { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.act.err { color: var(--danger); border-color: var(--danger); }
+
+/* ---------- confirmation ---------- */
+.confirm {
+  border: 1px solid var(--warn); background: var(--surface);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius); padding: 16px 18px; margin-bottom: 18px;
+  box-shadow: var(--shadow);
+}
+.confirm h4 { margin: 0 0 6px; font-size: 15px; font-weight: 650; color: var(--warn); }
+.confirm p { margin: 0 0 14px; font-size: 15px; color: var(--ink-2); word-break: break-word; }
+.confirm .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  min-height: 44px; padding: 10px 18px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--surface-2);
+  cursor: pointer; font-weight: 600; font-size: 15px;
+}
+.btn.go { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.go:hover { filter: brightness(1.06); }
+.btn:hover { border-color: var(--accent); }
+.confirm.done { border-color: var(--line); border-left-color: var(--ink-3); }
+.confirm.done h4 { color: var(--ink-3); }
+
+.err {
+  border: 1px solid var(--danger); border-left: 4px solid var(--danger);
+  background: var(--surface); border-radius: var(--radius);
+  padding: 14px 16px; margin-bottom: 18px; font-size: 15px;
+}
+.err b { color: var(--danger); }
+
+/* ---------- composer ---------- */
+.composer { border-top: 1px solid var(--line); background: var(--surface); padding: 14px 22px 18px; }
+.cwrap { max-width: 760px; margin: 0 auto; }
+.cbox {
+  display: flex; align-items: flex-end; gap: 10px;
+  border: 1px solid var(--line); background: var(--bg);
+  border-radius: var(--radius); padding: 8px 8px 8px 14px;
+}
+.cbox:focus-within { border-color: var(--accent); }
+#input {
+  flex: 1; border: none; background: none; outline: none; resize: none;
+  font-size: 16px; line-height: 1.5; padding: 11px 0; max-height: 200px; min-height: 44px;
+}
+#send {
+  flex: none; min-height: 44px; min-width: 44px; padding: 0 18px;
+  border: none; border-radius: var(--radius-sm);
+  background: var(--accent); color: var(--accent-ink);
+  font-weight: 650; cursor: pointer;
+}
+#send:disabled { opacity: .45; cursor: not-allowed; }
+.chint { font-size: 12.5px; color: var(--ink-3); margin: 8px 2px 0; display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .rail {
+    position: fixed; inset: 0 auto 0 0; width: 82vw; max-width: 320px;
+    z-index: 40; transform: translateX(-101%);
+    transition: transform .22s ease; box-shadow: var(--shadow);
+  }
+  .rail.open { transform: none; }
+  .scrim {
+    display: block;
+    position: fixed; inset: 0; background: rgba(0,0,0,.42);
+    z-index: 35; opacity: 0; pointer-events: none; transition: opacity .22s;
+  }
+  .scrim.on { opacity: 1; pointer-events: auto; }
+  .menubtn {
+    display: flex; align-items: center; justify-content: center;
+    min-width: 44px; min-height: 44px; border: 1px solid var(--line);
+    background: var(--surface-2); border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .thread, .cwrap, .empty { padding-left: 16px; padding-right: 16px; }
+  .composer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .topbar { padding: 12px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <nav class="rail" id="rail" aria-label="Modes">
+    <div class="brand"><span class="dot"></span><h1>Dourmouse</h1></div>
+
+    <button class="newchat" id="newchat">＋ New conversation</button>
+
+    <div class="modes" role="tablist" aria-label="What do you need?">
+      <button class="mode" role="tab" data-mode="chat" aria-selected="true">
+        <span class="ic" aria-hidden="true">◆</span>
+        <span><span class="lbl">Chat</span><span class="sub">Anything — email, calendar, files, questions</span></span>
+      </button>
+      <button class="mode" role="tab" data-mode="research" aria-selected="false">
+        <span class="ic" aria-hidden="true">◈</span>
+        <span><span class="lbl">Research</span><span class="sub">Search the web and summarise sources</span></span>
+      </button>
+      <button class="mode" role="tab" data-mode="code" aria-selected="false">
+        <span class="ic" aria-hidden="true">▤</span>
+        <span><span class="lbl">Code</span><span class="sub">Write, run and debug code</span></span>
+      </button>
+    </div>
+
+    <div class="rail-foot">
+      <div class="who" id="who">Checking sign-in…</div>
+      <div class="railbtns">
+        <button class="mini" id="themebtn" title="Switch theme">◐ Theme</button>
+        <button class="mini" id="hudbtn" title="Open the original HUD">⧉ HUD</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="scrim" id="scrim"></div>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="menubtn" id="menubtn" aria-label="Open menu">☰</button>
+      <h2 id="title">Chat</h2>
+      <span class="hint" id="hint">Ask anything</span>
+      <div class="status"><span class="led" id="led"></span><span id="statustext">Ready</span></div>
+    </header>
+
+    <div class="scroll" id="scroll">
+      <div class="empty" id="empty"></div>
+      <div class="thread" id="thread" hidden></div>
+    </div>
+
+    <div class="composer">
+      <div class="cwrap">
+        <div class="cbox">
+          <textarea id="input" rows="1" placeholder="Ask anything…" spellcheck="true"></textarea>
+          <button id="send">Send</button>
+        </div>
+        <div class="chint">
+          <span><b>Enter</b> to send · <b>Shift+Enter</b> for a new line</span>
+          <span id="modehint"></span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const scroll = $("scroll"), thread = $("thread"), empty = $("empty");
+const input = $("input"), send = $("send");
+
+/* Each tab is a different agent, not a different prompt prefix: the server
+   already supports focus_agent, so Research really is the research roster
+   and Code really is the coding roster. A tab that only changed wording
+   would be a costume. */
+const MODES = {
+  chat: {
+    title: "Chat", agent: "", hint: "Ask anything",
+    placeholder: "Ask anything…",
+    lede: "What can I help with?",
+    sub: "I can read your mail, check your calendar, search the web, make documents and run code.",
+    starters: [
+      ["Summarise my unread email", "Reads your inbox and pulls out what matters"],
+      ["What's on my calendar this week?", "Checks your Google Calendar"],
+      ["Draft a Google Doc summarising this quarter", "Creates a real document in your Drive"],
+    ],
+  },
+  research: {
+    title: "Research", agent: "research_info", hint: "Searches the web and cites sources",
+    placeholder: "What should I look into?",
+    lede: "What should I look into?",
+    sub: "I search the live web and summarise what I find, with the sources.",
+    starters: [
+      ["What happened in the Bangladesh vs Australia test?", "Live news search"],
+      ["Compare the newest open-weight language models", "Searches and synthesises"],
+      ["Find recent papers on retrieval-augmented generation", "Web search and summary"],
+    ],
+  },
+  code: {
+    title: "Code", agent: "dev_coding", hint: "Writes, runs and debugs code",
+    placeholder: "What should I build or fix?",
+    lede: "What should I build?",
+    sub: "I write code, run it, and show you what it did — including when it fails.",
+    starters: [
+      ["Write a Python script to rename files by date", "Writes and runs it"],
+      ["Explain what this error means and fix it", "Paste a traceback"],
+      ["Refactor this function to be testable", "Paste the code"],
+    ],
+  },
+};
+
+let mode = "chat";
+let busy = false;
+let started = false;
+
+/* ---------- theme ---------- */
+const savedTheme = localStorage.getItem("dm-theme");
+if (savedTheme) document.documentElement.setAttribute("data-theme", savedTheme);
+$("themebtn").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const dark = cur ? cur === "dark"
+    : matchMedia("(prefers-color-scheme: dark)").matches;
+  const next = dark ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("dm-theme", next);
+};
+
+/* ---------- rail (mobile) ---------- */
+const rail = $("rail"), scrim = $("scrim");
+const closeRail = () => { rail.classList.remove("open"); scrim.classList.remove("on"); };
+$("menubtn").onclick = () => { rail.classList.toggle("open"); scrim.classList.toggle("on"); };
+scrim.onclick = closeRail;
+$("hudbtn").onclick = () => { location.href = "/"; };
+
+/* ---------- modes ---------- */
+function setMode(next) {
+  mode = next;
+  const m = MODES[next];
+  document.querySelectorAll(".mode").forEach((b) =>
+    b.setAttribute("aria-selected", String(b.dataset.mode === next)));
+  $("title").textContent = m.title;
+  $("hint").textContent = m.hint;
+  input.placeholder = m.placeholder;
+  $("modehint").textContent = m.agent ? `Using the ${m.agent} agent` : "";
+  if (!started) renderEmpty();
+  closeRail();
+}
+document.querySelectorAll(".mode").forEach((b) => {
+  b.onclick = () => setMode(b.dataset.mode);
+});
+
+function renderEmpty() {
+  const m = MODES[mode];
+  empty.hidden = false;
+  thread.hidden = true;
+  empty.innerHTML = "";
+  const h = document.createElement("h3"); h.textContent = m.lede;
+  const p = document.createElement("p"); p.textContent = m.sub;
+  const wrap = document.createElement("div"); wrap.className = "starters";
+  m.starters.forEach(([q, why]) => {
+    const b = document.createElement("button");
+    b.className = "starter";
+    const strong = document.createElement("b"); strong.textContent = q;
+    const s = document.createElement("span"); s.textContent = why;
+    b.append(strong, s);
+    b.onclick = () => { input.value = q; input.focus(); submit(); };
+    wrap.appendChild(b);
+  });
+  empty.append(h, p, wrap);
+}
+
+$("newchat").onclick = () => {
+  thread.innerHTML = "";
+  started = false;
+  renderEmpty();
+  input.focus();
+  closeRail();
+};
+
+/* ---------- composer ---------- */
+function autosize() {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 200) + "px";
+}
+input.addEventListener("input", autosize);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+});
+send.onclick = submit;
+
+function setBusy(on, label) {
+  busy = on;
+  send.disabled = on;
+  send.textContent = on ? "…" : "Send";
+  $("led").className = "led " + (on ? "busy" : "on");
+  $("statustext").textContent = on ? (label || "Working…") : "Ready";
+}
+
+/* ---------- rendering ---------- */
+function atBottom() { return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 140; }
+function toBottom() { scroll.scrollTop = scroll.scrollHeight; }
+
+function addUser(text) {
+  if (!started) { started = true; empty.hidden = true; thread.hidden = false; }
+  const t = document.createElement("div"); t.className = "turn user";
+  const b = document.createElement("div"); b.className = "bubble";
+  b.textContent = text;                       // textContent: never inject user text as HTML
+  t.appendChild(b); thread.appendChild(t); toBottom();
+}
+
+function addTurn() {
+  const t = document.createElement("div"); t.className = "turn";
+  const acts = document.createElement("div"); acts.className = "acts";
+  const ans = document.createElement("div"); ans.className = "answer";
+  t.append(acts, ans); thread.appendChild(t); toBottom();
+  return { turn: t, acts, ans };
+}
+
+function addAct(acts, label, name, bad) {
+  const a = document.createElement("div");
+  a.className = "act" + (bad ? " err" : "");
+  const s = document.createElement("span"); s.textContent = label;
+  a.appendChild(s);
+  if (name) { const n = document.createElement("span"); n.className = "nm"; n.textContent = name; a.appendChild(n); }
+  acts.appendChild(a);
+  if (atBottom()) toBottom();
+  return a;
+}
+
+/* Minimal, escaped markdown. Everything is escaped first and only a fixed
+   set of shapes is re-introduced, so model output can never inject markup. */
+function esc(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+function render(md) {
+  const blocks = esc(md).split(/```/);
+  let out = "";
+  blocks.forEach((chunk, i) => {
+    if (i % 2) { out += "<pre><code>" + chunk.replace(/^\w*\n/, "") + "</code></pre>"; return; }
+    let t = chunk
+      .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    const lines = t.split("\n");
+    let html = "", list = null;
+    for (const line of lines) {
+      const ul = line.match(/^\s*[-*]\s+(.*)$/);
+      const ol = line.match(/^\s*(\d+)\.\s+(.*)$/);
+      if (ul) { if (list !== "ul") { if (list) html += `</${list}>`; html += "<ul>"; list = "ul"; } html += `<li>${ul[1]}</li>`; }
+      else if (ol) { if (list !== "ol") { if (list) html += `</${list}>`; html += "<ol>"; list = "ol"; } html += `<li>${ol[2]}</li>`; }
+      else {
+        if (list) { html += `</${list}>`; list = null; }
+        if (line.trim()) html += `<p>${line}</p>`;
+      }
+    }
+    if (list) html += `</${list}>`;
+    out += html;
+  });
+  return out;
+}
+
+/* ---------- confirmation ---------- */
+function addConfirm(acts, evt) {
+  const box = document.createElement("div"); box.className = "confirm";
+  const h = document.createElement("h4"); h.textContent = "Approval needed";
+  const p = document.createElement("p"); p.textContent = evt.prompt || "This action needs your approval.";
+  const row = document.createElement("div"); row.className = "row";
+  const yes = document.createElement("button"); yes.className = "btn go"; yes.textContent = "Approve";
+  const no = document.createElement("button"); no.className = "btn"; no.textContent = "Decline";
+  row.append(yes, no); box.append(h, p, row);
+  acts.parentNode.insertBefore(box, acts.nextSibling);
+  toBottom();
+
+  const resolve = async (ok) => {
+    yes.disabled = no.disabled = true;
+    try {
+      await fetch("/api/confirm", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: evt.id, approved: ok }),
+      });
+    } catch (_) { /* the turn will report the outcome either way */ }
+    box.classList.add("done");
+    h.textContent = ok ? "Approved" : "Declined";
+    row.remove();
+  };
+  yes.onclick = () => resolve(true);
+  no.onclick = () => resolve(false);
+}
+
+/* ---------- send ---------- */
+async function submit() {
+  const text = input.value.trim();
+  if (!text || busy) return;
+  input.value = ""; autosize();
+  addUser(text);
+  setBusy(true, "Thinking…");
+
+  const { acts, ans } = addTurn();
+  let buf = "";
+  let caret = document.createElement("span"); caret.className = "caret";
+  ans.appendChild(caret);
+
+  const paint = () => {
+    ans.innerHTML = render(buf);
+    ans.appendChild(caret);
+    if (atBottom()) toBottom();
+  };
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: text, focus_agent: MODES[mode].agent || undefined }),
+    });
+    if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let carry = "";
+
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      carry += dec.decode(value, { stream: true });
+      const parts = carry.split("\n");
+      carry = parts.pop() || "";
+      for (const line of parts) {
+        if (!line.startsWith("data:")) continue;
+        let evt; try { evt = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        switch (evt.type) {
+          case "brain":
+            setBusy(true, evt.model ? "Thinking · " + evt.model.split("/").pop() : "Thinking…");
+            break;
+          case "plan":
+            addAct(acts, "Planning", "");
+            break;
+          case "tool_use":
+          case "function":
+            addAct(acts, "Using", evt.name || evt.tool || "tool");
+            setBusy(true, "Working…");
+            break;
+          case "tool_result":
+          case "result":
+            addAct(acts, "Got result", evt.name || evt.tool || "");
+            break;
+          case "confirmation_requested":
+            setBusy(true, "Waiting for you");
+            addConfirm(acts, evt);
+            break;
+          case "assistant_delta":
+            buf += evt.text || ""; paint();
+            break;
+          case "assistant_text":
+            if (evt.text && evt.text.length > buf.length) { buf = evt.text; paint(); }
+            break;
+          case "error":
+            addAct(acts, "Error", evt.message || "unknown", true);
+            break;
+          case "done":
+            if (evt.final_text && evt.final_text.length > buf.length) buf = evt.final_text;
+            break;
+        }
+      }
+    }
+  } catch (err) {
+    const e = document.createElement("div"); e.className = "err";
+    const b = document.createElement("b"); b.textContent = "Couldn't reach Dourmouse. ";
+    e.append(b, document.createTextNode(String(err.message || err) + " — check the server is running."));
+    ans.parentNode.insertBefore(e, ans);
+  } finally {
+    caret.remove();
+    ans.innerHTML = render(buf) || "<p><em>No reply.</em></p>";
+    setBusy(false);
+    toBottom();
+    input.focus();
+  }
+}
+
+/* ---------- sign-in status ---------- */
+(async () => {
+  try {
+    const r = await fetch("/api/auth/me");
+    const j = await r.json();
+    const who = $("who");
+    who.textContent = "";
+    if (j.me) {
+      who.append(document.createTextNode("Signed in as "));
+      const b = document.createElement("b"); b.textContent = j.me;
+      who.appendChild(b);
+    } else {
+      who.append(document.createTextNode("Not signed in to Google — "));
+      const a = document.createElement("a"); a.href = "/login"; a.textContent = "sign in";
+      a.style.color = "var(--accent)";
+      who.appendChild(a);
+    }
+  } catch { $("who").textContent = "Sign-in status unavailable"; }
+})();
+
+setMode("chat");
+$("led").className = "led on";
+input.focus();
+})();
+</script>
+</body>
+</html>

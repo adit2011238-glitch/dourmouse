@@ -1,0 +1,262 @@
+{
+  "domain": "Condensed Matter & Materials (physics)",
+  "field": "Strongly Correlated Electron Systems",
+  "tests": [
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qualifier2019.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-a99fb91b38.pdf",
+      "bytes": 536007,
+      "sha256": "a99fb91b3858bdfd537d4a487fa4095e452f13965791e58ff41ae407be6e410a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qual_19_p1_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-c0ebe34e2c.pdf",
+      "bytes": 116253,
+      "sha256": "c0ebe34e2c77aed7120b08c195375e3a44b8e2ea837eb46200cbf2a99b53e7f1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qual_19_p2_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-4685eae31a.pdf",
+      "bytes": 2636777,
+      "sha256": "4685eae31a5b576dcff8f156bc197eae8346dc1c75885d395079c78bbabdae83",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qual_19_p3_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-087d58269f.pdf",
+      "bytes": 97722,
+      "sha256": "087d58269f932ed4a86421e060ae748ca4527069f3dffc2ad0759de8e4003235",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qual_19_p4_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-2800a58e79.pdf",
+      "bytes": 188288,
+      "sha256": "2800a58e79fb32ba2988a2e492d3e0b62243c9c8e5015c7c2e0fe4e5bf91c50f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qualifier2018.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-ff234a66a8.pdf",
+      "bytes": 587025,
+      "sha256": "ff234a66a822a152e7a117c86893be7189042c4de6eefc1712a22579bfb29718",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qual_18_p1_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-607df8925a.pdf",
+      "bytes": 85440,
+      "sha256": "607df8925a635bd9e8f884290d189fb834e7c219469f7a0d4b43df5dbc35f935",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qual_18_p2_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-74bfe2a341.pdf",
+      "bytes": 100003,
+      "sha256": "74bfe2a341468364a872321ce83cb22e9ada2ffe85320d433c578ecad1d8691b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qual_18_p3_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-acd4746f31.pdf",
+      "bytes": 102067,
+      "sha256": "acd4746f314fdc4b8c6d0cc0b476022924c5e841a02a61b089b2f14242d8199d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/qual_18_p4_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-15c2b64e45.pdf",
+      "bytes": 123888,
+      "sha256": "15c2b64e450ba8dbc3ed2d2a0898d52cf3c83686e4cdaa2dd6a36d9120b7edbb",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [
+    {
+      "url": "https://physics.yale.edu/academics/graduate-studies/graduate-student-handbook/qualifying-exam-past-exams",
+      "file": "_archives/https-physics-yale-edu-academics-graduat-19a1f4d367.html",
+      "bytes": 28190,
+      "sha256": "19a1f4d36776caab62091a714b68c2292cd016c863cce7bbe0a55156459f629f",
+      "key": true,
+      "kind": "html"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/QualExam_24_Combined.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-87c7fd6065.pdf",
+      "bytes": 693919,
+      "sha256": "87c7fd60651740b1e2f5af6ac6539d7c90498bcaec92436430259242a8c110cd",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_24_p1_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-fa5c301c29.pdf",
+      "bytes": 126847,
+      "sha256": "fa5c301c29ab3da7f0dcdac0ecc562d194d48b80ac10aab30f5b17d20da86e8b",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_24_p2_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-bad7bf78f5.pdf",
+      "bytes": 1094491,
+      "sha256": "bad7bf78f5eaca34820c1643df816d2a3583c5a6010a1257b794804a85a4dcc9",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_24_p3_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-251f865027.pdf",
+      "bytes": 113573,
+      "sha256": "251f865027c4e541cc2bf502a6fe089eb17eac95a2c135e4e9b24e6b48200604",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_24_p4_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-5c8946d290.pdf",
+      "bytes": 139867,
+      "sha256": "5c8946d29080ffd44171f42a6b0491316d92bf0567fd73d08dd109bad508aa4e",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/2023%20Qualifying%20Exams%20Combined.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-74fd864ae3.pdf",
+      "bytes": 468835,
+      "sha256": "74fd864ae368c9a5b1d45efd629bf08a917eaa8073a7c2d973250c40d44b33a0",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_23_p1_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-b7709264ad.pdf",
+      "bytes": 103711,
+      "sha256": "b7709264ad0fafc6453f8f4a9cfda99d31a8a4ff894da9cc66021bb31da14cf8",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_23_p2_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-17152194e6.pdf",
+      "bytes": 130081,
+      "sha256": "17152194e6eeac47adf048bc6ea81cf21b7e1c9bb6e41769d0776ec9549ebaaf",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_23_p3_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-5c3d59b472.pdf",
+      "bytes": 99813,
+      "sha256": "5c3d59b4726f4691d39dad58c5aa5a7cb238efcc95fc3d5b85263930ac80ab5d",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_23_p4_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-19d7bcdbd5.pdf",
+      "bytes": 125622,
+      "sha256": "19d7bcdbd5ebbcf38ef5db9c02c148073c1ea41b5af0907e1cdd9945c18a366a",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/2022%20Qualifying%20Exams.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-ca0cb6ddf7.pdf",
+      "bytes": 477046,
+      "sha256": "ca0cb6ddf728f08e69f23b5d6ac73d8b39294e3c73d27ec7cc2785989ad0a78d",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_22_p1_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-95ba7bfdde.pdf",
+      "bytes": 105563,
+      "sha256": "95ba7bfdde661a06cd68443854eba92054982642b9d190cf703e36ee20d2360c",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_22_p2_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-691f572b00.pdf",
+      "bytes": 104478,
+      "sha256": "691f572b005e1808663e6f7b6f91ad03ab7e6fbba6a35aaf956cc75328ebff87",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_22_p3_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-1665fa0176.pdf",
+      "bytes": 109779,
+      "sha256": "1665fa0176196814e40fc5126beaae63d052d3fcd6d1aa03e8a0817a85796029",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_22_p4_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-ef12070626.pdf",
+      "bytes": 194192,
+      "sha256": "ef12070626f4eb4a9b40d6e494e7fecf9b763d99d3048a7f1413e06012c2fb58",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/2021%20Qualifying%20Exams.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-e3dccd82e9.pdf",
+      "bytes": 546382,
+      "sha256": "e3dccd82e90db75009ff44994c5cc5ffcc50cbdf3f9e334a2bbf878e69b2e84d",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_21_p1_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-fe8464f60b.pdf",
+      "bytes": 104289,
+      "sha256": "fe8464f60b706e9d5d11f6c7412b80767c18b2ba1c6dbc087a605369f5aff5b2",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_21_p2_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-e62b1b31fa.pdf",
+      "bytes": 122081,
+      "sha256": "e62b1b31fa3aebb416ec5a03122618199855c75b3b257505ebac1e5ad6a3c35b",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_21_p3_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-d617b28ece.pdf",
+      "bytes": 112904,
+      "sha256": "d617b28ece0b9cef0c01ac95f892286acb9c018478fdf9e1401dfec8fb495c53",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.yale.edu/sites/default/files/files/Grad%20Misc/qual_21_p4_sol.pdf",
+      "file": "_archives/https-physics-yale-edu-sites-default-fil-1b536d6fa4.pdf",
+      "bytes": 93322,
+      "sha256": "1b536d6fa403a87fe48768bf5027bce085a10df1d2ff8a3a95ff40240c5072ac",
+      "key": true,
+      "kind": "pdf"
+    }
+  ],
+  "links": [
+    {
+      "url": "https://physics.yale.edu/academics/graduate-studies/graduate-student-handbook/qualifying-exam-past-exams",
+      "label": "Yale Physics quals \u2014 condensed matter section"
+    }
+  ]
+}

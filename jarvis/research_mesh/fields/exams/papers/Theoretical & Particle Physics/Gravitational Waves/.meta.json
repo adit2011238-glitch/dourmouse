@@ -1,0 +1,262 @@
+{
+  "domain": "Theoretical & Particle Physics",
+  "field": "Gravitational Waves",
+  "tests": [
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall12Sol.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-46663616a3.pdf",
+      "bytes": 343853,
+      "sha256": "46663616a325aedb06e056877998ef0c4e8652d4899397ca8707a482612f3d43",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/fall2012_E_M_1-5.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-bb01576b9d.pdf",
+      "bytes": 122244,
+      "sha256": "bb01576b9d1ee85a67e920d151bd6c3423cb853a7a73e72f51331ada238052ec",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring12.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-27f6f0eae6.pdf",
+      "bytes": 188610,
+      "sha256": "27f6f0eae6e5a1420af5b2e69d480390ebe644d89fd8098773f6b33bc7c7d956",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring12Sol.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-ef095090be.pdf",
+      "bytes": 711248,
+      "sha256": "ef095090be06c41965eea121c9f6e8e6df0e0a56f7685356f73c653ee5129246",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall02.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-d7f58aaa89.pdf",
+      "bytes": 228446,
+      "sha256": "d7f58aaa89b8d91c023c7f6cf3a31d04f576b25b3a730b736304464ae32bc6c2",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall02Sol.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-5e07ef2cbc.pdf",
+      "bytes": 1065060,
+      "sha256": "5e07ef2cbc57a1ddd719f03c6afc21280e7ebefd410e896362000c79d4db454e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall02_EM1_soln.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-4601652af0.pdf",
+      "bytes": 127934,
+      "sha256": "4601652af042abc3424d98763ef25ff62de40aa97b5ea4c6f19c428ce003db23",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/files/2025/01/Fall_2002_CM.pdf",
+      "file": "_archives/https-physrefs-mit-edu-files-2025-01-fal-db8447c88b.pdf",
+      "bytes": 314965,
+      "sha256": "db8447c88b82c996be5fb2d1ff4ee24a241cc8e9b3ec31599e59e45d216331b4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring02.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-df484d195a.pdf",
+      "bytes": 371499,
+      "sha256": "df484d195aeb78112c9648206b98e16e4de8a253169e568d477eabe3bdfd6df9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring02Sol.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-eb8e5f99ad.pdf",
+      "bytes": 1369168,
+      "sha256": "eb8e5f99ada39ccf0115e06ee5b4f88245e2b0ba81b4dd1ceb542fc9facba21b",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [
+    {
+      "url": "https://physrefs.mit.edu/general-exam-preparation/",
+      "file": "_archives/https-physrefs-mit-edu-general-exam-prep-29c93b3da9.html",
+      "bytes": 91267,
+      "sha256": "29c93b3da991c5cca62378d2c6e1be66e8eda87ecedfcee27330ee59f4585ab7",
+      "key": true,
+      "kind": "html"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/pgsc_report1.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-5be7a39306.pdf",
+      "bytes": 72729,
+      "sha256": "5be7a3930653304b513da68dd67e9e5eb3a15b7a126f27e322e2b581eab439c3",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/comparisonreport.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-ec8729a6a7.pdf",
+      "bytes": 43339,
+      "sha256": "ec8729a6a796678a543c8b7aa2a978003e9f3b0855ba480ab7fde552aeefa96e",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/testexamples2.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-dd5fb357dd.pdf",
+      "bytes": 1409086,
+      "sha256": "dd5fb357ddf6ce5914b49e0f175040d6cb0259176f105e9b0425d405f827c024",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/PartIIStudyGuide_ALeder.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-6e08a2fe06.pdf",
+      "bytes": 288206,
+      "sha256": "6e08a2fe062a6a56e30d02b7d2b98ff122a41ebaa2a0fe488aeecacb082add8d",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall21.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-5fddbd6fe3.pdf",
+      "bytes": 622982,
+      "sha256": "5fddbd6fe3ba79abbd7a876f7d36a9f9eb9c1665dc89ae2017f28355651419de",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall21_CM_soln.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-1fee656cff.pdf",
+      "bytes": 253908,
+      "sha256": "1fee656cff891f98eadf93988fcaf2bf5bda15aa25dfb7e6bf4f2ddd8bcccccb",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/sm-sol-Fall2021.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-025249dc66.pdf",
+      "bytes": 167037,
+      "sha256": "025249dc66a2b7f0a947b245474ffee022b5b46d3352b2be55e818cbf5bbe3fb",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/em-sol-Fall2021.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-f7648566c6.pdf",
+      "bytes": 161663,
+      "sha256": "f7648566c67c758a1f0d82b772c3e0bd0d371ee6149afc6bb25ab07ce0cb2bc1",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/QM_fall_21.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-db404bc30e.pdf",
+      "bytes": 126683,
+      "sha256": "db404bc30e89d2097981b22ec242273e6aee635356c3abbb1776cf6d471dc7c1",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring21.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-4ba1d1b9b4.pdf",
+      "bytes": 196577,
+      "sha256": "4ba1d1b9b4fe6a38974ebc41d24e61439e0499e891618253baf993d7450cb2ce",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring21_CM_soln.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-d937f219cc.pdf",
+      "bytes": 233005,
+      "sha256": "d937f219cc09d02816fee6f558db48d93cc099f9e573f45896b2ba4db636a39d",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/MIT_PhD_Spring2021_Statistical_Mechanics-1.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-6e9a7d8181.pdf",
+      "bytes": 190175,
+      "sha256": "6e9a7d81813f350915d709cf046fd19a0901e12550c7e02ec3c5967b1d11ec76",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring21_EM_mreefe.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-b42a84f3ae.pdf",
+      "bytes": 165428,
+      "sha256": "b42a84f3aee17ccfdca1a2cf4862f687d9a3a30a3f81551cc0e23832eaaac2d9",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/QM_spring_21.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-e3bfde5322.pdf",
+      "bytes": 136845,
+      "sha256": "e3bfde53228af5c179adbdeeac489e14c50a6058abded95fb78676025a64d163",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring16.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-683569a566.pdf",
+      "bytes": 561635,
+      "sha256": "683569a5669a15894a6bd1f1b33de43c144c8476c8148c7c2bd558d2e3d04e48",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring16Sol.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-600107f652.pdf",
+      "bytes": 1019461,
+      "sha256": "600107f6526cd361b7e46784236703f5c5b3eb658fbac28971c4dc97d5a380ce",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/files/2025/08/Spring_2016_QM_1d_.pdf",
+      "file": "_archives/https-physrefs-mit-edu-files-2025-08-spr-914b042a75.pdf",
+      "bytes": 103447,
+      "sha256": "914b042a751be72aaf6f384ef61dfd69bb2bb1853d46ecf2cace8438c3c9ce93",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall15.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-a86a3ccb50.pdf",
+      "bytes": 612459,
+      "sha256": "a86a3ccb508da548ad8acb96443e52ed6c954c1082c03fa7c1156d52874c5921",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall15Sol.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-e337357a07.pdf",
+      "bytes": 733807,
+      "sha256": "e337357a072b0fbcc1da418374884b2a303942e2092bdd79caa8ae193f53942d",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall12.pdf",
+      "file": "_archives/https-physrefs-mit-edu-wp-content-upload-a409e4fc53.pdf",
+      "bytes": 278108,
+      "sha256": "a409e4fc5308104a31d7a32b1e33d9744cb9988daa7af09e3fdd04b09809d73f",
+      "key": true,
+      "kind": "pdf"
+    }
+  ],
+  "links": [
+    {
+      "url": "https://physrefs.mit.edu/general-exam-preparation/",
+      "label": "MIT Physics \u2014 General Exam sample papers"
+    }
+  ]
+}

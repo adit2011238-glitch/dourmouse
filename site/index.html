@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dourmouse</title>
+<meta name="description" content="A personal AI operating system that runs on your own machine.">
+<!-- Private distribution: this page is for a handful of people, not the
+     open web. Keep it out of search results. -->
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='85' stroke='%23f2b73d' stroke-width='9' fill='none'/%3E%3Cpath d='M100 34 L146 166 H128 L100 84 L72 166 H54 Z' fill='%23f2b73d'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
+  --amber:#f2b73d; --amber-hi:#ffd27a; --amber-ink:#08111c;
+  --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6; --blue-deep:#6f97b3;
+  --line:rgba(120,175,210,.18); --line-2:rgba(120,175,210,.30);
+  --amber-soft:rgba(242,183,61,.12);
+  --ok:#5fbf8a; --warn:#f2b73d;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--blue);font-family:var(--mono);
+  font-size:14px;line-height:1.7;-webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:56px 22px 90px;
+  display:flex;flex-direction:column;gap:44px}
+
+/* ── hero ── */
+.hero{display:flex;flex-direction:column;align-items:center;text-align:center;gap:16px}
+.mk{width:104px;height:104px;color:var(--amber)}
+.mk svg{width:100%;height:100%;display:block}
+h1{font-size:30px;letter-spacing:.26em;color:var(--amber);margin:0;font-weight:400}
+.tag{color:var(--blue-dim);margin:0;max-width:46ch;font-size:14.5px}
+
+/* ── download ── */
+.dl{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%}
+.btn{display:inline-flex;align-items:center;gap:11px;background:var(--amber);
+  color:var(--amber-ink);text-decoration:none;padding:16px 30px;font-size:14px;
+  letter-spacing:.10em;border:none;transition:transform .15s ease;min-height:52px}
+.btn:hover{transform:translateY(-2px);background:var(--amber-hi)}
+.btn.off{background:none;border:1px solid var(--line-2);color:var(--blue-deep);
+  pointer-events:none}
+.meta{font-size:11.5px;color:var(--blue-deep);letter-spacing:.05em;text-align:center}
+.alt{font-size:11.5px}
+.alt a{color:var(--blue-dim)}
+
+/* ── blocks ── */
+.card{border:1px solid var(--line);background:var(--panel);padding:22px 24px;
+  display:flex;flex-direction:column;gap:12px}
+h2{font-size:11px;letter-spacing:.22em;color:var(--amber);margin:0;
+  text-transform:uppercase;font-weight:400}
+p{margin:0;color:var(--blue-dim)}
+ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:9px}
+ol li{color:var(--blue-dim)}
+b{color:var(--blue-hi);font-weight:400}
+code{background:var(--panel2);padding:2px 6px;color:var(--blue-hi);font-size:12px;
+  word-break:break-all}
+.hash{font-size:10.5px;color:var(--blue-deep);word-break:break-all;line-height:1.6}
+.warn{border-left:2px solid var(--warn);padding-left:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+.feat{border:1px solid var(--line);padding:15px 16px;background:var(--panel)}
+.feat .t{color:var(--blue-hi);font-size:12.5px;margin-bottom:5px}
+.feat .d{font-size:11.5px;color:var(--blue-dim);line-height:1.6}
+footer{text-align:center;font-size:11px;color:var(--blue-deep);letter-spacing:.08em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="mk"><svg viewBox="0 0 200 200" fill="none" aria-hidden="true">
+      <circle cx="100" cy="100" r="85" stroke="currentColor" stroke-width="7"/>
+      <path d="M100 34 L146 166 H128 L100 84 L72 166 H54 Z" fill="currentColor"/>
+      <path d="M30 150 L74 108 L100 132 L140 74 L168 52" stroke="currentColor"
+            stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M148 46 L176 44 L166 70 Z" fill="currentColor"/>
+    </svg></span>
+    <h1>DOURMOUSE</h1>
+    <p class="tag">A personal AI operating system. It runs on your own machine,
+      uses your own models, and keeps your data where you put it.</p>
+  </header>
+
+  <section class="dl">
+    <a class="btn" id="dlBtn" href="/downloads/DourmouseSetup-8.9.0.exe" download>
+      <span id="dlLabel">Download for Windows</span>
+    </a>
+    <div class="meta" id="dlMeta">Version 8.9.0 · 28.3 MB · Windows 10/11 (64-bit)</div>
+    <div class="alt" id="dlAlt"></div>
+  </section>
+
+  <section class="card warn">
+    <h2>Windows will warn you the first time</h2>
+    <p>This build is <b>not code-signed</b> yet, so Windows shows a blue
+      "Windows protected your PC" screen. That is SmartScreen reacting to an
+      unrecognised publisher, not a virus warning.</p>
+    <ol>
+      <li>Click <b>More info</b></li>
+      <li>Click <b>Run anyway</b></li>
+    </ol>
+    <p>Once per machine. If you would rather verify the file first, compare
+      its checksum against the one below.</p>
+  </section>
+
+  <section class="card">
+    <h2>Install</h2>
+    <ol>
+      <li>Run the installer. It installs for <b>you only</b> and never asks for
+        administrator rights.</li>
+      <li>On first launch, setup asks which intelligence to use.</li>
+      <li>If you have <b>Ollama</b> installed it is detected automatically and
+        works immediately — no key, no account, nothing leaves your machine.</li>
+      <li>Otherwise setup walks you through getting a <b>free NVIDIA key</b>,
+        step by step, and checks it works before saving.</li>
+    </ol>
+    <p>Your settings are kept outside the app folder, so updating or
+      reinstalling never wipes them.</p>
+  </section>
+
+  <section class="grid">
+    <div class="feat"><div class="t">Runs locally</div>
+      <div class="d">Models run on your machine or your own hardware. Nothing is
+        sent anywhere you did not configure.</div></div>
+    <div class="feat"><div class="t">Asks before it acts</div>
+      <div class="d">It can read files, run commands and send mail. Anything
+        destructive asks first, showing the exact action.</div></div>
+    <div class="feat"><div class="t">World monitor</div>
+      <div class="d">Live earthquakes, disasters, aircraft, markets and news,
+        plotted on a map from public feeds.</div></div>
+    <div class="feat"><div class="t">Four interfaces</div>
+      <div class="d">Pick the look on first run — amber console, light
+        workspace, mono terminal, or gothic.</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Verify the download</h2>
+    <p>SHA-256 of <code>DourmouseSetup-8.9.0.exe</code>:</p>
+    <div class="hash">A90ED795AD306A6E4CCA031DDA23EC100F916D97D324227C736AB46366B62ACE</div>
+    <p>Check it in PowerShell:</p>
+    <p><code>Get-FileHash .\DourmouseSetup-8.9.0.exe -Algorithm SHA256</code></p>
+  </section>
+
+  <footer>Dourmouse 8.9.0 · shared privately · unsigned build</footer>
+</div>
+
+<script>
+/* Offer the build that matches the visitor's OS. macOS has no build yet, so
+   say so plainly rather than handing a Mac user a Windows installer. */
+(function(){
+  var ua = navigator.userAgent || "";
+  var isMac = /Mac|iPhone|iPad/i.test(ua);
+  var isWin = /Windows/i.test(ua);
+  var btn = document.getElementById("dlBtn");
+  var label = document.getElementById("dlLabel");
+  var meta = document.getElementById("dlMeta");
+  var alt = document.getElementById("dlAlt");
+
+  if (isMac) {
+    btn.classList.add("off");
+    btn.removeAttribute("href");
+    label.textContent = "macOS build coming";
+    meta.textContent = "No Mac build yet — the Windows installer will not run on macOS.";
+    alt.innerHTML = '<a href="/downloads/DourmouseSetup-8.9.0.exe" download>Download the Windows installer anyway</a>';
+  } else if (!isWin) {
+    meta.textContent = "Version 8.9.0 · 28.3 MB · built for Windows 10/11 (64-bit)";
+    alt.textContent = "Detected a non-Windows system — this installer is Windows only.";
+  }
+})();
+</script>
+</body>
+</html>

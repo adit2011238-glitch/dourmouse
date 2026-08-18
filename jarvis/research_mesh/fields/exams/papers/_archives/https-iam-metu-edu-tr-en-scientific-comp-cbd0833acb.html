@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+<meta name="Generator" content="Drupal 10 (https://www.drupal.org)" />
+<meta name="MobileOptimized" content="width" />
+<meta name="HandheldFriendly" content="true" />
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+<meta http-equiv="x-ua-compatible" content="ie=edge" />
+<link rel="icon" href="/themes/custom/miys/favicon.ico" type="image/vnd.microsoft.icon" />
+<link rel="alternate" hreflang="en" href="https://iam.metu.edu.tr/en/scientific-computing" />
+<link rel="alternate" hreflang="tr" href="https://iam.metu.edu.tr/tr/bilimsel-hesaplama" />
+<link rel="canonical" href="https://iam.metu.edu.tr/en/scientific-computing" />
+<link rel="shortlink" href="https://iam.metu.edu.tr/en/node/23" />
+
+    <title>Scientific Computing | INSTITUTE OF APPLIED MATHEMATICS</title>
+    <link rel="stylesheet" media="all" href="/sites/iam.metu.edu.tr/files/css/css_cyk_bGBQkeMjcAQn8KpZrCOscFmZtgxM4mjNUelWWOY.css?delta=0&amp;language=en&amp;theme=miys&amp;include=eJyFUotuwyAM_CESPgkZcBO3BkfYaZu_H-k0aVrZJiEEuvPrzqCKFqheMZk0n1RnSElaJqkBag4GkTEkYWnq4J0dId2CST_bEKZo-BwhK2UMkAvVULDugQxLyKBrFGh5FEFQIigltYNxRChAdYNliFV86GugBIw1w3iabd1Cb3m1wkN4j0wJrIuj4dKg4DCLpibMX6pEEVNr0DNDayS-R2nvUgPTsto7XiWj6x6gT1I2qVitC_mDNU2nam-0QodOU2wIObW9xF8If8S-zDiV_MRz2zfgGa7wdBepBg9UKei_vecHxvOr_xJmXak4hkN2C5k0yR3b4Xv9vmDurO8Xlgg8nR5TXZwe2vfCd9_R3al76F_3XCTvjB8n8BTi" />
+<link rel="stylesheet" media="all" href="/sites/iam.metu.edu.tr/files/css/css_7URw9p28MGEZLWomtzYgL711KkENmI-BG3f6IOYMqp8.css?delta=1&amp;language=en&amp;theme=miys&amp;include=eJyFUotuwyAM_CESPgkZcBO3BkfYaZu_H-k0aVrZJiEEuvPrzqCKFqheMZk0n1RnSElaJqkBag4GkTEkYWnq4J0dId2CST_bEKZo-BwhK2UMkAvVULDugQxLyKBrFGh5FEFQIigltYNxRChAdYNliFV86GugBIw1w3iabd1Cb3m1wkN4j0wJrIuj4dKg4DCLpibMX6pEEVNr0DNDayS-R2nvUgPTsto7XiWj6x6gT1I2qVitC_mDNU2nam-0QodOU2wIObW9xF8If8S-zDiV_MRz2zfgGa7wdBepBg9UKei_vecHxvOr_xJmXak4hkN2C5k0yR3b4Xv9vmDurO8Xlgg8nR5TXZwe2vfCd9_R3al76F_3XCTvjB8n8BTi" />
+<link rel="stylesheet" media="all" href="/sites/iam.metu.edu.tr/files/css/css_nrCi5Xg3d5YXLW1ZbMbc4F0S4Yt0MtYETJRD9Ieyr-8.css?delta=2&amp;language=en&amp;theme=miys&amp;include=eJyFUotuwyAM_CESPgkZcBO3BkfYaZu_H-k0aVrZJiEEuvPrzqCKFqheMZk0n1RnSElaJqkBag4GkTEkYWnq4J0dId2CST_bEKZo-BwhK2UMkAvVULDugQxLyKBrFGh5FEFQIigltYNxRChAdYNliFV86GugBIw1w3iabd1Cb3m1wkN4j0wJrIuj4dKg4DCLpibMX6pEEVNr0DNDayS-R2nvUgPTsto7XiWj6x6gT1I2qVitC_mDNU2nam-0QodOU2wIObW9xF8If8S-zDiV_MRz2zfgGa7wdBepBg9UKei_vecHxvOr_xJmXak4hkN2C5k0yR3b4Xv9vmDurO8Xlgg8nR5TXZwe2vfCd9_R3al76F_3XCTvjB8n8BTi" />
+
+    <script type="application/json" data-drupal-selector="drupal-settings-json">{"path":{"baseUrl":"\/","pathPrefix":"en\/","currentPath":"node\/23","currentPathIsAdmin":false,"isFront":false,"currentLanguage":"en"},"pluralDelimiter":"\u0003","gtag":{"tagId":"G-945B1RV8JT","consentMode":false,"otherIds":[""],"events":[],"additionalConfigInfo":[]},"suppressDeprecationErrors":true,"ajaxPageState":{"libraries":"eJyFUgFuwyAM_FASnoQMuMQr4Ag77fL7OZUmTQ3bJISw7wD7fCCC6ql9YFTuLoosECP3RNw8tOQVQkEfuXCXCa7sAPHulW1tQ5iC4ucIWSmhh1Sp-Ypt96RYfQJZA0NPoxsENYBQFD0KjggVqG2Qh1jDp7wailCwJRh3s62bt5JXrWUI76FQBDVxxN86VBy-IrFzKd-qBGYV7WAvQ-_ELhcOUOazDWr5ilv2Lte0fSbWnPhCedUr3jjhZKNDF7lu3LCp6f_GmudT7Aut0iHzHDpCin2v4RfCH3dfMzwHMN24KTxRuKL7cV6eGM5Q_iUsslKdMnM25ylkl217jxf4gM-pwMG7-kQS-YH9cFaTeXU6a3rXWQ4xizmzEE4PMju4175UTnvBL07oMnk","theme":"miys","theme_token":null},"ajaxTrustedUrl":{"\/en\/search\/node":true},"user":{"uid":0,"permissionsHash":"58c83de4db5f980a96ce6a55ff30964ca94c41b3aa54297e14f2aeb121dfb93e"}}</script>
+<script src="/sites/iam.metu.edu.tr/files/js/js_Vgw2SGKUg47UQIrgQ1Kb-WnY8QtJsd6slwixqjw_UMI.js?scope=header&amp;delta=0&amp;language=en&amp;theme=miys&amp;include=eJxLz89Pz0mNL0lM108HEjrpqHy9xKzECp3czMpi_fSc_KTEHN3iksqczLx0AGZJFZg"></script>
+<script src="/modules/contrib/google_tag/js/gtag.js?tj6pbe"></script>
+
+  </head>
+  <body class="layout-one-sidebar layout-sidebar-first page-node-23 path-node node--type-page">
+    <a href="#main-content" class="visually-hidden-focusable">
+      Skip to main content
+    </a>
+    
+      <div class="dialog-off-canvas-main-canvas" data-off-canvas-main-canvas>
+    
+<div id="page-wrapper">
+  <div id="page">
+    <header id="header" class="header" role="banner" aria-label="Site header">
+                        <nav class="navbar" id="navbar-top">
+                    <div class="container">
+                          <section class="region region-secondary-menu">
+    <nav role="navigation" aria-labelledby="block-miys-secondary-menu-menu" id="block-miys-secondary-menu" class="block block-menu navigation menu--secondary">
+            
+  <h2 class="visually-hidden" id="block-miys-secondary-menu-menu">Secondary menu</h2>
+  
+
+        
+                  <ul class="clearfix nav" data-component-id="miys:menu">
+                    <li class="nav-item nav-lang-en">
+                <a href="https://www.metu.edu.tr" target="_blank" class="nav-link nav-link-https--wwwmetuedutr">METU</a>
+              </li>
+                <li class="nav-item nav-lang-en">
+                <a href="https://open.metu.edu.tr/?locale-attribute=en" class="nav-link nav-link-https--openmetuedutr-locale-attributeen">OpenMETU</a>
+              </li>
+                <li class="nav-item nav-lang-en">
+                <a href="https://iam.metu.edu.tr/en/form/feedback-form" class="nav-link nav-link-https--iammetuedutr-en-form-feedback-form">Feedback</a>
+              </li>
+                <li class="nav-item nav-lang-tr">
+                <a href="https://www.metu.edu.tr/tr" target="_blank" class="nav-link nav-link-https--wwwmetuedutr-tr">ODTÜ</a>
+              </li>
+        </ul>
+  
+
+
+
+  </nav>
+<div class="language-switcher-language-url block block-language block-language-blocklanguage-interface" id="block-miys-language-switcher-secondary" role="navigation">
+  
+    
+      <div class="content">
+      
+
+  <nav class="links nav links-inline"><span hreflang="en" data-drupal-link-system-path="node/23" class="en nav-link is-active" aria-current="page"><a href="/en/scientific-computing" class="language-link is-active" hreflang="en" data-drupal-link-system-path="node/23" aria-current="page">English</a></span><span hreflang="tr" data-drupal-link-system-path="node/23" class="tr nav-link"><a href="/tr/bilimsel-hesaplama" class="language-link" hreflang="tr" data-drupal-link-system-path="node/23">Turkish</a></span></nav>
+
+    </div>
+  </div>
+<div class="search-block-form block block-search block-search-form-block" data-drupal-selector="search-block-form" id="block-miys-search-form" role="search">
+  
+    
+      <div class="content">
+      <div class="offcanvas-search-trigger-wrapper">
+  <button type="button" data-feather="search" data-bs-toggle="offcanvas" data-bs-target="#offcanvasTop" aria-controls="offcanvasTop"></button>
+</div>
+<div class="offcanvas offcanvas-top" tabindex="-1" id="offcanvasTop" aria-labelledby="offcanvasTopLabel">
+  <div class="offcanvas-body">
+    <div class="container">
+      <div class="row">
+        <div class="col">
+          <form action="/en/search/node" method="get" id="search-block-form" accept-charset="UTF-8" class="search-form search-block-form form-row">
+            
+
+
+
+
+        
+  <div class="js-form-item js-form-type-search form-type-search js-form-item-keys form-item-keys form-no-label mb-3">
+          <label for="edit-keys" class="visually-hidden">Search</label>
+                    <input title="Enter the terms you wish to search for." placeholder="Search..." data-drupal-selector="edit-keys" type="search" id="edit-keys" name="keys" value="" size="15" maxlength="128" class="form-search form-control" />
+
+                      </div>
+<div data-drupal-selector="edit-actions" class="form-actions js-form-wrapper form-wrapper mb-3" id="edit-actions"><button data-drupal-selector="edit-submit" type="submit" id="edit-submit" value="Search" class="button js-form-submit form-submit btn btn-primary">Search</button>
+</div>
+
+            <div class="btn-close-wrapper">
+              <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    </div>
+  </div>
+
+  </section>
+
+              
+                                  </div>
+                    </nav>
+                          <nav class="navbar navbar-expand-lg" id="navbar-main">
+                        <div class="container">
+                                  <div class="d-inline-block site-branding site-logo mb-3 mb-md-4_2 me-auto me-lg-4 order-first">
+      <a href="/en" title="Home" rel="home">
+        <img src="/themes/custom/miys/images/logos/metu.svg" alt="Home" class="img-fluid" />
+      </a>
+    </div>
+        <div class="d-inline-flex align-items-center site-branding site-name mb-lg-4_2 py-3 ps-lg-4 order-4 order-lg-1">
+      <a href="/en" title="Home" rel="home">
+        INSTITUTE OF APPLIED MATHEMATICS
+      </a>
+    </div>
+    <div class="language-switcher-language-url block block-language block-language-blocklanguage-interface" id="block-miys-language-switcher-header" role="navigation">
+  
+    
+      <div class="content">
+      
+
+  <nav class="links nav links-inline"><span hreflang="en" data-drupal-link-system-path="node/23" class="en nav-link is-active" aria-current="page"><a href="/en/scientific-computing" class="language-link is-active" title="English" hreflang="en" data-drupal-link-system-path="node/23" aria-current="page">EN</a></span><span hreflang="tr" data-drupal-link-system-path="node/23" class="tr nav-link"><a href="/tr/bilimsel-hesaplama" class="language-link" title="Turkish" hreflang="tr" data-drupal-link-system-path="node/23">TR</a></span></nav>
+
+    </div>
+  </div>
+
+
+                              <button class="search-toggler" type="button" data-feather="search" data-bs-toggle="offcanvas" data-bs-target="#offcanvasTop" aria-controls="offcanvasTop"></button>
+                <button class="navbar-toggler collapsed" type="button" data-bs-toggle="offcanvas" data-bs-target="#CollapsingNavbar" aria-controls="CollapsingNavbar" aria-expanded="false" aria-label="Toggle navigation"><span class="navbar-toggler-icon"></span></button>
+                <div class="offcanvas offcanvas-start" id="CollapsingNavbar">
+                                      <div class="offcanvas-header">
+                      <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+                    </div>
+                    <div class="offcanvas-body">
+                                      <nav role="navigation" aria-labelledby="block-miys-main-menu-menu" id="block-miys-main-menu" class="block block-menu navigation menu--main">
+            
+  <h2 class="visually-hidden" id="block-miys-main-menu-menu">Main navigation</h2>
+  
+
+        
+              <ul class="clearfix nav navbar-nav" data-component-id="miys:menu_main">
+                    <li class="nav-item nav-lang-en">
+                          <a href="/en" class="nav-link nav-link--en" data-drupal-link-system-path="&lt;front&gt;">Home</a>
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">UME</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/about-iam" class="nav-link--en-about-iam" data-drupal-link-system-path="node/6">Hakkımızda</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Yönetim</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/current" class="nav-link--en-current" data-drupal-link-system-path="node/7">Mevcut Yönetim</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/former-directors" class="nav-link--en-former-directors" data-drupal-link-system-path="node/8">Eski Enstitü Müdürlerimiz</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/mission-vision-values" class="nav-link--en-mission-vision-values" data-drupal-link-system-path="node/10">Misyon, Vizyon ve Değerler</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/collaborations" class="nav-link--en-collaborations" data-drupal-link-system-path="node/11">İşbirliklerimiz</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Raporlar</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/annual-reports" class="nav-link--en-annual-reports" data-drupal-link-system-path="node/13">Faaliyet Raporları</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/general-reports" class="nav-link--en-general-reports" data-drupal-link-system-path="node/14">Genel Raporlar</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/outlook-and-viewpoints" class="nav-link--en-outlook-and-viewpoints" data-drupal-link-system-path="node/15">Görünüm ve Bakışaçıları</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/contact" class="nav-link--en-contact" data-drupal-link-system-path="node/16">İletişim</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Hizmetler ve İmkanlar</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/cryptographic-module-test-lab" class="nav-link--en-cryptographic-module-test-lab" data-drupal-link-system-path="node/18">Kriptografik Modül Test Laboratuvarı</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="https://s2rl.iam.metu.edu.tr" class="nav-link-https--s2rliammetuedutr">Sistem Güvenliği Araştırma Laboratuvarı</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/siam-student-chapter" class="nav-link--en-siam-student-chapter" data-drupal-link-system-path="node/19">SIAM Öğrenci Topluluğu</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/europt" class="nav-link--en-europt" data-drupal-link-system-path="node/35">EUROPT</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/hayri-korezlioglu-seminar-room" class="nav-link--en-hayri-korezlioglu-seminar-room" data-drupal-link-system-path="node/36">Hayri Körezlioğlu Seminer Odası</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link nav-link-" aria-expanded="false" aria-haspopup="true">IAM</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/about-iam" class="nav-link--en-about-iam" data-drupal-link-system-path="node/6">About IAM</a>
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Administration</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/current" class="nav-link--en-current" data-drupal-link-system-path="node/7">Current</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/former-directors" class="nav-link--en-former-directors" data-drupal-link-system-path="node/8">Former Directors</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/mission-vision-values" class="nav-link--en-mission-vision-values" data-drupal-link-system-path="node/10">Mission &amp; Vision &amp; Values</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/collaborations" class="nav-link--en-collaborations" data-drupal-link-system-path="node/11">Collaborations</a>
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Reports</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/annual-reports" class="nav-link--en-annual-reports" data-drupal-link-system-path="node/13">Annual Reports</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/general-reports" class="nav-link--en-general-reports" data-drupal-link-system-path="node/14">General Reports</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/outlook-and-viewpoints" class="nav-link--en-outlook-and-viewpoints" data-drupal-link-system-path="node/15">Outlook and Viewpoints</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/contact" class="nav-link--en-contact" data-drupal-link-system-path="node/16">Contact</a>
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Services &amp; Facilities</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/cryptographic-module-test-lab" class="nav-link--en-cryptographic-module-test-lab" data-drupal-link-system-path="node/18">Cryptographic Module Test Laboratory</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://s2rl.iam.metu.edu.tr/" class="nav-link-https--s2rliammetuedutr-">Systems Security Research Lab.</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/siam-student-chapter" class="nav-link--en-siam-student-chapter" data-drupal-link-system-path="node/19">SIAM Student Chapter</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/europt" class="nav-link--en-europt" data-drupal-link-system-path="node/35">EUROPT</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/hayri-korezlioglu-seminar-room" class="nav-link--en-hayri-korezlioglu-seminar-room" data-drupal-link-system-path="node/36">Hayri Körezlioğlu Seminar Room</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded dropdown">
+                          <a href="https://iam.metu.edu.tr/en" class="nav-link nav-link-https--iammetuedutr-en" aria-expanded="false" aria-haspopup="true">Application &amp; Admission</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/application-and-admission" class="nav-link--en-application-and-admission" data-drupal-link-system-path="node/137">Application and Admission</a>
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Job Applications</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <span class="nav-link-">--&gt; Short Term</span>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <span class="nav-link-">Opportunities at IAM</span>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/opportunities-students" class="nav-link--en-opportunities-students" data-drupal-link-system-path="node/37">Opportunities for Students</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/long-term" class="nav-link--en-long-term" data-drupal-link-system-path="node/38">Long Term</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded active dropdown">
+                          <span class="nav-link active nav-link-" aria-expanded="false" aria-haspopup="true">Academics</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en menu-item--expanded active dropdown">
+                          <span class="active nav-link-" aria-expanded="false" aria-haspopup="true">Programmes</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/actuarial-sciences" class="nav-link--en-actuarial-sciences" data-drupal-link-system-path="node/20">Actuarial Sciences</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/cryptography" class="nav-link-https--iammetuedutr-en-cryptography">Cryptography</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/financial-mathematics" class="nav-link-https--iammetuedutr-en-financial-mathematics">Financial Mathematics</a>
+              </li>
+                <li class="dropdown-item nav-lang-en active">
+                          <a href="/en/scientific-computing" class="active nav-link--en-scientific-computing is-active" data-drupal-link-system-path="node/23" aria-current="page">Scientific Computing</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/curricula" class="nav-link-https--iammetuedutr-en-curricula">-&gt;Curricula</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/phd-qualifying-examination" class="nav-link-https--iammetuedutr-en-phd-qualifying-examination">-&gt;PhD Qualifying Examination</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Courses</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/actuarial-science-courses" class="nav-link-https--iammetuedutr-en-actuarial-science-courses">Actuarial Science Courses</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/cryptography-courses" class="nav-link-https--iammetuedutr-en-cryptography-courses">Cryptography Courses</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/financial-mathematics-courses" class="nav-link-https--iammetuedutr-en-financial-mathematics-courses">Financial Mathematics Courses</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/scientific-computing-courses" class="nav-link-https--iammetuedutr-en-scientific-computing-courses">Scientific Computing Courses</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded dropdown">
+                          <a href="https://iam.metu.edu.tr/en" class="nav-link nav-link-https--iammetuedutr-en" aria-expanded="false" aria-haspopup="true">People</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Faculty</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/current-faculty" class="nav-link--en-current-faculty" data-drupal-link-system-path="node/62">Current Faculty</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/former-faculty-members" class="nav-link--en-former-faculty-members" data-drupal-link-system-path="node/63">Former Faculty Members</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/affiliated-faculty" class="nav-link--en-affiliated-faculty" data-drupal-link-system-path="node/64">Affiliated Faculty</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/research-assistants" class="nav-link--en-research-assistants" data-drupal-link-system-path="node/138">Research Assistants</a>
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Staff</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/current-staff" class="nav-link--en-current-staff" data-drupal-link-system-path="node/140">Current Staff</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/retired-staff" class="nav-link--en-retired-staff" data-drupal-link-system-path="node/67">Retired Staff</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded dropdown">
+                          <a href="https://iam.metu.edu.tr/en" class="nav-link nav-link-https--iammetuedutr-en" aria-expanded="false" aria-haspopup="true">Research</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/research-groups" class="nav-link--en-research-groups" data-drupal-link-system-path="node/49">Research Groups</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/publications" class="nav-link--en-publications" data-drupal-link-system-path="node/50">Publications</a>
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Theses &amp; Term Projects</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/phd-theses" class="nav-link--en-phd-theses" data-drupal-link-system-path="node/142">PhD Theses</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/msc-theses" class="nav-link--en-msc-theses" data-drupal-link-system-path="node/143">MSc Theses</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/term-projects" class="nav-link--en-term-projects" data-drupal-link-system-path="node/144">Term Projects</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/projects" class="nav-link--en-projects" data-drupal-link-system-path="node/161">Projects</a>
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Lecture Notes</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf" class="nav-link--sites-iammetuedutr-files-lecturenotes-ilk-4-sayfa-9700510-quantum-cryptography-removedpdf">IAM 510 Quantum Cryptography</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link nav-link-" aria-expanded="false" aria-haspopup="true">News &amp; Events</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Seminars</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/colloquia" class="nav-link--en-colloquia" data-drupal-link-system-path="node/155">Colloquia</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/special-seminarslectures" class="nav-link--en-special-seminarslectures" data-drupal-link-system-path="node/76">Special Seminars/Lectures</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/thesis-defences" class="nav-link--en-thesis-defences" data-drupal-link-system-path="node/72">Thesis Defences</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/siam-student-chapter-seminars" class="nav-link--en-siam-student-chapter-seminars" data-drupal-link-system-path="node/157">SIAM Student Chapter Seminars</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/lecture-notes" class="nav-link-https--iammetuedutr-en-lecture-notes">-&gt;Public Lecture Notes</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/conferences-and-workshops" class="nav-link--en-conferences-and-workshops" data-drupal-link-system-path="node/79">Conferences and Workshops</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link nav-link-" aria-expanded="false" aria-haspopup="true">Awards</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/mustafa-parlar-award" class="nav-link--en-mustafa-parlar-award" data-drupal-link-system-path="node/121">Mustafa Parlar Award</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/awarded-graduates" class="nav-link--en-awarded-graduates" data-drupal-link-system-path="node/122">Awarded Graduates</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/announcements/metu-graduate-awards" class="nav-link--en-announcements-metu-graduate-awards" data-drupal-link-system-path="node/99">METU Graduate Awards</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link nav-link-" aria-expanded="false" aria-haspopup="true">Rules &amp; Forms</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Rules &amp; Regulations</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/regulations-iam" class="nav-link--en-regulations-iam" data-drupal-link-system-path="node/123">Regulations @ IAM</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/thesis-procedures" class="nav-link--en-thesis-procedures" data-drupal-link-system-path="node/125">Thesis Procedures</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/non-thesis-procedures" class="nav-link--en-non-thesis-procedures" data-drupal-link-system-path="node/127">Non-Thesis Procedures</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="https://fbe.metu.edu.tr/tr/takip-kartlari" class="nav-link-https--fbemetuedutr-tr-takip-kartlari">Procedures ( FBE İşleyiş Kartları)</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/frequently-asked-questions" class="nav-link--en-frequently-asked-questions" data-drupal-link-system-path="node/17">Frequently Asked Questions</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Forms</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/form-thesis" class="nav-link--en-form-thesis" data-drupal-link-system-path="node/126">Form Thesis</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/form-courses" class="nav-link--en-form-courses" data-drupal-link-system-path="node/128">Form Courses</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/form-phdqualification" class="nav-link--en-form-phdqualification" data-drupal-link-system-path="node/129">Form PhD Qualification</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/form-awards" class="nav-link--en-form-awards" data-drupal-link-system-path="node/130">Form Awards</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/form-transfer-thesis-program" class="nav-link--en-form-transfer-thesis-program" data-drupal-link-system-path="node/131">Form Transfer to Thesis Program</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/form-others" class="nav-link--en-form-others" data-drupal-link-system-path="node/132">Form Others</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Scholarship &amp; Funding</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="/en/scholarship-funding" class="nav-link--en-scholarship-funding" data-drupal-link-system-path="node/133">Scholarship &amp; Funding</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/yok-1002000-phd-scholarship" class="nav-link--en-yok-1002000-phd-scholarship" data-drupal-link-system-path="node/135">YÖK 100/2000 PhD Scholarship</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">Başvuru &amp; Kabul</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/application-and-admission" class="nav-link--en-application-and-admission" data-drupal-link-system-path="node/137">Lisansüstü Başvuru ve Kabul</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">İş Başvuruları</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/opportunities-students" class="nav-link--en-opportunities-students" data-drupal-link-system-path="node/37">Öğrenciler için Fırsatlar</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/long-term" class="nav-link--en-long-term" data-drupal-link-system-path="node/38">Enstitümüzdeki İş Fırsatları</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">Akademik</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Programlar</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/actuarial-sciences" class="nav-link--en-actuarial-sciences" data-drupal-link-system-path="node/20">Aktüerya Bilimleri</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/cryptography" class="nav-link--en-cryptography" data-drupal-link-system-path="node/21">Kriptografi</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/financial-mathematics" class="nav-link--en-financial-mathematics" data-drupal-link-system-path="node/22">Finansal Matematik</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/scientific-computing" class="nav-link--en-scientific-computing is-active" data-drupal-link-system-path="node/23" aria-current="page">Bilimsel Hesaplama</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/curricula" class="nav-link--en-curricula" data-drupal-link-system-path="node/24">Müfredat</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/phd-qualifying-examination" class="nav-link--en-phd-qualifying-examination" data-drupal-link-system-path="node/51">Doktora Yeterlilik Sınavı</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Dersler</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/actuarial-science-courses" class="nav-link--en-actuarial-science-courses" data-drupal-link-system-path="node/57">Aktüerya Bilimleri Dersler</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/cryptography-courses" class="nav-link--en-cryptography-courses" data-drupal-link-system-path="node/59">Kriptografi Dersler</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/financial-mathematics-courses" class="nav-link--en-financial-mathematics-courses" data-drupal-link-system-path="node/60">Finansal Matematik Dersler</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/scientific-computing-courses" class="nav-link--en-scientific-computing-courses" data-drupal-link-system-path="node/61">Bilimsel Hesaplama Dersler</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-en menu-item--expanded dropdown">
+                          <span class="nav-link nav-link-" aria-expanded="false" aria-haspopup="true">Internal Control</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-en">
+                          <a href="https://iam.metu.edu.tr/en/internal-control-and-organization" class="nav-link-https--iammetuedutr-en-internal-control-and-organization">Internal Control and Organization</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">Kişiler</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Öğretim Üyeleri</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/current-faculty" class="nav-link--en-current-faculty" data-drupal-link-system-path="node/62">Mevcut Öğretim Üyeleri</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/former-faculty-members" class="nav-link--en-former-faculty-members" data-drupal-link-system-path="node/63">Eski Öğretim Üyeleri</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/affiliated-faculty" class="nav-link--en-affiliated-faculty" data-drupal-link-system-path="node/64">Bağlantılı Öğretim Üyeleri</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/research-assistants" class="nav-link--en-research-assistants" data-drupal-link-system-path="node/138">Araştırma Görevlileri</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">İdari Personel</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/current-staff" class="nav-link--en-current-staff" data-drupal-link-system-path="node/140">Mevcut İdari Personel</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/retired-staff" class="nav-link--en-retired-staff" data-drupal-link-system-path="node/67">Emekli İdari Personel</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">Araştırma</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/research-groups" class="nav-link--en-research-groups" data-drupal-link-system-path="node/49">Araştırma Grupları</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/publications" class="nav-link--en-publications" data-drupal-link-system-path="node/50">Yayınlar</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Tezler &amp; Dönem Projeleri</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/phd-theses" class="nav-link--en-phd-theses" data-drupal-link-system-path="node/142">Doktora Tezleri</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/msc-theses" class="nav-link--en-msc-theses" data-drupal-link-system-path="node/143">Yüksek Lisans Tezleri</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/term-projects" class="nav-link--en-term-projects" data-drupal-link-system-path="node/144">Dönem Projeleri</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/projects" class="nav-link--en-projects" data-drupal-link-system-path="node/161">Projeler</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Ders Notları</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf" class="nav-link-https--iammetuedutr-sites-iammetuedutr-files-lecturenotes-ilk-4-sayfa-9700510-quantum-cryptography-removedpdf">IAM510 Kuantum Kriptografi</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">Haberler ve Etkinlikler</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Seminerler</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/colloquia" class="nav-link--en-colloquia" data-drupal-link-system-path="node/155">Söyleşiler</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/special-seminarslectures" class="nav-link--en-special-seminarslectures" data-drupal-link-system-path="node/76">Özel Seminerler/Dersler</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/thesis-defences" class="nav-link--en-thesis-defences" data-drupal-link-system-path="node/72">Tez Savunmaları</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/siam-student-chapter-seminars" class="nav-link--en-siam-student-chapter-seminars" data-drupal-link-system-path="node/157">SIAM Öğrenci Topluluğu Seminerleri</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/lecture-notes" class="nav-link--en-lecture-notes" data-drupal-link-system-path="node/56">Açık Ders Notları</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/conferences-and-workshops" class="nav-link--en-conferences-and-workshops" data-drupal-link-system-path="node/79">Konferanslar ve Çalıştaylar</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">Ödüller</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/mustafa-parlar-award" class="nav-link--en-mustafa-parlar-award" data-drupal-link-system-path="node/121">Mustafa Parlar Ödülü</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/awarded-graduates" class="nav-link--en-awarded-graduates" data-drupal-link-system-path="node/122">Ödül Alan Mezunlarımız</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/announcements/metu-graduate-awards" class="nav-link--en-announcements-metu-graduate-awards" data-drupal-link-system-path="node/99">ODTÜ Tez Ödülleri</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">Kurallar &amp; Formlar</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Kurallar ve Yönetmelikler</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/regulations-iam" class="nav-link--en-regulations-iam" data-drupal-link-system-path="node/123">UME Yönetmeliği</a>
+              </li>
+                <li class="dropdown-item nav-lang-en">
+                          <a href="/en/thesis-procedures" class="nav-link--en-thesis-procedures" data-drupal-link-system-path="node/125">Tez Prosedürleri</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/non-thesis-procedures" class="nav-link--en-non-thesis-procedures" data-drupal-link-system-path="node/127">Tezsiz Program Prosedürleri</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="https://fbe.metu.edu.tr/tr/takip-kartlari" class="nav-link-https--fbemetuedutr-tr-takip-kartlari">Prosedürler (FBE İşleyiş Kartları)</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/frequently-asked-questions" class="nav-link--en-frequently-asked-questions" data-drupal-link-system-path="node/17">Sıkça Sorulan Sorular (SSS)</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Formlar</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/form-thesis" class="nav-link--en-form-thesis" data-drupal-link-system-path="node/126">Tez Formları</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/form-courses" class="nav-link--en-form-courses" data-drupal-link-system-path="node/128">Ders Formları</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/form-phdqualification" class="nav-link--en-form-phdqualification" data-drupal-link-system-path="node/129">Doktora Tezi Formları</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/form-awards" class="nav-link--en-form-awards" data-drupal-link-system-path="node/130">Ödül Başvuru Formları</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/form-transfer-thesis-program" class="nav-link--en-form-transfer-thesis-program" data-drupal-link-system-path="node/131">Tezli Programa Geçiş Formları</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/form-others" class="nav-link--en-form-others" data-drupal-link-system-path="node/132">Diğer Formlar</a>
+              </li>
+        </ul>
+  
+              </li>
+                <li class="dropdown-item nav-lang-tr menu-item--expanded dropdown">
+                          <span class="nav-link-" aria-expanded="false" aria-haspopup="true">Burs ve Fonlar</span>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/scholarship-funding" class="nav-link--en-scholarship-funding" data-drupal-link-system-path="node/133">Genel Bilgiler</a>
+              </li>
+                <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/yok-1002000-phd-scholarship" class="nav-link--en-yok-1002000-phd-scholarship" data-drupal-link-system-path="node/135">YÖK 100/2000 Doktora Bursu</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+              </li>
+                <li class="nav-item nav-lang-tr menu-item--expanded dropdown">
+                          <a href="/en" class="nav-link nav-link--en" aria-expanded="false" aria-haspopup="true" data-drupal-link-system-path="&lt;front&gt;">İç Kontrol</a>
+          <span class="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true"></span>
+                        <ul class="dropdown-menu">
+                    <li class="dropdown-item nav-lang-tr">
+                          <a href="/en/internal-control-and-organization" class="nav-link--en-internal-control-and-organization" data-drupal-link-system-path="node/199">İç Kontrol ve Organizasyon</a>
+              </li>
+        </ul>
+  
+              </li>
+        </ul>
+  
+
+
+
+  </nav>
+
+
+                                                        </div>
+                                  </div>
+                                                    </div>
+                      </nav>
+                  </header>
+          <div class="highlighted">
+        <aside class="container section clearfix" role="complementary">
+            <div data-drupal-messages-fallback class="hidden"></div>
+
+
+        </aside>
+      </div>
+            <div id="main-wrapper" class="layout-main-wrapper clearfix">
+              <div id="main" class="container">
+          <div class="row row-offcanvas row-offcanvas-left clearfix">
+              <main class="main-content col" id="content" role="main">
+                <section class="section">
+                    <div id="block-miys-breadcrumbs" class="block block-system block-system-breadcrumb-block">
+  
+    
+      <div class="content">
+      
+  <nav role="navigation" aria-label="breadcrumb">
+  <ol class="breadcrumb">
+            <li class="breadcrumb-item">
+        <a href="/en">Home</a>
+                  <i data-feather="chevron-right"></i>
+              </li>
+                <li class="breadcrumb-item active">
+        Scientific Computing
+              </li>
+        </ol>
+</nav>
+
+
+    </div>
+  </div>
+
+
+                  <a href="#main-content" id="main-content" tabindex="-1"></a>
+                    <div id="block-miys-page-title" class="block block-core block-page-title-block">
+  
+    
+      <div class="content">
+      
+  <h1 class="title"><span class="field field--name-title field--type-string field--label-hidden">Scientific Computing</span>
+</h1>
+
+
+    </div>
+  </div>
+<div id="block-miys-content" class="block block-system block-system-main-block">
+  
+    
+      <div class="content">
+      
+
+<article class="node node--type-page node--view-mode-full clearfix">
+  <header>
+    
+        
+      </header>
+  <div class="node__content clearfix">
+      <div class="layout layout--onecol">
+    <div  class="layout__region layout__region--content">
+      <div class="block block-layout-builder block-field-blocknodepagebody">
+  
+    
+      <div class="content">
+      
+            <div class="clearfix text-formatted field field--name-body field--type-text-with-summary field--label-hidden field__item"><p><img src="/sites/iam.metu.edu.tr/files/sc_cloud_sliders_0_0.png" align="middle" width="100%"></p>
+<hr>
+<div id="accordion">
+<div>
+<div>
+<h4><span style="color:#1f8edf;">Introduction (Scientific Computing)</span></h4>
+</div>
+<div id="intro">
+<div>
+<p class="text-align-justify">Scientific Computing (SC) is a broad, multidisciplinary area that encompasses mathematics, computer science, and applications in science and engineering. SC makes use of the techniques of applied mathematics and computer science for the solution of scientific and engineering problems. Therefore, SC is nowadays regarded as a "third pillar" of science, along with theory and experiment in the advancement of scientific knowledge and engineering practice.</p>
+<p class="text-align-justify">The graduate program in SC is designed according to the multidisciplinary nature of SC, including the mathematical and algorithmic foundations underlying numerical simulation. The coursework ranges from foundation mathematics and fundamental numerical algorithms to such practical topics in fluid mechanics, PDE-constrained optimization, finite element methods, statistical learning, dynamical systems, and computational finance. The SC program aims to produce highly skilled scientist capable of applying numerical methods and critical evaluation of their results to their field in science and engineering. It brings together best practice in computing with cutting edge science and fills in the computational gap in the traditional mathematical, science, and engineering programs.</p>
+<p><img style="display:block;margin-left:auto;margin-right:auto;vertical-align:middle;" src="/sites/iam.metu.edu.tr/files/iamData/images/flyer/scientific_computing_flyer2.png" width="600" height="849"></p>
+</div>
+</div>
+</div>
+<div>
+<hr>
+<h4>&nbsp;</h4>
+<div>
+<h4><span style="color:#1f8edf;">Objectives</span></h4>
+</div>
+<div id="objective" aria-expanded="true">
+<div>
+<p>The objectives of scientific computing program are:</p>
+<ul>
+<li data-list-item-id="e1ae0838d2669b2aa12b75746c734f324">
+<p class="text-align-justify">To educate graduates from different disciplines with the aim to develop and apply their skills to the solution of real life problems from science, engineering, industry;</p>
+</li>
+<li data-list-item-id="e347fe3825f54f9abc01d869bfc621b14">
+<p class="text-align-justify">To develop and maintain collaboration with scientist elsewhere by building a comprehensive and international research platform, to support academic and technological exchange and advancement;</p>
+</li>
+<li data-list-item-id="ebdbd07f8fe2cf05b9a383c4a38c32765">
+<p class="text-align-justify">To conduct fundamental and frontier research with advanced computational approaches, thereby talents worldwide and train highly qualified research personal, to support scientific development in Turkey.</p>
+</li>
+</ul>
+</div>
+</div>
+<hr>
+<h4>&nbsp;</h4>
+<div>
+<h4><span style="color:#1f8edf;">Degrees Offered</span></h4>
+<ul>
+<li data-list-item-id="ed8d31ee3edcbd150c5fe1c7850356876">MSc with Thesis in Scientific Computing</li>
+<li data-list-item-id="ea4b12df55a61b04c6fd58a946714daf9">MSc without Thesis in Scientific Computing</li>
+<li data-list-item-id="ea5b578a69427fa9615a1278111cadeb3">PhD in Scientific Computing</li>
+<li data-list-item-id="e23fc5a4281ee936faa8e67444cf8ec91">Integrated PhD in Scientific Computing</li>
+</ul>
+<p>See&nbsp;<a href="https://iam.metu.edu.tr/en/curricula" target="_blank">Curricula for Scientific Computing</a>&nbsp;or see&nbsp;<a href="https://catalog.metu.edu.tr/program.php?inst_prog=972" target="_blank">Academic Catalogue at METU</a>.</p>
+<div>
+<hr>
+<h4><span style="color:#1f8edf;">Admission</span></h4>
+</div>
+<div id="admission" aria-expanded="true">
+<p class="text-align-justify">University graduates of any discipline, who are willing to acquire expertise in Scientific Computing and have strong interest to combine skills in&nbsp;<span data-mce-mark="1">applied mathematics</span>,&nbsp;<span data-mce-mark="1">computer programming</span>, and&nbsp;<span data-mce-mark="1">scientific and engineering applications</span>, are natural candidates for the program. Admission procedure will be implemented according to the Rules and Regulations concerning Graduate Studies of Middle East Technical University. Selection of the candidates for the programs is generally based on the applicants’ scores in</p>
+<ul>
+<li data-list-item-id="e7511660292f5eae8a0d0b84c3679d5cf">
+<p class="text-align-justify">Graduate Education Examination (ALES/GRE),</p>
+</li>
+<li data-list-item-id="eea5fe16962c9e0c9db4e6d0992abca68">
+<p class="text-align-justify">English Proficiency Exam (METE-EPE/TOEFL/PTE),</p>
+</li>
+<li data-list-item-id="e9bec2f044a23f10e6a1b7bebbabb4ccd">
+<p class="text-align-justify">Graduation CGPA (BS and/or MSc),</p>
+</li>
+<li data-list-item-id="ed0e4324e3d2c2eb60fedeaf6b4581dfc">
+<p class="text-align-justify">Evaluation by the Scientific Computing Admission Committee.</p>
+</li>
+</ul>
+<p class="text-align-justify">It is strongly suggested that applicants should take the opportunity to contact to the faculty (or affiliated faculty) members for their opinions on possible research topics and recommendations. Especially, the&nbsp;<span data-mce-mark="1"><strong>PhD candidates</strong> (applicants)</span>&nbsp;are advised to submit a letter of recommendation of a faculty (or affiliated faculty) member together with a thoroughly specified letter of intention.</p>
+<p>See&nbsp;<a href="https://iam.metu.edu.tr/en/application-and-admission" target="_blank">Application and Admission</a>.</p>
+</div>
+</div>
+<hr>
+<h4><span style="color:#1f8edf;">Contact</span></h4>
+</div>
+<div class="text-align-justify" id="admission" aria-expanded="true">Please contact Ömür Uğur (Head of Scientific Computing) at ougur[at]metu.edu.tr - for any questions!</div>
+<!------------------------AFİŞLER GECİCİ OLARAK KAPATILDI----------------------- --><hr></div>
+<p>Download the flyers, summarizing the Scientific Computing Program at IAM, in&nbsp;<a href="/en/system/files/iamData/dataFiles/iamDocs/sci_comp_eng_brosur0922.pdf" target="_blank" title="flyer_sc_en.pdf">English</a>&nbsp; . Follow us on&nbsp;<a href="https://www.facebook.com/SCiamMETU/" target="_blank">Facebook</a>,&nbsp;<a href="https://www.instagram.com/scmetu/" target="_blank">Instagram</a>, and&nbsp;<a href="https://www.youtube.com/channel/UCzOmJ7lO0ywuQqwoI3YE7rw/featured?view_as=subscriber" target="_blank">Youtube</a>.</p>
+<h4><a href="https://iam.metu.edu.tr/scientific-computing#objective" data-toggle="collapse" data-parent="#accordion">&nbsp;</a></h4>
+</div>
+      
+    </div>
+  </div>
+<div class="block block-layout-builder block-field-blocknodepagechanged">
+  
+    
+      <div class="content">
+      
+  <div class="field field--name-changed field--type-changed field--label-above">
+    <div class="field__label">Last updated</div>
+              <div class="field__item"><time datetime="2026-06-18T10:21:16+03:00" class="datetime">18/06/2026 - 10:21</time>
+</div>
+          </div>
+
+    </div>
+  </div>
+
+    </div>
+  </div>
+
+  </div>
+</article>
+
+    </div>
+  </div>
+
+
+                </section>
+              </main>
+                          <div class="sidebar_first sidebar col-md-2 order-first" id="sidebar_first">
+                <aside class="section" role="complementary">
+                    <nav role="navigation" aria-labelledby="block-miys-main-navigation-sidebar-first-menu" id="block-miys-main-navigation-sidebar-first" class="block block-menu navigation menu--main">
+      
+  <h2 id="block-miys-main-navigation-sidebar-first-menu">Programmes</h2>
+  
+
+        
+                  <ul class="clearfix nav" data-component-id="miys:menu">
+                    <li class="nav-item nav-lang-en">
+                <a href="/en/actuarial-sciences" class="nav-link nav-link--en-actuarial-sciences" data-drupal-link-system-path="node/20">Actuarial Sciences</a>
+              </li>
+                <li class="nav-item nav-lang-en">
+                <a href="https://iam.metu.edu.tr/en/cryptography" class="nav-link nav-link-https--iammetuedutr-en-cryptography">Cryptography</a>
+              </li>
+                <li class="nav-item nav-lang-en">
+                <a href="https://iam.metu.edu.tr/en/financial-mathematics" class="nav-link nav-link-https--iammetuedutr-en-financial-mathematics">Financial Mathematics</a>
+              </li>
+                <li class="nav-item nav-lang-en active">
+                <a href="/en/scientific-computing" class="nav-link active nav-link--en-scientific-computing is-active" data-drupal-link-system-path="node/23" aria-current="page">Scientific Computing</a>
+              </li>
+                <li class="nav-item nav-lang-en">
+                <a href="https://iam.metu.edu.tr/en/curricula" class="nav-link nav-link-https--iammetuedutr-en-curricula">-&gt;Curricula</a>
+              </li>
+                <li class="nav-item nav-lang-en">
+                <a href="https://iam.metu.edu.tr/en/phd-qualifying-examination" class="nav-link nav-link-https--iammetuedutr-en-phd-qualifying-examination">-&gt;PhD Qualifying Examination</a>
+              </li>
+        </ul>
+  
+
+
+
+  </nav>
+<div class="views-element-container block block-views block-views-blocknode-updated-block-1" id="block-miys-views-block-node-updated-block-1">
+  
+    
+      <div class="content">
+      <div><div class="view view-node-updated view-id-node_updated view-display-id-block_1 js-view-dom-id-f5136a9606382af946daa1d346ef3a881bdaa5984ab7363bff20464fc7dcc8d4">
+  
+    
+      
+      <div class="view-content">
+          <div class="views-row">
+    <div class="views-field views-field-changed"><span class="field-content">
+  <div class="field field--name-changed field--type-changed field--label-above">
+    <div class="field__label">Last updated</div>
+              <div class="field__item"><time datetime="2026-07-01T14:26:25+03:00" class="datetime">01/07/2026 - 14:26</time>
+</div>
+          </div>
+</span></div>
+  </div>
+
+    </div>
+  
+          </div>
+</div>
+
+    </div>
+  </div>
+
+
+                </aside>
+              </div>
+                                  </div>
+        </div>
+          </div>
+        <footer class="site-footer">
+              <div class="container">
+          <div class="site-footer__top clearfix row">
+            <section class="region region-footer-logo col-12 col-xl-3 pb-4 pb-xl-0">
+              <div class="footer-logo-wrapper">
+                <div class="footer-logo">
+                  <img src="/themes/custom/miys/images/logos/metu-odtu.svg">
+                </div>
+              </div>
+            </section>
+                          
+                <section class="region region-footer-social">
+    <div class="row region-wrapper">
+      <nav role="navigation" aria-labelledby="block-miys-social-menu-menu" id="block-miys-social-menu" class="block block-menu navigation menu--social">
+            
+  <h2 class="visually-hidden" id="block-miys-social-menu-menu">Social menu</h2>
+  
+
+        
+                  <ul class="clearfix nav" data-component-id="bootstrap_barrio:menu">
+                    <li class="nav-item">
+                <a href="https://www.facebook.com/iam.metu.edu.tr" class="fa-brands fa-facebook nav-link fa-brands fa-facebook nav-link-https--wwwfacebookcom-iammetuedutr" target="_blank"></a>
+              </li>
+                <li class="nav-item">
+                <a href="https://twitter.com/metu_iam" class="fa-brands fa-x-twitter nav-link fa-brands fa-x-twitter nav-link-https--twittercom-metu-iam" target="_blank"></a>
+              </li>
+                <li class="nav-item">
+                <a href="https://www.youtube.com/channel/UCRpW3LgO4FFSZJ_eO_f_1ZA" class="fa-brands fa-youtube nav-link fa-brands fa-youtube nav-link-https--wwwyoutubecom-channel-ucrpw3lgo4ffszj-eo-f-1za" target="_blank"></a>
+              </li>
+                <li class="nav-item">
+                <a href="https://www.instagram.com/metu_iam/" class="fa-brands fa-instagram nav-link fa-brands fa-instagram nav-link-https--wwwinstagramcom-metu-iam-" target="_blank"></a>
+              </li>
+                <li class="nav-item">
+                <a href="https://www.linkedin.com/company/ume-odtu/" class="fa-brands fa-linkedin nav-link fa-brands fa-linkedin nav-link-https--wwwlinkedincom-company-ume-odtu-" target="_blank"></a>
+              </li>
+        </ul>
+  
+
+
+
+  </nav>
+
+    </div>
+  </section>
+
+                        </div>
+                      <div class="site-footer__bottom">
+                <section class="row region region-footer-bottom">
+    <div id="block-miys-bottom-footer-left" class="block-content-basic block block-block-content block-block-content09045577-e4d3-4170-856f-2eb00c798182">
+  
+    
+      <div class="content">
+      
+            <div class="clearfix text-formatted field field--name-body field--type-text-with-summary field--label-hidden field__item"><p>Uygulamalı Matematik Enstitüsü, Üniversiteler Mahallesi, Dumlupınar Bulvarı No:1, 06800 Çankaya/Ankara © ORTA DOĞU TEKNİK ÜNİVERSİTESİ ANKARA KAMPUSU</p>
+<p>&nbsp;</p>
+</div>
+      
+    </div>
+  </div>
+<div id="block-miys-bottom-footer-right" class="block-content-basic block block-block-content block-block-contenta62312c0-8c2b-4e3d-8d74-618dfbb02e63">
+  
+    
+      <div class="content">
+      
+            <div class="clearfix text-formatted field field--name-body field--type-text-with-summary field--label-hidden field__item"><p>© Middle East Technical University. CC-IG 2025. All rights reserved.</p>
+</div>
+      
+    </div>
+  </div>
+
+  </section>
+
+            </div>
+                  </div>
+          </footer>
+  </div>
+</div>
+
+  </div>
+
+    
+    <script src="/sites/iam.metu.edu.tr/files/js/js_jIMJzAElmfiyJcEtZOb2LcFAp3tZESRX-AobpD4qtWY.js?scope=footer&amp;delta=0&amp;language=en&amp;theme=miys&amp;include=eJxLz89Pz0mNL0lM108HEjrpqHy9xKzECp3czMpi_fSc_KTEHN3iksqczLx0AGZJFZg"></script>
+
+  </body>
+</html>

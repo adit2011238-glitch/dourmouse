@@ -274,7 +274,10 @@ def validate_tool_arguments(parameters: dict[str, Any], arguments: dict[str, Any
 
     Returns None when valid, else a human-readable error. Extra arguments
     (model noise) are tolerated; missing required fields and wrong types are
-    rejected BEFORE any handler runs.
+    rejected BEFORE any handler runs. Mutates ``arguments`` IN PLACE when it
+    coerces a numeric string (see ``_coerce_numeric_string`` below) — the
+    caller passes the same dict on to the handler, so the coercion is what
+    the handler actually sees.
     """
     props = parameters.get("properties", {})
     for required in parameters.get("required", []):
@@ -285,9 +288,47 @@ def validate_tool_arguments(parameters: dict[str, Any], arguments: dict[str, Any
         if declared is None:
             continue  # not in the schema — tolerated, handler decides
         expected = declared.get("type")
-        if expected is not None and not _matches_type(expected, value):
+        if expected is None:
+            continue
+        if not _matches_type(expected, value):
+            # v8.12: a JSON-string number ("10" for an integer field) is a
+            # known tool-calling quirk, not malformed input — observed live,
+            # web_search's max_results as a string, rejected 3x verbatim
+            # before the model gave up and dropped the argument. Coerce and
+            # re-check rather than reject outright; anything that still
+            # fails after coercion (a real non-numeric string, "abc") stays
+            # rejected exactly as before.
+            coerced = _coerce_numeric_string(expected, value)
+            if coerced is not _UNCOERCIBLE:
+                arguments[name] = coerced
+                continue
             return f"argument {name!r} must be {expected}, got {type(value).__name__}"
     return None
+
+
+_UNCOERCIBLE = object()  # sentinel: distinguishes "coerced to None" from "couldn't coerce"
+
+
+def _coerce_numeric_string(expected: str, value: Any) -> Any:
+    """A numeric-looking JSON string for an "integer"/"number" field ->
+    the real int/float, or ``_UNCOERCIBLE`` if it isn't one.
+
+    Deliberately narrow: only ``str`` values, only the two numeric
+    types, and integer coercion demands a plain sign+digits string ("10",
+    "-3") — never "3.5" ('integer' must stay a real integer, not silently
+    truncated float text).
+    """
+    if not isinstance(value, str) or expected not in ("integer", "number"):
+        return _UNCOERCIBLE
+    text = value.strip()
+    if expected == "integer":
+        if re.fullmatch(r"[+-]?\d+", text):
+            return int(text)
+        return _UNCOERCIBLE
+    try:
+        return float(text)
+    except ValueError:
+        return _UNCOERCIBLE
 
 
 def validate_against_schema(value: Any, schema: dict[str, Any]) -> str | None:

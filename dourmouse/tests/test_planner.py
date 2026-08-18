@@ -127,9 +127,21 @@ class TestBuildPlan:
     def test_multi_step_returns_numbered_steps_with_subagents(self):
         registry = build_general_registry()
         # "news" routes to the v2.3 news agent, so keep the research step
-        # unambiguous to assert research_info routing.
+        # unambiguous to assert research_info routing. v8.11: was "Search
+        # the web for NVIDIA earnings" — two accidental credits, both
+        # closed by the same fix (the planner's name match stopped being a
+        # raw substring check, so "free" no longer matches "freebuff" —
+        # dourmouse_capability_denial): "nvidia" no longer name-matches
+        # "code_nvidia" by coincidence, and "search" no longer name-matches
+        # "research_info" (a substring of the word "research") either. The
+        # second one mattered here: without it, "search the web for X" is a
+        # genuine near-tie with `mail` (whose gmail_search tool also
+        # satisfies the "search" capability verb), settled alphabetically
+        # ("mail" < "research_info"). Saying "research" instead of "search"
+        # is the honest way to mean it — a real word match, not a substring
+        # accident — and routes unambiguously.
         plan = build_plan(
-            "Search the web for NVIDIA earnings, then draft an email about it",
+            "Research Apple's latest earnings online, then draft an email about it",
             registry,
         )
         assert plan is not None
@@ -197,8 +209,11 @@ class TestPlanEventInTranscript:
                 _FakeResponse(_FakeMessage(content="Final answer.")),
             ]
         )
+        # v8.11: same fix as above — "research" instead of "search the web"
+        # (see TestBuildPlan.test_multi_step_returns_numbered_steps_with_
+        # subagents for why).
         report = run_dispatch(
-            "Search the web for facts about fusion, then draft an email about it",
+            "Research the latest Mars rover findings online, then draft an email about it",
             build_general_registry(),
             client=client,
             max_turns=2,

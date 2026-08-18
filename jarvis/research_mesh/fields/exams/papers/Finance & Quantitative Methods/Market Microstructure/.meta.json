@@ -1,0 +1,29 @@
+{
+  "domain": "Finance & Quantitative Methods",
+  "field": "Market Microstructure",
+  "tests": [
+    {
+      "url": "https://iam.metu.edu.tr/en/phd-qualifying-exam-financial-mathematics",
+      "file": "_archives/https-iam-metu-edu-tr-en-phd-qualifying--aa0b77f892.html",
+      "bytes": 73743,
+      "sha256": "aa0b77f89278289a9fe4928d5ffde91f14e80ad3fae5ff5e99f1e38186fe0823",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf",
+      "file": "_archives/https-iam-metu-edu-tr-sites-iam-metu-edu-eeea643227.pdf",
+      "bytes": 389775,
+      "sha256": "eeea64322767b4a70550abf000bcd8e6b2dd4d9a0f5c0427b02eb3556166e3f5",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://iam.metu.edu.tr/en/phd-qualifying-exam-financial-mathematics",
+      "label": "METU \u2014 PhD Qualifying Exam in Financial Mathematics"
+    }
+  ]
+}

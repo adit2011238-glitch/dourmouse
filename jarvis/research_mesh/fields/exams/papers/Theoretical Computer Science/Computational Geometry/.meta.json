@@ -1,0 +1,21 @@
+{
+  "domain": "Theoretical Computer Science",
+  "field": "Computational Geometry",
+  "tests": [
+    {
+      "url": "https://publish.illinois.edu/theory-cs/resources/qualifying-exam/",
+      "file": "_archives/https-publish-illinois-edu-theory-cs-res-1e105949b8.html",
+      "bytes": 35133,
+      "sha256": "1e105949b8634f9569f5a15e99a9d8c9d94ed8e279c06fe74969bf83f602e5fe",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://publish.illinois.edu/theory-cs/resources/qualifying-exam/",
+      "label": "UIUC TCS quals (computational geometry)"
+    }
+  ]
+}

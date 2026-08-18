@@ -1,0 +1,21 @@
+{
+  "domain": "Robotics & Control",
+  "field": "Model Predictive Control",
+  "tests": [
+    {
+      "url": "https://www.bu.edu/eng/files/2024/09/May-2024-SE-Qual-Exam-Assembled.pdf",
+      "file": "_archives/https-www-bu-edu-eng-files-2024-09-may-2-74cd6ef4e5.pdf",
+      "bytes": 662609,
+      "sha256": "74cd6ef4e596e496a91d3cc710d38014013f02a9733cb0037e2b1b957fcfe342",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.bu.edu/eng/files/2024/09/May-2024-SE-Qual-Exam-Assembled.pdf",
+      "label": "BU \u2014 Systems Engineering Qualifying Exam May 2024 (PDF)"
+    }
+  ]
+}

@@ -652,6 +652,17 @@ def launch(
     learn.open_default_store). Hermetic tests pass an explicit store or
     set DOURMOUSE_LEARN=0.
     """
+    # v8.9: in the packaged Windows build every child process would open its
+    # own console window, so launching the app flashed up a terminal beside
+    # it. Applied here, before anything can shell out. No-op on macOS/Linux
+    # and in a source checkout.
+    try:
+        from dourmouse import winquiet
+
+        winquiet.install()
+    except Exception:  # noqa: BLE001 - cosmetic; never block startup
+        pass
+
     from dourmouse import learn, webui
     from dourmouse.general_roster import build_general_registry
 
@@ -735,6 +746,13 @@ def launch(
         # strategies pushed from the other desktop appear automatically.
         # Opened at launch, sized smaller, positioned offset from the main
         # window; the bridge's open_agent-style reuse keeps it to ONE.
+        # v8.9: the strategy lab no longer opens itself at launch. Two
+        # windows appearing unbidden reads as a malfunction to anyone who
+        # did not build this, and an installed app should open ONE window.
+        # It is still created up-front (the thread-safe pattern above) and
+        # revealed on demand through the bridge. Set
+        # DOURMOUSE_OPEN_ATLAS_LAB=1 to restore the old launch behaviour.
+        _atlas_at_launch = os.environ.get("DOURMOUSE_OPEN_ATLAS_LAB", "").strip() == "1"
         atlas_window = webview.create_window(
             "ATLAS // STRATEGY LAB",
             f"{url}/atlas-lab",
@@ -742,6 +760,7 @@ def launch(
             height=760,
             min_size=(820, 540),
             js_api=bridge,
+            hidden=not _atlas_at_launch,
         )
         bridge.attach_atlas_window(atlas_window)
         try:

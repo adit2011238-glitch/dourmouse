@@ -1,0 +1,21 @@
+{
+  "domain": "Psychology",
+  "field": "Personality Psychology",
+  "tests": [
+    {
+      "url": "https://www.fordham.edu/academics/departments/psychology/graduate-program/phd-in-clinical-psychology/doctoral-comprehensive-examination/",
+      "file": "_archives/https-www-fordham-edu-academics-departme-85c826551e.html",
+      "bytes": 73670,
+      "sha256": "85c826551e1b34707484f76aacb59ed1ee5ce701fe8300916158de7778b6c115",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.fordham.edu/academics/departments/psychology/graduate-program/phd-in-clinical-psychology/doctoral-comprehensive-examination/",
+      "label": "Fordham \u2014 Clinical Psychology PhD Comprehensive Examination (format)"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "domain": "Environmental Science & Ecology",
+  "field": "Conservation Biology",
+  "tests": [
+    {
+      "url": "https://www.unr.edu/eecb/current-students/handbook/comp-exam",
+      "file": "_archives/https-www-unr-edu-eecb-current-students--21d734278b.html",
+      "bytes": 81538,
+      "sha256": "21d734278bae21ad685f309d6481f138eb2b34fe699663cfdf208d2b748da6e4",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.unr.edu/eecb/current-students/handbook/comp-exam",
+      "label": "U. Nevada Reno \u2014 Ecology/Evol/Bio comp exam study questions"
+    }
+  ]
+}

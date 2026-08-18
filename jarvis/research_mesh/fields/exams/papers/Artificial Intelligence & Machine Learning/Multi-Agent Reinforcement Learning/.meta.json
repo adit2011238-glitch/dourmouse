@@ -1,0 +1,229 @@
+{
+  "domain": "Artificial Intelligence & Machine Learning",
+  "field": "Multi-Agent Reinforcement Learning",
+  "tests": [
+    {
+      "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams",
+      "file": "_archives/https-www-cc-gatech-edu-phd-cs-past-qual-bbadd5e828.html",
+      "bytes": 67928,
+      "sha256": "bbadd5e828640fbfb688c01ae20a56fea29bd3e42097f945219a6f5ad7521dc7",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/qual_2019_fall.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-80f65a86a6.pdf",
+      "bytes": 109732,
+      "sha256": "80f65a86a68bc22ef97057638248e45865265f9de7f210b42f529d29b2163f36",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/qual_2018_spring_1.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-d990020bc9.pdf",
+      "bytes": 2043346,
+      "sha256": "d990020bc94cd01a1a74255dbeebc93dccd135c7dfccb529fe2575616eb9dab8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/qual_2017_spring.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-af3216fca3.pdf",
+      "bytes": 1544282,
+      "sha256": "af3216fca3b06f040e3c8d5654e3aa25cb0ba032ec67daa230c1b5967a0e0fe9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/2017intelligent_systemsqualifyingexam.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-418f70a9b5.pdf",
+      "bytes": 491172,
+      "sha256": "418f70a9b5146c1e3b04d9073265f67faf0d8d2df83a779e71416d09172fe428",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/mlqual17_.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-2ec0f25cd7.pdf",
+      "bytes": 294390,
+      "sha256": "2ec0f25cd7fb371dc058d4cefa3d000949e951c0b9baceab62063a4294c0e2e0",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/qual_2016_spring_0.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-759b793cca.pdf",
+      "bytes": 271562,
+      "sha256": "759b793cca31c2b975235fc856bc72e51a4334d0683b8823eb38f981b66a68bb",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/csphd_hci_qualsp2016.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-9e77afb5df.pdf",
+      "bytes": 85890,
+      "sha256": "9e77afb5dfd9dbbb40c211cdceb47204d45945ec4a520361ae89ce229c8245bc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/2016intelligent_systemsqualifying-exam.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-96728fcefa.pdf",
+      "bytes": 281082,
+      "sha256": "96728fcefa7028e0a476aef69261f5729c968adf539ad1ac7daff3d611441c2c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/qual_spring_2015_0.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-78d1a55e57.pdf",
+      "bytes": 66431,
+      "sha256": "78d1a55e575a98969b06e063e415d6fac9a038727b9b458788411aaac9ddec8c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/qualifying-exams-is-2015spring-formatted.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-f73be18593.pdf",
+      "bytes": 161080,
+      "sha256": "f73be1859339a27e4b7ceafbb9ec597688e30ff976b62e1e79a98cc15cfbf11d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/graphics_qual_2014.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-149bc7b2c2.pdf",
+      "bytes": 166181,
+      "sha256": "149bc7b2c269221e582531087cd91ec1d922fe3e7d34a9fcb93593903e3636af",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/qualifying-exams-is-2014spring-formatted.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-4e24835791.pdf",
+      "bytes": 65215,
+      "sha256": "4e24835791ff722eb5ea82e324056a20561cd9e622636e754200bf16b33ee32b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/gv_quals_2013_j_k_g.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-2fb0b0605e.pdf",
+      "bytes": 216284,
+      "sha256": "2fb0b0605ef33dbe11f0e6497b8b027a7b378b6e20714509c4c20f3d95acd138",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/qualifying-exams-is-2013spring-formatted.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-c3405b1f2c.pdf",
+      "bytes": 67515,
+      "sha256": "c3405b1f2c01f4882b50ce8e964693c0633ee5fc34b803eaeb669f220fd8591a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201202gv_quals.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-346478040f.pdf",
+      "bytes": 324969,
+      "sha256": "346478040ff7e6babeef70a1a4a4c24656ceffbada794941e9f301cd8db75bdc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/is-qual-spring-2012.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-73cf8bc185.pdf",
+      "bytes": 167361,
+      "sha256": "73cf8bc18548ed139fda9a162869849500dbc3e44e7613d9496ae4f7e23bd5fd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201108_architecture_1.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-4d8ec7e462.pdf",
+      "bytes": 112874,
+      "sha256": "4d8ec7e462393c98f4f2ee672fab55caed1605de89753f61f86f7dffad906d87",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201108_machine_learning.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-68033810cd.pdf",
+      "bytes": 148893,
+      "sha256": "68033810cdc2c06c0ab6a4be4192b0fa5e8debb0e0cf8f85a53fb4da2fd39837",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201108_security_0.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-2e70411149.pdf",
+      "bytes": 60841,
+      "sha256": "2e704111494c22781a5b9c6654936c059952152de128e1655660625fab5d7279",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201102_is_0.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-5ebed9222e.pdf",
+      "bytes": 146741,
+      "sha256": "5ebed9222eb3d466810ad3fadf30f01be659b9925750ff0206f1fa7b48cdbc46",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201102_networking_p1_0.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-4bb7905159.pdf",
+      "bytes": 107299,
+      "sha256": "4bb790515949559660c3cb1b71bfe3f7c88ea11ae391964522dcc2fcfe039c72",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201102_plc_0.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-807c8ec495.pdf",
+      "bytes": 78819,
+      "sha256": "807c8ec4956a9a5e672d9469382636cf48c49cf09d28eceab96435de88f59c02",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201102_security.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-1258b31f96.pdf",
+      "bytes": 53664,
+      "sha256": "1258b31f966820d095531d3b87a8799469bcf8db2310983a13b1212e6d22dab4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201102_sweng.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-293050cd44.pdf",
+      "bytes": 60125,
+      "sha256": "293050cd4427c0d87c5a9546b250f1ec635e8ac903d15a623b25d3ae13385e44",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://prod-cc.cc.gatech.edu/sites/default/files/documents/2021/201102_systems.pdf",
+      "file": "_archives/https-prod-cc-cc-gatech-edu-sites-defaul-8cb5546ab3.pdf",
+      "bytes": 125046,
+      "sha256": "8cb5546ab3d54a70a7d8f76c71453551f4cee5ae0f803dbd6ff409790b70a3c4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf",
+      "file": "_archives/https-www-cc-gatech-edu-sites-default-fi-be89229c28.pdf",
+      "bytes": 649413,
+      "sha256": "be89229c28a5bd2f19d7c0690512035033c994d1b39c6710179bee3d5a892a48",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.cc.gatech.edu/phd-cs-past-qualifying-exams",
+      "label": "GaTech \u2014 Machine Learning past qualifying exams"
+    }
+  ]
+}

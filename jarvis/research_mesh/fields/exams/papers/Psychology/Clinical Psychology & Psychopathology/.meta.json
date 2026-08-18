@@ -1,0 +1,21 @@
+{
+  "domain": "Psychology",
+  "field": "Clinical Psychology & Psychopathology",
+  "tests": [
+    {
+      "url": "https://www.ohio.edu/cas/psychology/graduate/clinical/manual/general-requirements/comprehensive-examination",
+      "file": "_archives/https-www-ohio-edu-cas-psychology-gradua-c10a4c392b.html",
+      "bytes": 94162,
+      "sha256": "c10a4c392baab596c18a52cb795eeb7b0834980f686ebb71a282003a1bc34849",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.ohio.edu/cas/psychology/graduate/clinical/manual/general-requirements/comprehensive-examination",
+      "label": "Ohio University \u2014 Clinical PhD Comprehensive Examination (format)"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "domain": "Astrophysics & Cosmology",
+  "field": "Solar Physics & Heliophysics",
+  "tests": [
+    {
+      "url": "http://www.astrobetter.com/wiki/Qualifying%2BExams%2Bin%2BPhysics%2Band%2BAstronomy%2BGraduate%2BPrograms",
+      "file": "_archives/http-www-astrobetter-com-wiki-qualifying-1e63989db2.html",
+      "bytes": 355434,
+      "sha256": "1e63989db235864d4def5ff6e1cefdd4151f04db007a42058fc5c31e330ca30b",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf",
+      "file": "_archives/https-astronomy-yale-edu-sites-default-f-2a86abcf4e.pdf",
+      "bytes": 2093442,
+      "sha256": "2a86abcf4e9422278456947db6b76aad786c7c8c2789a16e3a2c91f79f2194b9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.bu.edu/physics/files/2022/11/Fall-2022-Physics-PhD-Degree-Requirements.pdf",
+      "file": "_archives/https-www-bu-edu-physics-files-2022-11-f-1fc9b4f4f2.pdf",
+      "bytes": 229667,
+      "sha256": "1fc9b4f4f2c916c84f44fd699cada0b78b892cf32ada8c73c036091c35e7eece",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://pa.msu.edu/sites/_pa/assets/File/GradHandbook-062322(1).pdf",
+      "file": "_archives/https-pa-msu-edu-sites-pa-assets-file-gr-d020322860.html",
+      "bytes": 212,
+      "sha256": "d02032286070b4dd9d8fbd985a7bdca8af8edf52b89ff177db3bfcb2c8a9c43d",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www.brown.edu/academics/physics/sites/physics/files/2022%20PhD%20Student%20Handbook.pdf",
+      "file": "_archives/https-www-brown-edu-academics-physics-si-172e443bd0.html",
+      "bytes": 153435,
+      "sha256": "172e443bd0632038c2781c929eda07d3b228de3f9a318484ea8acccb7871cbbf",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www.physastro.iastate.edu/files/inline-files/RULES-QualifyingExam.pdf",
+      "file": "_archives/https-www-physastro-iastate-edu-files-in-ed23431675.pdf",
+      "bytes": 119155,
+      "sha256": "ed23431675e45f685f7e0078de847b04278ea933649fe7feab0689b424c9ff20",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf",
+      "file": "_archives/https-www-as-arizona-edu-sites-default-f-d5d96d4463.pdf",
+      "bytes": 159407,
+      "sha256": "d5d96d4463c5282f2122a0291b2ac7425a914e7706f64d65a966bfb84681ec2d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.artsci.uc.edu/content/dam/refresh/artsandsciences-62/departments/physics/docs/Handbook_2015_08112015.pdf",
+      "file": "_archives/https-www-artsci-uc-edu-content-dam-refr-7faf973381.pdf",
+      "bytes": 498423,
+      "sha256": "7faf97338145a963a3675b38ea09f4082020dd1eff6fb26ceeeda5fe1638c17f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.montana.edu/grad/documents/manual/GradManual%202022.pdf",
+      "file": "_archives/https-physics-montana-edu-grad-documents-6df7f88abd.pdf",
+      "bytes": 279406,
+      "sha256": "6df7f88abd52b0dbdb0133ac2bce39408397da512710af04dbfdfe5c901e6181",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "http://www.astrobetter.com/wiki/Qualifying%2BExams%2Bin%2BPhysics%2Band%2BAstronomy%2BGraduate%2BPrograms",
+      "label": "astrobetter \u2014 Physics & Astronomy quals directory"
+    }
+  ]
+}

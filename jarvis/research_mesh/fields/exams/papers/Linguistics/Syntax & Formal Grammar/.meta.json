@@ -1,0 +1,21 @@
+{
+  "domain": "Linguistics",
+  "field": "Syntax & Formal Grammar",
+  "tests": [
+    {
+      "url": "https://www.uprm.edu/english/wp-content/uploads/sites/124/2023/05/MAEE-Comprehensive-Exams-Study-Guide-Rev.-May-2023.pdf",
+      "file": "_archives/https-www-uprm-edu-english-wp-content-up-a6d4a87fc5.pdf",
+      "bytes": 363065,
+      "sha256": "a6d4a87fc57c5be0e74cfbed5ae4ddc47e78eae17dc29882d9a2773453965a66",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.uprm.edu/english/wp-content/uploads/sites/124/2023/05/MAEE-Comprehensive-Exams-Study-Guide-Rev.-May-2023.pdf",
+      "label": "UPRM \u2014 Comprehensive Exam Study Guide (sample questions)"
+    }
+  ]
+}

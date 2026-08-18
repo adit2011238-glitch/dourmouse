@@ -1,0 +1,21 @@
+{
+  "domain": "Linguistics",
+  "field": "Field Linguistics & Documentation",
+  "tests": [
+    {
+      "url": "https://www.memphis.edu/english/pdfs/grad-advising-pdfs/al_phd_comps.pdf",
+      "file": "_archives/https-www-memphis-edu-english-pdfs-grad--9e69454ebd.pdf",
+      "bytes": 96136,
+      "sha256": "9e69454ebd7991b387ae26e6a577ea5238f5aa148c32994fd04f1c9a7d68864e",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.memphis.edu/english/pdfs/grad-advising-pdfs/al_phd_comps.pdf",
+      "label": "U. Memphis \u2014 Applied Linguistics PhD Comprehensive Exams"
+    }
+  ]
+}

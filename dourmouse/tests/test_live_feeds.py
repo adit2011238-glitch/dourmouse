@@ -277,7 +277,10 @@ class TestPreloadedAgents:
     def test_news_agent_tool(self):
         registry = build_general_registry()
         tools = {t.name for t in registry.get_subagent("news").tools}
-        assert tools == {"news_headlines"}
+        # news_search joined the agent so that live "what happened with X"
+        # questions (sport, elections) have a correct destination; without it
+        # they routed into stock_quote and died on a Yahoo 404.
+        assert tools == {"news_headlines", "news_search"}
 
     def test_markets_agent_tools(self):
         registry = build_general_registry()
@@ -300,7 +303,10 @@ class TestPreloadedAgents:
         # v5.27: drive_create_doc moved to the docs agent (Drive directives
         # route to docs; the registry forbids cross-agent tool-name
         # collisions, so the write tool lives there, not on mail).
+        # v8.4: archive / trash / untrash. All three are reversible and
+        # confirmation-gated; permanent deletion is deliberately absent.
         assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send",
+                "gmail_archive", "gmail_trash", "gmail_untrash",
                 "drive_read", "drive_search",
                 "email_identity_status", "email_own_send"} == tools
 

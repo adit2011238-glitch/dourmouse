@@ -1,0 +1,21 @@
+{
+  "domain": "Engineering",
+  "field": "Fluid Mechanics & Turbomachinery",
+  "tests": [
+    {
+      "url": "https://me.umbc.edu/files/2014/10/Mechanical-Engineering-PhD-Qualifying-Examination-Topics-List.pdf",
+      "file": "_archives/https-me-umbc-edu-files-2014-10-mechanic-720db95f37.pdf",
+      "bytes": 66827,
+      "sha256": "720db95f373706e5ec8214c65936a6bb8ba9087eb84a50769e8ab9b817a707c8",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://me.umbc.edu/files/2014/10/Mechanical-Engineering-PhD-Qualifying-Examination-Topics-List.pdf",
+      "label": "UMBC ME \u2014 Qualifying Exam Topics List (PDF)"
+    }
+  ]
+}

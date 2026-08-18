@@ -1,0 +1,261 @@
+{
+  "domain": "Philosophy & Ethics",
+  "field": "Philosophy of Mind",
+  "tests": [
+    {
+      "url": "https://www.phil.cam.ac.uk/curr-students/ugrads-exam-folder/II-past-exam-papers",
+      "file": "_archives/https-www-phil-cam-ac-uk-curr-students-u-b1bf53fbcc.html",
+      "bytes": 69950,
+      "sha256": "b1bf53fbcc830d9ca3a4a618f41a1d90281dd5d047a37dd3d6a341ae7264b52a",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/curr-students/writing-skils/09-plagiarism-2018revjuly18.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-curr-students-w-5cdf33244f.html",
+      "bytes": 44462,
+      "sha256": "5cdf33244f4863c5ecae347ddd70e2ef5471068de6d894ddda0616b1fabd66e1",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/curr-students/postgraduates/Graduate-Forms/risk-assessment-examples.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-curr-students-p-73c80d3cea.html",
+      "bytes": 46558,
+      "sha256": "73c80d3cea0d95de42d0d3e0ab259332621e1dffd55f166aa1fc25a5a17215f4",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/files/ii-1-metaphysics.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-files-ii-1-meta-7da981bd51.pdf",
+      "bytes": 151509,
+      "sha256": "7da981bd518478742007fd9c96e3d4bf61e2d7913cc0b46d59a1da257f7438df",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/files/pht2-1_metaphysics_in_hall.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-files-pht2-1-me-306d19c0ce.pdf",
+      "bytes": 147861,
+      "sha256": "306d19c0ceadb81e96a91a946bd3c1538227fe7197fcb078ac6d3b82afad13e9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/files/part_ii_paper_1_metaphysics_final.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-files-part-ii-p-daeabd1fbf.pdf",
+      "bytes": 31095,
+      "sha256": "daeabd1fbf3308690d058660eadb3fa92f58e417df73eef9c4a2f48c6f98fb5b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/files/pht2_1_ii_paper_1_2021_final_cd1.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-files-pht2-1-ii-3d3d111a3c.pdf",
+      "bytes": 61920,
+      "sha256": "3d3d111a3c77bb298b0b7e47373305e1bc981686632ec5741960e756f88f3b0c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/ii-paper-1-2019-final.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-97c0f067a0.pdf",
+      "bytes": 29648,
+      "sha256": "97c0f067a0e970afc5eed1daba8fcb5293f09a2a3f5c99d528ce16cc358d8c28",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-final-2018.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-6557f76ad4.pdf",
+      "bytes": 100916,
+      "sha256": "6557f76ad4e03fc672b73b23fd3c0bf9f6466718ba9352513fc04024c4471316",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2017.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-7bbf8e8ae0.pdf",
+      "bytes": 74099,
+      "sha256": "7bbf8e8ae0cbdde16e28ccb2ba9ea14e44bb46a372c2ae6826764f22a3f65f8c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2016.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-25f3e8eb23.pdf",
+      "bytes": 70904,
+      "sha256": "25f3e8eb2387ab2d21496603ea2f26afb1358fe3c6b8e7e89f7065e32d547b1c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper1Metaaftersetting.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-ed703400ea.pdf",
+      "bytes": 74296,
+      "sha256": "ed703400eabd2ac063f59cf013566d16aef40b04b8813e69a0fe38151745e00b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%201%20Meta.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-5e3bfd51cc.pdf",
+      "bytes": 73055,
+      "sha256": "5e3bfd51ccd48e4745e4555f97bc75753905909b16bb7b4625825dabbb66479b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2013.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-4fa032b66e.pdf",
+      "bytes": 83084,
+      "sha256": "4fa032b66e9c01def1d710669cd594aca3c910be9ecfed3599eab3827353f591",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2012.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-5d043731a3.pdf",
+      "bytes": 84561,
+      "sha256": "5d043731a39ff5eed3c80da7b64433ba198635bf3923dcf735f2b44d3d77d264",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2011.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-5af219ed62.pdf",
+      "bytes": 85797,
+      "sha256": "5af219ed62fc0d37a8e41d92ae4b6851982f7e5cb0a45ecc3edee3090be595b7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2010.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-5250869e4a.pdf",
+      "bytes": 81343,
+      "sha256": "5250869e4a0cb38340591af3817ab53e58c7bd393060aedb274317661bf69980",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2007.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-5a061527ae.pdf",
+      "bytes": 70953,
+      "sha256": "5a061527ae8e7758a66943baeb68500077546dee5863c1ff0f31404858a3c3ff",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/files/ii-2-philosophy_of_mind.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-files-ii-2-phil-bc26a18874.pdf",
+      "bytes": 159284,
+      "sha256": "bc26a188745fa56a3437e4867dc89ddbe889da943ddcb35ff79b56c109ba970a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/files/pht2-2_philosophy_of_mind_in_hall.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-files-pht2-2-ph-6ad7d09a42.pdf",
+      "bytes": 150029,
+      "sha256": "6ad7d09a42821b2144848f9c981f46b6cd26706426b6be247129432c4adc4b97",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/files/part_ii_paper_2_philosophy_of_the_mind_v2_2.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-files-part-ii-p-135d7cc551.pdf",
+      "bytes": 31681,
+      "sha256": "135d7cc5513a344714d90da7678510b59efa67b61fafb98bd706b33f1b8dad3d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/files/pht2_2_ii_paper_2_2021_final_cd1-1.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-files-pht2-2-ii-4c18a65c4f.pdf",
+      "bytes": 106776,
+      "sha256": "4c18a65c4f4539ef338941a2642af1e44e47cd417257ad7703cc18c3eb16db46",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/ii-paper-2-2019-final.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-211a81342d.pdf",
+      "bytes": 30071,
+      "sha256": "211a81342d4ca687ecded237bff609bfb6148077f84a82a2d4d1fd8359b18d92",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-final-2018.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-065ec486f6.pdf",
+      "bytes": 101224,
+      "sha256": "065ec486f6536decf3e27352545065a22b790340b748067208bbf7e82882d8cf",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2017.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-afc8d37c5c.pdf",
+      "bytes": 84367,
+      "sha256": "afc8d37c5c681f984420cb89f032b6df07cd5bf3e5eadbe76abc8064cb699234",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2016.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-2379f0a9d0.pdf",
+      "bytes": 73550,
+      "sha256": "2379f0a9d055997f781cd2a6a25638f3f513a525f438714977e81d4f8c982017",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper2PhilofMind.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-b9ed2c9768.pdf",
+      "bytes": 75896,
+      "sha256": "b9ed2c97686454eae637456a56acd98c4f9cc5888f73fb5a9e1653f1d831683f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%202%20Phil%20of%20Mind.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-2b51e8758d.pdf",
+      "bytes": 112487,
+      "sha256": "2b51e8758d83e46cd0bf3aa795d3ec8c01c9d7f1d97a7c56ee28995811f023f5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/system/files/documents/ii-paper-02-2013.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-system-files-do-4f290326c4.pdf",
+      "bytes": 83639,
+      "sha256": "4f290326c4d2617adedaf7bebe23c391d03645115cabbb1b92a1c0b90b1059bb",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/sites/default/files/documents/risk-assessment-examples.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-sites-default-f-85894da32b.pdf",
+      "bytes": 385342,
+      "sha256": "85894da32b9740588619aabe7d17064cebfdda08c7f60b8f90a86e2f79611b01",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.phil.cam.ac.uk/sites/default/files/exam_paper_pht2_paper_2_philosophy_of_mind_final.pdf",
+      "file": "_archives/https-www-phil-cam-ac-uk-sites-default-f-ab63755dd9.pdf",
+      "bytes": 75534,
+      "sha256": "ab63755dd94d92c0ede9427eb49534c07bd4cb6f7f27d9bdf79389f10de411c2",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.phil.cam.ac.uk/curr-students/ugrads-exam-folder/II-past-exam-papers",
+      "label": "Cambridge \u2014 Part II Past Paper 2: Philosophy of Mind"
+    }
+  ]
+}

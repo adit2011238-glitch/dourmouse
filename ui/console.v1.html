@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DOURMOUSE // CONSOLE</title>
+  <!-- v8.7 PWA: the console is now the default surface at "/", so it must
+       carry the SAME install metadata the HUD had. Without these, making
+       the console default would silently kill "Add to Home Screen", the
+       Android install banner, the standalone window and the app icon. -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#04080e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="DourMouse">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="/assets/icon-192.png">
+<style>
+/* =====================================================================
+   DOURMOUSE CONSOLE
+   Tokens taken from the supplied design: amber #f2b73d on #04080e, with a
+   blue-grey information tier. Sekuya for display, JetBrains Mono for
+   everything else. Every value on screen comes from the live backend —
+   the mockup's numbers were placeholders and are not reproduced.
+   ===================================================================== */
+@font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;
+  src:url('assets/fonts/sekuya-regular.ttf') format('truetype')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:300;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-300-latin.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-500-latin.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:700;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-700-latin.woff2') format('woff2')}
+
+:root{
+  --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
+  --amber:#f2b73d; --amber-hi:#ffd27a; --amber-ink:#08111c;
+  --blue:#7ea9c9; --blue-dim:#5b86a6; --blue-hi:#c6d8e6; --blue-deep:#3f6480;
+  --line:rgba(120,175,210,.18); --line-2:rgba(120,175,210,.30);
+  --amber-line:rgba(242,183,61,.35); --amber-soft:rgba(242,183,61,.14);
+  --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--blue);
+  font-family:var(--mono);font-size:11px;font-weight:300;line-height:1.55;
+  letter-spacing:.02em;-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font:inherit;color:inherit}
+:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
+::selection{background:var(--amber);color:var(--amber-ink)}
+
+.wrap{display:flex;flex-direction:column;height:100dvh;padding:10px 14px 8px;gap:9px}
+
+/* ---------- masthead ---------- */
+.mast{display:flex;align-items:center;gap:12px;font-size:10px;letter-spacing:.16em;color:var(--amber)}
+.mast .brand{font-family:var(--display);font-size:13px;letter-spacing:.2em;display:flex;align-items:center;gap:8px}
+.mast .mk{width:15px;height:15px;flex:none}
+.mast .mk svg{width:100%;height:100%}
+.mast .right{margin-left:auto;display:flex;gap:16px;color:var(--blue-dim);letter-spacing:.14em}
+.mast .right b{color:var(--blue-hi);font-weight:500}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:0;border:1px solid var(--line);border-radius:3px;overflow:hidden;flex-wrap:wrap}
+.tab{flex:1 1 auto;min-width:78px;min-height:34px;padding:9px 6px;background:none;border:none;
+  border-right:1px solid var(--line);cursor:pointer;color:var(--blue-dim);
+  font-size:9.5px;letter-spacing:.16em;white-space:nowrap;
+  display:flex;align-items:center;justify-content:center;gap:6px;transition:background .12s,color .12s}
+.tab:last-child{border-right:none}
+.tab:hover{background:rgba(120,175,210,.07);color:var(--blue-hi)}
+.tab[aria-selected="true"]{background:var(--amber-soft);color:var(--amber);
+  box-shadow:inset 0 -2px 0 var(--amber)}
+.tab .dia{color:var(--amber);font-size:8px}
+
+/* ---------- body grid ---------- */
+.body{flex:1;display:grid;grid-template-columns:196px minmax(0,1fr);gap:9px;min-height:0}
+.rail{border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.railhead{padding:9px 11px;border-bottom:1px solid var(--line);
+  font-size:9px;letter-spacing:.18em;color:var(--amber)}
+.railbody{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
+.railfoot{border-top:1px solid var(--line);padding:8px 11px;font-size:8.5px;
+  letter-spacing:.16em;color:var(--blue-deep)}
+
+.agent{border:1px solid var(--line);border-radius:2px;padding:8px 9px;background:var(--panel2)}
+.agent .top{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.agent .nm{font-size:10px;font-weight:500;color:var(--blue-hi);letter-spacing:.1em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent .badge{margin-left:auto;font-size:7.5px;letter-spacing:.14em;padding:2px 5px;
+  border:1px solid var(--line-2);color:var(--blue-dim);border-radius:2px;flex:none}
+.agent .badge.live{color:var(--amber);border-color:var(--amber-line)}
+.agent .badge.ready{color:var(--ok);border-color:rgba(95,191,138,.4)}
+.agent .d{font-size:8.5px;line-height:1.5;color:var(--blue-deep)}
+
+/* ---------- panes ---------- */
+.pane{border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  display:none;flex-direction:column;min-height:0;overflow:hidden}
+.pane.on{display:flex}
+.panehead{padding:10px 14px;border-bottom:1px solid var(--line);
+  font-family:var(--display);font-size:12px;letter-spacing:.16em;color:var(--amber);flex:none}
+.panebody{flex:1;overflow-y:auto;padding:14px;min-height:0}
+
+.lede{font-family:var(--display);font-size:13px;line-height:1.85;color:var(--blue-hi);
+  letter-spacing:.06em;margin:0 0 16px;max-width:76ch}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));
+  border:1px solid var(--line);border-radius:2px;margin-bottom:16px}
+.metric{padding:11px 13px;border-right:1px solid var(--line);display:flex;
+  align-items:center;justify-content:space-between;gap:10px}
+.metric:last-child{border-right:none}
+.metric .k{font-size:8.5px;letter-spacing:.16em;color:var(--blue-dim)}
+.metric .v{font-size:11px;color:var(--amber);font-weight:500}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:9px}
+.card{border:1px solid var(--line);border-radius:2px;padding:11px 13px;background:var(--panel2);
+  cursor:pointer;text-align:left;min-height:44px;transition:border-color .12s}
+.card:hover{border-color:var(--amber-line)}
+.card .h{font-size:9.5px;letter-spacing:.14em;color:var(--amber);margin-bottom:4px}
+.card .d{font-size:8.5px;color:var(--blue-deep);line-height:1.5}
+
+/* ---------- transcript ---------- */
+.turn{padding:10px 0;border-top:1px solid rgba(120,175,210,.10)}
+.turn:first-child{border-top:none}
+.turn .gut{display:flex;gap:9px;align-items:center;font-size:8.5px;
+  letter-spacing:.14em;color:var(--blue-deep);margin-bottom:5px}
+.turn .gut .who{color:var(--amber)}
+.turn.you .gut .who{color:var(--blue-hi)}
+.turn .body{font-size:11.5px;line-height:1.7;color:var(--blue-hi);word-break:break-word}
+.turn.you .body{color:var(--blue);white-space:pre-wrap}
+.turn .body p{margin:0 0 9px}.turn .body p:last-child{margin:0}
+.turn .body ul,.turn .body ol{margin:8px 0;padding-left:19px}
+.turn .body li{margin-bottom:3px}.turn .body li::marker{color:var(--amber)}
+.turn .body strong{color:var(--amber-hi);font-weight:500}
+.turn .body a{color:var(--amber)}
+.turn .body code{background:rgba(120,175,210,.10);border:1px solid var(--line);
+  padding:1px 4px;border-radius:2px;font-size:10.5px}
+.turn .body pre{background:#050c15;border:1px solid var(--line);border-radius:2px;
+  padding:10px 12px;overflow-x:auto;margin:9px 0;position:relative;font-size:10.5px;line-height:1.6}
+.turn .body pre code{background:none;border:none;padding:0}
+.copybtn{position:absolute;top:5px;right:5px;border:1px solid var(--line-2);background:var(--panel);
+  color:var(--blue-dim);border-radius:2px;padding:3px 8px;font-size:8px;letter-spacing:.12em;
+  cursor:pointer;opacity:0;transition:opacity .12s;min-height:24px}
+pre:hover .copybtn,.copybtn:focus{opacity:1}
+.copybtn:hover{color:var(--amber);border-color:var(--amber-line)}
+.acts{display:flex;flex-direction:column;gap:3px;margin-bottom:7px}
+.act{display:flex;align-items:center;gap:7px;font-size:8.5px;letter-spacing:.1em;
+  color:var(--blue-deep);border:1px solid var(--line);border-radius:2px;
+  padding:3px 8px;width:fit-content;max-width:100%;background:var(--panel2)}
+.act .nm{color:var(--blue);}
+.act.bad{border-color:var(--bad);color:var(--bad)}
+.spin{width:7px;height:7px;border:1px solid var(--line-2);border-top-color:var(--amber);
+  border-radius:50%;animation:sp .7s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.rowacts{display:flex;gap:5px;margin-top:8px}
+.mini{border:1px solid var(--line);background:var(--panel2);color:var(--blue-dim);
+  border-radius:2px;padding:4px 9px;font-size:8px;letter-spacing:.12em;cursor:pointer;min-height:26px}
+.mini:hover{color:var(--amber);border-color:var(--amber-line)}
+
+/* ---------- approval ---------- */
+.approve{border:1px solid var(--amber);border-left:2px solid var(--amber);border-radius:2px;
+  padding:11px 13px;margin:0 0 12px;background:rgba(242,183,61,.06)}
+.approve .t{font-size:9px;letter-spacing:.16em;color:var(--amber);margin-bottom:6px}
+.approve .p{font-size:11px;color:var(--blue-hi);margin-bottom:10px;word-break:break-word}
+.approve .r{display:flex;gap:7px;flex-wrap:wrap}
+.btn{min-height:34px;padding:8px 15px;border:1px solid var(--line-2);background:var(--panel2);
+  color:var(--blue-hi);border-radius:2px;cursor:pointer;font-size:9px;letter-spacing:.14em}
+.btn.go{background:var(--amber);color:var(--amber-ink);border-color:var(--amber);font-weight:700}
+.btn:hover{border-color:var(--amber)}
+.approve.done{border-color:var(--line);border-left-color:var(--blue-deep);background:none}
+.approve.done .t{color:var(--blue-deep)}
+.errbox{border:1px solid var(--bad);border-left:2px solid var(--bad);border-radius:2px;
+  padding:10px 12px;margin-bottom:12px;font-size:10.5px;color:var(--blue-hi)}
+.errbox .t{font-size:9px;letter-spacing:.16em;color:var(--bad);margin-bottom:4px}
+
+/* ---------- composer ---------- */
+.dock{border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  padding:9px 11px;flex:none}
+.queue{display:flex;flex-direction:column;gap:4px;margin-bottom:7px}
+.qi{display:flex;align-items:center;gap:8px;font-size:9px;color:var(--blue-dim);
+  border:1px dashed var(--line-2);border-radius:2px;padding:5px 9px}
+.qi b{color:var(--amber);font-weight:500}
+.qi span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qi button{border:none;background:none;color:var(--blue-deep);cursor:pointer;
+  min-height:26px;min-width:26px;border-radius:2px}
+.qi button:hover{color:var(--bad)}
+/* v8.7: this row did not wrap, so on a narrow viewport SEND_DIRECTIVE was
+   laid out past the right edge and could not be reached or tapped at all —
+   the primary action of the whole console, off-screen. flex-wrap keeps
+   every control inside the viewport at any width. */
+.dockrow{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}
+.hint{font-size:8.5px;letter-spacing:.16em;color:var(--amber);white-space:nowrap;flex:none}
+.chip{padding:5px 9px;border:1px solid var(--line-2);border-radius:2px;font-size:8.5px;
+  letter-spacing:.14em;color:var(--blue-dim);cursor:pointer;min-height:30px;
+  display:inline-flex;align-items:center;gap:5px;flex:none;background:none}
+.chip:hover{border-color:var(--amber-line);color:var(--amber)}
+.chip.on{color:var(--amber);border-color:var(--amber-line);background:var(--amber-soft)}
+/* v8.7: flex:1 with a 0 basis let the input collapse to ~16px on a narrow
+   viewport, squeezed between the hint, the two chips and the send button —
+   the box you type in was narrower than a single character. A min-width
+   forces it onto its own line instead of being crushed. */
+#ta{flex:1 1 190px;min-width:190px;background:none;border:none;outline:none;resize:none;
+  color:var(--blue-hi);
+  font-size:10.5px;line-height:1.6;padding:7px 0;max-height:130px;min-height:34px}
+#ta::placeholder{color:var(--blue-deep)}
+#go{padding:9px 17px;background:var(--amber);color:var(--amber-ink);border:none;border-radius:3px;
+  font-size:9.5px;font-weight:700;letter-spacing:.14em;cursor:pointer;min-height:36px;flex:none}
+#go:hover{background:var(--amber-hi)}
+#stop{display:none;padding:9px 15px;background:none;border:1px solid var(--amber-line);
+  color:var(--amber);border-radius:3px;font-size:9px;letter-spacing:.14em;cursor:pointer;
+  min-height:36px;flex:none;align-items:center;gap:7px}
+#stop.on{display:inline-flex}
+#stop .sq{width:7px;height:7px;background:currentColor;border-radius:1px}
+
+/* ---------- footer ---------- */
+.foot{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  font-size:8.5px;letter-spacing:.16em;color:var(--blue-deep);flex:none;padding:0 4px}
+.foot b{color:var(--blue-dim);font-weight:400}
+
+/* ---------- code tool picker ---------- */
+.toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:13px;
+  padding-bottom:12px;border-bottom:1px solid var(--line)}
+.lbl{font-size:8.5px;letter-spacing:.16em;color:var(--blue-dim)}
+.sel{position:relative}
+.selbtn{display:flex;align-items:center;gap:9px;min-height:36px;padding:8px 13px;
+  border:1px solid var(--line-2);background:var(--panel2);color:var(--blue-hi);
+  border-radius:2px;cursor:pointer;font-size:9.5px;letter-spacing:.12em}
+.selbtn:hover{border-color:var(--amber-line)}
+.selbtn .cv{color:var(--amber)}
+/* v8.7: the menu used a hard min-width:290px, which is wider than a narrow
+   phone viewport — the option text was clipped off the right edge with no
+   way to read it. Clamp to the viewport instead so it stays legible. */
+.selmenu{position:absolute;top:calc(100% + 4px);left:0;z-index:40;
+  min-width:min(290px, calc(100vw - 40px));max-width:calc(100vw - 40px);
+  border:1px solid var(--line-2);background:var(--panel);border-radius:3px;
+  box-shadow:0 12px 34px -14px #000;display:none;overflow:hidden}
+.selmenu.on{display:block}
+/* v8.7: on a narrow viewport the menu cannot fit BESIDE its button at all
+   — anchoring left overflowed the right edge, anchoring right overflowed
+   the left. Both gave the page a horizontal scrollbar. So below 560px it
+   stops being an overlay and flows in the panel as a full-width list,
+   which cannot overflow whatever the option text says. */
+@media (max-width:560px){
+  .toolbar .sel{width:100%}
+  .selmenu{position:static;min-width:0;max-width:100%;width:100%;
+    margin-top:6px;box-shadow:none}
+}
+.opt{display:flex;align-items:flex-start;gap:9px;width:100%;padding:9px 12px;border:none;
+  background:none;cursor:pointer;text-align:left;border-bottom:1px solid rgba(120,175,210,.08);min-height:40px}
+.opt:last-child{border-bottom:none}
+.opt:hover{background:rgba(120,175,210,.07)}
+.opt[aria-selected="true"]{background:var(--amber-soft)}
+/* v8.7: both were inline spans, so the name and description rendered as
+   one run-on string ("CLAUDE CODEYour Claude Code CLI") and the .od
+   margin-top was silently ignored. display:block puts the description on
+   its own line, which is what the margin always intended. */
+.opt .on{display:block;font-size:9.5px;letter-spacing:.12em;color:var(--blue-hi)}
+.opt[aria-selected="true"] .on{color:var(--amber)}
+.opt .od{display:block;font-size:8px;color:var(--blue-deep);line-height:1.45;margin-top:2px}
+.dot{width:5px;height:5px;border-radius:50%;flex:none;margin-top:5px;background:var(--blue-deep)}
+.dot.ok{background:var(--ok)}.dot.no{background:var(--bad)}
+
+/* ---------- voice ---------- */
+.voicewrap{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:13px;height:100%;min-height:0}
+@media (max-width:1000px){.voicewrap{grid-template-columns:1fr}}
+.vmain{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:16px;padding:20px;min-height:0}
+.orb{width:150px;height:150px;border-radius:50%;border:1px solid var(--amber-line);
+  display:grid;place-items:center;position:relative;flex:none}
+.orb::before{content:"";position:absolute;inset:-13px;border-radius:50%;
+  border:1px solid rgba(242,183,61,.18)}
+.orb.listening::before{animation:pulse 1.7s ease-out infinite}
+.orb.speaking{border-color:var(--amber);box-shadow:0 0 34px -8px rgba(242,183,61,.5)}
+@keyframes pulse{0%{transform:scale(1);opacity:.8}100%{transform:scale(1.28);opacity:0}}
+.orb .g{font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--amber)}
+.vstate{font-size:10px;letter-spacing:.18em;color:var(--blue-dim)}
+.vtext{font-size:12px;line-height:1.7;color:var(--blue-hi);max-width:60ch;min-height:3em}
+.vbtn{min-height:44px;padding:12px 28px;border:1px solid var(--amber-line);background:var(--amber-soft);
+  color:var(--amber);border-radius:3px;cursor:pointer;font-size:10px;letter-spacing:.18em}
+.vbtn:hover{background:rgba(242,183,61,.2)}
+.vbtn.rec{background:var(--amber);color:var(--amber-ink);font-weight:700}
+.vnote{font-size:8.5px;color:var(--blue-deep);letter-spacing:.1em;max-width:52ch;line-height:1.6}
+
+/* live activity — what it is DOING, while voice-only hides the transcript */
+.live{border:1px solid var(--line);border-radius:3px;background:var(--panel2);
+  display:flex;flex-direction:column;min-height:0}
+.livehead{padding:9px 11px;border-bottom:1px solid var(--line);font-size:9px;
+  letter-spacing:.18em;color:var(--amber);display:flex;align-items:center;gap:7px;flex:none}
+.livebody{flex:1;overflow-y:auto;padding:9px;display:flex;flex-direction:column;gap:6px;min-height:0}
+.ev{border:1px solid var(--line);border-left:2px solid var(--line-2);border-radius:2px;
+  padding:7px 9px;background:var(--panel);animation:evin .2s ease-out}
+@keyframes evin{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.ev.act{border-left-color:var(--amber)}
+.ev.done{border-left-color:var(--ok)}
+.ev.err{border-left-color:var(--bad)}
+.ev .t{font-size:9px;color:var(--blue-hi);letter-spacing:.06em}
+.ev .s{font-size:8px;color:var(--blue-deep);margin-top:2px;letter-spacing:.08em}
+.ev .ts{font-size:7.5px;color:var(--blue-deep);float:right}
+.liveempty{font-size:9px;color:var(--blue-deep);padding:11px;text-align:center;letter-spacing:.1em}
+
+.note{font-size:9.5px;color:var(--blue-deep);line-height:1.65;letter-spacing:.04em}
+.sec{font-size:9px;letter-spacing:.18em;color:var(--amber);margin:16px 0 9px;
+  padding-bottom:6px;border-bottom:1px solid var(--line)}
+.sec:first-child{margin-top:0}
+.row{display:flex;gap:11px;padding:8px 0;border-bottom:1px solid rgba(120,175,210,.08);align-items:flex-start}
+.row:last-child{border-bottom:none}
+.row .g{flex:1;min-width:0}
+.row .n{font-size:10px;color:var(--blue-hi);letter-spacing:.08em}
+.row .d{font-size:8.5px;color:var(--blue-deep);margin-top:2px;word-break:break-word}
+.row .s{font-size:8px;letter-spacing:.12em;color:var(--blue-dim);flex:none}
+
+@media (max-width:860px){
+  .body{grid-template-columns:1fr}
+  .rail{display:none}
+  .rail.show{display:flex;position:fixed;inset:56px 0 auto 0;max-height:60vh;z-index:50}
+  .tab{min-width:64px;font-size:9px}
+  .mast .right{display:none}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="mast">
+    <span class="brand">
+      <span class="mk"><svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="100" cy="100" r="85" stroke="currentColor" stroke-width="7" fill="none"/>
+        <path d="M100 34 L146 166 H128 L100 84 L72 166 H54 Z" fill="currentColor"/>
+        <path d="M30 150 L74 108 L100 132 L140 74 L168 52" stroke="currentColor" stroke-width="10"
+              fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M148 46 L176 44 L166 70 Z" fill="currentColor"/>
+      </svg></span>
+      DOURMOUSE
+    </span>
+    <span id="mastScreen">// HOME</span>
+    <span class="right">
+      <span>MEM_LOAD: <b id="mMem">—</b></span>
+      <span>SESSION: <b id="mSess">—</b></span>
+      <span><b id="mClock">--:--:--</b></span>
+    </span>
+  </div>
+
+  <div class="tabs" role="tablist" id="tabs"></div>
+
+  <div class="body">
+    <nav class="rail" id="rail" aria-label="Session stream">
+      <div class="railhead">◆ SESSION STREAM</div>
+      <div class="railbody" id="agents"><div class="note">Loading roster…</div></div>
+      <div class="railfoot" id="railFoot">—</div>
+    </nav>
+
+    <section class="pane on" id="pane-home"><div class="panehead">◆ CENTRAL AGENT DISPATCH // ARC CORE</div>
+      <div class="panebody" id="homeBody"></div></section>
+
+    <section class="pane" id="pane-comms"><div class="panehead">◆ COMMS // TRANSCRIPT</div>
+      <div class="panebody" id="thread"></div></section>
+
+    <section class="pane" id="pane-research"><div class="panehead">◆ RESEARCH // LIVE WEB</div>
+      <div class="panebody" id="researchBody"></div></section>
+
+    <section class="pane" id="pane-code"><div class="panehead">◆ CODE // TOOLCHAIN</div>
+      <div class="panebody" id="codeBody"></div></section>
+
+    <section class="pane" id="pane-media"><div class="panehead">◆ MEDIA</div>
+      <div class="panebody" id="mediaBody"></div></section>
+
+    <section class="pane" id="pane-settings"><div class="panehead">◆ SETTINGS</div>
+      <div class="panebody" id="settingsBody"></div></section>
+
+    <section class="pane" id="pane-atlas"><div class="panehead">◆ ATLAS // QUANT</div>
+      <div class="panebody" id="atlasBody"></div></section>
+
+    <section class="pane" id="pane-news"><div class="panehead">◆ NEWS // LIVE FEED</div>
+      <div class="panebody" id="newsBody"></div></section>
+
+    <section class="pane" id="pane-voice"><div class="panehead">◆ VOICE // HANDS-FREE</div>
+      <div class="panebody" style="padding:0">
+        <div class="voicewrap">
+          <div class="vmain">
+            <div class="orb" id="orb"><span class="g" id="orbG">IDLE</span></div>
+            <div class="vstate" id="vState">VOICE-ONLY MODE</div>
+            <div class="vtext" id="vText">Hold the button and speak. The panel on the right shows what Dourmouse is doing while it works.</div>
+            <button class="vbtn" id="vBtn">▶ START LISTENING</button>
+            <div class="vnote" id="vNote"></div>
+          </div>
+          <aside class="live" aria-label="Live activity">
+            <div class="livehead"><span id="liveDot" class="dot"></span>LIVE ACTIVITY</div>
+            <div class="livebody" id="liveBody">
+              <div class="liveempty">Nothing running.</div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="dock">
+    <div class="queue" id="queue"></div>
+    <div class="dockrow">
+      <span class="hint">⌘ + ENTER TO BROADCAST</span>
+      <button class="chip" id="micChip" title="Switch to voice-only mode">(MIC)</button>
+      <textarea id="ta" rows="1" placeholder="Ask anything — or /all &lt;goal&gt; to put every resource on it"></textarea>
+      <button class="chip" id="spkChip" title="Speak replies aloud">(SPK)</button>
+      <button id="stop" type="button"><span class="sq"></span>STOP</button>
+      <button id="go">SEND_DIRECTIVE</button>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span id="footL">SCREEN 01 / 09 — HOME</span>
+    <span>BACKEND: <b id="footBackend">—</b> · NODE: <b id="footNode">—</b></span>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
+
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","MEDIA","SETTINGS","ATLAS","NEWS","VOICE"];
+const sys = {roster:null,conns:null,server:null,backend:null,memory:null,telemetry:null,version:null,me:null,voice:null};
+let screen = "HOME", busy = false, focusAgent = "", speak = false, voiceMode = false;
+const queue = [];
+
+/* ---------------- tabs ---------------- */
+const tabsEl = $("tabs");
+SCREENS.forEach((name,i) => {
+  const b = document.createElement("button");
+  b.className = "tab"; b.type = "button"; b.setAttribute("role","tab");
+  b.setAttribute("aria-selected", String(i===0));
+  b.innerHTML = `<span class="dia">◆</span>${name}`;
+  b.onclick = () => show(name);
+  tabsEl.appendChild(b);
+});
+function show(name){
+  screen = name;
+  [...tabsEl.children].forEach(b => b.setAttribute("aria-selected", String(b.textContent.trim().endsWith(name))));
+  SCREENS.forEach(s => { const p = $("pane-"+s.toLowerCase()); if(p) p.classList.toggle("on", s===name); });
+  $("mastScreen").textContent = "// " + name;
+  $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / 09 — ${name}`;
+  if(name==="RESEARCH") paintResearch();
+  if(name==="CODE") paintCode();
+  if(name==="MEDIA") paintMedia();
+  if(name==="SETTINGS") paintSettings();
+  if(name==="ATLAS") paintAtlas();
+  if(name==="NEWS") paintNews();
+  if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
+  else if(voiceMode && name!=="VOICE"){ voiceMode = false; $("micChip").classList.remove("on"); }
+}
+
+/* ---------------- system state ---------------- */
+async function refresh(){
+  const g = async (k,p) => { try{ sys[k] = await api(p); }catch{ sys[k]=null; } };
+  await Promise.all([
+    g("roster","/api/roster"), g("conns","/api/connections"), g("server","/api/server"),
+    g("backend","/api/backend"), g("memory","/api/memory"), g("telemetry","/api/telemetry"),
+    g("version","/api/version"), g("me","/api/auth/me"), g("voice","/api/voice"),
+  ]);
+  paintMast(); paintAgents(); paintHome();
+}
+function paintMast(){
+  const t = sys.telemetry||{}, b = sys.backend||{}, s = sys.server||{};
+  $("mMem").textContent = (t.mem_used_gb!=null) ? `${t.mem_used_gb}GB / ${t.mem_total_gb}GB` : "—";
+  $("footBackend").textContent = b.model ? b.model.split("/").pop() : "—";
+  $("footNode").textContent = s.online ? `${s.node} ${s.latency_ms}ms` : "OFFLINE";
+  const r = sys.roster ? (sys.roster.subagents||[]).length : 0;
+  $("railFoot").textContent = `${r} AGENTS / ${liveEvents.length} EVENTS`;
+}
+function paintAgents(){
+  const box = $("agents"); const rost = (sys.roster&&sys.roster.subagents)||[]; const c = sys.conns||{};
+  if(!rost.length){ box.innerHTML = '<div class="note">Roster unavailable.</div>'; return; }
+  box.innerHTML = "";
+  rost.slice(0,40).forEach(a => {
+    const conn = c[a.name];
+    const state = conn ? (conn.ok ? "READY" : "IDLE") : "READY";
+    const el = document.createElement("div"); el.className = "agent";
+    el.innerHTML = `<div class="top"><span class="nm"></span><span class="badge ${state==="READY"?"ready":""}">${state}</span></div><div class="d"></div>`;
+    el.querySelector(".nm").textContent = a.name.toUpperCase();
+    el.querySelector(".d").textContent = (a.description||"").slice(0,72);
+    el.title = `${a.name} · ${(a.tools||[]).length} tools`;
+    box.appendChild(el);
+  });
+}
+function paintHome(){
+  const s = sys.server||{}, m = sys.memory||{}, rost=(sys.roster&&sys.roster.subagents)||[];
+  const c = sys.conns||{}; const okN = Object.values(c).filter(x=>x&&x.ok).length;
+  $("homeBody").innerHTML = `
+    <p class="lede">${rost.length} AGENTS MOUNTED. ${okN} OF ${Object.keys(c).length} CONNECTIONS LIVE.
+      ${s.online?`COMPUTE NODE ${esc(s.node)} ONLINE AT ${s.latency_ms}MS.`:"COMPUTE NODE OFFLINE — RUNNING ON THE CONFIGURED BACKEND."}</p>
+    <div class="metrics">
+      <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"—"} FACTS</span></div>
+      <div class="metric"><span class="k">LEARNING</span><span class="v">${m.active?"ON":"OFF"}</span></div>
+      <div class="metric"><span class="k">CONNECTIONS</span><span class="v">${okN}/${Object.keys(c).length}</span></div>
+      <div class="metric"><span class="k">VERSION</span><span class="v">${esc((sys.version||{}).current||"—")}</span></div>
+    </div>
+    <div class="cards" id="homeCards"></div>`;
+  const cards = [
+    ["COMMS","Open the transcript and broadcast a directive.","COMMS"],
+    ["RESEARCH","Live web search with sources.","RESEARCH"],
+    ["CODE","Pick a toolchain and write code.","CODE"],
+    ["VOICE","Hands-free, with a live activity feed.","VOICE"],
+  ];
+  const wrap = $("homeCards");
+  cards.forEach(([h,d,go]) => {
+    const b=document.createElement("button"); b.className="card"; b.type="button";
+    b.innerHTML=`<div class="h">${h}</div><div class="d">${d}</div>`;
+    b.onclick=()=>show(go); wrap.appendChild(b);
+  });
+}
+
+/* ---------------- markdown ---------------- */
+function md(src){
+  const parts = esc(src).split(/```/); let out="";
+  parts.forEach((chunk,i)=>{
+    if(i%2){ out += `<pre><code>${chunk.replace(/^[\w-]*\n/,"")}</code></pre>`; return; }
+    let t = chunk.replace(/`([^`\n]+)`/g,"<code>$1</code>")
+                 .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
+                 .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    let html="",list=null;
+    t.split("\n").forEach(line=>{
+      const ul=line.match(/^\s*[-*]\s+(.*)$/), ol=line.match(/^\s*\d+\.\s+(.*)$/);
+      if(ul){ if(list!=="ul"){ if(list)html+=`</${list}>`; html+="<ul>"; list="ul"; } html+=`<li>${ul[1]}</li>`; }
+      else if(ol){ if(list!=="ol"){ if(list)html+=`</${list}>`; html+="<ol>"; list="ol"; } html+=`<li>${ol[1]}</li>`; }
+      else { if(list){html+=`</${list}>`;list=null;} if(line.trim()) html+=`<p>${line}</p>`; }
+    });
+    if(list) html+=`</${list}>`;
+    out+=html;
+  });
+  return out;
+}
+
+/* ---------------- LIVE ACTIVITY ----------------
+   Voice-only hides the transcript, so the operator needs to see what the
+   system is DOING. Tool names are translated into plain statements of the
+   work — this map is the difference between "drive_create_doc" and
+   "Writing a document". Unknown tools degrade to the raw name rather than
+   being hidden or guessed at. */
+const WORK = {
+  drive_create_doc:["Writing a document","Creating a Google Doc in your Drive"],
+  slides_create:["Building a slideshow","Creating a Google Slides deck"],
+  drive_share:["Sharing a file","Granting access in Drive"],
+  gmail_send:["Sending an email","Delivering via Gmail"],
+  gmail_search:["Searching your inbox","Looking through Gmail"],
+  gmail_read:["Reading an email",""],
+  gmail_archive:["Archiving mail",""],
+  gmail_trash:["Moving mail to Trash",""],
+  read_inbox:["Reading your inbox",""],
+  calendar_events:["Checking your calendar",""],
+  drive_search:["Searching Drive",""],
+  drive_read:["Reading a file from Drive",""],
+  sheets_read:["Reading a spreadsheet",""],
+  web_search:["Searching the web","Live results with sources"],
+  news_search:["Searching the news",""],
+  news_headlines:["Fetching headlines",""],
+  fetch_url:["Reading a web page",""],
+  run_python:["Running Python","Executing code and capturing real output"],
+  run_command:["Running a shell command",""],
+  write_file:["Writing a file",""],
+  read_file:["Reading a file",""],
+  edit_file:["Editing a file",""],
+  claude_code:["Working in Claude Code",""],
+  codex_code:["Working in Codex",""],
+  stock_quote:["Checking a stock quote",""],
+  market_movers:["Checking market movers",""],
+  remember:["Saving to memory",""],
+  recall:["Recalling from memory",""],
+  delegate_task:["Delegating a sub-task",""],
+};
+const liveEvents = [];
+function liveAdd(kind, title, sub){
+  liveEvents.push({kind,title,sub,t:Date.now()});
+  const box = $("liveBody");
+  if(box.querySelector(".liveempty")) box.innerHTML = "";
+  const el = document.createElement("div");
+  el.className = "ev " + kind;
+  const ts = new Date().toTimeString().slice(0,8);
+  el.innerHTML = `<span class="ts">${ts}</span><div class="t"></div>${sub?'<div class="s"></div>':""}`;
+  el.querySelector(".t").textContent = title;
+  if(sub) el.querySelector(".s").textContent = sub;
+  box.appendChild(el); box.scrollTop = box.scrollHeight;
+  while(box.children.length > 60) box.removeChild(box.firstChild);
+  $("liveDot").className = "dot " + (kind==="err"?"no":kind==="done"?"ok":"");
+}
+function liveClear(){ liveEvents.length=0; $("liveBody").innerHTML='<div class="liveempty">Nothing running.</div>'; $("liveDot").className="dot"; }
+function describeTool(name){
+  const w = WORK[name];
+  return w ? {t:w[0], s:w[1]} : {t:"Using "+name, s:""};
+}
+
+/* ---------------- transcript ---------------- */
+const thread = $("thread"), ta = $("ta"), go = $("go"), stopBtn = $("stop");
+let ctrl = null;
+function addYou(text){
+  const d=document.createElement("div"); d.className="turn you";
+  d.innerHTML=`<div class="gut"><span class="who">YOU</span><span>${new Date().toTimeString().slice(0,8)}</span></div><div class="body"></div>`;
+  d.querySelector(".body").textContent=text; thread.appendChild(d); thread.scrollTop=thread.scrollHeight;
+}
+function addReply(){
+  const d=document.createElement("div"); d.className="turn";
+  d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span></div>
+    <div class="acts"></div><div class="body"></div><div class="rowacts"></div>`;
+  thread.appendChild(d); thread.scrollTop=thread.scrollHeight;
+  return {el:d, acts:d.querySelector(".acts"), body:d.querySelector(".body"),
+          row:d.querySelector(".rowacts"), mdl:d.querySelector(".mdl"), st:d.querySelector(".st")};
+}
+function act(acts,label,name,bad,spin){
+  const a=document.createElement("div"); a.className="act"+(bad?" bad":"");
+  if(spin){const s=document.createElement("span");s.className="spin";a.appendChild(s);}
+  const l=document.createElement("span"); l.textContent=label; a.appendChild(l);
+  if(name){const n=document.createElement("span");n.className="nm";n.textContent=name;a.appendChild(n);}
+  acts.appendChild(a); return a;
+}
+function wireCopies(root){
+  root.querySelectorAll("pre").forEach(pre=>{
+    if(pre.querySelector(".copybtn")) return;
+    const b=document.createElement("button"); b.className="copybtn"; b.type="button"; b.textContent="COPY";
+    b.onclick=async()=>{ try{ await navigator.clipboard.writeText(pre.innerText.replace(/^COPY\n?/,""));
+      b.textContent="COPIED"; setTimeout(()=>b.textContent="COPY",1200);}catch{b.textContent="FAILED";} };
+    pre.appendChild(b);
+  });
+}
+function addApproval(node, evt){
+  const box=document.createElement("div"); box.className="approve";
+  box.innerHTML=`<div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
+    <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div>`;
+  box.querySelector(".p").textContent = evt.prompt||"This action needs your approval.";
+  node.body.parentNode.insertBefore(box, node.body);
+  liveAdd("act","Waiting for your approval", (evt.prompt||"").slice(0,90));
+  const [yes,no]=box.querySelectorAll("button"); let done=false;
+  const decide=async(ok)=>{ if(done)return; done=true;
+    box.classList.add("done"); box.querySelector(".t").textContent = ok?"◆ APPROVED":"◆ DECLINED";
+    box.querySelector(".r").remove();
+    liveAdd(ok?"done":"err", ok?"You approved it":"You declined it","");
+    try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id:evt.id,approved:ok})}); }catch{}
+  };
+  yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
+  yes.focus();
+}
+function setBusy(on){
+  busy=on; go.disabled=false; go.textContent = on?"QUEUE":"SEND_DIRECTIVE";
+  stopBtn.classList.toggle("on",on);
+  paintQueue();
+}
+function paintQueue(){
+  const box=$("queue"); box.innerHTML="";
+  queue.forEach((t,i)=>{
+    const r=document.createElement("div"); r.className="qi";
+    const n=document.createElement("b"); n.textContent=String(i+1);
+    const s=document.createElement("span"); s.textContent=t;
+    const x=document.createElement("button"); x.type="button"; x.setAttribute("aria-label","Remove"); x.textContent="✕";
+    x.onclick=()=>{queue.splice(i,1);paintQueue();};
+    r.append(n,s,x); box.appendChild(r);
+  });
+}
+
+/* ---------------- send ---------------- */
+async function submit(){
+  const text = ta.value.trim(); if(!text) return;
+  if(busy){ queue.push(text); ta.value=""; ta.style.height="auto"; paintQueue(); return; }
+  ta.value=""; ta.style.height="auto";
+  await run(text);
+  while(queue.length){ const n=queue.shift(); paintQueue(); await run(n); }
+}
+async function run(text){
+  if(screen!=="VOICE") show("COMMS");
+  addYou(text); setBusy(true);
+  liveClear(); liveAdd("act","Thinking", text.slice(0,80));
+  const node = addReply(); node.st.textContent="THINKING";
+  let buf="", stopped=false, dirty=false, painting=false;
+  const paint=()=>{ dirty=true; if(painting)return; painting=true;
+    setTimeout(()=>{ painting=false; if(!dirty)return; dirty=false;
+      node.body.innerHTML=md(buf); wireCopies(node.body);
+      thread.scrollTop=thread.scrollHeight;
+      if(voiceMode) $("vText").textContent = buf.slice(-600);
+    },40); };
+  ctrl = new AbortController();
+  stopBtn.onclick = ()=>{ stopped=true; try{ctrl.abort();}catch{} };
+  try{
+    const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({prompt:text, focus_agent:focusAgent||undefined}), signal:ctrl.signal});
+    if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
+    const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
+    for(;;){
+      const {value,done}=await rd.read(); if(done)break;
+      carry+=dec.decode(value,{stream:true});
+      const parts=carry.split("\n"); carry=parts.pop()||"";
+      for(const line of parts){
+        if(!line.startsWith("data:"))continue;
+        let e; try{e=JSON.parse(line.slice(5));}catch{continue;}
+        switch(e.type){
+          case "brain":{
+            const raw=e.model||""; const onNode=raw.startsWith("server:");
+            const shown=raw.replace(/^server:/,"").split("/").pop()||"—";
+            node.mdl.textContent = onNode?`${(sys.server&&sys.server.node)||"NODE"} · ${shown}`:shown;
+            node.st.textContent="GENERATING";
+            liveAdd("act","Routing", onNode?`compute node · ${shown}`:shown);
+            break; }
+          case "plan": act(node.acts,"PLAN",""); liveAdd("act","Planning the steps",""); break;
+          case "tool_use": case "function":{
+            const nm=e.name||e.tool||"tool"; const w=describeTool(nm);
+            act(node.acts,"USING",nm,false,true);
+            liveAdd("act", w.t, w.s || nm);
+            node.st.textContent="WORKING"; break; }
+          case "tool_result": case "result":{
+            const nm=e.name||e.tool||""; act(node.acts,"RESULT",nm);
+            liveAdd("done","Finished "+(WORK[nm]?WORK[nm][0].toLowerCase():nm),"");
+            break; }
+          case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e); break;
+          case "assistant_delta": buf+=e.text||""; paint(); break;
+          case "assistant_text": if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
+          case "error": act(node.acts,"ERROR",e.message||"",true); liveAdd("err","Error",e.message||""); break;
+          case "done": if(e.final_text&&e.final_text.length>buf.length) buf=e.final_text; break;
+        }
+      }
+    }
+  }catch(err){
+    if(stopped||err.name==="AbortError"){ act(node.acts,"STOPPED BY YOU",""); liveAdd("err","Stopped by you",""); }
+    else{
+      const s=sys.server||{};
+      const b=document.createElement("div"); b.className="errbox";
+      b.innerHTML=`<div class="t">◆ REQUEST FAILED</div><div></div>`;
+      b.children[1].textContent = String(err.message||err) + (s.online
+        ? " — the stream ended early. Retry, or check SETTINGS."
+        : " — the compute node is offline and the fallback did not answer.");
+      node.body.parentNode.insertBefore(b,node.body);
+      liveAdd("err","Request failed",String(err.message||err).slice(0,80));
+    }
+  }finally{
+    ctrl=null;
+    node.body.innerHTML = md(buf) || "<p><em>No reply.</em></p>";
+    wireCopies(node.body);
+    node.st.textContent = stopped?"STOPPED":"DONE";
+    node.acts.querySelectorAll(".spin").forEach(x=>x.remove());
+    const c=document.createElement("button"); c.className="mini"; c.type="button"; c.textContent="COPY";
+    c.onclick=async()=>{try{await navigator.clipboard.writeText(buf);c.textContent="COPIED";setTimeout(()=>c.textContent="COPY",1200);}catch{}};
+    const rg=document.createElement("button"); rg.className="mini"; rg.type="button";
+    rg.textContent = stopped?"CONTINUE":"REGENERATE";
+    rg.onclick=()=>{ if(!busy) run(stopped?text+"\n\n(continue)":text); };
+    node.row.append(c,rg);
+    liveAdd(stopped?"err":"done", stopped?"Halted":"Done","");
+    setBusy(false);
+    if(voiceMode){ $("vText").textContent = buf.slice(-600) || "No reply."; setVoice("idle"); if(speak) say(buf); }
+    thread.scrollTop=thread.scrollHeight;
+    refresh();
+  }
+}
+
+ta.addEventListener("input",()=>{ta.style.height="auto";ta.style.height=Math.min(ta.scrollHeight,130)+"px";
+  go.textContent = busy?"QUEUE":"SEND_DIRECTIVE";});
+ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();} });
+go.onclick=()=>submit();
+
+/* ---------------- CODE: toolchain picker ----------------
+   Each option is a REAL agent in the roster and maps to focus_agent, so
+   choosing one genuinely routes the request there. Availability comes from
+   /api/connections — an unavailable tool is shown and marked, never hidden,
+   because "why can't I pick Claude" is a question the UI should answer. */
+const TOOLS = [
+  {id:"", name:"AUTO", desc:"Let Dourmouse route the request itself.", conn:null},
+  {id:"code_claude", name:"CLAUDE CODE", desc:"Your Claude Code CLI (claude -p).", conn:"claude"},
+  {id:"code_nvidia", name:"NVIDIA NIM", desc:"NVIDIA-hosted model, OpenAI-compatible.", conn:"nvidia"},
+  {id:"code_codex", name:"CODEX", desc:"OpenAI Codex CLI/API.", conn:"codex"},
+  {id:"code_deepseek", name:"DEEPSEEK", desc:"Free DeepSeek via Freebuff.", conn:"freebuff"},
+  {id:"code_ollama", name:"OLLAMA (LOCAL)", desc:"Local model, keyless, zero spend.", conn:"ollama"},
+  {id:"dev_coding", name:"DEV AGENT", desc:"Full toolset: run, read, edit, diff, deploy.", conn:null},
+  {id:"freebuff", name:"FREEBUFF", desc:"Dispatch into a Freebuff thread.", conn:"freebuff"},
+];
+let codeTool = "";
+function toolAvail(t){
+  if(!t.conn) return true;
+  const c = (sys.conns||{})[t.conn];
+  return c ? !!c.ok : null;
+}
+function paintCode(){
+  const box=$("codeBody");
+  const cur = TOOLS.find(t=>t.id===codeTool) || TOOLS[0];
+  box.innerHTML = `
+    <div class="toolbar">
+      <span class="lbl">TOOLCHAIN</span>
+      <div class="sel">
+        <button class="selbtn" id="toolBtn" aria-haspopup="listbox" aria-expanded="false">
+          <span class="cv" id="toolCur"></span><span style="color:var(--blue-deep)">▾</span>
+        </button>
+        <div class="selmenu" id="toolMenu" role="listbox"></div>
+      </div>
+      <span class="lbl" id="toolState"></span>
+    </div>
+    <div class="note" id="toolNote"></div>
+    <div class="sec">WHAT THIS DOES</div>
+    <div class="note">Selecting a toolchain pins the next directive to that agent
+      (<code>focus_agent</code>). AUTO lets the router choose. Requests still stream into
+      COMMS, and anything destructive still asks for approval.</div>`;
+  $("toolCur").textContent = cur.name;
+  const menu=$("toolMenu");
+  TOOLS.forEach(t=>{
+    const av = toolAvail(t);
+    const b=document.createElement("button"); b.className="opt"; b.type="button"; b.setAttribute("role","option");
+    b.setAttribute("aria-selected", String(t.id===codeTool));
+    b.innerHTML=`<span class="dot ${av===true?"ok":av===false?"no":""}"></span>
+      <span><span class="on"></span><span class="od"></span></span>`;
+    b.querySelector(".on").textContent = t.name;
+    b.querySelector(".od").textContent = t.desc + (av===false ? " — not available" : "");
+    b.onclick=()=>{ codeTool=t.id; focusAgent=t.id; menu.classList.remove("on");
+      $("toolBtn").setAttribute("aria-expanded","false"); paintCode(); };
+    menu.appendChild(b);
+  });
+  $("toolBtn").onclick=()=>{ const on=menu.classList.toggle("on");
+    $("toolBtn").setAttribute("aria-expanded",String(on)); };
+  const av = toolAvail(cur);
+  $("toolState").textContent = av===false ? "● UNAVAILABLE" : av===true ? "● READY" : "";
+  $("toolState").style.color = av===false ? "var(--bad)" : "var(--ok)";
+  const c = cur.conn ? (sys.conns||{})[cur.conn] : null;
+  $("toolNote").textContent = c ? (c.ok ? c.detail : `${c.detail} — fix: ${c.hint||"see SETTINGS"}`)
+                                : "Routing handled by Dourmouse.";
+  focusAgent = codeTool;
+}
+document.addEventListener("click",e=>{
+  const m=$("toolMenu"); if(!m) return;
+  if(!e.target.closest(".sel")) { m.classList.remove("on"); const b=$("toolBtn"); if(b) b.setAttribute("aria-expanded","false"); }
+});
+
+/* ---------------- other panes ---------------- */
+function paintResearch(){
+  $("researchBody").innerHTML = `<div class="note">Ask a question below — it routes to the research agent,
+    searches the live web and cites sources. Results stream into COMMS.</div>
+    <div class="sec">TRY</div><div class="cards" id="rc"></div>`;
+  [["Latest on open-weight models",""],["What happened in the news today",""],["Compare two frameworks",""]]
+    .forEach(([q])=>{ const b=document.createElement("button"); b.className="card"; b.type="button";
+      b.innerHTML=`<div class="h">${esc(q)}</div>`;
+      b.onclick=()=>{ focusAgent="research_info"; ta.value=q; submit(); }; $("rc").appendChild(b); });
+}
+function paintMedia(){
+  const c=(sys.conns||{}).spotify;
+  $("mediaBody").innerHTML = `<div class="sec">SPOTIFY</div>
+    <div class="row"><span class="dot ${c&&c.ok?"ok":"no"}"></span><div class="g">
+      <div class="n">${c&&c.ok?"Linked":"Not linked"}</div><div class="d">${esc((c&&c.detail)||"")}</div></div></div>
+    <div class="note" style="margin-top:12px">Ask for a track below and the music agent handles it.
+      Playback changes ask for approval first.</div>`;
+}
+function paintSettings(){
+  const b=sys.backend||{}, s=sys.server||{}, me=sys.me||{}, v=sys.voice||{}, t=sys.telemetry||{};
+  const c=sys.conns||{};
+  const rows = Object.entries(c).map(([k,x])=>`<div class="row"><span class="dot ${x.ok?"ok":"no"}"></span>
+    <div class="g"><div class="n">${esc(k)}</div><div class="d">${esc(x.detail||"")}</div>
+    ${!x.ok&&x.hint?`<div class="d">fix: ${esc(x.hint)}</div>`:""}</div></div>`).join("");
+  $("settingsBody").innerHTML=`
+    <div class="sec">INTELLIGENCE</div>
+    <div class="row"><div class="g"><div class="n">${esc(b.model||"—")}</div>
+      <div class="d">${esc(b.backend||"")} · ${esc(b.base_url||"")}</div></div></div>
+    <div class="row"><div class="g"><div class="n">Compute node</div>
+      <div class="d">${s.online?`${esc(s.node)} · ${esc(s.model)} · ${s.latency_ms}ms`:"offline"}</div></div></div>
+    <div class="sec">ACCOUNT</div>
+    <div class="row"><div class="g"><div class="n">${me.me?esc(me.me):"Not signed in"}</div>
+      <div class="d">${me.me?"Gmail, Calendar and Drive available":'<a href="/login" style="color:var(--amber)">Sign in</a> to enable mail, calendar and Drive'}</div></div></div>
+    <div class="sec">VOICE</div>
+    <div class="row"><div class="g"><div class="n">STT ${esc(v.stt||"—")} · TTS ${esc(v.tts||"—")}</div>
+      <div class="d">whisper: ${esc(v.whisper_model||"—")} · piper: ${esc(v.piper_voice||"—")}</div></div></div>
+    <div class="sec">HOST</div>
+    <div class="row"><div class="g"><div class="n">${esc(t.host||"—")}</div>
+      <div class="d">${t.cpu_pct!=null?`CPU ${t.cpu_pct}% · MEM ${t.mem_used_gb}/${t.mem_total_gb} GB`:"telemetry unavailable"}</div></div></div>
+    <div class="sec">CONNECTIONS</div>${rows}
+    <div class="note" style="margin-top:12px">Secrets are never shown here. Configure them in <code>.env</code> on the host.</div>`;
+}
+async function paintAtlas(){
+  $("atlasBody").innerHTML='<div class="note">Loading ATLAS…</div>';
+  try{ const d=await api("/api/atlas");
+    $("atlasBody").innerHTML=`<div class="sec">STATUS</div><pre style="white-space:pre-wrap;font-size:10px;color:var(--blue)">${esc(JSON.stringify(d,null,1).slice(0,2600))}</pre>`;
+  }catch(e){ $("atlasBody").innerHTML=`<div class="note">ATLAS not reachable — ${esc(String(e.message||e))}</div>`; }
+}
+async function paintNews(){
+  $("newsBody").innerHTML='<div class="note">Ask for headlines below — the news agent fetches them live.</div>'+
+    '<div class="sec">TRY</div><div class="cards" id="nc"></div>';
+  [["Top headlines now","news_headlines"],["Search a story","news_search"]].forEach(([q])=>{
+    const b=document.createElement("button"); b.className="card"; b.type="button";
+    b.innerHTML=`<div class="h">${esc(q)}</div>`;
+    b.onclick=()=>{ focusAgent="news"; ta.value=q; submit(); }; $("nc").appendChild(b);
+  });
+}
+
+/* ---------------- VOICE ---------------- */
+let rec = null, listening = false;
+function setVoice(state){
+  const orb=$("orb");
+  orb.className = "orb" + (state==="listening"?" listening":state==="speaking"?" speaking":"");
+  $("orbG").textContent = state.toUpperCase();
+  $("vState").textContent = state==="listening" ? "LISTENING…" :
+    state==="thinking" ? "WORKING…" : state==="speaking" ? "SPEAKING" : "VOICE-ONLY MODE";
+}
+function say(text){
+  if(!("speechSynthesis" in window) || !text) return;
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text.slice(0,1200));
+    u.onstart=()=>setVoice("speaking"); u.onend=()=>setVoice("idle");
+    speechSynthesis.speak(u);
+  }catch{}
+}
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function initVoice(){
+  const note=$("vNote"), btn=$("vBtn");
+  if(!SR){
+    btn.disabled=true; btn.style.opacity=".5";
+    note.textContent="This browser has no speech recognition. Dictation needs Chrome, or the server-side Whisper pipeline (SETTINGS shows it is not configured).";
+    return;
+  }
+  note.textContent="Speech recognition runs in this browser. Server-side Whisper/Piper are not configured — SETTINGS shows their state.";
+  btn.onclick=()=>{
+    if(listening){ try{rec.stop();}catch{} return; }
+    rec = new SR(); rec.lang="en-US"; rec.interimResults=true; rec.continuous=false;
+    rec.onstart=()=>{ listening=true; btn.classList.add("rec"); btn.textContent="■ STOP LISTENING"; setVoice("listening"); $("vText").textContent="…"; };
+    rec.onresult=(ev)=>{
+      let s=""; for(const r of ev.results) s+=r[0].transcript;
+      $("vText").textContent=s;
+      if(ev.results[ev.results.length-1].isFinal && s.trim()){
+        setVoice("thinking"); ta.value=s.trim(); submit();
+      }
+    };
+    rec.onerror=(e)=>{ $("vNote").textContent="Speech error: "+e.error; };
+    rec.onend=()=>{ listening=false; btn.classList.remove("rec"); btn.textContent="▶ START LISTENING";
+      if($("orbG").textContent==="LISTENING") setVoice("idle"); };
+    try{ rec.start(); }catch(e){ $("vNote").textContent="Could not start: "+e.message; }
+  };
+}
+$("micChip").onclick=()=>show("VOICE");
+$("spkChip").onclick=()=>{ speak=!speak; $("spkChip").classList.toggle("on",speak);
+  $("spkChip").title = speak?"Replies will be spoken":"Speak replies aloud"; };
+
+/* ---------------- boot ---------------- */
+setInterval(()=>{ $("mClock").textContent=new Date().toTimeString().slice(0,8); },1000);
+$("mClock").textContent=new Date().toTimeString().slice(0,8);
+(async()=>{ try{ const d=await api("/api/sessions/recent");
+  const s=(d.sessions||[])[0]; $("mSess").textContent = s? (s.name||"").replace(/\.jsonl$/,"").slice(-13) : "—";
+}catch{} })();
+initVoice(); paintQueue(); refresh(); setInterval(refresh, 30000);
+ta.focus();
+
+/* v8.7: register the service worker, matching the HUD. The console is the
+   default surface now, so the offline shell has to come with it — the
+   manifest alone does not make the app installable. Failure is non-fatal:
+   an unsupported browser just runs online-only. */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => { /* SW unsupported — browser fallback only */ });
+}
+})();
+</script>
+</body>
+</html>

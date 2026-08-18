@@ -1,0 +1,21 @@
+{
+  "domain": "Artificial Intelligence & Machine Learning",
+  "field": "Deep Learning Theory",
+  "tests": [
+    {
+      "url": "https://siebelschool.illinois.edu/academics/graduate/phd-program/qualifying-exam/ai",
+      "file": "_archives/https-siebelschool-illinois-edu-academic-58feffb81e.html",
+      "bytes": 72413,
+      "sha256": "58feffb81e93f5f70ec1f0c3af0e7a99e7f071eb2615459c00372ef38a9e8969",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://siebelschool.illinois.edu/academics/graduate/phd-program/qualifying-exam/ai",
+      "label": "UIUC Siebel \u2014 AI Qualifying Exam guidelines"
+    }
+  ]
+}

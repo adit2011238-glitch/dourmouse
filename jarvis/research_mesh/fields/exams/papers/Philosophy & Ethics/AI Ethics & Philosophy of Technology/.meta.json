@@ -1,0 +1,21 @@
+{
+  "domain": "Philosophy & Ethics",
+  "field": "AI Ethics & Philosophy of Technology",
+  "tests": [
+    {
+      "url": "https://www.ou.edu/content/dam/cas/philosophy/docs/graduate-students/exams/qualifying/2019qualifyingexamancient.pdf",
+      "file": "_archives/https-www-ou-edu-content-dam-cas-philoso-d4d3aa2b6b.pdf",
+      "bytes": 208002,
+      "sha256": "d4d3aa2b6bd5ee214b23892692285ed006e760e27337b61ac5eea68b75124bc5",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.ou.edu/content/dam/cas/philosophy/docs/graduate-students/exams/qualifying/2019qualifyingexamancient.pdf",
+      "label": "U. Oklahoma \u2014 Qualifying Exam: Ancient Philosophy 2019 (real paper, PDF)"
+    }
+  ]
+}

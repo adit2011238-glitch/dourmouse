@@ -1,0 +1,262 @@
+{
+  "domain": "Applied Mathematics",
+  "field": "Industrial & Engineering Mathematics",
+  "tests": [
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/qualifying-exam-archives/",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-qu-de36b2dbd2.html",
+      "bytes": 69140,
+      "sha256": "de36b2dbd2eb0fd4452b12fb094633bb1893684a8617bd8df908051012b635ba",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/10/AppliedQualFall2024.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-9d1d1a6d31.pdf",
+      "bytes": 73824,
+      "sha256": "9d1d1a6d313f51aedb7e489aeda5519aee8abcb47a7d4213eb1a3c7db08895e5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/AppliedMathQualF20.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-cac5aa8305.pdf",
+      "bytes": 215984,
+      "sha256": "cac5aa830544d5245e6bfecc56eb4a4fbba33f7371b27a81b45bbbbf8f1fce10",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2025/10/AlgebraFall2025.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-3eb4e2a231.pdf",
+      "bytes": 96885,
+      "sha256": "3eb4e2a231f19eb7eec70805614dc5731d65ca01f8a9a4ffd0afe529487bc02b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2025/10/AlgebraFall2025Sols.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-68b52db35b.pdf",
+      "bytes": 129820,
+      "sha256": "68b52db35b27203530cc581b1e2dae8d3b18b09c4a979c5a0e5d315faed4caf2",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/10/AlgebraQualFall2024.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-282dd94e94.pdf",
+      "bytes": 140416,
+      "sha256": "282dd94e943e54d30ad1a277287108455912a68819126ac177358db74e36b136",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/04/2024-Winterq-d186a5340dad5181.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-043e65e004.pdf",
+      "bytes": 164614,
+      "sha256": "043e65e0040e44726586192640c757fe2abcfcbcb1ba7b21de2d49738f0b131f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/04/2024-Wintera-b88a6775970f8073.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-a7f1760d82.pdf",
+      "bytes": 230636,
+      "sha256": "a7f1760d82367204fc53bca2aa628a5668784deaf3eb7b4f88c10ce219652518",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/04/2023-Fallq-cac75a742242d424.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-153ab6c10b.pdf",
+      "bytes": 120957,
+      "sha256": "153ab6c10bbf264c25655a3c892852cd708de4c13ad8f370c0a21d8968641d64",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/04/2023-Falla-966d042b6abdd771.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-f10062520f.pdf",
+      "bytes": 188989,
+      "sha256": "f10062520f4e1d9d32afad73611df86f37cb41af92322e54780e845ef5991217",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/08/AlgebraQual_F22.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-0cd2335a15.pdf",
+      "bytes": 112092,
+      "sha256": "0cd2335a15934683e130f2424eedba641efd143b11a9f309dfb5552a198b8b76",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/AlgebraQual_F21.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-6ab7359a85.pdf",
+      "bytes": 102819,
+      "sha256": "6ab7359a853f11ab40d0607de858a18ce9151c4796804c4f278cfc53c0a87c1d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/AlgebraQualW21_20200917.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-51bae37b97.pdf",
+      "bytes": 70264,
+      "sha256": "51bae37b977a7e10bd18d0cd742a41e9b1283662fdc80cda9cf326030502cfca",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/AlgebraF20.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-11212e70ad.pdf",
+      "bytes": 58025,
+      "sha256": "11212e70ade7daf7adb736e83ef494c25e05b0eb552f4c34f4d5131e3b1f0e67",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/AlgebraSept2019Exam.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-8ee7d007ae.pdf",
+      "bytes": 200031,
+      "sha256": "8ee7d007aec6584d1dfcb1b588af180d7974681f77964fa4724b4fdbbe20ba7a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/AlgebraSept2019solutions.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-6ca35c2a93.pdf",
+      "bytes": 2746792,
+      "sha256": "6ca35c2a93730bf651524a3a087834413faa80454a8ac0e4378e35c3a254fbfc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/qual18winter.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-28e6fef438.pdf",
+      "bytes": 95545,
+      "sha256": "28e6fef43807540a51e0169d07b1dbddd0180b86ebc963e082d400beeee1051a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/qual18wintersol.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-7ebc434268.pdf",
+      "bytes": 141976,
+      "sha256": "7ebc43426871f7f4a2dc403238e0efcb9f3b5bebdc438b0d101b01928366fbd8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/qual18fall.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-de2de2ad3f.pdf",
+      "bytes": 100510,
+      "sha256": "de2de2ad3fe71440f8f879e212bded90a1fb8767127e2b87cd2fb869b0648e8c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/qual18fallsol.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-fdf7317114.pdf",
+      "bytes": 125690,
+      "sha256": "fdf7317114beaa03eb3e895726f8fb122b834c656a5c4da09d8f94315a268587",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/Algebra17_Qual_Winter.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-ea0264048a.pdf",
+      "bytes": 89876,
+      "sha256": "ea0264048ac9149f1c9e1c3152fca790b2ff9905daf670f4635739ebb6f4d444",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/Algebra17_Qual_Winter_Solutions.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-85f2b60903.pdf",
+      "bytes": 144665,
+      "sha256": "85f2b609031896c203c495860a484e67904820fe3346c3be3a5411dd59207559",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/Algebra17_Qual_Fall.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-9d4db346bf.pdf",
+      "bytes": 109180,
+      "sha256": "9d4db346bfd02d597862522984512272f3c12208e4217da779cd75eb450ffc47",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/Algebra17_Qual_Fall_Solutions.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-f9705c8832.pdf",
+      "bytes": 151724,
+      "sha256": "f9705c88323203df6d4d4f2b51c78e2be042a6c3361eb9c425ce979274f740a6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/alg_qual_16F.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-527f6064e3.pdf",
+      "bytes": 107294,
+      "sha256": "527f6064e3c13bc4445b3000e2afd9fe088e0af3c55eb0dde9726524a6b65f81",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/10/AppliedQualFall2024Solutions.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-d772af9882.pdf",
+      "bytes": 172440,
+      "sha256": "d772af9882072f27f30e98e1730b86e344bb735e4b5f36c22a041dc43ff950a4",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2024/10/AlgebraQualFall2024Solutions.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-5d33c404c9.pdf",
+      "bytes": 174921,
+      "sha256": "5d33c404c97a6369e6e78f560c984d20114784c5c9ef460eecaa0955020154a5",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/SolutionsAlgebraQual_F22.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-0a00e15c63.pdf",
+      "bytes": 134617,
+      "sha256": "0a00e15c630caab102f8bb4312339e65a494df0d84a845449611cb367b1d46e4",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/SolutionsAlgebraQual_F21.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-059efa6e0e.pdf",
+      "bytes": 120026,
+      "sha256": "059efa6e0e6a3368e2245b841acb8f0b4a8c18c8ea746b9850eef9add61a77c7",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/AlgebraWinterSolutions_20200917.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-2d88aa67fd.pdf",
+      "bytes": 98500,
+      "sha256": "2d88aa67fd861b6ac56e1911066b4b4e3178d12db6c9e9b86ce3cec076dc04fb",
+      "key": true,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/files/2023/06/AlgebraFallSolutions_20200925.pdf",
+      "file": "_archives/https-blogs-uoregon-edu-mathresources-fi-da41094144.pdf",
+      "bytes": 104165,
+      "sha256": "da410941444bb0c228c57bdad7e36e8996ea3557b14f0d5fae0490fbc2cb936c",
+      "key": true,
+      "kind": "pdf"
+    }
+  ],
+  "links": [
+    {
+      "url": "https://blogs.uoregon.edu/mathresources/qualifying-exam-archives/",
+      "label": "U. Oregon Math \u2014 Applied Math quals archive"
+    }
+  ]
+}

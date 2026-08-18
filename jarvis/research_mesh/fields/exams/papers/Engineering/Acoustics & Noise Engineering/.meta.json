@@ -1,0 +1,61 @@
+{
+  "domain": "Engineering",
+  "field": "Acoustics & Noise Engineering",
+  "tests": [
+    {
+      "url": "https://www.me.utexas.edu/academics/graduate-program/qualifying-exams",
+      "file": "_archives/https-www-me-utexas-edu-academics-gradua-c2f3b5ef32.html",
+      "bytes": 21926,
+      "sha256": "c2f3b5ef32d4af5be77d1319d74bcaa37e727c40b65eddb870e9b125cbce11c6",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www.me.utexas.edu/images/pdfs/qualifying-exams/M-D-QE-evaluation-form_11-12-25.pdf",
+      "file": "_archives/https-www-me-utexas-edu-images-pdfs-qual-2a56b78768.pdf",
+      "bytes": 122747,
+      "sha256": "2a56b787688b0f112a147d4a336eab9dedc127322ff9eedb8b41c783f1f7fda0",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.me.utexas.edu/images/academics/TFS-QE-request-form_9-1-25.pdf",
+      "file": "_archives/https-www-me-utexas-edu-images-academics-3bc8e5c68c.pdf",
+      "bytes": 131551,
+      "sha256": "3bc8e5c68ce3dee32846b66124446e69f3875f4bae71837fad53a3e5e88ecd07",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.me.utexas.edu/images/academics/TFS-QE-evaluation_9-1-25.pdf",
+      "file": "_archives/https-www-me-utexas-edu-images-academics-7565e5306d.pdf",
+      "bytes": 131017,
+      "sha256": "7565e5306df0a41ec72d00dd19fb28ffdd6df71ea736efd7fd46ac648e76cae9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.me.utexas.edu/images/academics/TFS-QE-committee_9-1-25.pdf",
+      "file": "_archives/https-www-me-utexas-edu-images-academics-245c125a83.pdf",
+      "bytes": 126343,
+      "sha256": "245c125a83d8ad2c63395a2131531007ede8fee4d7598c841279e89aa4710949",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.me.utexas.edu/images/academics/TFS-example-questions_9-1-25.pdf",
+      "file": "_archives/https-www-me-utexas-edu-images-academics-6250371147.pdf",
+      "bytes": 133262,
+      "sha256": "62503711470c138e1aeb3439d43766d676896755642833aa9f2f66a5c4bb23d1",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.me.utexas.edu/academics/graduate-program/qualifying-exams",
+      "label": "UT Austin ME \u2014 Acoustics qualifying exams"
+    }
+  ]
+}

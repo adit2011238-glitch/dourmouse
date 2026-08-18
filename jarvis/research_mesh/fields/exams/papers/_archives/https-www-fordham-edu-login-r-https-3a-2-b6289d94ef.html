@@ -1,0 +1,259 @@
+<!DOCTYPE html><html>
+
+<head>
+
+    <meta charset="UTF-8"/><meta http-equiv="X-UA-Compatible" content="IE=edge"/><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"/><title>Login - CAS &#8211; Central Authentication Service</title>
+
+
+
+<link rel='stylesheet' href="/css/vendor/bootstrap/css/bootstrap.min-b9203c1075cfa0664b6a2c7a39ae4b7d.css"><link rel="stylesheet" href="/css/vendor/fontawesome/css/all.min-74bab4578692993514e7f882cc15c218.css"><script src="/js/jquery.min-2c872dbe60f4ba70fb85356113d8b35e.js"></script>
+<script src="/js/jquery-ui.min-c15b1008dec3c8967ea657a7bb4baaec.js"></script>
+
+
+    
+
+    <link rel="stylesheet" href="/css/cas-a90aca7e2afb259734284377211db332.css"/><link rel="stylesheet" href="/css/fordham-7e6ed2d58f2da88cc23cb6b49d89ea27.css"/><link rel="icon" href="/favicon-577f182e61f5fc93fa5dae08ce39b739.ico" type="image/x-icon"/></head>
+
+
+
+<body class="login mdc-typography">
+<header role="banner">
+<h1 id="logo"><a href="https://my.fordham.edu/mylogin/index.html#"><img border="0" src="/images/fordham_logo-511438211c49317a82bdb2cf5f1d08fd.jpg" alt="Fordham University"></a>
+</h1>
+    <div id="course_docs_resp" class="course_docs_resp">
+<a href="https://reg-prod.ec.fordham.edu/StudentRegistrationSsb/ssb/term/termSelection?mode=search" target="_blank" data-toggle="tooltip" title="Courses offered for the current term and terms open/opening for registration.">Class Schedule</a>
+ | 
+ <a href="https://reg-prod.ec.fordham.edu/StudentRegistrationSsb/ssb/term/termSelection?mode=courseSearch" target="_blank" data-toggle="tooltip" title="All courses that appear in school bulletins. Note that not all courses are offered each term.">Course Catalog</a>
+</div>
+</header>
+
+
+
+<main role="main" id="main" class="container">
+
+    <div id="contentblock">
+
+        <div id="content" class="d-flex justify-content-center">
+   <div class="d-flex justify-content-center flex-md-row flex-column mdc-card mdc-card-content card flex-grow-1">
+
+        <section id="loginForm"
+                 class="login-section login-form card-body">
+            <div class="card">
+                <div class="card-body">
+
+    <!-- New Configuration values display (inserted) --><!-- End configuration values display --><form method="post" id="fm1" action="login">
+
+                        <div class="alert alert-danger" id="alertmsg-on" style="display:none;">
+                            <span id="alertmsg-holder"></span>
+                        </div>
+
+                        <h3 style="text-align: center; margin-top:-15px">
+                            <i class="fas fa-id-card"></i>
+                            <span>Secure Access Login</span>
+                        </h3>
+                        
+                        <section class="form-group">
+                            </section>
+
+                        <section class="form-group">
+                            <span><span class="accesskey">username:</span>
+
+                            <div>
+                                <input class="form-control required"
+                                       id="username"
+                                       size="25"
+                                       tabindex="1"
+                                       type="text"
+                                       accesskey="a"
+                                       autocomplete="off" name="username" value=""/><span id="email-on" style="display:none;">
+                                    <p>
+                                        <i class="fa fa-exclamation-circle"></i>
+                                        <span>Please enter username not an email.</span>
+                                    </p>
+                                </span>
+                                <span id="fidn-on" style="display:none;">
+                                    <p>
+                                        <i class="fa fa-exclamation-circle"></i>
+                                        <span>Please enter username not an FIDN.</span>
+                                    </p>
+                                </span>
+                            </div>
+                        </section>
+
+                        <section class="form-group">
+                            <span><span class="accesskey">password:</span>
+
+                            <div>
+                                <input class="form-control required"
+                                       type="password"
+                                       id="password"
+                                       size="25"
+                                       tabindex="2"
+                                       accesskey="p"
+                                       autocomplete="off" name="password" value=""/><span id="capslock-on" style="display:none;">
+                                <p>
+                                    <i class="fa fa-exclamation-circle"></i>
+                                    <span>CAPSLOCK key is turned on!</span>
+                                </p>
+                            </span>
+                            </div>
+                        </section>
+
+                        <section class="form-group">
+                            </section>
+
+                        <!-- Auto-enable rememberMe for specific services --><input type="hidden" name="execution" value="084e9d8d-a91c-4e10-a862-8e392b12cb41_ZXlKaGJHY2lPaUpJVXpVeE1pSXNJblI1Y0NJNklrcFhWQ0lzSW10cFpDSTZJbUkzTnpZd1ptUmpMV1EzWkRrdE5EQmpPQzA1TnpRMUxUYzRZVGRqWVdNeU1qaGhPU0o5Lmt6ODJkMzR2S0RpX3hYOVlVSU9oRFc1dEVmTzJTU2NjZmlGTlZ1bXZseVFVbWpWaHNFX0lLT3dWSV9RS0dMRGJFWmNJUl9ZWXRCVy1kQzYwLXlwUFNwLVJtX1duNGR6c0E3Zmc3eDVJSXB4THRKNTl5TDFTQ05nR0ZpVUpKZTkxV05ibXQtV01SNHF5THR4UmEyZTM2UDF5T3hBeEJBNGhaMFFrRGgzbGVqaHI1V2hpQ0ZIR3JJZ1RfNkVtaDBxMnBuSjNWT0FIV0c3Skx2ZjZ0MEZBSkN0RDN4X1VfMDhrYnA3ZERXZW1JdTZESFJMZ05HLTJkUFlQQXJvS05HRUFvcmdVV2oxeEFfOFNBVFdBWi1FeHN3MWJsaEFaZjI4Qmg1Sk9rcUpDMWhnUkFmSVlRSXQ0T2syS0pqRktSVVhfcHBRLWFVT2puaWdRcGFraU9fRnpPQkk0MEFTcmdVMkhjdm9zdjFrQVpiYWQ0MDJzZC1hNWlad2l3RC14R2NmbzM3eTZMWkhkNHp1X1kwb1BsUTZwanhiRGx1SmpOTkdDOUktVU12ZHdHeXVqdnJLSUtMYkcwQlJjMFN6RUVVTnllNTF5SUdCWEo2MTZkWVJ4WW41WUZpdHNYYzctaWtRcFZLR0dvSWttTy14b1FFN1FVbExYY0o4STNOS3A2UUpOUXFiNy10bmdQVDE0WFdPaWhEU0FVSGl1MDRyUDdSSXVEZnZlVnNmU1hyWUsyUm83Nkh3RGc2ZWp5TjltNlBJRUlxQWFkV3RmTEFXQ09ZbTN4N2diTEltVHdvOXBXYWNtWlJfc2tYdjNvTGlSRUJkLVczLVRreFQzWEV6RzdXY2FKT2RIN003OEc4LWlxTUNrVXZSNUR0NU15czNFazVqdC1BcUowWk80aTVjT3N5WUlMSFpKa3Z1RGE5NDlUSkJxYlhOeU1LMFpIZFJnTnA3ZzRpTUhzRWhKeE5kNVZYNHVQeEJvb0R6RkU4WEU5WGYtaE9LQlkzSEFNbFhLaDhzV3F5Yjh3NnJmR0pFdnUzNjZFSmZ2aWE4d3NDbm10WmxmZmNjaXhhSFJvdTBxNUlTd0NQQVoyUmpwbUFuanhoU1BfblBkR3lReDlsTTFMUFlEMnFxODlGbmZjbXZLSXk3U1VkOE1GVlZNUWY4UUt2Z2gxNnpFaXlkVUpoMHBpOFdfR1BNOHVESzJtTEt2WmFYaHVQbFBpUHRIdGJBQ2JhSU9LUlJjNTNCeFZmenlFN09ocEtjcVYxWXRtVGx5NXJVck40dkFOaW5wRktuNFh6V1R1VThjQzNPSHRNcW54a3Z5THkxV2hiTHBEZk1rTHR1UnQxMmRPQU93djJtb3hvZWVfQkQ3VlBoMzhWWnEtdUNIN3paTG9XMEJhazNSZHJ1dEZHcHZ4eF9STGtGUFlnQzZaWXVWRTVCdThYNGMzTHNBeTdJZm10Q3pKNklTQUY4dkxoQVMtbUY1Yjc3dlRZNWJYTDFValpITWdPWlE5MkpoVlk0QjludGpoQWdHM1FCQWp4NTY4THVhWGw4OWRoWW9qMmFxR0t6S2hERGZjdDN2Q25vRGdHSVBGNDZXVlRoTURhRUZiRV82WWNDY0EzSFN0V0FqTE5ydURKN3dXWkt5bVBEbWF6eHBCbHF5ZzExTk9GM3FGbGpWMmItTVR6dWplamZUTTRKLXVJZmk4NVhDVUZHQnl6T3ktOUhKQXpZbkg3aThQS3U0MXVNU0VOMmpXQWREY2VsZldqZ18wUmczZ2FoVVVFMS1acXV2RndzZFhjdUxhd0tCWEFxWkdiSFhTTUstYzVfYkhRSGtDZ0xFOFh3bzZvNXdJcXpEUlZ3WmxjcC16OXF0d09JZkdYVHVfaDhzVVJOS3BIcGRHcjVsbHVFb2h4Y0xIQ04zbDJodGJoNkxXRWhZZDhFdVdqOEpNWWZUaTRZR05CZE9iWHlONlluOWdyWms4dEtSM0lkYTc1czNCUHMxbzd4QU14SlNBYkNjN2UtV2RRbS01R0pUNHFFRXFxVFZUTmlaQ09zNjkxcVZ3U3pzM2ZLa291QUp3SEVNVGhReEQzd0R4cUFubGdPSTVjNDAxZmFUVnU4Q1FQNUhDV3Y5eXpqbmhBMU01b0h1ZWUtMU56TVFiZmJGRlVDb2d5eTZ0TzFyS0NkLTd2TUEzTFdWZmtSb2dIVmw2WUJONlU5UEdaRTViNUJDQjg0X25NRVd2ZjBtWkhITDZuRFR5Q2JNZHJiQm5TMkhVcmx5ZnFDVkdfUi1UeGxYWW02NEdTbW9nZGNScnoxOFdVS0ZDdlVyeFdEcTdDNHViaUs0YXB4OEVYVi1wSUV1R3NOVEFRUUdNaTVkM0hvQlFoMWc0WlhiZWt3VnNydlJ3MzdpV2RkLVotTHJOQlB6U0lPeVZsQm5SdWZFSmdjRVRudlRTbU1rb1JJWVdhWXdXZmRndTc5WUt6alJXR0tsTXY0SDZhVkdNVjJhRG1wa2dpYWF2RUo1QmZ3a2E3YW5pUUg3czI4eEtxOVBZWmhwVThhMy1EWW9oV2tnWU1OOWU2Vmh4U2Q4VVQta0dTdnpjRElHaXhtMFhSZ0F0S0tYWVMtMjRQaXZYUlNhcjFQZXJjeF9jQ2pfN0lXak5oa1B4d3FqbUhReXlSM0hmWDZBamItTDFzZHpnTWk3UzhVTk9GRENqRkFCYmFUMk5tWXNXaVhxclhLODZKQ2ZfSUc4ck9NQ3k4amMzMklSS0VTS0k1OXJkQkpTdk01ODBqVmNXOHVpUmtjTF95dF84WGFaeUpFTVM2bVIzSGR1ZnVQNlNackNRR1RIMWJnMXBUSVBva19aWlFXSS1fNXM3aUNqVU1nTjlkai1MNEhLZnZlUmtnQW9XeWtWUVhkZ2hldFZQbkZuWHU3LVM5TEl2VGttVEN1dENHZnlzVFhpWGY3TlpoT3JPS1hDdEhhZ1cxUEdHZEVseW5LWFhSTm5ZQjRwblVLN0x1cWVMNkhSM3o5clZQM1Y0YlRjU2dhSG9lWVhBM3pyVUFuQ002eHBDYy1kczR3cVRwVUdaRmpPZEJoMGw2OHFKOENVSFdieFpBNFlBNUNTdlZVWEVMbU91VEJIV2x4ZVFnVHNqNVlXLWt1WW9yZzhDOWc1VXJ5a2oxR1pwMzZXMEktT2p0enVRYmNKbW5ENjlXNDM0d2tCeV80WE9vbjlGYV9WMi14ZDFmS05FX1BCdlZlTklDWV9aTU0yNWJTdU5fX2l5SzBuQnI1ZlJVd2N0aXpBTE15WnZRaG9nTWNxeWdRWFNpR0xaWFB4Mmk5YWczSkJxN1gteENBSUJwbUxKZ1ZfcDMybVZ3WVV3TUZsUno3OExhMzZhYVhhQWxFV2VzeG9wUDBycHI1bllJN3NWZlJhSG1VSmZKeWRrcVVDZ19TUDdBSS10bHB5ZGpLbkRxWFRPS0szbFEzV19EdzVOZE9EMXdlVF9ZRFBHTUpRNl9WdDdRcXV2ay1NWjhvVV9FeTE4TzduUnVlekhGNmNoblhuUFkwa19HNWt2OHllT3FkdGpEclpsWVdnMko3dU5lUG10VV92U1h3d2Y2QmVwYlVnSFJqQXJZVkRsQ0ctbnQ4VV9NN0FtOERYdmgxVTFVQWRncnpoRnlJVnRuMklWeE1TczFmSm1jRkkzd2lpU2ppdVR2V2RWR19CR1dNQk1LQ05OYnQ5NGRGZFIwbnU3MmF6N2tMdkdMTUdXRl9uWlQwVFRNYVVzV0hWUENFWmlMbWZYejhDS29YckdjdWpMYm5nenJMSEdUMVkzMUhSbUZTZWJ4VFFTWmNhRWpQUHNsSW0wLWhGdHdJTkV3a2Y5ZlVxcXg5RlhHUGxQVC1JTnZrMm1ZMGhBNHdURXF0M2RMTFZkUU5lYS1ITVhINF9uaTN3bXYzYm1qRWp4OUpJRFdfdXUtTHJ1OENYMl9wNjBIU2hGMWJmTkxvWF96Mlp1UGpwUUFwb0RXYkZfTENpRWxQM3V4cnRseGVFNVNfUUgtd2tFT0hsRnlOdC1IN0E4VzVYU1hZZG5Vbnc5RDV6S3lkMEhhbWpYYkR0enRleG1BaUdKTS1yQks2dmhXU0NYSUduN0pjellhVlRmMWNaMW9xSFEwVkhMMTRxSk9PRTVYRHNyZHVENlQ2X2g4c3lGTm5JUUFOSGFKV2V2U0tnM1FrTFhUV2RySGVTZHNDYXpZak5pemUwVnBZd2YxeWpRVFVzWmRmLVZmcnV4QlNZajFJUWJaaXFHN2NSNnVlaFdUWGhKSHp2My1kV3JZTXpfMHJQaWlyYTh6Yzd3eHJCSUNMUDhZZ3gyZkc4UDJHSW9WR0Q5QS01THVKSW02Y3pvQ1AyQUdZUktDVGxTc1I1aWVNTTVrTkV2Y3FIbllVS21zU05FRTJnamQ1TmlSakRkRzNyVk5XQkZHWlVLU1JaYlRTVnhVb0JHNEdzak1id3Y2WF85b0FOTndxREVHQ1lQUDNJcDZlZkZ3UnZ4X0dvR3BhbzktdzdmcGRtUkhhWlRhV3JpWVdaNDJkel8xaFdWWEpJUzF5a0pxNFZBeXBrNlFjR2o1Q29LbEhjY0hUckU0NU1FdWt3MkhNMnZGQk9kZ09PTk5Od21BZ1h1eFpxWkJnN1BHZHh0UHZXSWRGTHlrTUhWLVFIYlJlTHVublkybjhFWEhFcjFHbUVLdWhLUU9sNEY5N0ZSMHVEdXBvb3ZtZnFobVozQm9QOE9SZGRIQTVtaXNMUzYxOGx2ZURydkw4ai1JMkw1RVZqT0xwV1RpUU5fS2UyZmVaeUFFWlVqYmRtb3ppbWdvOUNwdlRzS2V1ai1VN1RIZXYwdUkzVGdOd3VZejRqNnV4ZVRBOXRibkZnVW9LS1ZjOUV6cVNRazNrdkd3QXF1ZVktd1FvVzAtQzlMTGgyRHd6YS1BUDRXc1lmTjdSVElZVGFPWXZTYUMtNGJSQXZUdkxaaElLNkRoME00dmVlcW1MdDYtTG12cnFRbGVHbWxRLUx4X0ZxMjJ3QncwdXExemFOS0RObzlqNm5vel9xUUpQVmpjQWFMeWdQUUkzN2Z0RjV1RzNUSlBQLTB5STRmSkJUQ20yLUVFNHA3WFl1R0M5TWFCYTVuX3lvbS04SF9vWk5tNHpnQ0Zhb1FNaHFHLThsZXFuaklSbTAxYUZJbndFUGo0TzllT28xWVVqTExqa1RvUmVQUWRJdWZjVlpzalU2dnZFZFNrOGZKOXRqRHN5TEVCR1ZXV2VLQ0NJTExtb3R2cGhybE5DVlNoZG5nWFNzbGxFQ0tZVHNtbDFia3p4VTZrV0FpcFFYaXFBYU5LMXVCNVNkY0lpeWYzcGUzdS1lM2JLckNiUi11TmcxdHlvQjlOUjl1bzc5T1g1SVVBbE9YdmZRMjM1WmkzN3ZJS09QREJSSDhCZmlXODZEaHhSQ0RmWFJnUXQ4dEFWUzZmS1YtemNYdjlMRnNQVU1WTjF0czZnZlJBWExVd0lqOUdPeEZRdXNMbnlZMnBiMk00cnZodFhQSU8yRWxjNWlGTTBnMVJ6eVg0Wmtuc3NpY3VDa1lJVGlDUVREWG9rR0luZmlwWm9IbU0zbHBFNHF5ejVpRDJ1QzR4WTN2dlJIMmhtb0NpWDlYTVFyNEg4QWNfZFBPM1UtaUdjQllKaFpIRk91c3g0SXhTWVplSnlZRnJJRW5nQmxiNnFkZXRkdzF6STFTa19QVVlsYVFIWTBfdG9EOFNZODV5VzJpYjVjNG5UZWdfaVI2S05ObkF3NHBZUjZTS2JETGUwdGtsaHhzVUpzTDctamoyZ3dxOFFEb0ZwTy1oeGFVYzdhX0JvOUhLa3d6dU55NGpvb2pFMWRaTHN5bXU0VURPaHZvdlhUVk8tTlRjN1AxcF94WnpxSDhLTTNzVk1CbXd3ZHNBUlF5RDJIQ08yejdBdmFPNTc1RDlueGhLb3F0XzY0ZF8yZktnZG5Qa2UxNWJSQWMyS1E2cjJLNnRZT1lNUU9tSW9FM1dQUG5jcWxLS1RkWW1sdVhWdlQ4Z1VrbldueTVKSHFKWnFvUEk5RXJRQmpPWDk5QWtLUlN0R0ZuTDRDN0NmMjI4N3pZVWRPcG1OSVJlWHpWQi1KWFo4Rjh3Z2FtQ2dUTDdjdlBMTkpEN1g4OVJWeG9FYU5pcjNDdXVPTUhuMUw4TW5XYnowdXcwQ3V0Y24tT251R2oxajBnZUZlQVE0aTNHbXdYQm03N3NsQnUwelM2SUhTeGRBaHBOM2xaMndYaGdvMUFkVWxEanlHZF9qUm9IaU16VlhvX1hQSU9SLWdCVGJTM19QYWdKMm05ZWlySTJ1TVk4MTZxMEpyUm9IS3lCTVp4Q0hZX2tWTEJKejNwMEN2NExZT01UR1ZlREpZSXJIRV8zTzVhbW9lM0NNb25JUl84ZXZIQl9oT2NYNVlBZkJLcGNISWZCNU9VdklycXA1QVBHYW1Mc29KYXNraGlONm5adW9QRy1Iak0tWlVoMWhIUDQxVGZHSFlmQ19RaTJwVGtsZjg5UTUzMlFiWGtfcVlQUThFUkFwZmNqVVF2S1pjZldvbnJod0Q4SjQ3TnJjUzN1ZmVkblZsYk5YRXR5cDJoeFJMVU9faHBubjBXVHlUUmJ4UlI5bXBLOHZwaEdUTmlwRnN4VDYyb0R4OEM0amcxQ0tWU2prcnlKSmlJXzVfdC1VaVdFbGY2dC1jZnppNWV1bWhxR291NU1abkwtbzNlTFRtVWl4T01rOGhwQzBjdE1JOHNJNEJNWnY3UENIM3FyWnF3QVZpSzk4ckxkTHBzbnlNV2l3ejV3YWFBTlhLdUgxOFBxQzBnYXJsMlFRUEFiNFFiN0dKdDlsNFRpcFFNZlZWdjJwLUJKUFRyb291TGhvN1g1TDg4dHdUejhRVTY3MlA1UUJ1YmRaR20yVU1tenFkQjI4NVk3R3dqUVNrb0dvMmV6SXRpZzFRTXBENThSSHRBNUprTzJnbGJNNFVsOU9TMEhYekdLby5PZXFwZzFONlYwVExPMkhZd0xxa1Y1RWc1ay1ZbmdGS1BUT3Jvd2RPNGhlUHhhQ2kwUkpNUjdNbVJOSk1KX1dwbFNIVm50dXNMOXlUa3FtV1dzZ2FEdw=="/><input type="hidden" name="_eventId" value="submit"/><input type="hidden" name="geolocation"/><input class="btn btn-block btn-submit"
+                               name="submit"
+                               accesskey="l"
+                               tabindex="6"
+                               type="submit"
+                               value="LOGIN"
+                        /></form>
+
+                    <script type="text/javascript">
+                        $(document).ready(function () {
+                            $("#fm1").submit(function (event) {
+                                const username = $.trim($("#username").val() || "");
+
+                                $("#email-on").hide();
+                                $("#username").removeAttr("aria-invalid");
+
+                                if (username.indexOf("@") !== -1) {
+                                    event.preventDefault();
+                                    $("#email-on").show();
+                                    $("#username").attr("aria-invalid", "true").focus();
+                                    return false;
+                                }
+
+                                $(":submit").attr("disabled", true);
+                                return true;
+                            });
+                        });
+                    </script>
+                </div>
+            </div>
+        </section>
+        </div>
+</div>
+
+        <div id="loginhelp">
+        <div class="help">
+        <div><a href="https://claim.fordham.edu/claim/index.jsp" target="_blank">New user: Claim account</a></div>
+        <div>
+          <ul>
+            <li><a href="https://claim.fordham.edu/update/index.jsp" target="_blank">Change password</a></li>
+            <li><a href="https://claim.fordham.edu/forgot/index.jsp" target="_blank">Forgot password</a></li>
+          </ul>
+        </div>
+        <div class="helpit">For help, call the IT Service Desk at 718-817-3999</div>
+        <div> 
+           <ul>
+             <li><a href="https://www.fordham.edu/accessit" target="_blank">What is a username?</a></li>
+	     <li><a href="https://claim.fordham.edu/howto/" target="_blank">How to Claim?</a></li> 
+          </ul>
+        </div>		
+    </div>
+    <div class="duo">
+        <div><a href="https://www.fordham.edu/mfa_duo" target="_blank"><img src="/images/MFA-apparatus-1-764e5f6568ec76f5f2391653a1e59113.png" border=0 style="width:100%; height:auto;" alt="How does multi factor authentication work?" /></a></div>
+    </div>  
+    </div>
+
+    </div>
+
+</main>
+
+
+
+<footer class="footer" aria-label="Site footer">
+  <div class="footer__container container-fluid">
+    <div class="row">
+      <div class="footer__col footer__col--primary col-xl-8">
+        <div class="footer__logo__container">
+          <a href="https://www.fordham.edu" class="footer__logo">
+            <img src="/images/logo/logo-no-tagline-c6b8c22a7f486073d5905e67933b0965.svg" alt="Fordham University"></a>
+          <div class="footer__tagline">
+            <p></p>
+          </div>
+        </div>
+
+        <!-- Desktop Social Media --><div class="footer__social footer__social--desktop">
+
+          <ul class="footer__social__list">
+            <li class="footer__social__item">
+              <a href="https://www.facebook.com/FordhamUniversity" class="footer__social__link">
+                <img src="/images/icons/facebook-cd414b1047e4638374097133f617c520.svg" alt="Link to our Facebook"></a>
+            </li>
+            <li class="footer__social__item">
+              <a href="https://www.instagram.com/fordhamuniversity/" class="footer__social__link">
+                <img src="/images/icons/instagram-ce597352c2fb12514364af570148452a.svg" alt="Link to our Instagram"></a>
+            </li>
+            <li class="footer__social__item">
+              <a href="https://www.linkedin.com/school/7338?pathWildcard=7338" class="footer__social__link">
+                  <img src="/images/icons/linkedin-fa11021100acf821e7639eab82131b8a.svg" alt="Link to our LinkedIn"></a>
+            </li>
+            <li class="footer__social__item">
+              <a href="https://twitter.com/FordhamNYC" class="footer__social__link">
+                <img src="/images/icons/x-logo-8dd7dac3f96f38f430832c0e8e505983.svg" alt="Link to our X"></a>
+            </li>
+            <li class="footer__social__item">
+              <a href="https://www.youtube.com/user/FordhamUniversity/featured" class="footer__social__link">
+                <img src="/images/icons/youtube-f4af7567ca8d2fdd019976a32eb08611.svg" alt="Link to our YouTube"></a>
+            </li>
+            <li class="footer__social__item footer__social__item--show-more">
+              <a href="https://www.fordham.edu/about/socialmedia" class="footer__social__link">
+                  <span class="footer__social__link__text">More on social media &#10148;</span>
+              </a>
+            </li>
+          </ul>
+
+        </div>
+        <div class="footer__server-indicator" style="display: none;">
+          Server: <span>casprod-2</span>
+        </div>
+      </div>
+
+     <div class="footer__col footer__col--secondary col-xl-4">
+  <div class="footer__link-widget">
+    <ul class="footer__link-widget__col">
+      <li class="footer__link-widget__item footer__link-widget__item--title">
+        <span class="footer__link-widget__link-title">Helpful Links</span>
+      </li>
+      <li><a href="https://411.fordham.edu/" target="_blank" rel="noopener">University Directory</a></li>
+      <li><a href="https://www.fordham.edu/human-resources/career-opportunities/" target="_blank" rel="noopener">Careers at Fordham</a></li>
+      <li><a href="https://www.fordham.edu/about/leadership-and-administration/administrative-offices/gender-equity-and-title-ix-office/non-discrimination-policy/" target="_blank" rel="noopener">Nondiscrimination Policy</a></li>
+      <li><a href="https://www.fordham.edu/resources/accessibility-at-fordham/" target="_blank" rel="noopener">Accessibility</a></li>
+    </ul>
+
+    <ul class="footer__link-widget__col">
+      <li class="footer__link-widget__item footer__link-widget__item--title">
+        <span class="footer__link-widget__link-title">Visit</span>
+      </li>
+      <li><a href="https://www.fordham.edu/about/maps-and-directions/" target="_blank" rel="noopener">Maps and Directions</a></li>
+      <li><a href="https://admission.fordham.edu/portal/campusvisit" target="_blank" rel="noopener">Campus Tours</a></li>
+      <li><a href="https://www.fordham.edu/undergraduate-admission/visit/virtual-tour/" target="_blank" rel="noopener">Virtual Tour</a></li>
+    </ul>
+  </div>
+</div>
+
+    </div>
+    <p class="footer__privacy-notice">
+      We use strictly necessary cookies on this login page to enable secure sign-in and protect your account. These cookies are not used to track your activity across apps or websites and are not used for advertising. For details, see Fordham's Privacy Policy at
+      <a href="https://www.fordham.edu/resources/policies/privacy-policy/" target="_blank" rel="noopener">https://www.fordham.edu/resources/policies/privacy-policy/</a>.
+    </p>
+  </div>
+</footer>
+
+
+
+<script src="/js/bootstrap.min-117f561e228c4b051f1ced6a5d47b598.js"></script>
+
+<script type="text/javascript" src="/js/cas-cd46228f2a9b608731f0c9dacfb9758c.js"></script>
+
+
+
+<script src="/js/bg-a32c24e9b600d984903df8c092bd3b03.js"></script>
+
+
+</body>
+
+</html>

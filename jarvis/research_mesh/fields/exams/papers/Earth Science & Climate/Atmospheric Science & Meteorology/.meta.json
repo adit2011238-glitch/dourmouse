@@ -1,0 +1,29 @@
+{
+  "domain": "Earth Science & Climate",
+  "field": "Atmospheric Science & Meteorology",
+  "tests": [
+    {
+      "url": "https://www.mees.umd.edu/env-sci-comp-exam",
+      "file": "_archives/https-www-mees-umd-edu-env-sci-comp-exam-afdbf692d2.html",
+      "bytes": 81601,
+      "sha256": "afdbf692d25a7a7f7f58332c872ba88860eabcfcc44fff15ae39992808031aee",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf",
+      "file": "_archives/https-www-mees-umd-edu-s-mees-program-on-8bfae6a7f2.pdf",
+      "bytes": 3084595,
+      "sha256": "8bfae6a7f26132fe470b5bff5c6a4d469182f829a0ba737a627b3d333dbc6024",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.mees.umd.edu/env-sci-comp-exam",
+      "label": "UMD MEES \u2014 Environmental Science PhD Comprehensive Exam (format)"
+    }
+  ]
+}

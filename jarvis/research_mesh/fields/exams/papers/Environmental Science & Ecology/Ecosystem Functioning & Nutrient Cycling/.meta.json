@@ -1,0 +1,21 @@
+{
+  "domain": "Environmental Science & Ecology",
+  "field": "Ecosystem Functioning & Nutrient Cycling",
+  "tests": [
+    {
+      "url": "https://github.com/BahlaiLab/Candidacy_exams",
+      "file": "_archives/https-github-com-bahlailab-candidacy-exa-cda0767802.html",
+      "bytes": 272756,
+      "sha256": "cda0767802d9206860198577a42f4867ddcc22d8bd3304492cf057bb02fa5352",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://github.com/BahlaiLab/Candidacy_exams",
+      "label": "BahlaiLab \u2014 Candidacy exams (GitHub, real written questions)"
+    }
+  ]
+}

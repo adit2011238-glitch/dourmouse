@@ -1,0 +1,245 @@
+{
+  "domain": "Theoretical & Particle Physics",
+  "field": "Nuclear Physics",
+  "tests": [
+    {
+      "url": "https://physics.howard.edu/graduate/qualifying-exam",
+      "file": "_archives/https-physics-howard-edu-graduate-qualif-4a6cba9141.html",
+      "bytes": 50854,
+      "sha256": "4a6cba91418011ceccaa52fd57642b190af92922df92d0a3c31c2abc67d6c047",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2023-11/Final-Questions-CM-EM-combined.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-f4fd69ab2f.pdf",
+      "bytes": 443595,
+      "sha256": "f4fd69ab2ffff46bff85d8cbd6cb6ce699139e59f584d3b13d9913436781c07c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2020-01/CQXm2018.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-db8c782b8e.pdf",
+      "bytes": 402430,
+      "sha256": "db8c782b8ef567eb625c6d1bc59a8bcfbeabd0571641c844b8745cde346c8d09",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2020-01/CQXm2016.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-cc2602465b.pdf",
+      "bytes": 640039,
+      "sha256": "cc2602465b52598dc5c9f2805343de186fd439b476901755e53773e6de73bfba",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2020-01/CQXm2015.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-f6b9b7f1d6.pdf",
+      "bytes": 382637,
+      "sha256": "f6b9b7f1d60cc063371513c49ecc3cc9168f422efdfda348f54198390a972b24",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2020-01/CQXm2014.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-c1e6fa8cbb.pdf",
+      "bytes": 344824,
+      "sha256": "c1e6fa8cbb0d81cf27e56cb650b1e4e35926961956b3990f5e1f86556044e042",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2020-01/CQXm2013.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-9ea7461494.pdf",
+      "bytes": 912203,
+      "sha256": "9ea746149402609181e0c094f0effc5c252b350d124d0225a94e03c3e740679b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2020-01/CQXm2012.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-63ce1f04c4.pdf",
+      "bytes": 612875,
+      "sha256": "63ce1f04c40384d96f642b7fcd4b48a31f9097fb5e575f0f506a4c7dc54b1db1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2020-01/CQXm2011.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-5182c454f5.pdf",
+      "bytes": 501715,
+      "sha256": "5182c454f51201de77650eedf672bd88639f3fb74296cb72e99e7ef55f099788",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2020-01/CQXm2010.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-5b13e6801b.pdf",
+      "bytes": 309424,
+      "sha256": "5b13e6801be7c6469473ed11656490d355336b857f71cc3036508bcff2676b84",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2009.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-32c0cc928b.pdf",
+      "bytes": 265407,
+      "sha256": "32c0cc928bf3cd6d26dd328a1868321567db6f9dd2d7e26aac500b5ad9c6440e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2008.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-630fc51010.pdf",
+      "bytes": 775629,
+      "sha256": "630fc51010cd2f38fe3b2679a4ca7360fa11bd7ee42d252254ae4514b9e9a4dc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2007.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-666e6ba561.pdf",
+      "bytes": 430594,
+      "sha256": "666e6ba561477d1eb803e76cb6709e278c236eee979001f7c5da527e0a936681",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2006.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-85a7a645b9.pdf",
+      "bytes": 109759,
+      "sha256": "85a7a645b9829d722f9ead5e01ea98b0597abd88fc172349a3d31e1cf0aab0c6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2005.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-ee913b5873.pdf",
+      "bytes": 139936,
+      "sha256": "ee913b587324d4455a4049a20d682f4198a5666f647463e3fa0ef9cb4482365f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2004.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-93b949a63f.pdf",
+      "bytes": 132184,
+      "sha256": "93b949a63f4d4541fddbb432670d8678c49b7cf1e6d71d337cea3465409b90c6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2003.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-73583bfb28.pdf",
+      "bytes": 125541,
+      "sha256": "73583bfb283e87a3b23c2f327f321802408f99cb48ca20db70892214457407a6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2002.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-ce5e88bb95.pdf",
+      "bytes": 182797,
+      "sha256": "ce5e88bb95eb99e1b834e1ce2107a998960f44db6ec03a5bc7b0fdf54dca09e3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2001.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-bc1809ebd3.pdf",
+      "bytes": 132358,
+      "sha256": "bc1809ebd31aa29ac80f55a8f3470e9877ecba7206363bbe4e797eb29e03dd73",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex2000.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-cd47f05fdb.pdf",
+      "bytes": 335288,
+      "sha256": "cd47f05fdb88724b11980298ce21b2cbb8d0b0f576ff340ddcc9039f882f1b31",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex1999_0.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-8e30d8496a.pdf",
+      "bytes": 135098,
+      "sha256": "8e30d8496a91ee98d63cf9c0d33108f81593d0be5fbf59068163fe4cefc8e9ec",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex1998.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-16a4efaf0d.pdf",
+      "bytes": 763068,
+      "sha256": "16a4efaf0dbae95070bd9963f3c5e2775da48ee785a6629987598ed0c5572489",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex1997.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-9316bef730.pdf",
+      "bytes": 544691,
+      "sha256": "9316bef7307dfce97f454c2901042b227294d8bdc62e85511e1d3e4ef0b64b84",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex1996.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-494d1c0544.pdf",
+      "bytes": 678910,
+      "sha256": "494d1c05449014551581a1322d7f2551233500432d7223157b2779209222d99b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex1995.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-ffcbf300ca.pdf",
+      "bytes": 2165638,
+      "sha256": "ffcbf300ca52b908b1cb1896195d1cb2fcea7e1d799e691d9c16dabd8d91f066",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex94cm.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-9a227429b3.pdf",
+      "bytes": 317363,
+      "sha256": "9a227429b3f0def71b2a38598443b581501ef6b926a89ecff0c5100e5d403df8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex94qm.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-d65ba5de9f.pdf",
+      "bytes": 759344,
+      "sha256": "d65ba5de9f280a95d45c61275daa59df27a53b8265b0fd7bfe3332e3d619d6fd",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex94em.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-8aa8cf69f4.pdf",
+      "bytes": 248737,
+      "sha256": "8aa8cf69f45841c7ceb797c67bc65d5fe96e4d1d37c660594086c7a3c0a26087",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex94sm.pdf",
+      "file": "_archives/https-physics-howard-edu-sites-physics-h-841d75dedc.pdf",
+      "bytes": 353642,
+      "sha256": "841d75dedc908570025808943ca3e1bdf13f1d89fb50030c3b3d5f3ff7be8f00",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://physics.howard.edu/graduate/qualifying-exam",
+      "label": "Howard University Physics \u2014 Qualifying Exam problem books"
+    }
+  ]
+}

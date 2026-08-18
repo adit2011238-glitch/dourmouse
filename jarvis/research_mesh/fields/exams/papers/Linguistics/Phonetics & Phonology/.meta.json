@@ -1,0 +1,21 @@
+{
+  "domain": "Linguistics",
+  "field": "Phonetics & Phonology",
+  "tests": [
+    {
+      "url": "https://www.colorado.edu/linguistics/current-students/graduates/professional-ma-tesol/comprehensive-exam",
+      "file": "_archives/https-www-colorado-edu-linguistics-curre-d2de9d0dd7.html",
+      "bytes": 33330,
+      "sha256": "d2de9d0dd736f686755e85f8b2590ce8c0d383637ba4a02b6a00747876b91b0c",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.colorado.edu/linguistics/current-students/graduates/professional-ma-tesol/comprehensive-exam",
+      "label": "U. Colorado \u2014 Linguistics Comprehensive Exam (format)"
+    }
+  ]
+}

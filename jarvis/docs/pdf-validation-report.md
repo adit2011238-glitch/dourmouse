@@ -1,0 +1,535 @@
+# PDF Validation Report (post-cleanup)
+
+Probe of all 6041 PDFs referenced in the cleaned MANIFEST.json.
+
+## Categories
+
+- **AMBIGUOUS**: 419  (6.9%)
+- **SUSPECT**: 79  (1.3%)
+- **CORRUPT**: 9  (0.1%)
+
+## Problem files
+
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Active Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Adversarial ML & Robustness` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Anomaly & Novelty Detection` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Continual & Online Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Diffusion Models` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Ensemble Methods & Gradient Boosting` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Federated Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Gaussian Processes & Bayesian Optimization` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Generative Models (GANs & VAEs)` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Graph Neural Networks` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Graphical Models & Probabilistic Inference` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Imitation Learning & Inverse RL` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Interpretability & Explainable AI` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Kernel Methods & SVMs` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Metric & Representation Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Model Compression & Distillation` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Multi-Agent Reinforcement Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Neural Architecture Search & AutoML` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Optimization for Deep Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Probabilistic Machine Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Recommender Systems` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Self-Supervised Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Time Series Forecasting` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Transfer & Meta-Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Artificial Intelligence & Machine Learning / Transformer & Attention Architectures` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Astrobiology` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Astrobiology` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Astronomical Instrumentation` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Astronomical Instrumentation` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Astrostatistics` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Astrostatistics` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Compact Objects (NS & BH)` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Compact Objects (NS & BH)` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Cosmology & Large-Scale Structure` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Cosmology & Large-Scale Structure` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Dark Energy & Modified Gravity` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Dark Energy & Modified Gravity` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Exoplanets & Planet Formation` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Exoplanets & Planet Formation` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Galaxy Formation & Evolution` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Galaxy Formation & Evolution` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Gravitational Lensing` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Gravitational Lensing` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / High-Energy Astrophysics` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / High-Energy Astrophysics` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Interstellar & Intergalactic Medium` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Interstellar & Intergalactic Medium` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Observational Astronomy & Surveys` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Observational Astronomy & Surveys` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Radio Astronomy & Interferometry` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Radio Astronomy & Interferometry` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Solar Physics & Heliophysics` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Solar Physics & Heliophysics` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Stellar Astrophysics` — https://astronomy.yale.edu/sites/default/files/files/Advising%20Document%20-%20updated%202023.pdf — no exam terms p1, 17p
+- **AMBIGUOUS** `Astrophysics & Cosmology / Stellar Astrophysics` — https://www.as.arizona.edu/sites/default/files/2022-2023_Graduate_Manual.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / 3D Vision & Reconstruction` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Computational Photography` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Computer Graphics Rendering` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Face & Biometric Analysis` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Geometric Modeling & Animation` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Image Classification & Recognition` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Image Generation & Editing` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Medical Image Analysis` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Neural Rendering & Radiance Fields` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Object Detection & Segmentation` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Remote Sensing & Satellite Imagery` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Scene Understanding & Layout` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Video Understanding & Action Recognition` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Visual Representation Learning` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Computer Vision & Graphics / Visual Tracking & MOT` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/academics/graduate-program/prelims/PrelimJ05.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J00.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J03.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J99.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M02.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M04.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M98.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimJ08.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM05.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM07.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Condensed Matter & Materials (physics) / Electronic Structure Theory (DFT)` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM09.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Earth Science & Climate / Atmospheric Chemistry & Air Quality` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Atmospheric Science & Meteorology` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Biogeochemistry & Carbon Cycle` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Climate Dynamics & Modeling` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Earth Remote Sensing` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Extreme Events & Climate Risk` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Geology & Tectonics` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Geophysics & Geodesy` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Glacial & Cryosphere Science` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Hydrology & Water Resources` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Paleoclimatology` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Physical Oceanography` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Seismology` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Soil Science` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Earth Science & Climate / Volcanology` — https://www.mees.umd.edu/s/MEES-Program-One-Page-Flyer-v8-031225.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Economics / Behavioral Economics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Behavioral Economics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Behavioral Economics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Behavioral Economics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Behavioral Economics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Development Economics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Development Economics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Development Economics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Development Economics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Development Economics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Econometrics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Econometrics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Econometrics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Econometrics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Econometrics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Economic History` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Economic History` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Economic History` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Economic History` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Economic History` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Environmental & Resource Economics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Environmental & Resource Economics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Environmental & Resource Economics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Environmental & Resource Economics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Environmental & Resource Economics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Experimental Economics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Experimental Economics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Experimental Economics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Experimental Economics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Experimental Economics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Financial Economics & Asset Pricing` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Financial Economics & Asset Pricing` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Financial Economics & Asset Pricing` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Financial Economics & Asset Pricing` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Financial Economics & Asset Pricing` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Health Economics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Health Economics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Health Economics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Health Economics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Health Economics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Industrial Organization & Competition` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Industrial Organization & Competition` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Industrial Organization & Competition` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Industrial Organization & Competition` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Industrial Organization & Competition` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / International Trade & Macroeconomics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / International Trade & Macroeconomics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / International Trade & Macroeconomics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / International Trade & Macroeconomics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / International Trade & Macroeconomics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Labor Economics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Labor Economics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Labor Economics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Labor Economics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Labor Economics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Macroeconomics & Monetary Policy` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Macroeconomics & Monetary Policy` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Macroeconomics & Monetary Policy` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Macroeconomics & Monetary Policy` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Macroeconomics & Monetary Policy` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Microeconomic Theory` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Microeconomic Theory` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Microeconomic Theory` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Microeconomic Theory` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Microeconomic Theory` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Political Economy` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Political Economy` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Political Economy` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Political Economy` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Political Economy` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Public Economics & Taxation` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Public Economics & Taxation` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Public Economics & Taxation` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Public Economics & Taxation` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Public Economics & Taxation` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Economics / Urban & Regional Economics` — http://www.klenow.com/Idea_Rents.pdf — no exam terms p1, 61p
+- **SUSPECT** `Economics / Urban & Regional Economics` — https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf — 'lecture
+notes' p1, 1p
+- **AMBIGUOUS** `Economics / Urban & Regional Economics` — https://eminakamura.com/papers/Commoditization.pdf — no exam terms p1, 66p
+- **AMBIGUOUS** `Economics / Urban & Regional Economics` — https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf — no exam terms p1, 9p
+- **SUSPECT** `Economics / Urban & Regional Economics` — https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf — 'assignment' p1, 68p
+- **AMBIGUOUS** `Engineering / Aerospace Engineering & Aerodynamics` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Biomedical Engineering` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Chemical Engineering & Process Design` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Civil & Structural Engineering` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Electrical Power Systems` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Engineering Design & CAD/CAM` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Environmental Engineering` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Industrial & Systems Engineering` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Mechanical Engineering & Solid Mechanics` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Microelectronics & VLSI` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Photonic & Optical Engineering` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Engineering / Transportation & Traffic Engineering` — https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf — no exam terms p1, 2p
+- **SUSPECT** `Finance & Quantitative Methods / Algorithmic & High-Frequency Trading` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Behavioral Finance` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Blockchain & Digital Assets` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Credit Risk & Default Modeling` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Derivatives & Options Theory` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Financial Econometrics & Volatility` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Fixed Income Analytics` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Market Microstructure` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Portfolio Theory & Risk Management` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **SUSPECT** `Finance & Quantitative Methods / Stochastic Calculus & Mathematical Finance` — https://iam.metu.edu.tr/sites/iam.metu.edu.tr/files/LectureNotes/ilk_4_sayfa_9700510_quantum_cryptography_removed.pdf — 'lecture notes' p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Cancer Genomics & Precision Oncology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Cancer Genomics & Precision Oncology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Cancer Genomics & Precision Oncology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Cancer Genomics & Precision Oncology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Comparative & Evolutionary Genomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Comparative & Evolutionary Genomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Comparative & Evolutionary Genomics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Comparative & Evolutionary Genomics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Computational Genomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Computational Genomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Computational Genomics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Computational Genomics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Epigenomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Epigenomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Epigenomics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Epigenomics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Functional Genomics (CRISPR screens)` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Functional Genomics (CRISPR screens)` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Functional Genomics (CRISPR screens)` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Functional Genomics (CRISPR screens)` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Genome Assembly & Sequencing` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Genome Assembly & Sequencing` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Genome Assembly & Sequencing` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Genome Assembly & Sequencing` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Genome Editing & CRISPR Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Genome Editing & CRISPR Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Genome Editing & CRISPR Biology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Genome Editing & CRISPR Biology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Metabolomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Metabolomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Metabolomics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Metabolomics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Metagenomics & Microbiome Science` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Metagenomics & Microbiome Science` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Metagenomics & Microbiome Science` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Metagenomics & Microbiome Science` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Phylogenetics & Molecular Evolution` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Phylogenetics & Molecular Evolution` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Phylogenetics & Molecular Evolution` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Phylogenetics & Molecular Evolution` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Population Genetics & Genomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Population Genetics & Genomics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Population Genetics & Genomics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Population Genetics & Genomics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Proteomics & Mass-Spec Analysis` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Proteomics & Mass-Spec Analysis` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Proteomics & Mass-Spec Analysis` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Proteomics & Mass-Spec Analysis` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Single-Cell & Spatial Omics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Single-Cell & Spatial Omics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Single-Cell & Spatial Omics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Single-Cell & Spatial Omics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Systems Biology & Network Modeling` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Systems Biology & Network Modeling` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Systems Biology & Network Modeling` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Systems Biology & Network Modeling` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Genomics & Systems Biology / Transcriptomics & Expression Analysis` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Genomics & Systems Biology / Transcriptomics & Expression Analysis` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Genomics & Systems Biology / Transcriptomics & Expression Analysis` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Genomics & Systems Biology / Transcriptomics & Expression Analysis` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Human-Computer Interaction / Accessibility & Inclusive Design` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Human-Computer Interaction / BCI & Neural Interfaces` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Human-Computer Interaction / Computer-Supported Cooperative Work` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Human-Computer Interaction / Human Factors & Ergonomics` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Human-Computer Interaction / Information Visualization` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Human-Computer Interaction / Interaction Design & Usability` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Human-Computer Interaction / Mobile & Wearable Interaction` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Human-Computer Interaction / Tangible & Embodied Interaction` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Human-Computer Interaction / Ubiquitous & Pervasive Computing` — https://www.cc.gatech.edu/sites/default/files/documents/2023/nace-career-readiness-competencies-revised-apr-2021.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Law / AI & Technology Law` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Law / Constitutional Law` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Law / Contract & Commercial Law` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Law / Corporate & Securities Law` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Law / Criminal Law & Procedure` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Law / Data Protection & Privacy Law` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Law / Environmental & Energy Law` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Law / Intellectual Property Law` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Law / International Law & Human Rights` — https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf — no exam terms p1, 158p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Biochemistry & Enzymology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Biochemistry & Enzymology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Biochemistry & Enzymology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Biochemistry & Enzymology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Cell Biology & Signaling` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Cell Biology & Signaling` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Cell Biology & Signaling` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Cell Biology & Signaling` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Cell Cycle & Cancer Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Cell Cycle & Cancer Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Cell Cycle & Cancer Biology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Cell Cycle & Cancer Biology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / DNA Repair & Replication` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / DNA Repair & Replication` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / DNA Repair & Replication` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / DNA Repair & Replication` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Developmental Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Developmental Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Developmental Biology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Developmental Biology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Epigenetics & Chromatin` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Epigenetics & Chromatin` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Epigenetics & Chromatin` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Epigenetics & Chromatin` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Gene Expression & Regulation` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Gene Expression & Regulation` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Gene Expression & Regulation` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Gene Expression & Regulation` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Membrane Biology & Transport` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Membrane Biology & Transport` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Membrane Biology & Transport` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Membrane Biology & Transport` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Metabolism & Bioenergetics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Metabolism & Bioenergetics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Metabolism & Bioenergetics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Metabolism & Bioenergetics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Microbiology & Bacteriology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Microbiology & Bacteriology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Microbiology & Bacteriology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Microbiology & Bacteriology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Molecular Genetics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Molecular Genetics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Molecular Genetics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Molecular Genetics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Molecular Immunology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Molecular Immunology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Molecular Immunology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Molecular Immunology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Organelle Biology & Trafficking` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Organelle Biology & Trafficking` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Organelle Biology & Trafficking` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Organelle Biology & Trafficking` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Protein Folding & Biophysics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Protein Folding & Biophysics` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Protein Folding & Biophysics` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Protein Folding & Biophysics` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / RNA Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / RNA Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / RNA Biology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / RNA Biology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Stem Cell Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Stem Cell Biology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Stem Cell Biology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Stem Cell Biology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Structural Biology (cryo-EM/X-ray)` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Structural Biology (cryo-EM/X-ray)` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Structural Biology (cryo-EM/X-ray)` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Structural Biology (cryo-EM/X-ray)` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Virology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/admissions/gmb-program-brochure.pdf — no exam terms p1, 4p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Virology` — https://biomed.emory.edu/PROGRAM_SITES/GMB/_includes/documents/sections/resources/adjusting-to-atlanta.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Molecular & Cellular Biology / Virology` — https://biomed.emory.edu/_includes/documents/site-wide/gdbbs-program-directory.pdf — no exam terms p1, 4p
+- **SUSPECT** `Molecular & Cellular Biology / Virology` — https://biomed.emory.edu/_includes/documents/students/wellness-and-support-resources.pdf — 'schedule' p1, 3p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/files/part_ii_paper_1_metaphysics_final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/files/part_ii_paper_2_philosophy_of_the_mind_v2_2.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/files/pht2-1_metaphysics_in_hall.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/files/pht2-2_philosophy_of_mind_in_hall.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/files/pht2_1_ii_paper_1_2021_final_cd1.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/files/pht2_2_ii_paper_2_2021_final_cd1-1.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/sites/default/files/exam_paper_pht2_paper_2_philosophy_of_mind_final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%201%20Meta.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%202%20Phil%20of%20Mind.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper1Metaaftersetting.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper2PhilofMind.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2007.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2010.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2011.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2012.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2013.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-1-2019-final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-2-2019-final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-final-2018.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2016.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2017.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-final-2018.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2016.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Epistemology` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2017.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/files/part_ii_paper_1_metaphysics_final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/files/part_ii_paper_2_philosophy_of_the_mind_v2_2.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/files/pht2-1_metaphysics_in_hall.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/files/pht2-2_philosophy_of_mind_in_hall.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/files/pht2_1_ii_paper_1_2021_final_cd1.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/files/pht2_2_ii_paper_2_2021_final_cd1-1.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/sites/default/files/exam_paper_pht2_paper_2_philosophy_of_mind_final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%201%20Meta.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%202%20Phil%20of%20Mind.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper1Metaaftersetting.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper2PhilofMind.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2007.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2010.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2011.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2012.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2013.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-1-2019-final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-2-2019-final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-final-2018.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2016.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2017.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-final-2018.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2016.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Ethics & Moral Theory` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2017.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/files/part_ii_paper_1_metaphysics_final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/files/part_ii_paper_2_philosophy_of_the_mind_v2_2.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/files/pht2-1_metaphysics_in_hall.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/files/pht2-2_philosophy_of_mind_in_hall.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/files/pht2_1_ii_paper_1_2021_final_cd1.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/files/pht2_2_ii_paper_2_2021_final_cd1-1.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/sites/default/files/exam_paper_pht2_paper_2_philosophy_of_mind_final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%201%20Meta.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%202%20Phil%20of%20Mind.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper1Metaaftersetting.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper2PhilofMind.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2007.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2010.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2011.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2012.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2013.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-1-2019-final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-2-2019-final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-final-2018.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2016.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2017.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-final-2018.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2016.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Metaphysics` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2017.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/files/part_ii_paper_1_metaphysics_final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/files/part_ii_paper_2_philosophy_of_the_mind_v2_2.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/files/pht2-1_metaphysics_in_hall.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/files/pht2-2_philosophy_of_mind_in_hall.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/files/pht2_1_ii_paper_1_2021_final_cd1.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/files/pht2_2_ii_paper_2_2021_final_cd1-1.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/sites/default/files/exam_paper_pht2_paper_2_philosophy_of_mind_final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%201%20Meta.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/II%20Paper%202%20Phil%20of%20Mind.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper1Metaaftersetting.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/PartIIPaper2PhilofMind.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2007.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2010.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2011.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2012.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-01-2013.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-1-2019-final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/ii-paper-2-2019-final.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-final-2018.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2016.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-1-meta-final-2017.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-final-2018.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2016.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Philosophy & Ethics / Philosophy of Mind` — https://www.phil.cam.ac.uk/system/files/documents/part-ii-paper-2-phil-of-mind-final-2017.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/2023-10-02-comparative-politics-grad-course-offerings-and-subfield-requirements.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/2025-08-29-quantitative-empirical-methods-grad-course-offerings-and-subfield-requirements.pdf — no exam terms p1, 1p
+- **SUSPECT** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/american_politics-2019-05.pdf — 'reading list' p1, 9p
+- **AMBIGUOUS** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/american_politics_field_exam-2025-08.pdf — no exam terms p1, 4p
+- **SUSPECT** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/ampols_aug_2011.pdf — 'assignment' p1, 3p
+- **SUSPECT** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/comparative_politics_reading_list-2020-04_revised.pdf — 'reading list' p1, 12p
+- **AMBIGUOUS** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/ir_field_exam_2025-08.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/political_theory_grad_course_offerings_and_subfield_requirements_august_28_2025.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/politicaleconomy_aug2025.pdf — no exam terms p1, 4p
+- **SUSPECT** `Political Science & International Relations / Quantitative Political Methodology` — https://politicalscience.yale.edu/sites/default/files/qualitative_and_archival_methods-reading_list-2016-06-03.pdf — 'reading list' p1, 7p
+- **CORRUPT** `Statistics & Probability / Bayesian Inference & Computation` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / Bayesian Inference & Computation` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / Bayesian Inference & Computation` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **CORRUPT** `Statistics & Probability / Experimental Design & DOE` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / Experimental Design & DOE` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / Experimental Design & DOE` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **CORRUPT** `Statistics & Probability / High-Dimensional Statistics` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / High-Dimensional Statistics` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / High-Dimensional Statistics` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **CORRUPT** `Statistics & Probability / Mathematical Statistics` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / Mathematical Statistics` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / Mathematical Statistics` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **CORRUPT** `Statistics & Probability / Monte Carlo & Simulation Methods` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / Monte Carlo & Simulation Methods` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / Monte Carlo & Simulation Methods` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **CORRUPT** `Statistics & Probability / Nonparametric & Semiparametric Methods` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / Nonparametric & Semiparametric Methods` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / Nonparametric & Semiparametric Methods` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Statistics & Probability / Probability Theory` — https://www-math.umd.edu/images/SetupHybridSeminar.pdf — no exam terms p1, 2p
+- **CORRUPT** `Statistics & Probability / Statistical Learning Theory` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / Statistical Learning Theory` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / Statistical Learning Theory` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **CORRUPT** `Statistics & Probability / Survival Analysis` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / Survival Analysis` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / Survival Analysis` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **CORRUPT** `Statistics & Probability / Time Series Analysis` — https://people.stat.sc.edu/Hitchcock/May2014QualsSolution.pdf — PdfStreamError
+- **AMBIGUOUS** `Statistics & Probability / Time Series Analysis` — https://people.stat.sc.edu/Hitchcock/May2015fullsolutions.pdf — no exam terms p1, 27p
+- **AMBIGUOUS** `Statistics & Probability / Time Series Analysis` — https://people.stat.sc.edu/Hitchcock/R_code_output_Aug2024.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Gravitational Waves` — https://physrefs.mit.edu/files/2025/08/Spring_2016_QM_1d_.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Gravitational Waves` — https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall21_CM_soln.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Gravitational Waves` — https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring21_CM_soln.pdf — no exam terms p1, 5p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Gravitational Waves` — https://physrefs.mit.edu/wp-content/uploads/2019/08/QM_fall_21.pdf — no exam terms p1, 3p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Gravitational Waves` — https://physrefs.mit.edu/wp-content/uploads/2019/08/testexamples2.pdf — no exam terms p1, 65p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Nuclear Physics` — https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex1996.pdf — no exam terms p1, 24p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Nuclear Physics` — https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex94em.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Nuclear Physics` — https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex94qm.pdf — no exam terms p1, 6p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Nuclear Physics` — https://physics.howard.edu/sites/physics.howard.edu/files/2019-07/cqex94sm.pdf — no exam terms p1, 2p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Quantum Field Theory` — https://physrefs.mit.edu/files/2025/08/Spring_2016_QM_1d_.pdf — no exam terms p1, 1p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Quantum Field Theory` — https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Fall21_CM_soln.pdf — no exam terms p1, 10p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Quantum Field Theory` — https://physrefs.mit.edu/wp-content/uploads/2019/08/P2Spring21_CM_soln.pdf — no exam terms p1, 5p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Quantum Field Theory` — https://physrefs.mit.edu/wp-content/uploads/2019/08/QM_fall_21.pdf — no exam terms p1, 3p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Quantum Field Theory` — https://physrefs.mit.edu/wp-content/uploads/2019/08/testexamples2.pdf — no exam terms p1, 65p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/academics/graduate-program/prelims/PrelimJ05.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J00.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J03.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/J99.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M02.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M04.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/M98.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimJ08.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM05.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM07.pdf — no exam terms p1, 12p
+- **AMBIGUOUS** `Theoretical & Particle Physics / Statistical Mechanics & Phase Transitions` — https://phy.princeton.edu/sites/phy2020/files/graduate-program/prelims/PrelimM09.pdf — no exam terms p1, 12p

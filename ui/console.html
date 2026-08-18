@@ -1,0 +1,1662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DOURMOUSE // CONSOLE</title>
+  <!-- v8.7 PWA: the console is now the default surface at "/", so it must
+       carry the SAME install metadata the HUD had. Without these, making
+       the console default would silently kill "Add to Home Screen", the
+       Android install banner, the standalone window and the app icon. -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#04080e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="DourMouse">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="/assets/icon-192.png">
+<style>
+/* =====================================================================
+   DOURMOUSE CONSOLE
+   Tokens taken from the supplied design: amber #f2b73d on #04080e, with a
+   blue-grey information tier. Sekuya for display, JetBrains Mono for
+   everything else. Every value on screen comes from the live backend —
+   the mockup's numbers were placeholders and are not reproduced.
+   ===================================================================== */
+@font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;
+  src:url('assets/fonts/sekuya-regular.ttf') format('truetype')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:300;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-300-latin.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-500-latin.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:700;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-700-latin.woff2') format('woff2')}
+
+:root{
+  --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
+  --amber:#f2b73d; --amber-hi:#ffd27a; --amber-ink:#08111c;
+  --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6; --blue-deep:#6f97b3;
+  --line:rgba(120,175,210,.18); --line-2:rgba(120,175,210,.30);
+  --amber-line:rgba(242,183,61,.35); --amber-soft:rgba(242,183,61,.14);
+  --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+  --map-land:#12283a;
+}
+
+/* =====================================================================
+   v8.8 THEMES — four skins over ONE working console.
+   Every colour in this file already routes through var(), so a theme is
+   a token swap plus a few structural overrides. The backend wiring,
+   the toolchain picker and the nine screens are shared: a theme changes
+   how it looks, never what it reports.
+
+   Fonts are LOCAL ONLY (no CDN — the console must work with the internet
+   down). Two designs asked for families we do not ship, so they get an
+   honest local substitute rather than a silent fallback to Times:
+     AETHER   Newsreader -> system serif, Inter -> Space Grotesk
+     PROTOCOL Space Mono -> Share Tech Mono
+   ===================================================================== */
+
+/* --- 1. ARC CORE (default): amber on deep navy. Tokens above. --------- */
+
+/* --- 2. AETHER WORKSPACE: paper and ink, neo-academic, light ---------- */
+[data-theme="aether"]{
+  --bg:#f9f9f8; --panel:#ffffff; --panel2:#f3f4f3;
+  --amber:#1a1c1c; --amber-hi:#000000; --amber-ink:#ffffff;
+  --blue:#444748; --blue-dim:#5a5e5f; --blue-hi:#1a1c1c; --blue-deep:#646869;
+  --line:rgba(26,28,28,.12); --line-2:rgba(26,28,28,.20);
+  --amber-line:rgba(26,28,28,.28); --amber-soft:rgba(26,28,28,.06);
+  --ok:#2f7d52; --warn:#8a6d1f; --bad:#ba1a1a;
+  --mono:'Space Grotesk',ui-sans-serif,system-ui,-apple-system,sans-serif;
+  --display:Georgia,'Times New Roman',serif;
+  --map-land:#d9dedb;
+
+}
+/* The light theme needs softer chrome than a HUD: rounded cards, hairline
+   rules, and serif titles carrying the hierarchy instead of glow. */
+[data-theme="aether"] .card,[data-theme="aether"] .pane,
+[data-theme="aether"] .dock,[data-theme="aether"] .rail{border-radius:12px}
+[data-theme="aether"] .tabs .tab{border-radius:8px}
+[data-theme="aether"] .paneh,[data-theme="aether"] h1,[data-theme="aether"] .title{
+  font-family:var(--display);letter-spacing:-.01em;text-transform:none}
+[data-theme="aether"] body{background:var(--bg)}
+
+/* --- 3. ACHERON PROTOCOL: monochrome terminal, Space-Mono-ish --------- */
+[data-theme="protocol"]{
+  --bg:#131313; --panel:#1b1b1b; --panel2:#1f1f1f;
+  --amber:#ffffff; --amber-hi:#ffffff; --amber-ink:#31312c;
+  --blue:#c8c7be; --blue-dim:#929189; --blue-hi:#e2e2e2; --blue-deep:#929189;
+  --line:rgba(244,241,234,.12); --line-2:rgba(244,241,234,.24);
+  --amber-line:rgba(244,241,234,.40); --amber-soft:rgba(244,241,234,.10);
+  --ok:#e2e2e2; --warn:#c8c7be; --bad:#ffb4ab;
+  --mono:'Share Tech Mono','JetBrains Mono',ui-monospace,monospace;
+  --display:'Share Tech Mono','JetBrains Mono',ui-monospace,monospace;
+  --map-land:#2f3638;
+
+}
+[data-theme="protocol"] .card,[data-theme="protocol"] .pane,
+[data-theme="protocol"] .dock,[data-theme="protocol"] .rail{border-radius:0}
+
+/* --- 4. THE KEEP: gothic, parchment on void, rain and grain ----------- */
+[data-theme="keep"]{
+  --bg:#000000; --panel:#050505; --panel2:#040404;
+  --amber:#f4f1ea; --amber-hi:#ffffff; --amber-ink:#000000;
+  --blue:#c3bfb7; --blue-dim:#9c9891; --blue-hi:#f4f1ea; --blue-deep:#8f8b84;
+  --line:rgba(244,241,234,.14); --line-2:rgba(244,241,234,.30);
+  --amber-line:rgba(244,241,234,.40); --amber-soft:rgba(244,241,234,.08);
+  --ok:#f4f1ea; --warn:#c3bfb7; --bad:#e0685c;
+  --mono:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+  --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+  --map-land:#23211e;
+
+}
+[data-theme="keep"] .card,[data-theme="keep"] .pane,
+[data-theme="keep"] .dock,[data-theme="keep"] .rail{border-radius:0}
+/* Diamond bullets are this theme's signature. */
+[data-theme="keep"] .tab::before{content:"◆ ";opacity:.7}
+
+/* --- Ambient texture layer (rain + grain), theme-driven -------------- */
+@keyframes dmRainA{0%{mask-position:0 0;-webkit-mask-position:0 0}
+  100%{mask-position:0 96px;-webkit-mask-position:0 96px}}
+@keyframes dmRainB{0%{mask-position:0 0;-webkit-mask-position:0 0}
+  100%{mask-position:0 132px;-webkit-mask-position:0 132px}}
+/* v8.8: opacity is set PER THEME below, not via var(--texture-op).
+   A transitioned property whose value comes from a custom property does
+   not reliably re-evaluate when that property changes — switching themes
+   left the old opacity stuck on screen. Explicit per-theme rules avoid
+   depending on that behaviour.
+   overflow:hidden is required: the rain layers are deliberately oversized
+   (inset:-10%) so their animation has somewhere to travel, and without
+   clipping they widen the document and add a horizontal scrollbar. */
+/* No transition on purpose: switching data-theme recalculates every token
+   at once, and an opacity transition riding on that recalc did not settle
+   deterministically — measured opacity came back as the PREVIOUS theme's
+   value often enough to be a real bug. An ambient texture does not need a
+   fade, and correctness beats the flourish here. */
+#tex{position:fixed;inset:0;pointer-events:none;z-index:1;overflow:hidden;opacity:0}
+[data-theme="keep"] #tex{opacity:.5}
+[data-theme="protocol"] #tex{opacity:.05}
+[data-theme="arc"] #tex,[data-theme="aether"] #tex{opacity:0}
+#tex i{position:absolute;inset:-10%;display:block}
+#tex .r1{background-image:repeating-linear-gradient(90deg,rgba(244,241,234,.6) 0 2px,transparent 2px 34px);
+  -webkit-mask-image:repeating-linear-gradient(180deg,#000 0 12px,transparent 12px 96px);
+  mask-image:repeating-linear-gradient(180deg,#000 0 12px,transparent 12px 96px);
+  animation:dmRainA 3.6s linear infinite;opacity:.55}
+#tex .r2{background-image:repeating-linear-gradient(90deg,rgba(244,241,234,.45) 0 2px,transparent 2px 53px);
+  -webkit-mask-image:repeating-linear-gradient(180deg,#000 0 16px,transparent 16px 132px);
+  mask-image:repeating-linear-gradient(180deg,#000 0 16px,transparent 16px 132px);
+  animation:dmRainB 5.6s linear infinite;opacity:.4}
+#tex .gr{inset:0;background-image:radial-gradient(rgba(244,241,234,.14) 1px,transparent 1px);
+  background-size:3px 3px;opacity:.5}
+#tex .vig{inset:0;box-shadow:inset 0 0 150px 20px rgba(0,0,0,.55)}
+/* Only the two dark-textured themes paint rain; the others keep it off
+   entirely so a light theme never gets grey streaks over paper. */
+[data-theme="arc"] #tex .r1,[data-theme="arc"] #tex .r2,
+[data-theme="aether"] #tex,[data-theme="protocol"] #tex .r1,
+[data-theme="protocol"] #tex .r2{display:none}
+@media (prefers-reduced-motion:reduce){
+  #tex .r1,#tex .r2{animation:none}
+}
+
+/* --- Theme picker (first run) ---------------------------------------- */
+#picker{position:fixed;inset:0;z-index:80;background:var(--bg);
+  display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto}
+#picker[hidden]{display:none}
+.pkbox{width:100%;max-width:960px;margin:auto}
+.pkhead{margin-bottom:20px}
+.pkt{font-family:var(--display);font-size:19px;letter-spacing:.20em;color:var(--amber);
+  margin-bottom:9px}
+.pksub{font-family:var(--mono);font-size:11px;line-height:1.75;color:var(--blue-dim);
+  max-width:62ch}
+.pkgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+.pkcard{position:relative;border:1px solid var(--line-2);background:var(--panel);
+  padding:0;cursor:pointer;text-align:left;color:inherit;font:inherit;
+  display:flex;flex-direction:column;overflow:hidden;
+  transition:border-color .18s ease,transform .18s ease}
+.pkcard:hover,.pkcard:focus-visible{border-color:var(--amber);transform:translateY(-3px);outline:none}
+/* Each card previews its OWN theme's colours, not the current one, so the
+   choice is made by looking rather than by reading a name. */
+.pksw{height:96px;position:relative;overflow:hidden;flex:none}
+.pksw b{position:absolute;left:12px;top:12px;width:34px;height:34px;border-radius:50%}
+.pksw i{position:absolute;left:12px;right:12px;height:6px;border-radius:3px}
+.pkmeta{padding:13px 14px;display:flex;flex-direction:column;gap:6px;
+  border-top:1px solid var(--line)}
+.pkname{font-family:var(--display);font-size:12.5px;letter-spacing:.16em;color:var(--amber)}
+.pkdesc{font-family:var(--mono);font-size:9.5px;line-height:1.7;color:var(--blue-dim)}
+
+/* --- Boot sequence ---------------------------------------------------- */
+#boot{position:fixed;inset:0;z-index:90;background:var(--bg);
+  display:flex;align-items:center;justify-content:center}
+#boot[hidden]{display:none}
+#boot.out{opacity:0;transition:opacity .5s ease;pointer-events:none}
+.btinner{display:flex;flex-direction:column;align-items:center;gap:16px;
+  padding:20px;width:100%;max-width:520px}
+.btart{width:180px;height:180px;color:var(--amber);flex:none}
+.btart svg{width:100%;height:100%;display:block}
+.btword{font-family:var(--display);font-size:clamp(20px,6vw,34px);letter-spacing:.26em;
+  color:var(--amber);min-height:1.2em;text-align:center;white-space:nowrap}
+.btread{font-family:var(--mono);font-size:10px;line-height:2.1;color:var(--blue-dim);
+  letter-spacing:.1em;text-align:left;width:100%;max-width:400px;min-height:104px}
+.btread b{color:var(--amber);font-weight:400}
+.btread .dn{color:var(--bad)}
+.btskip{margin-top:4px;background:none;border:1px solid var(--line-2);color:var(--blue-deep);
+  font-family:var(--mono);font-size:9px;letter-spacing:.2em;padding:7px 15px;cursor:pointer;
+  min-height:32px}
+.btskip:hover{border-color:var(--amber);color:var(--amber)}
+
+@keyframes dmDraw{to{stroke-dashoffset:0}}
+@keyframes dmFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes dmRise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes dmSpin{to{transform:rotate(360deg)}}
+@keyframes dmBreathe{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:.85;transform:scale(1.05)}}
+@keyframes dmBlink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.bt-draw{stroke-dasharray:1200;stroke-dashoffset:1200;animation:dmDraw 1.5s ease forwards}
+.bt-fade{opacity:0;animation:dmFadeIn .7s ease forwards}
+.bt-rise{opacity:0;animation:dmRise .6s ease forwards}
+.bt-spin{transform-origin:50% 50%;animation:dmSpin 22s linear infinite}
+.bt-breathe{animation:dmBreathe 3.4s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){
+  .bt-draw,.bt-fade,.bt-rise{animation-duration:.01s}
+  .bt-spin,.bt-breathe{animation:none}
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--blue);
+  font-family:var(--mono);font-size:11px;font-weight:300;line-height:1.55;
+  letter-spacing:.02em;-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font:inherit;color:inherit}
+:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
+::selection{background:var(--amber);color:var(--amber-ink)}
+
+.wrap{display:flex;flex-direction:column;height:100dvh;padding:10px 14px 8px;gap:9px}
+
+/* ---------- masthead ---------- */
+.mast{display:flex;align-items:center;gap:12px;font-size:10px;letter-spacing:.16em;color:var(--amber)}
+.mast .brand{font-family:var(--display);font-size:13px;letter-spacing:.2em;display:flex;align-items:center;gap:8px}
+.mast .mk{width:15px;height:15px;flex:none}
+.mast .mk svg{width:100%;height:100%}
+.mast .right{margin-left:auto;display:flex;gap:16px;color:var(--blue-dim);letter-spacing:.14em}
+.mast .right b{color:var(--blue-hi);font-weight:500}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:0;border:1px solid var(--line);border-radius:3px;overflow:hidden;flex-wrap:wrap}
+.tab{flex:1 1 auto;min-width:78px;min-height:34px;padding:9px 6px;background:none;border:none;
+  border-right:1px solid var(--line);cursor:pointer;color:var(--blue-dim);
+  font-size:9.5px;letter-spacing:.16em;white-space:nowrap;
+  display:flex;align-items:center;justify-content:center;gap:6px;transition:background .12s,color .12s}
+.tab:last-child{border-right:none}
+.tab:hover{background:rgba(120,175,210,.07);color:var(--blue-hi)}
+.tab[aria-selected="true"]{background:var(--amber-soft);color:var(--amber);
+  box-shadow:inset 0 -2px 0 var(--amber)}
+.tab .dia{color:var(--amber);font-size:8px}
+
+/* ---------- body grid ---------- */
+.body{flex:1;display:grid;grid-template-columns:196px minmax(0,1fr);gap:9px;min-height:0}
+.rail{border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.railhead{padding:9px 11px;border-bottom:1px solid var(--line);
+  font-size:9px;letter-spacing:.18em;color:var(--amber)}
+.railbody{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
+.railfoot{border-top:1px solid var(--line);padding:8px 11px;font-size:8.5px;
+  letter-spacing:.16em;color:var(--blue-deep)}
+
+.agent{border:1px solid var(--line);border-radius:2px;padding:8px 9px;background:var(--panel2)}
+.agent .top{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.agent .nm{font-size:10px;font-weight:500;color:var(--blue-hi);letter-spacing:.1em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent .badge{margin-left:auto;font-size:7.5px;letter-spacing:.14em;padding:2px 5px;
+  border:1px solid var(--line-2);color:var(--blue-dim);border-radius:2px;flex:none}
+.agent .badge.live{color:var(--amber);border-color:var(--amber-line)}
+.agent .badge.ready{color:var(--ok);border-color:rgba(95,191,138,.4)}
+.agent .d{font-size:8.5px;line-height:1.5;color:var(--blue-deep)}
+
+/* ---------- panes ---------- */
+.pane{border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  display:none;flex-direction:column;min-height:0;overflow:hidden}
+.pane.on{display:flex}
+.panehead{padding:10px 14px;border-bottom:1px solid var(--line);
+  font-family:var(--display);font-size:12px;letter-spacing:.16em;color:var(--amber);flex:none}
+.panebody{flex:1;overflow-y:auto;padding:14px;min-height:0}
+
+.lede{font-family:var(--display);font-size:13px;line-height:1.85;color:var(--blue-hi);
+  letter-spacing:.06em;margin:0 0 16px;max-width:76ch}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));
+  border:1px solid var(--line);border-radius:2px;margin-bottom:16px}
+.metric{padding:11px 13px;border-right:1px solid var(--line);display:flex;
+  align-items:center;justify-content:space-between;gap:10px}
+.metric:last-child{border-right:none}
+.metric .k{font-size:8.5px;letter-spacing:.16em;color:var(--blue-dim)}
+.metric .v{font-size:11px;color:var(--amber);font-weight:500}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:9px}
+.card{border:1px solid var(--line);border-radius:2px;padding:11px 13px;background:var(--panel2);
+  cursor:pointer;text-align:left;min-height:44px;transition:border-color .12s}
+.card:hover{border-color:var(--amber-line)}
+.card .h{font-size:9.5px;letter-spacing:.14em;color:var(--amber);margin-bottom:4px}
+.card .d{font-size:8.5px;color:var(--blue-deep);line-height:1.5}
+
+/* ---------- transcript ---------- */
+.turn{padding:10px 0;border-top:1px solid rgba(120,175,210,.10)}
+.turn:first-child{border-top:none}
+.turn .gut{display:flex;gap:9px;align-items:center;font-size:8.5px;
+  letter-spacing:.14em;color:var(--blue-deep);margin-bottom:5px}
+.turn .gut .who{color:var(--amber)}
+.turn.you .gut .who{color:var(--blue-hi)}
+.turn .body{font-size:11.5px;line-height:1.7;color:var(--blue-hi);word-break:break-word}
+.turn.you .body{color:var(--blue);white-space:pre-wrap}
+.turn .body p{margin:0 0 9px}.turn .body p:last-child{margin:0}
+.turn .body ul,.turn .body ol{margin:8px 0;padding-left:19px}
+.turn .body li{margin-bottom:3px}.turn .body li::marker{color:var(--amber)}
+.turn .body strong{color:var(--amber-hi);font-weight:500}
+.turn .body a{color:var(--amber)}
+.turn .body code{background:rgba(120,175,210,.10);border:1px solid var(--line);
+  padding:1px 4px;border-radius:2px;font-size:10.5px}
+.turn .body pre{background:#050c15;border:1px solid var(--line);border-radius:2px;
+  padding:10px 12px;overflow-x:auto;margin:9px 0;position:relative;font-size:10.5px;line-height:1.6}
+.turn .body pre code{background:none;border:none;padding:0}
+.copybtn{position:absolute;top:5px;right:5px;border:1px solid var(--line-2);background:var(--panel);
+  color:var(--blue-dim);border-radius:2px;padding:3px 8px;font-size:8px;letter-spacing:.12em;
+  cursor:pointer;opacity:0;transition:opacity .12s;min-height:24px}
+pre:hover .copybtn,.copybtn:focus{opacity:1}
+.copybtn:hover{color:var(--amber);border-color:var(--amber-line)}
+.acts{display:flex;flex-direction:column;gap:3px;margin-bottom:7px}
+.act{display:flex;align-items:center;gap:7px;font-size:8.5px;letter-spacing:.1em;
+  color:var(--blue-deep);border:1px solid var(--line);border-radius:2px;
+  padding:3px 8px;width:fit-content;max-width:100%;background:var(--panel2)}
+.act .nm{color:var(--blue);}
+.act.bad{border-color:var(--bad);color:var(--bad)}
+.spin{width:7px;height:7px;border:1px solid var(--line-2);border-top-color:var(--amber);
+  border-radius:50%;animation:sp .7s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.rowacts{display:flex;gap:5px;margin-top:8px}
+.mini{border:1px solid var(--line);background:var(--panel2);color:var(--blue-dim);
+  border-radius:2px;padding:4px 9px;font-size:8px;letter-spacing:.12em;cursor:pointer;min-height:26px}
+.mini:hover{color:var(--amber);border-color:var(--amber-line)}
+
+/* ---------- approval ---------- */
+.approve{border:1px solid var(--amber);border-left:2px solid var(--amber);border-radius:2px;
+  padding:11px 13px;margin:0 0 12px;background:rgba(242,183,61,.06)}
+.approve .t{font-size:9px;letter-spacing:.16em;color:var(--amber);margin-bottom:6px}
+.approve .p{font-size:11px;color:var(--blue-hi);margin-bottom:10px;word-break:break-word}
+.approve .r{display:flex;gap:7px;flex-wrap:wrap}
+.btn{min-height:34px;padding:8px 15px;border:1px solid var(--line-2);background:var(--panel2);
+  color:var(--blue-hi);border-radius:2px;cursor:pointer;font-size:9px;letter-spacing:.14em}
+.btn.go{background:var(--amber);color:var(--amber-ink);border-color:var(--amber);font-weight:700}
+.btn:hover{border-color:var(--amber)}
+.approve.done{border-color:var(--line);border-left-color:var(--blue-deep);background:none}
+.approve.done .t{color:var(--blue-deep)}
+.errbox{border:1px solid var(--bad);border-left:2px solid var(--bad);border-radius:2px;
+  padding:10px 12px;margin-bottom:12px;font-size:10.5px;color:var(--blue-hi)}
+.errbox .t{font-size:9px;letter-spacing:.16em;color:var(--bad);margin-bottom:4px}
+
+/* ---------- composer ---------- */
+.dock{border:1px solid var(--line);border-radius:3px;background:var(--panel);
+  padding:9px 11px;flex:none}
+.queue{display:flex;flex-direction:column;gap:4px;margin-bottom:7px}
+.qi{display:flex;align-items:center;gap:8px;font-size:9px;color:var(--blue-dim);
+  border:1px dashed var(--line-2);border-radius:2px;padding:5px 9px}
+.qi b{color:var(--amber);font-weight:500}
+.qi span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qi button{border:none;background:none;color:var(--blue-deep);cursor:pointer;
+  min-height:26px;min-width:26px;border-radius:2px}
+.qi button:hover{color:var(--bad)}
+/* v8.7: this row did not wrap, so on a narrow viewport SEND_DIRECTIVE was
+   laid out past the right edge and could not be reached or tapped at all —
+   the primary action of the whole console, off-screen. flex-wrap keeps
+   every control inside the viewport at any width. */
+.dockrow{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}
+.hint{font-size:8.5px;letter-spacing:.16em;color:var(--amber);white-space:nowrap;flex:none}
+.chip{padding:5px 9px;border:1px solid var(--line-2);border-radius:2px;font-size:8.5px;
+  letter-spacing:.14em;color:var(--blue-dim);cursor:pointer;min-height:30px;
+  display:inline-flex;align-items:center;gap:5px;flex:none;background:none}
+.chip:hover{border-color:var(--amber-line);color:var(--amber)}
+.chip.on{color:var(--amber);border-color:var(--amber-line);background:var(--amber-soft)}
+/* v8.7: flex:1 with a 0 basis let the input collapse to ~16px on a narrow
+   viewport, squeezed between the hint, the two chips and the send button —
+   the box you type in was narrower than a single character. A min-width
+   forces it onto its own line instead of being crushed. */
+#ta{flex:1 1 190px;min-width:190px;background:none;border:none;outline:none;resize:none;
+  color:var(--blue-hi);
+  font-size:10.5px;line-height:1.6;padding:7px 0;max-height:130px;min-height:34px}
+#ta::placeholder{color:var(--blue-deep)}
+#go{padding:9px 17px;background:var(--amber);color:var(--amber-ink);border:none;border-radius:3px;
+  font-size:9.5px;font-weight:700;letter-spacing:.14em;cursor:pointer;min-height:36px;flex:none}
+#go:hover{background:var(--amber-hi)}
+#stop{display:none;padding:9px 15px;background:none;border:1px solid var(--amber-line);
+  color:var(--amber);border-radius:3px;font-size:9px;letter-spacing:.14em;cursor:pointer;
+  min-height:36px;flex:none;align-items:center;gap:7px}
+#stop.on{display:inline-flex}
+#stop .sq{width:7px;height:7px;background:currentColor;border-radius:1px}
+
+/* ---------- footer ---------- */
+.foot{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  font-size:8.5px;letter-spacing:.16em;color:var(--blue-deep);flex:none;padding:0 4px}
+.foot b{color:var(--blue-dim);font-weight:400}
+
+/* ---------- code tool picker ---------- */
+.toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:13px;
+  padding-bottom:12px;border-bottom:1px solid var(--line)}
+.lbl{font-size:8.5px;letter-spacing:.16em;color:var(--blue-dim)}
+.sel{position:relative}
+.selbtn{display:flex;align-items:center;gap:9px;min-height:36px;padding:8px 13px;
+  border:1px solid var(--line-2);background:var(--panel2);color:var(--blue-hi);
+  border-radius:2px;cursor:pointer;font-size:9.5px;letter-spacing:.12em}
+.selbtn:hover{border-color:var(--amber-line)}
+.selbtn .cv{color:var(--amber)}
+/* v8.7: the menu used a hard min-width:290px, which is wider than a narrow
+   phone viewport — the option text was clipped off the right edge with no
+   way to read it. Clamp to the viewport instead so it stays legible. */
+.selmenu{position:absolute;top:calc(100% + 4px);left:0;z-index:40;
+  min-width:min(290px, calc(100vw - 40px));max-width:calc(100vw - 40px);
+  border:1px solid var(--line-2);background:var(--panel);border-radius:3px;
+  box-shadow:0 12px 34px -14px #000;display:none;overflow:hidden}
+.selmenu.on{display:block}
+/* v8.7: on a narrow viewport the menu cannot fit BESIDE its button at all
+   — anchoring left overflowed the right edge, anchoring right overflowed
+   the left. Both gave the page a horizontal scrollbar. So below 560px it
+   stops being an overlay and flows in the panel as a full-width list,
+   which cannot overflow whatever the option text says. */
+@media (max-width:560px){
+  .toolbar .sel{width:100%}
+  .selmenu{position:static;min-width:0;max-width:100%;width:100%;
+    margin-top:6px;box-shadow:none}
+}
+.opt{display:flex;align-items:flex-start;gap:9px;width:100%;padding:9px 12px;border:none;
+  background:none;cursor:pointer;text-align:left;border-bottom:1px solid rgba(120,175,210,.08);min-height:40px}
+.opt:last-child{border-bottom:none}
+.opt:hover{background:rgba(120,175,210,.07)}
+.opt[aria-selected="true"]{background:var(--amber-soft)}
+/* v8.7: both were inline spans, so the name and description rendered as
+   one run-on string ("CLAUDE CODEYour Claude Code CLI") and the .od
+   margin-top was silently ignored. display:block puts the description on
+   its own line, which is what the margin always intended. */
+.opt .on{display:block;font-size:9.5px;letter-spacing:.12em;color:var(--blue-hi)}
+.opt[aria-selected="true"] .on{color:var(--amber)}
+.opt .od{display:block;font-size:8px;color:var(--blue-deep);line-height:1.45;margin-top:2px}
+.dot{width:5px;height:5px;border-radius:50%;flex:none;margin-top:5px;background:var(--blue-deep)}
+.dot.ok{background:var(--ok)}.dot.no{background:var(--bad)}
+
+/* ---------- voice ---------- */
+.voicewrap{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:13px;height:100%;min-height:0}
+@media (max-width:1000px){.voicewrap{grid-template-columns:1fr}}
+.vmain{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:16px;padding:20px;min-height:0}
+.orb{width:150px;height:150px;border-radius:50%;border:1px solid var(--amber-line);
+  display:grid;place-items:center;position:relative;flex:none}
+.orb::before{content:"";position:absolute;inset:-13px;border-radius:50%;
+  border:1px solid rgba(242,183,61,.18)}
+.orb.listening::before{animation:pulse 1.7s ease-out infinite}
+.orb.speaking{border-color:var(--amber);box-shadow:0 0 34px -8px rgba(242,183,61,.5)}
+@keyframes pulse{0%{transform:scale(1);opacity:.8}100%{transform:scale(1.28);opacity:0}}
+.orb .g{font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--amber)}
+.vstate{font-size:10px;letter-spacing:.18em;color:var(--blue-dim)}
+.vtext{font-size:12px;line-height:1.7;color:var(--blue-hi);max-width:60ch;min-height:3em}
+.vbtn{min-height:44px;padding:12px 28px;border:1px solid var(--amber-line);background:var(--amber-soft);
+  color:var(--amber);border-radius:3px;cursor:pointer;font-size:10px;letter-spacing:.18em}
+.vbtn:hover{background:rgba(242,183,61,.2)}
+.vbtn.rec{background:var(--amber);color:var(--amber-ink);font-weight:700}
+.vnote{font-size:8.5px;color:var(--blue-deep);letter-spacing:.1em;max-width:52ch;line-height:1.6}
+
+/* live activity — what it is DOING, while voice-only hides the transcript */
+.live{border:1px solid var(--line);border-radius:3px;background:var(--panel2);
+  display:flex;flex-direction:column;min-height:0}
+.livehead{padding:9px 11px;border-bottom:1px solid var(--line);font-size:9px;
+  letter-spacing:.18em;color:var(--amber);display:flex;align-items:center;gap:7px;flex:none}
+.livebody{flex:1;overflow-y:auto;padding:9px;display:flex;flex-direction:column;gap:6px;min-height:0}
+.ev{border:1px solid var(--line);border-left:2px solid var(--line-2);border-radius:2px;
+  padding:7px 9px;background:var(--panel);animation:evin .2s ease-out}
+@keyframes evin{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.ev.act{border-left-color:var(--amber)}
+.ev.done{border-left-color:var(--ok)}
+.ev.err{border-left-color:var(--bad)}
+.ev .t{font-size:9px;color:var(--blue-hi);letter-spacing:.06em}
+.ev .s{font-size:8px;color:var(--blue-deep);margin-top:2px;letter-spacing:.08em}
+.ev .ts{font-size:7.5px;color:var(--blue-deep);float:right}
+.liveempty{font-size:9px;color:var(--blue-deep);padding:11px;text-align:center;letter-spacing:.1em}
+
+.note{font-size:9.5px;color:var(--blue-deep);line-height:1.65;letter-spacing:.04em}
+.sec{font-size:9px;letter-spacing:.18em;color:var(--amber);margin:16px 0 9px;
+  padding-bottom:6px;border-bottom:1px solid var(--line)}
+.sec:first-child{margin-top:0}
+.row{display:flex;gap:11px;padding:8px 0;border-bottom:1px solid rgba(120,175,210,.08);align-items:flex-start}
+.row:last-child{border-bottom:none}
+.row .g{flex:1;min-width:0}
+.row .n{font-size:10px;color:var(--blue-hi);letter-spacing:.08em}
+.row .d{font-size:8.5px;color:var(--blue-deep);margin-top:2px;word-break:break-word}
+.row .s{font-size:8px;letter-spacing:.12em;color:var(--blue-dim);flex:none}
+
+@media (max-width:860px){
+  .body{grid-template-columns:1fr}
+  .rail{display:none}
+  .rail.show{display:flex;position:fixed;inset:56px 0 auto 0;max-height:60vh;z-index:50}
+  .tab{min-width:64px;font-size:9px}
+  .mast .right{display:none}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+
+<!-- v8.8: ambient texture (rain/grain/vignette). Opacity is theme-driven,
+     so ARC and AETHER render it at 0 and paint nothing. -->
+<div id="tex" aria-hidden="true"><i class="r1"></i><i class="r2"></i><i class="gr"></i><i class="vig"></i></div>
+
+<!-- v8.8: first-run theme chooser. Shown ONLY when no theme is stored;
+     after that the console goes straight to the boot sequence. Re-openable
+     from SETTINGS, so this is a first-run default, not a gate. -->
+<div id="picker" hidden>
+  <div class="pkbox" role="dialog" aria-modal="true" aria-labelledby="pkTitle">
+    <div class="pkhead">
+      <div id="pkTitle" class="pkt">CHOOSE YOUR CONSOLE</div>
+      <div class="pksub">Four interfaces over the same system. Every one reports the
+        same live data — this picks how it looks, not what it does.
+        You can change it later in SETTINGS.</div>
+    </div>
+    <div class="pkgrid" id="pkGrid"></div>
+  </div>
+</div>
+
+<!-- v8.8: per-theme boot sequence. Each theme gets its own animation;
+     the readout underneath is LIVE (agents, backend, node, memory), so a
+     down node says so instead of animating a comforting lie. -->
+<div id="boot" hidden aria-live="polite">
+  <div class="btinner">
+    <div id="btArt" class="btart"></div>
+    <div id="btWord" class="btword"></div>
+    <div id="btRead" class="btread"></div>
+    <button id="btSkip" class="btskip" type="button">SKIP</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="mast">
+    <span class="brand">
+      <span class="mk"><svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="100" cy="100" r="85" stroke="currentColor" stroke-width="7" fill="none"/>
+        <path d="M100 34 L146 166 H128 L100 84 L72 166 H54 Z" fill="currentColor"/>
+        <path d="M30 150 L74 108 L100 132 L140 74 L168 52" stroke="currentColor" stroke-width="10"
+              fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M148 46 L176 44 L166 70 Z" fill="currentColor"/>
+      </svg></span>
+      DOURMOUSE
+    </span>
+    <span id="mastScreen">// HOME</span>
+    <span class="right">
+      <span>MEM_LOAD: <b id="mMem">—</b></span>
+      <span>SESSION: <b id="mSess">—</b></span>
+      <span><b id="mClock">--:--:--</b></span>
+    </span>
+  </div>
+
+  <div class="tabs" role="tablist" id="tabs"></div>
+
+  <div class="body">
+    <nav class="rail" id="rail" aria-label="Session stream">
+      <div class="railhead">◆ SESSION STREAM</div>
+      <div class="railbody" id="agents"><div class="note">Loading roster…</div></div>
+      <div class="railfoot" id="railFoot">—</div>
+    </nav>
+
+    <section class="pane on" id="pane-home"><div class="panehead">◆ CENTRAL AGENT DISPATCH // ARC CORE</div>
+      <div class="panebody" id="homeBody"></div></section>
+
+    <section class="pane" id="pane-comms"><div class="panehead">◆ COMMS // TRANSCRIPT</div>
+      <div class="panebody" id="thread"></div></section>
+
+    <section class="pane" id="pane-research"><div class="panehead">◆ RESEARCH // LIVE WEB</div>
+      <div class="panebody" id="researchBody"></div></section>
+
+    <section class="pane" id="pane-code"><div class="panehead">◆ CODE // TOOLCHAIN</div>
+      <div class="panebody" id="codeBody"></div></section>
+
+    <section class="pane" id="pane-media"><div class="panehead">◆ MEDIA</div>
+      <div class="panebody" id="mediaBody"></div></section>
+
+    <section class="pane" id="pane-settings"><div class="panehead">◆ SETTINGS</div>
+      <div class="panebody" id="settingsBody"></div></section>
+
+    <section class="pane" id="pane-atlas"><div class="panehead">◆ ATLAS // QUANT</div>
+      <div class="panebody" id="atlasBody"></div></section>
+
+    <section class="pane" id="pane-news"><div class="panehead">◆ NEWS // LIVE FEED</div>
+      <div class="panebody" id="newsBody"></div></section>
+
+    <section class="pane" id="pane-voice"><div class="panehead">◆ VOICE // HANDS-FREE</div>
+      <div class="panebody" style="padding:0">
+        <div class="voicewrap">
+          <div class="vmain">
+            <div class="orb" id="orb"><span class="g" id="orbG">IDLE</span></div>
+            <div class="vstate" id="vState">VOICE-ONLY MODE</div>
+            <div class="vtext" id="vText">Hold the button and speak. The panel on the right shows what Dourmouse is doing while it works.</div>
+            <button class="vbtn" id="vBtn">▶ START LISTENING</button>
+            <div class="vnote" id="vNote"></div>
+          </div>
+          <aside class="live" aria-label="Live activity">
+            <div class="livehead"><span id="liveDot" class="dot"></span>LIVE ACTIVITY</div>
+            <div class="livebody" id="liveBody">
+              <div class="liveempty">Nothing running.</div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="dock">
+    <div class="queue" id="queue"></div>
+    <div class="dockrow">
+      <span class="hint">⌘ + ENTER TO BROADCAST</span>
+      <button class="chip" id="micChip" title="Switch to voice-only mode">(MIC)</button>
+      <textarea id="ta" rows="1" placeholder="Ask anything — or /all &lt;goal&gt; to put every resource on it"></textarea>
+      <button class="chip" id="spkChip" title="Speak replies aloud">(SPK)</button>
+      <button id="stop" type="button"><span class="sq"></span>STOP</button>
+      <button id="go">SEND_DIRECTIVE</button>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span id="footL">SCREEN 01 / 09 — HOME</span>
+    <span>BACKEND: <b id="footBackend">—</b> · NODE: <b id="footNode">—</b></span>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
+
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","MEDIA","SETTINGS","ATLAS","NEWS","VOICE"];
+const sys = {roster:null,conns:null,server:null,backend:null,memory:null,telemetry:null,version:null,me:null,voice:null};
+let screen = "HOME", busy = false, focusAgent = "", speak = false, voiceMode = false;
+const queue = [];
+
+/* ---------------- tabs ---------------- */
+const tabsEl = $("tabs");
+SCREENS.forEach((name,i) => {
+  const b = document.createElement("button");
+  b.className = "tab"; b.type = "button"; b.setAttribute("role","tab");
+  b.setAttribute("aria-selected", String(i===0));
+  b.innerHTML = `<span class="dia">◆</span>${name}`;
+  b.onclick = () => show(name);
+  tabsEl.appendChild(b);
+});
+function show(name){
+  screen = name;
+  [...tabsEl.children].forEach(b => b.setAttribute("aria-selected", String(b.textContent.trim().endsWith(name))));
+  SCREENS.forEach(s => { const p = $("pane-"+s.toLowerCase()); if(p) p.classList.toggle("on", s===name); });
+  $("mastScreen").textContent = "// " + name;
+  $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / 09 — ${name}`;
+  if(name==="RESEARCH") paintResearch();
+  if(name==="CODE") paintCode();
+  if(name==="MEDIA") paintMedia();
+  if(name==="SETTINGS") paintSettings();
+  if(name==="ATLAS") paintAtlas();
+  if(name==="NEWS") paintNews();
+  if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
+  else if(voiceMode && name!=="VOICE"){ voiceMode = false; $("micChip").classList.remove("on"); }
+}
+
+/* ---------------- system state ---------------- */
+/* =====================================================================
+   v8.8 THEME ENGINE
+   Four skins, one console. A theme sets CSS tokens (data-theme on <html>)
+   and supplies its own boot animation. Nothing here touches routing,
+   the toolchain picker or any endpoint — a theme cannot change what the
+   console reports, only how it is drawn.
+   ===================================================================== */
+const THEMES = {
+  arc: {
+    /* Named AMBER DISPATCH, not "ARC CORE": ARC CORE is already the title
+       of the HOME screen, and having a theme share that name made the
+       masthead read as if the theme were the screen. */
+    name:"AMBER DISPATCH",
+    desc:"Amber on deep navy. The dense operator HUD — highest information per pixel.",
+    sw:{bg:"#04080e",dot:"#f2b73d",bars:["#f2b73d","#7ea9c9","#3f6480"]}
+  },
+  aether: {
+    name:"AETHER WORKSPACE",
+    desc:"Paper and ink. Light, serif, generous — built for long reading, not glanceable status.",
+    sw:{bg:"#f9f9f8",dot:"#1a1c1c",bars:["#1a1c1c","#747878","#c4c7c7"]}
+  },
+  protocol: {
+    name:"ACHERON PROTOCOL",
+    desc:"Monochrome terminal. Hard edges, wide tracking, telemetry everywhere.",
+    sw:{bg:"#131313",dot:"#ffffff",bars:["#e2e2e2","#929189","#474740"]}
+  },
+  keep: {
+    name:"THE KEEP",
+    desc:"Gothic. Parchment on void, with rain and grain over the whole console.",
+    sw:{bg:"#000000",dot:"#f4f1ea",bars:["#f4f1ea","#8f8b84","#6d6a64"]}
+  }
+};
+const THEME_KEY = "dm_theme_v1";
+function themeGet(){ try{ const t=localStorage.getItem(THEME_KEY); return THEMES[t]?t:null; }catch{ return null; } }
+function themeSet(t){
+  if(!THEMES[t]) return;
+  document.documentElement.setAttribute("data-theme", t);
+  try{ localStorage.setItem(THEME_KEY, t); }catch{ /* private mode: theme is session-only */ }
+}
+
+/* --- The picker (first run only) -------------------------------------- */
+function paintPicker(){
+  const grid = $("pkGrid"); grid.innerHTML = "";
+  Object.entries(THEMES).forEach(([id,t]) => {
+    const b = document.createElement("button");
+    b.className = "pkcard"; b.type = "button";
+    b.setAttribute("aria-label", `Use the ${t.name} interface. ${t.desc}`);
+    const bars = t.sw.bars.map((c,i) =>
+      `<i style="background:${c};top:${58+i*13}px;opacity:${1-i*0.22}"></i>`).join("");
+    b.innerHTML =
+      `<span class="pksw" style="background:${t.sw.bg}">
+         <b style="background:${t.sw.dot}"></b>${bars}
+       </span>
+       <span class="pkmeta">
+         <span class="pkname"></span>
+         <span class="pkdesc"></span>
+       </span>`;
+    b.querySelector(".pkname").textContent = t.name;
+    b.querySelector(".pkdesc").textContent = t.desc;
+    b.onclick = () => { themeSet(id); $("picker").hidden = true; runBoot(id); };
+    grid.appendChild(b);
+  });
+}
+function openPicker(){ paintPicker(); $("picker").hidden = false; }
+
+/* --- Boot art, one per theme ------------------------------------------ */
+const BOOT_ART = {
+  /* ARC: the mark draws itself — ring, then A, then the trend arrow. */
+  arc: `<svg viewBox="0 0 200 200" fill="none" aria-hidden="true">
+    <circle cx="100" cy="100" r="85" stroke="currentColor" stroke-width="6"
+      class="bt-draw" style="animation-delay:0s"/>
+    <path d="M100 34 L146 166 H128 L100 84 L72 166 H54 Z" fill="currentColor"
+      class="bt-fade" style="animation-delay:.8s"/>
+    <path d="M30 150 L74 108 L100 132 L140 74 L168 52" stroke="currentColor"
+      stroke-width="9" stroke-linecap="round" stroke-linejoin="round"
+      class="bt-draw" style="animation-delay:1.2s"/>
+    <path d="M148 46 L176 44 L166 70 Z" fill="currentColor"
+      class="bt-fade" style="animation-delay:2s"/></svg>`,
+  /* AETHER: quiet concentric rules settling — no glow, no spin. */
+  aether: `<svg viewBox="0 0 200 200" fill="none" aria-hidden="true">
+    <circle cx="100" cy="100" r="78" stroke="currentColor" stroke-width="1.5"
+      class="bt-draw" style="animation-delay:0s"/>
+    <circle cx="100" cy="100" r="54" stroke="currentColor" stroke-width="1.5"
+      class="bt-draw" style="animation-delay:.35s" opacity=".55"/>
+    <circle cx="100" cy="100" r="30" stroke="currentColor" stroke-width="1.5"
+      class="bt-draw" style="animation-delay:.7s" opacity=".3"/>
+    <circle cx="100" cy="100" r="6" fill="currentColor"
+      class="bt-fade" style="animation-delay:1.3s"/>
+    <path d="M22 100 H60 M140 100 H178" stroke="currentColor" stroke-width="1.5"
+      class="bt-fade" style="animation-delay:1.6s"/></svg>`,
+  /* PROTOCOL: a scanning reticle — rotating ticks over a locked frame. */
+  protocol: `<svg viewBox="0 0 200 200" fill="none" aria-hidden="true">
+    <rect x="26" y="26" width="148" height="148" stroke="currentColor" stroke-width="1.5"
+      class="bt-draw"/>
+    <g class="bt-spin" opacity=".8">
+      <circle cx="100" cy="100" r="62" stroke="currentColor" stroke-width="1"
+        stroke-dasharray="6 10"/>
+    </g>
+    <circle cx="100" cy="100" r="40" stroke="currentColor" stroke-width="1.5"
+      class="bt-breathe"/>
+    <path d="M100 60 V140 M60 100 H140" stroke="currentColor" stroke-width="1"
+      class="bt-fade" style="animation-delay:.9s" opacity=".6"/>
+    <rect x="92" y="92" width="16" height="16" fill="currentColor"
+      class="bt-fade" style="animation-delay:1.4s"/></svg>`,
+  /* KEEP: a gothic arch assembling, diamond keystone last. */
+  keep: `<svg viewBox="0 0 200 200" fill="none" aria-hidden="true">
+    <path d="M46 176 V96 A54 54 0 0 1 154 96 V176" stroke="currentColor" stroke-width="2"
+      class="bt-draw"/>
+    <path d="M70 176 V100 A30 30 0 0 1 130 100 V176" stroke="currentColor" stroke-width="1.5"
+      class="bt-draw" style="animation-delay:.5s" opacity=".6"/>
+    <rect x="90" y="52" width="20" height="20" fill="currentColor"
+      transform="rotate(45 100 62)" class="bt-fade" style="animation-delay:1.5s"/>
+    <path d="M30 176 H170" stroke="currentColor" stroke-width="3"
+      class="bt-fade" style="animation-delay:1.8s"/></svg>`
+};
+
+/* --- Boot runner ------------------------------------------------------
+   The wordmark types out, then a LIVE readout is appended line by line.
+   The readout is built from the same sys.* the console uses, so if the
+   node is down it prints OFFLINE rather than animating a reassuring lie. */
+let bootTimers = [];
+function bootClear(){ bootTimers.forEach(clearTimeout); bootTimers = []; }
+function bootLines(){
+  const r = sys.roster ? (sys.roster.subagents||[]).length : null;
+  const b = sys.backend||{}, s = sys.server||{}, m = sys.memory||{};
+  const L = [];
+  L.push(r!=null ? `CORE  :: ${r} agents mounted <b>READY</b>`
+                 : `CORE  :: roster unavailable <span class="dn">DOWN</span>`);
+  L.push(b.model ? `BRAIN :: ${String(b.model).split("/").pop()} <b>ONLINE</b>`
+                 : `BRAIN :: backend unreported <span class="dn">DOWN</span>`);
+  L.push(s.online ? `NODE  :: ${s.node} · ${s.latency_ms}ms <b>SYNCED</b>`
+                  : `NODE  :: offline — using fallback <span class="dn">OFFLINE</span>`);
+  /* /api/memory returns {active, count, gate} — NOT `facts`. Reading the
+     wrong key made the boot report "memory unavailable DOWN" while the
+     HOME screen showed 72 facts from the same payload: a false failure,
+     which is worse than a missing line. */
+  L.push(m.count!=null ? `MEM   :: ${m.count} facts recalled <b>OK</b>`
+                       : `MEM   :: memory unavailable <span class="dn">DOWN</span>`);
+  L.push(`MODE  :: <b>READY.</b>`);
+  return L;
+}
+function endBoot(){
+  bootClear();
+  const el = $("boot"); if(!el || el.hidden) return;
+  el.classList.add("out");
+  setTimeout(() => { el.hidden = true; el.classList.remove("out"); try{ ta.focus(); }catch{} }, 500);
+}
+function runBoot(theme){
+  const el = $("boot"); if(!el) return;
+  bootClear();
+  $("btArt").innerHTML = BOOT_ART[theme] || BOOT_ART.arc;
+  $("btWord").textContent = ""; $("btRead").innerHTML = "";
+  el.hidden = false; el.classList.remove("out");
+
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const word = "DOURMOUSE";
+  const step = reduce ? 0 : 90;
+  if(reduce){ $("btWord").textContent = word; }
+  else word.split("").forEach((ch,i) => {
+    bootTimers.push(setTimeout(() => { $("btWord").textContent += ch; }, 900 + i*step));
+  });
+
+  const startRead = reduce ? 100 : 900 + word.length*step + 200;
+  bootLines().forEach((line,i) => {
+    bootTimers.push(setTimeout(() => {
+      const d = document.createElement("div");
+      d.className = "bt-rise"; d.innerHTML = line;
+      $("btRead").appendChild(d);
+    }, startRead + i*(reduce?0:230)));
+  });
+  bootTimers.push(setTimeout(endBoot, reduce ? 700 : startRead + 5*230 + 900));
+
+  el.onclick = e => { if(e.target.id!=="btSkip") endBoot(); };
+  $("btSkip").onclick = e => { e.stopPropagation(); endBoot(); };
+  document.addEventListener("keydown", function esc(ev){
+    if(ev.key==="Escape"||ev.key===" "){ endBoot(); document.removeEventListener("keydown", esc); }
+  });
+}
+
+async function refresh(){
+  const g = async (k,p) => { try{ sys[k] = await api(p); }catch{ sys[k]=null; } };
+  await Promise.all([
+    g("roster","/api/roster"), g("conns","/api/connections"), g("server","/api/server"),
+    g("backend","/api/backend"), g("memory","/api/memory"), g("telemetry","/api/telemetry"),
+    g("version","/api/version"), g("me","/api/auth/me"), g("voice","/api/voice"),
+  ]);
+  paintMast(); paintAgents(); paintHome();
+}
+function paintMast(){
+  const t = sys.telemetry||{}, b = sys.backend||{}, s = sys.server||{};
+  $("mMem").textContent = (t.mem_used_gb!=null) ? `${t.mem_used_gb}GB / ${t.mem_total_gb}GB` : "—";
+  $("footBackend").textContent = b.model ? b.model.split("/").pop() : "—";
+  $("footNode").textContent = s.online ? `${s.node} ${s.latency_ms}ms` : "OFFLINE";
+  const r = sys.roster ? (sys.roster.subagents||[]).length : 0;
+  $("railFoot").textContent = `${r} AGENTS / ${liveEvents.length} EVENTS`;
+}
+function paintAgents(){
+  const box = $("agents"); const rost = (sys.roster&&sys.roster.subagents)||[]; const c = sys.conns||{};
+  if(!rost.length){ box.innerHTML = '<div class="note">Roster unavailable.</div>'; return; }
+  box.innerHTML = "";
+  rost.slice(0,40).forEach(a => {
+    const conn = c[a.name];
+    const state = conn ? (conn.ok ? "READY" : "IDLE") : "READY";
+    const el = document.createElement("div"); el.className = "agent";
+    el.innerHTML = `<div class="top"><span class="nm"></span><span class="badge ${state==="READY"?"ready":""}">${state}</span></div><div class="d"></div>`;
+    el.querySelector(".nm").textContent = a.name.toUpperCase();
+    el.querySelector(".d").textContent = (a.description||"").slice(0,72);
+    el.title = `${a.name} · ${(a.tools||[]).length} tools`;
+    box.appendChild(el);
+  });
+}
+function paintHome(){
+  const s = sys.server||{}, m = sys.memory||{}, rost=(sys.roster&&sys.roster.subagents)||[];
+  const c = sys.conns||{}; const okN = Object.values(c).filter(x=>x&&x.ok).length;
+  $("homeBody").innerHTML = `
+    <p class="lede">${rost.length} AGENTS MOUNTED. ${okN} OF ${Object.keys(c).length} CONNECTIONS LIVE.
+      ${s.online?`COMPUTE NODE ${esc(s.node)} ONLINE AT ${s.latency_ms}MS.`:"COMPUTE NODE OFFLINE — RUNNING ON THE CONFIGURED BACKEND."}</p>
+    <div class="metrics">
+      <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"—"} FACTS</span></div>
+      <div class="metric"><span class="k">LEARNING</span><span class="v">${m.active?"ON":"OFF"}</span></div>
+      <div class="metric"><span class="k">CONNECTIONS</span><span class="v">${okN}/${Object.keys(c).length}</span></div>
+      <div class="metric"><span class="k">VERSION</span><span class="v">${esc((sys.version||{}).current||"—")}</span></div>
+    </div>
+    <div class="cards" id="homeCards"></div>`;
+  const cards = [
+    ["COMMS","Open the transcript and broadcast a directive.","COMMS"],
+    ["RESEARCH","Live web search with sources.","RESEARCH"],
+    ["CODE","Pick a toolchain and write code.","CODE"],
+    ["VOICE","Hands-free, with a live activity feed.","VOICE"],
+  ];
+  const wrap = $("homeCards");
+  cards.forEach(([h,d,go]) => {
+    const b=document.createElement("button"); b.className="card"; b.type="button";
+    b.innerHTML=`<div class="h">${h}</div><div class="d">${d}</div>`;
+    b.onclick=()=>show(go); wrap.appendChild(b);
+  });
+}
+
+/* ---------------- markdown ---------------- */
+function md(src){
+  const parts = esc(src).split(/```/); let out="";
+  parts.forEach((chunk,i)=>{
+    if(i%2){ out += `<pre><code>${chunk.replace(/^[\w-]*\n/,"")}</code></pre>`; return; }
+    let t = chunk.replace(/`([^`\n]+)`/g,"<code>$1</code>")
+                 .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
+                 .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    let html="",list=null;
+    t.split("\n").forEach(line=>{
+      const ul=line.match(/^\s*[-*]\s+(.*)$/), ol=line.match(/^\s*\d+\.\s+(.*)$/);
+      if(ul){ if(list!=="ul"){ if(list)html+=`</${list}>`; html+="<ul>"; list="ul"; } html+=`<li>${ul[1]}</li>`; }
+      else if(ol){ if(list!=="ol"){ if(list)html+=`</${list}>`; html+="<ol>"; list="ol"; } html+=`<li>${ol[1]}</li>`; }
+      else { if(list){html+=`</${list}>`;list=null;} if(line.trim()) html+=`<p>${line}</p>`; }
+    });
+    if(list) html+=`</${list}>`;
+    out+=html;
+  });
+  return out;
+}
+
+/* ---------------- LIVE ACTIVITY ----------------
+   Voice-only hides the transcript, so the operator needs to see what the
+   system is DOING. Tool names are translated into plain statements of the
+   work — this map is the difference between "drive_create_doc" and
+   "Writing a document". Unknown tools degrade to the raw name rather than
+   being hidden or guessed at. */
+const WORK = {
+  drive_create_doc:["Writing a document","Creating a Google Doc in your Drive"],
+  slides_create:["Building a slideshow","Creating a Google Slides deck"],
+  drive_share:["Sharing a file","Granting access in Drive"],
+  gmail_send:["Sending an email","Delivering via Gmail"],
+  gmail_search:["Searching your inbox","Looking through Gmail"],
+  gmail_read:["Reading an email",""],
+  gmail_archive:["Archiving mail",""],
+  gmail_trash:["Moving mail to Trash",""],
+  read_inbox:["Reading your inbox",""],
+  calendar_events:["Checking your calendar",""],
+  drive_search:["Searching Drive",""],
+  drive_read:["Reading a file from Drive",""],
+  sheets_read:["Reading a spreadsheet",""],
+  web_search:["Searching the web","Live results with sources"],
+  news_search:["Searching the news",""],
+  news_headlines:["Fetching headlines",""],
+  fetch_url:["Reading a web page",""],
+  run_python:["Running Python","Executing code and capturing real output"],
+  run_command:["Running a shell command",""],
+  write_file:["Writing a file",""],
+  read_file:["Reading a file",""],
+  edit_file:["Editing a file",""],
+  claude_code:["Working in Claude Code",""],
+  codex_code:["Working in Codex",""],
+  stock_quote:["Checking a stock quote",""],
+  market_movers:["Checking market movers",""],
+  remember:["Saving to memory",""],
+  recall:["Recalling from memory",""],
+  delegate_task:["Delegating a sub-task",""],
+};
+const liveEvents = [];
+function liveAdd(kind, title, sub){
+  liveEvents.push({kind,title,sub,t:Date.now()});
+  const box = $("liveBody");
+  if(box.querySelector(".liveempty")) box.innerHTML = "";
+  const el = document.createElement("div");
+  el.className = "ev " + kind;
+  const ts = new Date().toTimeString().slice(0,8);
+  el.innerHTML = `<span class="ts">${ts}</span><div class="t"></div>${sub?'<div class="s"></div>':""}`;
+  el.querySelector(".t").textContent = title;
+  if(sub) el.querySelector(".s").textContent = sub;
+  box.appendChild(el); box.scrollTop = box.scrollHeight;
+  while(box.children.length > 60) box.removeChild(box.firstChild);
+  $("liveDot").className = "dot " + (kind==="err"?"no":kind==="done"?"ok":"");
+}
+function liveClear(){ liveEvents.length=0; $("liveBody").innerHTML='<div class="liveempty">Nothing running.</div>'; $("liveDot").className="dot"; }
+function describeTool(name){
+  const w = WORK[name];
+  return w ? {t:w[0], s:w[1]} : {t:"Using "+name, s:""};
+}
+
+/* v8.12: agent/tool names in the TRANSCRIPT (roadmap "hide agent names
+   behind a show-details toggle" — HANDOFF's own reasoning: "when
+   something misbehaves, knowing which agent ran is the difference
+   between a fix and a guess", so it is a toggle, not a deletion).
+   Default OFF (hidden) — matches "hide ... behind a toggle", not
+   "show ... with an option to hide". Persists like the theme choice.
+   Deliberately its OWN fallback, not describeTool's: describeTool's
+   "Using "+name fallback is correct for the LIVE ACTIVITY panel (out of
+   scope here — the roadmap item names the transcript specifically, and
+   that panel already has its own established convention), but reusing
+   it here would leak the raw name right back for any of the ~140 tools
+   with no WORK entry, defeating the toggle for most of the roster. */
+const DETAILS_KEY = "dm_show_details_v1";
+function detailsGet(){ try{ return localStorage.getItem(DETAILS_KEY)==="1"; }catch{ return false; } }
+function detailsSet(v){ try{ localStorage.setItem(DETAILS_KEY, v?"1":"0"); }catch{ /* private mode: session-only */ } }
+function hiddenToolLabel(name){
+  const w = WORK[name];
+  return w ? w[0] : "Using a tool";
+}
+function transcriptToolLabel(name){
+  return detailsGet() ? name : hiddenToolLabel(name);
+}
+
+/* ---------------- transcript ---------------- */
+const thread = $("thread"), ta = $("ta"), go = $("go"), stopBtn = $("stop");
+let ctrl = null;
+function addYou(text){
+  const d=document.createElement("div"); d.className="turn you";
+  d.innerHTML=`<div class="gut"><span class="who">YOU</span><span>${new Date().toTimeString().slice(0,8)}</span></div><div class="body"></div>`;
+  d.querySelector(".body").textContent=text; thread.appendChild(d); thread.scrollTop=thread.scrollHeight;
+}
+function addReply(){
+  const d=document.createElement("div"); d.className="turn";
+  d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span></div>
+    <div class="acts"></div><div class="body"></div><div class="rowacts"></div>`;
+  thread.appendChild(d); thread.scrollTop=thread.scrollHeight;
+  return {el:d, acts:d.querySelector(".acts"), body:d.querySelector(".body"),
+          row:d.querySelector(".rowacts"), mdl:d.querySelector(".mdl"), st:d.querySelector(".st")};
+}
+function act(acts,label,name,bad,spin){
+  const a=document.createElement("div"); a.className="act"+(bad?" bad":"");
+  if(spin){const s=document.createElement("span");s.className="spin";a.appendChild(s);}
+  const l=document.createElement("span"); l.textContent=label; a.appendChild(l);
+  if(name){const n=document.createElement("span");n.className="nm";n.textContent=name;a.appendChild(n);}
+  acts.appendChild(a); return a;
+}
+function wireCopies(root){
+  root.querySelectorAll("pre").forEach(pre=>{
+    if(pre.querySelector(".copybtn")) return;
+    const b=document.createElement("button"); b.className="copybtn"; b.type="button"; b.textContent="COPY";
+    b.onclick=async()=>{ try{ await navigator.clipboard.writeText(pre.innerText.replace(/^COPY\n?/,""));
+      b.textContent="COPIED"; setTimeout(()=>b.textContent="COPY",1200);}catch{b.textContent="FAILED";} };
+    pre.appendChild(b);
+  });
+}
+function addApproval(node, evt){
+  const box=document.createElement("div"); box.className="approve";
+  box.innerHTML=`<div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
+    <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div>`;
+  box.querySelector(".p").textContent = evt.prompt||"This action needs your approval.";
+  node.body.parentNode.insertBefore(box, node.body);
+  liveAdd("act","Waiting for your approval", (evt.prompt||"").slice(0,90));
+  const [yes,no]=box.querySelectorAll("button"); let done=false;
+  const decide=async(ok)=>{ if(done)return; done=true;
+    box.classList.add("done"); box.querySelector(".t").textContent = ok?"◆ APPROVED":"◆ DECLINED";
+    box.querySelector(".r").remove();
+    liveAdd(ok?"done":"err", ok?"You approved it":"You declined it","");
+    try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id:evt.id,approved:ok})}); }catch{}
+  };
+  yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
+  yes.focus();
+}
+function setBusy(on){
+  busy=on; go.disabled=false; go.textContent = on?"QUEUE":"SEND_DIRECTIVE";
+  stopBtn.classList.toggle("on",on);
+  paintQueue();
+}
+function paintQueue(){
+  const box=$("queue"); box.innerHTML="";
+  queue.forEach((t,i)=>{
+    const r=document.createElement("div"); r.className="qi";
+    const n=document.createElement("b"); n.textContent=String(i+1);
+    const s=document.createElement("span"); s.textContent=t;
+    const x=document.createElement("button"); x.type="button"; x.setAttribute("aria-label","Remove"); x.textContent="✕";
+    x.onclick=()=>{queue.splice(i,1);paintQueue();};
+    r.append(n,s,x); box.appendChild(r);
+  });
+}
+
+/* ---------------- send ---------------- */
+async function submit(){
+  const text = ta.value.trim(); if(!text) return;
+  if(busy){ queue.push(text); ta.value=""; ta.style.height="auto"; paintQueue(); return; }
+  ta.value=""; ta.style.height="auto";
+  await run(text);
+  while(queue.length){ const n=queue.shift(); paintQueue(); await run(n); }
+}
+async function run(text){
+  if(screen!=="VOICE") show("COMMS");
+  addYou(text); setBusy(true);
+  liveClear(); liveAdd("act","Thinking", text.slice(0,80));
+  const node = addReply(); node.st.textContent="THINKING";
+  let buf="", stopped=false, dirty=false, painting=false;
+  const paint=()=>{ dirty=true; if(painting)return; painting=true;
+    setTimeout(()=>{ painting=false; if(!dirty)return; dirty=false;
+      node.body.innerHTML=md(buf); wireCopies(node.body);
+      thread.scrollTop=thread.scrollHeight;
+      if(voiceMode) $("vText").textContent = buf.slice(-600);
+    },40); };
+  ctrl = new AbortController();
+  stopBtn.onclick = ()=>{ stopped=true; try{ctrl.abort();}catch{} };
+  try{
+    const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({prompt:text, focus_agent:focusAgent||undefined}), signal:ctrl.signal});
+    if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
+    const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
+    for(;;){
+      const {value,done}=await rd.read(); if(done)break;
+      carry+=dec.decode(value,{stream:true});
+      const parts=carry.split("\n"); carry=parts.pop()||"";
+      for(const line of parts){
+        if(!line.startsWith("data:"))continue;
+        let e; try{e=JSON.parse(line.slice(5));}catch{continue;}
+        switch(e.type){
+          case "brain":{
+            const raw=e.model||""; const onNode=raw.startsWith("server:");
+            const shown=raw.replace(/^server:/,"").split("/").pop()||"—";
+            node.mdl.textContent = onNode?`${(sys.server&&sys.server.node)||"NODE"} · ${shown}`:shown;
+            node.st.textContent="GENERATING";
+            liveAdd("act","Routing", onNode?`compute node · ${shown}`:shown);
+            break; }
+          case "plan": act(node.acts,"PLAN",""); liveAdd("act","Planning the steps",""); break;
+          case "tool_use": case "function":{
+            const nm=e.name||e.tool||"tool"; const w=describeTool(nm);
+            act(node.acts,"USING",transcriptToolLabel(nm),false,true);
+            liveAdd("act", w.t, w.s || nm);
+            node.st.textContent="WORKING"; break; }
+          case "tool_result": case "result":{
+            const nm=e.name||e.tool||""; act(node.acts,"RESULT",transcriptToolLabel(nm));
+            liveAdd("done","Finished "+(WORK[nm]?WORK[nm][0].toLowerCase():nm),"");
+            break; }
+          case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e); break;
+          case "assistant_delta": buf+=e.text||""; paint(); break;
+          case "assistant_text": if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
+          case "error": act(node.acts,"ERROR",e.message||"",true); liveAdd("err","Error",e.message||""); break;
+          case "done": if(e.final_text&&e.final_text.length>buf.length) buf=e.final_text; break;
+        }
+      }
+    }
+  }catch(err){
+    if(stopped||err.name==="AbortError"){ act(node.acts,"STOPPED BY YOU",""); liveAdd("err","Stopped by you",""); }
+    else{
+      const s=sys.server||{};
+      const b=document.createElement("div"); b.className="errbox";
+      b.innerHTML=`<div class="t">◆ REQUEST FAILED</div><div></div>`;
+      b.children[1].textContent = String(err.message||err) + (s.online
+        ? " — the stream ended early. Retry, or check SETTINGS."
+        : " — the compute node is offline and the fallback did not answer.");
+      node.body.parentNode.insertBefore(b,node.body);
+      liveAdd("err","Request failed",String(err.message||err).slice(0,80));
+    }
+  }finally{
+    ctrl=null;
+    node.body.innerHTML = md(buf) || "<p><em>No reply.</em></p>";
+    wireCopies(node.body);
+    node.st.textContent = stopped?"STOPPED":"DONE";
+    node.acts.querySelectorAll(".spin").forEach(x=>x.remove());
+    const c=document.createElement("button"); c.className="mini"; c.type="button"; c.textContent="COPY";
+    c.onclick=async()=>{try{await navigator.clipboard.writeText(buf);c.textContent="COPIED";setTimeout(()=>c.textContent="COPY",1200);}catch{}};
+    const rg=document.createElement("button"); rg.className="mini"; rg.type="button";
+    rg.textContent = stopped?"CONTINUE":"REGENERATE";
+    rg.onclick=()=>{ if(!busy) run(stopped?text+"\n\n(continue)":text); };
+    node.row.append(c,rg);
+    liveAdd(stopped?"err":"done", stopped?"Halted":"Done","");
+    setBusy(false);
+    if(voiceMode){ $("vText").textContent = buf.slice(-600) || "No reply."; setVoice("idle"); if(speak) say(buf); }
+    thread.scrollTop=thread.scrollHeight;
+    refresh();
+  }
+}
+
+ta.addEventListener("input",()=>{ta.style.height="auto";ta.style.height=Math.min(ta.scrollHeight,130)+"px";
+  go.textContent = busy?"QUEUE":"SEND_DIRECTIVE";});
+ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();} });
+go.onclick=()=>submit();
+
+/* ---------------- CODE: toolchain picker ----------------
+   Each option is a REAL agent in the roster and maps to focus_agent, so
+   choosing one genuinely routes the request there. Availability comes from
+   /api/connections — an unavailable tool is shown and marked, never hidden,
+   because "why can't I pick Claude" is a question the UI should answer. */
+const TOOLS = [
+  {id:"", name:"AUTO", desc:"Let Dourmouse route the request itself.", conn:null},
+  {id:"code_claude", name:"CLAUDE CODE", desc:"Your Claude Code CLI (claude -p).", conn:"claude"},
+  {id:"code_nvidia", name:"NVIDIA NIM", desc:"NVIDIA-hosted model, OpenAI-compatible.", conn:"nvidia"},
+  {id:"code_codex", name:"CODEX", desc:"OpenAI Codex CLI/API.", conn:"codex"},
+  {id:"code_deepseek", name:"DEEPSEEK", desc:"Free DeepSeek via Freebuff.", conn:"freebuff"},
+  {id:"code_ollama", name:"OLLAMA (LOCAL)", desc:"Local model, keyless, zero spend.", conn:"ollama"},
+  {id:"dev_coding", name:"DEV AGENT", desc:"Full toolset: run, read, edit, diff, deploy.", conn:null},
+  {id:"freebuff", name:"FREEBUFF", desc:"Dispatch into a Freebuff thread.", conn:"freebuff"},
+];
+let codeTool = "";
+function toolAvail(t){
+  if(!t.conn) return true;
+  const c = (sys.conns||{})[t.conn];
+  return c ? !!c.ok : null;
+}
+function paintCode(){
+  const box=$("codeBody");
+  const cur = TOOLS.find(t=>t.id===codeTool) || TOOLS[0];
+  box.innerHTML = `
+    <div class="toolbar">
+      <span class="lbl">TOOLCHAIN</span>
+      <div class="sel">
+        <button class="selbtn" id="toolBtn" aria-haspopup="listbox" aria-expanded="false">
+          <span class="cv" id="toolCur"></span><span style="color:var(--blue-deep)">▾</span>
+        </button>
+        <div class="selmenu" id="toolMenu" role="listbox"></div>
+      </div>
+      <span class="lbl" id="toolState"></span>
+    </div>
+    <div class="note" id="toolNote"></div>
+    <div class="sec">WHAT THIS DOES</div>
+    <div class="note">Selecting a toolchain pins the next directive to that agent
+      (<code>focus_agent</code>). AUTO lets the router choose. Requests still stream into
+      COMMS, and anything destructive still asks for approval.</div>`;
+  $("toolCur").textContent = cur.name;
+  const menu=$("toolMenu");
+  TOOLS.forEach(t=>{
+    const av = toolAvail(t);
+    const b=document.createElement("button"); b.className="opt"; b.type="button"; b.setAttribute("role","option");
+    b.setAttribute("aria-selected", String(t.id===codeTool));
+    b.innerHTML=`<span class="dot ${av===true?"ok":av===false?"no":""}"></span>
+      <span><span class="on"></span><span class="od"></span></span>`;
+    b.querySelector(".on").textContent = t.name;
+    b.querySelector(".od").textContent = t.desc + (av===false ? " — not available" : "");
+    b.onclick=()=>{ codeTool=t.id; focusAgent=t.id; menu.classList.remove("on");
+      $("toolBtn").setAttribute("aria-expanded","false"); paintCode(); };
+    menu.appendChild(b);
+  });
+  $("toolBtn").onclick=()=>{ const on=menu.classList.toggle("on");
+    $("toolBtn").setAttribute("aria-expanded",String(on)); };
+  const av = toolAvail(cur);
+  $("toolState").textContent = av===false ? "● UNAVAILABLE" : av===true ? "● READY" : "";
+  $("toolState").style.color = av===false ? "var(--bad)" : "var(--ok)";
+  const c = cur.conn ? (sys.conns||{})[cur.conn] : null;
+  $("toolNote").textContent = c ? (c.ok ? c.detail : `${c.detail} — fix: ${c.hint||"see SETTINGS"}`)
+                                : "Routing handled by Dourmouse.";
+  focusAgent = codeTool;
+}
+document.addEventListener("click",e=>{
+  const m=$("toolMenu"); if(!m) return;
+  if(!e.target.closest(".sel")) { m.classList.remove("on"); const b=$("toolBtn"); if(b) b.setAttribute("aria-expanded","false"); }
+});
+
+/* ---------------- other panes ---------------- */
+function paintResearch(){
+  $("researchBody").innerHTML = `<div class="note">Ask a question below — it routes to the research agent,
+    searches the live web and cites sources. Results stream into COMMS.</div>
+    <div class="sec">TRY</div><div class="cards" id="rc"></div>`;
+  [["Latest on open-weight models",""],["What happened in the news today",""],["Compare two frameworks",""]]
+    .forEach(([q])=>{ const b=document.createElement("button"); b.className="card"; b.type="button";
+      b.innerHTML=`<div class="h">${esc(q)}</div>`;
+      b.onclick=()=>{ focusAgent="research_info"; ta.value=q; submit(); }; $("rc").appendChild(b); });
+}
+function paintMedia(){
+  const c=(sys.conns||{}).spotify;
+  $("mediaBody").innerHTML = `<div class="sec">SPOTIFY</div>
+    <div class="row"><span class="dot ${c&&c.ok?"ok":"no"}"></span><div class="g">
+      <div class="n">${c&&c.ok?"Linked":"Not linked"}</div><div class="d">${esc((c&&c.detail)||"")}</div></div></div>
+    <div class="note" style="margin-top:12px">Ask for a track below and the music agent handles it.
+      Playback changes ask for approval first.</div>`;
+}
+function paintSettings(){
+  const b=sys.backend||{}, s=sys.server||{}, me=sys.me||{}, v=sys.voice||{}, t=sys.telemetry||{};
+  const m=sys.memory||{};
+  const c=sys.conns||{};
+  const rows = Object.entries(c).map(([k,x])=>`<div class="row"><span class="dot ${x.ok?"ok":"no"}"></span>
+    <div class="g"><div class="n">${esc(k)}</div><div class="d">${esc(x.detail||"")}</div>
+    ${!x.ok&&x.hint?`<div class="d">fix: ${esc(x.hint)}</div>`:""}</div></div>`).join("");
+  $("settingsBody").innerHTML=`
+    <div class="sec">INTERFACE</div>
+    <div class="toolbar">
+      <span class="lbl">THEME</span>
+      <div id="themeRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+    <div class="note" id="themeNote"></div>
+    <div class="toolbar">
+      <span class="lbl">TRANSCRIPT</span>
+      <div id="detailsRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+    <div class="note">Off shows what DOURMOUSE is doing in plain language.
+      On shows the actual tool/agent name it called — turn this on when
+      something misbehaves; knowing which agent ran is the difference
+      between a fix and a guess.</div>
+    <div class="sec">INTELLIGENCE</div>
+    <div class="row"><div class="g"><div class="n">${esc(b.model||"—")}</div>
+      <div class="d">${esc(b.backend||"")} · ${esc(b.base_url||"")}</div></div></div>
+    <div class="row"><div class="g"><div class="n">Compute node</div>
+      <div class="d">${s.online?`${esc(s.node)} · ${esc(s.model)} · ${s.latency_ms}ms`:"offline"}</div></div></div>
+    <div class="sec">MEMORY</div>
+    <div class="row"><div class="g"><div class="n">${m.count!=null?`${m.count} facts stored`:"—"}</div>
+      <div class="d">${m.active?"learning loop on":esc(m.gate||"")}</div></div></div>
+    <div class="toolbar">
+      <button class="chip" type="button" id="importHistoryBtn">IMPORT CLAUDE + CODEX HISTORY</button>
+    </div>
+    <div class="note" id="importHistoryNote">Pulls session history already on disk into
+      long-term memory — no API call, nothing sent anywhere. Safe to run again later;
+      re-importing the same session just refreshes it, never duplicates it.</div>
+    <div id="profileBlock"></div>
+    <div class="sec">ACCOUNT</div>
+    <div class="row"><div class="g"><div class="n">${me.me?esc(me.me):"Not signed in"}</div>
+      <div class="d">${me.me?"Gmail, Calendar and Drive available":'<a href="/login" style="color:var(--amber)">Sign in</a> to enable mail, calendar and Drive'}</div></div></div>
+    <div class="sec">VOICE</div>
+    <div class="row"><div class="g"><div class="n">STT ${esc(v.stt||"—")} · TTS ${esc(v.tts||"—")}</div>
+      <div class="d">whisper: ${esc(v.whisper_model||"—")} · piper: ${esc(v.piper_voice||"—")}</div></div></div>
+    <div class="sec">HOST</div>
+    <div class="row"><div class="g"><div class="n">${esc(t.host||"—")}</div>
+      <div class="d">${t.cpu_pct!=null?`CPU ${t.cpu_pct}% · MEM ${t.mem_used_gb}/${t.mem_total_gb} GB`:"telemetry unavailable"}</div></div></div>
+    <div class="sec">CONNECTIONS</div>${rows}
+    <div class="note" style="margin-top:12px">Secrets are never shown here. Configure them in <code>.env</code> on the host.</div>`;
+
+  /* v8.8: theme switcher. Applies instantly (no reload) and persists, so
+     the first-run choice is a default rather than a decision you are
+     stuck with. REPLAY re-runs the chosen theme's boot sequence. */
+  const cur = themeGet() || "arc";
+  const row = $("themeRow");
+  Object.entries(THEMES).forEach(([id,t]) => {
+    const b = document.createElement("button");
+    b.className = "chip" + (id===cur ? " on" : "");
+    b.type = "button"; b.textContent = t.name;
+    b.setAttribute("aria-pressed", String(id===cur));
+    b.onclick = () => { themeSet(id); paintSettings(); };
+    row.appendChild(b);
+  });
+  const replay = document.createElement("button");
+  replay.className = "chip"; replay.type = "button"; replay.textContent = "REPLAY BOOT";
+  replay.onclick = () => runBoot(themeGet() || "arc");
+  row.appendChild(replay);
+  $("themeNote").textContent = THEMES[cur] ? THEMES[cur].desc : "";
+
+  /* v8.12: show/hide agent & tool names in the transcript. Same chip
+     pattern as THEME above; only future turns pick up a change — an
+     already-rendered chip keeps whatever mode it was drawn in, same as
+     the theme choice never repainting past turns. */
+  const detRow = $("detailsRow");
+  [["off","PLAIN LANGUAGE",false],["on","SHOW NAMES",true]].forEach(([id,label,val]) => {
+    const btn = document.createElement("button");
+    const on = detailsGet() === val;
+    btn.className = "chip" + (on ? " on" : "");
+    btn.type = "button"; btn.textContent = label;
+    btn.setAttribute("aria-pressed", String(on));
+    btn.onclick = () => { detailsSet(val); paintSettings(); };
+    detRow.appendChild(btn);
+  });
+
+  /* v8.13: history import. Synchronous — verified live at ~3s for the
+     user's real 81-session/116MB history, well inside a click-and-wait —
+     so no progress bar, just a disabled state and a result line. */
+  const importBtn = $("importHistoryBtn");
+  if (importBtn) {
+    importBtn.onclick = async () => {
+      const note = $("importHistoryNote");
+      importBtn.disabled = true;
+      const prevText = importBtn.textContent;
+      importBtn.textContent = "IMPORTING…";
+      note.textContent = "Reading session files…";
+      try {
+        const r = await fetch("/api/history/import", {method: "POST"});
+        const j = await r.json();
+        if (!j.ok) { note.textContent = "Could not import: " + (j.error || "unknown error"); }
+        else {
+          const c = j.claude || {}, x = j.codex || {};
+          const parts = [];
+          if (c.root) parts.push(`Claude Code: ${c.imported} imported, ${c.scanned} scanned`);
+          if (x.configured) parts.push(`Codex: ${x.imported} imported, ${x.scanned} scanned`);
+          else parts.push("Codex: not found on this machine");
+          note.textContent = parts.join(" · ") + ".";
+          // Refreshes sys.memory for other panels (HOME's fact count etc.)
+          // without repainting SETTINGS — a repaint here would wipe this
+          // very result line with the panel's static default note.
+          refresh();
+        }
+      } catch (err) {
+        note.textContent = "Import failed: " + (err.message || err);
+      } finally {
+        importBtn.disabled = false;
+        importBtn.textContent = prevText;
+      }
+    };
+  }
+
+  /* v8.14: the one-time working-style profile. Fetched lazily here
+     (SETTINGS-only, unlike memory/backend which the HOME screen also
+     needs) rather than added to refresh()'s 30s poll -- nothing about
+     it changes on its own between visits to this panel. */
+  paintProfileBlock();
+}
+async function paintProfileBlock(){
+  const box = $("profileBlock");
+  if(!box) return;
+  box.innerHTML = `<div class="sec">WORKING-STYLE PROFILE</div><div class="note">Checking…</div>`;
+  let status;
+  try{ status = await api("/api/profile"); }
+  catch{ box.innerHTML = `<div class="sec">WORKING-STYLE PROFILE</div><div class="note">Unavailable right now.</div>`; return; }
+
+  if(status.exists){
+    box.innerHTML = `
+      <div class="sec">WORKING-STYLE PROFILE</div>
+      <div class="note">Generated once, from your imported history. Working style,
+        preferences, communication style and general interests only — never
+        regenerated automatically, never any biographical detail.</div>
+      <pre style="white-space:pre-wrap;font-size:11px;padding:10px;border:1px solid var(--line-2);border-radius:2px;margin-top:8px">${esc(status.profile||"")}</pre>`;
+    return;
+  }
+
+  box.innerHTML = `
+    <div class="sec">WORKING-STYLE PROFILE</div>
+    <div class="toolbar">
+      <button class="chip" type="button" id="genProfileBtn">GENERATE MY PROFILE (ONE-TIME)</button>
+    </div>
+    <div class="note" id="genProfileNote">Reads your imported history once to build a
+      profile of working style, preferences, communication style and general interests —
+      deliberately never any name, age, location or other identifying detail. Runs once,
+      ever; import your history first if you haven't (above).</div>`;
+  const btn = $("genProfileBtn");
+  btn.onclick = async () => {
+    const note = $("genProfileNote");
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = "GENERATING…";
+    note.textContent = "Reading your history and building the profile…";
+    try{
+      const r = await fetch("/api/profile/generate", {method:"POST"});
+      const j = await r.json();
+      if(!j.ok){
+        note.textContent = j.reason === "no_source_material"
+          ? "No imported history yet — import Claude/Codex history first, then try again."
+          : "Could not generate: " + (j.reason || j.error || "unknown error");
+        btn.disabled = false; btn.textContent = prev;
+      } else {
+        paintProfileBlock();
+      }
+    } catch(err){
+      note.textContent = "Failed: " + (err.message || err);
+      btn.disabled = false; btn.textContent = prev;
+    }
+  };
+}
+/* ---------------- ATLAS: the world map (v8.9) ----------------
+   Equirectangular SVG. Coastlines are Natural Earth 110m land, public
+   domain, simplified and embedded so the map still draws with the
+   internet down — the same offline rule the fonts follow.
+   Only channels that carry REAL coordinates are plotted. Channels the
+   feeds give no location for are named under the map rather than being
+   given placeholder positions, so coverage is never overstated. */
+const WORLD_PATH = "M669 945L666 950L654 949L642 950L635 948L632 946L644 946L656 947L660 944L663 942L669 945ZM116 942L105 942L98 940L94 938L90 937L94 935L104 935L110 937L114 939L116 942ZM749 934L756 936L758 939L759 942L759 945L751 946L742 948L731 949L720 950L706 950L699 948L712 944L717 942L720 940L723 938L726 936L730 934L741 932L749 934ZM327 908L334 909L340 908L337 910L332 912L324 911L319 909L327 908ZM302 908L311 910L308 910L300 910L293 908L297 907L302 908ZM450 900L456 900L462 900L466 903L461 902L454 903L448 902L440 903L434 902L431 899L435 898L442 899L450 900ZM620 894L620 897L618 901L611 902L605 903L598 903L601 901L594 901L588 902L584 900L589 896L593 895L600 896L601 893L601 886L605 884L610 883L613 885L616 889L618 892ZM674 856L668 857L663 857L659 859L655 860L652 864L655 868L651 869L646 869L643 871L640 873L636 875L635 878L640 882L645 883L649 885L652 889L657 893L659 900L661 904L662 909L659 912L656 914L648 914L642 918L634 920L627 921L620 922L612 923L608 926L599 926L589 926L580 926L571 926L581 929L587 931L591 933L585 935L575 934L567 935L567 938L573 942L581 946L593 947L603 948L611 950L621 952L635 953L649 954L658 956L668 958L674 960L677 962L683 960L692 959L702 957L714 956L724 954L737 954L751 955L762 956L766 954L773 952L788 952L799 951L809 949L820 949L833 948L841 946L837 944L835 940L824 941L813 941L802 941L801 935L804 934L812 933L821 931L828 930L835 928L840 926L847 925L855 924L858 924L867 924L875 923L882 922L889 920L895 919L903 917L908 916L913 914L909 910L914 906L920 905L926 904L932 902L936 900L939 897L943 896L949 896L952 898L959 898L962 894L968 895L976 897L983 896L990 895L996 896L999 898L1005 896L1010 895L1017 894L1023 894L1029 892L1035 891L1040 890L1043 888L1047 890L1053 889L1057 892L1060 894L1066 892L1069 890L1075 889L1082 889L1089 889L1095 888L1101 888L1107 888L1113 889L1119 889L1122 891L1125 893L1131 892L1138 892L1144 892L1151 891L1156 891L1162 890L1167 889L1172 888L1178 887L1182 885L1185 882L1188 881L1194 881L1201 885L1207 884L1211 886L1215 888L1220 886L1227 883L1233 881L1239 880L1245 879L1249 878L1254 877L1258 876L1264 876L1269 874L1272 873L1277 873L1282 872L1288 868L1292 867L1298 866L1303 866L1308 866L1313 867L1318 868L1323 872L1326 874L1333 874L1337 876L1341 878L1347 878L1351 877L1356 874L1361 876L1367 876L1372 877L1377 877L1383 877L1387 883L1386 887L1381 889L1377 891L1384 893L1380 897L1377 899L1382 901L1388 901L1395 900L1398 898L1403 895L1406 893L1410 888L1414 888L1420 887L1426 887L1431 886L1434 884L1440 880L1445 878L1450 877L1453 875L1456 874L1460 873L1465 874L1470 873L1476 873L1482 873L1486 872L1489 868L1493 872L1498 873L1504 873L1509 873L1514 873L1520 873L1523 873L1528 873L1532 874L1537 874L1543 874L1548 873L1554 874L1558 872L1561 870L1564 868L1571 864L1575 865L1579 867L1583 868L1590 872L1595 872L1600 872L1606 871L1612 871L1617 869L1621 867L1627 867L1631 866L1635 867L1638 869L1642 871L1648 870L1652 872L1659 873L1666 874L1672 873L1676 872L1680 870L1685 869L1690 870L1695 871L1701 870L1706 870L1710 870L1716 871L1721 870L1727 869L1732 869L1739 869L1744 868L1749 868L1750 865L1754 864L1755 867L1759 871L1764 872L1770 872L1777 872L1782 871L1790 871L1795 871L1802 871L1808 872L1812 873L1811 876L1815 877L1821 879L1827 880L1834 881L1842 882L1847 883L1854 883L1857 881L1862 882L1866 884L1871 885L1878 886L1884 887L1887 889L1893 890L1898 892L1904 893L1910 893L1916 893L1923 893L1929 894L1936 894L1941 896L1947 897L1951 898L1948 902L1945 905L1940 909L1933 910L1930 912L1923 913L1920 915L1916 917L1912 919L1910 922L1908 926L1911 930L1915 934L1926 935L1928 938L1918 938L1909 940L1899 940L1894 943L1893 946L1888 950L1895 952L1898 954L1903 956L1909 958L1917 959L1926 961L1938 963L1941 966L1957 967L1962 969L1978 968L1990 969L2000 971L2000 1000L0 1000L0 971L5 967L15 969L19 968L22 967L31 970L38 967L56 966L61 967L64 968L72 970L88 971L100 973L122 974L138 973L161 974L175 976L190 974L205 972L184 970L166 968L162 966L147 965L148 962L152 958L142 954L137 952L129 951L142 951L155 950L163 952L173 950L182 948L187 946L177 943L169 941L158 941L148 940L137 939L133 937L126 935L122 933L120 927L123 928L128 929L137 929L146 928L150 931L159 930L167 929L174 927L180 925L188 925L186 921L195 918L198 920L207 919L213 917L221 917L229 916L236 915L242 914L249 913L253 913L257 914L265 913L273 914L280 914L288 913L295 913L303 914L311 914L319 914L327 914L335 914L341 912L347 911L354 912L361 911L367 910L371 911L376 915L382 913L389 916L396 916L402 918L410 917L417 916L426 917L433 917L441 918L444 916L440 914L437 912L430 912L427 910L424 903L428 904L436 905L443 904L449 905L455 907L465 909L472 908L480 907L486 906L492 908L500 907L504 903L509 906L515 907L522 906L527 908L534 908L541 909L547 910L552 908L559 908L567 908L573 909L577 911L584 910L590 909L595 908L602 907L610 906L617 906L622 904L626 903L627 900L625 896L621 891L619 887L622 883L625 881L624 876L626 872L629 870L633 868L637 866L641 864L647 861L650 859L655 859L659 857L663 856L667 855L671 854L674 852L679 852L682 853L674 856ZM624 799L631 802L639 804L636 807L631 807L628 805L621 809L615 808L611 807L606 806L599 803L593 800L585 794L590 795L598 798L605 800L608 798L610 794L615 792L619 792L621 795L624 799ZM675 784L679 786L670 790L663 791L660 788L667 785L671 786L675 784ZM1390 776L1382 777L1382 774L1383 771L1387 772L1392 773L1390 776ZM1808 727L1813 729L1816 728L1820 727L1824 727L1824 734L1822 740L1816 742L1811 742L1808 737L1807 734L1804 729L1804 726L1808 727ZM1961 727L1962 730L1966 727L1968 730L1966 735L1962 739L1962 744L1957 744L1953 746L1951 749L1948 755L1944 758L1941 759L1936 759L1932 757L1926 757L1928 751L1935 745L1939 744L1943 742L1947 739L1951 736L1953 732L1956 728L1960 725ZM1970 701L1974 707L1974 703L1977 704L1978 709L1982 710L1986 711L1989 709L1992 709L1990 714L1989 718L1984 717L1984 722L1981 726L1978 729L1974 732L1970 729L1973 725L1972 722L1966 719L1970 716L1971 711L1971 708L1968 704L1966 701L1961 696L1959 692L1964 694L1968 696L1970 701ZM1928 623L1923 623L1919 620L1916 617L1912 614L1917 614L1921 617L1926 621ZM1991 596L1992 601L1989 602L1985 601L1985 598L1990 597ZM1996 593L1993 595L1992 592L1995 591L2000 589L2000 592L1996 593ZM1278 575L1279 582L1280 585L1279 589L1277 586L1277 591L1277 594L1275 600L1272 606L1270 614L1266 624L1264 632L1262 639L1257 640L1252 642L1249 641L1245 639L1243 636L1243 631L1241 627L1240 623L1241 619L1244 618L1247 612L1247 608L1246 605L1245 602L1244 597L1246 594L1247 590L1250 590L1253 589L1257 588L1260 585L1265 581L1267 578L1271 573L1271 569L1275 569L1277 572L1278 575ZM1798 576L1800 581L1803 579L1808 583L1807 586L1808 590L1809 593L1812 599L1811 602L1813 605L1819 608L1823 611L1827 613L1829 618L1832 624L1836 625L1838 630L1842 634L1845 636L1849 640L1851 645L1851 648L1851 651L1853 656L1853 661L1852 664L1850 669L1850 672L1849 676L1847 681L1843 684L1841 688L1839 691L1837 695L1835 698L1834 702L1833 706L1830 710L1824 710L1819 712L1816 714L1813 717L1808 714L1805 713L1798 716L1793 714L1790 713L1787 713L1781 711L1778 708L1777 704L1775 701L1767 698L1769 695L1768 691L1765 695L1760 696L1763 693L1764 690L1766 687L1766 683L1761 688L1758 689L1755 694L1751 692L1751 689L1748 685L1745 682L1739 678L1735 678L1730 675L1720 676L1712 677L1706 679L1701 679L1695 682L1690 683L1689 686L1682 688L1679 689L1674 688L1670 689L1666 689L1663 692L1658 693L1652 695L1648 695L1642 691L1639 690L1639 687L1642 686L1643 683L1643 679L1643 676L1640 670L1639 667L1639 664L1637 660L1634 656L1634 652L1630 647L1630 642L1633 644L1632 639L1630 635L1631 632L1632 628L1632 625L1634 621L1635 625L1637 621L1641 619L1644 617L1648 615L1651 615L1657 613L1660 613L1663 611L1666 611L1671 609L1674 607L1676 604L1679 601L1680 596L1683 591L1686 596L1686 592L1690 591L1691 586L1694 584L1698 581L1701 580L1706 577L1710 579L1713 583L1717 583L1720 583L1719 580L1722 576L1723 573L1726 570L1729 568L1732 568L1737 567L1736 564L1732 563L1735 562L1739 563L1742 565L1747 567L1752 568L1755 566L1758 566L1761 569L1759 572L1755 574L1754 579L1752 582L1757 586L1761 588L1764 590L1768 593L1773 595L1779 598L1783 596L1785 591L1786 588L1787 584L1786 581L1786 576L1787 572L1787 569L1788 566L1790 563L1792 559L1793 562L1794 565L1795 568L1797 571L1798 574ZM1671 557L1668 557L1661 553L1666 552L1669 554L1671 557ZM1894 555L1891 555L1888 554L1887 551L1891 552L1894 555ZM1691 556L1687 558L1686 555L1689 552L1694 549L1700 547L1704 547L1707 547L1700 551L1695 552L1691 556ZM1655 545L1660 546L1655 549L1652 550L1649 550L1650 547L1654 547ZM1683 545L1682 548L1674 550L1666 549L1671 546L1674 547L1678 547L1683 545ZM1603 538L1614 538L1626 539L1628 542L1636 543L1643 547L1636 549L1630 546L1625 547L1620 546L1614 545L1608 543L1604 542L1591 541L1590 538L1585 538L1589 533L1596 533L1600 535L1603 536ZM1748 535L1746 538L1745 534L1747 530L1748 535ZM1866 538L1862 536L1860 533L1858 529L1861 531L1864 534L1867 536ZM1844 530L1841 531L1838 534L1835 535L1832 535L1827 533L1824 532L1829 531L1832 531L1833 528L1835 531L1838 530L1842 526L1842 523L1845 523L1846 527L1844 530ZM1725 517L1727 521L1722 519L1718 519L1714 519L1711 519L1712 516L1719 516L1725 517ZM1851 525L1848 523L1844 519L1841 517L1837 515L1842 515L1846 518L1850 522L1851 525ZM1745 506L1747 515L1753 519L1757 513L1764 509L1768 509L1773 511L1777 513L1783 514L1793 518L1803 521L1807 524L1810 527L1811 530L1820 534L1822 537L1817 537L1818 541L1823 545L1826 551L1829 550L1829 553L1834 554L1838 557L1833 559L1827 557L1822 556L1817 553L1814 550L1811 545L1804 542L1799 544L1796 546L1797 550L1792 552L1789 551L1784 551L1779 546L1773 545L1765 547L1767 542L1770 541L1769 535L1766 530L1755 525L1751 525L1743 520L1739 523L1738 518L1733 516L1739 514L1743 514L1735 512L1732 509L1727 508L1725 505L1733 504L1744 504ZM1696 492L1691 498L1687 499L1682 498L1673 498L1668 499L1667 503L1672 508L1675 505L1685 503L1685 506L1682 505L1680 508L1675 511L1680 518L1684 526L1684 530L1681 531L1682 525L1676 527L1676 523L1672 520L1672 515L1668 516L1669 523L1669 531L1666 532L1663 530L1665 525L1664 519L1660 516L1662 512L1663 508L1666 499L1672 493L1676 494L1683 495L1689 495L1695 491ZM1715 494L1715 499L1712 498L1711 501L1713 504L1709 501L1708 494L1709 490L1714 491L1715 494ZM1588 533L1582 533L1577 528L1570 523L1568 520L1563 516L1561 511L1556 504L1551 499L1550 494L1548 490L1543 486L1540 482L1536 479L1530 472L1533 470L1542 471L1546 476L1551 480L1554 482L1559 488L1565 488L1569 492L1573 497L1577 499L1575 504L1578 506L1581 510L1583 513L1587 513L1589 517L1588 524L1588 533ZM1655 490L1661 495L1655 496L1653 499L1653 504L1648 508L1647 514L1645 522L1638 523L1636 519L1632 519L1629 517L1623 519L1617 517L1612 516L1612 509L1609 507L1606 503L1605 498L1606 493L1609 489L1613 491L1618 490L1619 485L1628 483L1632 478L1634 475L1637 473L1641 470L1646 466L1648 462L1651 462L1654 464L1654 467L1657 468L1662 470L1658 472L1659 475L1655 477L1652 482L1656 487L1655 490ZM1702 453L1703 457L1703 460L1701 465L1699 459L1696 462L1698 466L1697 469L1690 466L1689 462L1690 459L1687 456L1685 459L1682 459L1678 462L1680 455L1683 454L1686 452L1692 453L1693 450L1697 450L1697 446L1701 448L1702 451ZM1451 466L1446 467L1444 462L1443 454L1445 445L1449 449L1452 452L1454 458L1454 464L1451 466ZM661 444L657 444L657 440L661 440L661 444ZM1689 443L1685 448L1680 446L1682 443L1683 440L1686 439L1685 443L1689 438L1689 443ZM1658 448L1651 454L1654 450L1658 446L1661 442L1664 437L1665 441L1661 444L1658 448ZM1677 434L1680 436L1684 436L1681 440L1678 442L1678 439L1677 434ZM1697 432L1699 439L1695 437L1696 442L1693 444L1693 440L1691 436L1694 437L1694 434L1690 430L1696 430ZM1675 427L1674 432L1671 429L1668 425L1673 425ZM1674 397L1677 399L1680 399L1681 405L1679 410L1676 411L1675 416L1676 420L1679 421L1682 420L1689 423L1688 426L1689 430L1685 428L1683 425L1678 423L1673 424L1670 423L1672 419L1667 417L1666 414L1666 409L1669 402L1671 397L1674 397ZM636 399L630 400L627 400L627 397L632 397L635 398ZM573 401L568 401L565 399L568 397L573 398L576 399L573 401ZM597 390L602 390L607 390L610 391L615 393L618 395L618 399L613 398L610 399L607 398L603 402L598 399L595 399L592 399L589 400L586 398L592 397L596 398L596 394L592 391L597 390ZM1613 396L1608 399L1604 397L1603 392L1606 390L1612 388L1615 388L1617 391L1614 393L1613 396ZM136 394L133 391L134 388L137 388L140 392L136 394ZM557 374L560 376L565 375L571 380L575 382L580 383L584 385L588 387L584 389L580 390L576 389L568 390L572 387L569 385L566 385L563 380L560 380L554 379L545 377L546 374L540 374L536 377L533 378L530 379L532 375L535 373L542 372L548 372L552 372L557 374ZM569 368L566 365L566 360L569 365L569 368ZM1673 373L1671 378L1668 373L1667 369L1671 364L1675 359L1678 361L1677 364L1673 373ZM572 352L571 356L570 353L568 350L572 352ZM1748 310L1746 316L1743 314L1740 315L1739 318L1735 317L1735 314L1738 311L1742 311L1748 310ZM1192 302L1188 304L1183 308L1179 305L1182 305L1187 303L1192 302ZM1132 302L1135 304L1139 303L1143 304L1146 304L1137 306L1131 304ZM1086 288L1084 292L1084 297L1080 294L1077 294L1069 291L1070 288L1076 289L1082 288L1086 288ZM1051 271L1054 275L1054 282L1051 282L1047 282L1047 276L1045 272L1048 273L1051 271ZM1783 294L1781 298L1782 301L1779 305L1772 307L1762 308L1754 314L1751 312L1750 308L1741 309L1734 312L1728 312L1733 316L1730 325L1726 328L1723 325L1725 320L1721 319L1719 315L1724 313L1727 310L1733 307L1737 303L1748 301L1754 303L1760 293L1763 295L1771 290L1775 288L1778 281L1777 275L1779 271L1785 270L1788 278L1788 282L1783 288L1783 294ZM1053 266L1051 270L1047 265L1052 261L1053 266ZM1800 255L1803 256L1807 253L1809 260L1800 261L1795 267L1787 263L1784 269L1778 269L1777 264L1780 259L1785 259L1787 251L1789 247L1795 253L1800 255ZM646 241L650 242L655 242L651 245L644 242L644 239ZM657 227L654 227L647 226L642 223L651 224L656 226ZM314 230L311 231L302 229L295 225L289 222L286 219L293 219L296 220L301 221L306 225L312 227L314 230ZM688 218L684 223L688 221L692 223L695 226L703 226L701 230L705 230L708 236L705 241L699 240L700 235L692 240L689 239L693 237L687 235L682 236L671 236L673 232L676 227L681 218L685 215L690 213L688 218ZM263 200L268 199L266 206L271 210L266 208L264 205L261 203L260 199L263 200ZM1798 218L1804 228L1795 226L1792 234L1797 240L1797 244L1793 240L1789 245L1788 240L1789 235L1788 229L1790 224L1790 217L1787 211L1787 204L1792 201L1793 198L1794 202L1796 207L1796 212L1798 218ZM962 210L952 213L945 212L949 206L946 201L954 196L958 194L963 193L969 197L966 201L966 205L962 210ZM1071 191L1067 196L1061 192L1069 188L1071 191ZM150 183L144 185L141 181L146 179L149 178L152 178L155 180L150 183ZM983 174L977 180L983 179L989 180L988 184L983 189L988 189L994 197L998 197L1001 204L1009 207L1009 211L1006 212L1008 215L1003 218L996 218L986 219L980 221L975 220L971 222L968 221L976 215L981 214L972 213L977 209L973 206L975 203L983 203L984 200L980 197L973 196L974 192L969 193L969 187L966 185L968 179L972 174L977 175L983 174ZM80 167L77 168L73 167L70 165L75 165L80 165ZM545 152L539 155L535 155L537 150L545 151ZM46 146L49 147L53 146L57 148L63 148L58 150L54 149L47 148ZM527 135L528 138L531 137L534 138L540 140L546 142L547 145L551 144L555 146L550 148L541 146L538 144L533 147L525 150L523 146L515 147L520 144L521 140L523 135L527 135ZM919 131L918 134L924 138L917 142L901 146L896 147L889 146L874 145L879 142L867 139L877 138L865 135L869 132L877 131L886 135L894 132L901 133L910 130L919 131ZM579 127L572 127L573 121L578 121L583 122L583 125L579 127ZM28 130L31 131L30 127L45 128L56 133L51 136L41 136L41 142L34 143L30 141L22 139L15 136L9 137L6 135L1 134L3 137L0 139L0 117L14 121L28 127L28 130ZM469 116L465 118L458 116L453 117L446 114L450 113L454 110L460 112L464 113L469 116ZM7 106L0 106L0 103L5 102L13 104L7 106ZM497 114L497 120L504 115L511 119L509 123L515 127L521 123L525 118L525 112L533 112L541 113L548 116L549 119L545 121L549 124L548 127L537 131L529 132L524 130L522 133L516 138L508 144L500 144L496 147L496 150L489 151L482 155L476 162L474 166L474 173L482 173L485 179L487 183L495 182L505 184L511 186L515 189L522 190L528 193L537 193L543 194L542 198L544 204L548 210L556 216L560 214L563 208L560 199L557 196L565 194L572 190L575 186L574 182L571 177L564 173L570 167L568 162L566 154L570 152L579 154L585 155L590 153L595 155L602 158L613 161L613 165L615 172L620 173L624 177L632 174L638 167L641 165L646 170L653 177L659 184L657 187L664 190L669 193L678 195L681 197L684 201L688 202L691 210L687 212L683 214L673 216L666 221L657 222L645 221L637 221L631 221L626 225L619 227L611 235L605 240L610 239L619 232L630 227L639 226L643 229L638 233L640 239L642 243L649 246L658 245L664 239L664 243L668 245L661 249L649 252L643 254L637 258L633 258L632 253L642 248L633 249L627 249L622 254L616 256L610 257L607 261L607 265L608 268L611 268L608 270L605 269L601 270L598 271L595 271L590 273L599 272L593 274L589 274L588 279L584 284L580 281L582 284L583 287L578 293L579 289L576 287L576 282L575 285L576 288L572 288L576 289L576 295L579 297L579 302L576 307L570 308L566 312L561 314L554 319L551 322L548 325L547 329L548 333L550 338L553 342L555 351L555 354L555 357L553 360L549 360L546 356L543 351L541 347L541 341L539 338L535 334L527 335L523 332L520 331L514 332L509 331L505 332L502 332L503 336L499 338L495 338L491 335L486 336L482 335L479 335L474 336L469 340L463 343L460 345L459 348L459 352L460 356L458 361L457 365L457 373L457 378L459 381L460 385L464 389L465 393L473 397L480 398L485 397L489 396L492 395L496 393L497 390L497 385L502 382L508 381L513 381L516 380L518 384L515 387L513 391L513 394L512 399L509 397L510 400L510 403L509 408L506 412L510 413L513 412L517 412L520 412L524 411L527 412L530 412L533 413L537 415L537 418L537 422L536 425L536 429L535 432L535 435L534 438L537 442L541 447L543 450L546 450L550 451L553 449L556 448L561 447L564 448L568 450L573 452L577 448L580 448L581 441L584 438L587 438L592 438L597 435L601 431L605 433L604 436L600 437L602 442L600 445L602 450L605 445L603 439L610 437L609 434L613 436L617 436L621 440L626 441L632 441L635 443L639 444L643 442L650 441L656 440L651 442L653 445L658 445L662 448L663 452L666 452L672 456L675 459L675 462L680 465L683 467L689 468L694 467L700 468L706 470L712 475L715 477L716 480L719 489L722 490L723 494L718 499L730 501L730 507L734 503L741 505L751 509L753 512L752 515L759 513L770 516L778 516L786 521L793 527L797 528L802 529L806 537L807 541L805 550L802 554L794 561L791 568L787 572L784 577L784 587L782 596L782 599L779 609L773 616L773 622L768 624L767 628L761 628L752 630L748 632L742 634L735 638L731 644L730 648L731 651L730 657L725 662L718 672L713 677L710 679L707 684L703 688L701 691L695 694L691 693L688 694L683 691L679 691L675 688L675 691L682 696L681 700L685 702L685 705L679 712L671 715L660 716L654 716L655 719L654 723L655 726L651 728L646 729L640 727L639 734L643 735L646 734L642 738L638 742L637 747L636 750L631 750L626 753L625 757L630 761L635 762L633 767L627 771L623 777L618 779L616 782L618 788L621 791L614 791L611 792L606 794L606 799L603 799L597 797L591 794L584 790L582 787L583 784L581 780L580 770L582 765L588 761L580 759L585 754L587 745L593 747L596 735L592 734L591 741L587 740L589 732L591 722L593 718L592 713L591 706L594 706L597 697L601 688L603 680L602 672L604 667L603 660L606 654L607 643L609 631L611 619L610 610L609 602L603 599L603 596L592 591L582 585L578 581L575 577L572 568L566 558L561 547L559 544L557 540L553 536L549 534L548 526L549 522L554 519L557 515L556 512L554 515L550 512L550 506L553 502L555 498L558 495L562 492L563 487L567 485L569 482L572 479L569 477L571 474L569 469L570 463L567 460L564 455L563 452L560 450L557 452L553 454L556 458L553 460L550 457L547 457L544 455L540 454L536 453L535 450L532 447L529 445L526 445L523 444L524 440L522 437L519 434L516 431L513 428L508 427L504 425L501 425L497 423L493 423L488 419L481 413L478 411L474 410L471 410L466 412L460 412L455 411L450 408L446 407L440 405L435 402L431 400L425 398L417 393L414 389L413 386L415 383L413 378L411 373L406 368L400 364L398 360L393 358L393 353L390 352L387 349L385 345L382 345L379 342L377 339L373 333L371 329L367 325L362 323L361 326L363 332L365 335L369 339L371 342L374 346L376 349L380 352L382 357L385 362L385 365L388 365L390 368L392 371L389 373L387 370L384 367L380 364L377 363L377 358L376 355L373 354L370 351L364 349L361 346L366 344L366 341L361 337L358 336L356 332L354 329L352 324L349 319L348 316L345 313L342 313L338 311L331 309L329 305L324 299L319 291L317 288L313 284L312 279L309 276L310 271L310 267L308 262L310 257L312 247L311 240L309 235L307 232L316 233L319 238L319 232L318 228L306 222L302 220L292 218L289 213L290 209L283 207L282 202L275 198L272 193L267 192L265 187L258 182L255 177L250 177L241 177L234 175L223 169L218 168L208 166L200 167L189 164L183 162L177 163L178 167L175 167L168 168L163 170L157 171L156 168L159 163L165 161L156 163L152 166L144 170L148 173L143 177L137 179L132 181L122 186L120 189L113 191L110 191L104 192L99 194L94 196L85 198L90 194L95 193L101 189L108 189L111 187L118 183L124 180L125 176L128 173L121 174L116 175L113 173L109 172L104 174L100 174L100 171L97 167L90 168L85 165L81 164L81 161L77 158L79 155L84 152L86 149L90 149L94 150L99 147L103 147L107 146L106 143L103 142L107 140L103 140L97 141L91 141L84 142L75 141L73 138L66 135L74 133L86 130L91 130L90 133L102 133L97 129L90 127L86 124L81 122L74 120L77 117L86 117L94 115L95 112L101 109L106 109L116 106L122 107L130 104L139 105L143 107L154 106L163 109L168 108L180 110L191 110L195 111L202 110L211 112L217 113L227 114L236 117L242 117L247 115L253 113L262 114L270 111L279 110L283 112L287 111L288 108L292 109L301 114L309 110L310 114L316 114L325 112L334 115L347 117L354 118L360 117L367 120L359 123L369 124L384 123L389 122L395 126L401 123L395 120L399 119L406 118L410 118L415 119L420 122L427 122L436 124L445 123L453 123L452 120L457 119L466 121L466 126L470 122L474 122L476 116L471 113L464 111L464 104L471 100L478 101L484 104L492 110L487 113L497 114ZM366 94L363 96L375 95L383 97L389 95L394 96L399 102L402 100L398 94L403 93L408 94L414 96L418 102L420 106L429 108L439 111L429 114L433 116L421 117L411 116L405 116L394 118L378 119L370 119L367 117L360 115L355 116L348 111L352 111L360 110L368 110L375 109L365 108L353 108L345 108L342 106L355 104L346 104L337 102L341 98L345 96L360 93L366 94ZM419 92L415 96L406 92L415 91L419 92ZM576 94L570 95L564 95L558 96L551 93L554 90L566 91L576 94ZM519 94L523 97L529 93L543 90L552 96L551 100L562 98L568 96L580 99L588 101L588 104L599 102L604 106L618 108L623 110L628 116L618 118L631 122L640 123L648 128L656 129L655 132L645 139L638 137L629 131L622 132L621 135L627 138L635 141L641 148L639 152L632 150L618 146L626 151L632 154L617 154L605 150L599 148L592 143L584 141L568 143L564 141L567 137L578 137L589 136L589 132L596 126L593 122L584 119L573 117L577 116L571 112L566 112L561 110L558 112L548 113L528 111L516 110L507 109L503 107L509 104L501 104L499 99L503 94L509 91L523 90L519 94ZM442 90L449 91L459 90L455 94L464 97L463 102L454 104L448 104L444 101L431 97L442 96L436 92L442 90ZM1798 93L1789 93L1778 93L1782 90L1789 90L1797 92ZM482 96L476 100L470 100L466 95L467 92L475 88L487 88L497 90L489 95L482 96ZM331 103L316 106L313 104L300 101L307 94L311 91L306 87L325 86L333 88L347 88L352 89L358 92L351 93L338 97L331 101ZM1837 83L1831 85L1822 85L1812 82L1823 81L1837 83ZM480 83L477 86L469 85L462 84L465 81L473 80L478 82ZM1806 80L1802 84L1781 84L1772 85L1761 82L1764 78L1771 77L1786 77L1806 80ZM453 74L457 76L457 79L455 83L446 84L440 83L440 80L431 80L430 76L436 76L445 74L452 75ZM399 77L406 78L412 78L413 81L409 83L391 84L377 87L368 87L379 82L354 83L346 82L354 77L359 75L374 77L384 80L394 81L386 75L391 73L397 74L399 77ZM1320 107L1316 108L1298 107L1297 104L1287 103L1286 100L1292 99L1291 96L1302 91L1297 90L1311 85L1321 80L1340 76L1358 75L1368 73L1379 73L1383 75L1379 76L1359 79L1342 82L1325 87L1317 93L1308 98L1309 103L1320 107ZM474 72L480 73L491 73L496 75L501 79L505 80L512 80L520 81L529 79L540 79L549 79L555 81L556 84L553 85L545 86L538 86L522 87L510 87L501 86L487 84L485 81L484 78L478 76L467 75L460 74L463 71L474 72ZM354 69L354 73L349 75L344 75L334 77L325 78L317 77L327 73L338 69L347 69L354 69ZM1594 72L1596 75L1601 74L1617 74L1630 77L1634 79L1633 82L1627 83L1612 86L1608 88L1615 89L1623 90L1628 89L1631 93L1642 90L1660 91L1661 94L1684 95L1685 90L1697 91L1705 91L1714 94L1717 98L1714 100L1721 104L1729 107L1735 101L1744 103L1753 102L1764 104L1768 102L1777 103L1773 98L1780 95L1831 99L1835 102L1850 106L1872 105L1883 106L1888 109L1887 113L1894 114L1902 113L1911 113L1922 114L1932 113L1942 118L1949 117L1944 113L1947 111L1965 112L1976 112L1992 114L2000 117L2000 139L1993 141L1986 141L1991 144L1994 149L1997 150L1996 154L1985 153L1970 157L1965 157L1956 161L1948 165L1938 163L1924 168L1921 166L1916 168L1909 167L1907 171L1900 176L1900 179L1907 180L1906 188L1901 188L1898 193L1901 195L1891 198L1889 204L1881 206L1879 211L1871 217L1869 213L1867 205L1864 192L1866 185L1871 181L1880 177L1890 170L1899 165L1909 160L1914 152L1907 153L1904 158L1890 164L1885 157L1871 159L1857 168L1861 171L1849 173L1840 173L1841 169L1832 169L1825 171L1808 170L1790 172L1772 183L1751 196L1759 197L1762 200L1768 201L1771 199L1777 199L1785 205L1785 210L1781 215L1781 222L1778 231L1770 239L1768 243L1760 249L1753 256L1749 259L1742 262L1738 262L1735 260L1727 264L1724 265L1720 269L1721 273L1718 274L1715 277L1711 278L1708 282L1713 285L1718 292L1719 296L1719 302L1717 305L1712 306L1708 308L1703 309L1702 306L1703 302L1701 296L1705 295L1701 290L1698 289L1694 289L1694 286L1697 281L1693 280L1690 278L1683 280L1679 282L1673 284L1675 281L1679 275L1676 273L1671 274L1665 278L1661 282L1656 282L1653 285L1656 289L1660 289L1661 292L1665 294L1671 290L1676 292L1680 292L1681 295L1673 296L1670 299L1665 302L1662 306L1668 309L1670 315L1673 320L1677 324L1677 328L1674 330L1675 333L1678 334L1677 339L1676 343L1673 344L1669 350L1664 357L1659 364L1652 369L1644 373L1638 374L1634 377L1629 377L1621 380L1615 381L1614 387L1610 387L1609 383L1603 379L1600 380L1593 385L1588 390L1587 394L1591 400L1596 407L1601 411L1605 415L1607 425L1607 435L1602 439L1596 442L1591 447L1584 452L1582 449L1584 445L1580 442L1575 441L1573 438L1570 432L1565 430L1560 430L1561 425L1556 426L1556 432L1553 440L1551 445L1551 449L1555 449L1557 454L1558 459L1561 462L1565 463L1569 466L1572 469L1574 473L1575 477L1575 481L1575 484L1579 491L1575 493L1570 489L1563 485L1563 482L1559 478L1559 474L1557 470L1557 466L1554 462L1553 459L1550 456L1547 453L1546 457L1545 454L1546 450L1548 445L1547 441L1549 436L1547 433L1547 427L1545 424L1543 418L1542 411L1540 406L1536 409L1530 413L1527 412L1523 411L1525 404L1524 399L1520 392L1517 390L1513 385L1512 382L1511 379L1508 374L1503 373L1503 376L1502 379L1499 378L1495 377L1490 379L1483 381L1484 385L1481 388L1473 392L1466 398L1462 402L1457 405L1457 408L1454 409L1449 411L1446 412L1445 416L1446 423L1446 428L1444 433L1444 442L1441 443L1438 447L1435 450L1433 454L1426 451L1423 443L1421 437L1416 429L1415 422L1414 419L1409 411L1406 400L1405 393L1405 387L1404 381L1395 385L1392 384L1384 377L1387 375L1379 368L1375 367L1373 363L1369 359L1359 360L1349 360L1342 361L1331 359L1325 358L1319 357L1317 350L1314 349L1310 350L1304 353L1297 351L1292 347L1286 345L1283 340L1278 333L1275 333L1272 332L1267 333L1268 336L1269 341L1271 346L1274 347L1279 352L1278 356L1281 359L1282 362L1282 358L1285 355L1287 360L1285 363L1288 365L1292 366L1297 366L1300 366L1304 362L1308 359L1312 355L1313 362L1316 365L1319 367L1323 368L1326 369L1329 372L1332 375L1330 379L1327 383L1325 387L1322 386L1320 390L1321 394L1318 395L1314 397L1314 400L1309 401L1307 404L1304 406L1301 405L1298 407L1295 407L1291 409L1290 413L1284 416L1275 418L1270 422L1266 422L1263 424L1260 426L1255 426L1252 428L1247 429L1242 430L1240 427L1240 424L1238 418L1237 415L1238 412L1238 409L1235 405L1232 401L1229 396L1227 392L1224 388L1221 387L1217 382L1217 378L1217 375L1214 368L1211 366L1208 365L1206 362L1205 358L1201 352L1198 348L1195 344L1192 344L1193 341L1194 337L1191 343L1188 346L1184 342L1180 334L1182 341L1185 346L1189 355L1192 358L1193 361L1198 367L1197 372L1204 377L1207 383L1206 390L1208 397L1213 400L1217 406L1218 412L1221 414L1229 419L1232 423L1235 426L1239 429L1240 433L1237 435L1240 436L1243 440L1248 442L1253 441L1259 440L1264 438L1267 438L1272 437L1276 436L1279 435L1282 433L1284 438L1284 441L1281 449L1278 455L1275 462L1270 470L1265 477L1259 484L1253 489L1245 494L1240 498L1234 505L1232 508L1227 512L1224 514L1223 518L1220 524L1215 533L1216 536L1219 538L1218 543L1218 547L1220 551L1222 556L1225 560L1225 565L1225 570L1226 579L1227 582L1225 586L1223 589L1219 593L1214 595L1208 598L1202 604L1199 605L1196 609L1193 610L1193 614L1195 618L1197 621L1197 628L1197 631L1197 634L1190 638L1183 641L1181 645L1182 649L1181 653L1180 657L1179 660L1175 663L1172 666L1170 669L1167 673L1161 679L1157 682L1153 685L1147 687L1144 687L1140 688L1137 689L1131 688L1128 688L1125 688L1120 690L1115 691L1112 693L1109 693L1105 691L1102 689L1101 685L1100 681L1101 676L1098 671L1095 666L1091 659L1087 655L1085 651L1083 645L1082 641L1080 633L1080 626L1079 623L1074 616L1071 609L1070 606L1066 600L1065 596L1065 593L1065 588L1067 583L1068 580L1069 575L1074 569L1076 563L1076 560L1073 554L1072 551L1074 548L1072 542L1071 538L1068 535L1068 532L1066 528L1062 522L1056 516L1052 512L1049 506L1050 503L1052 499L1053 494L1054 487L1054 483L1052 479L1049 476L1047 473L1041 475L1037 476L1033 476L1030 473L1028 469L1024 465L1020 465L1015 465L1010 466L1006 467L997 470L994 472L989 474L984 472L978 471L974 471L968 472L964 474L958 476L950 473L945 469L940 466L936 462L931 460L928 457L926 451L924 447L920 444L918 441L913 436L909 434L907 431L906 427L907 424L905 420L902 418L905 417L907 413L909 410L908 407L910 399L910 394L909 391L910 388L905 383L906 378L910 374L911 368L914 365L918 361L918 358L920 354L923 352L927 346L930 344L935 344L939 340L942 338L947 334L945 327L948 322L948 319L952 315L957 313L962 310L965 305L967 301L971 301L974 304L980 303L986 305L993 302L999 301L1003 298L1008 297L1018 296L1027 295L1030 296L1035 294L1041 294L1047 295L1053 292L1057 293L1057 296L1061 294L1059 298L1061 302L1060 306L1056 309L1057 312L1060 312L1062 315L1070 318L1073 317L1077 318L1085 321L1087 326L1092 327L1100 329L1106 332L1109 330L1110 324L1112 321L1116 318L1120 318L1127 319L1131 321L1138 323L1147 325L1153 326L1158 328L1161 328L1165 327L1172 325L1176 325L1178 328L1183 328L1188 328L1192 325L1193 322L1194 318L1197 312L1200 308L1199 303L1199 298L1193 296L1189 299L1181 299L1176 296L1170 296L1169 299L1165 299L1160 296L1154 296L1150 291L1146 288L1149 283L1145 281L1152 275L1160 275L1162 271L1173 272L1180 268L1186 267L1195 266L1205 270L1213 273L1220 272L1224 272L1231 269L1230 263L1227 261L1224 260L1215 254L1209 252L1204 249L1208 248L1212 243L1209 241L1217 239L1212 238L1208 239L1204 241L1199 241L1194 243L1195 246L1203 247L1196 250L1188 254L1185 252L1180 248L1187 245L1176 243L1171 241L1169 244L1164 248L1162 251L1159 257L1156 259L1154 263L1156 267L1161 271L1153 272L1146 277L1145 274L1141 273L1138 273L1132 274L1136 277L1133 278L1130 278L1127 275L1127 280L1130 282L1131 286L1134 291L1128 289L1130 292L1127 293L1129 298L1125 298L1120 295L1118 291L1117 287L1112 281L1111 278L1108 276L1108 270L1108 267L1105 265L1097 262L1094 260L1089 258L1084 254L1083 251L1079 249L1076 249L1073 246L1068 248L1069 251L1070 255L1075 258L1078 262L1084 267L1088 267L1093 271L1097 273L1102 276L1102 279L1099 276L1094 275L1091 279L1095 281L1095 284L1092 284L1089 289L1088 285L1087 280L1083 277L1082 274L1078 273L1072 271L1067 268L1062 265L1058 261L1057 256L1054 255L1049 254L1044 257L1041 257L1036 260L1025 259L1017 261L1017 264L1017 267L1012 271L1005 272L1001 277L998 282L1001 285L997 287L996 291L992 292L988 296L981 296L976 296L972 298L967 300L964 295L959 294L956 295L953 295L951 291L951 287L948 287L948 281L950 277L951 274L951 271L950 267L950 263L956 257L962 258L970 258L976 259L980 259L989 259L992 255L993 244L988 239L984 236L975 234L974 230L982 228L991 230L989 223L995 226L1007 222L1009 217L1014 216L1018 215L1021 213L1026 205L1034 203L1038 203L1044 201L1049 200L1047 195L1045 192L1045 186L1047 183L1052 182L1059 179L1059 182L1058 185L1061 186L1058 188L1054 192L1055 195L1061 198L1066 199L1070 197L1076 200L1082 200L1091 197L1098 195L1103 196L1109 198L1110 195L1118 193L1117 189L1117 185L1120 181L1125 179L1130 183L1134 183L1135 179L1136 176L1130 174L1130 171L1137 170L1144 169L1150 170L1155 170L1162 167L1156 164L1146 164L1136 166L1127 168L1124 164L1118 163L1120 157L1117 152L1120 149L1125 145L1137 139L1141 138L1133 133L1123 135L1118 139L1119 142L1110 147L1099 151L1095 159L1099 163L1104 166L1099 172L1093 174L1091 183L1088 188L1081 188L1078 192L1072 192L1070 187L1065 181L1061 173L1058 170L1047 176L1039 177L1031 175L1029 169L1028 156L1033 152L1048 147L1058 142L1069 134L1082 123L1091 119L1107 112L1119 110L1128 110L1136 105L1147 106L1156 105L1174 109L1167 110L1173 114L1179 112L1188 115L1203 116L1224 123L1228 125L1228 129L1222 132L1213 133L1188 129L1184 130L1193 134L1194 142L1201 144L1206 145L1203 140L1207 138L1220 142L1225 140L1221 136L1234 131L1239 131L1244 133L1247 129L1243 126L1245 122L1241 119L1257 121L1260 124L1253 125L1253 128L1257 130L1266 128L1267 125L1279 122L1298 117L1303 118L1297 121L1304 122L1308 120L1318 120L1327 117L1333 121L1339 117L1334 114L1353 114L1360 115L1381 122L1384 119L1379 116L1372 114L1371 107L1381 100L1384 95L1389 94L1403 96L1404 99L1399 103L1403 105L1404 109L1403 117L1409 120L1407 124L1396 132L1402 132L1405 130L1411 129L1412 126L1417 124L1414 120L1416 117L1410 116L1409 113L1413 108L1406 103L1416 99L1415 95L1418 95L1420 98L1418 104L1424 105L1422 101L1431 99L1443 98L1453 101L1448 97L1447 91L1457 90L1470 90L1482 89L1478 86L1484 83L1491 83L1501 80L1516 79L1533 77L1537 78L1550 75L1560 75L1567 71L1580 68L1589 70L1582 72L1594 72ZM1273 271L1276 275L1280 276L1275 277L1274 281L1271 284L1272 287L1273 291L1279 292L1282 295L1290 296L1299 295L1299 289L1299 284L1295 282L1296 278L1293 278L1294 273L1299 274L1304 272L1300 269L1298 266L1294 267L1293 271L1292 268L1293 264L1285 260L1283 255L1280 254L1285 253L1285 249L1290 248L1295 249L1296 243L1295 240L1289 240L1284 239L1278 241L1273 242L1270 246L1265 246L1259 252L1264 257L1264 261L1270 268L1273 271ZM479 69L476 69L466 69L475 68L479 69ZM388 68L377 70L369 68L374 66L382 66L390 67ZM1137 67L1125 70L1115 68L1119 67L1116 65L1127 64L1137 67ZM391 63L384 64L375 64L381 62L384 62L391 63ZM468 66L459 67L455 66L452 64L459 62L462 62L469 64ZM444 65L437 67L428 65L416 65L421 63L414 62L414 59L425 60L440 62L444 65ZM1584 65L1552 67L1563 60L1567 59L1571 60L1585 63ZM1101 57L1120 61L1106 64L1103 68L1098 69L1095 73L1088 73L1076 70L1081 68L1073 67L1062 62L1058 57L1073 55L1076 57L1084 57L1094 55L1101 57ZM1141 53L1152 55L1144 58L1128 59L1112 58L1103 56L1096 54L1114 52L1122 54L1127 52L1141 53ZM1284 53L1277 53L1272 54L1264 55L1258 54L1262 52L1249 52L1260 51L1268 51L1273 51L1278 50L1286 52ZM1555 62L1543 62L1528 61L1518 59L1514 55L1507 54L1521 50L1533 49L1544 51L1557 57L1555 62ZM517 57L523 59L516 61L505 65L496 65L484 65L478 62L483 59L472 59L466 57L463 55L467 52L470 51L476 50L487 49L494 52L503 53L512 54L517 57ZM619 38L634 39L646 39L656 41L643 45L629 46L624 47L636 47L623 51L614 52L605 57L593 58L590 59L573 59L580 60L577 61L581 64L576 66L567 67L557 71L567 72L552 77L538 75L522 76L513 75L503 75L502 72L512 71L510 67L513 67L528 69L520 66L511 65L516 62L526 61L519 57L517 54L532 54L537 55L545 53L533 52L513 53L504 51L499 49L492 47L499 44L506 44L517 43L525 41L532 41L538 43L542 40L549 39L559 38L576 38L579 39L595 38L607 38L619 38ZM849 36L884 40L874 43L853 43L823 43L826 44L845 44L862 46L873 44L877 46L871 49L885 47L912 45L929 46L932 48L910 52L906 54L889 55L901 55L895 59L891 62L891 69L897 72L889 73L880 74L890 77L891 82L885 82L892 87L880 88L886 90L877 93L869 93L876 97L865 97L862 98L870 100L877 103L879 107L869 108L865 106L858 103L860 107L854 110L868 110L876 110L861 115L846 120L830 122L823 122L818 124L810 130L798 133L794 134L787 135L779 136L774 140L774 144L771 147L762 152L764 156L762 161L759 166L751 166L743 162L732 162L726 159L723 153L713 147L710 143L710 138L702 133L704 129L700 127L706 120L714 118L717 112L711 113L708 114L703 115L696 113L696 110L698 107L703 106L714 108L705 104L700 103L694 103L690 102L696 97L693 95L688 91L682 85L674 83L675 80L660 77L648 77L633 77L619 77L613 76L603 72L618 70L629 70L605 69L593 66L615 62L635 59L622 55L627 53L646 49L654 48L665 44L682 43L699 43L705 45L720 42L733 44L741 45L753 46L739 43L759 38L778 38L785 36L805 35L849 36Z";
+const MAP_LAYERS = {
+  quakes:    {label:"EARTHQUAKES", on:true},
+  disasters: {label:"DISASTERS",   on:true},
+  flights:   {label:"AIRCRAFT",    on:true},
+};
+const SEV_RANK = {critical:4, high:3, watch:2, info:1};
+function sevColor(s){
+  if(s==="critical") return "var(--bad)";
+  if(s==="high")     return "var(--warn)";
+  if(s==="watch")    return "var(--amber)";
+  return "var(--blue)";
+}
+function projX(lon){ return (Number(lon)+180)*2000/360; }
+function projY(lat){ return (90-Number(lat))*1000/180; }
+
+let mapData = null;
+async function paintAtlas(){
+  const box = $("atlasBody");
+  box.innerHTML = '<div class="note">Loading world monitor…</div>';
+  try{ mapData = await api("/api/worldmap"); }
+  catch(e){
+    box.innerHTML = `<div class="note">World monitor unreachable — ${esc(String(e.message||e))}</div>`;
+    return;
+  }
+  const counts = mapData.counts || {};
+  const total = Object.values(counts).reduce((a,b)=>a+b, 0);
+  box.innerHTML = `
+    <div class="toolbar">
+      <span class="lbl">PULSE</span>
+      <span class="chip on" id="mapPulse"></span>
+      <span class="lbl">LAYERS</span>
+      <span id="mapLayers" style="display:flex;gap:8px;flex-wrap:wrap"></span>
+    </div>
+    <div id="mapWrap" style="position:relative;border:1px solid var(--line);
+      background:var(--panel);overflow:hidden"></div>
+    <div class="note" id="mapNote"></div>
+    <div class="sec">STRONGEST SIGNALS</div>
+    <div id="mapList"></div>`;
+
+  $("mapPulse").textContent = `${mapData.pulse_score ?? "—"} ${mapData.pulse_label || ""}`.trim();
+
+  const lrow = $("mapLayers");
+  Object.entries(MAP_LAYERS).forEach(([k,cfg]) => {
+    const n = counts[k] || 0;
+    const b = document.createElement("button");
+    b.className = "chip" + (cfg.on && n ? " on" : "");
+    b.type = "button";
+    b.disabled = !n;
+    b.textContent = `${cfg.label} ${n}`;
+    b.setAttribute("aria-pressed", String(!!(cfg.on && n)));
+    b.onclick = () => { cfg.on = !cfg.on; paintAtlas(); };
+    lrow.appendChild(b);
+  });
+
+  drawMap();
+
+  /* Say plainly which channels cannot be mapped and why. */
+  const un = mapData.unmappable || {};
+  const names = Object.keys(un);
+  $("mapNote").textContent = names.length
+    ? `Plotting ${total} located items. Not on the map: ${names.join(", ")} — these feeds carry no coordinates, so they are omitted rather than placed at a guessed position.`
+    : `Plotting ${total} located items.`;
+
+  /* Ranked list: severity first, then magnitude where present. */
+  const all = [];
+  Object.entries(mapData.layers||{}).forEach(([chan,list]) => {
+    if(!MAP_LAYERS[chan] || !MAP_LAYERS[chan].on) return;
+    (list||[]).forEach(i => all.push({...i, chan}));
+  });
+  all.sort((a,b) => (SEV_RANK[b.severity]||0) - (SEV_RANK[a.severity]||0));
+  const listBox = $("mapList");
+  listBox.innerHTML = "";
+  all.slice(0,8).forEach(i => {
+    const r = document.createElement("div"); r.className = "row";
+    r.innerHTML = `<span class="dot" style="background:${sevColor(i.severity)}"></span>
+      <div class="g"><div class="n"></div><div class="d"></div></div>`;
+    r.querySelector(".n").textContent = i.title || "";
+    r.querySelector(".d").textContent =
+      `${i.chan} · ${Number(i.lat).toFixed(2)}, ${Number(i.lon).toFixed(2)}` +
+      (i.summary ? ` · ${i.summary}` : "");
+    listBox.appendChild(r);
+  });
+}
+
+function drawMap(){
+  const wrap = $("mapWrap"); if(!wrap || !mapData) return;
+  const pts = [];
+  Object.entries(mapData.layers||{}).forEach(([chan,list]) => {
+    if(!MAP_LAYERS[chan] || !MAP_LAYERS[chan].on) return;
+    (list||[]).forEach(i => {
+      if(typeof i.lat !== "number" || typeof i.lon !== "number") return;
+      pts.push({...i, chan});
+    });
+  });
+  /* Graticule every 30 degrees — orientation without a busy grid. */
+  let grat = "";
+  for(let lon=-180; lon<=180; lon+=30) grat += `<line x1="${projX(lon)}" y1="0" x2="${projX(lon)}" y2="1000"/>`;
+  for(let lat=-60; lat<=60; lat+=30)  grat += `<line x1="0" y1="${projY(lat)}" x2="2000" y2="${projY(lat)}"/>`;
+
+  const marks = pts.map(p => {
+    const x = projX(p.lon), y = projY(p.lat);
+    const c = sevColor(p.severity);
+    const rank = SEV_RANK[p.severity] || 1;
+    const r = p.chan === "flights" ? 3 : 4 + rank * 2;
+    const title = `${(p.title||"").replace(/[<&>]/g,"")} (${p.chan})`;
+    /* Aircraft are plain marks; hazards pulse by severity so the eye is
+       drawn to what actually matters. */
+    const pulse = (p.chan !== "flights" && rank >= 3)
+      ? `<circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="${c}" stroke-width="2" opacity=".8">
+           <animate attributeName="r" from="${r}" to="${r*3.4}" dur="2.4s" repeatCount="indefinite"/>
+           <animate attributeName="opacity" from=".8" to="0" dur="2.4s" repeatCount="indefinite"/>
+         </circle>` : "";
+    return `<g><title>${title}</title>${pulse}
+      <circle cx="${x}" cy="${y}" r="${r}" fill="${c}" fill-opacity="${p.chan==="flights"?".75":".9"}"/></g>`;
+  }).join("");
+
+  wrap.innerHTML = `<svg viewBox="0 0 2000 1000" width="100%" style="display:block"
+      role="img" aria-label="World map showing ${pts.length} located world-monitor items">
+    <g stroke="var(--line)" stroke-width="1" opacity=".55">${grat}</g>
+    <path d="${WORLD_PATH}" fill="var(--map-land)" stroke="var(--line-2)" stroke-width="1.4"/>
+    <g>${marks}</g>
+  </svg>`;
+}
+
+async function paintNews(){
+  $("newsBody").innerHTML='<div class="note">Ask for headlines below — the news agent fetches them live.</div>'+
+    '<div class="sec">TRY</div><div class="cards" id="nc"></div>';
+  [["Top headlines now","news_headlines"],["Search a story","news_search"]].forEach(([q])=>{
+    const b=document.createElement("button"); b.className="card"; b.type="button";
+    b.innerHTML=`<div class="h">${esc(q)}</div>`;
+    b.onclick=()=>{ focusAgent="news"; ta.value=q; submit(); }; $("nc").appendChild(b);
+  });
+}
+
+/* ---------------- VOICE ---------------- */
+let rec = null, listening = false;
+function setVoice(state){
+  const orb=$("orb");
+  orb.className = "orb" + (state==="listening"?" listening":state==="speaking"?" speaking":"");
+  $("orbG").textContent = state.toUpperCase();
+  $("vState").textContent = state==="listening" ? "LISTENING…" :
+    state==="thinking" ? "WORKING…" : state==="speaking" ? "SPEAKING" : "VOICE-ONLY MODE";
+}
+function say(text){
+  if(!("speechSynthesis" in window) || !text) return;
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text.slice(0,1200));
+    u.onstart=()=>setVoice("speaking"); u.onend=()=>setVoice("idle");
+    speechSynthesis.speak(u);
+  }catch{}
+}
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function initVoice(){
+  const note=$("vNote"), btn=$("vBtn");
+  if(!SR){
+    btn.disabled=true; btn.style.opacity=".5";
+    note.textContent="This browser has no speech recognition. Dictation needs Chrome, or the server-side Whisper pipeline (SETTINGS shows it is not configured).";
+    return;
+  }
+  note.textContent="Speech recognition runs in this browser. Server-side Whisper/Piper are not configured — SETTINGS shows their state.";
+  btn.onclick=()=>{
+    if(listening){ try{rec.stop();}catch{} return; }
+    rec = new SR(); rec.lang="en-US"; rec.interimResults=true; rec.continuous=false;
+    rec.onstart=()=>{ listening=true; btn.classList.add("rec"); btn.textContent="■ STOP LISTENING"; setVoice("listening"); $("vText").textContent="…"; };
+    rec.onresult=(ev)=>{
+      let s=""; for(const r of ev.results) s+=r[0].transcript;
+      $("vText").textContent=s;
+      if(ev.results[ev.results.length-1].isFinal && s.trim()){
+        setVoice("thinking"); ta.value=s.trim(); submit();
+      }
+    };
+    rec.onerror=(e)=>{ $("vNote").textContent="Speech error: "+e.error; };
+    rec.onend=()=>{ listening=false; btn.classList.remove("rec"); btn.textContent="▶ START LISTENING";
+      if($("orbG").textContent==="LISTENING") setVoice("idle"); };
+    try{ rec.start(); }catch(e){ $("vNote").textContent="Could not start: "+e.message; }
+  };
+}
+$("micChip").onclick=()=>show("VOICE");
+$("spkChip").onclick=()=>{ speak=!speak; $("spkChip").classList.toggle("on",speak);
+  $("spkChip").title = speak?"Replies will be spoken":"Speak replies aloud"; };
+
+/* ---------------- boot ---------------- */
+setInterval(()=>{ $("mClock").textContent=new Date().toTimeString().slice(0,8); },1000);
+$("mClock").textContent=new Date().toTimeString().slice(0,8);
+(async()=>{ try{ const d=await api("/api/sessions/recent");
+  const s=(d.sessions||[])[0]; $("mSess").textContent = s? (s.name||"").replace(/\.jsonl$/,"").slice(-13) : "—";
+}catch{} })();
+initVoice(); paintQueue();
+
+/* v8.8 startup order matters:
+   1. apply the stored theme BEFORE first paint, so there is no flash of
+      the default amber on a user who chose the light theme;
+   2. refresh() first, so the boot readout reports REAL state — booting
+      on placeholder numbers and correcting them a second later is the
+      kind of comfortable lie this console is not allowed to tell;
+   3. then either the picker (first run) or the boot sequence.
+   Boot runs once per tab session, not on every navigation. */
+const storedTheme = themeGet();
+if(storedTheme) document.documentElement.setAttribute("data-theme", storedTheme);
+else document.documentElement.setAttribute("data-theme","arc");
+
+(async () => {
+  await refresh();
+  setInterval(refresh, 30000);
+  let booted = false;
+  try{ booted = sessionStorage.getItem("dm_booted_v1") === "1"; }catch{}
+  if(!storedTheme){ openPicker(); }
+  else if(!booted){ runBoot(storedTheme); }
+  try{ sessionStorage.setItem("dm_booted_v1","1"); }catch{}
+})();
+ta.focus();
+
+/* v8.7: register the service worker, matching the HUD. The console is the
+   default surface now, so the offline shell has to come with it — the
+   manifest alone does not make the app installable. Failure is non-fatal:
+   an unsupported browser just runs online-only. */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => { /* SW unsupported — browser fallback only */ });
+}
+})();
+</script>
+</body>
+</html>

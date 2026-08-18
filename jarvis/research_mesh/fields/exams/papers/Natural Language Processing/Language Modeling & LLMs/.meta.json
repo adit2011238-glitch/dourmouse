@@ -1,0 +1,21 @@
+{
+  "domain": "Natural Language Processing",
+  "field": "Language Modeling & LLMs",
+  "tests": [
+    {
+      "url": "https://www.cs.stanford.edu/phd-program-requirements-qualifying-exams",
+      "file": "_archives/https-www-cs-stanford-edu-phd-program-re-a20637f19e.html",
+      "bytes": 71380,
+      "sha256": "a20637f19edb5b947d4eb18d98b1fd141fdafde99ea8e5e8c987796c059bd774",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.cs.stanford.edu/phd-program-requirements-qualifying-exams",
+      "label": "Stanford CS \u2014 NLP Qualifying Exam"
+    }
+  ]
+}

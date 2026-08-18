@@ -1,0 +1,21 @@
+{
+  "domain": "Pharmacology & Drug Discovery",
+  "field": "Drug Delivery Systems",
+  "tests": [
+    {
+      "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/",
+      "file": "_archives/https-chem-mst-edu-academic-programs-gra-eee3c84d99.html",
+      "bytes": 125046,
+      "sha256": "eee3c84d99767ac0652a91403eed96770b86d9995bbabf829b7c2cfe7a2607f6",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/",
+      "label": "No public pharm quals \u2014 nearest verified: Missouri S&T chemistry qualifiers"
+    }
+  ]
+}

@@ -16,6 +16,10 @@ backend:
   key of any kind is set.
 - ``claude`` — the user's real Claude Code CLI (``claude -p``), the same
   honest subprocess pattern as the dev_coding ``claude_code`` tool.
+- ``codex`` — the user's real Codex CLI (``codex exec``, their ChatGPT
+  login), falling back to the OpenAI-compatible API when only a
+  ``CODEX_API_KEY`` / ``OPENAI_API_KEY`` is available. CLI-first because
+  that is exactly what the CODEX connection status probe measures.
 
 Every path returns REAL output or an honest error (Rules 2.1 / 2.2): a
 missing key/CLI is NOT CONFIGURED, an API/CLI failure surfaces the real
@@ -100,13 +104,22 @@ def load_backend(backend: str) -> tuple[str, str, str]:
     if name in ("codex", "openai_codex"):
         # v5.0: OpenAI Codex — OpenAI-compatible endpoint. Key from
         # CODEX_API_KEY (preferred) or OPENAI_API_KEY; model env-overridable.
+        # v8.7: this is the API path only. ``run_code_task`` prefers the
+        # user's real Codex CLI (their ChatGPT login) and only lands here as
+        # a fallback, so the error names BOTH routes — the connections probe
+        # reports on the CLI, and an error naming only the key read as a
+        # contradiction of a green status light.
         key = os.environ.get("CODEX_API_KEY", "").strip()
         if not key:
             key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not key:
             raise RuntimeError(
-                "NOT CONFIGURED: the Codex coding backend needs CODEX_API_KEY "
-                "(or OPENAI_API_KEY) in .env. Nothing was run."
+                # ASCII only: these surface on a Windows console, where a
+                # non-ASCII dash renders as a replacement char.
+                "NOT CONFIGURED: Codex needs EITHER the Codex CLI signed in "
+                "(npm i -g @openai/codex, then 'codex login' - this is what "
+                "the CODEX connection status checks) OR CODEX_API_KEY / "
+                "OPENAI_API_KEY in .env. Nothing was run."
             )
         base = os.environ.get(
             "CODEX_BASE_URL", "https://api.openai.com/v1"
@@ -193,9 +206,72 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     if proc.returncode != 0:
-        raise RuntimeError(f"claude exited {proc.returncode}: {err[-2000:] or '(no stderr)'}")
+        # v8.7: `claude -p` exits 1 with an EMPTY stderr when the CLI is
+        # installed but not signed in — the single most likely failure here,
+        # and "exited 1: (no stderr)" tells the user nothing actionable.
+        # Name the probable cause without asserting it: on Windows the login
+        # lives in the Credential Manager, so we cannot confirm it from here.
+        if not err:
+            raise RuntimeError(
+                "claude exited 1 with no error output. The most likely cause "
+                "is that the CLI is installed but NOT SIGNED IN - run "
+                "'claude' on the host machine and complete /login, then "
+                "retry. (Sign-in cannot be verified from here: Windows keeps "
+                "it in the Credential Manager.)"
+            )
+        raise RuntimeError(f"claude exited {proc.returncode}: {err[-2000:]}")
     if not out:
         raise RuntimeError("claude returned no output (honest).")
+    return out[-_OUTPUT_CAP:]
+
+
+def _run_codex(task: str, *, cwd: str | None, timeout: int) -> str:
+    """Run a coding task through the user's real Codex CLI (headless).
+
+    v8.7: ``code_codex`` previously went straight to the OpenAI API, while
+    the CODEX connection probe reports on the CLI + ~/.codex/auth.json. The
+    two disagreed, so a user who ran ``codex login`` saw a green light and
+    still got "needs CODEX_API_KEY". The CLI is now the primary path — the
+    same thing the status light actually measures — and the API key remains
+    a fallback for users who have one. Mirrors ``_run_claude``: real output
+    or an honest error, never a fabricated result.
+    """
+    from dourmouse.general_roster import _find_codex_cli
+
+    cli = _find_codex_cli()
+    if cli is None:
+        # No CLI: fall back to the API path, which raises its own honest
+        # NOT CONFIGURED naming both routes when no key is set either.
+        base_url, api_key, model = load_backend("codex")
+        return _run_openai_compat(base_url, api_key, model, task, timeout)
+    timeout = max(1, min(int(timeout), 600))
+    try:
+        proc = subprocess.run(
+            [cli, "exec", task, "--skip-git-repo-check"],
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"codex timed out after {timeout}s (task still running).") from None
+    except OSError as exc:
+        raise RuntimeError(f"could not run the codex CLI: {exc}") from exc
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    if proc.returncode != 0:
+        detail = err[-2000:] or "(no stderr)"
+        lowered = (err + out).lower()
+        if "login" in lowered or "auth" in lowered or not err:
+            raise RuntimeError(
+                f"codex exited {proc.returncode}: {detail} — if this is an "
+                "auth failure, run 'codex login' on the host machine and "
+                "retry."
+            )
+        raise RuntimeError(f"codex exited {proc.returncode}: {detail}")
+    if not out:
+        raise RuntimeError("codex returned no output (honest).")
     return out[-_OUTPUT_CAP:]
 
 
@@ -217,5 +293,9 @@ def run_code_task(
     name = (backend or "").strip().lower()
     if name == "claude":
         return _run_claude(task, cwd=cwd, timeout=timeout)
+    if name in ("codex", "openai_codex"):
+        # v8.7: CLI first (what the CODEX status light measures), API key
+        # only as a fallback — see _run_codex.
+        return _run_codex(task, cwd=cwd, timeout=timeout)
     base_url, api_key, model = load_backend(name)
     return _run_openai_compat(base_url, api_key, model, task, timeout)

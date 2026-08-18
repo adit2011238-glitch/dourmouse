@@ -1,0 +1,707 @@
+{
+ "domains": [
+  {
+   "id": 19,
+   "name": "Genomics & Systems Biology",
+   "status": "domain-level",
+   "fields": [
+    "Genome Assembly & Sequencing",
+    "Comparative & Evolutionary Genomics",
+    "Functional Genomics (CRISPR screens)",
+    "Transcriptomics & Expression Analysis",
+    "Proteomics & Mass-Spec Analysis",
+    "Metabolomics",
+    "Single-Cell & Spatial Omics",
+    "Epigenomics",
+    "Systems Biology & Network Modeling",
+    "Computational Genomics",
+    "Genome Editing & CRISPR Biology",
+    "Population Genetics & Genomics",
+    "Phylogenetics & Molecular Evolution",
+    "Metagenomics & Microbiome Science",
+    "Cancer Genomics & Precision Oncology"
+   ],
+   "archives": [
+    {
+     "src": "Emory GDBBS — Genetics & Molecular Biology written quals",
+     "url": "https://biomed.emory.edu/PROGRAM_SITES/GMB/resources/past-written-qualifying-exams.html",
+     "note": "GMB past written qualifying exams.",
+     "iterations": "3+ papers",
+     "years": "2016-2018"
+    }
+   ]
+  },
+  {
+   "id": 20,
+   "name": "Neuroscience & Cognitive Science",
+   "status": "format-only",
+   "fields": [
+    "Systems Neuroscience",
+    "Computational Neuroscience",
+    "Neural Coding & Information",
+    "Synaptic Plasticity & Learning",
+    "Cognitive Neuroscience (memory & attention)",
+    "Decision Neuroscience",
+    "Motor Control & Sensorimotor",
+    "Visual Neuroscience",
+    "Auditory Neuroscience",
+    "Neurophysiology & Electrophysiology",
+    "Neuroimaging (fMRI/EEG)",
+    "Molecular & Cellular Neuroscience",
+    "Neurodevelopment & Plasticity",
+    "Sleep & Circadian Neuroscience",
+    "Neuromodulation & Brain Stimulation",
+    "Cognitive Modeling & Bayesian Brain"
+   ],
+   "archives": [
+    {
+     "src": "Vanderbilt Brain Institute — PhD Qualifying Exam",
+     "url": "https://medschool.vanderbilt.edu/brain-institute/neuroscience-ph-d-program/phd-qualifying-exam/",
+     "note": "5-10 page Nature Reviews-style review with 1 figure.",
+     "iterations": "format verified; no public papers",
+     "years": "current"
+    },
+    {
+     "src": "Harvard PIN — Preliminary Qualifying Examination",
+     "url": "https://pinphd.hms.harvard.edu/training/curriculum/pqe",
+     "note": "Written research proposal + 2-hour oral.",
+     "iterations": "format verified; no public papers",
+     "years": "current"
+    },
+    {
+     "src": "UCSF Neuroscience — Qualifying Exam",
+     "url": "https://neurograd.ucsf.edu/node/36526",
+     "note": "Oral exam on a student-written research proposal.",
+     "iterations": "format verified; no public papers",
+     "years": "current"
+    }
+   ]
+  },
+  {
+   "id": 21,
+   "name": "Medicine & Clinical Science",
+   "status": "none",
+   "fields": [
+    "Cardiology",
+    "Oncology & Hematology",
+    "Neurology & Stroke",
+    "Psychiatry & Psychopharmacology",
+    "Endocrinology & Metabolism",
+    "Gastroenterology & Hepatology",
+    "Pulmonology & Respiratory Medicine",
+    "Nephrology",
+    "Infectious Diseases & Epidemiology",
+    "Clinical Immunology & Allergy",
+    "Rheumatology & Autoimmune Disease",
+    "Pediatrics & Neonatology",
+    "Obstetrics & Gynecology",
+    "Surgery & Surgical Science",
+    "Anesthesiology & Perioperative Medicine",
+    "Radiology & Diagnostic Imaging",
+    "Pathology & Laboratory Medicine",
+    "Critical Care Medicine",
+    "Preventive Medicine & Public Health",
+    "Clinical Trials & Evidence-Based Medicine"
+   ],
+   "archives": [
+    {
+     "src": "U. Pittsburgh — Public Health PhD Qualifying Exam study guide",
+     "url": "https://www.publichealth.pitt.edu/sites/default/files/assets/Hugen/qualifying_exam_study_guide.pdf",
+     "note": "Nearest verified public exam-adjacent doc (research-article oral presentation).",
+     "iterations": "guide",
+     "years": "current"
+    },
+    {
+     "src": "Arizona — Clinical Translational Sciences PhD program",
+     "url": "https://healthsciences.arizona.edu/academics/clinical-translational-sciences/programs/phd-program",
+     "note": "Oral comprehensive = proposal defense; no public papers.",
+     "iterations": "format verified",
+     "years": "current"
+    },
+    {
+     "src": "Honest note",
+     "url": "",
+     "note": "Clinical specialty certification exams (USMLE, ABIM, ABPN, etc.) are the real gate exams for these fields but are NOT publicly published. No public qualifying-exam archive exists for clinical specialties."
+    }
+   ]
+  },
+  {
+   "id": 22,
+   "name": "Pharmacology & Drug Discovery",
+   "status": "none",
+   "fields": [
+    "Pharmacokinetics & Pharmacodynamics",
+    "Structure-Based Drug Design",
+    "Drug Metabolism & Toxicology",
+    "Clinical Pharmacology",
+    "Pharmacogenomics & Precision Dosing",
+    "Drug Delivery Systems",
+    "Neuropharmacology",
+    "Antimicrobial Pharmacology & Resistance",
+    "Cancer Pharmacology & Targeted Therapy",
+    "Computational Drug Discovery (ML + docking)",
+    "Pharmacovigilance & Drug Safety"
+   ],
+   "archives": [
+    {
+     "src": "Nearest: Chemistry quals (medicinal/pharm areas)",
+     "url": "https://chem.mst.edu/academic-programs/graduate-programs/examinations/",
+     "note": "No public pharmacology-specific qual archive found; nearest verified are chemistry qualifiers.",
+     "iterations": "n/a",
+     "years": "n/a"
+    }
+   ]
+  },
+  {
+   "id": 23,
+   "name": "Earth Science & Climate",
+   "status": "domain-level",
+   "fields": [
+    "Climate Dynamics & Modeling",
+    "Atmospheric Science & Meteorology",
+    "Physical Oceanography",
+    "Biogeochemistry & Carbon Cycle",
+    "Glacial & Cryosphere Science",
+    "Paleoclimatology",
+    "Geology & Tectonics",
+    "Seismology",
+    "Volcanology",
+    "Hydrology & Water Resources",
+    "Soil Science",
+    "Geophysics & Geodesy",
+    "Earth Remote Sensing",
+    "Extreme Events & Climate Risk",
+    "Atmospheric Chemistry & Air Quality"
+   ],
+   "archives": [
+    {
+     "src": "UMD MEES — Environmental Science PhD Comprehensive Exam format",
+     "url": "https://www.mees.umd.edu/env-sci-comp-exam",
+     "note": "Seven exam areas incl. general ecology, environmental chemistry, etc.",
+     "iterations": "format verified",
+     "years": "current"
+    }
+   ]
+  },
+  {
+   "id": 24,
+   "name": "Environmental Science & Ecology",
+   "status": "specific",
+   "fields": [
+    "Community Ecology",
+    "Ecosystem Functioning & Nutrient Cycling",
+    "Conservation Biology",
+    "Marine Ecology & Conservation",
+    "Freshwater Ecology",
+    "Global Change Ecology",
+    "Restoration Ecology",
+    "Evolutionary Ecology",
+    "Behavioral Ecology",
+    "Population Ecology & Demography",
+    "Ecotoxicology & Pollution Science",
+    "Environmental Policy & Assessment",
+    "Urban Ecology & Sustainability"
+   ],
+   "archives": [
+    {
+     "src": "U. Nevada Reno — Ecology/Evol/Bio comp exam study questions",
+     "url": "https://www.unr.edu/eecb/current-students/handbook/comp-exam",
+     "note": "Real comprehensive-exam study questions (ecological models, habitat selection, ecosystem function).",
+     "iterations": "question set",
+     "years": "current"
+    },
+    {
+     "src": "BahlaiLab — Candidacy exams (GitHub)",
+     "url": "https://github.com/BahlaiLab/Candidacy_exams",
+     "note": "Real written exam questions: ecosystem service vs function, biodiversity influence.",
+     "iterations": "written question set",
+     "years": "current"
+    }
+   ]
+  },
+  {
+   "id": 25,
+   "name": "Economics",
+   "status": "specific",
+   "fields": [
+    "Microeconomic Theory",
+    "Macroeconomics & Monetary Policy",
+    "Econometrics",
+    "Labor Economics",
+    "Public Economics & Taxation",
+    "Behavioral Economics",
+    "Experimental Economics",
+    "Industrial Organization & Competition",
+    "Development Economics",
+    "International Trade & Macroeconomics",
+    "Financial Economics & Asset Pricing",
+    "Health Economics",
+    "Environmental & Resource Economics",
+    "Urban & Regional Economics",
+    "Political Economy",
+    "Economic History",
+    "Market Design & Mechanism Design"
+   ],
+   "archives": [
+    {
+     "src": "UC Davis Economics — Past Preliminary Exams (some with keys)",
+     "url": "https://economics.ucdavis.edu/past-preliminary-exams",
+     "note": "Past prelims for econometrics, macro, and micro, some with answer keys.",
+     "iterations": "10+ papers",
+     "years": "multi-year"
+    },
+    {
+     "src": "U. Utah Economics — Sample Qualifier Exams",
+     "url": "https://econ.utah.edu/samplequalexams.php",
+     "note": "2025 macroeconomics qualifier and more.",
+     "iterations": "2+ papers",
+     "years": "2025"
+    },
+    {
+     "src": "Virginia Tech Economics — Qualifying Exam Archive",
+     "url": "https://econ.vt.edu/graduate/currentstudents/qualifying-exam-archive.html",
+     "note": "Past qual questions: micro, macro, econometrics.",
+     "iterations": "multi-year",
+     "years": "unverified"
+    },
+    {
+     "src": "U. Albany Economics — Past Preliminary Exams",
+     "url": "https://www.albany.edu/economics/past-preliminary-exams",
+     "note": "First-year micro and macro prelims with answers.",
+     "iterations": "multi-year",
+     "years": "unverified"
+    },
+    {
+     "src": "Stanford / Chicago micro comps links (XJMR)",
+     "url": "https://www.econjobrumors.com/topic/links-for-micro-comprehensive-exams-and-solutions",
+     "note": "Public links to micro comp exams and solutions at top programs.",
+     "iterations": "multiple",
+     "years": "various"
+    }
+   ]
+  },
+  {
+   "id": 26,
+   "name": "Finance & Quantitative Methods",
+   "status": "specific",
+   "fields": [
+    "Quantitative Asset Pricing",
+    "Derivatives & Options Theory",
+    "Stochastic Calculus & Mathematical Finance",
+    "Portfolio Theory & Risk Management",
+    "Market Microstructure",
+    "Fixed Income Analytics",
+    "Algorithmic & High-Frequency Trading",
+    "Financial Econometrics & Volatility",
+    "Behavioral Finance",
+    "Credit Risk & Default Modeling",
+    "Blockchain & Digital Assets"
+   ],
+   "archives": [
+    {
+     "src": "METU — PhD Qualifying Exam in Financial Mathematics",
+     "url": "https://iam.metu.edu.tr/en/phd-qualifying-exam-financial-mathematics",
+     "note": "Real qual topics: CAPM, arbitrage pricing, general equilibrium.",
+     "iterations": "topics + format",
+     "years": "current"
+    },
+    {
+     "src": "Duke Fuqua — Finance Qualifying Exam (Asset Pricing)",
+     "url": "https://areas.fuqua.duke.edu/finance/phd-overview/curriculum-program-requirements/",
+     "note": "Finance IV (Asset Pricing) qualifying exam based on Finance I-IV.",
+     "iterations": "annual",
+     "years": "current"
+    },
+    {
+     "src": "Ohio State — Finance PhD Asset Pricing Qualifying Exams",
+     "url": "https://files.fisher.osu.edu/department-finance/public/2022-02/Finance%20PhD%20Handbook.pdf",
+     "note": "Asset-pricing qualifying examinations described in the PhD handbook.",
+     "iterations": "annual",
+     "years": "current"
+    }
+   ]
+  },
+  {
+   "id": 27,
+   "name": "Political Science & International Relations",
+   "status": "specific",
+   "fields": [
+    "Comparative Politics",
+    "International Relations Theory",
+    "American Politics & Institutions",
+    "Political Theory",
+    "Public Policy & Governance",
+    "International Political Economy",
+    "Security Studies & Conflict Resolution",
+    "Political Behavior & Public Opinion",
+    "Quantitative Political Methodology",
+    "Geopolitics & Strategy",
+    "Democracy & Authoritarianism"
+   ],
+   "archives": [
+    {
+     "src": "Columbia — Study Resources for Comprehensive Exams",
+     "url": "https://polisci.columbia.edu/content/study-resources-comprehensive-exams",
+     "note": "Reading lists: comparative politics comps handbook, political theory comps, IR comps (GR8804).",
+     "iterations": "reading lists",
+     "years": "current"
+    },
+    {
+     "src": "Georgetown — PhD Comprehensive Exam Reading Lists",
+     "url": "https://government.georgetown.edu/ph-d-in-government/program-details/exam-reading/",
+     "note": "Official comprehensive-exam reading lists.",
+     "iterations": "reading lists",
+     "years": "current"
+    },
+    {
+     "src": "Yale Political Science — Field Reading Lists, Requirements and Exams",
+     "url": "https://politicalscience.yale.edu/academics/graduate-program/field-reading-lists-requirements-and-exams",
+     "note": "American politics, comparative, IR, political economy, political theory, qualitative methods.",
+     "iterations": "reading lists",
+     "years": "current"
+    },
+    {
+     "src": "U. Oregon — Comprehensive Exams & Field Requirements",
+     "url": "https://blogs.uoregon.edu/polisciresources/comps/",
+     "note": "6-hour exam: 1 core-list question + 1 additional-readings question.",
+     "iterations": "format verified",
+     "years": "current"
+    },
+    {
+     "src": "U. Chicago — American Politics comprehensive exams",
+     "url": "https://political-science.uchicago.edu/graduate-study/graduate-degree-requirements/comprehensive-exams/american-politics",
+     "note": "100 classic readings list.",
+     "iterations": "reading list",
+     "years": "current"
+    }
+   ]
+  },
+  {
+   "id": 28,
+   "name": "Sociology & Anthropology",
+   "status": "none",
+   "fields": [
+    "Sociological Theory",
+    "Social Stratification & Inequality",
+    "Economic Sociology",
+    "Cultural Sociology",
+    "Sociology of Organizations",
+    "Social Networks & Computational Social Science",
+    "Cultural Anthropology & Ethnography",
+    "Medical Sociology",
+    "Demography & Population Studies"
+   ],
+   "archives": [
+    {
+     "src": "Honest note",
+     "url": "",
+     "note": "No public sociology/anthropology PhD comprehensive exam archive found in public web search (17 Aug 2026). Programs administer comps internally without publishing papers."
+    }
+   ]
+  },
+  {
+   "id": 29,
+   "name": "Psychology",
+   "status": "format-only",
+   "fields": [
+    "Cognitive Psychology",
+    "Social Psychology",
+    "Developmental Psychology",
+    "Clinical Psychology & Psychopathology",
+    "Personality Psychology",
+    "Behavioral Neuroscience",
+    "Psychometrics & Test Theory",
+    "Judgment & Decision Making",
+    "Educational Psychology",
+    "Positive Psychology & Well-Being",
+    "Evolutionary Psychology"
+   ],
+   "archives": [
+    {
+     "src": "Fordham — Doctoral Comprehensive Exam (Clinical Psychology)",
+     "url": "https://www.fordham.edu/academics/departments/psychology/graduate-program/phd-in-clinical-psychology/doctoral-comprehensive-examination/",
+     "note": "Comprehensive exam structure for clinical PhD.",
+     "iterations": "format verified; no public papers",
+     "years": "current"
+    },
+    {
+     "src": "Ohio University — Clinical PhD Comprehensive Examination",
+     "url": "https://www.ohio.edu/cas/psychology/graduate/clinical/manual/general-requirements/comprehensive-examination",
+     "note": "Conceptual/critical thinking, integrative knowledge, methodological acumen.",
+     "iterations": "format verified",
+     "years": "current"
+    },
+    {
+     "src": "APA — Preparing for your comprehensive exams",
+     "url": "https://www.apa.org/gradpsych/2004/04/comps",
+     "note": "Real guidance incl. reading lists and question style.",
+     "iterations": "guide",
+     "years": "2004"
+    }
+   ]
+  },
+  {
+   "id": 30,
+   "name": "Law",
+   "status": "bar-exam",
+   "fields": [
+    "Constitutional Law",
+    "Criminal Law & Procedure",
+    "Contract & Commercial Law",
+    "Intellectual Property Law",
+    "International Law & Human Rights",
+    "Environmental & Energy Law",
+    "Corporate & Securities Law",
+    "Data Protection & Privacy Law",
+    "AI & Technology Law"
+   ],
+   "archives": [
+    {
+     "src": "ustcivillaw (Philippine Bar review)",
+     "url": "https://www.ustcivillaw.com/wp-content/uploads/2020/03/REM-Bar-Exam-Questions.pdf",
+     "note": "Remedial Law bar exam questions with suggested answers (158pp, Q&A format, 2012+ years). Real bar exam material; not an SJD/PhD comprehensive exam — used as the best available published law test."
+    }
+   ]
+  },
+  {
+   "id": 31,
+   "name": "Linguistics",
+   "status": "specific",
+   "fields": [
+    "Phonetics & Phonology",
+    "Syntax & Formal Grammar",
+    "Semantics & Pragmatics",
+    "Morphology & Lexical Semantics",
+    "Historical & Comparative Linguistics",
+    "Sociolinguistics & Dialectology",
+    "Psycholinguistics & Language Acquisition",
+    "Computational & Corpus Linguistics",
+    "Field Linguistics & Documentation"
+   ],
+   "archives": [
+    {
+     "src": "U. Memphis — Applied Linguistics PhD Comprehensive Exams",
+     "url": "https://www.memphis.edu/english/pdfs/grad-advising-pdfs/al_phd_comps.pdf",
+     "note": "4 parts: 3 written exams + 1 oral.",
+     "iterations": "format verified",
+     "years": "current"
+    },
+    {
+     "src": "U. Colorado — Linguistics Comprehensive Exam",
+     "url": "https://www.colorado.edu/linguistics/current-students/graduates/professional-ma-tesol/comprehensive-exam",
+     "note": "Written responses applying core linguistic concepts.",
+     "iterations": "format verified",
+     "years": "current"
+    },
+    {
+     "src": "UPRM — Comprehensive Exam Study Guide with sample questions",
+     "url": "https://www.uprm.edu/english/wp-content/uploads/sites/124/2023/05/MAEE-Comprehensive-Exams-Study-Guide-Rev.-May-2023.pdf",
+     "note": "Sample applied-linguistics exam questions.",
+     "iterations": "sample questions",
+     "years": "2023"
+    }
+   ]
+  },
+  {
+   "id": 32,
+   "name": "Philosophy & Ethics",
+   "status": "specific",
+   "fields": [
+    "Epistemology",
+    "Metaphysics",
+    "Philosophy of Mind",
+    "Philosophy of Science",
+    "Ethics & Moral Theory",
+    "Applied Ethics & Bioethics",
+    "Logic & Philosophy of Logic",
+    "Political Philosophy",
+    "AI Ethics & Philosophy of Technology"
+   ],
+   "archives": [
+    {
+     "src": "U. Oklahoma — Qualifying Exam: Ancient Philosophy 2019 (PDF)",
+     "url": "https://www.ou.edu/content/dam/cas/philosophy/docs/graduate-students/exams/qualifying/2019qualifyingexamancient.pdf",
+     "note": "A real 2019 qualifying exam paper.",
+     "iterations": "1+ papers",
+     "years": "2019"
+    },
+    {
+     "src": "Cambridge Philosophy — Part II Past Exam Papers",
+     "url": "https://www.phil.cam.ac.uk/curr-students/ugrads-exam-folder/II-past-exam-papers",
+     "note": "Past papers: Metaphysics, Philosophy of Mind, Ethics, Kant, Long Middle Ages.",
+     "iterations": "multi-year papers",
+     "years": "multi-year"
+    },
+    {
+     "src": "U. Memphis — Modern Philosophy Qualifying/Comprehensive Exam",
+     "url": "https://www.memphis.edu/philosophy/graduate/pdfs/modern_qual-comp_guidelines.pdf",
+     "note": "Four-hour administered exam, guidelines.",
+     "iterations": "format verified",
+     "years": "current"
+    },
+    {
+     "src": "U. Georgia — Qualifying Papers (Written Preliminary Comprehensive)",
+     "url": "https://www.phil.uga.edu/qualifying-papers-written-preliminary-comprehensive-examinations",
+     "note": "6000-8000 word qualifying papers.",
+     "iterations": "format verified",
+     "years": "current"
+    }
+   ]
+  },
+  {
+   "id": 33,
+   "name": "Business & Management",
+   "status": "none",
+   "fields": [
+    "Corporate Strategy & Competitive Dynamics",
+    "Operations Management & Supply Chains",
+    "Marketing Science & Consumer Behavior",
+    "Organizational Behavior & Leadership",
+    "Entrepreneurship & Innovation",
+    "Accounting & Financial Reporting",
+    "Technology Strategy & Management",
+    "Business Analytics & Decision Science",
+    "International Business & Globalization"
+   ],
+   "archives": [
+    {
+     "src": "Nearest: Duke Fuqua Finance quals / econ quals",
+     "url": "https://areas.fuqua.duke.edu/finance/phd-overview/curriculum-program-requirements/",
+     "note": "No public management-specific comp archive found; nearest verified are finance and economics quals.",
+     "iterations": "n/a",
+     "years": "n/a"
+    }
+   ]
+  },
+  {
+   "id": 34,
+   "name": "Education & Learning Science",
+   "status": "none",
+   "fields": [
+    "Learning Sciences & Instructional Design",
+    "Educational Technology & Online Learning",
+    "Curriculum & Assessment Design",
+    "Learning & Memory in Education",
+    "STEM Education",
+    "Educational Policy & Reform",
+    "Second Language Acquisition & TESOL",
+    "Special Education & Inclusive Learning"
+   ],
+   "archives": [
+    {
+     "src": "Honest note",
+     "url": "",
+     "note": "No public education PhD comprehensive exam archive found in public web search."
+    }
+   ]
+  },
+  {
+   "id": 35,
+   "name": "Engineering",
+   "status": "specific",
+   "fields": [
+    "Aerospace Engineering & Aerodynamics",
+    "Mechanical Engineering & Solid Mechanics",
+    "Civil & Structural Engineering",
+    "Electrical Power Systems",
+    "Industrial Control Engineering",
+    "Chemical Engineering & Process Design",
+    "Biomedical Engineering",
+    "Materials Engineering & Processing",
+    "Microelectronics & VLSI",
+    "Photonic & Optical Engineering",
+    "Environmental Engineering",
+    "Industrial & Systems Engineering",
+    "Engineering Design & CAD/CAM",
+    "Acoustics & Noise Engineering",
+    "Thermodynamics & Heat Transfer",
+    "Fluid Mechanics & Turbomachinery",
+    "Transportation & Traffic Engineering",
+    "Nuclear Engineering & Radiation Science"
+   ],
+   "archives": [
+    {
+     "src": "UNC Charlotte — PhD Mechanical Engineering Qualifying Exam (sample exams)",
+     "url": "https://mees.charlotte.edu/academic-programs/phd-mechanical-engineering/qualifying-exam/",
+     "note": "Two real sample exams + syllabus.",
+     "iterations": "2 sample papers",
+     "years": "2021"
+    },
+    {
+     "src": "Wayne State — ME PhD Preliminary Qualifying Exams",
+     "url": "https://engineering.wayne.edu/mechanical/resources/preliminary-exams",
+     "note": "Guidelines + exam areas.",
+     "iterations": "format",
+     "years": "current"
+    },
+    {
+     "src": "UT Austin ME — Area-specific Qualifying Exams",
+     "url": "https://www.me.utexas.edu/academics/graduate-program/qualifying-exams",
+     "note": "Area quals: acoustics, biomechanical, dynamic systems & control, manufacturing & design, materials, etc.",
+     "iterations": "per-area",
+     "years": "current"
+    },
+    {
+     "src": "UMBC ME — PhD Qualifying Examination Topics List",
+     "url": "https://me.umbc.edu/files/2014/10/Mechanical-Engineering-PhD-Qualifying-Examination-Topics-List.pdf",
+     "note": "Real topics list (math through thermal/fluids).",
+     "iterations": "topics",
+     "years": "2014"
+    },
+    {
+     "src": "BU — Systems Engineering PhD Qualifying Exam May 2024",
+     "url": "https://www.bu.edu/eng/files/2024/09/May-2024-SE-Qual-Exam-Assembled.pdf",
+     "note": "Real 2024 paper.",
+     "iterations": "1 paper",
+     "years": "2024"
+    },
+    {
+     "src": "UT Austin — Nuclear & Radiation Engineering PhD Qualifying Exam",
+     "url": "https://nuclear.engr.utexas.edu/academics/graduate-program/ph-d-qualifying-exam",
+     "note": "Three exams from five topics: reactor theory, health physics, radiation detection, etc.",
+     "iterations": "per-area",
+     "years": "current"
+    },
+    {
+     "src": "GaTech MSE — Graduate Comprehensive Exams",
+     "url": "https://www.mse.gatech.edu/graduate/quals",
+     "note": "Written exam: answer 6 of 18 questions, 4 hours.",
+     "iterations": "annual",
+     "years": "current"
+    },
+    {
+     "src": "BYU — Materials Science sample exam problems",
+     "url": "https://www.me.byu.edu/00000173-72d8-d630-a573-73fbc5b60000/materials-science-information-sheet",
+     "note": "Sample problems: structure & properties, mechanical behavior.",
+     "iterations": "sample problems",
+     "years": "current"
+    }
+   ]
+  },
+  {
+   "id": 36,
+   "name": "Energy & Sustainability",
+   "status": "none",
+   "fields": [
+    "Solar & Renewable Energy Systems",
+    "Wind Energy Engineering",
+    "Energy Storage & Battery Science",
+    "Smart Grids & Power Electronics",
+    "Nuclear Fission & Fusion Energy",
+    "Hydrogen & Fuel Cell Technology",
+    "Carbon Capture & Utilization",
+    "Sustainable Buildings & Urban Systems",
+    "Life Cycle Assessment & Sustainability Metrics"
+   ],
+   "archives": [
+    {
+     "src": "Nearest: ME/EE quals (energy areas)",
+     "url": "https://www.me.utexas.edu/academics/graduate-program/qualifying-exams",
+     "note": "No public energy-specific comp archive found; nearest verified are mechanical/electrical engineering quals.",
+     "iterations": "n/a",
+     "years": "n/a"
+    }
+   ]
+  }
+ ]
+}

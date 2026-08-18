@@ -1,0 +1,269 @@
+{
+  "domain": "Statistics & Probability",
+  "field": "Probability Theory",
+  "tests": [
+    {
+      "url": "https://www-math.umd.edu/quals.html",
+      "file": "_archives/https-www-math-umd-edu-quals-html-c03040b595.html",
+      "bytes": 221145,
+      "sha256": "c03040b5950b07eb980b61f43cd9d7c52a2e88ea14d259c12968d7618a9a51ce",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2026.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-15ef2bef5a.pdf",
+      "bytes": 135653,
+      "sha256": "15ef2bef5a40de0aba788c04b0e88dd2295a26d36a82f05a5dfa06bea959807f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2025.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-33f6942479.pdf",
+      "bytes": 108752,
+      "sha256": "33f6942479d7b6a9295f1852fe9d6906f895ff76cc27e0dd029d074b9355359a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2025.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-92c2167c97.pdf",
+      "bytes": 114466,
+      "sha256": "92c2167c97bb844700b72a3f9452d42a9292aad79bbb942579877f3fcb2668a5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2024.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-6872eb60ce.pdf",
+      "bytes": 104744,
+      "sha256": "6872eb60ce6ee108cbef0dd4a7222ac42ec12d66158c1d88187afaafe82a5133",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2024.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-b213c6572b.pdf",
+      "bytes": 111985,
+      "sha256": "b213c6572bea6e7197568b94138ef9616b5f2c5af3cd69722cc53c94121e87e2",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2023.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-06849ac81d.pdf",
+      "bytes": 114211,
+      "sha256": "06849ac81dc96c85c753f1aa42776b6b1663b9095b5ac08780eeb510ef8483b1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2023.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-a2f9bec776.pdf",
+      "bytes": 111885,
+      "sha256": "a2f9bec776fafd9590082f0c99cd06446b151e0f93066b3af004e194a6b44bec",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2022.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-b1367d97ef.pdf",
+      "bytes": 105984,
+      "sha256": "b1367d97ef59e179cd754251b030000dc76fb66514facc6a674d91f88a0f48cb",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2022.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-8e4054fef9.pdf",
+      "bytes": 111131,
+      "sha256": "8e4054fef9b0e7a08311efa63b3ea3b3c02f8ca90f1f67a99fc3c568b9b22a67",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2021.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-df5fa2f4e4.pdf",
+      "bytes": 104207,
+      "sha256": "df5fa2f4e4b2464262e133f622d1da97e6963fb10620702f82c514ff67702024",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2017.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-c74f5feafb.pdf",
+      "bytes": 249422,
+      "sha256": "c74f5feafb0cf72a3def55a0ae6f57c1096e4823bf8f3167b0402fc86f81d73a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2020.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-058f698da7.pdf",
+      "bytes": 124509,
+      "sha256": "058f698da788f4b5dadef1bbcdfdb16d1eb4504d56b26cc18ad1794397454903",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-OlderExams.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-0df8c3bf3e.pdf",
+      "bytes": 1302421,
+      "sha256": "0df8c3bf3ec0451a395e248b5bbcd1886e172244d4e7d303752ca3879052d8d5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2021.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-b487174e34.pdf",
+      "bytes": 105263,
+      "sha256": "b487174e344fe54fb906d4580017446894f80381bcdcd762d75ee4bb89c4aa6e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2019.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-39ceaab215.pdf",
+      "bytes": 125931,
+      "sha256": "39ceaab2153b06dc45c5789d4250ebfeb8ee4cf38ffec68a40d079a9bccfc9b6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2018.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-b1d192fe58.pdf",
+      "bytes": 111277,
+      "sha256": "b1d192fe587ff42f004a5febd1b1ec6badfc1d2a48e8e26a92b85d67a2ebb262",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2016.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-e6b893e0d2.pdf",
+      "bytes": 263387,
+      "sha256": "e6b893e0d2d50ee8d86a8b51551f8df244acaa10b7762d8c7ff333248d18418f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2015.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-b172b328cd.pdf",
+      "bytes": 426532,
+      "sha256": "b172b328cd5336522e3581a6601a7fd9f7fbcc91e78c846c837c5228863d4079",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2014.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-4d5f4e5cb1.pdf",
+      "bytes": 349222,
+      "sha256": "4d5f4e5cb167ae59afeeded2620243a549f0edae0ac61b4f3b455a073a2b34c5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2013.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-e7cf6747e6.pdf",
+      "bytes": 349286,
+      "sha256": "e7cf6747e60f3adf3aff57959763c2ad8bf7c71ed490f27d88163961f79fee70",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2012.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-0031acb397.pdf",
+      "bytes": 62175,
+      "sha256": "0031acb39702d5c7ea261db61cfbc06285044bcb147fc0b56f214f853417e24e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-January-2011.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-8d95db557a.pdf",
+      "bytes": 71341,
+      "sha256": "8d95db557a74e159313ec99ecae2f87a6d428d119ff3ca2543483123a0a5d060",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2020.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-bfd0dca66b.pdf",
+      "bytes": 111247,
+      "sha256": "bfd0dca66ba58724cd202b2148059fb697de46381608f19b91796d3cd6caea77",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2019.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-93c87de6a0.pdf",
+      "bytes": 115179,
+      "sha256": "93c87de6a013d431bae1c91cceefdfa4a01cce1c8e1d151fdf0fdc770645435e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2018.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-2d41777d2b.pdf",
+      "bytes": 114751,
+      "sha256": "2d41777d2bf5eca919e90979586976bff538e333aa3c2ec2daee4692566987af",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2017.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-da32b6f9f0.pdf",
+      "bytes": 179980,
+      "sha256": "da32b6f9f0738919f00bd73b1160fa82b9363cd8a06f572fba03dbd6f89e27ab",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2016.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-e4989d0ee0.pdf",
+      "bytes": 236205,
+      "sha256": "e4989d0ee0aed6a227ec37aae0958311d22a24fb402a9ff666d1da1cc1b2fc18",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2015.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-f3ec3cd571.pdf",
+      "bytes": 244992,
+      "sha256": "f3ec3cd57158842f7e47b28fdcf78249f2f5c8cbe4a7c2da4cdab1b5c294c18c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2014.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-9a9d840b3f.pdf",
+      "bytes": 369235,
+      "sha256": "9a9d840b3f7b2a0d35a744f16f1972065c577c5df3c868970a046513bb05763c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/pdfs/quals/Algebra/Algebra-August-2013.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-pdfs-quals-20aadcb820.pdf",
+      "bytes": 433767,
+      "sha256": "20aadcb8205f68832726b151598e50b813d2e2eda7c70c71bdf162c2384eead3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www-math.umd.edu/images/SetupHybridSeminar.pdf",
+      "file": "_archives/https-www-math-umd-edu-images-setuphybri-c2cec2edb0.pdf",
+      "bytes": 87298,
+      "sha256": "c2cec2edb0287561b803c41f0c9d7a7fd77491067e6eb199578a71ff60e3cc47",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www-math.umd.edu/quals.html",
+      "label": "UMD Probability PhD quals"
+    }
+  ]
+}

@@ -114,6 +114,12 @@ class TestRosterShape:
             "delete_path",
             "run_privileged_command",
             "gmail_send",  # v5.0: sending email always requires a human
+            # v8.4: moving mail is reversible but still changes what the user
+            # sees, so all three are gated. Permanent deletion is not offered
+            # at all, so there is no ungated destructive mail path.
+            "gmail_archive",
+            "gmail_trash",
+            "gmail_untrash",
             "spotify_playback_control",  # v5.7: changing playback needs a human
             "spotify_play",
             "browser_submit",  # v5.25: submitting a form (login/signup) needs a human

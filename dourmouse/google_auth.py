@@ -59,6 +59,10 @@ _IDENTITY_SCOPES = "openid email profile "
 _FULL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly "
     "https://www.googleapis.com/auth/gmail.send "
+    # v8.4: archive / trash / untrash. modify covers label changes and the
+    # trash+untrash pair; it does NOT grant permanent deletion, which needs
+    # the separate mail.google.com scope and is deliberately not requested.
+    "https://www.googleapis.com/auth/gmail.modify "
     "https://www.googleapis.com/auth/calendar.readonly "
     "https://www.googleapis.com/auth/drive.readonly "
     "https://www.googleapis.com/auth/drive.file"

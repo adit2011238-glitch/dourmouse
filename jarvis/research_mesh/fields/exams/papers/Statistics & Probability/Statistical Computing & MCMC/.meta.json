@@ -1,0 +1,261 @@
+{
+  "domain": "Statistics & Probability",
+  "field": "Statistical Computing & MCMC",
+  "tests": [
+    {
+      "url": "https://math.uiowa.edu/graduate/phd-qualifying-ms-comprehensive-exam-archives",
+      "file": "_archives/https-math-uiowa-edu-graduate-phd-qualif-b641b89a84.html",
+      "bytes": 88163,
+      "sha256": "b641b89a84e4977bc5f33119db83c64d39964e94bf8f10b2f2c6d08465a6c2a1",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2026_2.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-b6cbf8b67d.pdf",
+      "bytes": 157485,
+      "sha256": "b6cbf8b67dfb09d12e3987d378a19b451708f89af07c5bf740ab6eba7987dc24",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2025.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-696b92cd32.pdf",
+      "bytes": 145914,
+      "sha256": "696b92cd32c842a0c56ef8abfc48b7e9e697ce4553a72a862646dbbaed7c2b49",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2025.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-f416043916.pdf",
+      "bytes": 216733,
+      "sha256": "f4160439167c22d5c2db4c3da836a66708f98a31e5335711dfc8e0c5c4f58fb1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2024.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-d190941dba.pdf",
+      "bytes": 62718,
+      "sha256": "d190941dba2a705e8e59d4f325ff91f1b82f62b95842a335483c43239b828c48",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2024.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-476d926fcf.pdf",
+      "bytes": 203575,
+      "sha256": "476d926fcf8a7de23136a7d5dd1a8d7a67bca5cb72c7cff6ac2a7607a2dcdfcc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2023.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-2fe5919775.pdf",
+      "bytes": 167500,
+      "sha256": "2fe591977591a3dad0607e5b6c4d9278627379acfd1561444b7c1e86b4001a35",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2025_0.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-f3bc379167.pdf",
+      "bytes": 87896,
+      "sha256": "f3bc37916780837572285edc0c5df4825d6880f76291505a0f5ba9c430c6031a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2025_0.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-62c7c3ff63.pdf",
+      "bytes": 84792,
+      "sha256": "62c7c3ff636487555dd8e5cbcc3f506748b28358e21dac53c3cc06df7b4b9c4c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2024_0.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-dd614550b9.pdf",
+      "bytes": 87321,
+      "sha256": "dd614550b91587b1709a683a43ef36b4861c2a38f04465b3c1ed319cb42ebe2e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2024_0.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-6686202114.pdf",
+      "bytes": 77642,
+      "sha256": "66862021143e00555162b05a3f52c0387e2e84caacd29321892af58458ef6034",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2023_0.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-1c890be245.pdf",
+      "bytes": 75749,
+      "sha256": "1c890be245bb6f64c9d7e2b3232a4d2c5c2108b2a4f3014ac95d94eb4c0cd17e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2026_0.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-0d4b4f11b9.pdf",
+      "bytes": 149891,
+      "sha256": "0d4b4f11b9a712911a5b0ced24e64c153bbc0cc441739a64ac6afdb701002c2a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2025_1.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-056573159c.pdf",
+      "bytes": 159748,
+      "sha256": "056573159c4c2b289bc49424d9c01e448d08dedd6dfbc448ab1c1ddd7ead6015",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2025_2.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-25965ba394.pdf",
+      "bytes": 143979,
+      "sha256": "25965ba394101721f4b037aba797cf6334be1314b677e7e105affed13e7effd6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2024_2.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-1b44a848ff.pdf",
+      "bytes": 144036,
+      "sha256": "1b44a848ff44a2fba54d55877219f6a49c45fed3b57f816140571dc847a22d1e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2024_1.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-21fa459048.pdf",
+      "bytes": 126626,
+      "sha256": "21fa459048933b119c43c7b61b55a2028590bbccd50e613d5db4c6eec2c404e8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2023_1.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-7324ef8672.pdf",
+      "bytes": 105047,
+      "sha256": "7324ef8672831d617ad42d7c589cbead8f08e79dd39d6869e2e2bbdba175b502",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2026_ODE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-4c029062f4.pdf",
+      "bytes": 123284,
+      "sha256": "4c029062f49f0875e572797892dae42c4ed51210015af22a29454c4fe9c08e47",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2025_ODE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-163c9b7ac2.pdf",
+      "bytes": 116638,
+      "sha256": "163c9b7ac2ad8e6330368e0da15140b29e569517383f045bd5bf1192a0a4e8a0",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2024_ODE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-6e51c44870.pdf",
+      "bytes": 113340,
+      "sha256": "6e51c448701bf2fa98dd38e7eb4d7f6b93f6cbf56665343708ba8fa999bde7a3",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2023_ODE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-9fa7129d35.pdf",
+      "bytes": 128219,
+      "sha256": "9fa7129d35821b0ebcafa1946bbe751ad0161e12e6e92ba098316beeb70c9752",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2026_PDE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-aae42ffb86.pdf",
+      "bytes": 87950,
+      "sha256": "aae42ffb8657dd8824f0b3b1e620dcf1e78f3068ca67a8b15d7fa27ce28e904c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2025_PDE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-f7873627e4.pdf",
+      "bytes": 96136,
+      "sha256": "f7873627e4e7514ae09f1714757dd0a5917aed7ba265bab24bdd9ef71e6ef598",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2025_PDE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-78385fb6bf.pdf",
+      "bytes": 96676,
+      "sha256": "78385fb6bfbe8cb76f5beddbc005209978c322e17cc5d604c73d59162d847297",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2024_PDE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-49f761999c.pdf",
+      "bytes": 93693,
+      "sha256": "49f761999c240e8c241a35bec0b183b3372724f67834a4d1904b02fbab3dddbb",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2024_PDE.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-374a7d6119.pdf",
+      "bytes": 91621,
+      "sha256": "374a7d61192873fc36ec6a2b9b0c0998263f2c4628c4cc2e58eca9adb5f802b6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2026_1.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-080723eb73.pdf",
+      "bytes": 152192,
+      "sha256": "080723eb73bcf533a7ea80247072fb634763d6bee8d017ad3ac70af3bc010504",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2025_2.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-c11d02f045.pdf",
+      "bytes": 134945,
+      "sha256": "c11d02f045f8b883184a8241a27531d5bc2e6f17bddd70300e40b279dce08065",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Spring-2025_1.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-0a89d71aec.pdf",
+      "bytes": 201490,
+      "sha256": "0a89d71aec44f06c1b52ed5bd60052506869d8ea87f86999fb6b4266d478a324",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://math.uiowa.edu/sites/math.uiowa.edu/files/2026-04/Fall-2024_1.pdf",
+      "file": "_archives/https-math-uiowa-edu-sites-math-uiowa-ed-2ff756bf04.pdf",
+      "bytes": 123008,
+      "sha256": "2ff756bf047c935306f16f7aa0cdaabd8d4f78c90908bb1bccf2d2965e349872",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://math.uiowa.edu/graduate/phd-qualifying-ms-comprehensive-exam-archives",
+      "label": "U. Iowa PhD Qualifying/MS Comprehensive archive"
+    }
+  ]
+}

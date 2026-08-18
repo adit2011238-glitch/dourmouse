@@ -1,0 +1,261 @@
+{
+  "domain": "Engineering",
+  "field": "Biomedical Engineering",
+  "tests": [
+    {
+      "url": "https://mees.charlotte.edu/academic-programs/phd-mechanical-engineering/qualifying-exam/",
+      "file": "_archives/https-mees-charlotte-edu-academic-progra-6673520ee8.html",
+      "bytes": 118625,
+      "sha256": "6673520ee88937207a36356eab8644b0a535e7362eaaa02a470c4b79caac6b9a",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2024/11/Instructions-to-complete-Qualifying-Exam-Report.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-e5732ab701.pdf",
+      "bytes": 291847,
+      "sha256": "e5732ab701dd896264c4b12e042c4443e988a175e4202f82fed07ab8262df51a",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Control-Qual_Syllabus_2023-version.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-97293fab44.pdf",
+      "bytes": 314594,
+      "sha256": "97293fab447295c9bce8d02cefe9aa4667a0bdc9e743be5de98029e5b13c564c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/sample-exam-controls-1.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-37c7c8b357.pdf",
+      "bytes": 97932,
+      "sha256": "37c7c8b357791d1a8e45176fd418f7e6dc999fdeb8bec7f9aa503768b3029244",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/sample-exam-controls-2.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-71299ece9e.pdf",
+      "bytes": 766459,
+      "sha256": "71299ece9e9ddeabda5ebf2c71a4e7b8265196ea6cd616d0297975018ed5b248",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2026/02/Control_Sample-Exam-3.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-c767922dbf.pdf",
+      "bytes": 997619,
+      "sha256": "c767922dbf73f749cc002be33a0fa0e014676fd3723afcacf84b869418d83d41",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/dynamics-syllabus-2016.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-5132d223a6.pdf",
+      "bytes": 21584,
+      "sha256": "5132d223a62d0339152c1e26ea984acdaed5cfaa3810a93777744a3e911d6486",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/dynamics-q-sample-2016.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-bb10b955be.pdf",
+      "bytes": 2080590,
+      "sha256": "bb10b955bed169b4d306c164880393d6a1f890ca627a136944a17a55dbff5406",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Dynamics_Fall-2022.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-4887567166.pdf",
+      "bytes": 1236797,
+      "sha256": "4887567166a4a05abf3de50d40a5563600a654e89023c0c01122f5008e2e63a7",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Dynamics_Sample-Exam_3-1.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-fdd6ade766.pdf",
+      "bytes": 911947,
+      "sha256": "fdd6ade7669cf5488b56bbbfaff1782a528434641b020e4929dbacd6d887e96e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Dynamics_Equation-Sheets-1.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-683d8c69a8.pdf",
+      "bytes": 857032,
+      "sha256": "683d8c69a8d25879ba5d0721117863e2339e930e79fe95ca93f5ffddecf6ec2b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2026/03/Fluid-Mechanics-PhD-Qualifying-Exam-Syllabus-March-2026-combined.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-7823b34f1b.pdf",
+      "bytes": 883077,
+      "sha256": "7823b34f1b9ec0679dc8c672817305689ed074f65084ff36d2cdb6c741b8fedb",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/fluid-mechanics-sample-exam-1.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-672d458f54.pdf",
+      "bytes": 45948,
+      "sha256": "672d458f540149a2cfc895855f342ab53e30a4d99b4d857256d7ab594ca8a9ad",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/fluid-mechanics-sample-exam-2.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-1204632d2b.pdf",
+      "bytes": 462597,
+      "sha256": "1204632d2b5571d28e6386a26e9edaf55b260c6a225f3499b3d007b0c37ec23e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/fluid-mechanics-sample-exam-3.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-46fb4d04e1.pdf",
+      "bytes": 350944,
+      "sha256": "46fb4d04e10f6597de1e987b177395087055ffbdd09b983b5f4d18bcdc8a6991",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2024/09/Fluid-Mechanics-Qualifying-Examination_Sample-Exam-4.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-572df27dc7.pdf",
+      "bytes": 574357,
+      "sha256": "572df27dc738492fda98074715058c88e4cc6e3678a46a1f57775a7567cb88d9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2026/03/Heat-Transfer-PhD-Qualifying-Exam-Syllabus-excerpt-Spring-2026v5.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-aac8b1d21c.pdf",
+      "bytes": 69979,
+      "sha256": "aac8b1d21c320d10453b13222e4728fb6a85abaa31455918fcfa423758dec209",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/fluids-heat-transfer-sample-2.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-33f7a4d528.pdf",
+      "bytes": 653687,
+      "sha256": "33f7a4d528967a5c66e55da7ae145bece64efc2747cef7bb2241487030231bc9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2024/09/Heat-Transfer_Qualifying-Exam_Sample-Exam-2.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-cc1da28dff.pdf",
+      "bytes": 141513,
+      "sha256": "cc1da28dfff9830556a8486e9432e2c0df9ad19267947869b0f4647c8427f12c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/instrumentation-syllabus.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-8dc76a518c.pdf",
+      "bytes": 97666,
+      "sha256": "8dc76a518c85c13c36cd7ef4ec57bf33bad84395423443a30bd8e37a8446315e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/instrumetation-sample-1.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-dc54c21f7f.pdf",
+      "bytes": 37644,
+      "sha256": "dc54c21f7ff8450ea5817a1e2a04be7143364b70e1a2c4fbc3f998a2ca1c05f4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Manufacturing-Qualifier_Syllabus_2023-version.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-ef0db568ae.pdf",
+      "bytes": 180915,
+      "sha256": "ef0db568aecb49bdbf4e2eff5a5fa51cc368220e1d6ec181af8d4c95ddc60709",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/Manufacturing_Sample-Exam_1.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-25076e1738.pdf",
+      "bytes": 188231,
+      "sha256": "25076e173858edf902f97ab8f4f288fdc4670d8e1c933f15d374b09982d5a880",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2026/01/Manufacturing_Sample-Exam-2.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-4e49d4fb40.pdf",
+      "bytes": 171953,
+      "sha256": "4e49d4fb4088cdb1503c22a4748c93b0133de6b7a126e50376847b6590d8fa3b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2026/01/Manufacturing_Sample-Exam-3.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-fc8ad49785.pdf",
+      "bytes": 258275,
+      "sha256": "fc8ad49785311572b869b56adcef8678772563d1024c03697608f61471f421ee",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/machine-design-sample-082112.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-73bfdbf6a5.pdf",
+      "bytes": 146606,
+      "sha256": "73bfdbf6a5d0339d46279f99fc7c9c493b80c3aaa842e27f3aded1aefb9cd803",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/materials-science-syllabus-11062014.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-6cd2c95853.pdf",
+      "bytes": 91178,
+      "sha256": "6cd2c9585394ada0f7a82ac55d2bdcbc3b173e2ff36d69b63e46ccf4e0fcbba5",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/materials-sample-2.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-deb3daf33d.pdf",
+      "bytes": 562168,
+      "sha256": "deb3daf33da5e0fae5084a3bbcac664a9960e6674ed49f6928b04dea5d23e791",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2024/05/Q-Exam-Metrology-Syllabus-2023-rev-3.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-bf4ca7415c.pdf",
+      "bytes": 149501,
+      "sha256": "bf4ca7415c2f800189d1d2dcb3a92a49b5fc09da2292d58d1bafd1cbd79d7135",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2023/12/metrology-sample-2.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-1b3a0a5121.pdf",
+      "bytes": 335736,
+      "sha256": "1b3a0a51219c0c05f9514b71cc0b3f41f7c21d0f7d72d706b97087662337916d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://mees.charlotte.edu/wp-content/uploads/sites/965/2024/09/for_website_-metrology-exam-all_combined.pdf",
+      "file": "_archives/https-mees-charlotte-edu-wp-content-uplo-83091a2f4e.pdf",
+      "bytes": 208917,
+      "sha256": "83091a2f4e6765c25b94e70674de63599c3e145a81055f8745f436d05986e431",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://mees.charlotte.edu/academic-programs/phd-mechanical-engineering/qualifying-exam/",
+      "label": "UNC Charlotte \u2014 ME PhD Qualifying Exam (2 real sample exams)"
+    }
+  ]
+}

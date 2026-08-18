@@ -1,0 +1,21 @@
+{
+  "domain": "Neuroscience & Cognitive Science",
+  "field": "Neurophysiology & Electrophysiology",
+  "tests": [
+    {
+      "url": "https://medschool.vanderbilt.edu/brain-institute/neuroscience-ph-d-program/phd-qualifying-exam/",
+      "file": "_archives/https-medschool-vanderbilt-edu-brain-ins-0f8beca0ae.html",
+      "bytes": 155505,
+      "sha256": "0f8beca0ae57baf10e81cba851ae23f85975dd85b39fab51f037a2692baec299",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://medschool.vanderbilt.edu/brain-institute/neuroscience-ph-d-program/phd-qualifying-exam/",
+      "label": "Vanderbilt Brain Institute \u2014 PhD Qualifying Exam (format)"
+    }
+  ]
+}

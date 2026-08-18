@@ -1,0 +1,21 @@
+{
+  "domain": "Business & Management",
+  "field": "Organizational Behavior & Leadership",
+  "tests": [
+    {
+      "url": "https://areas.fuqua.duke.edu/finance/phd-overview/curriculum-program-requirements/",
+      "file": "_archives/https-areas-fuqua-duke-edu-finance-phd-o-d89d56244e.html",
+      "bytes": 42572,
+      "sha256": "d89d56244ef8696306b06f8fc8ce40a97598e445148ad105eb560ede7773b99e",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://areas.fuqua.duke.edu/finance/phd-overview/curriculum-program-requirements/",
+      "label": "No public mgmt comps \u2014 nearest verified: Duke Fuqua Finance quals"
+    }
+  ]
+}

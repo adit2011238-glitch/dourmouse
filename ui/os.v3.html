@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dourmouse</title>
+<style>
+/* =====================================================================
+   DOURMOUSE — personal AI operating system
+
+   Design position: a working instrument, not a chat toy and not a sci-fi
+   HUD. Hierarchy comes from type, spacing and restraint. One accent, used
+   only where the system is telling you something.
+
+   Every value on screen is fetched from the running backend. Nothing here
+   is placeholder or decorative telemetry — if an endpoint has no answer,
+   the UI says so rather than inventing one.
+   ===================================================================== */
+
+:root {
+  /* ACHROMATIC BY POLICY.
+     Every consumer AI chat spends its colour budget on a brand accent —
+     Claude warm orange, ChatGPT green, Perplexity teal, Gemini blue. Do that
+     and you look like them no matter which hue you pick, because the accent
+     is decoration competing with content.
+
+     Dourmouse spends colour ONLY on system state. Green means a node is up,
+     amber means it wants you, red means it failed. Nothing else in this
+     interface is coloured — selection, focus and emphasis are carried by
+     weight, ground and rule. If you see colour here, the system is telling
+     you something. */
+  --v0:  #0A0A0B;   /* page */
+  --v1:  #0F0F11;   /* panel */
+  --v2:  #141417;   /* raised */
+  --v3:  #1A1A1E;   /* hover */
+  --v4:  #222227;   /* selected ground */
+  --line:#1F1F23;
+  --line-2:#2B2B31;
+
+  --t0:  #F2F2F3;   /* primary text */
+  --t1:  #B4B4BA;   /* secondary */
+  --t2:  #85858D;   /* tertiary — meets AA on --v1 */
+
+  /* semantic only */
+  --up:   #5BA97C;
+  --wait: #C9A227;
+  --down: #C2685C;
+
+  --sel: var(--v4);
+  --r:  4px;
+  --r2: 8px;
+
+  /* Mono carries the chrome: labels, metadata, status, navigation. Prose is
+     the only thing set in a humanist face. The split is the identity —
+     an instrument that talks, not a chat app with a monospace font. */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+
+  --rail: 220px;
+  --gutter: 116px;   /* per-turn metadata column */
+  --dur: 130ms;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --v0:#FCFCFB; --v1:#FFFFFF; --v2:#F5F5F3; --v3:#EFEFEC; --v4:#E6E6E2;
+    --line:#E7E7E3; --line-2:#D5D5D0;
+    --t0:#131315; --t1:#4E4E55; --t2:#6B6B73;
+    --up:#2F7D52; --wait:#8A6A12; --down:#A63F33;
+  }
+}
+:root[data-theme="light"] {
+  --v0:#FCFCFB; --v1:#FFFFFF; --v2:#F5F5F3; --v3:#EFEFEC; --v4:#E6E6E2;
+  --line:#E7E7E3; --line-2:#D5D5D0;
+  --t0:#131315; --t1:#4E4E55; --t2:#6B6B73;
+  --up:#2F7D52; --wait:#8A6A12; --down:#A63F33;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--v0);color:var(--t0);
+  font-family:var(--sans);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  font-feature-settings:"cv02","cv03","cv04","ss01";
+}
+button,input,textarea,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--t0);outline-offset:2px;border-radius:3px}
+::selection{background:var(--t0);color:var(--v0)}
+
+/* ---------- shell ---------- */
+.app{display:grid;grid-template-columns:var(--rail) 1fr;grid-template-rows:auto 1fr;height:100dvh}
+.app.railoff{grid-template-columns:0 1fr}
+
+/* ---------- header ---------- */
+header{
+  grid-column:1/-1;display:flex;align-items:center;gap:14px;
+  padding:0 14px;height:46px;background:var(--v1);
+  border-bottom:1px solid var(--line);
+}
+.wordmark{
+  display:flex;align-items:center;gap:9px;font-size:13px;
+  font-weight:620;letter-spacing:.14em;text-transform:uppercase;
+}
+.mk{width:7px;height:7px;background:var(--t0);border-radius:1px;transform:rotate(45deg)}
+.iconbtn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:30px;height:30px;border:1px solid transparent;background:none;
+  border-radius:var(--r);cursor:pointer;color:var(--t1);
+}
+.iconbtn:hover{background:var(--v3);color:var(--t0)}
+.hspace{margin-left:auto}
+.hstats{display:flex;align-items:center;gap:4px}
+.stat{
+  display:flex;align-items:center;gap:7px;padding:5px 10px;
+  border:1px solid var(--line);background:var(--v2);
+  border-radius:var(--r);cursor:pointer;font-size:11.5px;color:var(--t1);
+  transition:border-color var(--dur),background var(--dur);
+  min-height:30px;white-space:nowrap;
+}
+.stat:hover{border-color:var(--line-2);background:var(--v3);color:var(--t0)}
+.stat b{color:var(--t0);font-weight:550;font-family:var(--mono);font-size:11px}
+.led{width:6px;height:6px;border-radius:50%;background:var(--t2);flex:none}
+.led.ok{background:var(--up);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--up) 18%,transparent)}
+.led.bad{background:var(--down);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--down) 18%,transparent)}
+.led.warn{background:var(--wait)}
+.led.live{animation:brk 1.4s ease-in-out infinite}
+@keyframes brk{0%,100%{opacity:1}50%{opacity:.32}}
+
+/* ---------- rail ---------- */
+.rail{
+  background:var(--v1);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden;
+}
+.app.railoff .rail{display:none}
+.railtop{padding:12px 12px 8px}
+.newbtn{
+  width:100%;min-height:34px;display:flex;align-items:center;gap:9px;
+  padding:8px 11px;border:1px solid var(--line-2);background:var(--v2);
+  border-radius:var(--r);cursor:pointer;font-size:13px;font-weight:520;
+  transition:border-color var(--dur),background var(--dur);
+}
+.newbtn:hover{border-color:var(--t0);background:var(--v3)}
+.newbtn kbd{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--t2)}
+
+.navsec{padding:6px 8px}
+.navlbl{
+  font-size:11px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--t2);padding:8px 8px 5px;font-weight:600;
+}
+.nav{
+  width:100%;display:flex;align-items:center;gap:10px;min-height:32px;
+  padding:6px 9px;border:none;background:none;border-radius:var(--r);
+  cursor:pointer;text-align:left;color:var(--t1);font-size:13px;
+  transition:background var(--dur),color var(--dur);
+}
+.nav:hover{background:var(--v3);color:var(--t0)}
+.nav[aria-current="page"]{background:var(--sel);color:var(--t0);font-weight:550}
+.nav .gl{width:14px;text-align:center;font-size:12px;flex:none;opacity:.85}
+.nav .tail{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--t2)}
+
+.convs{flex:1;overflow-y:auto;padding:2px 8px 8px;min-height:0}
+.conv{
+  width:100%;text-align:left;border:none;background:none;cursor:pointer;
+  padding:7px 9px;border-radius:var(--r);color:var(--t1);
+  display:block;transition:background var(--dur);
+}
+.conv:hover{background:var(--v3);color:var(--t0)}
+.conv .t{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conv .m{font-size:11px;color:var(--t2);font-family:var(--mono)}
+.railfoot{border-top:1px solid var(--line);padding:9px 10px;font-size:11px;color:var(--t2)}
+.railfoot .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- main ---------- */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.scroll{flex:1;overflow-y:auto;min-height:0}
+.col{max-width:780px;margin:0 auto;padding:26px 26px 10px}
+
+/* ---------- welcome ---------- */
+.welcome{max-width:780px;margin:0 auto;padding:10vh 26px 0}
+.welcome h1{font-size:25px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px}
+.welcome .sub{color:var(--t1);margin:0 0 26px;font-size:14.5px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:8px}
+.card{
+  text-align:left;padding:13px 14px;border:1px solid var(--line);
+  background:var(--v1);border-radius:var(--r2);cursor:pointer;
+  transition:border-color var(--dur),background var(--dur),transform var(--dur);
+  min-height:44px;
+}
+.card:hover{border-color:var(--t0);background:var(--v2);transform:translateY(-1px)}
+.card .h{font-size:13px;font-weight:550;margin-bottom:3px}
+.card .d{font-size:11.5px;color:var(--t2)}
+
+/* ---------- turns ---------- */
+.turn{margin-bottom:26px;animation:rise 220ms cubic-bezier(.2,.7,.3,1)}
+@keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.who-row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.who-row .nm{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2);font-weight:600}
+.you .body{
+  border-left:2px solid var(--line-2);padding:2px 0 2px 13px;
+  color:var(--t0);white-space:pre-wrap;word-break:break-word;font-size:14.5px;
+}
+.msg{font-size:14.8px;line-height:1.68;color:var(--t0)}
+.msg p{margin:0 0 12px}
+.msg p:last-child{margin-bottom:0}
+.msg ul,.msg ol{margin:10px 0;padding-left:20px}
+.msg li{margin-bottom:4px}
+.msg li::marker{color:var(--t0)}
+.msg strong{font-weight:620}
+.msg a{color:var(--t0);text-underline-offset:2px}
+.msg h1,.msg h2,.msg h3{font-size:15px;font-weight:620;margin:16px 0 7px;letter-spacing:-.01em}
+.msg code{font-family:var(--mono);font-size:12.5px;background:var(--v3);border:1px solid var(--line);padding:1px 5px;border-radius:4px}
+.msg pre{
+  font-family:var(--mono);font-size:12.5px;line-height:1.55;background:var(--v1);
+  border:1px solid var(--line);border-radius:var(--r2);padding:12px 14px;
+  overflow-x:auto;margin:12px 0;position:relative;
+}
+.msg pre code{background:none;border:none;padding:0}
+.msg table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;display:block;overflow-x:auto}
+.msg th,.msg td{border:1px solid var(--line);padding:7px 10px;text-align:left}
+.msg th{background:var(--v3);font-weight:600}
+.caret{display:inline-block;width:6px;height:1.02em;margin-left:2px;vertical-align:text-bottom;background:var(--t0);animation:brk 1s steps(2,start) infinite}
+
+.acts{display:flex;flex-direction:column;gap:4px;margin-bottom:9px}
+.act{
+  display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--t2);
+  padding:4px 9px;border:1px solid var(--line);background:var(--v1);
+  border-radius:5px;width:fit-content;max-width:100%;
+  animation:rise 200ms ease-out;
+}
+.act .nm{font-family:var(--mono);font-size:11px;color:var(--t1)}
+.act.bad{border-color:var(--down);color:var(--down)}
+.act .spin{width:8px;height:8px;border:1.5px solid var(--line-2);border-top-color:var(--t0);border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+.rowacts{display:flex;gap:5px;margin-top:11px;opacity:0;transition:opacity var(--dur)}
+.turn:hover .rowacts,.rowacts:focus-within{opacity:1}
+.tinybtn{
+  border:1px solid var(--line);background:var(--v1);color:var(--t2);
+  border-radius:5px;padding:4px 9px;font-size:11px;cursor:pointer;min-height:28px;
+}
+.tinybtn:hover{border-color:var(--t0);color:var(--t0)}
+
+/* ---------- approval ---------- */
+.approve{
+  border:1px solid var(--wait);border-left:2px solid var(--wait);
+  background:var(--v1);border-radius:var(--r2);padding:14px 16px;margin:0 0 16px;
+}
+.approve .t{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--wait);font-weight:650;margin-bottom:7px}
+.approve .p{font-size:14px;color:var(--t0);margin-bottom:13px;word-break:break-word;white-space:pre-wrap}
+.approve .r{display:flex;gap:7px;flex-wrap:wrap}
+.btn{min-height:36px;padding:8px 15px;border-radius:var(--r);border:1px solid var(--line-2);background:var(--v2);cursor:pointer;font-size:13px;font-weight:550}
+.btn:hover{border-color:var(--t0)}
+.btn.go{background:var(--t0);color:var(--v0);border-color:var(--t0)}
+.approve.done{border-color:var(--line);border-left-color:var(--t2)}
+.approve.done .t{color:var(--t2)}
+
+.errbox{border:1px solid var(--down);border-left:2px solid var(--down);background:var(--v1);border-radius:var(--r2);padding:13px 15px;margin-bottom:16px;font-size:13.5px}
+.errbox .t{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--down);font-weight:650;margin-bottom:5px}
+.errbox .f{color:var(--t1);margin-top:7px;font-size:12.5px}
+
+/* ---------- composer ---------- */
+.dock{border-top:1px solid var(--line);background:var(--v1);padding:12px 26px 16px}
+.dockcol{max-width:780px;margin:0 auto}
+.queue{display:flex;flex-direction:column;gap:5px;margin-bottom:8px}
+.qitem{
+  display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--t1);
+  border:1px dashed var(--line-2);background:var(--v2);border-radius:var(--r);
+  padding:7px 11px;animation:rise 180ms ease-out;
+}
+.qitem .qn{font-family:var(--mono);font-size:11px;color:var(--t0);flex:none}
+.qitem .qt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qitem button{border:none;background:none;color:var(--t2);cursor:pointer;font-size:14px;min-height:28px;min-width:28px;border-radius:4px}
+.qitem button:hover{color:var(--down);background:var(--v3)}
+
+.box{border:1px solid var(--line-2);background:var(--v2);border-radius:var(--r2);transition:border-color var(--dur)}
+.box:focus-within{border-color:var(--t0)}
+#ta{
+  width:100%;border:none;background:none;outline:none;resize:none;
+  font-size:14.5px;line-height:1.55;padding:13px 15px 4px;
+  max-height:210px;min-height:46px;display:block;
+}
+.boxfoot{display:flex;align-items:center;gap:8px;padding:6px 8px 8px 13px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--t2);
+  border:1px solid var(--line);background:var(--v1);border-radius:99px;
+  padding:4px 10px;min-height:28px;cursor:default;font-family:var(--mono);
+}
+.chip.act{cursor:pointer}
+.chip.act:hover{border-color:var(--t0);color:var(--t0)}
+#go{
+  margin-left:auto;min-height:34px;min-width:34px;padding:0 14px;border:none;
+  border-radius:var(--r);background:var(--t0);color:var(--v0);
+  font-weight:620;cursor:pointer;font-size:13px;
+}
+#go:disabled{opacity:.4;cursor:not-allowed}
+.hint{font-size:11px;color:var(--t2);margin-top:7px;display:flex;gap:12px;flex-wrap:wrap}
+.hint kbd{font-family:var(--mono);font-size:11px;color:var(--t1);border:1px solid var(--line);border-radius:3px;padding:0 4px}
+
+/* ---------- panel ---------- */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity var(--dur);z-index:60}
+.scrim.on{opacity:1;pointer-events:auto}
+.panel{
+  position:fixed;top:0;right:0;bottom:0;width:min(430px,100vw);
+  background:var(--v1);border-left:1px solid var(--line);z-index:61;
+  transform:translateX(101%);transition:transform 220ms cubic-bezier(.2,.7,.3,1);
+  display:flex;flex-direction:column;
+}
+.panel.on{transform:none}
+.panelhead{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.panelhead h2{font-size:12px;font-weight:640;letter-spacing:.12em;text-transform:uppercase;margin:0}
+.panelbody{flex:1;overflow-y:auto;padding:16px}
+.kv{display:grid;grid-template-columns:112px 1fr;gap:9px 12px;font-size:13px;margin-bottom:18px}
+.kv dt{color:var(--t2);font-size:11.5px;letter-spacing:.04em}
+.kv dd{margin:0;font-family:var(--mono);font-size:12.5px;word-break:break-word}
+.sec{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--t2);font-weight:650;margin:22px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.sec:first-child{margin-top:0}
+.item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:none}
+.item .g{flex:1;min-width:0}
+.item .n{font-size:13px;font-weight:550}
+.item .d{font-size:11.5px;color:var(--t2);word-break:break-word;margin-top:1px}
+.item .s{font-size:11px;font-family:var(--mono);color:var(--t2);flex:none;display:flex;align-items:center;gap:6px}
+.note{font-size:12.5px;color:var(--t2);line-height:1.55}
+.bar{height:3px;background:var(--v3);border-radius:2px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--t0)}
+
+/* ---------- responsive ---------- */
+@media (max-width:900px){
+  /* Touch ergonomics. Desktop keeps its density deliberately — 44px is a
+     finger target, not a mouse one — but every control a thumb can reach
+     gets the floor, and nothing may push the page sideways. */
+  html,body{overflow-x:hidden;max-width:100vw}
+  .app{max-width:100vw;overflow-x:hidden}
+  button,.nav,.conv,.stat,.iconbtn,.chip,.tinybtn,.card,.newbtn,#go{min-height:44px}
+  .iconbtn{min-width:44px}
+  .stat{padding:8px 12px}
+  .nav,.conv{padding:10px 11px}
+  .hint,.qitem,.act,.conv .m,.nav .tail,.railfoot{font-size:12px}
+  #ta{font-size:16px}          /* below 16px iOS zooms the page on focus */
+  .msg,.you .body{font-size:15px}
+
+  .app{grid-template-columns:1fr}
+  .rail{position:fixed;top:46px;bottom:0;left:0;width:min(84vw,290px);z-index:50;transform:translateX(-101%);transition:transform 200ms}
+  .app:not(.railoff) .rail{display:flex}
+  .rail.on{transform:none}
+  .col,.welcome{padding-left:16px;padding-right:16px}
+  .dock{padding:10px 16px calc(12px + env(safe-area-inset-bottom))}
+  .hstats .stat span.lbl{display:none}
+  .panel{width:100vw}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+
+/* ---------- v2: research-driven affordances ---------- */
+/* Rail collapses to icons below 1200px rather than vanishing — the standard
+   two-pane behaviour; navigation stays reachable on a laptop. */
+@media (min-width:901px) and (max-width:1200px){
+  .app:not(.railoff){grid-template-columns:56px 1fr}
+  .rail .navlbl,.rail .conv,.newbtn span:not(.gl),.newbtn kbd,.nav .tail,.railfoot,.convs{display:none}
+  .nav{justify-content:center;padding:8px}
+  .newbtn{justify-content:center;padding:8px}
+}
+/* Stop / jump-to-latest */
+.stopbar{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;pointer-events:none;padding-bottom:10px}
+.stopbar button{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;
+  border:1px solid var(--line-2);background:var(--v1);color:var(--t0);
+  border-radius:99px;padding:8px 16px;min-height:36px;cursor:pointer;font-size:12.5px;
+  box-shadow:0 6px 20px -10px rgba(0,0,0,.6)}
+.stopbar button:hover{border-color:var(--t0)}
+.sq{width:9px;height:9px;background:currentColor;border-radius:2px}
+/* Code block copy */
+.msg pre{position:relative}
+.copycode{position:absolute;top:7px;right:7px;border:1px solid var(--line);
+  background:var(--v2);color:var(--t2);border-radius:5px;padding:3px 9px;
+  font-size:11px;cursor:pointer;opacity:0;transition:opacity var(--dur);min-height:26px}
+.msg pre:hover .copycode,.copycode:focus{opacity:1}
+.copycode:hover{color:var(--t0);border-color:var(--t0)}
+/* Command palette */
+.pal{position:fixed;inset:0;z-index:70;display:none;align-items:flex-start;justify-content:center;padding-top:12vh;background:rgba(0,0,0,.5)}
+.pal.on{display:flex}
+.palbox{width:min(560px,92vw);background:var(--v1);border:1px solid var(--line-2);
+  border-radius:var(--r2);overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.7)}
+.palbox input{width:100%;border:none;background:none;outline:none;padding:15px 17px;font-size:15px;border-bottom:1px solid var(--line)}
+.pallist{max-height:min(52vh,420px);overflow-y:auto;padding:6px}
+.palrow{display:flex;align-items:center;gap:11px;width:100%;border:none;background:none;
+  padding:9px 11px;border-radius:var(--r);cursor:pointer;text-align:left;color:var(--t1);min-height:38px}
+.palrow[aria-selected="true"]{background:var(--sel);color:var(--t0)}
+.palrow .pk{font-size:10.5px;font-family:var(--mono);color:var(--t2);margin-left:auto}
+.palempty{padding:16px;color:var(--t2);font-size:13px}
+/* follow-ups */
+.followups{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.fu{border:1px solid var(--line);background:var(--v1);border-radius:99px;padding:6px 13px;
+  font-size:12.5px;color:var(--t1);cursor:pointer;min-height:32px}
+.fu:hover{border-color:var(--t0);color:var(--t0)}
+
+
+/* ================= v3 · transcript, not a chat thread =================
+   Consumer chat centres a column and alternates bubbles, because there is
+   one model and nothing to say about it. Dourmouse routes across 31 agents,
+   two backends and a compute node — which one answered, how long it took
+   and what it touched IS the product. So each turn is a log entry with a
+   fixed metadata gutter, the way an engineering notebook or a build log
+   reads. Wide, left-aligned, scannable down the gutter.
+   ===================================================================== */
+.col{max-width:1080px;padding:22px 30px 10px}
+.turn{
+  display:grid;grid-template-columns:var(--gutter) minmax(0,1fr);
+  gap:0 22px;margin:0;padding:16px 0;border-top:1px solid var(--line);
+  animation:none;
+}
+.turn:first-child{border-top:none}
+.turn.you{display:grid;justify-content:initial}
+.gut{
+  font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--t2);
+  display:flex;flex-direction:column;gap:3px;padding-top:1px;
+  text-align:right;align-items:flex-end;
+}
+.gut .role{color:var(--t1);letter-spacing:.06em}
+.gut .meta{font-size:10.5px}
+.turn.you .body{
+  border:none;padding:0;font-family:var(--sans);font-size:15px;
+  color:var(--t0);white-space:pre-wrap;word-break:break-word;
+}
+.msg{font-size:15px;line-height:1.62;max-width:72ch}
+.who-row{display:none}          /* the gutter replaces it */
+.acts{gap:3px;margin-bottom:8px}
+.act{border-radius:3px;background:var(--v2)}
+.rowacts{margin-top:9px}
+
+/* Status dot in the gutter: the only colour on the page besides system state */
+.gut .dot{width:5px;height:5px;border-radius:50%;display:inline-block;margin-left:5px;vertical-align:middle}
+.gut .dot.up{background:var(--up)} .gut .dot.wait{background:var(--wait)} .gut .dot.down{background:var(--down)}
+
+/* Chrome is mono; only prose is humanist. */
+.nav,.newbtn,.conv .t,.stat,.chip,.tinybtn,.navlbl,.railfoot,.hint,.sec,.item .n,.item .d,.palrow,.gut{
+  font-family:var(--mono);
+}
+.nav,.conv .t{font-size:12px;letter-spacing:.01em}
+.navlbl{font-size:10px;letter-spacing:.18em}
+.wordmark{font-family:var(--mono);letter-spacing:.22em;font-weight:500}
+.mk{background:var(--t0);border-radius:0;transform:none;width:6px;height:6px}
+.welcome h1{font-family:var(--sans);font-size:22px;font-weight:550}
+.card .h{font-family:var(--mono);font-size:12px}
+.msg,.welcome .sub,.turn.you .body,.approve .p{font-family:var(--sans)}
+
+/* selection reads by ground + a left mark, never by hue */
+.nav[aria-current="page"],.nav.on{background:var(--sel);color:var(--t0);box-shadow:inset 2px 0 0 var(--t0)}
+.palrow[aria-selected="true"]{background:var(--sel);color:var(--t0)}
+.card:hover,.newbtn:hover,.stat:hover,.tinybtn:hover,.fu:hover,.chip.act:hover{border-color:var(--line-2);color:var(--t0)}
+.box:focus-within{border-color:var(--line-2);box-shadow:0 0 0 1px var(--line-2)}
+#go{background:var(--t0);color:var(--v0);border-radius:var(--r);font-family:var(--mono);font-size:12px;letter-spacing:.04em}
+.btn.go{background:var(--t0);color:var(--v0);border-color:var(--t0)}
+.caret{background:var(--t0)}
+.msg li::marker{color:var(--t2)}
+.msg a{color:var(--t0);text-decoration:underline;text-underline-offset:2px}
+.msg strong{color:var(--t0)}
+
+@media (max-width:820px){
+  .turn{grid-template-columns:1fr;gap:6px}
+  .gut{flex-direction:row;text-align:left;align-items:center;gap:9px;flex-wrap:wrap}
+  .col{padding-left:16px;padding-right:16px}
+}
+
+
+/* Gutter: one line per fact. A wrapped model id turned a 3-line stamp into a
+   121px column and pushed the prose down with it. Truncate with the full
+   value on hover; the gutter is a stamp, not a place to read. */
+.gut{max-width:var(--gutter)}
+.gut .meta,.gut .role{
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:11px;
+}
+.gut .meta[data-k="model"]{direction:rtl;text-align:right}  /* keep the tail visible */
+.turn{padding:14px 0}
+/* nothing below 11px anywhere */
+.navlbl,.conv .m,.nav .tail,.railfoot,.hint,.act,.chip,.palrow .pk,.card .d,.item .d,.item .s,.kv dt,.kv dd,.sec,.qitem,.copycode{font-size:11px}
+
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <header>
+    <button class="iconbtn" id="railtoggle" aria-label="Toggle sidebar" title="Toggle sidebar (⌘B)">☰</button>
+    <div class="wordmark"><span class="mk" aria-hidden="true"></span>Dourmouse</div>
+    <div class="hspace"></div>
+    <div class="hstats">
+      <button class="stat" id="s-sys"  title="System status"><span class="led" id="l-sys"></span><span class="lbl">System</span></button>
+      <button class="stat" id="s-node" title="Compute node"><span class="led" id="l-node"></span><b id="t-node">—</b></button>
+      <button class="stat" id="s-model" title="Active model"><b id="t-model">—</b></button>
+    </div>
+  </header>
+
+  <nav class="rail" id="rail" aria-label="Navigation">
+    <div class="railtop">
+      <button class="newbtn" id="newchat"><span aria-hidden="true">＋</span>New conversation<kbd>⌘N</kbd></button>
+    </div>
+
+    <div class="navsec">
+      <div class="navlbl">Intelligence</div>
+      <button class="nav" data-panel="compute"><span class="gl" aria-hidden="true">◈</span>Compute<span class="tail" id="n-node">—</span></button>
+      <button class="nav" data-panel="tools"><span class="gl" aria-hidden="true">▦</span>Tools<span class="tail" id="n-tools">—</span></button>
+      <button class="nav" data-panel="memory"><span class="gl" aria-hidden="true">◍</span>Memory<span class="tail" id="n-mem">—</span></button>
+      <button class="nav" data-panel="connections"><span class="gl" aria-hidden="true">⌗</span>Connections<span class="tail" id="n-conn">—</span></button>
+    </div>
+
+    <div class="navlbl">Conversations</div>
+    <div class="convs" id="convs"><div class="note" style="padding:6px 9px">Loading…</div></div>
+
+    <div class="navsec">
+      <button class="nav" data-panel="settings"><span class="gl" aria-hidden="true">⚙</span>Settings</button>
+      <button class="nav" data-panel="diagnostics"><span class="gl" aria-hidden="true">◎</span>Diagnostics</button>
+    </div>
+
+    <div class="railfoot"><div class="who" id="who">…</div></div>
+  </nav>
+
+  <main class="main">
+    <div class="scroll" id="scroll">
+      <div class="welcome" id="welcome"></div>
+      <div class="col" id="thread" hidden aria-live="polite" aria-relevant="additions text"></div>
+    </div>
+
+    <div class="stopbar" id="stopbar" hidden></div>
+    <div class="dock">
+      <div class="dockcol">
+        <div class="queue" id="queue"></div>
+        <div class="box">
+          <textarea id="ta" rows="1" placeholder="Ask Dourmouse anything…" spellcheck="true"></textarea>
+          <div class="boxfoot">
+            <span class="chip" id="c-route" title="Where this request will run">—</span>
+            <span class="chip act" id="c-mode" title="Restrict this request to one agent">All agents</span>
+            <button id="go">Send</button>
+          </div>
+        </div>
+        <div class="hint">
+          <span><kbd>Enter</kbd> send · <kbd>⇧Enter</kbd> newline · <kbd>⌘K</kbd> commands</span>
+          <span id="qhint"></span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+
+<div class="pal" id="pal" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palbox">
+    <input id="palq" placeholder="Search commands, agents, panels…" autocomplete="off" aria-label="Search commands">
+    <div class="pallist" id="pallist" role="listbox"></div>
+  </div>
+</div>
+<div class="scrim" id="scrim"></div>
+<aside class="panel" id="panel" aria-hidden="true" role="dialog" aria-label="Details">
+  <div class="panelhead">
+    <h2 id="panelTitle">—</h2>
+    <button class="iconbtn" id="panelClose" style="margin-left:auto" aria-label="Close">✕</button>
+  </div>
+  <div class="panelbody" id="panelBody"></div>
+</aside>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const api = async (p, o) => {
+  const r = await fetch(p, o);
+  if (!r.ok) throw new Error(p + " → HTTP " + r.status);
+  return r.json();
+};
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* Live system state, populated only from the backend. */
+const sys = { server:null, backend:null, connections:null, memory:null, roster:null, version:null, me:null, telemetry:null };
+let busy = false, started = false, focusAgent = "";
+const queue = [];
+
+/* ---------------- markdown (escape first, then a fixed grammar) --------- */
+function md(src){
+  const parts = esc(src).split(/```/);
+  let out = "";
+  parts.forEach((chunk,i) => {
+    if (i % 2) { out += `<pre><code>${chunk.replace(/^[\w-]*\n/,"")}</code></pre>`; return; }
+    let t = chunk
+      .replace(/`([^`\n]+)`/g,"<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    const lines = t.split("\n"); let html="", list=null, tbl=null;
+    const closeList = () => { if(list){ html+=`</${list}>`; list=null; } };
+    const closeTbl  = () => { if(tbl){ html+="</tbody></table>"; tbl=null; } };
+    for (const raw of lines){
+      const line = raw;
+      const h  = line.match(/^(#{1,3})\s+(.*)$/);
+      const ul = line.match(/^\s*[-*]\s+(.*)$/);
+      const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+      const tr = line.match(/^\s*\|(.+)\|\s*$/);
+      if (tr){
+        const cells = tr[1].split("|").map(c=>c.trim());
+        if (cells.every(c=>/^:?-{2,}:?$/.test(c))) continue;   // separator row
+        closeList();
+        if(!tbl){ html += "<table><thead><tr>" + cells.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>"; tbl=1; }
+        else html += "<tr>" + cells.map(c=>`<td>${c}</td>`).join("") + "</tr>";
+        continue;
+      }
+      closeTbl();
+      if (h){ closeList(); html += `<h3>${h[2]}</h3>`; }
+      else if (ul){ if(list!=="ul"){closeList();html+="<ul>";list="ul";} html+=`<li>${ul[1]}</li>`; }
+      else if (ol){ if(list!=="ol"){closeList();html+="<ol>";list="ol";} html+=`<li>${ol[1]}</li>`; }
+      else { closeList(); if(line.trim()) html += `<p>${line}</p>`; }
+    }
+    closeList(); closeTbl(); out += html;
+  });
+  return out;
+}
+
+/* ---------------- system state ---------------- */
+function ledClass(ok){ return "led " + (ok===true?"ok":ok===false?"bad":""); }
+
+async function refresh(){
+  const grab = async (k,p) => { try { sys[k] = await api(p); } catch { sys[k] = null; } };
+  await Promise.all([
+    grab("server","/api/server"), grab("backend","/api/backend"),
+    grab("connections","/api/connections"), grab("memory","/api/memory"),
+    grab("roster","/api/roster"), grab("version","/api/version"),
+    grab("me","/api/auth/me"), grab("telemetry","/api/telemetry"),
+  ]);
+  paintStatus();
+}
+
+/* What will actually serve the NEXT request is decided server-side per turn:
+   the compute node takes short fast-lane turns, the configured backend takes
+   the rest. The UI cannot know which in advance, so it must not claim one.
+   Show the configured backend (true for any turn that is not fast-laned) and
+   report the real model from the 'brain' event once the turn starts. */
+function routeLabel(){
+  const b = sys.backend || {};
+  const m = (b.model||"").split("/").pop() || "—";
+  const s = sys.server || {};
+  return {
+    where: b.backend ? b.backend.toUpperCase() : "LOCAL",
+    model: m,
+    nodeReady: s.online === true,
+    nodeModel: s.model || "",
+  };
+}
+
+function paintStatus(){
+  const s = sys.server || {}, b = sys.backend || {};
+  const anyBackend = !!(b.model);
+  $("l-sys").className  = ledClass(anyBackend);
+  $("l-node").className = ledClass(s.online === true ? true : s.online === false ? false : null);
+  $("t-node").textContent  = s.online ? (s.node || "NODE") : "OFFLINE";
+  $("n-node").textContent  = s.online ? `${s.latency_ms ?? "?"}ms` : "offline";
+  const r = routeLabel();
+  $("t-model").textContent = r.model;
+  $("c-route").textContent = r.nodeReady
+    ? `${r.where.toLowerCase()} · ${r.model} · node ready`
+    : `${r.where.toLowerCase()} · ${r.model}`;
+  $("c-route").title = r.nodeReady
+    ? `Most turns run on ${r.model}. Short turns may be routed to the compute node (${r.nodeModel}).`
+    : `Turns run on ${r.model}. The compute node is offline.`;
+
+  const conns = sys.connections || {};
+  const okN = Object.values(conns).filter(c=>c && c.ok).length;
+  $("n-conn").textContent = Object.keys(conns).length ? `${okN}/${Object.keys(conns).length}` : "—";
+  const mem = sys.memory || {};
+  $("n-mem").textContent = mem.count != null ? `${mem.count}` : "—";
+  const rost = (sys.roster && sys.roster.subagents) || [];
+  const toolCount = rost.reduce((n,a)=>n + ((a.tools||[]).length), 0);
+  $("n-tools").textContent = toolCount ? String(toolCount) : "—";
+  const me = sys.me || {};
+  $("who").textContent = me.me ? me.me : "Not signed in to Google";
+}
+
+async function loadConvs(){
+  try{
+    const d = await api("/api/sessions/recent");
+    const list = d.sessions || [];
+    const box = $("convs"); box.innerHTML = "";
+    if(!list.length){ box.innerHTML = '<div class="note" style="padding:6px 9px">No conversations yet</div>'; return; }
+    list.forEach(s => {
+      const b = document.createElement("button"); b.className="conv";
+      const t = document.createElement("div"); t.className="t";
+      t.textContent = s.first_user || s.name || "(untitled)";
+      const m = document.createElement("div"); m.className="m";
+      m.textContent = `${s.turns ?? "?"} turns`;
+      b.append(t,m);
+      b.title = s.last_answer ? String(s.last_answer).slice(0,180) : "";
+      box.appendChild(b);
+    });
+  }catch{ $("convs").innerHTML = '<div class="note" style="padding:6px 9px">History unavailable</div>'; }
+}
+
+/* ---------------- panels (real data only) ---------------- */
+const PANELS = {
+  compute(){
+    const s = sys.server || {}, b = sys.backend || {}, r = routeLabel();
+    const rows = [
+      ["Status", s.online ? "Online" : (s.url ? "Offline" : "Not configured")],
+      ["Node", s.node || "—"], ["Model", s.model || "—"],
+      ["Endpoint", s.url || "—"],
+      ["Latency", s.latency_ms != null ? s.latency_ms + " ms" : "—"],
+      ["Ollama on node", s.ollama === true ? "Ready" : s.ollama === false ? "No" : "—"],
+      ["Node version", s.version || "—"],
+      ["Kill switch", s.enabled === false ? "DISABLED" : "Enabled"],
+    ];
+    let h = `<div class="sec">Remote compute</div>
+      <div class="item"><span class="${ledClass(s.online===true)}"></span>
+        <div class="g"><div class="n">${s.online?"Dell compute node online":"Remote compute unavailable"}</div>
+        <div class="d">${s.online?"Requests route here first.":"Dourmouse falls back to the configured backend below."}</div></div></div>
+      <dl class="kv">${rows.map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
+      <div class="sec">Fallback backend</div>
+      <dl class="kv">
+        <dt>Backend</dt><dd>${esc(b.backend||"—")}</dd>
+        <dt>Model</dt><dd>${esc(b.model||"—")}</dd>
+        <dt>Endpoint</dt><dd>${esc(b.base_url||"—")}</dd>
+      </dl>
+      <div class="sec">Routing</div>
+      <div class="note">Short conversational turns are eligible for the compute node
+      (<code>${esc(s.model||"—")}</code>). Everything else runs on
+      <code>${esc(r.model)}</code>. Each reply reports which one actually served it.</div>`;
+    if (s.error) h += `<div class="sec">Last error</div><div class="note">${esc(s.error)}</div>`;
+    return h;
+  },
+  tools(){
+    const rost = (sys.roster && sys.roster.subagents) || [];
+    if(!rost.length) return `<div class="note">Roster unavailable.</div>`;
+    const conns = sys.connections || {};
+    return `<div class="sec">${rost.length} agents · ${rost.reduce((n,a)=>n+(a.tools||[]).length,0)} tools</div>` +
+      rost.map(a => {
+        const c = conns[a.name];
+        const st = c ? (c.ok?"ok":"bad") : "";
+        const gated = (a.tools||[]).filter(t=>t.permission && t.permission!=="regular").length;
+        return `<div class="item"><span class="led ${st}"></span><div class="g">
+          <div class="n">${esc(a.name)}</div>
+          <div class="d">${esc(a.description||"")}</div>
+          ${c?`<div class="d">${esc(c.detail||"")}</div>`:""}
+        </div><div class="s">${(a.tools||[]).length}${gated?` · ${gated}🔒`:""}</div></div>`;
+      }).join("");
+  },
+  memory(){
+    const m = sys.memory || {};
+    return `<div class="sec">Long-term memory</div>
+      <div class="item"><span class="${ledClass(m.active===true)}"></span><div class="g">
+        <div class="n">${m.active?"Learning on":"Learning off"}</div>
+        <div class="d">${esc(m.gate||"")}</div></div>
+        <div class="s">${m.count ?? "—"} facts</div></div>
+      <div class="note" style="margin-top:14px">Dourmouse stores durable facts across sessions and recalls them when relevant. Conversation history is listed in the sidebar.</div>`;
+  },
+  connections(){
+    const c = sys.connections || {};
+    const keys = Object.keys(c);
+    if(!keys.length) return `<div class="note">Connections unavailable.</div>`;
+    const on = keys.filter(k=>c[k].ok), off = keys.filter(k=>!c[k].ok);
+    const row = k => `<div class="item"><span class="${ledClass(!!c[k].ok)}"></span><div class="g">
+        <div class="n">${esc(k)}</div><div class="d">${esc(c[k].detail||"")}</div>
+        ${!c[k].ok && c[k].hint?`<div class="d">Fix: ${esc(c[k].hint)}</div>`:""}
+      </div></div>`;
+    return `<div class="sec">Connected · ${on.length}</div>${on.map(row).join("")}
+            <div class="sec">Not connected · ${off.length}</div>${off.map(row).join("")}`;
+  },
+  settings(){
+    const b = sys.backend||{}, s = sys.server||{}, me = sys.me||{};
+    const theme = document.documentElement.getAttribute("data-theme") || "system";
+    return `<div class="sec">Appearance</div>
+      <div class="item"><div class="g"><div class="n">Theme</div><div class="d">Currently: ${theme}</div></div>
+        <div class="s"><button class="tinybtn" id="setTheme">Switch</button></div></div>
+      <div class="sec">Intelligence</div>
+      <dl class="kv"><dt>Backend</dt><dd>${esc(b.backend||"—")}</dd>
+        <dt>Model</dt><dd>${esc(b.model||"—")}</dd>
+        <dt>Remote node</dt><dd>${s.online?esc(s.model||""):"offline"}</dd></dl>
+      <div class="sec">Account</div>
+      <dl class="kv"><dt>Google</dt><dd>${me.me?esc(me.me):"not signed in"}</dd></dl>
+      ${me.me?"":'<div class="note"><a href="/login">Sign in to Google</a> to enable mail, calendar and Drive.</div>'}
+      <div class="sec">Interfaces</div>
+      <div class="note">This is the OS interface. The original operator HUD is at <a href="/">/</a>; the simple chat view is at <a href="/app">/app</a>.</div>
+      <div class="note" style="margin-top:12px">Secrets are never displayed here. Configure them in <code>.env</code> on the host.</div>`;
+  },
+  diagnostics(){
+    const v = sys.version||{}, t = sys.telemetry||{};
+    let h = `<div class="sec">Version</div><dl class="kv">
+        <dt>Dourmouse</dt><dd>${esc(v.current||"—")}</dd>
+        <dt>Channel</dt><dd>${esc(v.channel||"—")}</dd></dl>`;
+    h += `<div class="sec">Host</div>`;
+    if (t && !t.unavailable){
+      h += `<dl class="kv">
+        <dt>Host</dt><dd>${esc(t.host||"—")}</dd>
+        <dt>CPU</dt><dd>${t.cpu_pct!=null?t.cpu_pct+"%":"—"}</dd>
+        <dt>Memory</dt><dd>${t.mem_used_gb!=null?`${t.mem_used_gb} / ${t.mem_total_gb} GB`:"—"}</dd>
+        ${t.load?`<dt>Load</dt><dd>${t.load.join(", ")}</dd>`:""}
+      </dl>`;
+      if(t.mem_pct!=null) h += `<div class="bar"><i style="width:${Math.min(100,t.mem_pct)}%"></i></div>`;
+    } else {
+      h += `<div class="note">Host telemetry unavailable${t.detail?` — ${esc(t.detail)}`:""}.</div>`;
+    }
+    return h;
+  },
+};
+
+function openPanel(name){
+  const body = $("panelBody");
+  $("panelTitle").textContent = name;
+  body.innerHTML = (PANELS[name]||(()=>"<div class='note'>—</div>"))();
+  $("panel").classList.add("on"); $("panel").setAttribute("aria-hidden","false");
+  $("scrim").classList.add("on");
+  const th = $("setTheme");
+  if (th) th.onclick = () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    const dark = cur ? cur==="dark" : !matchMedia("(prefers-color-scheme: light)").matches;
+    const next = dark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("dm-theme", next);
+    openPanel("settings");
+  };
+  $("panelClose").focus();
+}
+function closePanel(){
+  $("panel").classList.remove("on"); $("panel").setAttribute("aria-hidden","true");
+  $("scrim").classList.remove("on");
+}
+$("panelClose").onclick = closePanel;
+$("scrim").onclick = () => { closePanel(); $("rail").classList.remove("on"); };
+document.querySelectorAll(".nav[data-panel]").forEach(b => b.onclick = () => openPanel(b.dataset.panel));
+$("s-node").onclick = () => openPanel("compute");
+$("s-model").onclick = () => openPanel("compute");
+$("s-sys").onclick = () => openPanel("diagnostics");
+
+/* ---------------- welcome ---------------- */
+const STARTERS = [
+  ["Summarise my unread email","Reads your inbox via Gmail"],
+  ["What's on my calendar this week?","Google Calendar"],
+  ["Research the latest open-weight models","Live web search, with sources"],
+  ["Write and run a Python script","Executes and reports the real output"],
+];
+function paintWelcome(){
+  const w = $("welcome");
+  w.innerHTML = `<h1>Good to see you.</h1>
+    <p class="sub">Ask anything. Dourmouse routes across mail, calendar, Drive, the web, code execution and your compute node.</p>
+    <div class="grid2"></div>`;
+  const g = w.querySelector(".grid2");
+  STARTERS.forEach(([h,d]) => {
+    const b = document.createElement("button"); b.className="card";
+    b.innerHTML = `<div class="h"></div><div class="d"></div>`;
+    b.querySelector(".h").textContent = h; b.querySelector(".d").textContent = d;
+    b.onclick = () => { $("ta").value = h; $("ta").focus(); submit(); };
+    g.appendChild(b);
+  });
+}
+
+/* ---------------- composer ---------------- */
+const ta = $("ta"), go = $("go");
+function autosize(){ ta.style.height="auto"; ta.style.height = Math.min(ta.scrollHeight,210)+"px"; }
+ta.addEventListener("input", () => {
+  autosize();
+  go.textContent = busy ? "Queue" : "Send";
+});
+ta.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); submit(); }
+});
+go.onclick = () => submit();
+
+$("c-mode").onclick = () => {
+  const names = ["", "research_info", "dev_coding"];
+  const labels = ["All agents","Research only","Code only"];
+  const i = (names.indexOf(focusAgent) + 1) % names.length;
+  focusAgent = names[i];
+  $("c-mode").textContent = labels[i];
+};
+
+$("newchat").onclick = () => { $("thread").innerHTML=""; started=false; $("thread").hidden=true; $("welcome").hidden=false; ta.focus(); };
+$("railtoggle").onclick = () => {
+  if (matchMedia("(max-width:900px)").matches){ $("rail").classList.toggle("on"); $("scrim").classList.toggle("on"); }
+  else $("app").classList.toggle("railoff");
+};
+addEventListener("keydown", e => {
+  if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="b"){ e.preventDefault(); $("railtoggle").click(); }
+  if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="n"){ e.preventDefault(); $("newchat").click(); }
+  if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="k"){ e.preventDefault(); openPal(); }
+  if (e.key === "Escape"){ closePal(); closePanel(); $("rail").classList.remove("on"); }
+});
+
+/* ---------------- queue ---------------- */
+function paintQueue(){
+  const box = $("queue"); box.innerHTML = "";
+  queue.forEach((text,i) => {
+    const row = document.createElement("div"); row.className="qitem";
+    const n = document.createElement("span"); n.className="qn"; n.textContent = `${i+1}`;
+    const t = document.createElement("span"); t.className="qt"; t.textContent = text;
+    const x = document.createElement("button"); x.type="button";
+    x.setAttribute("aria-label","Remove queued message"); x.textContent="✕";
+    x.onclick = () => { queue.splice(i,1); paintQueue(); };
+    row.append(n,t,x); box.appendChild(row);
+  });
+  $("qhint").textContent = queue.length
+    ? `${queue.length} queued — sends automatically when the current reply finishes`
+    : (busy ? "Send while busy to queue" : "");
+}
+
+/* ---------------- rendering ---------------- */
+const scroll = $("scroll"), thread = $("thread");
+// 100px threshold, per the streaming-UX convention: auto-scroll only when the
+// reader is already at the bottom, so scrolling up to re-read is never yanked.
+const near = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 100;
+const bottom = () => { scroll.scrollTop = scroll.scrollHeight; };
+
+function stamp(){
+  const d=new Date();
+  return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0");
+}
+function addYou(text){
+  if(!started){ started=true; $("welcome").hidden=true; thread.hidden=false; }
+  const t = document.createElement("div"); t.className="turn you";
+  t.innerHTML = `<div class="gut"><span class="role">YOU</span><span class="meta"></span></div><div class="body"></div>`;
+  t.querySelector(".meta").textContent = stamp();
+  t.querySelector(".body").textContent = text;
+  thread.appendChild(t); bottom();
+}
+function addReply(){
+  const t = document.createElement("div"); t.className="turn";
+  t.innerHTML = `<div class="gut">
+      <span class="role">DOURMOUSE</span>
+      <span class="meta" data-k="model">—</span>
+      <span class="meta" data-k="state"></span>
+      <span class="meta" data-k="dur"></span>
+    </div>
+    <div><div class="acts"></div><div class="msg"></div><div class="rowacts"></div></div>`;
+  thread.appendChild(t); bottom();
+  const g = t.querySelector(".gut");
+  const t0 = performance.now();
+  return {
+    turn:t, acts:t.querySelector(".acts"), msg:t.querySelector(".msg"), row:t.querySelector(".rowacts"),
+    st:{ set textContent(v){ g.querySelector('[data-k="state"]').textContent = v; } },
+    setModel(m, onNode){
+      const el = g.querySelector('[data-k="model"]');
+      el.textContent = m;
+      el.title = onNode ? `${m} — served by the compute node` : `${m} — served by the configured backend`;
+      const d = document.createElement("span");
+      d.className = "dot " + (onNode ? "up" : "");
+      el.appendChild(d);
+    },
+    finish(){ g.querySelector('[data-k="dur"]').textContent = ((performance.now()-t0)/1000).toFixed(1)+"s"; },
+  };
+}
+function act(acts,label,name,bad,spin){
+  const a=document.createElement("div"); a.className="act"+(bad?" bad":"");
+  if(spin){ const s=document.createElement("span"); s.className="spin"; a.appendChild(s); }
+  const l=document.createElement("span"); l.textContent=label; a.appendChild(l);
+  if(name){ const n=document.createElement("span"); n.className="nm"; n.textContent=name; a.appendChild(n); }
+  acts.appendChild(a); if(near()) bottom(); return a;
+}
+function addApproval(node, evt){
+  const box=document.createElement("div"); box.className="approve";
+  box.innerHTML = `<div class="t">Approval required</div><div class="p"></div>
+    <div class="r"><button class="btn go">Approve</button><button class="btn">Decline</button></div>`;
+  box.querySelector(".p").textContent = evt.prompt || "This action needs your approval.";
+  node.msg.parentNode.insertBefore(box, node.msg);
+  const [yes,no] = box.querySelectorAll("button");
+  let settled=false;
+  const decide = async (ok) => {
+    if(settled) return; settled=true;
+    box.classList.add("done");
+    box.querySelector(".t").textContent = ok?"Approved":"Declined";
+    box.querySelector(".r").remove();
+    try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id:evt.id,approved:ok})}); }catch{}
+  };
+  yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
+  yes.scrollIntoView({block:"nearest"}); yes.focus();
+}
+function setBusy(on,label){
+  busy=on;
+  // Deliberately NOT disabled while busy: the button becomes the queue
+  // action. Disabling it made the send control dead exactly when queuing
+  // is most useful, so a click did nothing and only Enter worked.
+  go.disabled = false;
+  go.textContent = on ? "Queue" : "Send";
+  go.title = on ? "Queue this message — it sends when the current reply finishes" : "Send";
+  $("l-sys").classList.toggle("live",on);
+  paintQueue();
+  if(!on) return;
+  if(label) $("t-model").textContent = label;
+}
+
+/* ---------------- send ---------------- */
+async function submit(){
+  const text = ta.value.trim();
+  if(!text) return;
+  if(busy){ queue.push(text); ta.value=""; autosize(); paintQueue(); return; }
+  ta.value=""; autosize();
+  await run(text);
+  // Drain everything that arrived while we were generating, in order.
+  while(queue.length){
+    const next = queue.shift();
+    paintQueue();
+    await run(next);
+  }
+}
+
+let ctrl = null;                 // AbortController for the in-flight turn
+
+function showStop(on, onStop){
+  const bar = $("stopbar");
+  bar.innerHTML = "";
+  bar.hidden = !on;
+  if(!on) return;
+  const b = document.createElement("button");
+  b.innerHTML = '<span class="sq"></span>Stop generating';
+  b.onclick = onStop;
+  bar.appendChild(b);
+}
+function showJump(on){
+  const bar = $("stopbar");
+  if(!on){ if(bar.dataset.kind === "jump"){ bar.hidden = true; bar.dataset.kind=""; } return; }
+  if(busy) return;
+  bar.innerHTML = ""; bar.hidden = false; bar.dataset.kind = "jump";
+  const b = document.createElement("button");
+  b.textContent = "↓ Jump to latest";
+  b.onclick = () => { bottom(); showJump(false); };
+  bar.appendChild(b);
+}
+scroll.addEventListener("scroll", () => { if(!busy) showJump(!near() && started); });
+
+/* One-click copy on every code block (added after each paint). */
+function wireCopies(root){
+  root.querySelectorAll("pre").forEach(pre => {
+    if (pre.querySelector(".copycode")) return;
+    const b = document.createElement("button");
+    b.className = "copycode"; b.type = "button"; b.textContent = "Copy";
+    b.onclick = async () => {
+      try{ await navigator.clipboard.writeText(pre.innerText.replace(/^Copy\n?/,"")); 
+           b.textContent="Copied"; setTimeout(()=>b.textContent="Copy",1200); }
+      catch{ b.textContent="Failed"; }
+    };
+    pre.appendChild(b);
+  });
+}
+
+function addFollowups(node, items){
+  if(!items.length) return;
+  const wrap=document.createElement("div"); wrap.className="followups";
+  items.forEach(t=>{
+    const b=document.createElement("button"); b.className="fu"; b.type="button"; b.textContent=t;
+    b.onclick=()=>{ wrap.remove(); ta.value=t; submit(); };
+    wrap.appendChild(b);
+  });
+  const x=document.createElement("button"); x.className="fu"; x.type="button";
+  x.textContent="✕"; x.setAttribute("aria-label","Dismiss suggestions");
+  x.onclick=()=>wrap.remove(); wrap.appendChild(x);
+  node.row.parentNode.appendChild(wrap);
+}
+
+async function run(text){
+  addYou(text);
+  setBusy(true);
+  const node = addReply();
+  node.st.textContent = "thinking";
+  const r = routeLabel();
+  const routeChip = act(node.acts, "Routing", "…", false, true);
+
+  let buf = "", stopped = false;
+  const caret = document.createElement("span"); caret.className="caret";
+  node.msg.appendChild(caret);
+
+  // Token batching: repaint on a ~40ms frame budget instead of per-delta.
+  // Per-token innerHTML rewrites make fast models stutter and pin the CPU.
+  let dirty = false, painting = false;
+  const paint = () => {
+    dirty = true;
+    if (painting) return;
+    painting = true;
+    setTimeout(() => {
+      painting = false;
+      if (!dirty) return;
+      dirty = false;
+      node.msg.innerHTML = md(buf);
+      node.msg.appendChild(caret);
+      wireCopies(node.msg);
+      if (near()) bottom();
+    }, 40);
+  };
+
+  ctrl = new AbortController();
+  showStop(true, () => { stopped = true; try{ ctrl.abort(); }catch{} });
+
+  try{
+    const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({prompt:text, focus_agent: focusAgent||undefined}), signal: ctrl.signal});
+    if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
+    const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
+    for(;;){
+      const {value,done}=await rd.read(); if(done) break;
+      carry+=dec.decode(value,{stream:true});
+      const parts=carry.split("\n"); carry=parts.pop()||"";
+      for(const line of parts){
+        if(!line.startsWith("data:")) continue;
+        let e; try{ e=JSON.parse(line.slice(5)); }catch{ continue; }
+        switch(e.type){
+          case "brain": {
+            const raw = e.model || "";
+            const onNode = raw.startsWith("server:");
+            const shown = raw.replace(/^server:/,"").split("/").pop() || "unknown";
+            node.setModel(shown, onNode);
+            const nm = routeChip.querySelector(".nm");
+            if (nm) nm.textContent = onNode ? `${(sys.server&&sys.server.node)||"node"} · ${shown}` : shown;
+            routeChip.children[1] && (routeChip.children[1].textContent = onNode ? "on compute node" : "on");
+            node.st.textContent = "generating";
+            break;
+          }
+          case "plan": act(node.acts,"Planning",""); break;
+          case "tool_use": case "function":
+            node.st.textContent="working"; act(node.acts,"Using",e.name||e.tool||"tool",false,true); break;
+          case "tool_result": case "result":
+            act(node.acts,"Result",e.name||e.tool||""); break;
+          case "confirmation_requested":
+            node.st.textContent="waiting for you"; addApproval(node,e); break;
+          case "assistant_delta": buf+=e.text||""; paint(); break;
+          case "assistant_text": if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
+          case "error": act(node.acts,"Error",e.message||"unknown",true); break;
+          case "done": if(e.final_text&&e.final_text.length>buf.length) buf=e.final_text; break;
+        }
+      }
+    }
+  }catch(err){
+    if (stopped || err.name === "AbortError"){
+      act(node.acts,"Stopped by you","");
+    } else {
+      const sv = sys.server||{};
+      const box=document.createElement("div"); box.className="errbox";
+      box.innerHTML=`<div class="t">Request failed</div><div></div><div class="f"></div>`;
+      box.children[1].textContent = String(err.message||err);
+      box.querySelector(".f").textContent = sv.online
+        ? "Dourmouse answered but the stream ended early. Retry, or open Diagnostics."
+        : "The compute node is offline and the fallback did not answer. Open Compute for details.";
+      node.msg.parentNode.insertBefore(box,node.msg);
+    }
+  }finally{
+    ctrl = null;
+    showStop(false);
+    caret.remove();
+    // Partial output is preserved on stop — never discarded.
+    node.msg.innerHTML = md(buf) || (stopped ? "<p><em>Stopped before any output.</em></p>" : "<p><em>No reply.</em></p>");
+    wireCopies(node.msg);
+    node.st.textContent = stopped ? "stopped" : "done";
+    node.finish();
+    node.acts.querySelectorAll(".spin").forEach(x=>x.remove());
+
+    const copy=document.createElement("button"); copy.className="tinybtn"; copy.type="button"; copy.textContent="Copy";
+    copy.onclick=async()=>{ try{ await navigator.clipboard.writeText(buf); copy.textContent="Copied"; setTimeout(()=>copy.textContent="Copy",1200);}catch{ copy.textContent="Failed"; } };
+    const again=document.createElement("button"); again.className="tinybtn"; again.type="button";
+    again.textContent = stopped ? "Continue" : "Regenerate";
+    again.onclick=()=>{ if(!busy) run(stopped ? text + "\n\n(continue from where you stopped)" : text); };
+    node.row.append(copy,again);
+
+    setBusy(false);
+    if (near()) bottom();
+    ta.focus();
+    refresh(); loadConvs();
+  }
+}
+
+
+/* ---------------- command palette (⌘K) ----------------
+   Built from what the system actually has: the server's own palette
+   destinations, the live agent roster, and the panels in this UI. No
+   invented commands. */
+let palItems = [], palIdx = 0;
+
+function buildPalette(){
+  const items = [];
+  items.push({k:"New conversation", h:"⌘N", run:()=>$("newchat").click()});
+  ["compute","tools","memory","connections","settings","diagnostics"].forEach(n =>
+    items.push({k:"Open "+n[0].toUpperCase()+n.slice(1), h:"panel", run:()=>openPanel(n)}));
+  items.push({k:"Toggle sidebar", h:"⌘B", run:()=>$("railtoggle").click()});
+  items.push({k:"Switch theme", h:"", run:()=>{
+    const cur=document.documentElement.getAttribute("data-theme");
+    const dark=cur?cur==="dark":!matchMedia("(prefers-color-scheme: light)").matches;
+    const nx=dark?"light":"dark";
+    document.documentElement.setAttribute("data-theme",nx); localStorage.setItem("dm-theme",nx);
+  }});
+  const rost=(sys.roster&&sys.roster.subagents)||[];
+  rost.forEach(a => items.push({
+    k:"Ask "+a.name, h:"agent",
+    run:()=>{ focusAgent=a.name; $("c-mode").textContent=a.name; ta.focus(); }
+  }));
+  (palDest||[]).forEach(d => d && d.label && items.push({
+    k:d.label, h:"go", run:()=>{ if(d.href) location.hash=d.href.replace(/^#/,""); }
+  }));
+  return items;
+}
+let palDest = [];
+(async()=>{ try{ const d=await api("/api/palette"); palDest=d.destinations||[]; }catch{} })();
+
+function paintPal(q){
+  const list=$("pallist"); list.innerHTML="";
+  const needle=(q||"").trim().toLowerCase();
+  palItems = buildPalette().filter(i => !needle || i.k.toLowerCase().includes(needle)).slice(0,40);
+  if(!palItems.length){ list.innerHTML='<div class="palempty">Nothing matches.</div>'; return; }
+  palIdx = Math.min(palIdx, palItems.length-1);
+  palItems.forEach((it,i)=>{
+    const b=document.createElement("button"); b.className="palrow"; b.type="button";
+    b.setAttribute("role","option"); b.setAttribute("aria-selected", String(i===palIdx));
+    const t=document.createElement("span"); t.textContent=it.k;
+    const h=document.createElement("span"); h.className="pk"; h.textContent=it.h||"";
+    b.append(t,h);
+    b.onclick=()=>{ closePal(); it.run(); };
+    list.appendChild(b);
+  });
+}
+function openPal(){ $("pal").classList.add("on"); palIdx=0; $("palq").value=""; paintPal(""); $("palq").focus(); }
+function closePal(){ $("pal").classList.remove("on"); }
+$("palq").addEventListener("input", e => { palIdx=0; paintPal(e.target.value); });
+$("palq").addEventListener("keydown", e => {
+  if(e.key==="ArrowDown"){ e.preventDefault(); palIdx=Math.min(palIdx+1,palItems.length-1); paintPal($("palq").value); }
+  else if(e.key==="ArrowUp"){ e.preventDefault(); palIdx=Math.max(palIdx-1,0); paintPal($("palq").value); }
+  else if(e.key==="Enter"){ e.preventDefault(); const it=palItems[palIdx]; if(it){ closePal(); it.run(); } }
+  else if(e.key==="Escape"){ closePal(); }
+});
+$("pal").addEventListener("click", e => { if(e.target.id==="pal") closePal(); });
+
+/* ---------------- boot ---------------- */
+const savedTheme = localStorage.getItem("dm-theme");
+if(savedTheme) document.documentElement.setAttribute("data-theme",savedTheme);
+paintWelcome(); paintQueue();
+refresh(); loadConvs();
+setInterval(refresh, 30000);   // one light poll; no per-second chatter
+ta.focus();
+})();
+</script>
+</body>
+</html>

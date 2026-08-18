@@ -47,6 +47,39 @@ _WB_JSON = json.dumps(
 )
 
 
+# v8.9 geo channels. USGS is [lon, lat, depth] — the reverse of the RSS
+# feeds' lat/lon order — so the canned payload deliberately uses a point
+# where swapping the two would be obvious (lon -150, lat 61: Alaska, not
+# the Indian Ocean).
+_USGS_JSON = json.dumps(
+    {
+        "features": [
+            {
+                "properties": {"mag": 6.4, "place": "Southern Alaska", "url": "https://usgs.example/1"},
+                "geometry": {"coordinates": [-150.5, 61.2, 35.0]},
+            },
+            {
+                "properties": {"mag": 3.1, "place": "Nevada", "url": "https://usgs.example/2"},
+                "geometry": {"coordinates": [-117.0, 38.0, 8.0]},
+            },
+        ]
+    }
+)
+
+# OpenSky state vectors: [icao, callsign, origin, ..., lon, lat, alt, ...]
+_OPENSKY_JSON = json.dumps(
+    {
+        "states": [
+            ["abc123", "TEST123 ", "United Kingdom", 0, 0, -0.45, 51.47, 11000.0],
+            ["def456", "TEST456 ", "France", 0, 0, 2.35, 48.85, 9500.0],
+        ]
+    }
+)
+
+_BINANCE_JSON = json.dumps({"lastPrice": "63000.00", "priceChangePercent": "1.25"})
+_FX_JSON = json.dumps({"date": "2026-08-16", "rates": {"USD": 1.15, "GBP": 0.85, "JPY": 183.0}})
+
+
 def _fake_http_get(url: str) -> str:
     if "news.google.com" in url:
         return _NEWS_RSS
@@ -58,6 +91,14 @@ def _fake_http_get(url: str) -> str:
         return _CONFLICT_RSS
     if "worldbank.org" in url:
         return _WB_JSON
+    if "earthquake.usgs.gov" in url:
+        return _USGS_JSON
+    if "opensky-network.org" in url:
+        return _OPENSKY_JSON
+    if "binance.com" in url:
+        return _BINANCE_JSON
+    if "frankfurter.app" in url:
+        return _FX_JSON
     raise AssertionError(f"unexpected url in test: {url}")
 
 
@@ -92,7 +133,14 @@ class TestSnapshot:
     def test_all_sources_aggregate(self):
         snap = wp.world_pulse_snapshot(force=True)
         assert snap["engine"].startswith("world-pulse")
-        assert set(snap["sources"]) == {"markets", "news", "disasters", "cyber", "conflict", "macro"}
+        # v8.9: quakes (USGS) and flights (OpenSky) joined the roster. Both
+        # carry real coordinates, which is what makes the map possible —
+        # asserted explicitly rather than by count so a channel silently
+        # disappearing still fails this test.
+        assert set(snap["sources"]) == {
+            "markets", "news", "disasters", "cyber", "conflict", "macro",
+            "quakes", "flights",
+        }
         for name, src in snap["sources"].items():
             assert src["ok"] is True, f"{name} should be up: {src}"
             assert src["count"] > 0
@@ -152,8 +200,8 @@ class TestDetails:
     def test_status_shape(self):
         st = wp.world_pulse_status()
         assert st["configured"] is True
-        assert st["sources_up"] == 6
-        assert st["sources_total"] == 6
+        assert st["sources_up"] == 8
+        assert st["sources_total"] == 8
         assert 5 <= st["pulse_score"] <= 95
 
 
@@ -185,3 +233,81 @@ class TestWiring:
             srv.shutdown()
             srv.server_close()
             thread.join(timeout=2)
+
+
+class TestGeoParsing:
+    """v8.9: coordinates are what make the map possible.
+
+    GDACS was already shipping georss:point on every alert and the parser
+    was discarding it, so the map had nothing to plot. These pin the parse
+    and — just as importantly — pin that an item WITHOUT a location gets no
+    lat/lon at all rather than a placeholder.
+    """
+
+    def _node(self, xml: str):
+        import xml.etree.ElementTree as ET
+
+        return ET.fromstring(xml)
+
+    def test_parses_georss_point(self):
+        node = self._node(
+            '<item xmlns:georss="http://www.georss.org/georss">'
+            "<georss:point>-7.9322 120.5855</georss:point></item>"
+        )
+        assert wp._parse_point(node) == (-7.9322, 120.5855)
+
+    def test_parses_geo_lat_long_pair(self):
+        node = self._node(
+            '<item xmlns:geo="http://www.w3.org/2003/01/geo/wgs84_pos#">'
+            "<geo:lat>51.5</geo:lat><geo:long>-0.12</geo:long></item>"
+        )
+        assert wp._parse_point(node) == (51.5, -0.12)
+
+    def test_rejects_out_of_range(self):
+        node = self._node(
+            '<item xmlns:georss="http://www.georss.org/georss">'
+            "<georss:point>999 999</georss:point></item>"
+        )
+        assert wp._parse_point(node) == (None, None)
+
+    def test_malformed_point_does_not_raise(self):
+        node = self._node(
+            '<item xmlns:georss="http://www.georss.org/georss">'
+            "<georss:point>not a coordinate</georss:point></item>"
+        )
+        assert wp._parse_point(node) == (None, None)
+
+    def test_item_omits_location_when_absent(self):
+        """No coordinates must mean NO keys — not 0,0.
+
+        A placeholder would plot every unlocated advisory in the Gulf of
+        Guinea, which reads as real data.
+        """
+        it = wp._item("no location here")
+        assert "lat" not in it and "lon" not in it
+
+    def test_item_keeps_location_when_present(self):
+        it = wp._item("somewhere", lat=1.5, lon=-2.5)
+        assert it["lat"] == 1.5 and it["lon"] == -2.5
+
+
+class TestGeoEndpoint:
+    def test_geo_reports_unmappable_channels(self):
+        """The map payload must NAME what it cannot plot.
+
+        Returning only the plottable layers would let the UI imply full
+        coverage while silently dropping five of eight channels.
+        """
+        geo = wp.world_pulse_geo()
+        assert "layers" in geo and "unmappable" in geo
+        # Every channel is accounted for in exactly one of the two buckets.
+        snap = wp.world_pulse_snapshot()
+        assert set(geo["layers"]) | set(geo["unmappable"]) == set(snap["items"])
+        assert not (set(geo["layers"]) & set(geo["unmappable"]))
+
+    def test_every_plotted_item_has_real_coordinates(self):
+        geo = wp.world_pulse_geo()
+        for chan, items in (geo.get("layers") or {}).items():
+            for it in items:
+                assert -90 <= it["lat"] <= 90, chan
+                assert -180 <= it["lon"] <= 180, chan

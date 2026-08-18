@@ -54,6 +54,7 @@ from dourmouse.dispatch import (
     run_dispatch_messages,
     system_message,
 )
+from dourmouse import net_errors
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.system_access import build_system_subagent
 
@@ -411,8 +412,14 @@ def _web_search_tool(arguments: dict[str, Any]) -> str:
     query = arguments.get("query", "").strip()
     if not query:
         return "ERROR: web_search requires a non-empty 'query'."
-    max_results = int(arguments.get("max_results", 5))
+    try:
+        max_results = int(arguments.get("max_results", 5))
+    except (TypeError, ValueError):
+        # The model sometimes passes "five"; that must not crash the tool.
+        return "ERROR: max_results must be an integer."
     errors: list[str] = []
+    # Falls through to this if every engine returns unparseable-but-not-raising.
+    last_exc: BaseException | str = "all engines returned no parseable results"
     # Keyless engines in resilience order: Brave first (2026-08: DDG's HTML
     # endpoints serve bot challenges), DuckDuckGo second (may recover), then
     # Wikipedia as the always-reliable fallback.
@@ -424,11 +431,22 @@ def _web_search_tool(arguments: dict[str, Any]) -> str:
             errors.append(f"{name} returned no parseable results")
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             errors.append(f"{name} failed: {exc}")
+            last_exc = exc
     try:
         return _wikipedia_search(query, max_results)
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         errors.append(f"Wikipedia failed: {exc}")
-    return f"WEB SEARCH FAILED (reported honestly): {'; '.join(errors)}"
+        last_exc: BaseException | str = exc
+    # Every keyless engine is down or unparseable. Classify on the last real
+    # failure so an offline machine reads as offline rather than "not found",
+    # and keep the per-engine detail in the log rather than in chat.
+    return net_errors.report(
+        last_exc,
+        what=f"results for {query!r}",
+        source="web_search",
+        extra={"query": query, "engine_errors": errors},
+        prefix="WEB SEARCH FAILED (reported honestly):",
+    )
 
 
 def _strip_html(raw: str) -> str:
@@ -457,7 +475,13 @@ def _fetch_url_tool(arguments: dict[str, Any]) -> str:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read(max_chars * 2 + 4096).decode("utf-8", errors="replace")
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return f"FETCH FAILED (reported honestly): {exc}"
+        return net_errors.report(
+            exc,
+            what=f"the page at {url}",
+            source="fetch_url",
+            extra={"url": url},
+            prefix="FETCH FAILED (reported honestly):",
+        )
     text = _strip_html(raw)[:max_chars]
     if not text:
         return "FETCH: page returned no readable text (honest)."
@@ -1303,12 +1327,44 @@ def _news_headlines_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: max_results must be an integer."
     try:
         items = live_feeds.news_headlines(max_results)
-    except RuntimeError as exc:
-        return f"NEWS FEED FAILED (reported honestly): {exc}"
+    except (RuntimeError, OSError, ValueError) as exc:
+        return net_errors.report(
+            exc,
+            what="today's headlines",
+            source="news_headlines",
+            suggestion="You can ask me to web_search for a specific story instead.",
+        )
     lines = [
         f"- {it['title']} [{it['source']}] {it['published']}" for it in items
     ]
     return "LIVE NEWS HEADLINES (Google News, keyless):\n" + "\n".join(lines)
+
+
+def _news_search_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse import live_feeds
+
+    query = (arguments.get("query") or "").strip()
+    if not query:
+        return "ERROR: news_search requires a non-empty 'query'."
+    try:
+        max_results = int(arguments.get("max_results", 10))
+    except (TypeError, ValueError):
+        return "ERROR: max_results must be an integer."
+    try:
+        items = live_feeds.news_search(query, max_results)
+    except (RuntimeError, OSError, ValueError) as exc:
+        return net_errors.report(
+            exc,
+            what=f"news about {query}",
+            source="news_search",
+            suggestion="You can ask me to web_search for it instead.",
+            extra={"query": query},
+        )
+    lines = [f"- {it['title']} [{it['source']}] {it['published']}" for it in items]
+    return (
+        f"LIVE NEWS RESULTS for {query!r} (Google News, keyless):\n"
+        + "\n".join(lines)
+    )
 
 
 def _stock_quote_tool(arguments: dict[str, Any]) -> str:
@@ -1319,8 +1375,25 @@ def _stock_quote_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: stock_quote requires a 'symbol' (e.g. AAPL)."
     try:
         q = live_feeds.stock_quote(symbol)
-    except RuntimeError as exc:
-        return f"QUOTE FAILED (reported honestly): {exc}"
+    except (RuntimeError, OSError, ValueError) as exc:
+        # A 404 here usually means the model routed a non-ticker question
+        # (a sports score, a country) into the markets agent. Say so, and
+        # point at the tool that can actually answer it.
+        kind = net_errors.classify(exc)
+        if kind is net_errors.ErrorKind.NOT_FOUND:
+            suggestion = (
+                f"{symbol!r} doesn't look like a tradeable ticker — "
+                "use web_search if you meant something other than a stock."
+            )
+        else:
+            suggestion = None
+        return net_errors.report(
+            exc,
+            what=f"a quote for {symbol}",
+            source="stock_quote",
+            suggestion=suggestion,
+            extra={"symbol": symbol},
+        )
     return (
         f"QUOTE {q['symbol']}: ${q['price']} {q['currency']} "
         f"(day {q['day_low']}–{q['day_high']}, 52wk {q['week52_low']}–{q['week52_high']})"
@@ -1337,8 +1410,13 @@ def _market_movers_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: count must be an integer."
     try:
         rows = live_feeds.market_movers(direction, count)
-    except RuntimeError as exc:
-        return f"MARKET MOVERS FAILED (reported honestly): {exc}"
+    except (RuntimeError, OSError, ValueError) as exc:
+        return net_errors.report(
+            exc,
+            what=f"today's top {direction}",
+            source="market_movers",
+            extra={"direction": direction},
+        )
     lines = []
     for i, r in enumerate(rows, 1):
         pct = r["change_pct"]
@@ -1583,6 +1661,16 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
                 dlp=ctx.dlp,
                 rbac=ctx.rbac,
                 model=nested_model,
+                # v8.12: the ROUTING DIRECTIVE text above already says
+                # "using ONLY the 'target' subagent" — forced_agent makes
+                # that authoritative instead of re-derived by the general
+                # planner, which a comma-heavy task description could
+                # otherwise fool into scoping the WRONG agents (traced
+                # live: the nested run got no web_search tool, had nothing
+                # but its own delegate_task available, and recursed to the
+                # depth limit for an empty answer). None when no target was
+                # given — a free sub-orchestration still plans normally.
+                forced_agent=target or None,
             )
         except Exception as exc:  # honest failure surface (Rule 2.2)
             if ctx.jobs is not None and job_id:
@@ -2504,6 +2592,32 @@ def build_general_registry() -> DispatchRegistry:
                     },
                     handler=_news_headlines_tool,
                 ),
+                ToolSpec(
+                    name="news_search",
+                    description=(
+                        "Search LIVE news for a specific topic, event, team, "
+                        "match or person (keyless Google News RSS). Use this "
+                        "for sports scores and results, elections, and any "
+                        "'what happened with X' question. This is the correct "
+                        "tool for anything current that is NOT a stock — "
+                        "stock_quote only understands tradeable tickers."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": (
+                                    "What to look for, e.g. "
+                                    "'Bangladesh vs Australia cricket score'."
+                                ),
+                            },
+                            "max_results": {"type": "integer", "default": 10},
+                        },
+                        "required": ["query"],
+                    },
+                    handler=_news_search_tool,
+                ),
             ],
         )
     )
@@ -2811,6 +2925,30 @@ def build_general_registry() -> DispatchRegistry:
             return f"GMAIL READ (reported honestly): {exc}"
         except Exception as exc:  # noqa: BLE001 - network/IMAP failures, readable
             return f"GMAIL READ FAILED: {type(exc).__name__}: {exc}"
+
+    def _gmail_archive_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import gmail_archive
+
+        try:
+            return gmail_archive(arguments.get("message_id", ""))
+        except RuntimeError as exc:
+            return f"GMAIL ARCHIVE (reported honestly): {exc}"
+
+    def _gmail_trash_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import gmail_trash
+
+        try:
+            return gmail_trash(arguments.get("message_id", ""))
+        except RuntimeError as exc:
+            return f"GMAIL TRASH (reported honestly): {exc}"
+
+    def _gmail_untrash_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import gmail_untrash
+
+        try:
+            return gmail_untrash(arguments.get("message_id", ""))
+        except RuntimeError as exc:
+            return f"GMAIL UNTRASH (reported honestly): {exc}"
 
     def _gmail_send_h(arguments: dict[str, Any]) -> str:
         from dourmouse.google_services import gmail_send
@@ -3466,6 +3604,74 @@ def build_general_registry() -> DispatchRegistry:
                         f"Send Gmail to {a.get('to', '?')!r} with subject "
                         f"{a.get('subject', '')!r}? (body: "
                         f"{(a.get('body') or '')[:140]}...)"
+                    ),
+                ),
+                ToolSpec(
+                    name="gmail_archive",
+                    description=(
+                        "Remove one email from the INBOX (it stays in All Mail "
+                        "and is fully searchable). Nothing is deleted and it is "
+                        "reversible. Needs the message id from gmail_search."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "message_id": {
+                                "type": "string",
+                                "description": "Gmail message id, as returned by gmail_search.",
+                            }
+                        },
+                        "required": ["message_id"],
+                    },
+                    handler=_gmail_archive_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Archive Gmail message {a.get('message_id', '?')} "
+                        "(leaves the inbox, stays in All Mail, nothing deleted)?"
+                    ),
+                ),
+                ToolSpec(
+                    name="gmail_trash",
+                    description=(
+                        "Move one email to Trash, recoverable for 30 days. This "
+                        "is NOT permanent deletion — Dourmouse cannot permanently "
+                        "delete mail. Use gmail_untrash to undo. Needs the message "
+                        "id from gmail_search."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "message_id": {
+                                "type": "string",
+                                "description": "Gmail message id, as returned by gmail_search.",
+                            }
+                        },
+                        "required": ["message_id"],
+                    },
+                    handler=_gmail_trash_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Move Gmail message {a.get('message_id', '?')} to Trash? "
+                        "Recoverable for 30 days."
+                    ),
+                ),
+                ToolSpec(
+                    name="gmail_untrash",
+                    description=(
+                        "Restore an email from Trash back to the inbox. The undo "
+                        "for gmail_trash."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "message_id": {"type": "string"},
+                        },
+                        "required": ["message_id"],
+                    },
+                    handler=_gmail_untrash_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Restore Gmail message {a.get('message_id', '?')} from Trash?"
                     ),
                 ),
                 ToolSpec(

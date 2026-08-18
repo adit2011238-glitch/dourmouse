@@ -1,0 +1,29 @@
+{
+  "domain": "Security & Privacy",
+  "field": "Intrusion Detection & Defenses",
+  "tests": [
+    {
+      "url": "https://eecs.berkeley.edu/book/phd/exam-prep/",
+      "file": "_archives/https-eecs-berkeley-edu-book-phd-exam-pr-14a5eaa97c.html",
+      "bytes": 163244,
+      "sha256": "14a5eaa97c30f62c0f278f37f628bfd291283db592707bf2039ba2db1fc1d284",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://www2.eecs.berkeley.edu/Protected/Grads/qual-overview.pdf",
+      "file": "_archives/https-www2-eecs-berkeley-edu-protected-g-8d2a7dc691.html",
+      "bytes": 21582,
+      "sha256": "8d2a7dc6916058a8842797edf49dde9f2a8085375ae10e4e2b92f404c38edddd",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://eecs.berkeley.edu/book/phd/exam-prep/",
+      "label": "Berkeley EECS \u2014 prelims (Security area)"
+    }
+  ]
+}

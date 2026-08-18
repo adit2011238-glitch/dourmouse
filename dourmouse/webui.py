@@ -428,7 +428,15 @@ def _system_telemetry() -> dict:
             "mem_total_gb": round(mem.total / (1024 ** 3), 2),
             "mem_pct": round(mem.percent, 1),
             "cpu_pct": round(psutil.cpu_percent(interval=0.1), 1),
-            "load": [round(x, 2) for x in os.getloadavg()],
+            # os.getloadavg() is Unix-only; on Windows it raises AttributeError
+            # and took the WHOLE telemetry payload down with it — host, memory
+            # and CPU were all discarded over one optional field. Load average
+            # is simply absent there rather than fatal.
+            **(
+                {"load": [round(x, 2) for x in os.getloadavg()]}
+                if hasattr(os, "getloadavg")
+                else {}
+            ),
             "at": datetime.now().isoformat(timespec="seconds"),
         }
     except Exception as exc:  # honest degradation (Rule 2.2)
@@ -925,8 +933,52 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_unauthorized()
             return
-        if path in ("/", "/index.html"):
+        if path in ("/setup", "/setup.html"):
+            # v8.9: first-run setup. Served without a session for the same
+            # reason the setup POSTs are — a fresh install has no config to
+            # authenticate against yet.
+            self._serve_static("setup.html")
+            return
+        if path in ("/", "/console", "/console.html"):
+            # v8.9: an install with no working backend goes to setup instead
+            # of a console that looks alive and answers nothing. That silent
+            # dead-end is exactly what a packaged build hits, because the
+            # bundle deliberately ships no .env.
+            try:
+                from dourmouse.config import is_configured
+
+                if not is_configured():
+                    self.send_response(302)
+                    self.send_header("Location", "/setup")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+            except Exception:  # noqa: BLE001 - never block the UI on this check
+                pass
+            # v8.7 — the console is now the default surface: nine screens
+            # over the existing endpoints, with a code-toolchain picker and
+            # a voice mode that surfaces live tool activity. The HUD is
+            # unchanged and still served at /hud (and /index.html), so
+            # nothing was removed — only the default landing changed.
+            self._serve_static("console.html")
+        elif path in ("/dispatch", "/index.html"):
+            # v8.7: the HUD, unchanged. It keeps /index.html because the
+            # deeplink redirect targets that path — the hash router that
+            # serves #/atlas, #/world, #/portfolio etc lives ONLY here
+            # (console.html has no hash routing), so deeplinks must not be
+            # pointed at "/" now that "/" is the console.
             self._serve_static("index.html")
+        elif path in ("/os", "/os.html"):
+            # v8.5 — the OS interface: conversation-first with real system
+            # panels (compute, tools, memory, connections) bound to the
+            # existing endpoints. Additive: "/" and "/app" are untouched.
+            self._serve_static("os.html")
+        elif path in ("/app", "/app.html"):
+            # v8.3 — the consumer interface: chat-first, three modes
+            # (chat/research/code) mapped to real focus_agents. Served
+            # alongside the HUD rather than replacing it, so the operator
+            # surface stays available at "/".
+            self._serve_static("app.html")
         elif path in ("/map", "/map.html"):
             self._serve_static("map.html")
         elif path in ("/atlas-lab", "/atlas-lab.html"):
@@ -1034,8 +1086,35 @@ class _Handler(BaseHTTPRequestHandler):
             # v5.22.14: real host telemetry (mem/cpu/load) — replaces the
             # previously SIMULATED MEM_LOAD + metrics micro-bars (audit fix).
             self._send_json(_system_telemetry())
+        elif path == "/api/setup/status":
+            # v8.9 first-run setup. Every field is a REAL probe (is Ollama
+            # actually answering, is a key actually present) — setup must
+            # never report a backend as ready because it is merely named.
+            try:
+                from dourmouse.firstrun import setup_status
+
+                self._send_json(setup_status())
+            except Exception as exc:  # noqa: BLE001 - setup must never 500
+                self._send_json({"configured": False, "error": str(exc)[:200]})
+        elif path == "/api/worldmap":
+            # v8.9: locatable world-monitor items for the map screen. Reads
+            # the cached world_pulse snapshot, so hitting this does not add
+            # load on the upstream feeds. Never raises: a total failure is
+            # reported as empty layers with the real reason attached.
+            try:
+                from dourmouse.world_pulse import world_pulse_geo
+
+                self._send_json(world_pulse_geo())
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({
+                    "layers": {}, "counts": {}, "unmappable": {},
+                    "error": str(exc)[:200],
+                })
         elif path == "/api/memory":
             self._handle_memory_api()
+        elif path == "/api/profile":
+            # v8.14: the one-time working-style profile — status for SETTINGS.
+            self._handle_profile_status()
         elif path == "/api/repo":
             # v4.1 (P6+): Project Memory — repo index status, last scan,
             # recent facts, and ?q= search (all scoped to source='repo').
@@ -1363,6 +1442,14 @@ class _Handler(BaseHTTPRequestHandler):
             # client can always clear its cookie).
             self._handle_auth_logout()
             return
+        if parsed.path.startswith("/api/setup/"):
+            # v8.9 first-run setup. PRE-auth by necessity: on a fresh install
+            # there is no configuration yet, so requiring a session here would
+            # lock the user out of the screen that exists to configure them.
+            # Bounded by design — the handler writes only an ALLOWLISTED set
+            # of config keys, and the server binds loopback only.
+            self._handle_setup(parsed.path)
+            return
         if not self._authorized():
             self._send_unauthorized()
             return
@@ -1455,6 +1542,12 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/neuro/train":
             # v5.6: force a background retrain of the neural orchestrator.
             self._handle_neuro_train()
+        elif parsed.path == "/api/history/import":
+            # v8.13: pull Claude Code + Codex CLI session history into memory.
+            self._handle_history_import()
+        elif parsed.path == "/api/profile/generate":
+            # v8.14: the one-time working-style profile.
+            self._handle_profile_generate()
         elif parsed.path == "/api/spotify/login":
             # v5.7: start the one-time Spotify account linking (background).
             from dourmouse.spotify_services import spotify_login
@@ -2092,7 +2185,20 @@ class _Handler(BaseHTTPRequestHandler):
         The Host header's PORT is honored when present and sane (reviewer-
         caught: behind a proxy the external port differs from server_port, and
         sending the wrong port makes Google reject with redirect_uri_mismatch).
+
+        DOURMOUSE_OAUTH_REDIRECT_BASE overrides all of it. This matters
+        because Google only accepts plain-http redirects on loopback: reach
+        this server over a VPN address (e.g. a Tailscale 100.x IP) and the
+        derived URI is non-loopback http, which Google rejects outright with
+        "Error 400: invalid_request" — before the user ever sees a consent
+        screen. Pinning the registered loopback URI here lets sign-in work
+        from any host, provided the browser can still reach that loopback
+        address (an SSH tunnel, or a browser on the server itself).
         """
+        pinned = os.environ.get("DOURMOUSE_OAUTH_REDIRECT_BASE", "").strip()
+        if pinned:
+            return pinned.rstrip("/") + "/api/auth/google/callback"
+
         host_header = self.headers.get("Host", "") or ""
         host, port = host_header, None
         # "host:port" splits on the LAST colon; bracketed IPv6 "[::1]:8765"
@@ -2161,6 +2267,35 @@ class _Handler(BaseHTTPRequestHandler):
                 status=400,
             )
             return
+        # Refuse early on a redirect URI Google is guaranteed to reject, and
+        # say why. Sending the user to a consent screen that dead-ends on
+        # "Error 400: invalid_request" is the worst version of this failure:
+        # the cause (reached the server over a non-loopback address) is
+        # nowhere in the message Google shows.
+        redirect_uri = self._google_redirect_uri()
+        host = urllib.parse.urlparse(redirect_uri).hostname or ""
+        if not (host in ("127.0.0.1", "::1", "localhost") or redirect_uri.startswith("https://")):
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": (
+                        f"Google will reject this sign-in: the redirect URI is "
+                        f"{redirect_uri!r}, and Google only accepts plain http "
+                        "redirects on loopback (127.0.0.1 / localhost)."
+                    ),
+                    "fix": (
+                        "Reach Dourmouse on http://127.0.0.1:<port> to sign in "
+                        "(an SSH tunnel works: "
+                        "ssh -N -L 8765:127.0.0.1:8765 <user>@<host>), or set "
+                        "DOURMOUSE_OAUTH_REDIRECT_BASE=http://127.0.0.1:8765 "
+                        "to always use the URI registered in Google Cloud Console."
+                    ),
+                    "redirect_uri": redirect_uri,
+                },
+                status=400,
+            )
+            return
+
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
         claim = (qs.get("claim") or [""])[0].strip() or None
@@ -2451,6 +2586,37 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body.encode("utf-8"))
 
+    def _handle_setup(self, path: str) -> None:
+        """v8.9 first-run setup endpoints.
+
+        Three actions, all bounded: validate a key against the real API,
+        probe a node, and save an ALLOWLISTED set of config values. Nothing
+        here can execute a tool or read arbitrary files, which is why it is
+        safe to expose before a session exists.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except (ValueError, OSError):
+            self._send_json({"ok": False, "detail": "malformed request"}, status=400)
+            return
+        try:
+            from dourmouse import firstrun
+
+            if path == "/api/setup/validate-key":
+                self._send_json(firstrun.validate_nvidia_key(body.get("api_key", "")))
+            elif path == "/api/setup/probe-node":
+                self._send_json(firstrun.probe_node(body.get("url", "")))
+            elif path == "/api/setup/save":
+                self._send_json(firstrun.save_config(body.get("values") or {}))
+            elif path == "/api/setup/restart":
+                self._send_json(firstrun.restart_app())
+            else:
+                self._send_json({"ok": False, "detail": "unknown setup action"}, status=404)
+        except Exception as exc:  # noqa: BLE001 - setup must never 500
+            self._send_json({"ok": False, "detail": str(exc)[:200]}, status=200)
+
     def _handle_memory_api(self) -> None:
         """v2.9: honest Store & Learn stats for the dashboard.
 
@@ -2477,6 +2643,78 @@ class _Handler(BaseHTTPRequestHandler):
                 ),
             }
         )
+
+    def _handle_history_import(self) -> None:
+        """v8.13: POST /api/history/import — pull Claude Code + Codex CLI
+        session history into long-term memory (roadmap item 4).
+
+        Synchronous, not backgrounded like /api/neuro/train: verified live
+        against the user's real 81-session/116MB history, the whole import
+        (both sources) completes in ~3s — well inside one HTTP request, and
+        a synchronous result is simpler to show honestly than a poll loop
+        for something this fast. Runs against ``self.server.memory`` (the
+        SAME store the rest of Store & Learn uses), so an import shows up
+        in /api/memory's count and in recall immediately, no restart.
+        """
+        if self.server.memory is None:
+            self._send_json(
+                {"ok": False, "error": "long-term memory is not configured "
+                 "(DOURMOUSE_LEARN=0, or SQLite FTS5 unavailable on this build)"},
+                status=409,
+            )
+            return
+        from dourmouse.history_import import import_all_history
+
+        try:
+            result = import_all_history(self.server.memory)
+        except Exception as exc:  # honest failure surface (Rule 2.2)
+            self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+        self._send_json({"ok": True, **result})
+
+    def _handle_profile_status(self) -> None:
+        """v8.14: GET /api/profile — honest status for the SETTINGS panel.
+
+        ``exists`` gates the UI: the button only offers to generate once,
+        matching the explicit "once, at setup" spec on
+        dourmouse.personality_profile (never on a schedule, never
+        silently regenerated).
+        """
+        from dourmouse.personality_profile import PROFILE_SOURCE, PROFILE_TITLE, has_profile
+
+        if self.server.memory is None:
+            self._send_json({"exists": False, "profile": None})
+            return
+        exists = has_profile(self.server.memory)
+        profile = None
+        if exists:
+            fact = self.server.memory.get(PROFILE_SOURCE, PROFILE_TITLE)
+            profile = fact["body"] if fact else None
+        self._send_json({"exists": exists, "profile": profile})
+
+    def _handle_profile_generate(self) -> None:
+        """v8.14: POST /api/profile/generate — the one-time working-style
+        profile (roadmap: "should only be done once at the beginning of
+        setup"). Synchronous: one LLM call, same real-time budget as any
+        other chat turn this server already makes.
+        """
+        if self.server.memory is None:
+            self._send_json(
+                {"ok": False, "error": "long-term memory is not configured "
+                 "(DOURMOUSE_LEARN=0, or SQLite FTS5 unavailable on this build)"},
+                status=409,
+            )
+            return
+        from dourmouse.personality_profile import generate_profile
+
+        try:
+            result = generate_profile(
+                self.server.memory, client=self.server.client, config=self.server.config
+            )
+        except Exception as exc:  # honest failure surface (Rule 2.2)
+            self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+        self._send_json({"ok": True, **result})
 
     def _handle_neuro_train(self) -> None:
         """v5.6: POST /api/neuro/train — force a background retrain.
@@ -2859,10 +3097,12 @@ class _Handler(BaseHTTPRequestHandler):
             return
         # Location MUST resolve to the SPA root, not back onto /api/deeplink
         # (a fragment-only Location resolves against the REQUEST uri and would
-        # loop forever). "/" + the hash lands on index.html where the hash
-        # router takes over.
+        # loop forever). v8.7: this targets "/index.html" EXPLICITLY rather
+        # than "/" — the hash router that handles #/atlas, #/world, etc lives
+        # only in the HUD, and "/" now serves the console (no hash routing),
+        # so a bare "/" would silently drop every deeplink on the home screen.
         self.send_response(302)
-        self.send_header("Location", "/" + parsed_target["href"])
+        self.send_header("Location", "/index.html" + parsed_target["href"])
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -3365,6 +3605,26 @@ def serve_forever(
     )
     print(f"Dourmouse UI running at http://{host}:{port}")
     print(f"Registry: {', '.join(sorted(registry.subagent_names))}")
+    # A configured model that was never pulled fails as a bare "404 page not
+    # found" on every request that routes to it, which reads as a network
+    # fault rather than a missing model. Say it once, at startup, where it is
+    # actionable — a silent mismatch cost a working fast lane for weeks.
+    try:
+        from dourmouse import config as _cfg
+        from dourmouse.model_check import check_configured_models
+
+        _report = check_configured_models(
+            {
+                "fast lane": _cfg.fast_lane_model(),
+                "local": os.environ.get("OLLAMA_MODEL", "").strip(),
+            }
+        )
+        if _report["missing"]:
+            print(f"MODELS: {_report['detail']}")
+            for _label, _name in _report["missing"].items():
+                print(f"  fix: ollama pull {_name}   ({_label})")
+    except Exception:  # noqa: BLE001 - a diagnostic must never block startup
+        pass
     if server.live_runtime is not None:
         print(f"Live polling: {server.live_runtime.poll_count} scheduled poll loop(s) running")
     if server.daily_reporter is not None and server.daily_reporter.running:

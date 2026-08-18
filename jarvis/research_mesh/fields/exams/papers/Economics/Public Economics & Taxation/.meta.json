@@ -1,0 +1,509 @@
+{
+  "domain": "Economics",
+  "field": "Public Economics & Taxation",
+  "tests": [
+    {
+      "url": "https://economics.ucdavis.edu/past-preliminary-exams",
+      "file": "_archives/https-economics-ucdavis-edu-past-prelimi-cbd81cf903.html",
+      "bytes": 51084,
+      "sha256": "cbd81cf903c700a9ccbc26e6df0037efb64c9f359ef0779965193ec2b6d1ae95",
+      "key": false,
+      "kind": "html"
+    },
+    {
+      "url": "https://economics.sf.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Graduate%20Handbook%20Fall%202019.pdf",
+      "file": "_archives/https-economics-sf-ucdavis-edu-sites-g-f-341942999c.pdf",
+      "bytes": 101757,
+      "sha256": "341942999cc893a349605a427548ffadfc5478b47ae3b5bb45f0ab0c208e0898",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.sf.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Graduate%20Handbook%20Fall%202020%20-1.pdf",
+      "file": "_archives/https-economics-sf-ucdavis-edu-sites-g-f-5997b51396.pdf",
+      "bytes": 651550,
+      "sha256": "5997b5139655c79ffefe2b1c61abf71ba5dfb755d7fb7556e98ee1240620a056",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.sf.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Graduate%20Handbook%20Fall%202021.pdf",
+      "file": "_archives/https-economics-sf-ucdavis-edu-sites-g-f-388488dd13.pdf",
+      "bytes": 652420,
+      "sha256": "388488dd13a12eb83b5898a6f42d0c5eb3d9db99648096b1bd25dfeffdbdd890",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Econometrics%20Prelim2025_August.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-2d80ac3ea1.pdf",
+      "bytes": 193032,
+      "sha256": "2d80ac3ea1527889c975bc79bff10fb052922faf2e071051cc3cf2a02ddf50e8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Metrics_Prelim2025.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-dd5af5586b.pdf",
+      "bytes": 257897,
+      "sha256": "dd5af5586b1920327b66310b6fb88fc020d5c7a5bad2e7a41e0350d5f0799c03",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Metrics%20Prelim_June_2024.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-3876b97021.pdf",
+      "bytes": 139102,
+      "sha256": "3876b9702164a80bed6d517339d5410d5490b3e85e83da2330ab4947949a9d12",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/econometrics-preliminary-exam-2023-june.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-e34412e6e4.pdf",
+      "bytes": 255177,
+      "sha256": "e34412e6e47609940124628cb31e13094331f269d3d1aeb46da927ad293fd403",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Econometrics%20Prelim%20June%202022.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-56192c4c13.pdf",
+      "bytes": 1272620,
+      "sha256": "56192c4c13d11a897d9c888f5d6766d207dd611048700f64bb28cb28d8f79391",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/econometrics-preliminary-exam-2021-july.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-16244efe34.pdf",
+      "bytes": 139935,
+      "sha256": "16244efe34b3920b140e6667725526e7f5cbedd52b352f0ba60717840b5f94ef",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/econometrics-preliminary-exam-2021-august.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-8beadb4430.pdf",
+      "bytes": 128476,
+      "sha256": "8beadb4430bd415ce059c073985de03f88ce46265f53265386eaf6a8623e5857",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/econometrics-preliminary-exam-2019-july.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-f3c4cdeb4a.pdf",
+      "bytes": 111388,
+      "sha256": "f3c4cdeb4a448bd336b456ef994c838dde5d60037bc998109af713ae0e78edee",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/econometrics_prelim_august_2019.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-9b4351a05f.pdf",
+      "bytes": 147803,
+      "sha256": "9b4351a05fc7330f90287cf2625833ce062d2c36449195f1814aa53828727471",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/econometrics-preliminary-exam-2018-july.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-f2db0758be.pdf",
+      "bytes": 209099,
+      "sha256": "f2db0758be1cbed3e6530ece328d4467dfc039cc2d8553374c8d2092c395ef0f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/econometrics-preliminary-exam-2018-august.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-da257f0cc5.pdf",
+      "bytes": 136109,
+      "sha256": "da257f0cc516d8dd4a53b4ebb29332f3a0d158c5f2f21c798dd361addb4d8c8c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/are_ecn240b_reference_sheet_2019.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-755d5ef5ee.pdf",
+      "bytes": 92489,
+      "sha256": "755d5ef5ee126164e56a628e89bd7b2934900b0cb0c8b2f1993f3d87bdb20045",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Macro%20Prelim%20July%202025%20-%20AK.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-38ba59d6f6.pdf",
+      "bytes": 205053,
+      "sha256": "38ba59d6f6c12d305204dbea22375dc7c365eaea19e1a24430a900ea996d6b98",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Macro_Prelim_July2025_200E_AK.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-08f23ddcc3.pdf",
+      "bytes": 231350,
+      "sha256": "08f23ddcc3d6fc6ece94f9bd3c835a7abe69c86c59638bc9673d04b2927c0bea",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Prelim_July_2025_AK_Q1-2.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-053d197690.pdf",
+      "bytes": 372177,
+      "sha256": "053d1976906fa0b289a56a767af0fd40199683e9609f31e5828047c40cacf981",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/PRELIM_JULY_2025_ALL_PARTS.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-785099ccc0.pdf",
+      "bytes": 257860,
+      "sha256": "785099ccc007de903a25131b9a638805fdc4b1fa7cfe5e48a5abf1834068e7e4",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Prelim_July_2024_AK_Q1-2.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-41ff45210d.pdf",
+      "bytes": 211023,
+      "sha256": "41ff45210d5d51bbe8898ab3c81fe2f3155cc7b81a39b69828daf6e5ac585759",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Prelim_July_2024_AK_Q3-5.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-f694cebb78.pdf",
+      "bytes": 194368,
+      "sha256": "f694cebb78ea2f0beaeae88f5a9dd8a67993ac0be0c661ad593d392df9c91b3d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Macro%20Prelim%20July%202024.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-203b5a0842.pdf",
+      "bytes": 277998,
+      "sha256": "203b5a0842676b900f4824e6481cd8c4a37fad597b853aec1ee6aa30237ff1db",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/MACRO%20PRELIM_JULY_2023.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-db88dea204.pdf",
+      "bytes": 241204,
+      "sha256": "db88dea2042af8c56dd4b62445bc81d3e60f9dfdcc1c202488bfcbf5ff40f6bf",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Prelim_July_2023_AK_Q1-2.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-a31ad0fd96.pdf",
+      "bytes": 172346,
+      "sha256": "a31ad0fd96e5b3ea70005adda7a17810eb01294bfacc43a47c784c8a087c53d1",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Prelim_July_2023_AK_Q3-4.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-baf62025a3.pdf",
+      "bytes": 216304,
+      "sha256": "baf62025a39460eca70a5b3d9febd2e02bf65ee4d0ffd4d802e015e885618578",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Prelim_July_2023_AK_Q5-6.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-244b738c5c.pdf",
+      "bytes": 175787,
+      "sha256": "244b738c5c5b36908486bab1e919db1c4c8b008eba2cee122c8be84bdbb017de",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Macro%20Prelim%202022.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-3824586f56.pdf",
+      "bytes": 251629,
+      "sha256": "3824586f56e26427252746f3fe072784304e79ea336fb602e7709bb89ec2de55",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Macro%20Prelim%202022%20ANSWERS%20200B.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-1df84ee3f0.pdf",
+      "bytes": 42417,
+      "sha256": "1df84ee3f00e3dacb7e47894948c4e302a74172f2a93f6848cce6c76de97c80f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Macro%20Prelim%202022%20ANSWERS%20200D.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-93442ee409.pdf",
+      "bytes": 351625,
+      "sha256": "93442ee4097f8948a5e9a7f11f448f830cdd3cf670bc80bcb6228138146fb517",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Macro%20Prelim%202022%20ANSWERS%20200E.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-f3846462c7.pdf",
+      "bytes": 211495,
+      "sha256": "f3846462c727d244a5012d9f80989ab11a0c17df9b5df7c159853194f692a79d",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Adv%20Econ%20Theory%20Prelim%20July%202004.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-9bd26bfe1d.pdf",
+      "bytes": 159778,
+      "sha256": "9bd26bfe1dad6cf170def876b4ec7c266a5baaae5da11043252b7760501e0bfe",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Adv%20Econ%20Theory%20Prelim%20July%202006.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-8c7f0e6fec.pdf",
+      "bytes": 129428,
+      "sha256": "8c7f0e6fec1c1fe8f99e568aa9abbfc33fd1007db5859a4aad315fd16860c119",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Adv%20Econ%20Theory%20Prelim%20June%202007.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-623d5bb64b.pdf",
+      "bytes": 576817,
+      "sha256": "623d5bb64b347c2c8723f6b68634e9236e6dbe2feac669992514a9de8723d2d0",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Adv%20Econ%20Theory%20Prelim%20Sept%202007.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-a7795d3878.pdf",
+      "bytes": 157572,
+      "sha256": "a7795d3878aaf7c018573cf9d52f22b91cc1cf640eb5c795dbd11ec48bb4e52c",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Adv%20Econ%20Theory%20Prelim%20June%202008.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-efdd6f6901.pdf",
+      "bytes": 185618,
+      "sha256": "efdd6f69016756890ad02e085f9944b6a161e0791a5f1cca43d061a6d3f86f1b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Adv%20Econ%20Theory%20Prelim%20June%202009.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-0ab0ca2e7e.pdf",
+      "bytes": 129833,
+      "sha256": "0ab0ca2e7e640689d7588d26ba224a2c313bb4fecfa7109f9e67eeaeb4ec10c6",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Econ%20History%20Prelim%20June%202004.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-3924b6db4b.pdf",
+      "bytes": 10627,
+      "sha256": "3924b6db4beb562b8fc96b66c05db766ecbfc3e9023e3308cbab1a22eac55385",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Econ%20History%20Prelim%20July%202005.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-6e5969dc0a.pdf",
+      "bytes": 11853,
+      "sha256": "6e5969dc0a94024d523f5bf8014bc8b0d9317057c8a8818c5bbb45ea4377f766",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Econ%20History%20Prelim%20July%202006.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-a32770526b.pdf",
+      "bytes": 26991,
+      "sha256": "a32770526b5c03013f3b9a02e4cb2f7cb1810e39bf13fd2dc190d2f1ca2df68e",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Econ%20History%20Prelim%20July%202007.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-474475db3f.pdf",
+      "bytes": 16912,
+      "sha256": "474475db3f1ba14cc0ae262c43621d3173d7bb3e6121baf319ed4df979d96c92",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Econ%20History%20Prelim%20June%202008.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-d38fd5c307.pdf",
+      "bytes": 34010,
+      "sha256": "d38fd5c30702c17769d757527e66a7839df5e42c70f97a34b2daab044c37b727",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Econ%20History%20Prelim%20July%202009.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-3449e81a0e.pdf",
+      "bytes": 10269,
+      "sha256": "3449e81a0edd42d4c18200529b01a7e447b02f20d08258069a069de9ecca5100",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Economics%20Growth%20Prelim%20July%202003.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-c8b9ea6d41.pdf",
+      "bytes": 101525,
+      "sha256": "c8b9ea6d41f841ce95c389d55440cd9dbcd81ac9b3e8c8e0d00c76cee7d4e06b",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Economics%20Growth%20Prelim%20July%202005.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-4ad39ba299.pdf",
+      "bytes": 13087,
+      "sha256": "4ad39ba299a111e56bd66f74f466311f212f26504c29ef635b70c159ebb4b6c8",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Economics%20Growth%20Prelim%20Sept%202005.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-f0af48d291.pdf",
+      "bytes": 11850,
+      "sha256": "f0af48d29160a87c8a3771d6f2bd851caca0849fdca586d25eade5268a5e7321",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Economics%20Growth%20Prelim%20July%202006.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-4ea69bd707.pdf",
+      "bytes": 10825,
+      "sha256": "4ea69bd7079021890436bd51dea5b514740ad920f19783d2e9f32b605da5be3f",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Economics%20Growth%20Prelim%20Sept%202006.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-d0226d4ff6.pdf",
+      "bytes": 10892,
+      "sha256": "d0226d4ff6f599e30252895149b234d30474182a8a4f742581ab34c654b4a761",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Economic%20Growth%20Prelim%20July%202007.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-cd19a98660.pdf",
+      "bytes": 13174,
+      "sha256": "cd19a98660b36275ad1d266feab9e3e25e5f34b6080b2bfd332c3723ab1be461",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Economics%20Growth%20Prelim%20July%202008.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-c5f657a9e7.pdf",
+      "bytes": 34007,
+      "sha256": "c5f657a9e711df385591354e8e71caf5c1a7cbdc3f91293f47f22962ae921986",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Industrial%20Organization%20Prelim%20ANSWERS%20June%202004.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-17f64e7508.pdf",
+      "bytes": 226664,
+      "sha256": "17f64e75083520dd99abf5b12c83b963c7da7a0cef65e4b464886ca7c91636dc",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Industrial%20Organization%20Prelim%20ANSWERS%20June%202005.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-62d1fe3048.pdf",
+      "bytes": 935320,
+      "sha256": "62d1fe304808c92eefd41752a4057de3eb571bd0533de29bdb97f1557a991801",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Industrial%20Organization%20Prelim%20ANSWERS%20Sept%202005.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-208552167b.pdf",
+      "bytes": 37138,
+      "sha256": "208552167b43982b0a95bcad62887199a448389770c892b58391077a81babc60",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Industrial%20Organization%20Prelim%20ANSWERS%20June%202006.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-b73b01cc44.pdf",
+      "bytes": 590990,
+      "sha256": "b73b01cc44194c3e88fccf71be02f4d81c4a49e2b498e1c00cab13327a3db603",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Industrial%20Organization%20Prelim%20ANSWERS%20July%202007.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-c21ce7c708.pdf",
+      "bytes": 27970,
+      "sha256": "c21ce7c70826766c84fdf2708a7d7e806b86e3f0ea6d5ff61820555d657528e9",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Industrial%20Organization%20Prelim%20ANSWERS%20Sept%202007.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-3a6b39a704.pdf",
+      "bytes": 45629,
+      "sha256": "3a6b39a704957a875f31e6b7c3bdd61fff328f569567e8a330249c9ef99c4b55",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Industrial%20Organization%20Prelim%20ANSWERS%20July%202008.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-a80779e5e4.pdf",
+      "bytes": 48719,
+      "sha256": "a80779e5e4d7cf5b359d321a98b3237ab83e2813a566b76b23dc30cdd9d28855",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://economics.ucdavis.edu/sites/g/files/dgvnsk13091/files/inline-files/Industrial%20Organization%20Prelim%20June%202004.pdf",
+      "file": "_archives/https-economics-ucdavis-edu-sites-g-file-992e332534.pdf",
+      "bytes": 56799,
+      "sha256": "992e33253422cbd5109301e788bc21fbc34f151ec1c16c68371d97e8e2889aac",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "http://www.klenow.com/Idea_Rents.pdf",
+      "file": "_archives/http-www-klenow-com-idea-rents-pdf-36190e4540.pdf",
+      "bytes": 1848893,
+      "sha256": "36190e4540e13896a50e294c1812439e3f9779450e78729f570004f2e54ef380",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.jonathandroth.com/assets/files/EvaluatingCounterfactualsWithIV.pdf",
+      "file": "_archives/https-www-jonathandroth-com-assets-files-9aabd8d684.pdf",
+      "bytes": 813886,
+      "sha256": "9aabd8d684e9cec9a2ec301ad0c6805d5ab0659950fb47b55bd2ce251ed888ad",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://www.anderson.ucla.edu/faculty_pages/keith.chen/papers/Final_PNAS26.pdf",
+      "file": "_archives/https-www-anderson-ucla-edu-faculty-page-97b66e483c.pdf",
+      "bytes": 5000000,
+      "sha256": "97b66e483c1eed3ce623b4f2cd29600e36965c2cf970e8b54fd66ee24e2c4725",
+      "key": false,
+      "kind": "pdf"
+    },
+    {
+      "url": "https://eminakamura.com/papers/Commoditization.pdf",
+      "file": "_archives/https-eminakamura-com-papers-commoditiza-aa0c728f59.pdf",
+      "bytes": 1078834,
+      "sha256": "aa0c728f59e7ea4b8dd0f53dffeb202b7f00381eef84ad03a69125f0a6098e9d",
+      "key": false,
+      "kind": "pdf"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://economics.ucdavis.edu/past-preliminary-exams",
+      "label": "UC Davis Economics \u2014 Past Preliminary Exams (some with answer keys)"
+    }
+  ]
+}

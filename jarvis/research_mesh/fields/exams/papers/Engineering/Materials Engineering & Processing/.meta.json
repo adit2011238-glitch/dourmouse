@@ -1,0 +1,21 @@
+{
+  "domain": "Engineering",
+  "field": "Materials Engineering & Processing",
+  "tests": [
+    {
+      "url": "https://www.mse.gatech.edu/graduate/quals",
+      "file": "_archives/https-www-mse-gatech-edu-graduate-quals-0f514a72ec.html",
+      "bytes": 54571,
+      "sha256": "0f514a72ec63cd4638878b7aadd0cb9a92e45cd7ece68a4c34b693d8c296b998",
+      "key": false,
+      "kind": "html"
+    }
+  ],
+  "keys": [],
+  "links": [
+    {
+      "url": "https://www.mse.gatech.edu/graduate/quals",
+      "label": "GaTech MSE \u2014 Graduate Comprehensive Exams (6 of 18, 4h)"
+    }
+  ]
+}
