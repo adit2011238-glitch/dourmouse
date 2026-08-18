@@ -211,14 +211,24 @@ def _wrap(fn):
 
 def build_t212_tool_specs() -> list[Any]:
     """ToolSpecs for the ``t212`` subagent (lazy ToolSpec import)."""
-    from dourmouse.dispatch import ToolSpec
+    from dourmouse.dispatch import Permission, ToolSpec
 
-    def _spec(name: str, description: str, handler, props: dict[str, Any]) -> Any:
+    def _spec(
+        name: str,
+        description: str,
+        handler,
+        props: dict[str, Any],
+        *,
+        permission: Any = Permission.REGULAR,
+        confirm_prompt: Any = None,
+    ) -> Any:
         return ToolSpec(
             name=name,
             description=description,
             parameters={"type": "object", "properties": props, "required": []},
             handler=handler,
+            permission=permission,
+            confirm_prompt=confirm_prompt,
         )
 
     return [
@@ -247,11 +257,15 @@ def build_t212_tool_specs() -> list[Any]:
             _wrap(t212_portfolio),
             {},
         ),
+        # v8.15: gated on top of paper_confirm/the live env double-gate —
+        # trade execution, even simulated, deserves the same human check as
+        # this system's other consequential actions.
         _spec(
             "t212_order",
             "Place a REAL order via the T212 API. Paper-first: refuses without "
             "paper_confirm=true, and live requires the double gate. Demo "
-            "executes against the practice account.",
+            "executes against the practice account. REQUIRES human "
+            "confirmation before it places any order.",
             _wrap(t212_order),
             {
                 "ticker": {"type": "string", "description": "Instrument ticker, e.g. AAPL, VOO"},
@@ -261,5 +275,11 @@ def build_t212_tool_specs() -> list[Any]:
                 "stop_price": {"type": "number", "description": "Required for STOP/STOP_LIMIT"},
                 "paper_confirm": {"type": "boolean", "description": "Must be true to place any order (paper-first)"},
             },
+            permission=Permission.REQUIRES_CONFIRMATION,
+            confirm_prompt=lambda a: (
+                f"Place T212 order: {a.get('order_type', 'MARKET')} "
+                f"{a.get('quantity', '?')} shares of {a.get('ticker', '?')}? "
+                "(practice account unless T212 live is explicitly opened)"
+            ),
         ),
     ]

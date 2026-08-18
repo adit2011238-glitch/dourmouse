@@ -368,7 +368,13 @@ class TestRunCommandGuard:
         assert perms["run_privileged_command"] is Permission.REQUIRES_CONFIRMATION
         assert perms["delete_path"] is Permission.REQUIRES_CONFIRMATION
         assert perms["read_path"] is Permission.REGULAR
-        assert perms["write_path"] is Permission.REGULAR
+        # v8.15: write_path silently overwrites any file on the whole laptop
+        # with no diff shown — the same destructive class as delete_path
+        # (its sibling in this same subagent/scope), just via truncate-and-
+        # replace instead of unlink. Gated to match.
+        assert perms["write_path"] is Permission.REQUIRES_CONFIRMATION
+        spec = next(t for t in sub.tools if t.name == "write_path")
+        assert spec.confirm_prompt is not None
 
 
 class TestSystemInfoAndHelpers:

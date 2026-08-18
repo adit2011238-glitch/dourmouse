@@ -129,6 +129,20 @@ class TestRosterShape:
             "email_own_send",  # v5.25: sending as the Dourmouse identity needs a human
             "drive_create_doc",  # v5.27: creating a file in the user's Drive needs a human
             "slides_create",  # v5.28: creating a deck in the user's Drive needs a human
+            # v8.15: roadmap item 5 (11% -> raise gating). Trade execution is
+            # at least as consequential as gmail_send/spotify_play, which are
+            # already gated — both were simply missed, not a deliberate call.
+            "mt5_order",
+            "t212_order",
+            # v8.15: hands a real autonomous agent in another live app a
+            # prompt to act on — closer to deploy/send_draft than a write.
+            "freebuff_dispatch",
+            # v8.15: silent overwrite, no diff shown (unlike write_file,
+            # which is workspace-sandboxed and shows one on overwrite).
+            # write_path is delete_path's sibling in the same subagent and
+            # same full-laptop scope; delete_path was already gated.
+            "write_note",
+            "write_path",
         }
 
     def test_internet_tools_registered(self):
@@ -465,6 +479,18 @@ class TestMemory:
         result = _write_note_tool({"path": "daily/2026-08-01.md", "content": "# Day\nnotes"})
         assert "WROTE" in result
         assert (vault / "daily" / "2026-08-01.md").read_text(encoding="utf-8") == "# Day\nnotes"
+
+    def test_write_note_requires_confirmation(self):
+        """v8.15: silent overwrite of the user's real vault notes, no diff
+        shown (unlike write_file, which is workspace-sandboxed and shows
+        one). Gated; read_note/search_vault stay regular."""
+        registry = build_general_registry()
+        spec = registry.lookup("write_note")
+        assert spec.permission is Permission.REQUIRES_CONFIRMATION
+        assert spec.confirm_prompt is not None
+        assert "notes.md" in spec.confirm_prompt({"path": "notes.md", "content": "x"})
+        assert registry.lookup("read_note").permission is Permission.REGULAR
+        assert registry.lookup("search_vault").permission is Permission.REGULAR
 
     def test_vault_unset_reports_not_configured(self, monkeypatch):
         monkeypatch.delenv("OBSIDIAN_VAULT_PATH", raising=False)

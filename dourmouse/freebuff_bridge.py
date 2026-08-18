@@ -580,14 +580,25 @@ def _freebuff_changes_tool(arguments: dict[str, Any]) -> str:
     return f"FREEBUFF CHANGES for {path} ({len(changes)} files, live):\n" + "\n".join(lines)
 
 
-def _spec(name: str, description: str, handler: Any, props: dict[str, Any], required: list[str] | None = None) -> Any:
-    from dourmouse.dispatch import ToolSpec
+def _spec(
+    name: str,
+    description: str,
+    handler: Any,
+    props: dict[str, Any],
+    required: list[str] | None = None,
+    *,
+    permission: Any = None,
+    confirm_prompt: Any = None,
+) -> Any:
+    from dourmouse.dispatch import Permission, ToolSpec
 
     return ToolSpec(
         name=name,
         description=description,
         parameters={"type": "object", "properties": props, "required": required or []},
         handler=handler,
+        permission=permission if permission is not None else Permission.REGULAR,
+        confirm_prompt=confirm_prompt,
     )
 
 
@@ -599,7 +610,14 @@ def build_freebuff_tool_specs() -> list[Any]:
     thread in the user's chosen project and posts ONE prompt to it — the
     explicit dispatch action the user asked for (v5.11). It never deletes
     or edits existing threads, and every write is reported honestly.
+
+    ``freebuff_dispatch`` is REQUIRES_CONFIRMATION: it doesn't just write
+    data, it hands a real autonomous agent in another live app a prompt to
+    act on against a real project path — closer to deploy/send_draft than
+    to a file write. Every other tool here is a read.
     """
+    from dourmouse.dispatch import Permission
+
     return [
         _spec(
             "freebuff_dispatch",
@@ -610,7 +628,8 @@ def build_freebuff_tool_specs() -> list[Any]:
             "freebuff_projects/freebuff_threads). Returns the new thread id "
             "+ post status; fetch the agent's answer later with "
             "freebuff_read_thread. Use this when the user wants work done "
-            "inside Freebuff (their AI workspace), not just read.",
+            "inside Freebuff (their AI workspace), not just read. REQUIRES "
+            "human confirmation before it dispatches anything.",
             _freebuff_dispatch_tool,
             {
                 "prompt": {
@@ -627,6 +646,13 @@ def build_freebuff_tool_specs() -> list[Any]:
                 },
             },
             ["prompt", "project_path"],
+            permission=Permission.REQUIRES_CONFIRMATION,
+            confirm_prompt=lambda a: (
+                f"Dispatch to Freebuff project {a.get('project_path', '?')!r}: "
+                f"{(a.get('prompt') or '')[:160]!r}"
+                f"{'...' if len(a.get('prompt') or '') > 160 else ''}? "
+                "A real Freebuff agent will start acting on this."
+            ),
         ),
         _spec(
             "freebuff_status",

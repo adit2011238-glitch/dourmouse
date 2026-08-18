@@ -29,6 +29,7 @@ import pytest
 
 from dourmouse import connections as conn
 from dourmouse import freebuff_bridge as fb
+from dourmouse.dispatch import Permission
 from dourmouse.general_roster import build_general_registry
 
 AUTH_OK = {"authed": True, "user": {"id": "u1", "email": "adit@example.com", "name": "adit"}}
@@ -450,6 +451,23 @@ class TestRosterAndPanel:
             "freebuff_changes",
             "freebuff_dispatch",
         } <= names
+
+    def test_freebuff_dispatch_requires_confirmation(self):
+        """v8.15: freebuff_dispatch hands a real autonomous agent in another
+        live app a prompt to act on — gated like deploy/send_draft. Every
+        other freebuff tool is a read and stays regular."""
+        registry = build_general_registry()
+        spec = registry.lookup("freebuff_dispatch")
+        assert spec.permission is Permission.REQUIRES_CONFIRMATION
+        assert spec.confirm_prompt is not None
+        prompt = spec.confirm_prompt({"prompt": "fix the bug", "project_path": "/x/proj"})
+        assert "/x/proj" in prompt and "fix the bug" in prompt
+        for name in (
+            "freebuff_status", "freebuff_projects", "freebuff_threads",
+            "freebuff_read_thread", "freebuff_notes", "freebuff_skills",
+            "freebuff_changes",
+        ):
+            assert registry.lookup(name).permission is Permission.REGULAR
 
     def test_panel_snapshot_not_configured(self, monkeypatch):
         monkeypatch.setattr(fb, "_FREEBUFF_BASE", "http://127.0.0.1:1")

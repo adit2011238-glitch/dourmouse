@@ -22,6 +22,7 @@ import types
 import pytest
 
 import dourmouse.mt5_ops as mt5_ops
+from dourmouse.dispatch import Permission
 from dourmouse.general_roster import build_general_registry
 
 
@@ -282,3 +283,17 @@ class TestRoster:
         registry = build_general_registry()
         tool_names = set(registry.tool_names)
         assert {"mt5_status", "mt5_universe", "mt5_quote", "mt5_order"} <= tool_names
+
+    def test_mt5_order_requires_confirmation(self):
+        """v8.15: real trade execution — even paper/demo — is gated like
+        every other consequential action (gmail_send, spotify_play), not
+        left to a model-settable paper_confirm argument alone."""
+        registry = build_general_registry()
+        spec = registry.lookup("mt5_order")
+        assert spec.permission is Permission.REQUIRES_CONFIRMATION
+        assert spec.confirm_prompt is not None
+        prompt = spec.confirm_prompt({"code": "ZC", "side": "buy", "volume": 0.5})
+        assert "ZC" in prompt and "0.5" in prompt
+        # sibling read-only tools stay regular
+        for name in ("mt5_status", "mt5_universe", "mt5_quote"):
+            assert registry.lookup(name).permission is Permission.REGULAR

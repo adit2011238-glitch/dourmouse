@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 from dourmouse import trading212_ops
+from dourmouse.dispatch import Permission
 from dourmouse.general_roster import build_general_registry
 from dourmouse.trading212_ops import (
     T212NotConfiguredError,
@@ -221,3 +222,17 @@ class TestRoster:
             "t212_portfolio",
             "t212_order",
         } <= names
+
+    def test_t212_order_requires_confirmation(self):
+        """v8.15: real trade execution — even paper/demo — is gated like
+        every other consequential action (gmail_send, spotify_play), not
+        left to a model-settable paper_confirm argument alone."""
+        registry = build_general_registry()
+        spec = registry.lookup("t212_order")
+        assert spec.permission is Permission.REQUIRES_CONFIRMATION
+        assert spec.confirm_prompt is not None
+        prompt = spec.confirm_prompt({"ticker": "AAPL", "quantity": 3, "order_type": "MARKET"})
+        assert "AAPL" in prompt and "3" in prompt
+        # sibling read-only tools stay regular
+        for name in ("t212_status", "t212_account", "t212_positions", "t212_portfolio"):
+            assert registry.lookup(name).permission is Permission.REGULAR

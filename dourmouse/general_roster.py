@@ -1219,9 +1219,15 @@ def _build_memory_subagent(registry: DispatchRegistry) -> Subagent:
                 },
                 handler=_read_note_tool,
             ),
+            # v8.15: gated — silently overwrites the user's real vault notes
+            # with no diff shown (unlike write_file, which is workspace-
+            # sandboxed and shows one on overwrite; see its docstring).
             ToolSpec(
                 name="write_note",
-                description="Write (create/overwrite) one note in the Obsidian vault.",
+                description=(
+                    "Write (create/overwrite) one note in the Obsidian vault. "
+                    "REQUIRES human confirmation before it overwrites anything."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
@@ -1231,6 +1237,12 @@ def _build_memory_subagent(registry: DispatchRegistry) -> Subagent:
                     "required": ["path", "content"],
                 },
                 handler=_write_note_tool,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: (
+                    f"Write vault note {a.get('path', '?')!r} "
+                    f"({len(a.get('content', ''))} chars)? This overwrites any "
+                    "existing content at that path with no diff shown."
+                ),
             ),
             ToolSpec(
                 name="daily_digest",
@@ -1509,10 +1521,25 @@ def _schedule_recurring_tool(arguments: dict[str, Any]) -> str:
     if not isinstance(args, dict):
         return "ERROR: 'arguments' must be a JSON object of tool arguments."
     registry = build_general_registry()
-    if registry.lookup(tool) is None:
+    tool_spec = registry.lookup(tool)
+    if tool_spec is None:
         return (
             f"ERROR: no such tool: {tool!r}. List the registry first to pick a "
             "real tool name. Nothing was scheduled."
+        )
+    if tool_spec.permission is not Permission.REGULAR:
+        # SchedulerRunner fires unattended (Rule 2.8) — no human is present to
+        # answer a confirmation prompt when a schedule comes due. A gated tool
+        # scheduled here would either silently never run (safe but confusing)
+        # or, worse, bypass its own gate if the runner ever calls the handler
+        # directly. Refuse at creation time instead, with an honest reason
+        # (Rule 2.2), so the model/human learns immediately, not on a missed
+        # 3am run six weeks from now.
+        return (
+            f"ERROR: cannot schedule {tool!r} — it requires human confirmation "
+            f"({tool_spec.permission.value}), which isn't available for "
+            "unattended scheduled runs. Only regular-tier tools can be "
+            "scheduled. Nothing was scheduled."
         )
     try:
         spec = schedules.parse_schedule(schedule_text)

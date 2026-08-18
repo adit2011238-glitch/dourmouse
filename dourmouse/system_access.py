@@ -614,11 +614,15 @@ def build_system_subagent() -> Subagent:
                 },
                 handler=_list_path_tool,
             ),
+            # v8.15: gated — same full-laptop scope as delete_path (already
+            # gated, right below), no diff shown; a silent overwrite destroys
+            # content exactly as delete_path's unlink does.
             ToolSpec(
                 name="write_path",
                 description=(
                     "Write (create/overwrite) any text file by absolute path. "
-                    "Refused inside credential/system dirs (~/.ssh, /etc, ...)."
+                    "Refused inside credential/system dirs (~/.ssh, /etc, ...). "
+                    "REQUIRES human confirmation before it overwrites anything."
                 ),
                 parameters={
                     "type": "object",
@@ -629,6 +633,12 @@ def build_system_subagent() -> Subagent:
                     "required": ["path", "content"],
                 },
                 handler=_write_path_tool,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: (
+                    f"Write {a.get('path', '?')!r} "
+                    f"({len(a.get('content', ''))} chars)? This overwrites any "
+                    "existing file at that path with no diff shown."
+                ),
             ),
             ToolSpec(
                 name="delete_path",

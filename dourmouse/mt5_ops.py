@@ -433,14 +433,24 @@ def _mt5_order_tool(arguments: dict[str, Any]) -> str:
 
 def build_mt5_tool_specs() -> list[Any]:
     """ToolSpecs for the ``mt5`` subagent (lazy ToolSpec import)."""
-    from dourmouse.dispatch import ToolSpec
+    from dourmouse.dispatch import Permission, ToolSpec
 
-    def _spec(name: str, description: str, handler, props: dict[str, Any]) -> Any:
+    def _spec(
+        name: str,
+        description: str,
+        handler,
+        props: dict[str, Any],
+        *,
+        permission: Any = Permission.REGULAR,
+        confirm_prompt: Any = None,
+    ) -> Any:
         return ToolSpec(
             name=name,
             description=description,
             parameters={"type": "object", "properties": props, "required": []},
             handler=handler,
+            permission=permission,
+            confirm_prompt=confirm_prompt,
         )
 
     return [
@@ -464,11 +474,15 @@ def build_mt5_tool_specs() -> list[Any]:
             _mt5_quote_tool,
             {"code": {"type": "string", "description": "Seasonal universe code, e.g. ZC, HE, GC"}},
         ),
+        # v8.15: gated on top of paper_confirm/the live env double-gate —
+        # trade execution, even simulated, deserves the same human check as
+        # this system's other consequential actions.
         _spec(
             "mt5_order",
             "Place a REAL order through the local MT5 terminal. Paper-first: "
             "refuses without paper_confirm=true, and live accounts are double-"
-            "gated (MT5_ALLOW_LIVE=1 + MT5_CONFIRM_LIVE=1). Demo = paper.",
+            "gated (MT5_ALLOW_LIVE=1 + MT5_CONFIRM_LIVE=1). Demo = paper. "
+            "REQUIRES human confirmation before it places any order.",
             _mt5_order_tool,
             {
                 "code": {"type": "string", "description": "Seasonal universe code, e.g. ZC"},
@@ -476,5 +490,11 @@ def build_mt5_tool_specs() -> list[Any]:
                 "volume": {"type": "number", "description": "Lots (default 0.01 micro lot)"},
                 "paper_confirm": {"type": "boolean", "description": "Must be true to place any order (paper-first)"},
             },
+            permission=Permission.REQUIRES_CONFIRMATION,
+            confirm_prompt=lambda a: (
+                f"Place MT5 order: {str(a.get('side', '?')).upper()} "
+                f"{a.get('volume', '?')} lots of {a.get('code', '?')}? "
+                "(paper account unless MT5_ALLOW_LIVE is set)"
+            ),
         ),
     ]

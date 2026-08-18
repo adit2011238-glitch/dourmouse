@@ -366,6 +366,24 @@ class SchedulerRunner:
             spec = self._registry.lookup(tool)
             if spec is None:
                 return f"ERROR: no such tool: {tool} (was it removed?)"
+            # Defense in depth: _schedule_recurring_tool already refuses to
+            # create a schedule for a non-REGULAR tool, but this is the fail-
+            # safe for anything that reaches the store another way (an entry
+            # written before that check existed, a tool re-tiered to
+            # REQUIRES_CONFIRMATION/PROHIBITED after it was scheduled, a
+            # future caller of Schedules.add() that skips the tool helper).
+            # The runner fires unattended — no human is present to answer a
+            # confirmation prompt — so calling spec.handler() directly here
+            # would silently execute a gated tool with no gate at all. Fail
+            # closed and say so honestly (Rule 2.2), the same shape
+            # _execute_tool uses when no confirmation_gate is attached.
+            if spec.permission.value != "regular":
+                return (
+                    f"CONFIRMATION REQUIRED: {tool} requires human confirmation "
+                    f"({spec.permission.value}) and cannot run on an unattended "
+                    "schedule; NOT executed. Disable this schedule or point it "
+                    "at a regular-tier tool."
+                )
             return str(spec.handler(args))
         except Exception as exc:  # honest failure, never a fabricated result
             return f"SCHEDULE RUN FAILED (reported honestly): {exc}"

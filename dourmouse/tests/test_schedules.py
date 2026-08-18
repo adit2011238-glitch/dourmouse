@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from dourmouse import schedules
+from dourmouse.dispatch import DispatchRegistry, Permission, Subagent, ToolSpec
 from dourmouse.general_roster import build_general_registry
 
 
@@ -170,6 +171,61 @@ class TestSchedulerRunner:
         assert tracker.events
         assert "no such tool" in tracker.events[0]["text"]
 
+    def test_gated_tool_fails_closed_never_calls_handler(self, tmp_path):
+        """v8.15: the runner has no confirmation channel — nobody is present
+        when a schedule fires. A gated tool reaching the store any other way
+        (a legacy entry, a future caller of Schedules.add() that skips the
+        schedule_recurring roster tool) must fail closed, not execute
+        unconfirmed. A synthetic registry + tool (rather than a real gated
+        tool like gmail_send, whose handler is a private closure with no
+        module-level name to intercept) proves the RUNNER itself is guarded
+        — defense in depth, not just schedule_recurring's creation-time
+        refusal.
+        """
+        called = []
+        gated = ToolSpec(
+            name="gated_thing",
+            description="a tool that requires confirmation",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda a: called.append(a) or "DID THE THING",
+            permission=Permission.REQUIRES_CONFIRMATION,
+            confirm_prompt=lambda a: "confirm?",
+        )
+        registry = DispatchRegistry()
+        registry.register_subagent(
+            Subagent(name="g", domain="Test", description="x", tools=(gated,))
+        )
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        store.add("gated_thing", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+        tracker = _FakeTracker()
+        runner = schedules.SchedulerRunner(
+            registry, tracker, store=store,
+            now_fn=lambda: datetime(2026, 8, 12, 9, 0), tick=1.0,
+        )
+        runner._tick_once()
+        assert not called, "gated tool's handler ran on an unattended schedule"
+        assert tracker.events
+        text = tracker.events[0]["text"]
+        assert "CONFIRMATION REQUIRED" in text and "NOT executed" in text
+        # The entry is left enabled (not silently disabled) — an honest,
+        # visible "not executed" every tick beats a schedule that looks
+        # live but quietly never fires.
+        assert store.list()[0]["enabled"] is True
+
+    def test_regular_tool_from_real_roster_still_runs_unattended(self, tmp_path):
+        """Companion to the gated-tool test above: confirm the fail-safe
+        check doesn't over-match and block ordinary scheduled tools too."""
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        store.add("list_tasks", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+        tracker = _FakeTracker()
+        runner = schedules.SchedulerRunner(
+            self._registry(), tracker, store=store,
+            now_fn=lambda: datetime(2026, 8, 12, 9, 0), tick=1.0,
+        )
+        runner._tick_once()
+        assert tracker.events
+        assert "CONFIRMATION REQUIRED" not in tracker.events[0]["text"]
+
 
 class TestStore:
     def test_crud(self, tmp_path):
@@ -220,3 +276,22 @@ class TestRosterTools:
         add = next(t for t in registry.get_subagent("tasks").tools if t.name == "schedule_recurring")
         out = add.handler({"tool": "list_tasks", "arguments": {}, "schedule_text": "sometimes"})
         assert "SCHEDULE REJECTED" in out
+
+    def test_schedule_recurring_refuses_gated_tool(self, tmp_path, monkeypatch):
+        """v8.15: a tool that REQUIRES_CONFIRMATION can't be scheduled at
+        all — the runner has no confirmation channel when a schedule fires
+        unattended, so refuse at creation time with an honest reason rather
+        than silently creating a schedule that can never do anything."""
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        registry = build_general_registry()
+        add = next(t for t in registry.get_subagent("tasks").tools if t.name == "schedule_recurring")
+        lst = next(t for t in registry.get_subagent("tasks").tools if t.name == "list_schedules")
+        out = add.handler({
+            "tool": "gmail_send",
+            "arguments": {"to": "x@example.com", "subject": "hi", "body": "hi"},
+            "schedule_text": "daily at 9:00",
+        })
+        assert "cannot schedule 'gmail_send'" in out
+        assert "requires_confirmation" in out
+        assert "Nothing was scheduled" in out
+        assert "SCHEDULES: none" in lst.handler({})
