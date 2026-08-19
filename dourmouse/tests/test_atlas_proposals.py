@@ -7,12 +7,27 @@ workspace/atlas_lab/proposals.json.
 from __future__ import annotations
 
 import json
+import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 import pytest
 
 from dourmouse import atlas_proposals as ap
 from dourmouse.tests.test_webui import server  # noqa: F401 — shared server fixture
+
+# custom_backtest.py is read from the atlas-strategy-lab submodule's
+# working tree (whatever branch/commit it happens to be checked out to,
+# not pinned) — only TestDesktopEngineClient's fake_engine fixture needs
+# it, so the import is lazy/fixture-scoped (see that fixture below) rather
+# than module-level: a module-level import would skip ALL ~90 tests in
+# this file if that submodule state doesn't have the file, when only the
+# 4 desktop-engine-client tests actually depend on it.
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "atlas-strategy-lab" / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 
 
 # --------------------------------------------------------------------------- #
@@ -170,6 +185,23 @@ class TestProposeFromIdea:
             ap.propose_from_idea("an idea")
         assert len(calls) == ap._CODEGEN_ATTEMPTS
 
+    def test_api_failure_is_not_retried_and_reports_the_real_reason(self, monkeypatch):
+        """Live-caught (2026-08-18): an API-level failure (auth/network/
+        rate-limit) is a fundamentally different failure than a malformed
+        response — retrying 3x just triples the wait before failing with a
+        misleading "malformed response" message. Must fail on the FIRST
+        attempt with the real reason."""
+        calls = []
+
+        def always_unavailable(prompt, system=""):
+            calls.append(1)
+            raise ap._LLMUnavailable("NVIDIA API call failed: 403 Forbidden")
+
+        monkeypatch.setattr(ap, "_llm_chat", always_unavailable)
+        with pytest.raises(ap._LLMUnavailable, match="403 Forbidden"):
+            ap.propose_from_idea("an idea")
+        assert len(calls) == 1  # not retried
+
     def test_persisted_across_reload(self, monkeypatch):
         monkeypatch.setattr(ap, "_llm_chat", lambda prompt, system="": _mock_llm())
         prop = ap.propose_from_idea("test persistence")
@@ -230,15 +262,22 @@ class TestApproveAndRun:
         with pytest.raises(KeyError):
             ap.approve_and_run("prop_nope", target="local")
 
-    def test_desktop_target_is_honest_not_configured(self, monkeypatch):
+    def test_desktop_target_with_nothing_listening_is_honest(self, monkeypatch):
+        """No fake_engine fixture here on purpose — DESKTOP_ENGINE_URL is
+        whatever's configured (default loopback:8790), and nothing is
+        listening there in the test environment. Proves the desktop path
+        fails honestly (a real connection error) rather than hanging or
+        fabricating a result when the actual desktop isn't reachable —
+        see TestDesktopEngineClient for the path where a server IS up."""
         monkeypatch.setattr(ap, "_llm_chat", lambda prompt, system="": _mock_llm(code=_GOOD_CODE_NO_DATA))
         p = ap.propose_from_idea("idea")
         run = ap.approve_and_run(p["id"], target="desktop")
         assert run["status"] == "failed"
-        assert "NOT CONFIGURED" in run["error"]
+        assert "not reachable" in run["error"]
         # And the proposal itself is still marked approved — the GATE did
         # its job (code only ran, or tried to, after approval), the failure
-        # is purely about the desktop backend not existing yet.
+        # is purely about connectivity to wherever the desktop engine
+        # should be running.
         assert ap.get_proposal(p["id"])["status"] == "approved"
 
     def test_local_execution_end_to_end_real_sandbox(self, monkeypatch):
@@ -365,6 +404,103 @@ class TestParseHarnessOutput:
         assert "unparseable" in err
 
 
+class _FakeEngineHandler(BaseHTTPRequestHandler):
+    """Implements the real /api/backtest/custom contract by calling the
+    real custom_backtest.run_custom_backtest — same logic engine_api.py
+    itself calls, just without needing a real data_registry.py (the fixture
+    below points data_dir at an empty tmp_path, so this only proves the
+    WIRE PROTOCOL round-trips correctly; the desktop path's own honest
+    NOT CONFIGURED behavior for load() is already covered by
+    test_atlas_engine_custom_backtest.py directly)."""
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        import custom_backtest as cb  # lazy — see fake_engine fixture's importorskip
+
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        body = json.loads(self.rfile.read(length).decode()) if length else {}
+        if self.path == "/api/backtest/custom":
+            try:
+                result = cb.run_custom_backtest(
+                    body.get("code", ""), body.get("params", {}), self.server.data_dir
+                )
+                payload, code = {"ok": True, "result": result}, 200
+            except RuntimeError as exc:
+                payload, code = {"ok": False, "error": str(exc)}, 422
+        else:
+            payload, code = {"ok": False, "error": "unknown endpoint"}, 404
+        out = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+
+@pytest.fixture
+def fake_engine(tmp_path):
+    """A real HTTP server on an ephemeral loopback port, implementing the
+    real /api/backtest/custom contract — this is a genuine wire-level test
+    of _call_desktop_engine, not a mock of it. Only the 4 tests requesting
+    this fixture skip if custom_backtest.py isn't on disk right now (see
+    the module-level comment above) — everything else in this file runs
+    regardless."""
+    pytest.importorskip(
+        "custom_backtest",
+        reason="atlas-strategy-lab submodule not checked out to a commit/branch "
+               "containing custom_backtest.py right now",
+    )
+    srv = HTTPServer(("127.0.0.1", 0), _FakeEngineHandler)
+    srv.data_dir = tmp_path
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}"
+    finally:
+        srv.shutdown()
+        thread.join(timeout=2)
+
+
+class TestDesktopEngineClient:
+    def test_successful_round_trip(self, monkeypatch, fake_engine):
+        monkeypatch.setattr(ap, "DESKTOP_ENGINE_URL", fake_engine)
+        metrics, err = ap._call_desktop_engine(_GOOD_CODE_NO_DATA, {})
+        assert err == ""
+        assert metrics["n_obs"] == 0
+
+    def test_unsafe_code_refused_over_the_wire(self, monkeypatch, fake_engine):
+        monkeypatch.setattr(ap, "DESKTOP_ENGINE_URL", fake_engine)
+        metrics, err = ap._call_desktop_engine("import os\ndef run(load, params):\n    return {}\n", {})
+        assert metrics == {}
+        assert "refused" in err.lower()
+
+    def test_engine_not_reachable_is_honest(self, monkeypatch):
+        # Port 1 is a real, universally-refused loopback port — no server
+        # will ever answer there, so this is a genuine connection failure,
+        # not a mocked one.
+        monkeypatch.setattr(ap, "DESKTOP_ENGINE_URL", "http://127.0.0.1:1")
+        metrics, err = ap._call_desktop_engine(_GOOD_CODE_NO_DATA, {})
+        assert metrics == {}
+        assert "not reachable" in err
+
+    def test_full_approve_and_run_desktop_target(self, monkeypatch, fake_engine):
+        """The whole client path through _execute, not just
+        _call_desktop_engine directly — proves the desktop target is
+        actually wired into the real proposal/run flow, not just callable
+        in isolation."""
+        monkeypatch.setattr(ap, "DESKTOP_ENGINE_URL", fake_engine)
+        monkeypatch.setattr(ap, "_llm_chat", lambda prompt, system="": _mock_llm(code=_GOOD_CODE_NO_DATA))
+        monkeypatch.setattr(ap, "_explain_run", lambda pid, run: "mocked explanation")
+        p = ap.propose_from_idea("idea")
+        run = ap.approve_and_run(p["id"], target="desktop")
+        assert run["status"] == "done", run.get("error")
+        assert run["target"] == "desktop"
+        assert run["metrics"]["n_obs"] == 0
+        assert run["explanation"] == "mocked explanation"
+
+
 class TestWebRoutes:
     """Real server fixture (same shape as TestAtlasLabRoutes in
     test_atlas_lab.py) — proves the routes are actually wired in webui.py,
@@ -472,6 +608,29 @@ class TestWebRoutes:
     def test_get_unknown_run_is_404(self, server):
         status, data = self._get(server, "/api/atlas-lab/runs/run_nope")
         assert status == 404
+
+
+class TestCapMetrics:
+    def test_short_series_untouched(self):
+        m = {"n_obs": 3, "returns_series": [0.01, -0.02, 0.03]}
+        assert ap._cap_metrics(m) == m
+
+    def test_missing_series_untouched(self):
+        m = {"n_obs": 0}
+        assert ap._cap_metrics(m) == m
+
+    def test_long_series_truncated_to_most_recent(self):
+        series = list(range(ap._MAX_RETURNS_SERIES_POINTS + 100))
+        capped = ap._cap_metrics({"n_obs": len(series), "returns_series": series})
+        assert len(capped["returns_series"]) == ap._MAX_RETURNS_SERIES_POINTS
+        assert capped["returns_series"][-1] == series[-1]  # kept the tail, not the head
+        assert capped["returns_series_truncated"] is True
+
+    def test_does_not_mutate_the_input_dict(self):
+        series = list(range(ap._MAX_RETURNS_SERIES_POINTS + 10))
+        original = {"n_obs": len(series), "returns_series": series}
+        ap._cap_metrics(original)
+        assert len(original["returns_series"]) == len(series)  # caller's dict untouched
 
 
 class TestVerdictFromMetrics:

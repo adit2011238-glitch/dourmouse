@@ -40,12 +40,17 @@ from these three if the strategy didn't provide them, never fabricated if
 the strategy also omitted the inputs needed to compute them).
 
 Execution targets:
-- "desktop": calls the atlas-strategy-lab engine_api.py service (real data,
-  real market history). Requires a NEW endpoint on that service to accept
-  reviewed-but-dynamic code — engine_api.py's current three functions are
-  hardcoded by design; extending it is a deliberate, separate decision
-  because that repo has another real contributor (see the ENGINE_TARGET
-  docstring below) — NOT wired until that's confirmed.
+- "desktop": calls POST /api/backtest/custom on the atlas-strategy-lab
+  engine_api.py service (added 2026-08-18 — see
+  atlas-strategy-lab/scripts/custom_backtest.py for the server-side half of
+  this same safety model, re-checked independently there rather than
+  trusted from this client). CODE is built and tested (both sides, real
+  subprocess execution, real timeout enforcement) — what's NOT done is
+  deploying it to the actual desktop and restarting that service, held
+  because the desktop was mid-transport of an unrelated large job when
+  this was built this session; DESKTOP_ENGINE_URL defaults to loopback and
+  will honestly connection-refuse until the endpoint is actually running
+  somewhere reachable.
 - "local": same sandboxed harness, pointed at ATLAS_DATA_PATH on this
   machine. Honestly NOT CONFIGURED if no local data registry is present —
   never substitutes different-shaped data from the Mac's separate ATLAS
@@ -89,6 +94,16 @@ DESKTOP_ENGINE_URL = os.environ.get("ATLAS_ENGINE_URL", "http://127.0.0.1:8790")
 DESKTOP_ENGINE_TOKEN = os.environ.get("ATLAS_ENGINE_TOKEN", "")
 
 _RUN_TIMEOUT_SECONDS = 90
+
+
+class _LLMUnavailable(RuntimeError):
+    """The API call itself failed (auth/network/rate-limit/timeout) — as
+    opposed to a plain RuntimeError from _generate_spec_once, which means
+    the API answered but the answer was malformed. Distinct on purpose:
+    propose_from_idea's retry loop retries the latter (routinely succeeds
+    on re-ask, confirmed live) but must NOT retry this one — three retries
+    of an auth failure just triples the wait before failing anyway, with a
+    misleading "malformed response" message that isn't what happened."""
 
 #: Import allowlist for generated strategy code (layer 1 — see module
 #: docstring; the real boundary is the sandbox at run time, this is a cheap
@@ -251,7 +266,7 @@ Strict rules for the "code" field:
 - `load(key)` is provided by the caller — call it to get one pandas DataFrame of market data. Valid keys look like "fx:EURUSD:d1", "fx:EURUSD:h1", "commodity:GC", "fundamental:X", "events", "rate:USD". Use only pairs/keys implied by the user's idea; default to "fx:EURUSD:d1" if unspecified.
 - `params` is the params dict from above — read your own thresholds/lookback/etc from it, do not hardcode magic numbers you already put in params.
 - You may import ONLY: pandas, numpy, math, statistics, datetime, json. No other imports of any kind — no os, sys, subprocess, socket, requests, urllib, io, pickle, __import__, eval, exec, open. Code using anything else will be refused before a human ever sees it.
-- Return a dict with AT LEAST these keys: "mean_return" (float, per-trade or per-period mean net return as a decimal, e.g. 0.002 for 0.2%), "std_dev" (float), "n_obs" (int, number of observations/trades the stats are computed from). Include "sharpe", "win_rate", "max_drawdown", "t_stat" too if you can compute them honestly from what you observed — omit any of these you cannot compute rather than inventing a plausible-looking number.
+- Return a dict with AT LEAST these keys: "mean_return" (float, per-trade or per-period mean net return as a decimal, e.g. 0.002 for 0.2%), "std_dev" (float), "n_obs" (int, number of observations/trades the stats are computed from). Include "sharpe", "win_rate", "max_drawdown", "t_stat" too if you can compute them honestly from what you observed — omit any of these you cannot compute rather than inventing a plausible-looking number. Also include "returns_series": a plain list of the individual per-trade/per-period returns (decimals, same units as mean_return) that the summary stats above were computed from — this is what draws the equity-curve chart. Only include it if you actually have those individual observations (you will, in any strategy that loops over trades to compute mean_return); never fabricate a series from just the summary numbers if you genuinely didn't keep the individual values.
 - If the data you need isn't available or a computation is undefined (e.g. n_obs=0), return {"mean_return": 0.0, "std_dev": 0.0, "n_obs": 0, "note": "explain why here"} rather than raising or fabricating.
 - No network access, no file access, no subprocess — the sandbox denies these regardless, so don't rely on them.
 
@@ -264,16 +279,28 @@ def _llm_chat(prompt: str, system: str) -> str:
 
     api_key = os.environ.get("NVIDIA_API_KEY", "")
     if not api_key:
-        raise RuntimeError(
+        raise _LLMUnavailable(
             "NVIDIA_API_KEY is not set — the strategy-proposal LLM needs it (.env)."
         )
     client = OpenAI(api_key=api_key, base_url=NVIDIA_BASE_URL, timeout=90)
-    response = client.chat.completions.create(
-        model=NVIDIA_MODEL,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=4000,
-    )
+    # v8.16 fix (live-caught): this call had no try/except at all, so any
+    # SDK-level failure (403/429/5xx/timeout/network) propagated raw out of
+    # this function and straight through propose_from_idea to webui.py's
+    # handler, past its (RuntimeError, ValueError) catch — the request
+    # thread died mid-handler with no response ever sent, which the
+    # browser reports as a bare "Failed to fetch" with zero diagnostic
+    # value. Converted to the same honest-failure convention every other
+    # path in this module already uses, as _LLMUnavailable specifically
+    # (not plain RuntimeError) so the retry loop below doesn't retry it.
+    try:
+        response = client.chat.completions.create(
+            model=NVIDIA_MODEL,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=4000,
+        )
+    except Exception as exc:  # noqa: BLE001 -- any SDK/network failure, converted honestly
+        raise _LLMUnavailable(f"NVIDIA API call failed: {exc}") from exc
     return (response.choices[0].message.content or "").strip()
 
 
@@ -330,6 +357,13 @@ def propose_from_idea(prompt: str, source: str = "chat") -> dict[str, Any]:
         try:
             spec = _generate_spec_once(prompt)
             break
+        except _LLMUnavailable:
+            # The API call itself failed, not the response it returned —
+            # retrying won't fix an auth/network/rate-limit failure, and
+            # would just triple the wait before failing anyway. Let the
+            # caller see the real reason immediately (see _LLMUnavailable's
+            # own docstring).
+            raise
         except RuntimeError as exc:
             last_exc = exc
     if spec is None:
@@ -529,6 +563,52 @@ _DESKTOP_LOADER_BODY = """
 """
 
 
+_DESKTOP_CALL_TIMEOUT_SECONDS = 100  # a little above custom_backtest.py's own 90s subprocess timeout
+
+
+def _call_desktop_engine(code: str, params: dict) -> tuple[dict, str]:
+    """POST code+params to atlas-strategy-lab's engine_api.py
+    /api/backtest/custom. Returns (metrics, "") on success or ({}, error)
+    — never raises, callers already expect the honest-failure shape every
+    other path here uses. The server re-runs its own static safety check
+    independently (custom_backtest.py) rather than trusting that this
+    client already did — this call does NOT skip _static_safety_check
+    upstream in propose_from_idea either, so an unsafe proposal is refused
+    twice before it could ever reach here anyway."""
+    body = json.dumps({"code": code, "params": params}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if DESKTOP_ENGINE_TOKEN:
+        headers["X-Engine-Token"] = DESKTOP_ENGINE_TOKEN
+    req = urllib.request.Request(
+        DESKTOP_ENGINE_URL.rstrip("/") + "/api/backtest/custom",
+        data=body, headers=headers, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_DESKTOP_CALL_TIMEOUT_SECONDS) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+            return {}, f"desktop engine refused: {payload.get('error', exc.reason)}"
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}, f"desktop engine returned HTTP {exc.code}: {exc.reason}"
+    except urllib.error.URLError as exc:
+        return {}, (
+            f"desktop engine not reachable at {DESKTOP_ENGINE_URL} ({exc.reason}) — "
+            "is engine_api.py running there? (this is an honest connection failure, "
+            "not a fabricated result)"
+        )
+    except TimeoutError:
+        return {}, f"desktop engine did not respond within {_DESKTOP_CALL_TIMEOUT_SECONDS}s"
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return {}, f"desktop engine returned an unparseable response: {exc}"
+
+    if not payload.get("ok"):
+        return {}, f"desktop engine refused: {payload.get('error', 'unknown error')}"
+    result = payload.get("result", {})
+    return result.get("metrics", {}), ""
+
+
 def _execute(
     proposal_id: str, code: str, params: dict, target: str, run_id: str | None = None,
 ) -> dict[str, Any]:
@@ -540,14 +620,19 @@ def _execute(
     )
 
     if target == "desktop":
-        run.status = "failed"
-        run.error = (
-            "NOT CONFIGURED: desktop execution needs a new engine_api.py endpoint "
-            "that doesn't exist yet (held pending — that repo has another real "
-            "contributor, see atlas_proposals.py module docstring). Use "
-            "target='local', or ask to have the desktop endpoint built."
-        )
+        metrics, err = _call_desktop_engine(code, params)
         run.finished_at = _now()
+        if err:
+            run.status = "failed"
+            run.error = err
+        else:
+            run.status = "done"
+            run.metrics = _cap_metrics(metrics)
+            run.verdict = _verdict_from_metrics(metrics)
+            try:
+                run.explanation = _explain_run(proposal_id, run)
+            except RuntimeError as exc:
+                run.explanation = f"(explanation unavailable: {exc})"
         return asdict(run)
 
     if not sandbox_available():
@@ -593,7 +678,7 @@ def _execute(
         run.error = err
     else:
         run.status = "done"
-        run.metrics = metrics
+        run.metrics = _cap_metrics(metrics)
         run.verdict = _verdict_from_metrics(metrics)
 
     if run.status == "done":
@@ -616,6 +701,24 @@ def _parse_harness_output(output: str) -> tuple[dict, str]:
         tail = output.split("===ERROR===", 1)[1].strip()
         return {}, f"strategy code raised: {tail[:500]}"
     return {}, f"sandbox produced no recognizable output: {output[:500]}"
+
+
+_MAX_RETURNS_SERIES_POINTS = 5000  # UI chart data — same output-capping instinct as _OUTPUT_CAP elsewhere
+
+
+def _cap_metrics(metrics: dict) -> dict:
+    """Defensively cap returns_series length before it's ever persisted —
+    a strategy legitimately computing thousands of trades is fine and
+    real, but nothing forces the LLM-authored code to be well-behaved
+    about list size, and this is UI chart data, not analysis data (no
+    information is lost that changes the verdict — only the chart
+    resolution)."""
+    series = metrics.get("returns_series")
+    if isinstance(series, list) and len(series) > _MAX_RETURNS_SERIES_POINTS:
+        metrics = dict(metrics)
+        metrics["returns_series"] = series[-_MAX_RETURNS_SERIES_POINTS:]
+        metrics["returns_series_truncated"] = True
+    return metrics
 
 
 def _verdict_from_metrics(m: dict) -> str:

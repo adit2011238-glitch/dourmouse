@@ -1290,6 +1290,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "run not found"}, status=404)
             else:
                 self._send_json({"ok": True, "run": run})
+        elif path == "/api/atlas-lab/generator/status":
+            from dourmouse import atlas_generator as gen
+
+            self._send_json({
+                "ok": True,
+                "interval_seconds": gen._GENERATOR_INTERVAL_SECONDS,
+                "max_pending": gen._MAX_PENDING_GENERATED,
+                "pending_generated_count": gen._pending_generated_count(),
+            })
         elif path == "/api/freebuff":
             # v5.5: Freebuff Desktop panel — account, projects, threads.
             from dourmouse.freebuff_bridge import freebuff_panel_snapshot
@@ -1615,6 +1624,24 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "proposal not found"}, status=404)
             else:
                 self._send_json({"ok": True, "proposal": result})
+        elif parsed.path == "/api/atlas-lab/generator/run-now":
+            # v8.16: manual trigger — same 2-LLM-call latency as any chat
+            # idea, so synchronous is fine (matches propose_from_idea's own
+            # HTTP handler above).
+            from dourmouse import atlas_generator as gen
+
+            try:
+                proposal = gen.generate_and_propose()
+                if proposal is None:
+                    self._send_json({
+                        "ok": True, "skipped": True,
+                        "reason": f"already {gen._MAX_PENDING_GENERATED} generator "
+                                  "proposals pending review — review some first",
+                    })
+                else:
+                    self._send_json({"ok": True, "skipped": False, "proposal": proposal})
+            except (RuntimeError, ValueError) as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
         elif parsed.path == "/api/neuro/train":
             # v5.6: force a background retrain of the neural orchestrator.
             self._handle_neuro_train()
@@ -3587,6 +3614,12 @@ def run_server(
     # or filesystem.
     if reporting:
         atlas_lab.start_auto_sync()
+        # v8.16: the autonomous idea generator — same reporting gate as
+        # auto-sync above, for the same reason (tests never want a
+        # background LLM loop touching the real proposal store).
+        from dourmouse import atlas_generator
+
+        atlas_generator.start_idea_generator()
         # v5.32: keep the compute-node health probe warm. The fast lane reads
         # ONLY a cached probe (it never probes itself, by design), and the only
         # thing populating that cache was the /api/connections call inside the

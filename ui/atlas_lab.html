@@ -220,6 +220,15 @@
   }
   .idea-box textarea:focus { border-color: var(--line-strong); }
   .idea-box button { flex: none; align-self: flex-end; }
+  .gen-bar {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 22px;
+    padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: rgba(var(--gold-rgb), 0.04);
+  }
+  .gen-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); flex: 1 1 auto; }
+  .gen-status b { color: var(--gold); }
+  #genRunNow { border-color: rgba(var(--gold-rgb), 0.4); color: var(--gold); }
+  #genRunNow:hover { background: rgba(var(--gold-rgb), 0.15); }
   .section-label {
     font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.5px;
     color: var(--text-dim); margin: 0 0 10px; padding-bottom: 6px;
@@ -267,6 +276,16 @@
   .metric-grid .m-val { color: var(--text); font-weight: 600; }
   .run-explain { font-size: 12.5px; line-height: 1.55; color: rgba(226,236,248,0.85); margin-top: 8px; }
   .spin { display: inline-block; animation: pulse 1s infinite; }
+  .chart-wrap { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0,0,0,0.2); }
+  .chart-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-dim); }
+  .chart-label .pos { color: var(--green); }
+  .chart-label .neg { color: var(--red); }
+  .chart-svg { width: 100%; height: 46px; display: block; margin-top: 3px; }
+  .chart-svg:first-of-type { height: 70px; }
+  .chart-baseline { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .chart-line { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  .chart-line.pos { stroke: var(--green); }
+  .chart-line.neg { stroke: var(--red); }
 </style>
 </head>
 <body>
@@ -349,6 +368,11 @@
     <button id="ideaSubmit">SUBMIT IDEA</button>
   </div>
   <div id="ideaError" class="error-banner" style="display:none"></div>
+
+  <div class="gen-bar">
+    <span id="genStatus" class="gen-status">generator: —</span>
+    <button id="genRunNow">⚡ GENERATE IDEA NOW</button>
+  </div>
 
   <div class="section-label">PENDING REVIEW</div>
   <div id="pendingList"><div class="empty">no proposals waiting on you</div></div>
@@ -596,8 +620,44 @@ document.querySelectorAll("#viewtabs .chip").forEach((btn) => {
     const view = btn.dataset.view;
     LEADERBOARD_ONLY.forEach((id) => { $(id).style.display = view === "leaderboard" ? "" : "none"; });
     $("proposalsView").style.display = view === "proposals" ? "block" : "none";
-    if (view === "proposals") { loadProposals(); loadHistory(); }
+    if (view === "proposals") { loadProposals(); loadHistory(); loadGenStatus(); }
   });
+});
+
+async function loadGenStatus() {
+  try {
+    const res = await fetch("/api/atlas-lab/generator/status", { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) return;
+    const mins = Math.round(data.interval_seconds / 60);
+    $("genStatus").innerHTML =
+      `generator: every ~${mins}m &middot; <b>${data.pending_generated_count}</b>/${data.max_pending} of its ideas pending your review`;
+  } catch (e) { /* transient — next poll retries */ }
+}
+
+$("genRunNow").addEventListener("click", async () => {
+  $("genRunNow").disabled = true;
+  $("genRunNow").textContent = "THINKING…";
+  try {
+    const res = await fetch("/api/atlas-lab/generator/run-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "unknown error");
+    if (data.skipped) {
+      $("ideaError").textContent = "⚡ " + data.reason;
+      $("ideaError").style.display = "block";
+    } else {
+      $("ideaError").style.display = "none";
+    }
+    await loadProposals();
+    await loadHistory();
+    await loadGenStatus();
+  } catch (e) {
+    $("ideaError").textContent = "⚠ " + String(e.message || e);
+    $("ideaError").style.display = "block";
+  } finally {
+    $("genRunNow").disabled = false;
+    $("genRunNow").textContent = "⚡ GENERATE IDEA NOW";
+  }
 });
 
 const VERDICT_RUN_CLASS = { done: "done", failed: "failed", running: "running" };
@@ -613,6 +673,59 @@ function metricGrid(m) {
     `<div><div class="m-label">${esc(k)}</div><div class="m-val">${fmtNum(m[k], k === "n_obs" ? 0 : 4)}</div></div>`
   );
   return rows.length ? `<div class="metric-grid">${rows.join("")}</div>` : "";
+}
+
+// v8.16 Phase 3: equity-curve + drawdown chart from a strategy's raw
+// returns_series (optional field — see atlas_proposals.py's code-gen
+// prompt). Pure inline SVG, no chart library — self-contained like the
+// rest of this app.
+function equityChart(returnsSeries, truncated) {
+  const r = (returnsSeries || []).filter((x) => typeof x === "number" && isFinite(x));
+  if (r.length < 2) return "";
+
+  // Cumulative equity (start at 1.0) + running-max drawdown.
+  const eq = [1];
+  for (const ret of r) eq.push(eq[eq.length - 1] * (1 + ret));
+  const dd = [0];
+  let peak = eq[0];
+  for (let i = 1; i < eq.length; i++) {
+    peak = Math.max(peak, eq[i]);
+    dd.push(peak > 0 ? (eq[i] - peak) / peak : 0);
+  }
+
+  const W = 640, EQ_H = 100, DD_H = 46, PAD = 4;
+  const toPath = (series, h, invert) => {
+    const lo = Math.min(...series), hi = Math.max(...series);
+    const span = (hi - lo) || 1;
+    return series.map((v, i) => {
+      const x = PAD + (i / (series.length - 1)) * (W - 2 * PAD);
+      const norm = (v - lo) / span; // 0..1
+      const y = invert ? PAD + norm * (h - 2 * PAD) : (h - PAD) - norm * (h - 2 * PAD);
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+  };
+
+  const eqPath = toPath(eq, EQ_H, false);
+  const ddPath = toPath(dd, DD_H, true); // drawdown: 0 at top, most negative at bottom
+  const eqEnd = eq[eq.length - 1];
+  const eqClass = eqEnd >= 1 ? "pos" : "neg";
+  const maxDdPct = (Math.min(...dd) * 100).toFixed(1);
+  const note = truncated ? `<div class="m-label" style="margin-top:2px">showing most recent ${r.length} of a longer series</div>` : "";
+
+  return `
+    <div class="chart-wrap">
+      <div class="chart-label">EQUITY CURVE <span class="${eqClass}">(${eqEnd >= 1 ? "+" : ""}${((eqEnd - 1) * 100).toFixed(2)}%)</span></div>
+      <svg viewBox="0 0 ${W} ${EQ_H}" class="chart-svg" preserveAspectRatio="none">
+        <line x1="0" y1="${EQ_H - PAD}" x2="${W}" y2="${EQ_H - PAD}" class="chart-baseline" />
+        <path d="${eqPath}" class="chart-line ${eqClass}" />
+      </svg>
+      <div class="chart-label" style="margin-top:6px">DRAWDOWN <span class="neg">(max ${maxDdPct}%)</span></div>
+      <svg viewBox="0 0 ${W} ${DD_H}" class="chart-svg" preserveAspectRatio="none">
+        <line x1="0" y1="${PAD}" x2="${W}" y2="${PAD}" class="chart-baseline" />
+        <path d="${ddPath}" class="chart-line neg" />
+      </svg>
+      ${note}
+    </div>`;
 }
 
 function renderPendingCard(p) {
@@ -664,6 +777,7 @@ function renderHistoryEntry(p, runsByProposal) {
       </div>
       ${r.status === "running" ? '<div class="run-explain"><span class="spin">⟳</span> running in sandbox…</div>' : ""}
       ${metricGrid(r.metrics)}
+      ${r.metrics ? equityChart(r.metrics.returns_series, r.metrics.returns_series_truncated) : ""}
       ${r.explanation ? `<div class="run-explain">${esc(r.explanation)}</div>` : ""}
       ${r.error ? `<div class="safety-note">${esc(r.error)}</div>` : ""}
     </div>`).join("");
@@ -756,7 +870,7 @@ async function rejectProposal(id) {
 // for a single-user local app, same unconditional-poll convention as the
 // leaderboard's own setInterval(refresh, 15000) above.
 setInterval(() => {
-  if ($("proposalsView").style.display !== "none") { loadProposals(); loadHistory(); }
+  if ($("proposalsView").style.display !== "none") { loadProposals(); loadHistory(); loadGenStatus(); }
 }, 5000);
 </script>
 </body>
