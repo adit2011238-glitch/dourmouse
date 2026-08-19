@@ -206,6 +206,67 @@
   .native-split-bar select { background: rgba(var(--amber-rgb), 0.1); color: var(--text); border: 1px solid rgba(var(--amber-rgb), 0.4); border-radius: 6px; padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; }
   .native-split-bar .note { font-size: 10px; color: var(--text-dim); }
   .native-split-bar .err { color: rgba(var(--red-rgb), 0.95); }
+
+  /* ---- v8.16: strategy proposals — chat + human-gated review queue ---- */
+  #proposalsView { height: calc(100% - 104px); overflow-y: auto; padding: 18px 20px 40px; }
+  .idea-box {
+    display: flex; gap: 10px; margin-bottom: 22px;
+  }
+  .idea-box textarea {
+    flex: 1 1 auto; resize: vertical; min-height: 54px; max-height: 160px;
+    background: rgba(var(--cyan-rgb), 0.05); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    font-family: var(--font-prose); font-size: 13px; outline: none;
+  }
+  .idea-box textarea:focus { border-color: var(--line-strong); }
+  .idea-box button { flex: none; align-self: flex-end; }
+  .section-label {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.5px;
+    color: var(--text-dim); margin: 0 0 10px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  .prop-card {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .prop-card .prop-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .prop-card .prop-name { font-family: var(--font-prose); font-weight: 600; font-size: 14px; color: var(--text); }
+  .prop-card .prop-src { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 1px; }
+  .prop-card .prop-explain { margin: 8px 0; font-size: 12.5px; line-height: 1.55; color: rgba(226,236,248,0.85); }
+  .prop-card details { margin: 8px 0; }
+  .prop-card summary { cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--cyan); }
+  .prop-card pre {
+    margin: 8px 0 0; padding: 10px 12px; border-radius: 6px; overflow-x: auto;
+    background: rgba(0,0,0,0.35); border: 1px solid var(--line);
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: rgba(226,236,248,0.9);
+  }
+  .prop-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .prop-actions select {
+    background: rgba(var(--cyan-rgb), 0.05); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+    font-family: var(--font-mono); font-size: 11px;
+  }
+  .btn-approve { border-color: rgba(var(--green-rgb), 0.5) !important; color: var(--green) !important; }
+  .btn-approve:hover { background: rgba(var(--green-rgb), 0.15) !important; }
+  .btn-reject { border-color: rgba(var(--red-rgb), 0.5) !important; color: var(--red) !important; }
+  .btn-reject:hover { background: rgba(var(--red-rgb), 0.15) !important; }
+  .safety-note {
+    margin-top: 8px; padding: 8px 10px; border-radius: 6px;
+    background: rgba(var(--red-rgb), 0.08); border: 1px solid rgba(var(--red-rgb), 0.35);
+    font-family: var(--font-mono); font-size: 11px; color: rgba(var(--red-rgb), 0.95);
+  }
+  .run-card { border-left: 3px solid var(--line-strong); padding-left: 12px; }
+  .run-card.done { border-left-color: rgba(var(--green-rgb), 0.6); }
+  .run-card.failed { border-left-color: rgba(var(--red-rgb), 0.6); }
+  .run-card.running { border-left-color: rgba(var(--amber-rgb), 0.6); }
+  .metric-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 8px; margin: 10px 0; font-family: var(--font-mono); font-size: 11px;
+  }
+  .metric-grid .m-label { color: var(--text-dim); }
+  .metric-grid .m-val { color: var(--text); font-weight: 600; }
+  .run-explain { font-size: 12.5px; line-height: 1.55; color: rgba(226,236,248,0.85); margin-top: 8px; }
+  .spin { display: inline-block; animation: pulse 1s infinite; }
 </style>
 </head>
 <body>
@@ -222,7 +283,11 @@
 </header>
 
 <div class="toolbar">
-  <span class="count"><b id="count">0</b> STRATEGIES TESTED</span>
+  <div class="filters" id="viewtabs">
+    <button class="chip on" data-view="leaderboard">LEADERBOARD</button>
+    <button class="chip" data-view="proposals">PROPOSALS</button>
+  </div>
+  <span class="count" id="leaderboardToolbarExtra"><b id="count">0</b> STRATEGIES TESTED</span>
   <div class="filters" id="filters">
     <button class="chip on" data-v="">ALL</button>
     <button class="chip" data-v="CANDIDATE">CANDIDATE</button>
@@ -277,6 +342,20 @@
             title="split pane"></iframe>
   </div>
 </main>
+
+<div id="proposalsView" style="display:none">
+  <div class="idea-box">
+    <textarea id="ideaInput" placeholder="Describe a trading idea in plain English — e.g. &quot;buy USDJPY when it drops 1% overnight on high-impact USD news, hold 3 days&quot;…"></textarea>
+    <button id="ideaSubmit">SUBMIT IDEA</button>
+  </div>
+  <div id="ideaError" class="error-banner" style="display:none"></div>
+
+  <div class="section-label">PENDING REVIEW</div>
+  <div id="pendingList"><div class="empty">no proposals waiting on you</div></div>
+
+  <div class="section-label" style="margin-top:26px">RECENT DECISIONS &amp; RESULTS</div>
+  <div id="historyList"><div class="empty">nothing yet — submit an idea above</div></div>
+</div>
 
 <script>
 "use strict";
@@ -505,6 +584,180 @@ if (api && api.split_with_app) {
 try {
   if (localStorage.getItem("atlas.split") === "1") setSplit(true);
 } catch (e) {}
+
+// --------------------------------------------------------------------- //
+// v8.16: strategy proposals — chat + human-gated review queue
+// --------------------------------------------------------------------- //
+const LEADERBOARD_ONLY = ["splitwrap", "leaderboardToolbarExtra", "filters", "search"];
+document.querySelectorAll("#viewtabs .chip").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#viewtabs .chip").forEach((b) => b.classList.remove("on"));
+    btn.classList.add("on");
+    const view = btn.dataset.view;
+    LEADERBOARD_ONLY.forEach((id) => { $(id).style.display = view === "leaderboard" ? "" : "none"; });
+    $("proposalsView").style.display = view === "proposals" ? "block" : "none";
+    if (view === "proposals") { loadProposals(); loadHistory(); }
+  });
+});
+
+const VERDICT_RUN_CLASS = { done: "done", failed: "failed", running: "running" };
+
+function codeBlock(code) {
+  return `<details><summary>view generated code</summary><pre>${esc(code)}</pre></details>`;
+}
+
+function metricGrid(m) {
+  if (!m || !Object.keys(m).length) return "";
+  const order = ["mean_return", "std_dev", "sharpe", "win_rate", "t_stat", "max_drawdown", "n_obs"];
+  const rows = order.filter((k) => m[k] !== undefined && m[k] !== null).map((k) =>
+    `<div><div class="m-label">${esc(k)}</div><div class="m-val">${fmtNum(m[k], k === "n_obs" ? 0 : 4)}</div></div>`
+  );
+  return rows.length ? `<div class="metric-grid">${rows.join("")}</div>` : "";
+}
+
+function renderPendingCard(p) {
+  const safety = p.safety_note
+    ? `<div class="safety-note">⚠ REFUSED before review: ${esc(p.safety_note)}</div>`
+    : "";
+  const actions = p.status === "rejected_unsafe" ? "" : `
+    <div class="prop-actions">
+      <select id="target-${esc(p.id)}">
+        <option value="local">run: LOCAL</option>
+        <option value="desktop">run: DESKTOP ENGINE</option>
+      </select>
+      <button class="btn-approve" onclick="approveProposal('${esc(p.id)}')">✓ APPROVE &amp; RUN</button>
+      <button class="btn-reject" onclick="rejectProposal('${esc(p.id)}')">✕ REJECT</button>
+    </div>`;
+  return `<div class="prop-card" id="prop-${esc(p.id)}">
+    <div class="prop-head">
+      <span class="prop-name">${esc(p.strategy_name || "(unnamed)")}</span>
+      <span class="prop-src">${esc((p.source || "chat").toUpperCase())}</span>
+    </div>
+    <div class="prop-explain">${esc(p.explanation || "")}</div>
+    ${codeBlock(p.code || "")}
+    ${safety}
+    ${actions}
+  </div>`;
+}
+
+async function loadProposals() {
+  try {
+    const res = await fetch("/api/atlas-lab/proposals?status=pending", { cache: "no-store" });
+    const data = await res.json();
+    const items = (data.proposals || []);
+    $("pendingList").innerHTML = items.length
+      ? items.map(renderPendingCard).join("")
+      : '<div class="empty">no proposals waiting on you</div>';
+  } catch (e) { /* transient — next poll retries */ }
+}
+
+function renderHistoryEntry(p, runsByProposal) {
+  const runs = runsByProposal[p.id] || [];
+  const decision = p.status === "rejected" || p.status === "rejected_unsafe"
+    ? `<div class="safety-note" style="background:rgba(var(--dead),0.08);border-color:var(--line-strong);color:var(--text-dim)">REJECTED${p.reviewer_note ? ": " + esc(p.reviewer_note) : (p.safety_note ? ": " + esc(p.safety_note) : "")}</div>`
+    : "";
+  const runBlocks = runs.map((r) => `
+    <div class="run-card ${VERDICT_RUN_CLASS[r.status] || ""}" style="margin-top:10px">
+      <div class="prop-head">
+        <span class="prop-src">${esc(r.target || "local").toUpperCase()} · ${esc(r.status || "")}</span>
+        ${r.verdict ? `<span class="badge b-${esc((r.verdict||"").toLowerCase().replace(/ /g,"-"))}">${esc(r.verdict)}</span>` : ""}
+      </div>
+      ${r.status === "running" ? '<div class="run-explain"><span class="spin">⟳</span> running in sandbox…</div>' : ""}
+      ${metricGrid(r.metrics)}
+      ${r.explanation ? `<div class="run-explain">${esc(r.explanation)}</div>` : ""}
+      ${r.error ? `<div class="safety-note">${esc(r.error)}</div>` : ""}
+    </div>`).join("");
+  return `<div class="prop-card">
+    <div class="prop-head">
+      <span class="prop-name">${esc(p.strategy_name || "(unnamed)")}</span>
+      <span class="prop-src">${esc((p.source || "chat").toUpperCase())}</span>
+    </div>
+    <div class="prop-explain">${esc(p.explanation || "")}</div>
+    ${codeBlock(p.code || "")}
+    ${decision}
+    ${runBlocks}
+  </div>`;
+}
+
+async function loadHistory() {
+  try {
+    const [propsRes, runsRes] = await Promise.all([
+      fetch("/api/atlas-lab/proposals", { cache: "no-store" }),
+      fetch("/api/atlas-lab/runs", { cache: "no-store" }),
+    ]);
+    const props = (await propsRes.json()).proposals || [];
+    const runs = (await runsRes.json()).runs || [];
+    const runsByProposal = {};
+    runs.forEach((r) => { (runsByProposal[r.proposal_id] = runsByProposal[r.proposal_id] || []).push(r); });
+    const decided = props.filter((p) => p.status !== "pending");
+    $("historyList").innerHTML = decided.length
+      ? decided.map((p) => renderHistoryEntry(p, runsByProposal)).join("")
+      : '<div class="empty">nothing yet — submit an idea above</div>';
+  } catch (e) { /* transient — next poll retries */ }
+}
+
+async function submitIdea() {
+  const prompt = $("ideaInput").value.trim();
+  if (!prompt) return;
+  $("ideaError").style.display = "none";
+  $("ideaSubmit").disabled = true;
+  $("ideaSubmit").textContent = "THINKING…";
+  try {
+    const res = await fetch("/api/atlas-lab/proposals", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, source: "chat" }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "unknown error");
+    $("ideaInput").value = "";
+    await loadProposals();
+  } catch (e) {
+    $("ideaError").textContent = "⚠ " + String(e.message || e);
+    $("ideaError").style.display = "block";
+  } finally {
+    $("ideaSubmit").disabled = false;
+    $("ideaSubmit").textContent = "SUBMIT IDEA";
+  }
+}
+$("ideaSubmit").addEventListener("click", submitIdea);
+$("ideaInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitIdea();
+});
+
+async function approveProposal(id) {
+  const target = $("target-" + id).value;
+  try {
+    const res = await fetch(`/api/atlas-lab/proposals/${id}/approve`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "unknown error");
+    await loadProposals();
+    await loadHistory();
+  } catch (e) {
+    alert("Could not approve: " + (e.message || e));
+  }
+}
+
+async function rejectProposal(id) {
+  const reason = prompt("Reason for rejecting (optional):", "") || "";
+  try {
+    await fetch(`/api/atlas-lab/proposals/${id}/reject`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+    await loadProposals();
+    await loadHistory();
+  } catch (e) { /* best-effort refresh below still runs */ }
+}
+
+// Poll pending + history every 5s while a run might be in flight — cheap
+// for a single-user local app, same unconditional-poll convention as the
+// leaderboard's own setInterval(refresh, 15000) above.
+setInterval(() => {
+  if ($("proposalsView").style.display !== "none") { loadProposals(); loadHistory(); }
+}, 5000);
 </script>
 </body>
 </html>

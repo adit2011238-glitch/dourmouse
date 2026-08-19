@@ -1258,6 +1258,38 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "strategy not found"}, status=404)
             else:
                 self._send_json({"ok": True, "strategy": detail})
+        elif path == "/api/atlas-lab/proposals":
+            # v8.16: strategy-proposal review queue (LLM-authored code,
+            # human-gated — see atlas_proposals.py module docstring).
+            from dourmouse.atlas_proposals import list_proposals
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            status = (qs.get("status") or [None])[0]
+            self._send_json({"ok": True, "proposals": list_proposals(status=status)})
+        elif path.startswith("/api/atlas-lab/proposals/"):
+            from dourmouse.atlas_proposals import get_proposal
+
+            proposal_id = path[len("/api/atlas-lab/proposals/"):]
+            proposal = get_proposal(proposal_id)
+            if proposal is None:
+                self._send_json({"ok": False, "error": "proposal not found"}, status=404)
+            else:
+                self._send_json({"ok": True, "proposal": proposal})
+        elif path == "/api/atlas-lab/runs":
+            from dourmouse.atlas_proposals import list_runs
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            proposal_id = (qs.get("proposal_id") or [None])[0]
+            self._send_json({"ok": True, "runs": list_runs(proposal_id=proposal_id)})
+        elif path.startswith("/api/atlas-lab/runs/"):
+            from dourmouse.atlas_proposals import get_run
+
+            run_id = path[len("/api/atlas-lab/runs/"):]
+            run = get_run(run_id)
+            if run is None:
+                self._send_json({"ok": False, "error": "run not found"}, status=404)
+            else:
+                self._send_json({"ok": True, "run": run})
         elif path == "/api/freebuff":
             # v5.5: Freebuff Desktop panel — account, projects, threads.
             from dourmouse.freebuff_bridge import freebuff_panel_snapshot
@@ -1539,6 +1571,50 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, **result})
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
+        elif parsed.path == "/api/atlas-lab/proposals":
+            # v8.16: idea -> LLM-authored strategy code, queued for review.
+            # Synchronous (the LLM call is the only latency, ~5-30s — same
+            # order as any chat response, no background thread needed).
+            from dourmouse.atlas_proposals import propose_from_idea
+
+            body = self._read_json_body()
+            prompt = (body.get("prompt") or "").strip()
+            if not prompt:
+                self._send_json({"ok": False, "error": "prompt is required"}, status=400)
+                return
+            source = (body.get("source") or "chat").strip()
+            try:
+                proposal = propose_from_idea(prompt, source=source)
+                self._send_json({"ok": True, "proposal": proposal})
+            except (RuntimeError, ValueError) as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+        elif parsed.path.startswith("/api/atlas-lab/proposals/") and parsed.path.endswith("/approve"):
+            # Execution can take up to 90s (sandboxed subprocess) — this
+            # returns a "running" placeholder immediately; poll
+            # /api/atlas-lab/runs/<id> for the real result.
+            from dourmouse.atlas_proposals import approve_and_run_async
+
+            proposal_id = parsed.path[len("/api/atlas-lab/proposals/"):-len("/approve")]
+            body = self._read_json_body()
+            target = (body.get("target") or "local").strip()
+            try:
+                run = approve_and_run_async(proposal_id, target=target)
+                self._send_json({"ok": True, "run": run})
+            except KeyError:
+                self._send_json({"ok": False, "error": "proposal not found"}, status=404)
+            except ValueError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+        elif parsed.path.startswith("/api/atlas-lab/proposals/") and parsed.path.endswith("/reject"):
+            from dourmouse.atlas_proposals import reject_proposal
+
+            proposal_id = parsed.path[len("/api/atlas-lab/proposals/"):-len("/reject")]
+            body = self._read_json_body()
+            reason = (body.get("reason") or "").strip()
+            result = reject_proposal(proposal_id, reason=reason)
+            if result is None:
+                self._send_json({"ok": False, "error": "proposal not found"}, status=404)
+            else:
+                self._send_json({"ok": True, "proposal": result})
         elif parsed.path == "/api/neuro/train":
             # v5.6: force a background retrain of the neural orchestrator.
             self._handle_neuro_train()
