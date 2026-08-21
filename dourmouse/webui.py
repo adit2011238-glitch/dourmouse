@@ -180,6 +180,63 @@ class WebConfirmationGate:
         pending.resolve(approved)
         return True
 
+    def pending_items(self) -> list[tuple[str, str]]:
+        """[(confirm_id, prompt_text), ...] for every confirmation still
+        awaiting a response — used by the "just say send" chat intercept to
+        decide whether a short affirm phrase is unambiguous."""
+        with self._lock:
+            return [(p.confirm_id, p.prompt_text) for p in self._pending.values()]
+
+
+# "Just say send": a short, exact imperative affirm phrase resolves a single
+# pending confirmation instead of starting a normal chat turn. Matched only
+# as a WHOLE (trimmed, case-insensitive) message — never as a substring of a
+# longer sentence — so ordinary chat like "let's go ahead and refactor this"
+# is never mistaken for an approval.
+_IMPERATIVE_AFFIRM_PHRASES = frozenset(
+    {
+        "yes",
+        "y",
+        "yeah",
+        "yep",
+        "confirm",
+        "confirmed",
+        "approve",
+        "approved",
+        "send",
+        "send it",
+        "go",
+        "go ahead",
+        "do it",
+        "do it now",
+        "send now",
+        "yes send",
+        "yes send it",
+        "yes go ahead",
+        "yes do it",
+        "ok send it",
+        "ok go ahead",
+        "okay send it",
+        "confirm it",
+    }
+)
+
+_TRAILING_PUNCT_RE = re.compile(r"[!.\s]+$")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize_affirm_text(text: str) -> str:
+    normalized = (text or "").strip().lower()
+    normalized = _TRAILING_PUNCT_RE.sub("", normalized).strip()
+    return _WHITESPACE_RE.sub(" ", normalized)
+
+
+def _is_imperative_affirm(text: str) -> bool:
+    """True only for an exact (whole-message) match against the curated
+    affirm-phrase set — deliberately not a substring/regex-search test, so a
+    phrase embedded in a longer sentence never false-triggers."""
+    return _normalize_affirm_text(text) in _IMPERATIVE_AFFIRM_PHRASES
+
 
 class ActivityTracker:
     """Per-subagent live activity tracker for the Agent Map window.
@@ -2047,6 +2104,9 @@ class _Handler(BaseHTTPRequestHandler):
         if not prompt:
             self._send_json({"error": "prompt is required"}, status=400)
             return
+        # Captured before any focus_agent routing-directive wrapping below,
+        # so the "just say send" intercept sees exactly what the user typed.
+        raw_prompt = prompt
         focus_agent = (body.get("focus_agent") or "").strip()
         if focus_agent and focus_agent not in self.server.registry.subagent_names:
             self._send_json(
@@ -2110,6 +2170,51 @@ class _Handler(BaseHTTPRequestHandler):
             # (reviewer-caught: the early return must close the stream).
             self.close_connection = True
             return
+
+        # "Just say send": a short imperative affirm phrase (e.g. "send it",
+        # "go ahead") resolves a pending confirmation instead of starting a
+        # normal chat turn. Runs OUTSIDE session_lock and BEFORE acquiring
+        # it deliberately — the thread that's actually waiting on the
+        # confirmation is blocked holding session_lock for the duration of
+        # its session.ask() call, so taking the lock here would deadlock
+        # against the very confirmation we're trying to resolve.
+        if _is_imperative_affirm(raw_prompt):
+            pending = self.server.gate.pending_items()
+            if len(pending) == 1:
+                confirm_id, prompt_text = pending[0]
+                ok = self._resolve_confirmation(confirm_id, True)
+                final_text = (
+                    f"Approved: {prompt_text}"
+                    if ok
+                    else "That confirmation is no longer pending."
+                )
+                sink(
+                    {
+                        "type": "confirmation_resolved",
+                        "id": confirm_id,
+                        "approved": True,
+                        "ok": ok,
+                    }
+                )
+                sink({"type": "done", "final_text": final_text})
+                self.close_connection = True
+                return
+            if len(pending) > 1:
+                # More than one pending confirmation — never guess which one
+                # "send it" means. List them briefly and let the user pick.
+                listing = "; ".join(f"{cid} — {txt}" for cid, txt in pending)
+                final_text = (
+                    "Multiple confirmations are pending, so I won't guess "
+                    f"which one you mean: {listing}"
+                )
+                sink({"type": "assistant_text", "text": final_text})
+                sink({"type": "done", "final_text": final_text})
+                self.close_connection = True
+                return
+            # Zero pending confirmations — this is ordinary chat content
+            # (e.g. the user really did just type "yes" or "go ahead" as a
+            # conversational reply), so fall through to the normal turn.
+
         with self.server.session_lock:
             gate.set_emit(stream.emit)
             session.confirmation_gate = gate
@@ -2232,17 +2337,28 @@ class _Handler(BaseHTTPRequestHandler):
             hub.unregister(stream)
             self.close_connection = True
 
+    def _resolve_confirmation(self, confirm_id: str, approved: bool) -> bool:
+        """Resolve a pending confirmation via the shared gate resolver.
+
+        The gate lives on the active chat request thread; ``confirm_resolver``
+        is the shared handle to reach it. This is the ONE path that resolves
+        a confirmation — both the UI-click POST /api/confirm handler and the
+        "just say send" chat intercept call through here so approval logic
+        never forks.
+        """
+        resolver = getattr(self.server, "confirm_resolver", None)
+        if resolver is None:
+            return False
+        return resolver(confirm_id, approved)
+
     def _handle_confirm(self) -> None:
         body = self._read_json_body()
         confirm_id = body.get("id") or ""
         approved = bool(body.get("approved"))
-        # The gate lives on the active chat request thread; hand it a shared
-        # resolver so confirms can reach it.
-        resolver = getattr(self.server, "confirm_resolver", None)
-        if resolver is None:
+        if getattr(self.server, "confirm_resolver", None) is None:
             self._send_json({"ok": False, "error": "no active chat"}, status=409)
             return
-        ok = resolver(confirm_id, approved)
+        ok = self._resolve_confirmation(confirm_id, approved)
         self._send_json({"ok": ok, "id": confirm_id, "approved": approved})
 
     def _handle_login(self) -> None:

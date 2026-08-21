@@ -24,6 +24,7 @@ from dourmouse.dispatch import (
 )
 from dourmouse.webui import (
     WebConfirmationGate,
+    _is_imperative_affirm,
     build_roster_payload,
     run_server,
 )
@@ -159,6 +160,82 @@ class TestConfirmationGate:
         monkeypatch.setattr(webui_module, "_CONFIRM_TIMEOUT_SECONDS", 0.05)
         gate = WebConfirmationGate(lambda e: None)
         assert gate("anything?") is False  # never resolved -> auto-decline
+
+    def test_pending_items_empty_when_nothing_pending(self):
+        gate = WebConfirmationGate(lambda e: None)
+        assert gate.pending_items() == []
+
+    def test_pending_items_lists_each_confirmation_awaiting_response(self):
+        # Two independent gate() calls, each blocking in its own thread, can
+        # coexist in _pending — pending_items() must surface both with their
+        # ids and prompt text, for the "just say send" ambiguity check.
+        gate = WebConfirmationGate(lambda e: None)
+        results: dict[str, bool] = {}
+
+        def run(key: str, prompt: str) -> None:
+            results[key] = gate(prompt)
+
+        t1 = threading.Thread(target=run, args=("a", "Send email to bob?"))
+        t2 = threading.Thread(target=run, args=("b", "Delete the file?"))
+        t1.start()
+        t2.start()
+        for _ in range(50):
+            if len(gate.pending_items()) == 2:
+                break
+            time.sleep(0.02)
+        items = gate.pending_items()
+        assert len(items) == 2
+        prompts = {text for _cid, text in items}
+        assert prompts == {"Send email to bob?", "Delete the file?"}
+        # Clean up both blocked threads.
+        for cid, _text in items:
+            gate.resolve(cid, True)
+        t1.join(timeout=2)
+        t2.join(timeout=2)
+        assert results == {"a": True, "b": True}
+
+
+class TestImperativeAffirmMatching:
+    """Unit coverage for the "just say send" phrase matcher — exact,
+    trimmed, case-insensitive whole-message matches only, never a substring
+    hit inside ordinary conversation."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "send it",
+            "Send It",
+            "  send it  ",
+            "send it.",
+            "send it!",
+            "SEND IT!!",
+            "yes",
+            "go ahead",
+            "do it",
+            "confirm",
+            "confirmed",
+        ],
+    )
+    def test_matches_known_affirm_phrases(self, text):
+        assert _is_imperative_affirm(text) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "",
+            "let's go ahead and refactor this",
+            "can you send it to the team tomorrow",
+            "I don't want to do it",
+            "sending the file now",
+            "yes, but only after you check the logs",
+            "please go ahead with caution",
+        ],
+    )
+    def test_does_not_match_embedded_or_unrelated_text(self, text):
+        assert _is_imperative_affirm(text) is False
+
+    def test_bare_send_is_a_match(self):
+        assert _is_imperative_affirm("send") is True
 
 
 class TestRosterPayload:
@@ -536,6 +613,139 @@ class TestSseChat:
         tool_result = next(e for e in remaining if e["type"] == "tool_result")
         assert "DECLINED" in tool_result["text"]
         assert "GATED-EXECUTED" not in tool_result["text"]
+
+    def test_just_say_send_resolves_the_one_pending_confirmation(self, server):
+        """"send it" on a second chat request approves the single pending
+        confirmation through the SAME resolver POST /api/confirm uses,
+        instead of starting a normal chat turn."""
+        srv, port = server
+        srv.session.client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(
+                        content=None,
+                        tool_calls=[_FakeToolCall("c1", "gated_echo", json.dumps({"text": "secret"}))],
+                    )
+                ),
+                _FakeResponse(_FakeMessage(content="Approved and done.")),
+            ]
+        )
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST",
+            "/api/chat",
+            body=json.dumps({"prompt": "do the gated thing"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 200
+
+        confirm_id = None
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                event = json.loads(line[6:])
+                if event["type"] == "confirmation_requested":
+                    confirm_id = event["id"]
+                    break
+        assert confirm_id is not None
+
+        # "send it" on a second connection, instead of a UI-click POST to
+        # /api/confirm with the exact id.
+        conn2 = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn2.request(
+            "POST",
+            "/api/chat",
+            body=json.dumps({"prompt": "send it"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp2 = conn2.getresponse()
+        assert resp2.status == 200
+        events2 = []
+        while True:
+            line = resp2.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                events2.append(json.loads(line[6:]))
+        conn2.close()
+
+        resolved = next(e for e in events2 if e["type"] == "confirmation_resolved")
+        assert resolved["id"] == confirm_id
+        assert resolved["approved"] is True
+        assert resolved["ok"] is True
+        assert events2[-1]["type"] == "done"
+
+        # The original stream continues and completes with the tool result —
+        # proof the intercept resolved the SAME pending confirmation via the
+        # real resolver, not a fake/parallel approval.
+        remaining = []
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                remaining.append(json.loads(line[6:]))
+        conn.close()
+        types = [e["type"] for e in remaining]
+        assert "tool_result" in types
+        assert "done" in types
+        tool_result = next(e for e in remaining if e["type"] == "tool_result")
+        assert "GATED-EXECUTED: secret" in tool_result["text"]
+
+    def test_just_say_send_falls_through_to_chat_when_nothing_pending(self, server):
+        """With zero confirmations pending, an affirm-shaped message like
+        "send it" is NOT special-cased — it goes through as an ordinary chat
+        turn, so legitimate chat content is never false-triggered."""
+        srv, port = server
+        srv.session.client = FakeClient(
+            [_FakeResponse(_FakeMessage(content="Sent what, exactly?"))]
+        )
+        events = self._stream_events(port, "send it")
+        types = [e["type"] for e in events]
+        assert "confirmation_resolved" not in types
+        assert types[-1] == "done"
+        assert events[-1]["final_text"] == "Sent what, exactly?"
+
+    def test_just_say_send_asks_which_one_when_multiple_pending(self, server):
+        """More than one confirmation pending -> never guess; list them and
+        let the user pick, without resolving either."""
+        srv, port = server
+        results: dict[str, bool] = {}
+
+        def run(key: str, prompt_text: str) -> None:
+            results[key] = srv.gate(prompt_text)
+
+        t1 = threading.Thread(target=run, args=("a", "Send email to bob?"))
+        t2 = threading.Thread(target=run, args=("b", "Delete the file?"))
+        t1.start()
+        t2.start()
+        try:
+            for _ in range(50):
+                if len(srv.gate.pending_items()) == 2:
+                    break
+                time.sleep(0.02)
+            assert len(srv.gate.pending_items()) == 2
+
+            events = self._stream_events(port, "send it")
+            types = [e["type"] for e in events]
+            assert "confirmation_resolved" not in types
+            assert types[-1] == "done"
+            final_text = events[-1]["final_text"]
+            assert "Send email to bob?" in final_text
+            assert "Delete the file?" in final_text
+
+            # Neither pending confirmation was resolved by the ambiguous
+            # "send it" — both are still awaiting a real answer.
+            assert len(srv.gate.pending_items()) == 2
+        finally:
+            for cid, _text in srv.gate.pending_items():
+                srv.gate.resolve(cid, False)
+            t1.join(timeout=2)
+            t2.join(timeout=2)
 
 
 class TestSpotifyPlayEndpoints:
