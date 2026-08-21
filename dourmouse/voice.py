@@ -12,6 +12,15 @@ Engines:
   ``say`` CLI (zero dependencies, fully local) as a documented fallback;
   otherwise honest NOT CONFIGURED.
 
+Content shaping (v8.18): ``text_to_speech`` strips markdown formatting
+(``strip_markdown_for_speech``) before either engine ever sees the text,
+so a reply written with headers/bullets/tables is spoken as prose instead
+of literal ``#``/``*``/``|`` characters. The companion half of the voice/
+text response split — the system-prompt-level instruction that shapes a
+*reply* for being spoken in the first place (short, no markdown structure,
+plain confirmations) — lives in dispatch.py's ``_VOICE_MARKER``, applied
+only to turns the caller marks as arriving on the voice channel.
+
 Env:
 - ``DOURMOUSE_VOICE=1``          -> enable the voice endpoints (default off).
 - ``DOURMOUSE_WHISPER_MODEL``    -> faster-whisper model id or local dir.
@@ -26,6 +35,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -191,6 +201,86 @@ def speech_to_text(audio_bytes: bytes, language: str | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Markdown stripping — v8.18 (voice/text response split). Text reaching a
+# TTS engine must be prose, not markup: nothing in dourmouse/requirements*
+# pulls in a markdown-to-text library (checked before writing this), so
+# this is a targeted pass over only the constructs that actually show up in
+# real replies -- headers, bold/italic, fenced/inline code, bullet and
+# numbered lists, table pipes -- not a general CommonMark parser. A parser
+# broad enough to handle the whole spec is also broad enough to mangle
+# ordinary punctuation (contractions, hyphenated words, code identifiers
+# with underscores) that only looks like markdown, which is the actual
+# failure mode to avoid here.
+# --------------------------------------------------------------------------- #
+
+_MD_FENCE_RE = re.compile(r"```[^\n]*\n?(.*?)```", re.DOTALL)
+_MD_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+# Emphasis markers require a non-word boundary OUTSIDE and non-space content
+# immediately INSIDE — this is what keeps "my_var_name" and "2 * 3" intact
+# while still catching "**bold**" / "*italic*" / "__bold__" / "_italic_".
+_MD_BOLD_STAR_RE = re.compile(r"(?<!\w)\*\*(\S(?:[^*\n]*\S)?)\*\*(?!\w)")
+_MD_BOLD_UNDER_RE = re.compile(r"(?<!\w)__(\S(?:[^_\n]*\S)?)__(?!\w)")
+_MD_ITALIC_STAR_RE = re.compile(r"(?<!\w)\*(\S(?:[^*\n]*\S)?)\*(?!\w)")
+_MD_ITALIC_UNDER_RE = re.compile(r"(?<!\w)_(\S(?:[^_\n]*\S)?)_(?!\w)")
+_MD_HEADER_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
+_MD_BULLET_RE = re.compile(r"^\s*[*\-+]\s+")
+_MD_NUMBERED_RE = re.compile(r"^\s*\d+[.)]\s+")
+# A standalone table-separator row, e.g. "|---|---|" or "| :-- | --: |" —
+# requires at least one pipe, so a bare "---" thematic break is left alone
+# (out of scope: the task asks for table PIPES, not every markdown rule).
+_MD_TABLE_SEP_RE = re.compile(r"^\s*\|\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
+
+
+def strip_markdown_for_speech(text: str) -> str:
+    """Plain-prose version of ``text`` for a TTS engine to actually speak.
+
+    Not a general markdown renderer (Rule 2.8 — deterministic, no LLM
+    judgement involved): a fixed pass over the specific constructs above,
+    ordered so a later pass never re-sees what an earlier one consumed:
+
+    1. fenced code blocks — the ``` fence markers are dropped and the code
+       text inside is kept and spoken as plain words, never read aloud as
+       literal backtick characters;
+    2. inline code spans — backticks dropped, content kept;
+    3. per-line prefixes — header hashes, bullet markers, numbered-list
+       markers, and standalone table-separator lines;
+    4. table pipes remaining in a data row — turned into commas so a row
+       reads as a list of values instead of a wall of ``|`` characters;
+    5. bold/italic markers — dropped, content kept (double-char markers
+       resolved before single-char ones, so "**x**" is fully consumed
+       before the italic pass ever sees a lone "*").
+    """
+    if not text:
+        return text
+
+    text = _MD_FENCE_RE.sub(lambda m: m.group(1).strip("\n"), text)
+    text = _MD_INLINE_CODE_RE.sub(r"\1", text)
+
+    out_lines = []
+    for line in text.split("\n"):
+        if _MD_TABLE_SEP_RE.match(line):
+            continue  # a separator row carries no spoken content at all
+        line = _MD_HEADER_RE.sub("", line)
+        line = _MD_BULLET_RE.sub("", line)
+        line = _MD_NUMBERED_RE.sub("", line)
+        if line.count("|") >= 2:
+            line = ", ".join(p.strip() for p in line.strip().strip("|").split("|"))
+        out_lines.append(line)
+    text = "\n".join(out_lines)
+
+    text = _MD_BOLD_STAR_RE.sub(r"\1", text)
+    text = _MD_BOLD_UNDER_RE.sub(r"\1", text)
+    text = _MD_ITALIC_STAR_RE.sub(r"\1", text)
+    text = _MD_ITALIC_UNDER_RE.sub(r"\1", text)
+
+    # Collapse the blank lines/extra spacing list and table stripping tends
+    # to leave behind, without joining separate sentences onto one line.
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
+
+
+# --------------------------------------------------------------------------- #
 # TTS — piper (local ONNX) with a macOS 'say' zero-dep fallback
 # --------------------------------------------------------------------------- #
 
@@ -200,10 +290,20 @@ def text_to_speech(text: str) -> bytes:
     Engine resolution: piper when importable, else macOS ``say`` (zero-dep,
     fully local). Raises ``VoiceNotConfiguredError`` honestly when the gate
     is off or no engine can run; ``ValueError`` on empty text.
+
+    v8.18: markdown is stripped BEFORE the length cap and BEFORE either
+    engine ever sees the text — a reply with headers/bullets/tables would
+    otherwise have Piper or ``say`` read out literal ``#``/``*``/``|``
+    characters, and the cap is more accurate measured against what will
+    actually be spoken than against the un-stripped source. A stripped
+    result that comes back empty (e.g. input was pure markup with no prose)
+    falls back to the original text rather than silently failing.
     """
     text = (text or "").strip()
     if not text:
         raise ValueError("no text to speak")
+    stripped = strip_markdown_for_speech(text)
+    text = stripped if stripped.strip() else text
     if len(text) > _MAX_TTS_CHARS:
         raise ValueError(
             f"text too long for TTS ({len(text)} > {_MAX_TTS_CHARS} chars)"

@@ -121,6 +121,7 @@ class ChatSession:
         max_turns: int = 8,
         event_sink: Callable[[dict[str, Any]], None] | None = None,
         model: str | None = None,
+        voice: bool = False,
     ) -> dict[str, Any]:
         """Send one user turn; returns the dispatch report.
 
@@ -128,7 +129,12 @@ class ChatSession:
         ``event_sink`` streams each transcript event as it is produced so a
         UI can show tool activity live. ``model`` (v3.1) overrides the model
         for THIS turn only — e.g. a focus_agent route runs that agent's own
-        NVIDIA model. None uses the session default.
+        NVIDIA model. None uses the session default. ``voice`` (v8.18) marks
+        THIS turn as arriving on the voice channel — the caller (webui's
+        /api/chat) sets it when the request came from the speak-and-listen
+        UI, not the typed one, so the reply is shaped to be spoken instead
+        of read. Defaults False, so an existing caller that never passes it
+        gets the unchanged text-channel behavior.
         """
         prompt = prompt.strip()
         if not prompt:
@@ -173,6 +179,7 @@ class ChatSession:
                 dlp=self.dlp,
                 rbac=self.rbac,
                 model=model,
+                voice=voice,
                 # v5.6 neural orchestration: every top-level turn feeds the
                 # neural orchestrator (delayed import — a disabled gate is a
                 # no-op, and the sink can never break the turn).

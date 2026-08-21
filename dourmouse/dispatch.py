@@ -1257,6 +1257,16 @@ class DispatchContext:
     # prompt shape, and inherited by nested runs so a delegate answering a
     # lookup does not write the essay on the parent's behalf.
     brief: bool = False
+    # v8.18: this turn arrived on the VOICE channel (spoken, not typed) — the
+    # API boundary marks the user turn with the voice-reply rule (no
+    # markdown structure, spoken-plain confirmations, one question instead
+    # of an enumerated list). Unlike ``brief`` this is never inferred from
+    # the prompt text itself (nothing about the words distinguishes a
+    # spoken request from a typed one) — it is set once from the caller's
+    # explicit channel flag and inherited by nested runs for the same
+    # reason ``brief`` is: a delegate answering on behalf of a voice turn
+    # must not hand back a table the parent cannot speak.
+    voice: bool = False
     # v8.12: hard-scopes this run to exactly one subagent — see the
     # forced_agent docstring on run_dispatch_messages for why. NOT
     # inherited by further nesting (unlike brief): a forced-agent run's
@@ -1352,6 +1362,7 @@ def run_dispatch_messages(
     experience_sink: Callable[[dict[str, Any]], None] | None = None,
     session_stem: str | None = None,
     forced_agent: str | None = None,
+    voice: bool = False,
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -1404,6 +1415,14 @@ def run_dispatch_messages(
     and recursed into itself until the depth-3 guard refused it, returning
     no answer after 145s. forced_agent makes the explicit directive
     authoritative instead of re-guessed.
+
+    v8.18: ``voice`` marks this turn as arriving on the voice channel (the
+    caller transcribed it from speech and will speak the reply back), so
+    the API boundary appends the voice-reply rule alongside (not instead
+    of) the brevity rule. Explicit and caller-supplied, unlike ``brief``,
+    because nothing in the prompt's own words says whether it was typed or
+    spoken — see the DispatchContext.voice docstring for why it still
+    inherits down through nested runs the same way ``brief`` does.
     """
     # v3.1 per-agent models: an explicit ``model`` override (e.g. a nested
     # delegate resolved to its target subagent's model) wins over the
@@ -1531,6 +1550,11 @@ def run_dispatch_messages(
         ctx.brief = _is_brief_intent(str(last_user)) or (
             bool(stack) and stack[-1].brief
         )
+    # v8.18: voice is an explicit channel flag (never inferred from the
+    # prompt), but still inherits down the delegate stack like brief does —
+    # a nested run started by delegate_task has no ``voice=`` of its own to
+    # pass, so it picks up the parent's.
+    ctx.voice = voice or (bool(stack) and stack[-1].voice)
     if fast_lane:
         # The lane still runs the loop (pure-chat exits after ONE call since
         # tools are empty), but the API boundary sees the compact system
@@ -1752,6 +1776,47 @@ def _append_brief(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         content = msg.get("content")
         if isinstance(content, str) and _BRIEF_MARKER not in content:
             msg["content"] = f"{content}\n\n{_BRIEF_MARKER}"
+        break
+    return out
+
+
+# v8.18: the voice-channel reply rule. Placed on the last user turn for the
+# exact reason documented on _BRIEF_MARKER above and pinned by
+# TestBoundaryPlacement in test_brief_intent.py: appended to the system
+# prompt instead, this brain treats it as an optional style note and
+# follows it inconsistently; on the last user turn (the same spot
+# _NO_THINK_TOKEN and _BRIEF_MARKER already use) it holds turn over turn.
+# So although the task that motivated this is "a channel-aware
+# system-prompt addendum", it is implemented with the mechanism already
+# proven to work on this backend rather than the one proven not to.
+# NO NUMBERS IN THIS STRING for the same reason _BRIEF_MARKER has none: a
+# reasoning-tuned model asked for "1-2 sentences" has been observed
+# counting the sentences out loud in the reply instead of just giving one.
+_VOICE_MARKER = (
+    "(This reply will be spoken aloud, not read: no markdown, no headings, "
+    "no tables, no code blocks, no bullet or numbered lists -- plain "
+    "spoken sentences only, code read out as plain words not symbols. Keep "
+    "it to a sentence or two unless the content genuinely needs more. "
+    "State a confirmation plainly, like done or sent or found three, want "
+    "me to read them, instead of showing it silently. If something is "
+    "unclear, ask one plain question instead of listing options.)"
+)
+
+
+def _append_voice(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Copy of ``messages`` with the voice-reply marker on the last user turn.
+
+    Mirrors ``_append_brief`` exactly (same copy-don't-mutate boundary
+    discipline), and the two stack: a brief AND spoken turn gets both
+    markers appended to the same copy, never persisted into history.
+    """
+    out = [dict(m) for m in messages]
+    for msg in reversed(out):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and _VOICE_MARKER not in content:
+            msg["content"] = f"{content}\n\n{_VOICE_MARKER}"
         break
     return out
 
@@ -2022,6 +2087,12 @@ def _run_dispatch_loop(
         # the answer. The standard cap still applies as it always did.
         if getattr(ctx, "brief", False) and bounded:
             bounded = _append_brief(bounded)
+        # v8.18: same API-boundary trick for the voice channel — applied
+        # after brief so a spoken lookup carries both markers. Text-channel
+        # turns never see this (ctx.voice defaults False), so typed
+        # behavior is unchanged.
+        if getattr(ctx, "voice", False) and bounded:
+            bounded = _append_voice(bounded)
         # v5.30: the server fast lane tries the Dell first; ANY failure
         # (unreachable, timeout, 500, malformed) falls back to the local
         # fast model — the node can never take the reply down.
@@ -2260,6 +2331,7 @@ def run_dispatch(
     config: NvidiaConfig | None = None,
     confirmation_gate: Callable[[str], bool] | None = None,
     model: str | None = None,
+    voice: bool = False,
 ) -> dict[str, Any]:
     """Send one request through the NVIDIA-backed general dispatcher.
 
@@ -2267,6 +2339,8 @@ def run_dispatch(
     fresh system+user message list, runs the loop, and returns
     {"final_text", "transcript"}. ``client``/``config`` injectable for
     isolated testing; ``confirmation_gate`` is the human-in-the-loop hook.
+    ``voice`` (v8.18) marks the turn as arriving on the voice channel — see
+    run_dispatch_messages for what that changes.
     """
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_message(registry)},
@@ -2280,6 +2354,7 @@ def run_dispatch(
         config=config,
         confirmation_gate=confirmation_gate,
         model=model,
+        voice=voice,
         # The CLI is a learning surface too: log the single-shot run so the
         # neural orchestrator learns from it.
         experience_sink=(

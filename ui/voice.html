@@ -361,7 +361,10 @@ async function ask(prompt) {
   try {
     const r = await api('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      // voice: true -- this UI transcribes the request and speaks the
+      // reply back with no human review in between (see ask()/speak()
+      // below), so the server shapes the reply for being heard, not read.
+      body: JSON.stringify({ prompt, voice: true }),
     });
     const reader = r.body.getReader();
     const dec = new TextDecoder();

@@ -2104,6 +2104,14 @@ class _Handler(BaseHTTPRequestHandler):
         if not prompt:
             self._send_json({"error": "prompt is required"}, status=400)
             return
+        # v8.18: voice/text response split. The speak-and-listen UI
+        # (ui/voice.html) marks its /api/chat calls with voice: true because
+        # it transcribes the request and speaks the reply back with zero
+        # human review in between; the typed UI (ui/index.html) never sends
+        # this, including its own mic button, which only fills the text box
+        # for the user to read/edit/send like any typed message. Missing or
+        # falsy defaults to the existing text-channel behavior.
+        voice_channel = bool(body.get("voice"))
         # Captured before any focus_agent routing-directive wrapping below,
         # so the "just say send" intercept sees exactly what the user typed.
         raw_prompt = prompt
@@ -2221,7 +2229,11 @@ class _Handler(BaseHTTPRequestHandler):
             self.server.confirm_resolver = gate.resolve
             try:
                 report = session.ask(
-                    prompt, max_turns=8, event_sink=sink, model=model_override
+                    prompt,
+                    max_turns=8,
+                    event_sink=sink,
+                    model=model_override,
+                    voice=voice_channel,
                 )
             except Exception as exc:  # surface real failures to the UI
                 error_msg = str(exc)

@@ -21,6 +21,7 @@ from dourmouse.general_roster import build_general_registry
 from dourmouse.voice import (
     VoiceNotConfiguredError,
     speech_to_text,
+    strip_markdown_for_speech,
     stt_available,
     text_to_speech,
     tts_engine,
@@ -272,6 +273,181 @@ class TestTts:
         assert calls["model"].endswith("en_US-lessac-medium.onnx"), "flat path, no subdir"
         assert calls["dir"].endswith("piper_models")
         assert (tmp_path / ".local" / "share" / "piper_models").is_dir(), "mkdir happened"
+
+
+# --------------------------------------------------------------------------- #
+# Markdown stripping (v8.18 voice/text response split)
+# --------------------------------------------------------------------------- #
+
+class TestMarkdownStripping:
+    def test_empty_text_passes_through(self):
+        assert strip_markdown_for_speech("") == ""
+
+    def test_plain_prose_is_untouched(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        assert strip_markdown_for_speech(text) == text
+
+    def test_headers_stripped(self):
+        out = strip_markdown_for_speech("# Title\n\nSome body text.")
+        assert "#" not in out
+        assert "Title" in out
+        assert "Some body text." in out
+
+    def test_multilevel_headers_stripped(self):
+        out = strip_markdown_for_speech("## Section\n### Subsection")
+        assert "#" not in out
+        assert "Section" in out and "Subsection" in out
+
+    def test_bold_star_stripped(self):
+        assert strip_markdown_for_speech("This is **bold** text.") == "This is bold text."
+
+    def test_bold_underscore_stripped(self):
+        assert strip_markdown_for_speech("This is __bold__ text.") == "This is bold text."
+
+    def test_italic_star_stripped(self):
+        assert strip_markdown_for_speech("This is *italic* text.") == "This is italic text."
+
+    def test_italic_underscore_stripped(self):
+        assert strip_markdown_for_speech("This is _italic_ text.") == "This is italic text."
+
+    def test_bold_and_italic_together(self):
+        out = strip_markdown_for_speech("**bold** and *italic* and __also bold__")
+        assert "*" not in out and "_" not in out
+        assert "bold" in out and "italic" in out and "also bold" in out
+
+    def test_fenced_code_block_backticks_removed_content_kept(self):
+        out = strip_markdown_for_speech("Run this:\n```python\nx = 1\nprint(x)\n```")
+        assert "`" not in out
+        assert "x = 1" in out
+        assert "print(x)" in out
+
+    def test_fenced_code_block_language_tag_not_spoken(self):
+        out = strip_markdown_for_speech("```python\nx = 1\n```")
+        # the fence's language annotation is boundary syntax, not code —
+        # only the code body ("x = 1") should survive.
+        assert out == "x = 1"
+
+    def test_inline_code_backticks_removed_content_kept(self):
+        assert strip_markdown_for_speech("Run `ls -la` now") == "Run ls -la now"
+
+    def test_bullet_list_markers_removed(self):
+        out = strip_markdown_for_speech("- one\n- two\n- three")
+        assert "- " not in out
+        for word in ("one", "two", "three"):
+            assert word in out
+
+    def test_bullet_list_with_asterisk_and_plus_markers(self):
+        out = strip_markdown_for_speech("* alpha\n+ beta")
+        assert not out.lstrip().startswith("*")
+        assert not out.lstrip().startswith("+")
+        assert "alpha" in out and "beta" in out
+
+    def test_numbered_list_markers_removed(self):
+        out = strip_markdown_for_speech("1. first\n2. second\n3. third")
+        assert "1." not in out and "2." not in out and "3." not in out
+        for word in ("first", "second", "third"):
+            assert word in out
+
+    def test_table_pipes_and_separator_removed(self):
+        table = "| Name | Age |\n|------|-----|\n| Alice | 30 |"
+        out = strip_markdown_for_speech(table)
+        assert "|" not in out
+        assert "---" not in out
+        for word in ("Name", "Age", "Alice", "30"):
+            assert word in out
+
+    def test_table_data_row_reads_as_a_list(self):
+        out = strip_markdown_for_speech("| Alice | 30 | Engineer |")
+        assert out == "Alice, 30, Engineer"
+
+    def test_horizontal_rule_alone_is_left_alone(self):
+        # Out of scope by design: the task asks for table PIPES, not every
+        # markdown rule, so a bare "---" thematic break (no pipes) is not
+        # treated as a table separator.
+        out = strip_markdown_for_speech("above\n---\nbelow")
+        assert "above" in out and "below" in out
+
+    # ---- readability: ordinary punctuation must survive untouched ---- #
+
+    def test_contractions_survive(self):
+        text = "I don't think it's ready yet."
+        assert strip_markdown_for_speech(text) == text
+
+    def test_hyphenated_compounds_survive(self):
+        text = "This is a state-of-the-art, well-tested system."
+        assert strip_markdown_for_speech(text) == text
+
+    def test_code_identifiers_with_underscores_survive(self):
+        text = "Call get_user_data with my_var_name as the argument."
+        assert strip_markdown_for_speech(text) == text
+
+    def test_multiplication_asterisk_survives(self):
+        text = "The area is 2 * 3 = 6 square feet."
+        assert strip_markdown_for_speech(text) == text
+
+    def test_exponent_double_star_survives(self):
+        text = "In Python, 2**3 equals 8."
+        assert strip_markdown_for_speech(text) == text
+
+    def test_combined_reply_has_no_stray_markdown_characters(self):
+        """A realistic mixed reply loses every markdown character while
+        keeping the words readable — not mangled into a run-on blob."""
+        reply = (
+            "# Summary\n\n"
+            "Here is what I found, **in short**:\n\n"
+            "- The `config.py` file sets *defaults*\n"
+            "- It doesn't override __anything__ else\n\n"
+            "| File | Lines |\n|------|-------|\n| config.py | 42 |\n\n"
+            "```python\ndef load():\n    return True\n```"
+        )
+        out = strip_markdown_for_speech(reply)
+        for ch in ("#", "*", "`", "|"):
+            assert ch not in out, f"stray {ch!r} left in: {out!r}"
+        for word in ("Summary", "short", "config.py", "defaults", "doesn't", "anything", "42", "def load", "return True"):
+            assert word in out, f"expected {word!r} in: {out!r}"
+
+
+# --------------------------------------------------------------------------- #
+# TTS engines receive stripped text (v8.18)
+# --------------------------------------------------------------------------- #
+
+class TestTtsStripsMarkdown:
+    def test_say_engine_receives_stripped_text(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_VOICE", "1")
+        monkeypatch.setitem(sys.modules, "piper", None)
+        monkeypatch.setattr(voice_module.shutil, "which", lambda _c: "/usr/bin/say")
+        seen: list[str] = []
+
+        def _fake_run(cmd, capture_output=False, timeout=0, check=False):
+            seen.append(cmd[-1])
+            out_path = Path(cmd[2])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(b"RIFF-x")
+            return types.SimpleNamespace(returncode=0, stderr=b"")
+
+        monkeypatch.setattr(voice_module.subprocess, "run", _fake_run)
+        text_to_speech("# Heading\n\nThis is **bold** and `code`.")
+        assert seen
+        spoken = seen[0]
+        assert "#" not in spoken and "*" not in spoken and "`" not in spoken
+        assert "Heading" in spoken and "bold" in spoken and "code" in spoken
+
+    def test_plain_text_still_reaches_say_unchanged(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_VOICE", "1")
+        monkeypatch.setitem(sys.modules, "piper", None)
+        monkeypatch.setattr(voice_module.shutil, "which", lambda _c: "/usr/bin/say")
+        seen: list[str] = []
+
+        def _fake_run(cmd, capture_output=False, timeout=0, check=False):
+            seen.append(cmd[-1])
+            out_path = Path(cmd[2])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(b"RIFF-x")
+            return types.SimpleNamespace(returncode=0, stderr=b"")
+
+        monkeypatch.setattr(voice_module.subprocess, "run", _fake_run)
+        text_to_speech("hello there, how are you?")
+        assert seen[0] == "hello there, how are you?"
 
 
 # --------------------------------------------------------------------------- #
