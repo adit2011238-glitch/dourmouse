@@ -1257,3 +1257,128 @@ class TestFirstRunSetup:
 
         pkg = Path(__file__).resolve().parent.parent
         assert pkg not in user_config_dir().parents
+
+
+class TestSetupWizardGoogleStep:
+    """v8.19: Google sign-in moved into the first-run setup wizard, as a
+    skippable step (ui/setup.html). UI wiring only — the OAuth flow itself
+    (google_auth.py, the claim bridge in webui.py) is unchanged and its
+    core mechanics are already covered by TestSystemBrowserClaimFlow. These
+    pin two things the new caller depends on: (1) the setup page actually
+    SHIPS the step wired to the real endpoints, not a decorative stub, and
+    (2) the callback's cancel/deny path — previously untested anywhere in
+    this suite — degrades gracefully instead of leaving a parked state or
+    a hung poll (Rule 2.2: honest failure, never silent).
+    """
+
+    _IDENTITY = {"email": "wizard@example.com", "name": "Wizard User",
+                 "picture": "", "sub": "sub-999"}
+
+    def _patch_google(self, monkeypatch):
+        """Same hermetic patch as TestSystemBrowserClaimFlow — no network."""
+        from dourmouse import google_auth
+        import dourmouse.webui as webui_module
+
+        monkeypatch.setattr(google_auth, "google_configured", lambda: True)
+        monkeypatch.setattr(
+            google_auth, "authorization_url",
+            lambda *a, **k: "https://accounts.google.com/o/oauth2/v2/auth?fake=1")
+        monkeypatch.setattr(
+            google_auth, "exchange_code",
+            lambda *a, **k: {"id_token": "tok", "access_token": "a",
+                             "refresh_token": "r"})
+        monkeypatch.setattr(
+            google_auth, "verify_id_token", lambda *a, **k: dict(self._IDENTITY))
+        monkeypatch.setattr(webui_module, "_pending_created_ts", lambda p: 4_100_000_000)
+
+    def _seed_pending(self, srv, state: str, claim: str):
+        with srv.oauth_lock:
+            srv.oauth_pending[state] = {
+                "verifier": "v", "redirect_uri": "http://127.0.0.1/cb",
+                "redirect_to": "/", "claim": claim,
+                "created": "2026-01-01T00:00:00",
+            }
+
+    def _get(self, server, path: str):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        status = resp.status
+        location = resp.getheader("Location")
+        body = resp.read()
+        conn.close()
+        return status, location, body
+
+    def test_setup_page_ships_google_step_wired_to_real_endpoints(self, server):
+        """The step must call the real, already-working OAuth surface —
+        not a placeholder button with no handler (the exact regression the
+        login page's claim bridge was built to catch, v5.22.11/12)."""
+        status, _, raw = self._get(server, "/setup")
+        assert status == 200
+        html = raw.decode("utf-8", errors="replace")
+        assert "/api/auth/google/start?claim=" in html
+        assert "/api/auth/claim?code=" in html
+        assert "/api/auth/status" in html
+        assert "/api/auth/me" in html
+        assert "Connect Google" in html
+        # the desktop app's webview bridge is honored, same as /login
+        assert "pywebview" in html and "open_external" in html
+
+    def test_setup_google_step_skip_button_is_never_gated(self, server):
+        """Requirement: this integration must remain entirely optional.
+        SKIP is a bare onclick with no disabled attribute anywhere near
+        it — unlike CONTINUE on the brain-choice step, which IS gated."""
+        status, _, raw = self._get(server, "/setup")
+        html = raw.decode("utf-8", errors="replace")
+        assert 'id="gSkipBtn" onclick="gAdvance()">SKIP<' in html
+
+    def test_claim_flow_works_when_initiated_from_the_setup_wizard(self, server, monkeypatch):
+        """The exact sequence the new step performs: start with a claim
+        code, Google redirects back, the wizard polls /api/auth/claim and
+        adopts the session — the same server wiring the login page's
+        webview bridge already uses, now exercised for this new caller."""
+        self._patch_google(monkeypatch)
+        srv, _ = server
+        state, claim = "wizard-state-1", "wizard-claim-1"
+        self._seed_pending(srv, state, claim)
+
+        status, location, _ = self._get(
+            server, f"/api/auth/google/callback?code=abc&state={state}")
+        assert status == 302
+        assert location == "/login?claimed=1"
+
+        status, _, raw = self._get(server, f"/api/auth/claim?code={claim}")
+        body = json.loads(raw.decode() or "{}")
+        assert status == 200 and body["ok"] is True
+        assert body["me"]["email"] == self._IDENTITY["email"]
+        assert body["me"]["name"] == self._IDENTITY["name"]
+
+    def test_denied_consent_never_parks_a_claim(self, server, monkeypatch):
+        """Regression, previously untested anywhere in this suite: if the
+        user cancels on Google's consent screen, the callback returns
+        error=access_denied and must NOT park anything under the claim
+        code. The wizard's poll must keep getting an honest 404 forever —
+        never a phantom success, never a crash — which is what lets it
+        time out to a friendly retry instead of hanging (requirement 4)."""
+        self._patch_google(monkeypatch)
+        srv, _ = server
+        state, claim = "wizard-state-denied", "wizard-claim-denied"
+        self._seed_pending(srv, state, claim)
+
+        status, location, raw = self._get(
+            server, f"/api/auth/google/callback?code=&state={state}&error=access_denied")
+        assert status == 302
+        assert location == "/login?reason=denied"
+        assert raw == b""  # no traceback, no body leaked on the honest path
+
+        status2, _, raw2 = self._get(server, f"/api/auth/claim?code={claim}")
+        body2 = json.loads(raw2.decode() or "{}")
+        assert status2 == 404
+        assert body2["ok"] is False
+
+        # The consumed state cannot be replayed either — single-use even
+        # on a denial, so a retried/duplicated Google redirect can't revive it.
+        status3, _, _ = self._get(
+            server, f"/api/auth/google/callback?code=abc&state={state}")
+        assert status3 == 400

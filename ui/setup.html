@@ -72,6 +72,24 @@ button.ghost:hover{border-color:var(--amber);color:var(--amber)}
 .note{font-size:10.5px;color:var(--blue-deep);line-height:1.6;margin-top:12px}
 code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:11px}
 .hide{display:none}
+
+/* Google sign-in step — the official button look (white, the Google G) is
+   kept as-is even inside this theme: it is the recognizable signifier from
+   signing into Gmail, same reasoning as the login page. */
+.gbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
+  padding:12px 14px;cursor:pointer;background:#fff;color:#1f1f1f;
+  font-family:"Roboto","Inter",-apple-system,var(--mono);font-size:12.5px;
+  font-weight:500;border:1px solid #dadce0;border-radius:4px;transition:all .15s ease}
+.gbtn:hover{background:#f6f7f8;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.gbtn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.gacct{border:1px solid rgba(95,191,138,.35);background:rgba(95,191,138,.08);
+  padding:14px 15px;display:flex;gap:12px;align-items:center}
+.gacct img{width:38px;height:38px;border-radius:50%;flex:none;background:var(--panel2);object-fit:cover}
+.gacct .who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.gacct .who b{color:var(--blue-hi);font-size:12.5px;font-weight:600}
+.gacct .who span{color:var(--blue-dim);font-size:10.5px;font-family:var(--mono);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg a{color:var(--amber)}
 </style>
 </head>
 <body>
@@ -86,7 +104,7 @@ code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:11p
       <path d="M148 46 L176 44 L166 70 Z" fill="currentColor"/>
     </svg></span>
     <span class="brand">DOURMOUSE</span>
-    <span class="steps"><i class="dot on" id="d1"></i><i class="dot" id="d2"></i><i class="dot" id="d3"></i></span>
+    <span class="steps"><i class="dot on" id="d1"></i><i class="dot" id="d2"></i><i class="dot" id="d3"></i><i class="dot" id="d4"></i></span>
   </div>
 
   <!-- STEP 1 — welcome, and an honest statement of reach -->
@@ -160,8 +178,45 @@ code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:11p
     <div class="note" id="whyDisabled"></div>
   </div>
 
-  <!-- STEP 3 — done -->
+  <!-- STEP 3 — Google sign-in (optional, skippable) -->
   <div class="card hide" id="s3">
+    <h1>Connect Google</h1>
+    <p>Optional. Sign in and Dourmouse can read and act on your Gmail,
+       Calendar and Drive when you ask it to — nothing is touched until you
+       do. Skip this and use Dourmouse with no Google account at all; you
+       can connect one later from Settings.</p>
+
+    <div id="gConfigured">
+      <button class="gbtn" id="gSigninBtn">
+        <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Sign in with Google
+      </button>
+      <div class="msg" id="gMsg"></div>
+    </div>
+
+    <div class="gacct hide" id="gAccount">
+      <img id="gAvatar" alt="" referrerpolicy="no-referrer" style="display:none">
+      <span class="who"><b id="gName"></b><span id="gEmail"></span></span>
+    </div>
+
+    <div class="note hide" id="gNotConfigured">GOOGLE SIGN-IN IS NOT CONFIGURED on
+      this install — the server has no OAuth client set. You can still use
+      Dourmouse fully without it; this can be added later in Settings.</div>
+
+    <div class="actions">
+      <button class="ghost" onclick="show(2)">BACK</button>
+      <button class="ghost" id="gSkipBtn" onclick="gAdvance()">SKIP</button>
+      <button class="go hide" id="gContinueBtn" onclick="gAdvance()">CONTINUE</button>
+    </div>
+  </div>
+
+  <!-- STEP 4 — done -->
+  <div class="card hide" id="s4">
     <h1>Ready</h1>
     <p id="doneDetail"></p>
     <div class="sec">Saved to</div>
@@ -182,8 +237,8 @@ const $ = id => document.getElementById(id);
 let choice = null, status = null, keyOk = false, nodeOk = false, nodeUrlOk = "";
 
 function show(n){
-  [1,2,3].forEach(i => $("s"+i).classList.toggle("hide", i !== n));
-  [1,2,3].forEach(i => $("d"+i).classList.toggle("on", i <= n));
+  [1,2,3,4].forEach(i => $("s"+i).classList.toggle("hide", i !== n));
+  [1,2,3,4].forEach(i => $("d"+i).classList.toggle("on", i <= n));
   window.scrollTo(0,0);
 }
 async function api(path, body){
@@ -296,6 +351,142 @@ async function finish(){
     show(3);
   }catch(e){ alert("Could not save: " + e.message); }
 }
+
+/* -- Google sign-in step (optional, skippable) --------------------------
+   Reuses the EXACT endpoints the /login page already exercises for its
+   system-browser bridge — /api/auth/google/start?claim=, /api/auth/claim,
+   /api/auth/me, /api/auth/status. Nothing here re-implements the OAuth
+   dance; it only opens the consent screen in a SEPARATE window/tab and
+   polls for the claim, so this wizard page never navigates away and can
+   never get stuck on a cancelled or denied consent — SKIP always works,
+   and a stalled poll degrades to a friendly retry instead of a spinner
+   that runs forever. */
+let gClaimTimer = null;
+
+const G_IN_WEBVIEW = typeof window.pywebview !== "undefined" &&
+    !!window.pywebview.api && typeof window.pywebview.api.open_external === "function";
+
+function gShowConnected(me){
+  $("gConfigured").classList.add("hide");
+  $("gNotConfigured").classList.add("hide");
+  $("gAccount").classList.remove("hide");
+  $("gName").textContent = me.name || me.email || "";
+  $("gEmail").textContent = me.email || "";
+  const img = $("gAvatar");
+  if(me.picture && /^https?:\/\//i.test(me.picture)){ img.src = me.picture; img.style.display = ""; }
+  else { img.style.display = "none"; }
+  $("gSkipBtn").classList.add("hide");
+  $("gContinueBtn").classList.remove("hide");
+}
+
+async function gShowConnectedFromEmail(email){
+  let name = "", picture = "";
+  try{
+    const r = await api("/api/auth/me");
+    const me = r.me || {};
+    name = me.name || ""; picture = me.picture || "";
+  }catch(e){ /* email-only fallback is fine */ }
+  gShowConnected({email, name, picture});
+}
+
+function gShowManualLink(url){
+  const m = $("gMsg");
+  m.className = "msg";
+  const safe = String(url).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  m.innerHTML = 'Could not open your browser automatically — ' +
+    '<a href="' + safe + '" target="_blank" rel="noopener">open this link</a> to continue, ' +
+    'then come back here.';
+}
+
+function gPollClaim(claim){
+  let n = 0;
+  const attempts = 60; // 2 minutes at 2s — long enough for a real consent flow
+  if(gClaimTimer) clearInterval(gClaimTimer);
+  gClaimTimer = setInterval(async () => {
+    n += 1;
+    if(n > attempts){
+      clearInterval(gClaimTimer);
+      const m = $("gMsg");
+      m.className = "msg bad";
+      m.textContent = "Didn't hear back from Google — try again, or just skip and connect later.";
+      const btn = $("gSigninBtn");
+      btn.disabled = false; btn.textContent = "TRY AGAIN";
+      return;
+    }
+    try{
+      const r = await fetch("/api/auth/claim?code=" + encodeURIComponent(claim));
+      if(r.ok){
+        clearInterval(gClaimTimer);
+        const body = await r.json();
+        gShowConnected(body.me || {});
+      }
+      // A non-ok response (404: not claimed yet) is expected while waiting;
+      // 400s never happen here since `claim` is always non-empty.
+    }catch(e){ /* transient network hiccup — keep polling */ }
+  }, 2000);
+}
+
+async function gStartSignin(){
+  const btn = $("gSigninBtn"), m = $("gMsg");
+  btn.disabled = true; m.className = "msg"; m.textContent = "opening Google…";
+  const claim = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2))
+    .replace(/-/g, "");
+  try{
+    const r = await fetch("/api/auth/google/start?claim=" + encodeURIComponent(claim),
+                          {redirect: "follow"});
+    if(!r.ok){
+      throw new Error("HTTP " + r.status);
+    }
+    const googleUrl = r.url;
+    let opened = true;
+    if(G_IN_WEBVIEW){
+      try{ opened = await window.pywebview.api.open_external(googleUrl); }
+      catch(e){ opened = false; }
+    } else {
+      opened = !!window.open(googleUrl, "_blank", "noopener");
+    }
+    if(!opened){
+      gShowManualLink(googleUrl);
+      btn.disabled = false; btn.textContent = "Sign in with Google";
+      return;
+    }
+    m.className = "msg";
+    m.textContent = "Approve it in the window that just opened — this page " +
+      "picks it up automatically once you're done.";
+    gPollClaim(claim);
+  }catch(e){
+    m.className = "msg bad"; m.textContent = "Could not reach Google — " + e.message;
+    btn.disabled = false; btn.textContent = "Sign in with Google";
+  }
+}
+
+function gAdvance(){
+  if(gClaimTimer){ clearInterval(gClaimTimer); gClaimTimer = null; }
+  show(4);
+}
+
+/* A cancelled/denied consent lands on the OTHER tab this step opened
+   (/login?reason=denied) — it never touches this page at all, so there is
+   nothing here to crash or get stuck. The poll above simply keeps waiting
+   until its own timeout, at which point SKIP has been sitting there the
+   whole time regardless. */
+async function gInit(){
+  try{
+    const r = await api("/api/auth/status");
+    if(r.me){
+      gShowConnectedFromEmail(r.me);
+    } else if(r.configured){
+      $("gSigninBtn").addEventListener("click", gStartSignin);
+    } else {
+      $("gConfigured").classList.add("hide");
+      $("gNotConfigured").classList.remove("hide");
+    }
+  }catch(e){
+    $("gMsg").textContent = "Could not check Google sign-in — you can still skip.";
+  }
+}
+gInit();
+
 (async () => {
   try{
     status = await api("/api/setup/status");
