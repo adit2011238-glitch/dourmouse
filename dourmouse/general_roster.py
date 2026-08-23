@@ -2414,6 +2414,38 @@ def build_general_registry() -> DispatchRegistry:
             lines.append(f"- {sev}{it.get('title', '')} {it.get('link', '')}")
         return "\n".join(lines)
 
+    # v8.20: two more real, deterministic tools on top of World Pulse —
+    # neither calls an LLM; both compose the same real snapshot/geo data
+    # already produced above into a different shape.
+    def _world_brief_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.world_brief import generate_brief
+        from dourmouse.world_pulse import world_pulse_snapshot
+
+        try:
+            brief = generate_brief(world_pulse_snapshot())
+        except Exception as exc:  # noqa: BLE001 - must never raise into the model
+            return f"WORLD BRIEF FAILED: {type(exc).__name__}: {exc}"
+        return brief.get("text", "")
+
+    def _world_correlations_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.world_correlation import find_correlations
+        from dourmouse.world_pulse import world_pulse_geo
+
+        try:
+            pairs = find_correlations(world_pulse_geo())
+        except Exception as exc:  # noqa: BLE001
+            return f"WORLD CORRELATIONS FAILED: {type(exc).__name__}: {exc}"
+        if not pairs:
+            return "No cross-channel correlations within the current threshold right now."
+        lines = ["CROSS-CHANNEL PROXIMITY (closest first):"]
+        for p in pairs[:10]:
+            a, b = p["a"], p["b"]
+            lines.append(
+                f"- {p['distance_km']:.0f} km apart: [{a['chan']}] {a['title']} "
+                f"<-> [{b['chan']}] {b['title']}"
+            )
+        return "\n".join(lines)
+
     registry.register_subagent(
         _subagent(
             "worldmonitor",
@@ -2449,6 +2481,31 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["source"],
                     },
                     handler=_world_pulse_details_h,
+                ),
+                ToolSpec(
+                    name="world_brief",
+                    description=(
+                        "A short, real, deterministic written brief ('what "
+                        "happened') composed from the current World Pulse "
+                        "snapshot — pulse score, the most severe real items "
+                        "per channel, and any channel that's OFFLINE. Never "
+                        "an LLM summary; every fact in it traces to real "
+                        "data in the snapshot."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_world_brief_h,
+                ),
+                ToolSpec(
+                    name="world_correlations",
+                    description=(
+                        "Real pairs of located World Pulse items from "
+                        "DIFFERENT channels that are geographically close "
+                        "(e.g. a wildfire near a flight path), closest "
+                        "first. Reports proximity only — never a causal "
+                        "claim."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_world_correlations_h,
                 ),
             ],
         )

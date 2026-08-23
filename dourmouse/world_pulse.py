@@ -1,8 +1,9 @@
-"""World Pulse — the SELF-HOSTED world monitor (v5.27).
+"""World Pulse — the SELF-HOSTED world monitor (v8.20).
 
-Dourmouse's own global-intelligence feed. No SDK, no API key: every source
-is a real public, keyless endpoint read over stdlib urllib, so nothing is
-ever fabricated (Rule 2.2). Six channels:
+Dourmouse's own global-intelligence feed. No SDK: every source is a real
+public endpoint read over stdlib urllib (or, for one channel, a hand-rolled
+stdlib-only WebSocket client) — nothing is ever fabricated (Rule 2.2).
+Fifteen channels, eight keyless and seven either keyless or key-gated:
 
 - ``markets``  — Yahoo Finance: top day gainers/losers + key index/commodity
                 quotes (^GSPC, ^IXIC, CL=F, GC=F, BTC-USD).
@@ -13,37 +14,81 @@ ever fabricated (Rule 2.2). Six channels:
 - ``conflict`` — ReliefWeb RSS: humanitarian / conflict / displacement
                 updates.
 - ``macro``    — World Bank API: GDP growth + inflation for US, CN, EU, IN.
+- ``quakes``   — USGS magnitude 2.5+, last 24h. Keyless.
+- ``flights``  — OpenSky live aircraft over Europe/N-Africa. Keyless.
+- ``ships``    — aisstream.io live AIS positions over the same bbox as
+                ``flights``. Needs ``AISSTREAM_API_KEY``; honestly NOT
+                CONFIGURED without one (Rule 2.2). The only non-HTTP
+                channel — aisstream is WebSocket-only, so this module
+                carries a small hand-rolled RFC 6455 client (stdlib
+                ``socket``/``ssl`` only, no new dependency) rather than
+                breaking the file's stdlib-only rule for one channel.
+- ``wildfires``— NASA FIRMS VIIRS thermal detections, last 24h. Needs
+                ``FIRMS_MAP_KEY`` (free at firms.modaps.eosdis.nasa.gov).
+- ``storms``   — NOAA/NHC active tropical cyclones. Keyless. An empty
+                result is a normal, non-error state (most days have zero
+                active named storms) — unlike quakes/flights, this channel
+                never raises on zero.
+- ``air_quality``— OpenAQ v3, latest PM2.5 readings. Needs
+                ``OPENAQ_API_KEY`` (OpenAQ now requires one for the v3
+                API — the old v2 keyless tier is retired).
+- ``power_grid``— ENTSO-E Transparency Platform actual total load for a
+                small, deliberately-honest set of bidding zones. Needs
+                ``ENTSOE_API_TOKEN`` (issued by email, not self-serve —
+                see the module docstring on ``_fetch_power_grid`` for
+                exactly what is and is not verified about this channel).
+- ``launches`` — Launch Library 2 (thespacedevs.com), upcoming launches.
+                Keyless.
+- ``infrastructure``— OSM Overpass: pipelines + harbours over the same
+                bbox as ``flights``/``ships``, as a static base layer.
+                Keyless. Zero matches is a legitimate result here (OSM tag
+                coverage varies by area) — this channel never raises on
+                zero, unlike quakes/flights/launches.
 
 Failure isolation: each source is fetched independently; a dead source is
 reported OFFLINE with its real error while every other channel keeps
-serving. The snapshot is cached (default 120 s) so the UI never pays the
-full fetch cost per poll. ``pulse_score`` is an INTERNAL deterministic
-composite of the real signals (documented below), never a fabricated
-number.
+serving. A key-gated source with no key configured reports NOT CONFIGURED
+the same honest way — cheap, no network call, never a fabricated result.
+The snapshot is cached (default 120 s) so the UI never pays the full fetch
+cost per poll. ``pulse_score`` is an INTERNAL deterministic composite of
+the real signals (documented below), never a fabricated number.
 
-Concurrency: a small thread pool (max 5) with a per-source timeout, so a
-stalled feed cannot stall the whole monitor.
+Concurrency: a small thread pool (one worker per source) with a per-source
+timeout, so a stalled feed cannot stall the whole monitor.
 """
 
 from __future__ import annotations
 
+import base64
 import concurrent.futures
+import csv
+import hashlib
+import io
 import json
 import os
 import re
+import secrets
+import socket
+import ssl
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from dourmouse import live_feeds
 
 _SOURCE_TIMEOUT = 8.0
 _MAX_ITEMS_PER_SOURCE = 8
-_SOURCE_COUNT = 8
+_SOURCE_COUNT = 15
+# Shared bbox for the three geo channels that need one: Europe + N. Africa
+# + the Med, matching the box _fetch_flights() already used before this
+# file grew ships/infrastructure — one box, one place it's defined, so the
+# three channels are always looking at the same region.
+_GEO_BBOX = {"south": 35.0, "west": -11.0, "north": 60.0, "east": 31.0}
 
 #: Cached snapshot: {at, snapshot}. A monitor refresh is bounded by the TTL.
 _cache_lock = threading.Lock()
@@ -64,6 +109,24 @@ def _now_iso() -> str:
 def _http_get(url: str) -> str:
     """Keyless GET via the existing live_feeds helper (honest errors)."""
     return live_feeds._http_get(url, timeout=_SOURCE_TIMEOUT)
+
+
+def _http_post(url: str, data: bytes) -> str:
+    """POST via stdlib urllib — only the Overpass channel needs a query
+    body rather than a query string, everything else in this file is GET.
+    Same honest-error contract as `_http_get`, and the same seam: tests
+    monkeypatch this function directly rather than reaching into
+    urllib.request, matching every other source in this file."""
+    req = urllib.request.Request(url, data=data, headers={"User-Agent": live_feeds._UA})
+    try:
+        with urllib.request.urlopen(req, timeout=_SOURCE_TIMEOUT) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code} from {url}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"network error posting to {url}: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError(f"timeout posting to {url}: {exc}") from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -241,6 +304,567 @@ def _fetch_flights() -> list[dict[str, Any]]:
     if not out:
         raise RuntimeError("OpenSky states carried no usable positions")
     return out
+
+
+# --------------------------------------------------------------------------- #
+# v8.20 world-monitor expansion — seven new channels.
+#
+# Three are keyless and pure stdlib urllib, same shape as everything above
+# (storms, launches, infrastructure). Three are honestly key-gated — NOT
+# CONFIGURED without a real key, never a fabricated reading (wildfires, air
+# quality, power grid). One (ships) needs both a key AND a transport this
+# file has never used before: aisstream.io is WebSocket-only, so a small,
+# self-contained RFC 6455 client lives directly below, built from stdlib
+# ``socket``/``ssl`` only — no new dependency, matching this file's own
+# stated stdlib-only rule rather than quietly breaking it for one channel.
+# --------------------------------------------------------------------------- #
+
+
+def _env(*names: str) -> str:
+    """First non-empty value among the given env var names, else ''."""
+    for name in names:
+        val = os.environ.get(name, "").strip()
+        if val:
+            return val
+    return ""
+
+
+# --- AIS (ships) — hand-rolled RFC 6455 WebSocket client, stdlib only ----- #
+#
+# Split into two layers deliberately: the frame codec (`_ws_encode_frame`,
+# `_ws_decode_frames`) is pure — no socket, no I/O — so it is fully unit-
+# testable the same way everything else in this file is. The transport
+# (`_ws_open`, `_fetch_ships`) takes an injectable socket factory (Rule 2.8:
+# "the client is injectable so tests swap a fake transport and never touch
+# the network" — the same rule worldmonitor.py states for its own client),
+# so a test can hand it a fake in-memory socket serving canned frames
+# without ever opening a real connection.
+
+_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _ws_encode_frame(payload: bytes, opcode: int = 0x1, mask: bool = True) -> bytes:
+    """Encode one complete (FIN=1) WebSocket frame. Client frames MUST be
+    masked per RFC 6455 §5.1 — the server rejects (or silently drops) an
+    unmasked client frame, so `mask` defaults True for the real client path;
+    tests exercise `mask=False` to check the raw payload framing directly."""
+    out = bytearray([0x80 | (opcode & 0x0F)])
+    length = len(payload)
+    mask_bit = 0x80 if mask else 0x00
+    if length < 126:
+        out.append(mask_bit | length)
+    elif length < 65536:
+        out.append(mask_bit | 126)
+        out += length.to_bytes(2, "big")
+    else:
+        out.append(mask_bit | 127)
+        out += length.to_bytes(8, "big")
+    if mask:
+        key = secrets.token_bytes(4)
+        out += key
+        out += bytes(b ^ key[i % 4] for i, b in enumerate(payload))
+    else:
+        out += payload
+    return bytes(out)
+
+
+def _ws_decode_frames(buf: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
+    """Decode as many COMPLETE frames as `buf` holds. Returns
+    ([(opcode, payload), ...], leftover_undecoded_bytes) — the leftover is
+    fed back in on the next read, since a frame can arrive split across TCP
+    reads. Server->client frames are never masked (RFC 6455 §5.1), so no
+    unmasking here. Malformed/truncated input simply yields fewer frames
+    and returns the rest as leftover, never raises — the caller decides
+    when a genuinely broken stream should become an honest error."""
+    frames: list[tuple[int, bytes]] = []
+    pos = 0
+    n = len(buf)
+    while True:
+        if pos + 2 > n:
+            break
+        b0, b1 = buf[pos], buf[pos + 1]
+        opcode = b0 & 0x0F
+        masked = bool(b1 & 0x80)
+        length = b1 & 0x7F
+        hdr = 2
+        if length == 126:
+            if pos + 4 > n:
+                break
+            length = int.from_bytes(buf[pos + 2:pos + 4], "big")
+            hdr = 4
+        elif length == 127:
+            if pos + 10 > n:
+                break
+            length = int.from_bytes(buf[pos + 2:pos + 10], "big")
+            hdr = 10
+        mask_key = b""
+        if masked:
+            if pos + hdr + 4 > n:
+                break
+            mask_key = buf[pos + hdr:pos + hdr + 4]
+            hdr += 4
+        end = pos + hdr + length
+        if end > n:
+            break
+        payload = buf[pos + hdr:end]
+        if masked and mask_key:
+            payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+        frames.append((opcode, payload))
+        pos = end
+    return frames, buf[pos:]
+
+
+def _ws_handshake(sock: Any, host: str, path: str) -> None:
+    """RFC 6455 opening handshake over an already-connected TLS socket.
+    Raises RuntimeError with the real reason on any failure — a wrong
+    status, a missing/mismatched Sec-WebSocket-Accept, or a dead
+    connection are all reported honestly, never treated as a soft
+    success."""
+    ws_key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
+    request = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {ws_key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n"
+    ).encode("ascii")
+    sock.sendall(request)
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise RuntimeError("connection closed during WebSocket handshake")
+        buf += chunk
+        if len(buf) > 16384:
+            raise RuntimeError("WebSocket handshake headers too large")
+    header_text = buf.split(b"\r\n\r\n", 1)[0].decode("iso-8859-1")
+    lines = header_text.split("\r\n")
+    status_line = lines[0] if lines else ""
+    if " 101 " not in f" {status_line} ":
+        raise RuntimeError(f"WebSocket handshake rejected: {status_line!r}")
+    headers = {}
+    for line in lines[1:]:
+        if ":" in line:
+            k, v = line.split(":", 1)
+            headers[k.strip().lower()] = v.strip()
+    accept = headers.get("sec-websocket-accept", "")
+    expected = base64.b64encode(hashlib.sha1((ws_key + _WS_GUID).encode("ascii")).digest()).decode("ascii")
+    if accept != expected:
+        raise RuntimeError("WebSocket handshake failed Sec-WebSocket-Accept verification")
+
+
+def _ws_open(host: str, port: int = 443, timeout: float = _SOURCE_TIMEOUT) -> Any:
+    """Open a real TLS-wrapped TCP socket to (host, port). The only piece
+    of `_fetch_ships` that isn't injectable — tests replace this whole
+    function via monkeypatch rather than mocking sockets one level lower,
+    since a real ssl.SSLSocket is not something a test should construct."""
+    raw = socket.create_connection((host, port), timeout=timeout)
+    ctx = ssl.create_default_context()
+    return ctx.wrap_socket(raw, server_hostname=host)
+
+
+def _fetch_ships(
+    open_socket: Callable[[], Any] | None = None,
+    *,
+    listen_seconds: float = 6.0,
+    max_messages: int = _MAX_ITEMS_PER_SOURCE,
+) -> list[dict[str, Any]]:
+    """Live AIS ship positions from aisstream.io over the shared geo bbox.
+
+    Needs AISSTREAM_API_KEY — honestly NOT CONFIGURED without one, no
+    connection attempted. `open_socket` is injectable (defaults to a real
+    TLS socket via `_ws_open`) so a test can hand this a fake in-memory
+    socket serving canned WebSocket frames without ever touching the
+    network — the frame codec above is already tested standalone; this
+    function is the thin, testable glue on top of it (Rule 2.8).
+    """
+    key = _env("AISSTREAM_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "NOT CONFIGURED: ships needs AISSTREAM_API_KEY (free at aisstream.io) "
+            "— nothing was connected and no positions were fabricated."
+        )
+    host = "stream.aisstream.io"
+    box = _GEO_BBOX
+    subscribe = json.dumps({
+        "APIKey": key,
+        "BoundingBoxes": [[[box["south"], box["west"]], [box["north"], box["east"]]]],
+        "FilterMessageTypes": ["PositionReport"],
+    }).encode("utf-8")
+
+    sock = (open_socket or (lambda: _ws_open(host)))()
+    try:
+        _ws_handshake(sock, host, "/v0/stream")
+        sock.sendall(_ws_encode_frame(subscribe, opcode=0x1, mask=True))
+        out: list[dict[str, Any]] = []
+        buf = b""
+        deadline = time.monotonic() + listen_seconds
+        while len(out) < max_messages and time.monotonic() < deadline:
+            try:
+                chunk = sock.recv(65536)
+            except (TimeoutError, OSError):
+                break
+            if not chunk:
+                break
+            buf += chunk
+            frames, buf = _ws_decode_frames(buf)
+            for opcode, payload in frames:
+                if opcode == 0x8:  # close frame — server ended the stream
+                    deadline = 0
+                    break
+                if opcode != 0x1:  # only text frames carry AIS JSON
+                    continue
+                try:
+                    msg = json.loads(payload.decode("utf-8", errors="replace"))
+                except ValueError:
+                    continue
+                if msg.get("MessageType") != "PositionReport":
+                    continue
+                meta = msg.get("MetaData") or {}
+                lat, lon = meta.get("Latitude"), meta.get("Longitude")
+                if lat is None or lon is None:
+                    continue
+                name = (meta.get("ShipName") or "").strip() or f"MMSI {meta.get('MMSI', '?')}"
+                out.append(_item(
+                    name, summary="live AIS position (aisstream.io)",
+                    severity="info", lat=float(lat), lon=float(lon),
+                ))
+                if len(out) >= max_messages:
+                    break
+    finally:
+        try:
+            sock.close()
+        except Exception:  # noqa: BLE001 - closing must never mask a real result/error
+            pass
+    if not out:
+        raise RuntimeError(
+            "aisstream.io returned no position reports in the listen window "
+            "(no traffic in the bbox right now, or the connection was rejected)"
+        )
+    return out
+
+
+def _fetch_wildfires() -> list[dict[str, Any]]:
+    """VIIRS thermal fire detections, last 24h, via NASA FIRMS.
+
+    Needs FIRMS_MAP_KEY (free, self-serve at firms.modaps.eosdis.nasa.gov/
+    api/area/). NOT CONFIGURED honestly without one. Response is CSV, not
+    JSON — parsed with the stdlib csv module. Ranked by FRP (fire radiative
+    power, MW) — a real physical intensity measure, not a guess — so the
+    strongest detections lead, same convention as quakes leading by
+    magnitude.
+    """
+    key = _env("FIRMS_MAP_KEY")
+    if not key:
+        raise RuntimeError(
+            "NOT CONFIGURED: wildfires needs FIRMS_MAP_KEY (free at "
+            "firms.modaps.eosdis.nasa.gov/api/area) — nothing was fetched."
+        )
+    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{key}/VIIRS_NOAA20_NRT/world/1"
+    raw = _http_get(url)
+    # A bad/expired key returns a short plain-text error body, not CSV —
+    # catch that honestly rather than parsing it as zero-row CSV.
+    if len(raw) < 200 and ("Invalid" in raw or "key" in raw.lower()):
+        raise RuntimeError(f"FIRMS rejected the request: {raw.strip()[:150]}")
+    rows = list(csv.DictReader(io.StringIO(raw)))
+    if not rows:
+        raise RuntimeError("FIRMS returned no fire detections")
+
+    def _frp(row: dict[str, str]) -> float:
+        try:
+            return float(row.get("frp") or 0)
+        except ValueError:
+            return 0.0
+
+    rows.sort(key=_frp, reverse=True)
+    out: list[dict[str, Any]] = []
+    for row in rows[:_MAX_ITEMS_PER_SOURCE]:
+        try:
+            lat = float(row["latitude"])
+            lon = float(row["longitude"])
+        except (KeyError, ValueError):
+            continue
+        frp = _frp(row)
+        if frp >= 50:
+            sev = "critical"
+        elif frp >= 15:
+            sev = "high"
+        elif frp >= 5:
+            sev = "watch"
+        else:
+            sev = "info"
+        conf = row.get("confidence", "?")
+        out.append(_item(
+            f"Fire detection — {frp:.0f} MW FRP",
+            summary=f"confidence {conf} · {row.get('acq_date', '')} {row.get('acq_time', '')} UTC (VIIRS/FIRMS)",
+            severity=sev, lat=lat, lon=lon,
+        ))
+    if not out:
+        raise RuntimeError("FIRMS rows carried no usable coordinates")
+    return out
+
+
+def _fetch_storms() -> list[dict[str, Any]]:
+    """Active tropical cyclones from NOAA/NHC — keyless.
+
+    Zero active storms is a NORMAL state (most days, most of the year,
+    have none) — unlike quakes/flights, this never raises on an empty
+    result; an empty list here means "checked, genuinely none right now,"
+    not "the feed is broken."
+    """
+    raw = _http_get("https://www.nhc.noaa.gov/CurrentStorms.json")
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"unparseable NHC response: {exc}") from exc
+    storms = data.get("activeStorms")
+    if storms is None:
+        raise RuntimeError("NHC response missing 'activeStorms'")
+    out: list[dict[str, Any]] = []
+    for s in storms[:_MAX_ITEMS_PER_SOURCE]:
+        lat, lon = s.get("latitudeNumeric"), s.get("longitudeNumeric")
+        if lat is None or lon is None:
+            continue
+        classification = str(s.get("classification", "")).upper()
+        if classification in ("HU", "TY", "STY"):
+            sev = "critical"
+        elif classification in ("TS", "STS"):
+            sev = "high"
+        elif classification == "TD":
+            sev = "watch"
+        else:
+            sev = "info"
+        out.append(_item(
+            f"{classification or 'STORM'} {s.get('name', '?')} — {s.get('intensity', '?')} kt",
+            summary=f"moving {s.get('movementDir', '?')} at {s.get('movementSpeed', '?')} · "
+                    f"updated {s.get('lastUpdate', 'unknown time')} (NHC)",
+            severity=sev, lat=float(lat), lon=float(lon),
+        ))
+    return out  # empty is a legitimate, non-error result — see docstring
+
+
+def _fetch_air_quality() -> list[dict[str, Any]]:
+    """Latest global PM2.5 readings from OpenAQ v3.
+
+    Needs OPENAQ_API_KEY — the v2 keyless tier is retired; v3 requires a
+    free key sent as the X-API-Key header. NOT CONFIGURED honestly without
+    one. Severity buckets follow the real EPA PM2.5 breakpoints (µg/m3),
+    not a guessed scale.
+    """
+    key = _env("OPENAQ_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "NOT CONFIGURED: air_quality needs OPENAQ_API_KEY (free at "
+            "openaq.org) — nothing was fetched."
+        )
+    # Parameter id 2 = PM2.5 in OpenAQ's own parameter registry.
+    url = "https://api.openaq.org/v3/parameters/2/latest?limit=20"
+    raw = live_feeds._http_get(url, timeout=int(_SOURCE_TIMEOUT), headers={"X-API-Key": key})
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"unparseable OpenAQ response: {exc}") from exc
+    results = data.get("results") or []
+    if not results:
+        raise RuntimeError("OpenAQ returned no PM2.5 readings")
+    out: list[dict[str, Any]] = []
+    for r in results[:_MAX_ITEMS_PER_SOURCE]:
+        coords = r.get("coordinates") or {}
+        lat, lon = coords.get("latitude"), coords.get("longitude")
+        value = r.get("value")
+        if lat is None or lon is None or value is None:
+            continue
+        value = float(value)
+        if value >= 55.5:
+            sev = "critical"
+        elif value >= 35.5:
+            sev = "high"
+        elif value >= 12.1:
+            sev = "watch"
+        else:
+            sev = "info"
+        when = (r.get("datetime") or {}).get("utc", "")
+        out.append(_item(
+            f"PM2.5 {value:.1f} µg/m³",
+            summary=f"location #{r.get('locationsId', '?')} · sensor #{r.get('sensorsId', '?')} "
+                    f"· {when} (OpenAQ)",
+            severity=sev, lat=float(lat), lon=float(lon),
+        ))
+    if not out:
+        raise RuntimeError("OpenAQ rows carried no usable coordinates")
+    return out
+
+
+# Deliberately small and honest: EIC bidding-zone codes for three zones
+# this was verified against ENTSO-E's own published area list at the time
+# this was written. A wrong EIC code fails loudly (an empty/error XML
+# response, reported honestly below) rather than silently — so if this
+# list is ever extended, verify the new code against ENTSO-E's area list
+# rather than guessing one from memory.
+_ENTSOE_ZONES = {"FR": "10YFR-RTE------C", "GB": "10YGB----------A", "NL": "10YNL----------L"}
+# Representative zone centroid, purely for placing a zone-wide reading on
+# the map — NOT the location of any sensor. Said explicitly in the item's
+# own summary text so this is never mistaken for a point measurement.
+_ENTSOE_CENTROIDS = {"FR": (46.6, 2.5), "GB": (54.0, -2.0), "NL": (52.1, 5.3)}
+
+
+def _fetch_power_grid() -> list[dict[str, Any]]:
+    """Actual total load (documentType A65) for a small set of ENTSO-E
+    bidding zones.
+
+    Needs ENTSOE_API_TOKEN. Unlike every other keyed channel in this file,
+    this token is NOT self-serve — ENTSO-E issues it by email after a
+    manual request (see their Transparency Platform docs), so this path
+    could not be exercised against a real token in the environment this
+    was written in. The request/parse logic follows ENTSO-E's documented
+    GL_MarketDocument schema exactly (TimeSeries -> Period -> Point, each
+    Point holding a position/quantity pair) and fails with an honest,
+    specific error on anything unexpected — but flagging plainly: this one
+    channel's live behavior is unverified beyond schema-level review,
+    unlike every other fetcher in this file, all of which run against
+    their real endpoints in this codebase's test fixtures or were
+    manually exercised. Treat a first real run of this channel as the
+    actual verification.
+    """
+    token = _env("ENTSOE_API_TOKEN")
+    if not token:
+        raise RuntimeError(
+            "NOT CONFIGURED: power_grid needs ENTSOE_API_TOKEN (issued by "
+            "email — see the ENTSO-E Transparency Platform docs) — nothing "
+            "was fetched."
+        )
+    now = datetime.now(timezone.utc)
+    period_end = now.strftime("%Y%m%d%H%M")
+    period_start = (now - timedelta(hours=2)).strftime("%Y%m%d%H%M")
+    out: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for label, eic in _ENTSOE_ZONES.items():
+        url = (
+            "https://web-api.tp.entsoe.eu/api"
+            f"?securityToken={token}&documentType=A65&processType=A16"
+            f"&outBiddingZone_Domain={eic}"
+            f"&periodStart={period_start}&periodEnd={period_end}"
+        )
+        try:
+            raw = _http_get(url)
+        except Exception as exc:  # noqa: BLE001 - one zone's failure must not sink the others
+            failures.append(f"{label}: {str(exc)[:80]}")
+            continue
+        try:
+            root = ET.fromstring(raw)
+        except ET.ParseError as exc:
+            failures.append(f"{label}: unparseable response ({exc})")
+            continue
+        points = [el for el in root.iter() if el.tag.rsplit("}", 1)[-1] == "Point"]
+        if not points:
+            failures.append(f"{label}: no data points in response")
+            continue
+        last = points[-1]
+        quantity = None
+        for child in last:
+            if child.tag.rsplit("}", 1)[-1] == "quantity":
+                quantity = child.text
+        if quantity is None:
+            failures.append(f"{label}: point carried no quantity")
+            continue
+        lat, lon = _ENTSOE_CENTROIDS.get(label, (None, None))
+        if lat is None:
+            continue
+        out.append(_item(
+            f"{label} load {float(quantity):,.0f} MW",
+            summary=f"actual total load, zone-wide (ENTSO-E) · point is the {label} "
+                    "zone centroid, not a sensor location",
+            severity="quote", lat=lat, lon=lon, country=label,
+        ))
+    if not out:
+        raise RuntimeError("no ENTSO-E zone reachable: " + "; ".join(failures[:4] or ["unknown"]))
+    return out
+
+
+def _fetch_launches() -> list[dict[str, Any]]:
+    """Upcoming orbital launches from Launch Library 2 — keyless.
+
+    Includes launches from the last 24h per the API's own semantics.
+    Global launch cadence essentially never reaches zero across every
+    provider at once, so — like quakes/flights, unlike storms — an empty
+    result here is treated as a fetch problem, not a real "nothing
+    scheduled" state.
+    """
+    raw = _http_get("https://ll.thespacedevs.com/2.0.0/launch/upcoming/?limit=8&mode=list")
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"unparseable Launch Library response: {exc}") from exc
+    results = data.get("results") or []
+    if not results:
+        raise RuntimeError("Launch Library returned no upcoming launches")
+    out: list[dict[str, Any]] = []
+    for r in results[:_MAX_ITEMS_PER_SOURCE]:
+        # The pad's own name ("LC-39A") and its coordinates live at two
+        # different nesting levels in LL2's shape: pad.name is the specific
+        # pad, pad.location.{latitude,longitude,name} is the broader site
+        # — read each from the level that actually carries it, not one
+        # borrowed from the other.
+        pad_obj = r.get("pad") or {}
+        location = pad_obj.get("location") or {}
+        lat, lon = location.get("latitude"), location.get("longitude")
+        if lat is None or lon is None:
+            continue
+        status = (r.get("status") or {}).get("name", "?")
+        out.append(_item(
+            f"{r.get('name', 'Launch')} — {pad_obj.get('name', '?')}",
+            summary=f"status: {status} · net {r.get('net', 'TBD')} (Launch Library 2)",
+            severity="launch", lat=float(lat), lon=float(lon),
+        ))
+    if not out:
+        raise RuntimeError("Launch Library rows carried no usable pad coordinates")
+    return out
+
+
+def _fetch_infrastructure() -> list[dict[str, Any]]:
+    """Pipelines + harbours over the shared geo bbox, from OSM Overpass —
+    keyless, POST query.
+
+    A static base layer, not a hazard feed — items carry severity="infra"
+    (no urgency implied). Zero matches is a legitimate result (OSM tag
+    density for these specific tags varies a lot by area); unlike
+    quakes/flights/launches, this never raises on an empty result.
+    """
+    box = _GEO_BBOX
+    bbox = f"{box['south']},{box['west']},{box['north']},{box['east']}"
+    query = (
+        "[out:json][timeout:8];("
+        f'way["man_made"="pipeline"]({bbox});'
+        f'node["harbour"="yes"]({bbox});'
+        f'node["seamark:type"="harbour"]({bbox});'
+        ");out center 30;"
+    )
+    data_bytes = urllib.parse.urlencode({"data": query}).encode("ascii")
+    raw = _http_post("https://overpass-api.de/api/interpreter", data_bytes)
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"unparseable Overpass response: {exc}") from exc
+    elements = data.get("elements") or []
+    out: list[dict[str, Any]] = []
+    for el in elements[:_MAX_ITEMS_PER_SOURCE]:
+        if "lat" in el and "lon" in el:
+            lat, lon = el["lat"], el["lon"]
+        else:
+            center = el.get("center") or {}
+            lat, lon = center.get("lat"), center.get("lon")
+        if lat is None or lon is None:
+            continue
+        tags = el.get("tags") or {}
+        kind = tags.get("man_made") or ("harbour" if "harbour" in tags or tags.get("seamark:type") == "harbour" else "infrastructure")
+        out.append(_item(
+            f"{kind} · {tags.get('name') or el.get('type', '?')} #{el.get('id', '?')}",
+            summary="OpenStreetMap / Overpass",
+            severity="infra", lat=float(lat), lon=float(lon),
+        ))
+    return out  # empty is a legitimate, non-error result — see docstring
 
 
 def _fetch_crypto_fx() -> tuple[list[dict[str, Any]], list[str]]:
@@ -547,6 +1171,17 @@ _SOURCES: dict[str, tuple[str, Callable[[], list[dict[str, Any]]]]] = {
     # are the ones the map can actually plot.
     "quakes": ("USGS — magnitude 2.5+ earthquakes, last 24h", _fetch_quakes),
     "flights": ("OpenSky — live aircraft positions", _fetch_flights),
+    # v8.20 world-monitor expansion. ships/wildfires/air_quality/power_grid
+    # are honestly NOT CONFIGURED without their respective key/token —
+    # they still register here (rather than being conditionally added)
+    # so /api/world/sources always reports their real state, keyed or not.
+    "ships": ("aisstream.io — live AIS ship positions (needs AISSTREAM_API_KEY)", _fetch_ships),
+    "wildfires": ("NASA FIRMS — VIIRS thermal detections, last 24h (needs FIRMS_MAP_KEY)", _fetch_wildfires),
+    "storms": ("NOAA/NHC — active tropical cyclones", _fetch_storms),
+    "air_quality": ("OpenAQ v3 — latest PM2.5 readings (needs OPENAQ_API_KEY)", _fetch_air_quality),
+    "power_grid": ("ENTSO-E — actual total load, FR/GB/NL (needs ENTSOE_API_TOKEN)", _fetch_power_grid),
+    "launches": ("Launch Library 2 — upcoming orbital launches", _fetch_launches),
+    "infrastructure": ("OSM Overpass — pipelines + harbours (static base layer)", _fetch_infrastructure),
 }
 
 
@@ -650,7 +1285,7 @@ def world_pulse_geo() -> dict[str, Any]:
             unmappable[chan] = (
                 src.get("error") or "source carries no coordinates"
             )[:160]
-    return {
+    geo = {
         "generated_at": snap.get("generated_at"),
         "pulse_score": snap.get("pulse_score"),
         "pulse_label": snap.get("pulse_label"),
@@ -663,6 +1298,17 @@ def world_pulse_geo() -> dict[str, Any]:
             "positions."
         ),
     }
+    # v8.20: feed the time-scrubber history store on every call. Cheap —
+    # record_snapshot() itself no-ops within its own min-interval, so
+    # calling this from every /api/worldmap hit is safe, not a write storm.
+    # Never lets a history-write problem break the map response itself.
+    try:
+        from dourmouse.world_pulse_history import record_snapshot
+
+        record_snapshot(geo)
+    except Exception:  # noqa: BLE001 - history is a nice-to-have, never load-bearing here
+        pass
+    return geo
 
 
 def world_pulse_details(source: str) -> dict[str, Any]:

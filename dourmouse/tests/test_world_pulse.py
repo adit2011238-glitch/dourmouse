@@ -8,6 +8,7 @@ failure-isolated, nothing is fabricated, and the snapshot NEVER raises.
 
 from __future__ import annotations
 
+import base64
 import http.client
 import json
 import threading
@@ -99,7 +100,90 @@ def _fake_http_get(url: str) -> str:
         return _BINANCE_JSON
     if "frankfurter.app" in url:
         return _FX_JSON
+    if "nhc.noaa.gov" in url:
+        return _STORMS_JSON
+    if "ll.thespacedevs.com" in url:
+        return _LAUNCHES_JSON
+    if "web-api.tp.entsoe.eu" in url:
+        return _ENTSOE_XML
     raise AssertionError(f"unexpected url in test: {url}")
+
+
+def _fake_http_post(url: str, data: bytes) -> str:
+    if "overpass-api.de" in url:
+        return _OVERPASS_JSON
+    raise AssertionError(f"unexpected POST url in test: {url}")
+
+
+_STORMS_JSON = json.dumps({
+    "activeStorms": [
+        {
+            "id": "AL012026", "name": "Test", "classification": "HU", "intensity": "100",
+            "pressure": "955", "latitudeNumeric": 25.4, "longitudeNumeric": -70.2,
+            "movementDir": "NW", "movementSpeed": "12 mph", "lastUpdate": "2026-08-23T09:00:00Z",
+        },
+    ]
+})
+_STORMS_EMPTY_JSON = json.dumps({"activeStorms": []})
+
+_LAUNCHES_JSON = json.dumps({
+    "results": [
+        {
+            "name": "Test Rocket Flight 1", "net": "2026-08-24T10:00:00Z",
+            "status": {"name": "Go for Launch"},
+            "pad": {"name": "LC-39A", "location": {"latitude": "28.6080", "longitude": "-80.6040"}},
+        },
+        {
+            "name": "Test Rocket Flight 2", "net": "2026-08-25T04:00:00Z",
+            "status": {"name": "To Be Determined"},
+            "pad": {"name": "Vostochny", "location": {"latitude": "51.8843", "longitude": "128.3327"}},
+        },
+    ]
+})
+_LAUNCHES_EMPTY_JSON = json.dumps({"results": []})
+
+_OVERPASS_JSON = json.dumps({
+    "elements": [
+        {"type": "way", "id": 111, "center": {"lat": 40.0, "lon": 20.0}, "tags": {"man_made": "pipeline"}},
+        {"type": "node", "id": 222, "lat": 43.3, "lon": 5.4, "tags": {"harbour": "yes", "name": "Test Port"}},
+    ]
+})
+_OVERPASS_EMPTY_JSON = json.dumps({"elements": []})
+
+_FIRMS_CSV = (
+    "latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,"
+    "confidence,version,bright_ti5,frp,daynight\n"
+    "34.05,-118.25,330.1,0.4,0.4,2026-08-23,0900,N,VIIRS,n,2.0,290.0,62.5,D\n"
+    "37.77,-122.42,310.2,0.4,0.4,2026-08-23,0910,N,VIIRS,l,2.0,285.0,8.0,D\n"
+)
+_FIRMS_BAD_KEY = "Invalid MAP_KEY"
+
+_OPENAQ_JSON = json.dumps({
+    "results": [
+        {
+            "value": 65.4, "coordinates": {"latitude": 28.6, "longitude": 77.2},
+            "locationsId": 1001, "sensorsId": 5001, "datetime": {"utc": "2026-08-23T09:00:00Z"},
+        },
+        {
+            "value": 8.1, "coordinates": {"latitude": 51.5, "longitude": -0.12},
+            "locationsId": 1002, "sensorsId": 5002, "datetime": {"utc": "2026-08-23T09:05:00Z"},
+        },
+    ]
+})
+
+_ENTSOE_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<GL_MarketDocument xmlns="urn:iec62325.351:tc57wg16:451-6:generationloaddocument:3:0">'
+    "<TimeSeries><Period>"
+    "<Point><position>1</position><quantity>42500</quantity></Point>"
+    "<Point><position>2</position><quantity>43100</quantity></Point>"
+    "</Period></TimeSeries></GL_MarketDocument>"
+)
+_ENTSOE_EMPTY_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<GL_MarketDocument xmlns="urn:iec62325.351:tc57wg16:451-6:generationloaddocument:3:0">'
+    "</GL_MarketDocument>"
+)
 
 
 def _fake_movers(direction="gainers", count=5):
@@ -117,11 +201,20 @@ def _fake_quote(symbol):
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch):
     monkeypatch.setattr(wp, "_http_get", _fake_http_get)
+    monkeypatch.setattr(wp, "_http_post", _fake_http_post)
     import dourmouse.live_feeds as lf
 
     monkeypatch.setattr(lf, "market_movers", _fake_movers)
     monkeypatch.setattr(lf, "stock_quote", _fake_quote)
     monkeypatch.setenv("DOURMOUSE_WORLD_PULSE_TTL", "300")  # cache across calls in one test
+    # v8.20: the four key-gated channels (ships/wildfires/air_quality/
+    # power_grid) are deliberately left UNCONFIGURED by default — no test
+    # should silently open a real socket or make a real keyed HTTP call
+    # just because the aggregate snapshot function touches all 15 sources.
+    # Tests that need the configured path set their own fake key + mock
+    # the transport explicitly (see TestNewChannels below).
+    for key in ("AISSTREAM_API_KEY", "FIRMS_MAP_KEY", "OPENAQ_API_KEY", "ENTSOE_API_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
     with wp._cache_lock:
         wp._cache.update({"at": 0.0, "snapshot": None})
     yield
@@ -137,13 +230,32 @@ class TestSnapshot:
         # carry real coordinates, which is what makes the map possible —
         # asserted explicitly rather than by count so a channel silently
         # disappearing still fails this test.
+        # v8.20: seven more channels joined. All fifteen are always
+        # REGISTERED (world_pulse_status must report their real state even
+        # unconfigured) — but the four key-gated ones (ships/wildfires/
+        # air_quality/power_grid) are NOT CONFIGURED by default in this
+        # fixture, matching the honest default state of a real install
+        # with no keys set. See TestNewChannels for the fully-configured
+        # path exercised end to end.
         assert set(snap["sources"]) == {
             "markets", "news", "disasters", "cyber", "conflict", "macro",
             "quakes", "flights",
+            "ships", "wildfires", "storms", "air_quality", "power_grid",
+            "launches", "infrastructure",
         }
-        for name, src in snap["sources"].items():
+        always_on = {
+            "markets", "news", "disasters", "cyber", "conflict", "macro",
+            "quakes", "flights", "storms", "launches", "infrastructure",
+        }
+        gated = {"ships", "wildfires", "air_quality", "power_grid"}
+        for name in always_on:
+            src = snap["sources"][name]
             assert src["ok"] is True, f"{name} should be up: {src}"
             assert src["count"] > 0
+        for name in gated:
+            src = snap["sources"][name]
+            assert src["ok"] is False, f"{name} should be NOT CONFIGURED by default: {src}"
+            assert "NOT CONFIGURED" in src["error"]
         assert isinstance(snap["pulse_score"], int) and 5 <= snap["pulse_score"] <= 95
         assert snap["pulse_label"] in ("STABLE", "ELEVATED", "HEIGHTENED", "CRITICAL")
 
@@ -200,8 +312,12 @@ class TestDetails:
     def test_status_shape(self):
         st = wp.world_pulse_status()
         assert st["configured"] is True
-        assert st["sources_up"] == 8
-        assert st["sources_total"] == 8
+        # v8.20: 15 sources registered; 11 always-on (up by default in this
+        # fixture) + 4 key-gated ones honestly reporting down (NOT
+        # CONFIGURED) with no keys set — see TestSnapshot.test_all_sources_
+        # aggregate for the exact up/down split by name.
+        assert st["sources_total"] == 15
+        assert st["sources_up"] == 11
         assert 5 <= st["pulse_score"] <= 95
 
 
@@ -311,3 +427,434 @@ class TestGeoEndpoint:
             for it in items:
                 assert -90 <= it["lat"] <= 90, chan
                 assert -180 <= it["lon"] <= 180, chan
+
+
+class TestWSFrameCodec:
+    """Pure encode/decode tests for the hand-rolled RFC 6455 client — no
+    socket, no I/O. `ships` is the only non-HTTP channel in this file, so
+    its wire-format code carries its own dedicated test layer per the
+    module's own stated Rule 2.8 design (the codec is pure, the transport
+    is injectable)."""
+
+    def test_round_trip_masked(self):
+        payload = b'{"hello":"world"}'
+        frame = wp._ws_encode_frame(payload, opcode=0x1, mask=True)
+        frames, leftover = wp._ws_decode_frames(frame)
+        assert leftover == b""
+        assert len(frames) == 1
+        opcode, decoded = frames[0]
+        assert opcode == 0x1
+        assert decoded == payload
+
+    def test_round_trip_unmasked_server_style(self):
+        payload = b"server frames are never masked"
+        frame = wp._ws_encode_frame(payload, opcode=0x1, mask=False)
+        frames, leftover = wp._ws_decode_frames(frame)
+        assert leftover == b""
+        assert frames == [(0x1, payload)]
+
+    def test_medium_payload_uses_16bit_length(self):
+        payload = b"x" * 5000  # > 125, forces the 126-length-prefix branch
+        frame = wp._ws_encode_frame(payload, opcode=0x1, mask=False)
+        assert frame[1] & 0x7F == 126
+        frames, leftover = wp._ws_decode_frames(frame)
+        assert leftover == b""
+        assert frames[0][1] == payload
+
+    def test_split_frame_across_two_reads(self):
+        """A frame arriving split across two TCP reads must not be
+        decoded until the second chunk arrives — this is what the real
+        `_fetch_ships` loop relies on (buf accumulates, leftover is fed
+        back in)."""
+        frame = wp._ws_encode_frame(b"complete message", opcode=0x1, mask=False)
+        part_a, part_b = frame[:5], frame[5:]
+        frames, leftover = wp._ws_decode_frames(part_a)
+        assert frames == []
+        assert leftover == part_a
+        frames, leftover = wp._ws_decode_frames(leftover + part_b)
+        assert leftover == b""
+        assert frames == [(0x1, b"complete message")]
+
+    def test_two_frames_in_one_buffer(self):
+        f1 = wp._ws_encode_frame(b"one", opcode=0x1, mask=False)
+        f2 = wp._ws_encode_frame(b"two", opcode=0x1, mask=False)
+        frames, leftover = wp._ws_decode_frames(f1 + f2)
+        assert leftover == b""
+        assert frames == [(0x1, b"one"), (0x1, b"two")]
+
+
+class _FakeAISSocket:
+    """In-memory stand-in for the TLS socket `_fetch_ships` opens.
+
+    Answers a REAL RFC 6455 handshake for whatever Sec-WebSocket-Key the
+    client actually sends (computing a real Sec-WebSocket-Accept, not a
+    canned one), so `_ws_handshake`'s own verification passes because it
+    is genuinely correct — not because the test skipped it. Then serves
+    pre-baked frames on subsequent recv() calls.
+    """
+
+    def __init__(self, frames):
+        self._frames = list(frames)
+        self._handshake_response = None
+        self.closed = False
+        self.sent = []
+
+    def sendall(self, data: bytes) -> None:
+        self.sent.append(data)
+        if self._handshake_response is None and data.startswith(b"GET "):
+            text = data.decode("iso-8859-1")
+            key = ""
+            for line in text.split("\r\n"):
+                if line.lower().startswith("sec-websocket-key:"):
+                    key = line.split(":", 1)[1].strip()
+            import hashlib as _hashlib
+
+            accept = base64.b64encode(
+                _hashlib.sha1((key + wp._WS_GUID).encode("ascii")).digest()
+            ).decode("ascii")
+            self._handshake_response = (
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                f"Sec-WebSocket-Accept: {accept}\r\n\r\n"
+            ).encode("ascii")
+
+    def recv(self, _n: int) -> bytes:
+        if self._handshake_response:
+            resp, self._handshake_response = self._handshake_response, None
+            return resp
+        if self._frames:
+            return self._frames.pop(0)
+        raise TimeoutError("no more fake frames")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _fake_position_frame(name: str, lat: float, lon: float) -> bytes:
+    payload = json.dumps({
+        "MessageType": "PositionReport",
+        "MetaData": {"ShipName": name, "Latitude": lat, "Longitude": lon},
+        "Message": {"PositionReport": {}},
+    }).encode("utf-8")
+    return wp._ws_encode_frame(payload, opcode=0x1, mask=False)
+
+
+class TestNewChannels:
+    """v8.20 — the seven channels added to the world monitor. Each gets
+    its own not-configured / severity / honest-empty-vs-honest-error
+    coverage; the aggregate default-state split is in
+    TestSnapshot.test_all_sources_aggregate."""
+
+    # --- ships (AIS over hand-rolled WebSocket) --------------------------
+
+    def test_ships_not_configured_without_key(self, monkeypatch):
+        monkeypatch.delenv("AISSTREAM_API_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
+            wp._fetch_ships()
+
+    def test_ships_parses_real_position_reports(self, monkeypatch):
+        monkeypatch.setenv("AISSTREAM_API_KEY", "fake-test-key")
+        frames = [
+            _fake_position_frame("QUEEN MARY 2", 50.8812, -1.3983),
+            _fake_position_frame("EVER GIVEN", 30.02, 32.58),
+        ]
+        fake_sock = _FakeAISSocket(frames)
+        out = wp._fetch_ships(open_socket=lambda: fake_sock, listen_seconds=1.0, max_messages=5)
+        assert {i["title"] for i in out} == {"QUEEN MARY 2", "EVER GIVEN"}
+        for it in out:
+            assert -90 <= it["lat"] <= 90 and -180 <= it["lon"] <= 180
+        assert fake_sock.closed is True
+
+    def test_ships_no_traffic_is_honest_error(self, monkeypatch):
+        """No PositionReport frames arriving is a real, reportable failure
+        — never silently returns an empty list pretending nothing was
+        wrong (this channel, unlike storms/infrastructure, isn't one
+        where zero is a normal state)."""
+        monkeypatch.setenv("AISSTREAM_API_KEY", "fake-test-key")
+        fake_sock = _FakeAISSocket(frames=[])
+        with pytest.raises(RuntimeError, match="no position reports"):
+            wp._fetch_ships(open_socket=lambda: fake_sock, listen_seconds=0.3, max_messages=5)
+
+    # --- wildfires (FIRMS) ------------------------------------------------
+
+    def test_wildfires_not_configured_without_key(self, monkeypatch):
+        monkeypatch.delenv("FIRMS_MAP_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
+            wp._fetch_wildfires()
+
+    def test_wildfires_parses_and_ranks_by_frp(self, monkeypatch):
+        monkeypatch.setenv("FIRMS_MAP_KEY", "fake-map-key")
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _FIRMS_CSV if "firms.modaps" in url else _fake_http_get(url),
+        )
+        out = wp._fetch_wildfires()
+        assert len(out) == 2
+        # Strongest FRP (62.5 MW, critical) must lead.
+        assert out[0]["severity"] == "critical"
+        assert out[1]["severity"] == "watch"
+
+    def test_wildfires_bad_key_is_honest(self, monkeypatch):
+        monkeypatch.setenv("FIRMS_MAP_KEY", "wrong-key")
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _FIRMS_BAD_KEY if "firms.modaps" in url else _fake_http_get(url),
+        )
+        with pytest.raises(RuntimeError, match="rejected"):
+            wp._fetch_wildfires()
+
+    # --- storms (NOAA/NHC) -------------------------------------------------
+
+    def test_storms_parses_classification_severity(self):
+        out = wp._fetch_storms()
+        assert len(out) == 1
+        assert out[0]["severity"] == "critical"  # HU -> critical
+        assert "Test" in out[0]["title"]
+
+    def test_storms_zero_active_is_not_an_error(self, monkeypatch):
+        """The whole point of this channel: no active storms is normal,
+        not a failure — unlike quakes/flights/launches, which raise on
+        empty."""
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _STORMS_EMPTY_JSON if "nhc.noaa" in url else _fake_http_get(url),
+        )
+        assert wp._fetch_storms() == []
+
+    # --- air_quality (OpenAQ v3) --------------------------------------------
+
+    def test_air_quality_not_configured_without_key(self, monkeypatch):
+        monkeypatch.delenv("OPENAQ_API_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
+            wp._fetch_air_quality()
+
+    def test_air_quality_sends_real_api_key_header_and_parses_epa_bands(self, monkeypatch):
+        monkeypatch.setenv("OPENAQ_API_KEY", "fake-openaq-key")
+        seen_headers = {}
+
+        def _fake_lf_http_get(url, timeout=15, headers=None):
+            seen_headers.update(headers or {})
+            assert "openaq.org" in url
+            return _OPENAQ_JSON
+
+        import dourmouse.live_feeds as lf
+
+        monkeypatch.setattr(lf, "_http_get", _fake_lf_http_get)
+        out = wp._fetch_air_quality()
+        assert seen_headers.get("X-API-Key") == "fake-openaq-key"
+        assert len(out) == 2
+        # 65.4 ug/m3 -> "high" EPA band (35.5-55.4 is high... 65.4 is >=55.5 -> critical)
+        assert out[0]["severity"] == "critical"
+        assert out[1]["severity"] == "info"  # 8.1 ug/m3 is well within "good"
+
+    # --- power_grid (ENTSO-E) -----------------------------------------------
+
+    def test_power_grid_not_configured_without_token(self, monkeypatch):
+        monkeypatch.delenv("ENTSOE_API_TOKEN", raising=False)
+        with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
+            wp._fetch_power_grid()
+
+    def test_power_grid_parses_all_configured_zones(self, monkeypatch):
+        monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
+        out = wp._fetch_power_grid()
+        # Three zones configured (FR/GB/NL); the fake XML is reused for
+        # each, so all three must independently parse and be labeled by
+        # their OWN zone (not each other's).
+        assert {it["country"] for it in out} == {"FR", "GB", "NL"}
+        for it in out:
+            # picks the LAST point (position 2, quantity 43100), not the first
+            assert "43,100 MW" in it["title"]
+
+    def test_power_grid_isolates_one_zone_failure(self, monkeypatch):
+        """One bad zone must not sink the other two — same failure-
+        isolation discipline as every other multi-call fetcher in this
+        file (e.g. _fetch_markets' per-symbol try/except)."""
+        monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
+
+        def _flaky(url):
+            if "GB" in url:
+                raise RuntimeError("entsoe rejected GB zone")
+            return _ENTSOE_XML
+
+        monkeypatch.setattr(wp, "_http_get", _flaky)
+        out = wp._fetch_power_grid()
+        assert {it["country"] for it in out} == {"FR", "NL"}
+
+    # --- launches (Launch Library 2) ----------------------------------------
+
+    def test_launches_parses_real_pad_coordinates(self):
+        out = wp._fetch_launches()
+        assert len(out) == 2
+        assert any("LC-39A" in it["title"] for it in out)
+        for it in out:
+            assert -90 <= it["lat"] <= 90 and -180 <= it["lon"] <= 180
+
+    def test_launches_empty_is_an_honest_error(self, monkeypatch):
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _LAUNCHES_EMPTY_JSON if "thespacedevs" in url else _fake_http_get(url),
+        )
+        with pytest.raises(RuntimeError, match="no upcoming launches"):
+            wp._fetch_launches()
+
+    # --- infrastructure (OSM Overpass) --------------------------------------
+
+    def test_infrastructure_parses_ways_and_nodes(self):
+        out = wp._fetch_infrastructure()
+        assert len(out) == 2
+        titles = " ".join(it["title"] for it in out)
+        assert "pipeline" in titles
+        assert "Test Port" in titles
+        for it in out:
+            assert it["severity"] == "infra"
+
+    def test_infrastructure_zero_matches_is_not_an_error(self, monkeypatch):
+        monkeypatch.setattr(
+            wp, "_http_post",
+            lambda url, data: _OVERPASS_EMPTY_JSON if "overpass" in url else _fake_http_post(url, data),
+        )
+        assert wp._fetch_infrastructure() == []
+
+    # --- fully-configured integration: all fifteen sources genuinely up ----
+
+    def test_all_fifteen_sources_when_fully_configured(self, monkeypatch):
+        monkeypatch.setenv("AISSTREAM_API_KEY", "fake-key")
+        monkeypatch.setenv("FIRMS_MAP_KEY", "fake-key")
+        monkeypatch.setenv("OPENAQ_API_KEY", "fake-key")
+        monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
+
+        def _all_http_get(url):
+            if "firms.modaps" in url:
+                return _FIRMS_CSV
+            return _fake_http_get(url)
+
+        monkeypatch.setattr(wp, "_http_get", _all_http_get)
+
+        import dourmouse.live_feeds as lf
+
+        monkeypatch.setattr(
+            lf, "_http_get",
+            lambda url, timeout=15, headers=None: _OPENAQ_JSON,
+        )
+        fake_sock = _FakeAISSocket([_fake_position_frame("TEST SHIP", 10.0, 20.0)])
+        monkeypatch.setattr(wp, "_ws_open", lambda host: fake_sock)
+
+        snap = wp.world_pulse_snapshot(force=True)
+        assert len(snap["sources"]) == 15
+        for name, src in snap["sources"].items():
+            assert src["ok"] is True, f"{name} should be up when fully configured: {src}"
+
+    # --- geo endpoint includes the new locatable channels -------------------
+
+    def test_geo_includes_all_new_locatable_channels(self):
+        geo = wp.world_pulse_geo()
+        # storms/launches/infrastructure are always-on and carry real
+        # coordinates, so they must be plotted, not listed as unmappable —
+        # same bar v8.9 set for quakes/flights.
+        for chan in ("storms", "launches", "infrastructure"):
+            assert chan in geo["layers"], f"{chan} should be mappable: {geo.get('unmappable')}"
+
+
+class TestNewChannelEndpoints:
+    """v8.20: real HTTP round-trips through webui.py for the new
+    /api/world/* routes, same server-spin-up pattern as
+    TestWiring.test_world_pulse_endpoint above. Network is still hermetic
+    (the autouse fixture's fakes cover everything these routes touch)."""
+
+    def _server(self):
+        from dourmouse.tests.test_webui import _echo_registry
+        from dourmouse.webui import run_server
+
+        srv = run_server(_echo_registry(), port=0, client=None, config=None)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        return srv, thread
+
+    def _get(self, port, path):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        body = json.loads(resp.read().decode())
+        conn.close()
+        return resp.status, body
+
+    def _post(self, port, path, payload):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        body = json.dumps(payload).encode()
+        conn.request("POST", path, body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        out = json.loads(resp.read().decode())
+        conn.close()
+        return resp.status, out
+
+    def test_history_and_brief_and_correlations_endpoints(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        srv, thread = self._server()
+        try:
+            port = srv.server_address[1]
+
+            status, body = self._get(port, "/api/world/history/range?hours=24")
+            assert status == 200
+            assert "range" in body
+
+            status, body = self._get(port, "/api/world/history?minutes_ago=0")
+            assert status == 200
+            assert "found" in body
+
+            status, body = self._get(port, "/api/world/correlations")
+            assert status == 200
+            assert "correlations" in body
+
+            status, body = self._get(port, "/api/world/brief")
+            assert status == 200
+            assert body.get("mode") == "template"
+            assert "text" in body
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
+    def test_regions_crud_over_http(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        srv, thread = self._server()
+        try:
+            port = srv.server_address[1]
+
+            status, body = self._get(port, "/api/world/regions")
+            assert status == 200 and body["regions"] == []
+
+            status, body = self._post(port, "/api/world/regions", {
+                "name": "Test Box", "min_lat": 10, "max_lat": 20, "min_lon": 10, "max_lon": 20,
+            })
+            assert status == 200 and body["ok"] is True
+            region_id = body["region"]["id"]
+
+            status, body = self._get(port, "/api/world/regions")
+            assert status == 200 and len(body["regions"]) == 1
+
+            status, body = self._get(port, "/api/world/regions/hits")
+            assert status == 200 and region_id in body["hits"]
+
+            status, body = self._post(port, "/api/world/regions/delete", {"id": region_id})
+            assert status == 200 and body["deleted"] is True
+
+            status, body = self._get(port, "/api/world/regions")
+            assert status == 200 and body["regions"] == []
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
+    def test_region_create_validation_error_is_400(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        srv, thread = self._server()
+        try:
+            port = srv.server_address[1]
+            status, body = self._post(port, "/api/world/regions", {
+                "name": "", "min_lat": 10, "max_lat": 20, "min_lon": 10, "max_lon": 20,
+            })
+            assert status == 400 and body["ok"] is False
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)

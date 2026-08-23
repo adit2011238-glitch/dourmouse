@@ -1167,6 +1167,86 @@ class _Handler(BaseHTTPRequestHandler):
                     "layers": {}, "counts": {}, "unmappable": {},
                     "error": str(exc)[:200],
                 })
+        elif path == "/api/world/history/range":
+            # v8.20 time scrubber: the timestamps of real recorded snapshots
+            # within the last N hours (default 24), for a UI slider to
+            # populate its stops from. Never a 500 — an empty/missing
+            # history store just means the slider has nothing yet.
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                hours = float((qs.get("hours") or ["24"])[0])
+            except ValueError:
+                hours = 24.0
+            try:
+                from dourmouse.world_pulse_history import history_range
+
+                self._send_json({"range": history_range(hours)})
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({"range": [], "error": str(exc)[:200]})
+        elif path == "/api/world/history":
+            # v8.20 time scrubber: the real recorded snapshot nearest
+            # `minutes_ago`. `found: false` (not a fabricated snapshot) when
+            # nothing has been recorded that far back yet.
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                minutes_ago = float((qs.get("minutes_ago") or ["0"])[0])
+            except ValueError:
+                minutes_ago = 0.0
+            try:
+                from dourmouse.world_pulse_history import history_at
+
+                snap = history_at(minutes_ago)
+                self._send_json({"found": snap is not None, "snapshot": snap})
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({"found": False, "snapshot": None, "error": str(exc)[:200]})
+        elif path == "/api/world/regions":
+            # v8.20 watch regions: list persisted regions (CRUD create is
+            # POST /api/world/regions, delete is POST
+            # /api/world/regions/delete — this server has no do_DELETE).
+            try:
+                from dourmouse.world_watch_regions import list_regions
+
+                self._send_json({"regions": list_regions()})
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({"regions": [], "error": str(exc)[:200]})
+        elif path == "/api/world/regions/hits":
+            # v8.20 watch regions: which real, currently-located items fall
+            # inside each persisted region right now.
+            try:
+                from dourmouse.world_pulse import world_pulse_geo
+                from dourmouse.world_watch_regions import check_region_hits
+
+                self._send_json({"hits": check_region_hits(world_pulse_geo())})
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({"hits": {}, "error": str(exc)[:200]})
+        elif path == "/api/world/correlations":
+            # v8.20: cross-layer proximity pairs from the current snapshot.
+            qs = urllib.parse.parse_qs(parsed.query)
+            threshold_km = None
+            if qs.get("threshold_km"):
+                try:
+                    threshold_km = float(qs["threshold_km"][0])
+                except ValueError:
+                    threshold_km = None
+            try:
+                from dourmouse.world_correlation import find_correlations
+                from dourmouse.world_pulse import world_pulse_geo
+
+                self._send_json({"correlations": find_correlations(world_pulse_geo(), threshold_km)})
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({"correlations": [], "error": str(exc)[:200]})
+        elif path == "/api/world/brief":
+            # v8.20: the deterministic "what happened" overnight brief.
+            try:
+                from dourmouse.world_brief import generate_brief
+                from dourmouse.world_pulse import world_pulse_snapshot
+
+                self._send_json(generate_brief(world_pulse_snapshot()))
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({
+                    "text": "Brief unavailable right now.", "mode": "template",
+                    "error": str(exc)[:200],
+                })
         elif path == "/api/memory":
             self._handle_memory_api()
         elif path == "/api/profile":
@@ -1590,6 +1670,36 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(exc)}, status=400)
                 return
             self._send_json({"ok": True, "task": task})
+        elif parsed.path == "/api/world/regions":
+            # v8.20 watch regions: create. Same deterministic-CRUD shape as
+            # /api/tasks above — no LLM in this path, real validation errors
+            # come back as 400 with the honest reason, never silently
+            # clamped or guessed.
+            body = self._read_json_body()
+            from dourmouse.world_watch_regions import add_region
+
+            try:
+                region = add_region(
+                    name=(body.get("name") or "").strip(),
+                    min_lat=body.get("min_lat"), max_lat=body.get("max_lat"),
+                    min_lon=body.get("min_lon"), max_lon=body.get("max_lon"),
+                )
+            except (ValueError, TypeError) as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self._send_json({"ok": True, "region": region})
+        elif parsed.path == "/api/world/regions/delete":
+            # v8.20 watch regions: delete. POST, not DELETE — this server
+            # implements do_GET/do_POST only, matching every other mutating
+            # action in this file.
+            body = self._read_json_body()
+            region_id = (body.get("id") or "").strip()
+            if not region_id:
+                self._send_json({"ok": False, "error": "id is required"}, status=400)
+                return
+            from dourmouse.world_watch_regions import delete_region
+
+            self._send_json({"ok": True, "deleted": delete_region(region_id)})
         elif parsed.path == "/api/push-notify":
             # v8.2: external watchers (tools/watch_dourmouse.py) surface a
             # real event into the AGENT COMMS bus — e.g. an upstream push
