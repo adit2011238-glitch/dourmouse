@@ -1662,6 +1662,50 @@ function drawMap(){
   wireHoverCardSVG(wrap);
 }
 
+/* v8.21: real coastlines on the globe. WORLD_PATH is a pre-flattened
+   equirectangular SVG path (x,y pixels in the 2000x1000 viewBox the flat
+   view uses), not raw lon/lat vertices — so it's parsed back apart into
+   rings of [lon,lat] pairs ONCE (inverting the same projX/projY the flat
+   view uses to build it), cached, and re-projected through orthoProject()
+   on every globe draw. A ring fully inside the visible hemisphere is
+   filled as a real closed landmass; a ring straddling the horizon is
+   stroked only as its contiguous visible runs — filling a horizon-
+   crossing ring correctly needs real spherical polygon clipping (its own
+   sizeable feature), so this stops short of that rather than drawing a
+   wrong fill shape at the edge of the globe. */
+let WORLD_RINGS = null;
+function parseWorldRings(pathStr){
+  const rings = [];
+  let current = null;
+  const re = /([MLZ])|(-?\d+(?:\.\d+)?)/g;
+  let m, buf = [];
+  while((m = re.exec(pathStr))){
+    if(m[1]){
+      if(m[1] === "Z"){
+        if(current && current.length > 2) rings.push(current);
+        current = null;
+      } else if(m[1] === "M"){
+        if(current && current.length > 2) rings.push(current);
+        current = [];
+      }
+      buf = [];
+    } else {
+      buf.push(parseFloat(m[2]));
+      if(buf.length === 2){
+        const [x,y] = buf; buf = [];
+        if(!current) current = [];
+        current.push([x*360/2000 - 180, 90 - y*180/1000]); // inverse of projX/projY
+      }
+    }
+  }
+  if(current && current.length > 2) rings.push(current);
+  return rings;
+}
+function worldRings(){
+  if(!WORLD_RINGS) WORLD_RINGS = parseWorldRings(WORLD_PATH);
+  return WORLD_RINGS;
+}
+
 function drawGlobe(wrap, pts){
   const size = 640;
   wrap.innerHTML = `<canvas id="mapCanvas" width="${size}" height="${size}"
@@ -1670,13 +1714,46 @@ function drawGlobe(wrap, pts){
   const canvas = $("mapCanvas");
   const ctx = canvas.getContext("2d");
   const R = size*0.42, cx = size/2, cy = size/2;
-  const line2 = cssVar("--line-2"), land = cssVar("--map-land"), panel = cssVar("--panel");
+  const line2 = cssVar("--line-2"), land = cssVar("--map-land"), panel = cssVar("--panel"), panel2 = cssVar("--panel2");
 
   ctx.clearRect(0,0,size,size);
   ctx.fillStyle = panel; ctx.fillRect(0,0,size,size);
+  // Ocean disk first — land gets drawn on top of it below, same as the
+  // flat view's <path fill="var(--map-land)"> sitting on the SVG's own
+  // background.
   ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
-  ctx.fillStyle = land; ctx.fill();
+  ctx.fillStyle = panel2; ctx.fill();
   ctx.strokeStyle = line2; ctx.lineWidth = 1.4; ctx.stroke();
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.clip(); // never let a coastline stroke bleed past the disk edge
+  ctx.fillStyle = land; ctx.strokeStyle = line2; ctx.lineWidth = 1;
+  worldRings().forEach(ring => {
+    const projected = ring.map(([lon,lat]) => orthoProject(lat, lon, R, cx, cy));
+    if(projected.every(p => p !== null)){
+      if(projected.length < 3) return;
+      ctx.beginPath();
+      ctx.moveTo(projected[0].x, projected[0].y);
+      for(let i=1;i<projected.length;i++) ctx.lineTo(projected[i].x, projected[i].y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      let run = [];
+      const flush = () => {
+        if(run.length > 1){
+          ctx.beginPath();
+          ctx.moveTo(run[0].x, run[0].y);
+          for(let i=1;i<run.length;i++) ctx.lineTo(run[i].x, run[i].y);
+          ctx.stroke();
+        }
+        run = [];
+      };
+      projected.forEach(p => { if(p === null){ flush(); } else { run.push(p); } });
+      flush();
+    }
+  });
+  ctx.restore();
 
   ctx.strokeStyle = line2; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
   for(let lon=-180; lon<180; lon+=30){
