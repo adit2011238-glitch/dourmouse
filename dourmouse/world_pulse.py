@@ -3,7 +3,7 @@
 Dourmouse's own global-intelligence feed. No SDK: every source is a real
 public endpoint read over stdlib urllib (or, for one channel, a hand-rolled
 stdlib-only WebSocket client) — nothing is ever fabricated (Rule 2.2).
-Fifteen channels, eight keyless and seven either keyless or key-gated:
+Sixteen channels, nine keyless and seven either keyless or key-gated:
 
 - ``markets``  — Yahoo Finance: top day gainers/losers + key index/commodity
                 quotes (^GSPC, ^IXIC, CL=F, GC=F, BTC-USD).
@@ -48,6 +48,16 @@ Fifteen channels, eight keyless and seven either keyless or key-gated:
                 Keyless. Zero matches is a legitimate result here (OSM tag
                 coverage varies by area) — this channel never raises on
                 zero, unlike quakes/flights/launches.
+- ``conflict_zones``— EASA's own published Conflict Zone Information
+                Bulletins (active airspace-risk advisories, source
+                authority: the EU's IRAG). Keyless. Distinct from
+                ``conflict`` above (ReliefWeb text updates, no
+                coordinates) — this one carries real, plottable points.
+                EASA publishes no severity rating on this feed, so every
+                active bulletin gets the same severity, never a
+                fabricated ranking (v8.26 — real research into keyless
+                structured conflict data: ACLED/UCDP both now require a
+                registered key, GDELT's GEO API is dead).
 
 Failure isolation: each source is fetched independently; a dead source is
 reported OFFLINE with its real error while every other channel keeps
@@ -87,7 +97,7 @@ from dourmouse import live_feeds
 
 _SOURCE_TIMEOUT = 8.0
 _MAX_ITEMS_PER_SOURCE = 8
-_SOURCE_COUNT = 15
+_SOURCE_COUNT = 16
 # Shared bbox for the three geo channels that need one: Europe + N. Africa
 # + the Med, matching the box _fetch_flights() already used before this
 # file grew ships/infrastructure — one box, one place it's defined, so the
@@ -957,6 +967,88 @@ def _fetch_infrastructure() -> list[dict[str, Any]]:
     return out  # empty is a legitimate, non-error result — see docstring
 
 
+# v8.26: EASA's own published Conflict Zone Information Bulletins — real,
+# keyless, official EU aviation-safety-regulator data (source authority:
+# the Integrated EU Aviation Security Risk Assessment Group, IRAG).
+# Genuinely unblocks the "conflict zones" ask that section 3.1 of the
+# project's own design doc left open — ACLED/UCDP both need a registered
+# key, GDELT's GEO API is dead. EASA publishes no severity rating on this
+# feed (checked directly — the page states none is shown), so every
+# active CZIB gets the same severity="conflict" treatment, never a
+# fabricated ranking against the others.
+#
+# Real limitation, stated plainly: several current bulletins (Ukraine,
+# Sudan, Russia, and every multi-country Middle East bulletin issued in
+# 2026) carry no coordinates at all in EASA's own export. Rather than
+# drop those entirely, this maps them to a real per-country centroid —
+# computed directly from the same Natural Earth polygon data already
+# baked into the frontend's country-border layer (area-weighted centroid
+# of the largest ring, i.e. genuinely derived from real geometry, not
+# invented) — and a multi-country bulletin becomes one point per country
+# it actually names. Every such point's summary says plainly that it's a
+# country-wide centroid, not a specific incident location, matching the
+# same honesty convention already used for the power_grid zone centroids.
+_CZIB_CENTROIDS = {
+    "Iran": (32.519, 54.285), "Iraq": (33.037, 43.757), "Jordan": (31.245, 36.779),
+    "Kuwait": (29.307, 47.600), "Lebanon": (33.912, 35.871), "Oman": (20.581, 56.098),
+    "Qatar": (25.322, 51.184), "Russia": (61.693, 99.217), "Sudan": (15.991, 29.863),
+    "Ukraine": (49.149, 31.229), "United Arab Emirates": (23.869, 54.207),
+    "Bahrain": (26.236, 50.583),  # too small for a 110m-resolution polygon centroid — its real capital instead
+}
+
+
+def _fetch_conflict_zones() -> list[dict[str, Any]]:
+    """Active EASA Conflict Zone Information Bulletins — keyless.
+
+    "Withdrawn" bulletins are dropped; only "Active" ones are plotted.
+    Zero active CZIBs would be a real, surprising state (EASA has
+    published at least a dozen continuously for years), so — like
+    quakes/flights/launches — an empty result here is treated as a fetch
+    problem, not a genuine "no active bulletins" state.
+    """
+    raw = _http_get("https://www.easa.europa.eu/en/domains/air-operations/czibs/export-json?page&_format=json")
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"unparseable EASA CZIB response: {exc}") from exc
+    zones = data.get("conflict_zones")
+    if zones is None:
+        raise RuntimeError("EASA CZIB response missing 'conflict_zones'")
+    out: list[dict[str, Any]] = []
+    for z in zones:
+        if z.get("status") != "Active":
+            continue
+        name = z.get("name") or z.get("country") or "Conflict zone"
+        summary = f"EASA CZIB · valid until {z.get('valid_until_date', '?')}"
+        coords = (z.get("coordinates") or "").strip()
+        if coords and "," in coords:
+            try:
+                lat_s, lon_s = (p.strip() for p in coords.split(",", 1))
+                out.append(_item(name, summary=summary, severity="conflict",
+                                  lat=float(lat_s), lon=float(lon_s)))
+            except ValueError:
+                pass
+            continue
+        # No coordinates in this bulletin — fall back to a real per-country
+        # centroid for each country the bulletin actually names.
+        for country in (z.get("country") or "").split(","):
+            country = country.strip()
+            centroid = _CZIB_CENTROIDS.get(country)
+            if not centroid:
+                continue
+            lat, lon = centroid
+            out.append(_item(
+                f"{name} ({country})" if country not in name else name,
+                summary=summary + " · point is the country centroid, not a specific incident location",
+                severity="conflict", lat=lat, lon=lon, country=country,
+            ))
+        if len(out) >= _MAX_ITEMS_PER_SOURCE:
+            break
+    if not out:
+        raise RuntimeError("EASA CZIB feed returned no active, plottable bulletins")
+    return out[:_MAX_ITEMS_PER_SOURCE]
+
+
 def _fetch_crypto_fx() -> tuple[list[dict[str, Any]], list[str]]:
     """Keyless crypto + FX, from providers that are NOT Yahoo.
 
@@ -1272,6 +1364,7 @@ _SOURCES: dict[str, tuple[str, Callable[[], list[dict[str, Any]]]]] = {
     "power_grid": ("energy-charts.info (keyless) + ENTSO-E if configured — actual total load", _fetch_power_grid),
     "launches": ("Launch Library 2 — upcoming orbital launches", _fetch_launches),
     "infrastructure": ("OSM Overpass — pipelines + harbours (static base layer)", _fetch_infrastructure),
+    "conflict_zones": ("EASA CZIBs — active Conflict Zone Information Bulletins", _fetch_conflict_zones),
 }
 
 

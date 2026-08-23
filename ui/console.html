@@ -1489,6 +1489,8 @@ const MAP_LAYERS = {
   // A static base layer, not a hazard — off by default so it doesn't
   // visually bury the hazard dots the moment it's populated.
   infrastructure: {label:"INFRASTRUCTURE", on:false},
+  // v8.26: EASA's own active Conflict Zone Information Bulletins.
+  conflict_zones: {label:"CONFLICT ZONES", on:true},
 };
 const SEV_RANK = {critical:4, high:3, watch:2, info:1};
 function sevColor(s){
@@ -1496,6 +1498,10 @@ function sevColor(s){
   if(s==="high")     return "var(--warn)";
   if(s==="watch")    return "var(--amber)";
   if(s==="capital")  return "var(--blue-hi)";
+  // v8.26: EASA publishes no severity rating on CZIBs — this color is a
+  // visibility choice (every active bulletin deserves attention), never
+  // a ranking claim; every conflict_zones item gets the exact same shade.
+  if(s==="conflict") return "var(--warn)";
   return "var(--blue)";
 }
 // Canvas 2D cannot resolve var(...) — same severity buckets, but as a CSS
@@ -1507,6 +1513,7 @@ function sevVarName(s){
   if(s==="high")     return "--warn";
   if(s==="watch")    return "--amber";
   if(s==="capital")  return "--blue-hi";
+  if(s==="conflict") return "--warn";
   return "--blue";
 }
 function cssVar(name){

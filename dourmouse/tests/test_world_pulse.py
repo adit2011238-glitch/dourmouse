@@ -110,6 +110,8 @@ def _fake_http_get(url: str) -> str:
         return _OPEN_METEO_AQ_JSON
     if "api.energy-charts.info" in url:
         return _ENERGY_CHARTS_JSON
+    if "easa.europa.eu" in url:
+        return _EASA_CZIB_JSON
     raise AssertionError(f"unexpected url in test: {url}")
 
 
@@ -203,6 +205,22 @@ _ENERGY_CHARTS_ALL_NULL_JSON = json.dumps({
     "production_types": [{"name": "Load (incl. self-consumption)", "data": [None, None]}],
 })
 
+# v8.26: real shape from EASA's own CZIB JSON export, verified live on
+# 23 Aug 2026 — one entry WITH real coordinates (Libya), one WITHOUT
+# (forcing the country-centroid fallback, including the multi-country
+# split), one Withdrawn (must be excluded).
+_EASA_CZIB_JSON = json.dumps({"conflict_zones": [
+    {"name": "Airspace of Libya", "status": "Active", "country": "Libya",
+     "coordinates": "27.0331541, 14.4316929", "valid_until_date": "31/01/2027"},
+    {"name": "Airspace of Ukraine", "status": "Active", "country": "Ukraine",
+     "coordinates": "", "valid_until_date": "31/01/2027"},
+    {"name": "Airspace of the Persian Gulf and Gulf of Oman", "status": "Active",
+     "country": "Jordan, Bahrain", "coordinates": "", "valid_until_date": "31/08/2026"},
+    {"name": "Airspace of a Formerly Active Zone", "status": "Withdrawn", "country": "Testland",
+     "coordinates": "1.0, 1.0", "valid_until_date": "01/01/2020"},
+]})
+_EASA_CZIB_EMPTY_JSON = json.dumps({"conflict_zones": []})
+
 _ENTSOE_EMPTY_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<GL_MarketDocument xmlns="urn:iec62325.351:tc57wg16:451-6:generationloaddocument:3:0">'
@@ -257,26 +275,26 @@ class TestSnapshot:
         # carry real coordinates, which is what makes the map possible —
         # asserted explicitly rather than by count so a channel silently
         # disappearing still fails this test.
-        # v8.20: seven more channels joined. All fifteen are always
+        # v8.20: seven more channels joined. All sixteen are always
         # REGISTERED (world_pulse_status must report their real state even
         # unconfigured). v8.23: air_quality moved off a key entirely (now
         # Open-Meteo, keyless). v8.24: power_grid did too (energy-charts.info
         # as an always-on keyless base, ENTSO-E merged in only if a token
-        # is ALSO configured) — only ships/wildfires are still NOT
-        # CONFIGURED by default in this fixture, matching the honest
-        # default state of a real install with no keys set. See
-        # TestNewChannels for the fully-configured path exercised end to
-        # end.
+        # is ALSO configured). v8.26: conflict_zones joined, keyless
+        # (EASA CZIBs) — only ships/wildfires are still NOT CONFIGURED by
+        # default in this fixture, matching the honest default state of a
+        # real install with no keys set. See TestNewChannels for the
+        # fully-configured path exercised end to end.
         assert set(snap["sources"]) == {
             "markets", "news", "disasters", "cyber", "conflict", "macro",
             "quakes", "flights",
             "ships", "wildfires", "storms", "air_quality", "power_grid",
-            "launches", "infrastructure",
+            "launches", "infrastructure", "conflict_zones",
         }
         always_on = {
             "markets", "news", "disasters", "cyber", "conflict", "macro",
             "quakes", "flights", "storms", "launches", "infrastructure",
-            "air_quality", "power_grid",
+            "air_quality", "power_grid", "conflict_zones",
         }
         gated = {"ships", "wildfires"}
         for name in always_on:
@@ -343,13 +361,14 @@ class TestDetails:
     def test_status_shape(self):
         st = wp.world_pulse_status()
         assert st["configured"] is True
-        # v8.20/v8.23/v8.24: 15 sources registered; 13 always-on (up by
-        # default in this fixture — air_quality since v8.23, power_grid
-        # since v8.24) + 2 key-gated ones honestly reporting down (NOT
-        # CONFIGURED) with no keys set — see TestSnapshot.test_all_sources_
-        # aggregate for the exact up/down split by name.
-        assert st["sources_total"] == 15
-        assert st["sources_up"] == 13
+        # v8.20/v8.23/v8.24/v8.26: 16 sources registered; 14 always-on (up
+        # by default in this fixture — air_quality since v8.23, power_grid
+        # since v8.24, conflict_zones since v8.26) + 2 key-gated ones
+        # honestly reporting down (NOT CONFIGURED) with no keys set — see
+        # TestSnapshot.test_all_sources_aggregate for the exact up/down
+        # split by name.
+        assert st["sources_total"] == 16
+        assert st["sources_up"] == 14
         assert 5 <= st["pulse_score"] <= 95
 
 
@@ -824,11 +843,70 @@ class TestNewChannels:
         )
         assert wp._fetch_infrastructure() == []
 
-    # --- fully-configured integration: all fifteen sources genuinely up ----
+    # --- conflict_zones (EASA CZIBs, keyless) --------------------------------
 
-    def test_all_fifteen_sources_when_fully_configured(self, monkeypatch):
-        # air_quality needs no key at all since v8.23 (Open-Meteo) — only
-        # the remaining three gated channels need a fake key/token here.
+    def test_conflict_zones_needs_no_key_at_all(self):
+        out = wp._fetch_conflict_zones()
+        # Libya (real coords) + Ukraine (centroid) + Jordan + Bahrain
+        # (the Persian Gulf bulletin split into one point per country) —
+        # the Withdrawn entry excluded.
+        assert len(out) == 4
+
+    def test_conflict_zones_uses_real_coordinates_when_present(self):
+        out = wp._fetch_conflict_zones()
+        libya = next(it for it in out if "Libya" in it["title"])
+        assert libya["lat"] == 27.0331541 and libya["lon"] == 14.4316929
+        assert "centroid" not in libya["summary"]
+
+    def test_conflict_zones_falls_back_to_country_centroid(self):
+        out = wp._fetch_conflict_zones()
+        ukraine = next(it for it in out if "Ukraine" in it["title"])
+        assert ukraine["lat"] == 49.149 and ukraine["lon"] == 31.229
+        assert "centroid" in ukraine["summary"]
+
+    def test_conflict_zones_splits_multi_country_bulletin(self):
+        """One bulletin naming two countries with no coordinates becomes
+        one real point per country actually named — never one fabricated
+        regional midpoint."""
+        out = wp._fetch_conflict_zones()
+        jordan = next((it for it in out if it.get("country") == "Jordan"), None)
+        bahrain = next((it for it in out if it.get("country") == "Bahrain"), None)
+        assert jordan is not None and bahrain is not None
+        assert jordan["lat"] == 31.245 and jordan["lon"] == 36.779
+        assert bahrain["lat"] == 26.236 and bahrain["lon"] == 50.583
+        assert "Jordan" in jordan["title"] and "Bahrain" in bahrain["title"]
+
+    def test_conflict_zones_excludes_withdrawn(self):
+        out = wp._fetch_conflict_zones()
+        assert not any("Formerly Active" in it["title"] for it in out)
+
+    def test_conflict_zones_empty_is_an_honest_error(self, monkeypatch):
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _EASA_CZIB_EMPTY_JSON if "easa.europa" in url else _fake_http_get(url),
+        )
+        with pytest.raises(RuntimeError, match="no active"):
+            wp._fetch_conflict_zones()
+
+    def test_conflict_zones_unknown_country_is_skipped_not_fabricated(self, monkeypatch):
+        """A country name not in the centroid table must be silently
+        dropped, never given a made-up position."""
+        payload = json.dumps({"conflict_zones": [
+            {"name": "Airspace of Nowhereland", "status": "Active", "country": "Nowhereland",
+             "coordinates": "", "valid_until_date": "01/01/2099"},
+        ]})
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: payload if "easa.europa" in url else _fake_http_get(url),
+        )
+        with pytest.raises(RuntimeError, match="no active"):
+            wp._fetch_conflict_zones()
+
+    # --- fully-configured integration: all sixteen sources genuinely up ----
+
+    def test_all_sixteen_sources_when_fully_configured(self, monkeypatch):
+        # air_quality and conflict_zones need no key at all (Open-Meteo,
+        # EASA) — only the remaining gated channels need a fake key/token.
         monkeypatch.setenv("AISSTREAM_API_KEY", "fake-key")
         monkeypatch.setenv("FIRMS_MAP_KEY", "fake-key")
         monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
@@ -844,7 +922,7 @@ class TestNewChannels:
         monkeypatch.setattr(wp, "_ws_open", lambda host: fake_sock)
 
         snap = wp.world_pulse_snapshot(force=True)
-        assert len(snap["sources"]) == 15
+        assert len(snap["sources"]) == 16
         for name, src in snap["sources"].items():
             assert src["ok"] is True, f"{name} should be up when fully configured: {src}"
 
@@ -852,10 +930,10 @@ class TestNewChannels:
 
     def test_geo_includes_all_new_locatable_channels(self):
         geo = wp.world_pulse_geo()
-        # storms/launches/infrastructure are always-on and carry real
-        # coordinates, so they must be plotted, not listed as unmappable —
-        # same bar v8.9 set for quakes/flights.
-        for chan in ("storms", "launches", "infrastructure"):
+        # storms/launches/infrastructure/conflict_zones are always-on and
+        # carry real coordinates, so they must be plotted, not listed as
+        # unmappable — same bar v8.9 set for quakes/flights.
+        for chan in ("storms", "launches", "infrastructure", "conflict_zones"):
             assert chan in geo["layers"], f"{chan} should be mappable: {geo.get('unmappable')}"
 
 
