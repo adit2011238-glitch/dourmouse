@@ -34,11 +34,13 @@ Fifteen channels, eight keyless and seven either keyless or key-gated:
                 original OpenAQ v3 integration needed a key and both keys
                 supplied for it were rejected by OpenAQ's own server;
                 Open-Meteo needs nothing at all).
-- ``power_grid``— ENTSO-E Transparency Platform actual total load for a
-                small, deliberately-honest set of bidding zones. Needs
-                ``ENTSOE_API_TOKEN`` (issued by email, not self-serve —
-                see the module docstring on ``_fetch_power_grid`` for
-                exactly what is and is not verified about this channel).
+- ``power_grid``— real actual total load. Keyless base (v8.24):
+                energy-charts.info (Fraunhofer ISE), verified live,
+                Germany only — that source's Load-field coverage for
+                other countries was not confirmed live and isn't relied
+                on. If ``ENTSOE_API_TOKEN`` is ALSO configured (issued by
+                email, not self-serve), ENTSO-E's FR/GB/NL zones are
+                merged in too. Never NOT CONFIGURED any more.
 - ``launches`` — Launch Library 2 (thespacedevs.com), upcoming launches.
                 Keyless.
 - ``infrastructure``— OSM Overpass: pipelines + harbours over the same
@@ -741,31 +743,64 @@ _ENTSOE_ZONES = {"FR": "10YFR-RTE------C", "GB": "10YGB----------A", "NL": "10YN
 _ENTSOE_CENTROIDS = {"FR": (46.6, 2.5), "GB": (54.0, -2.0), "NL": (52.1, 5.3)}
 
 
-def _fetch_power_grid() -> list[dict[str, Any]]:
-    """Actual total load (documentType A65) for a small set of ENTSO-E
-    bidding zones.
+# v8.24: energy-charts.info (Fraunhofer ISE) — genuinely keyless, verified
+# live. Its "Load (incl. self-consumption)" field is the same real
+# actual-total-load signal ENTSO-E's A65 document gives, just for a
+# different, narrower set of countries: only "de" was confirmed live to
+# actually carry that field (the endpoint 404s for several other real
+# country codes tried live — at/it/es all 404'd, and the service rate-
+# limits aggressively on rapid successive requests) — so this stays
+# scoped to the one zone actually verified rather than guessing others
+# would work. Extend this list only after live-checking a new code the
+# same way (curl the endpoint, confirm "Load (incl. self-consumption)"
+# is actually present, not just a 200).
+_ENERGY_CHARTS_ZONES = {"DE": (51.1657, 10.4515)}  # label -> representative centroid
 
-    Needs ENTSOE_API_TOKEN. Unlike every other keyed channel in this file,
-    this token is NOT self-serve — ENTSO-E issues it by email after a
-    manual request (see their Transparency Platform docs), so this path
-    could not be exercised against a real token in the environment this
-    was written in. The request/parse logic follows ENTSO-E's documented
-    GL_MarketDocument schema exactly (TimeSeries -> Period -> Point, each
-    Point holding a position/quantity pair) and fails with an honest,
-    specific error on anything unexpected — but flagging plainly: this one
-    channel's live behavior is unverified beyond schema-level review,
-    unlike every other fetcher in this file, all of which run against
-    their real endpoints in this codebase's test fixtures or were
-    manually exercised. Treat a first real run of this channel as the
-    actual verification.
-    """
-    token = _env("ENTSOE_API_TOKEN")
-    if not token:
-        raise RuntimeError(
-            "NOT CONFIGURED: power_grid needs ENTSOE_API_TOKEN (issued by "
-            "email — see the ENTSO-E Transparency Platform docs) — nothing "
-            "was fetched."
+
+def _fetch_energy_charts_load() -> list[dict[str, Any]]:
+    """Keyless real total-load reading(s) from energy-charts.info. Never
+    NOT CONFIGURED — this is what makes power_grid always-on regardless
+    of whether an ENTSO-E token is ever configured."""
+    out: list[dict[str, Any]] = []
+    for label, (lat, lon) in _ENERGY_CHARTS_ZONES.items():
+        url = f"https://api.energy-charts.info/total_power?country={label.lower()}"
+        try:
+            raw = _http_get(url)
+            data = json.loads(raw)
+        except Exception:  # noqa: BLE001 - one zone's failure must not sink the others
+            continue
+        series = next(
+            (pt for pt in (data.get("production_types") or [])
+             if pt.get("name") == "Load (incl. self-consumption)"),
+            None,
         )
+        if not series:
+            continue
+        values = series.get("data") or []
+        # The most recent bucket is often still null (not yet finalized) —
+        # walk back to the last REAL value rather than reporting a
+        # fabricated-looking "current" reading that's actually empty.
+        value = next((v for v in reversed(values) if v is not None), None)
+        if value is None:
+            continue
+        out.append(_item(
+            f"{label} load {float(value):,.0f} MW",
+            summary=f"actual total load, zone-wide (energy-charts.info) · point is the "
+                    f"{label} zone centroid, not a sensor location",
+            severity="quote", lat=lat, lon=lon, country=label,
+        ))
+    return out
+
+
+def _fetch_entsoe_load(token: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """ENTSO-E path (needs a real token) — extracted from the original
+    _fetch_power_grid so it can run as an OPTIONAL supplement to the
+    always-on energy-charts.info base rather than being the only source.
+    Unlike every other keyed channel in this file, this token is NOT
+    self-serve — ENTSO-E issues it by email after a manual request. The
+    request/parse logic follows ENTSO-E's documented GL_MarketDocument
+    schema exactly (TimeSeries -> Period -> Point, each Point holding a
+    position/quantity pair)."""
     now = datetime.now(timezone.utc)
     period_end = now.strftime("%Y%m%d%H%M")
     period_start = (now - timedelta(hours=2)).strftime("%Y%m%d%H%M")
@@ -809,8 +844,32 @@ def _fetch_power_grid() -> list[dict[str, Any]]:
                     "zone centroid, not a sensor location",
             severity="quote", lat=lat, lon=lon, country=label,
         ))
+    return out, failures
+
+
+def _fetch_power_grid() -> list[dict[str, Any]]:
+    """Real actual-total-load readings for European grid zones.
+
+    v8.24: always-on, never NOT CONFIGURED — energy-charts.info (keyless,
+    verified live) supplies at least Germany's real load unconditionally.
+    If ENTSOE_API_TOKEN is also configured, its zones (FR/GB/NL) are
+    fetched too and merged in, deduplicating by country so a zone covered
+    by both sources doesn't appear twice (energy-charts.info's reading
+    wins on overlap, since it's the one actually verified live end to
+    end — see _fetch_entsoe_load's docstring on why its own live behavior
+    remains comparatively less proven).
+    """
+    out = _fetch_energy_charts_load()
+    covered = {it.get("country") for it in out}
+    token = _env("ENTSOE_API_TOKEN")
+    if token:
+        entsoe_out, _failures = _fetch_entsoe_load(token)
+        out.extend(it for it in entsoe_out if it.get("country") not in covered)
     if not out:
-        raise RuntimeError("no ENTSO-E zone reachable: " + "; ".join(failures[:4] or ["unknown"]))
+        raise RuntimeError(
+            "no power_grid source reachable — energy-charts.info failed and "
+            + ("ENTSO-E also failed" if token else "no ENTSOE_API_TOKEN is configured for a fallback")
+        )
     return out
 
 
@@ -1210,7 +1269,7 @@ _SOURCES: dict[str, tuple[str, Callable[[], list[dict[str, Any]]]]] = {
     "wildfires": ("NASA FIRMS — VIIRS thermal detections, last 24h (needs FIRMS_MAP_KEY)", _fetch_wildfires),
     "storms": ("NOAA/NHC — active tropical cyclones", _fetch_storms),
     "air_quality": ("Open-Meteo — real PM2.5 for major world cities, keyless", _fetch_air_quality),
-    "power_grid": ("ENTSO-E — actual total load, FR/GB/NL (needs ENTSOE_API_TOKEN)", _fetch_power_grid),
+    "power_grid": ("energy-charts.info (keyless) + ENTSO-E if configured — actual total load", _fetch_power_grid),
     "launches": ("Launch Library 2 — upcoming orbital launches", _fetch_launches),
     "infrastructure": ("OSM Overpass — pipelines + harbours (static base layer)", _fetch_infrastructure),
 }

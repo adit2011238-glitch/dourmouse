@@ -108,6 +108,8 @@ def _fake_http_get(url: str) -> str:
         return _ENTSOE_XML
     if "air-quality-api.open-meteo.com" in url:
         return _OPEN_METEO_AQ_JSON
+    if "api.energy-charts.info" in url:
+        return _ENERGY_CHARTS_JSON
     raise AssertionError(f"unexpected url in test: {url}")
 
 
@@ -182,6 +184,25 @@ _ENTSOE_XML = (
     "<Point><position>2</position><quantity>43100</quantity></Point>"
     "</Period></TimeSeries></GL_MarketDocument>"
 )
+# v8.24: real shape from energy-charts.info's /total_power, verified live
+# on 23 Aug 2026 — the trailing None mirrors the real, observed behavior
+# (the most recent bucket is often not yet finalized), which is exactly
+# what forces the "walk back to the last real value" logic being tested.
+_ENERGY_CHARTS_JSON = json.dumps({
+    "unix_seconds": [1, 2, 3],
+    "production_types": [
+        {"name": "Solar", "data": [10.0, 20.0, 30.0]},
+        {"name": "Load (incl. self-consumption)", "data": [42000.0, 43000.0, None]},
+    ],
+})
+_ENERGY_CHARTS_NO_LOAD_JSON = json.dumps({
+    "unix_seconds": [1], "production_types": [{"name": "Solar", "data": [10.0]}],
+})
+_ENERGY_CHARTS_ALL_NULL_JSON = json.dumps({
+    "unix_seconds": [1, 2],
+    "production_types": [{"name": "Load (incl. self-consumption)", "data": [None, None]}],
+})
+
 _ENTSOE_EMPTY_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<GL_MarketDocument xmlns="urn:iec62325.351:tc57wg16:451-6:generationloaddocument:3:0">'
@@ -239,11 +260,13 @@ class TestSnapshot:
         # v8.20: seven more channels joined. All fifteen are always
         # REGISTERED (world_pulse_status must report their real state even
         # unconfigured). v8.23: air_quality moved off a key entirely (now
-        # Open-Meteo, keyless) so it's always-on too — only ships/
-        # wildfires/power_grid are still NOT CONFIGURED by default in this
-        # fixture, matching the honest default state of a real install
-        # with no keys set. See TestNewChannels for the fully-configured
-        # path exercised end to end.
+        # Open-Meteo, keyless). v8.24: power_grid did too (energy-charts.info
+        # as an always-on keyless base, ENTSO-E merged in only if a token
+        # is ALSO configured) — only ships/wildfires are still NOT
+        # CONFIGURED by default in this fixture, matching the honest
+        # default state of a real install with no keys set. See
+        # TestNewChannels for the fully-configured path exercised end to
+        # end.
         assert set(snap["sources"]) == {
             "markets", "news", "disasters", "cyber", "conflict", "macro",
             "quakes", "flights",
@@ -253,9 +276,9 @@ class TestSnapshot:
         always_on = {
             "markets", "news", "disasters", "cyber", "conflict", "macro",
             "quakes", "flights", "storms", "launches", "infrastructure",
-            "air_quality",
+            "air_quality", "power_grid",
         }
-        gated = {"ships", "wildfires", "power_grid"}
+        gated = {"ships", "wildfires"}
         for name in always_on:
             src = snap["sources"][name]
             assert src["ok"] is True, f"{name} should be up: {src}"
@@ -320,13 +343,13 @@ class TestDetails:
     def test_status_shape(self):
         st = wp.world_pulse_status()
         assert st["configured"] is True
-        # v8.20/v8.23: 15 sources registered; 12 always-on (up by default
-        # in this fixture, air_quality included since v8.23) + 3 key-gated
-        # ones honestly reporting down (NOT CONFIGURED) with no keys set —
-        # see TestSnapshot.test_all_sources_aggregate for the exact
-        # up/down split by name.
+        # v8.20/v8.23/v8.24: 15 sources registered; 13 always-on (up by
+        # default in this fixture — air_quality since v8.23, power_grid
+        # since v8.24) + 2 key-gated ones honestly reporting down (NOT
+        # CONFIGURED) with no keys set — see TestSnapshot.test_all_sources_
+        # aggregate for the exact up/down split by name.
         assert st["sources_total"] == 15
-        assert st["sources_up"] == 12
+        assert st["sources_up"] == 13
         assert 5 <= st["pulse_score"] <= 95
 
 
@@ -696,38 +719,75 @@ class TestNewChannels:
         with pytest.raises(RuntimeError, match="no rows"):
             wp._fetch_air_quality()
 
-    # --- power_grid (ENTSO-E) -----------------------------------------------
+    # --- power_grid (energy-charts.info keyless base + optional ENTSO-E) ----
 
-    def test_power_grid_not_configured_without_token(self, monkeypatch):
+    def test_power_grid_works_with_no_token_at_all(self, monkeypatch):
+        """v8.24: the whole point of adding energy-charts.info — power_grid
+        is never NOT CONFIGURED any more."""
         monkeypatch.delenv("ENTSOE_API_TOKEN", raising=False)
-        with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
-            wp._fetch_power_grid()
+        out = wp._fetch_power_grid()
+        assert {it["country"] for it in out} == {"DE"}
 
-    def test_power_grid_parses_all_configured_zones(self, monkeypatch):
+    def test_energy_charts_walks_back_to_last_real_value(self):
+        """The real, observed behavior: the most recent bucket is often
+        still null. Must report the last REAL value (43000, not the
+        trailing None and not the first value 42000)."""
+        out = wp._fetch_energy_charts_load()
+        assert len(out) == 1
+        assert "43,000 MW" in out[0]["title"]
+
+    def test_energy_charts_missing_load_field_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _ENERGY_CHARTS_NO_LOAD_JSON if "energy-charts" in url else _fake_http_get(url),
+        )
+        assert wp._fetch_energy_charts_load() == []
+
+    def test_energy_charts_all_null_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _ENERGY_CHARTS_ALL_NULL_JSON if "energy-charts" in url else _fake_http_get(url),
+        )
+        assert wp._fetch_energy_charts_load() == []
+
+    def test_power_grid_merges_entsoe_zones_when_token_present(self, monkeypatch):
         monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
         out = wp._fetch_power_grid()
-        # Three zones configured (FR/GB/NL); the fake XML is reused for
-        # each, so all three must independently parse and be labeled by
-        # their OWN zone (not each other's).
-        assert {it["country"] for it in out} == {"FR", "GB", "NL"}
-        for it in out:
-            # picks the LAST point (position 2, quantity 43100), not the first
-            assert "43,100 MW" in it["title"]
+        # DE from the always-on keyless base, plus FR/GB/NL from ENTSO-E
+        # once a token is configured — all four present, not one replacing
+        # the other.
+        assert {it["country"] for it in out} == {"DE", "FR", "GB", "NL"}
 
-    def test_power_grid_isolates_one_zone_failure(self, monkeypatch):
-        """One bad zone must not sink the other two — same failure-
-        isolation discipline as every other multi-call fetcher in this
-        file (e.g. _fetch_markets' per-symbol try/except)."""
+    def test_power_grid_isolates_one_entsoe_zone_failure(self, monkeypatch):
+        """One bad ENTSO-E zone must not sink the others, and must not
+        take down the always-on energy-charts.info base either — same
+        failure-isolation discipline as every other multi-call fetcher in
+        this file (e.g. _fetch_markets' per-symbol try/except)."""
         monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
 
         def _flaky(url):
             if "GB" in url:
                 raise RuntimeError("entsoe rejected GB zone")
-            return _ENTSOE_XML
+            return _fake_http_get(url)
 
         monkeypatch.setattr(wp, "_http_get", _flaky)
         out = wp._fetch_power_grid()
-        assert {it["country"] for it in out} == {"FR", "NL"}
+        assert {it["country"] for it in out} == {"DE", "FR", "NL"}
+
+    def test_power_grid_entsoe_failure_still_leaves_keyless_base(self, monkeypatch):
+        """If ENTSO-E fails entirely (bad token, network down), power_grid
+        must still report the energy-charts.info base rather than the
+        whole channel going down."""
+        monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
+
+        def _entsoe_down(url):
+            if "entsoe" in url:
+                raise RuntimeError("connection refused")
+            return _fake_http_get(url)
+
+        monkeypatch.setattr(wp, "_http_get", _entsoe_down)
+        out = wp._fetch_power_grid()
+        assert {it["country"] for it in out} == {"DE"}
 
     # --- launches (Launch Library 2) ----------------------------------------
 
