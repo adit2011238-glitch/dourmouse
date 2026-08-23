@@ -29,9 +29,11 @@ Fifteen channels, eight keyless and seven either keyless or key-gated:
                 result is a normal, non-error state (most days have zero
                 active named storms) — unlike quakes/flights, this channel
                 never raises on zero.
-- ``air_quality``— OpenAQ v3, latest PM2.5 readings. Needs
-                ``OPENAQ_API_KEY`` (OpenAQ now requires one for the v3
-                API — the old v2 keyless tier is retired).
+- ``air_quality``— real PM2.5 for a fixed spread of major world cities,
+                via Open-Meteo's Air Quality API. Keyless (v8.23 — the
+                original OpenAQ v3 integration needed a key and both keys
+                supplied for it were rejected by OpenAQ's own server;
+                Open-Meteo needs nothing at all).
 - ``power_grid``— ENTSO-E Transparency Platform actual total load for a
                 small, deliberately-honest set of bidding zones. Needs
                 ``ENTSOE_API_TOKEN`` (issued by email, not self-serve —
@@ -649,55 +651,80 @@ def _fetch_storms() -> list[dict[str, Any]]:
     return out  # empty is a legitimate, non-error result — see docstring
 
 
-def _fetch_air_quality() -> list[dict[str, Any]]:
-    """Latest global PM2.5 readings from OpenAQ v3.
+# v8.23: 15 real, fixed, well-known city coordinates as the fetch points
+# for Open-Meteo's air-quality API. Open-Meteo has no "give me whatever
+# stations reported recently" sweep the way OpenAQ does — it answers a
+# real reading for whatever coordinates you ask it for, so a representative
+# spread of major cities across every populated continent is the honest
+# way to get global-ish coverage from a point API, not a station directory.
+_AQ_CITIES = [
+    ("Delhi", 28.6139, 77.2090), ("Beijing", 39.9042, 116.4074),
+    ("Lagos", 6.5244, 3.3792), ("Cairo", 30.0444, 31.2357),
+    ("Sao Paulo", -23.5505, -46.6333), ("Mexico City", 19.4326, -99.1332),
+    ("Jakarta", -6.2088, 106.8456), ("Los Angeles", 34.0522, -118.2437),
+    ("London", 51.5074, -0.1278), ("Moscow", 55.7558, 37.6173),
+    ("Lahore", 31.5497, 74.3436), ("Bangkok", 13.7563, 100.5018),
+    ("Johannesburg", -26.2041, 28.0473), ("Sydney", -33.8688, 151.2093),
+    ("New York", 40.7128, -74.0060),
+]
 
-    Needs OPENAQ_API_KEY — the v2 keyless tier is retired; v3 requires a
-    free key sent as the X-API-Key header. NOT CONFIGURED honestly without
-    one. Severity buckets follow the real EPA PM2.5 breakpoints (µg/m3),
-    not a guessed scale.
+
+def _fetch_air_quality() -> list[dict[str, Any]]:
+    """Real, current PM2.5 for a fixed spread of major world cities, via
+    Open-Meteo's Air Quality API.
+
+    v8.23: replaces the original OpenAQ v3 integration entirely — v3 needs
+    a key, and both keys supplied for it during live testing on 23 Aug
+    2026 were rejected by OpenAQ's own server (confirmed with raw curl,
+    independent of this codebase). Open-Meteo's air-quality endpoint is
+    genuinely keyless — verified live, no signup, no header, real batched
+    multi-location response — so this channel can never again go NOT
+    CONFIGURED or fail on a bad key; it either has real data or reports a
+    real network/parse error. Severity buckets follow the real EPA PM2.5
+    breakpoints (µg/m3), not a guessed scale.
     """
-    key = _env("OPENAQ_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "NOT CONFIGURED: air_quality needs OPENAQ_API_KEY (free at "
-            "openaq.org) — nothing was fetched."
-        )
-    # Parameter id 2 = PM2.5 in OpenAQ's own parameter registry.
-    url = "https://api.openaq.org/v3/parameters/2/latest?limit=20"
-    raw = live_feeds._http_get(url, timeout=int(_SOURCE_TIMEOUT), headers={"X-API-Key": key})
+    lat_str = ",".join(str(lat) for _n, lat, _lon in _AQ_CITIES)
+    lon_str = ",".join(str(lon) for _n, _lat, lon in _AQ_CITIES)
+    url = (
+        "https://air-quality-api.open-meteo.com/v1/air-quality"
+        f"?latitude={lat_str}&longitude={lon_str}&current=pm2_5,pm10,us_aqi"
+    )
+    raw = _http_get(url)
     try:
-        data = json.loads(raw)
+        rows = json.loads(raw)
     except ValueError as exc:
-        raise RuntimeError(f"unparseable OpenAQ response: {exc}") from exc
-    results = data.get("results") or []
-    if not results:
-        raise RuntimeError("OpenAQ returned no PM2.5 readings")
+        raise RuntimeError(f"unparseable Open-Meteo response: {exc}") from exc
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError("Open-Meteo air-quality returned no rows")
     out: list[dict[str, Any]] = []
-    for r in results[:_MAX_ITEMS_PER_SOURCE]:
-        coords = r.get("coordinates") or {}
-        lat, lon = coords.get("latitude"), coords.get("longitude")
-        value = r.get("value")
-        if lat is None or lon is None or value is None:
+    for (name, req_lat, req_lon), row in zip(_AQ_CITIES, rows):
+        if not isinstance(row, dict):
             continue
-        value = float(value)
-        if value >= 55.5:
+        current = row.get("current") or {}
+        pm25 = current.get("pm2_5")
+        if pm25 is None:
+            continue
+        pm25 = float(pm25)
+        if pm25 >= 55.5:
             sev = "critical"
-        elif value >= 35.5:
+        elif pm25 >= 35.5:
             sev = "high"
-        elif value >= 12.1:
+        elif pm25 >= 12.1:
             sev = "watch"
         else:
             sev = "info"
-        when = (r.get("datetime") or {}).get("utc", "")
+        aqi = current.get("us_aqi")
+        lat = row.get("latitude", req_lat)
+        lon = row.get("longitude", req_lon)
         out.append(_item(
-            f"PM2.5 {value:.1f} µg/m³",
-            summary=f"location #{r.get('locationsId', '?')} · sensor #{r.get('sensorsId', '?')} "
-                    f"· {when} (OpenAQ)",
-            severity=sev, lat=float(lat), lon=float(lon),
+            f"{name}: PM2.5 {pm25:.1f} µg/m³" + (f" (US AQI {aqi:.0f})" if aqi is not None else ""),
+            summary=f"PM10 {current.get('pm10', '?')} µg/m³ · {current.get('time', '')} UTC (Open-Meteo)",
+            severity=sev, lat=float(lat), lon=float(lon), country=name,
         ))
+        if len(out) >= _MAX_ITEMS_PER_SOURCE:
+            break
     if not out:
-        raise RuntimeError("OpenAQ rows carried no usable coordinates")
+        raise RuntimeError("Open-Meteo rows carried no usable PM2.5 readings")
     return out
 
 
@@ -1182,7 +1209,7 @@ _SOURCES: dict[str, tuple[str, Callable[[], list[dict[str, Any]]]]] = {
     "ships": ("aisstream.io — live AIS ship positions (needs AISSTREAM_API_KEY)", _fetch_ships),
     "wildfires": ("NASA FIRMS — VIIRS thermal detections, last 24h (needs FIRMS_MAP_KEY)", _fetch_wildfires),
     "storms": ("NOAA/NHC — active tropical cyclones", _fetch_storms),
-    "air_quality": ("OpenAQ v3 — latest PM2.5 readings (needs OPENAQ_API_KEY)", _fetch_air_quality),
+    "air_quality": ("Open-Meteo — real PM2.5 for major world cities, keyless", _fetch_air_quality),
     "power_grid": ("ENTSO-E — actual total load, FR/GB/NL (needs ENTSOE_API_TOKEN)", _fetch_power_grid),
     "launches": ("Launch Library 2 — upcoming orbital launches", _fetch_launches),
     "infrastructure": ("OSM Overpass — pipelines + harbours (static base layer)", _fetch_infrastructure),

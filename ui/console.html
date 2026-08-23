@@ -1480,19 +1480,13 @@ function projY(lat){ return (90-Number(lat))*1000/180; }
 
 /* v8.20 globe view — real orthographic projection (not a fake globe
    image), re-projecting the same real located points the flat view
-   plots. Fixed viewing center (20N, 20E); not drag-to-rotate — a real,
-   working scope decision, not a placeholder: rotating would need pointer
-   drag state, inertia, and re-render-on-drag, which is a genuinely
-   separate feature from "the points are correctly projected onto a
-   sphere," and this ships the correct math without it. Coastlines are
-   NOT re-drawn on the globe (WORLD_PATH is a pre-flattened equirectangular
-   SVG path, not raw lon/lat vertices, so re-projecting it would mean
-   parsing it back apart first) — the globe view shows a graticule +
-   real data points, which is what actually matters for reading the data,
-   not a decorative continent silhouette. */
+   plots. Default viewing center (20N, 20E); drag to rotate (v8.23 —
+   pointer-driven, updates globeCenterLat/globeCenterLon and re-renders
+   the existing canvas in place, never touching the DOM mid-drag). */
 const GLOBE_CENTER_LAT = 20, GLOBE_CENTER_LON = 20;
+let globeCenterLat = GLOBE_CENTER_LAT, globeCenterLon = GLOBE_CENTER_LON;
 function orthoProject(lat, lon, R, cx, cy){
-  const phi1 = GLOBE_CENTER_LAT*Math.PI/180, lambda0 = GLOBE_CENTER_LON*Math.PI/180;
+  const phi1 = globeCenterLat*Math.PI/180, lambda0 = globeCenterLon*Math.PI/180;
   const phi = lat*Math.PI/180, lambda = lon*Math.PI/180;
   const cosc = Math.sin(phi1)*Math.sin(phi) + Math.cos(phi1)*Math.cos(phi)*Math.cos(lambda-lambda0);
   if(cosc < 0) return null; // far side of the globe from this viewing center — not visible
@@ -1529,6 +1523,7 @@ async function paintAtlas(){
       <span class="lbl">VIEW</span>
       <button class="chip on" type="button" id="viewFlat">FLAT</button>
       <button class="chip" type="button" id="viewGlobe">GLOBE</button>
+      <button class="chip" type="button" id="resetGlobeBtn" style="display:none">RESET VIEW</button>
       <button class="chip" type="button" id="mapBriefBtn">BRIEF</button>
     </div>
     <div class="toolbar">
@@ -1557,13 +1552,16 @@ async function paintAtlas(){
   $("viewFlat").onclick = () => {
     mapView = "flat";
     $("viewFlat").classList.add("on"); $("viewGlobe").classList.remove("on");
+    $("resetGlobeBtn").style.display = "none";
     drawMap();
   };
   $("viewGlobe").onclick = () => {
     mapView = "globe";
     $("viewGlobe").classList.add("on"); $("viewFlat").classList.remove("on");
+    $("resetGlobeBtn").style.display = "inline-block";
     drawMap();
   };
+  $("resetGlobeBtn").onclick = resetGlobeView;
   $("mapBriefBtn").onclick = loadBrief;
 
   const lrow = $("mapLayers");
@@ -1706,15 +1704,35 @@ function worldRings(){
   return WORLD_RINGS;
 }
 
+const GLOBE_SIZE = 640;
+let lastGlobePts = [];
+
+/* v8.23: drawGlobe() sets the canvas DOM up ONCE (called on view-switch
+   or when the underlying data changes) and wires interaction once;
+   dragging just calls renderGlobeFrame() repeatedly against the SAME
+   canvas element. Recreating the canvas on every pointermove (the
+   original approach, going through wrap.innerHTML) would drop pointer
+   capture mid-drag and repaint the whole DOM subtree dozens of times a
+   second for no reason. */
 function drawGlobe(wrap, pts){
-  const size = 640;
-  wrap.innerHTML = `<canvas id="mapCanvas" width="${size}" height="${size}"
-      style="width:100%;max-width:${size}px;height:auto;display:block;margin:0 auto"></canvas>
-    <div id="mapCard" class="note" hidden style="position:absolute;z-index:5;max-width:240px;pointer-events:none"></div>`;
-  const canvas = $("mapCanvas");
+  lastGlobePts = pts;
+  let canvas = wrap.querySelector("#mapCanvas");
+  if(!canvas){
+    wrap.innerHTML = `<canvas id="mapCanvas" width="${GLOBE_SIZE}" height="${GLOBE_SIZE}"
+        style="width:100%;max-width:${GLOBE_SIZE}px;height:auto;display:block;margin:0 auto;touch-action:none;cursor:grab"></canvas>
+      <div id="mapCard" class="note" hidden style="position:absolute;z-index:5;max-width:240px;pointer-events:none"></div>`;
+    canvas = $("mapCanvas");
+    wireGlobeCanvas(wrap, canvas);
+  }
+  renderGlobeFrame(canvas);
+}
+
+function renderGlobeFrame(canvas){
+  const size = GLOBE_SIZE;
   const ctx = canvas.getContext("2d");
   const R = size*0.42, cx = size/2, cy = size/2;
   const line2 = cssVar("--line-2"), land = cssVar("--map-land"), panel = cssVar("--panel"), panel2 = cssVar("--panel2");
+  const pts = lastGlobePts;
 
   ctx.clearRect(0,0,size,size);
   ctx.fillStyle = panel; ctx.fillRect(0,0,size,size);
@@ -1790,8 +1808,6 @@ function drawGlobe(wrap, pts){
     ctx.globalAlpha = 1;
     MAP_GLOBE_POINTS.push({x:proj.x, y:proj.y, r, idx});
   });
-
-  wireHoverCardCanvas(wrap, canvas);
 }
 
 /* ---------------- hover cards (v8.20) ----------------
@@ -1844,28 +1860,70 @@ function wireHoverCardSVG(wrap){
     if(p) togglePin(p);
   });
 }
-function wireHoverCardCanvas(wrap, canvas){
+/* v8.23: hover, click-to-pin, AND drag-to-rotate all share one pointer
+   event stream on the globe canvas, so they're wired together rather
+   than as two independent listener sets that could race (a drag-end
+   must NOT also fire a pin-toggle). Pointer events (not mouse/touch
+   separately) cover both input types; setPointerCapture keeps the drag
+   tracking correctly even if the pointer leaves the canvas mid-drag. */
+function wireGlobeCanvas(wrap, canvas){
   const hitTest = (clientX, clientY) => {
     const rect = canvas.getBoundingClientRect();
     const scale = canvas.width / rect.width;
     const x = (clientX-rect.left)*scale, y = (clientY-rect.top)*scale;
     return MAP_GLOBE_POINTS.find(gp => Math.hypot(gp.x-x, gp.y-y) <= gp.r+3);
   };
-  canvas.addEventListener("mousemove", e => {
+  const DEG_PER_PX = 0.4;
+  let dragging = false, moved = false, lastX = 0, lastY = 0;
+
+  canvas.addEventListener("pointerdown", e => {
+    dragging = true; moved = false;
+    lastX = e.clientX; lastY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = "grabbing";
+    hideCard(wrap);
+  });
+  canvas.addEventListener("pointermove", e => {
+    if(dragging){
+      const dx = e.clientX-lastX, dy = e.clientY-lastY;
+      if(Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
+      if(moved){
+        lastX = e.clientX; lastY = e.clientY;
+        globeCenterLon = ((globeCenterLon - dx*DEG_PER_PX + 540) % 360) - 180; // wrap to -180..180
+        globeCenterLat = Math.max(-89, Math.min(89, globeCenterLat + dy*DEG_PER_PX));
+        renderGlobeFrame(canvas);
+      }
+      return;
+    }
     const hit = hitTest(e.clientX, e.clientY);
-    if(!hit){ hideCard(wrap); return; }
+    if(!hit){ hideCard(wrap); canvas.style.cursor = "grab"; return; }
+    canvas.style.cursor = "pointer";
     const p = MAP_POINTS[hit.idx];
     if(!p) return;
     const rect = wrap.getBoundingClientRect();
     showCard(wrap, e.clientX-rect.left, e.clientY-rect.top, p);
   });
-  canvas.addEventListener("mouseleave", () => hideCard(wrap));
-  canvas.addEventListener("click", e => {
-    const hit = hitTest(e.clientX, e.clientY);
-    if(!hit) return;
-    const p = MAP_POINTS[hit.idx];
-    if(p) togglePin(p);
-  });
+  const endDrag = e => {
+    if(!dragging) return;
+    dragging = false;
+    canvas.style.cursor = "grab";
+    if(!moved){
+      // A genuine click (no real movement) — treat as pin-toggle, same
+      // as the flat view's click handler.
+      const hit = hitTest(e.clientX, e.clientY);
+      if(hit){ const p = MAP_POINTS[hit.idx]; if(p) togglePin(p); }
+    }
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", () => { dragging = false; canvas.style.cursor = "grab"; });
+  canvas.addEventListener("mouseleave", () => { if(!dragging) hideCard(wrap); });
+}
+
+function resetGlobeView(){
+  globeCenterLat = GLOBE_CENTER_LAT;
+  globeCenterLon = GLOBE_CENTER_LON;
+  const canvas = document.getElementById("mapCanvas");
+  if(canvas) renderGlobeFrame(canvas);
 }
 function togglePin(p){
   const key = `${p.chan}|${p.title}|${p.lat}|${p.lon}`;

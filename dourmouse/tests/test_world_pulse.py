@@ -106,6 +106,8 @@ def _fake_http_get(url: str) -> str:
         return _LAUNCHES_JSON
     if "web-api.tp.entsoe.eu" in url:
         return _ENTSOE_XML
+    if "air-quality-api.open-meteo.com" in url:
+        return _OPEN_METEO_AQ_JSON
     raise AssertionError(f"unexpected url in test: {url}")
 
 
@@ -158,18 +160,19 @@ _FIRMS_CSV = (
 )
 _FIRMS_BAD_KEY = "Invalid MAP_KEY"
 
-_OPENAQ_JSON = json.dumps({
-    "results": [
-        {
-            "value": 65.4, "coordinates": {"latitude": 28.6, "longitude": 77.2},
-            "locationsId": 1001, "sensorsId": 5001, "datetime": {"utc": "2026-08-23T09:00:00Z"},
-        },
-        {
-            "value": 8.1, "coordinates": {"latitude": 51.5, "longitude": -0.12},
-            "locationsId": 1002, "sensorsId": 5002, "datetime": {"utc": "2026-08-23T09:05:00Z"},
-        },
-    ]
-})
+# v8.23: real batched-response shape from Open-Meteo's air-quality API,
+# verified live on 23 Aug 2026 (see the module docstring on
+# _fetch_air_quality) — one object per requested city, in request order.
+# Deliberately shorter than the real 15-city _AQ_CITIES list; zip() over
+# the shorter one is exactly what real parsing does when a request
+# returns fewer usable rows than cities asked for.
+_OPEN_METEO_AQ_JSON = json.dumps([
+    {"latitude": 28.6, "longitude": 77.2,
+     "current": {"time": "2026-08-23T16:00", "pm2_5": 65.4, "pm10": 90.0, "us_aqi": 152}},
+    {"latitude": 39.9, "longitude": 116.4,
+     "current": {"time": "2026-08-23T16:00", "pm2_5": 8.1, "pm10": 12.0, "us_aqi": 34}},
+])
+_OPEN_METEO_AQ_EMPTY_JSON = json.dumps([])
 
 _ENTSOE_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
@@ -207,12 +210,15 @@ def _hermetic(monkeypatch):
     monkeypatch.setattr(lf, "market_movers", _fake_movers)
     monkeypatch.setattr(lf, "stock_quote", _fake_quote)
     monkeypatch.setenv("DOURMOUSE_WORLD_PULSE_TTL", "300")  # cache across calls in one test
-    # v8.20: the four key-gated channels (ships/wildfires/air_quality/
+    # v8.20/v8.23: the three still-key-gated channels (ships/wildfires/
     # power_grid) are deliberately left UNCONFIGURED by default — no test
     # should silently open a real socket or make a real keyed HTTP call
     # just because the aggregate snapshot function touches all 15 sources.
-    # Tests that need the configured path set their own fake key + mock
-    # the transport explicitly (see TestNewChannels below).
+    # air_quality moved off OPENAQ_API_KEY entirely in v8.23 (now keyless,
+    # via Open-Meteo) — the env var is still deleted defensively in case a
+    # real .env leaks into the test environment, but nothing in the code
+    # reads it anymore. Tests that need the configured path set their own
+    # fake key + mock the transport explicitly (see TestNewChannels below).
     for key in ("AISSTREAM_API_KEY", "FIRMS_MAP_KEY", "OPENAQ_API_KEY", "ENTSOE_API_TOKEN"):
         monkeypatch.delenv(key, raising=False)
     with wp._cache_lock:
@@ -232,8 +238,9 @@ class TestSnapshot:
         # disappearing still fails this test.
         # v8.20: seven more channels joined. All fifteen are always
         # REGISTERED (world_pulse_status must report their real state even
-        # unconfigured) — but the four key-gated ones (ships/wildfires/
-        # air_quality/power_grid) are NOT CONFIGURED by default in this
+        # unconfigured). v8.23: air_quality moved off a key entirely (now
+        # Open-Meteo, keyless) so it's always-on too — only ships/
+        # wildfires/power_grid are still NOT CONFIGURED by default in this
         # fixture, matching the honest default state of a real install
         # with no keys set. See TestNewChannels for the fully-configured
         # path exercised end to end.
@@ -246,8 +253,9 @@ class TestSnapshot:
         always_on = {
             "markets", "news", "disasters", "cyber", "conflict", "macro",
             "quakes", "flights", "storms", "launches", "infrastructure",
+            "air_quality",
         }
-        gated = {"ships", "wildfires", "air_quality", "power_grid"}
+        gated = {"ships", "wildfires", "power_grid"}
         for name in always_on:
             src = snap["sources"][name]
             assert src["ok"] is True, f"{name} should be up: {src}"
@@ -312,12 +320,13 @@ class TestDetails:
     def test_status_shape(self):
         st = wp.world_pulse_status()
         assert st["configured"] is True
-        # v8.20: 15 sources registered; 11 always-on (up by default in this
-        # fixture) + 4 key-gated ones honestly reporting down (NOT
-        # CONFIGURED) with no keys set — see TestSnapshot.test_all_sources_
-        # aggregate for the exact up/down split by name.
+        # v8.20/v8.23: 15 sources registered; 12 always-on (up by default
+        # in this fixture, air_quality included since v8.23) + 3 key-gated
+        # ones honestly reporting down (NOT CONFIGURED) with no keys set —
+        # see TestSnapshot.test_all_sources_aggregate for the exact
+        # up/down split by name.
         assert st["sources_total"] == 15
-        assert st["sources_up"] == 11
+        assert st["sources_up"] == 12
         assert 5 <= st["pulse_score"] <= 95
 
 
@@ -661,31 +670,31 @@ class TestNewChannels:
         )
         assert wp._fetch_storms() == []
 
-    # --- air_quality (OpenAQ v3) --------------------------------------------
+    # --- air_quality (Open-Meteo, keyless since v8.23) ----------------------
 
-    def test_air_quality_not_configured_without_key(self, monkeypatch):
+    def test_air_quality_needs_no_key_at_all(self, monkeypatch):
+        """The whole point of the v8.23 swap: no key, no env var, no
+        NOT-CONFIGURED path — it either has real data or a real error."""
         monkeypatch.delenv("OPENAQ_API_KEY", raising=False)
-        with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
-            wp._fetch_air_quality()
-
-    def test_air_quality_sends_real_api_key_header_and_parses_epa_bands(self, monkeypatch):
-        monkeypatch.setenv("OPENAQ_API_KEY", "fake-openaq-key")
-        seen_headers = {}
-
-        def _fake_lf_http_get(url, timeout=15, headers=None):
-            seen_headers.update(headers or {})
-            assert "openaq.org" in url
-            return _OPENAQ_JSON
-
-        import dourmouse.live_feeds as lf
-
-        monkeypatch.setattr(lf, "_http_get", _fake_lf_http_get)
         out = wp._fetch_air_quality()
-        assert seen_headers.get("X-API-Key") == "fake-openaq-key"
         assert len(out) == 2
-        # 65.4 ug/m3 -> "high" EPA band (35.5-55.4 is high... 65.4 is >=55.5 -> critical)
+
+    def test_air_quality_parses_batched_response_and_epa_bands(self):
+        out = wp._fetch_air_quality()
+        assert len(out) == 2
+        # 65.4 ug/m3 -> critical (>=55.5); 8.1 ug/m3 -> info (well within "good")
         assert out[0]["severity"] == "critical"
-        assert out[1]["severity"] == "info"  # 8.1 ug/m3 is well within "good"
+        assert "152" in out[0]["title"]  # US AQI surfaced when present
+        assert out[1]["severity"] == "info"
+        assert out[0]["lat"] == 28.6 and out[0]["lon"] == 77.2
+
+    def test_air_quality_empty_response_is_an_honest_error(self, monkeypatch):
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _OPEN_METEO_AQ_EMPTY_JSON if "open-meteo" in url else _fake_http_get(url),
+        )
+        with pytest.raises(RuntimeError, match="no rows"):
+            wp._fetch_air_quality()
 
     # --- power_grid (ENTSO-E) -----------------------------------------------
 
@@ -758,9 +767,10 @@ class TestNewChannels:
     # --- fully-configured integration: all fifteen sources genuinely up ----
 
     def test_all_fifteen_sources_when_fully_configured(self, monkeypatch):
+        # air_quality needs no key at all since v8.23 (Open-Meteo) — only
+        # the remaining three gated channels need a fake key/token here.
         monkeypatch.setenv("AISSTREAM_API_KEY", "fake-key")
         monkeypatch.setenv("FIRMS_MAP_KEY", "fake-key")
-        monkeypatch.setenv("OPENAQ_API_KEY", "fake-key")
         monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
 
         def _all_http_get(url):
@@ -770,13 +780,7 @@ class TestNewChannels:
 
         monkeypatch.setattr(wp, "_http_get", _all_http_get)
 
-        import dourmouse.live_feeds as lf
-
-        monkeypatch.setattr(
-            lf, "_http_get",
-            lambda url, timeout=15, headers=None: _OPENAQ_JSON,
-        )
-        fake_sock = _FakeAISSocket([_fake_position_frame("TEST SHIP", 10.0, 20.0)])
+        fake_sock = _FakeAISSocket([_fake_position_frame_live("TEST SHIP", 10.0, 20.0)])
         monkeypatch.setattr(wp, "_ws_open", lambda host: fake_sock)
 
         snap = wp.world_pulse_snapshot(force=True)
