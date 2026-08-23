@@ -531,12 +531,32 @@ class _FakeAISSocket:
 
 
 def _fake_position_frame(name: str, lat: float, lon: float) -> bytes:
+    """Documented shape from aisstream.io's own docs example — text frame
+    (0x1), capitalized Latitude/Longitude. Still accepted (fallback), but
+    NOT what the live API actually sends — see _fake_position_frame_live."""
     payload = json.dumps({
         "MessageType": "PositionReport",
         "MetaData": {"ShipName": name, "Latitude": lat, "Longitude": lon},
         "Message": {"PositionReport": {}},
     }).encode("utf-8")
     return wp._ws_encode_frame(payload, opcode=0x1, mask=False)
+
+
+def _fake_position_frame_live(name: str, lat: float, lon: float) -> bytes:
+    """The REAL shape, verified live against aisstream.io on 23 Aug 2026
+    with a real key: BINARY frames (0x2, not 0x1), and MetaData carries
+    lowercase latitude/longitude — the docs example (capitalized, text
+    frame) does not match the live wire format. Two real bugs were caught
+    this way and fixed in _fetch_ships; this fixture locks in the actual
+    behavior so a future refactor can't silently regress back to the
+    documented-but-wrong shape."""
+    payload = json.dumps({
+        "MetaData": {"MMSI": 123456789, "ShipName": name, "latitude": lat, "longitude": lon,
+                      "time_utc": "2026-08-23 16:29:44.000000000 +0000 UTC"},
+        "MessageType": "PositionReport",
+        "Message": {"PositionReport": {"MessageID": 1, "Latitude": lat, "Longitude": lon}},
+    }).encode("utf-8")
+    return wp._ws_encode_frame(payload, opcode=0x2, mask=False)
 
 
 class TestNewChannels:
@@ -564,6 +584,26 @@ class TestNewChannels:
         for it in out:
             assert -90 <= it["lat"] <= 90 and -180 <= it["lon"] <= 180
         assert fake_sock.closed is True
+
+    def test_ships_parses_real_live_wire_format(self, monkeypatch):
+        """Locks in the ACTUAL live behavior, verified against a real
+        aisstream.io connection with a real key on 23 Aug 2026: binary
+        (0x2) frames, lowercase latitude/longitude in MetaData. Two real
+        bugs were caught this way — this test exists specifically so a
+        future refactor can't silently regress back to the
+        documented-but-wrong (text frame, capitalized) shape that
+        test_ships_parses_real_position_reports above also still accepts
+        as a fallback."""
+        monkeypatch.setenv("AISSTREAM_API_KEY", "fake-test-key")
+        frames = [
+            _fake_position_frame_live("WELLINGDORF", 54.31544, 10.135),
+            _fake_position_frame_live("BIG SLOOP", 52.30902, 5.24501),
+        ]
+        fake_sock = _FakeAISSocket(frames)
+        out = wp._fetch_ships(open_socket=lambda: fake_sock, listen_seconds=1.0, max_messages=5)
+        assert {i["title"] for i in out} == {"WELLINGDORF", "BIG SLOOP"}
+        wellingdorf = next(i for i in out if i["title"] == "WELLINGDORF")
+        assert wellingdorf["lat"] == 54.31544 and wellingdorf["lon"] == 10.135
 
     def test_ships_no_traffic_is_honest_error(self, monkeypatch):
         """No PositionReport frames arriving is a real, reportable failure

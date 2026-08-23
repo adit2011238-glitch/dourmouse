@@ -514,8 +514,8 @@ def _fetch_ships(
                 if opcode == 0x8:  # close frame — server ended the stream
                     deadline = 0
                     break
-                if opcode != 0x1:  # only text frames carry AIS JSON
-                    continue
+                if opcode not in (0x1, 0x2):  # text OR binary — verified live: aisstream.io
+                    continue                  # actually sends its JSON as binary (0x2) frames
                 try:
                     msg = json.loads(payload.decode("utf-8", errors="replace"))
                 except ValueError:
@@ -523,7 +523,11 @@ def _fetch_ships(
                 if msg.get("MessageType") != "PositionReport":
                     continue
                 meta = msg.get("MetaData") or {}
-                lat, lon = meta.get("Latitude"), meta.get("Longitude")
+                # Verified live: MetaData carries lowercase latitude/longitude,
+                # not the Latitude/Longitude shown in aisstream.io's own docs
+                # example — the docs and the real wire format disagree here.
+                lat = meta.get("latitude", meta.get("Latitude"))
+                lon = meta.get("longitude", meta.get("Longitude"))
                 if lat is None or lon is None:
                     continue
                 name = (meta.get("ShipName") or "").strip() or f"MMSI {meta.get('MMSI', '?')}"
