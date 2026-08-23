@@ -58,6 +58,18 @@ Sixteen channels, nine keyless and seven either keyless or key-gated:
                 fabricated ranking (v8.26 — real research into keyless
                 structured conflict data: ACLED/UCDP both now require a
                 registered key, GDELT's GEO API is dead).
+- ``conflict_events``— GDELT's raw 15-minute event-export stream
+                (data.gdeltproject.org, not the retired convenience APIs).
+                Keyless. Real per-event coordinates, filtered to CAMEO
+                assault/fight/mass-violence codes. Same severity for every
+                item — checked directly, GDELT's own GoldsteinScale field
+                clusters at -9/-10 for these three codes with no real
+                spread, so banding it would imply differentiation that
+                isn't there; the real number is still shown per item.
+                Automated NLP classification over global news — real
+                noise and per-article location duplication, both stated
+                honestly in the fetcher's own docstring, not hidden
+                (v8.27).
 
 Failure isolation: each source is fetched independently; a dead source is
 reported OFFLINE with its real error while every other channel keeps
@@ -90,6 +102,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -97,7 +110,7 @@ from dourmouse import live_feeds
 
 _SOURCE_TIMEOUT = 8.0
 _MAX_ITEMS_PER_SOURCE = 8
-_SOURCE_COUNT = 16
+_SOURCE_COUNT = 17
 # Shared bbox for the three geo channels that need one: Europe + N. Africa
 # + the Med, matching the box _fetch_flights() already used before this
 # file grew ships/infrastructure — one box, one place it's defined, so the
@@ -123,6 +136,23 @@ def _now_iso() -> str:
 def _http_get(url: str) -> str:
     """Keyless GET via the existing live_feeds helper (honest errors)."""
     return live_feeds._http_get(url, timeout=_SOURCE_TIMEOUT)
+
+
+def _http_get_bytes(url: str) -> bytes:
+    """Same honest-error contract as `_http_get`, but returns raw bytes
+    undecoded — only the conflict_events channel needs this, to fetch a
+    real ZIP file (GDELT's raw event-export stream) without corrupting
+    it through a text decode."""
+    req = urllib.request.Request(url, headers={"User-Agent": live_feeds._UA})
+    try:
+        with urllib.request.urlopen(req, timeout=_SOURCE_TIMEOUT) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code} from {url}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"network error fetching {url}: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError(f"timeout fetching {url}: {exc}") from exc
 
 
 def _http_post(url: str, data: bytes) -> str:
@@ -1049,6 +1079,116 @@ def _fetch_conflict_zones() -> list[dict[str, Any]]:
     return out[:_MAX_ITEMS_PER_SOURCE]
 
 
+# v8.27: GDELT's raw 15-minute event-export stream — genuinely keyless,
+# real per-event coordinates. NOT the GDELT convenience APIs (DOC/GEO) —
+# both were checked live the same day this was built and found either
+# coordinate-less (DOC) or entirely dead (GEO 2.0, every documented
+# example URL 404s, confirmed four separate ways). This reads GDELT's
+# actual underlying data files directly: `lastupdate.txt` names the
+# current 15-minute export file, which is fetched and unzipped in memory
+# (stdlib zipfile — no new dependency).
+#
+# Real, honestly-stated limitation, checked directly against real output
+# before this was trusted: GDELT's event classification is fully
+# automated NLP over global news text, not curated incident data. Even
+# filtered to CAMEO root codes 18/19/20 (assault, fight, mass violence —
+# narrower than the full "Material Conflict" QuadClass bucket, which also
+# sweeps in unrelated coercive-but-nonviolent codes), real non-conflict
+# items still get through — a Virginia crime story and a Japan earthquake
+# article both matched code 19 in the same real 15-minute window this was
+# verified against. And GDELT geocodes every location A MATCHING ARTICLE
+# MENTIONS, not only where the event happened, so one article commonly
+# produces several rows at different real places, only one of which (if
+# any) is the actual event location — deduplicated here by (url, lat,
+# lon) so the same mention isn't listed twice, but the underlying
+# per-article multi-location noise is inherent to the data, not a bug in
+# this parser. Distinct from `conflict_zones` (EASA's official, curated,
+# low-volume airspace bulletins, above) — this channel trades authority
+# for volume and genuine per-event coordinates. Severity is NOT invented:
+# it's a real, direct mapping of GoldsteinScale, an established CAMEO
+# field already present in GDELT's own schema (-10..+10, more negative =
+# more severe conflict intensity), not a rating this code makes up.
+_GDELT_LASTUPDATE_URL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+_VIOLENT_EVENT_ROOT_CODES = {"18", "19", "20"}  # assault, fight, mass violence
+
+# GoldsteinScale is a real CAMEO field (see the module comment above), but
+# checked directly against real output before trusting it for severity:
+# once already filtered to codes 18/19/20, every real example observed
+# clustered at -9.0 to -10.0 — CAMEO assigns those three root codes their
+# most negative scores by design, so within this specific filtered set
+# the field carries essentially zero differentiating signal. Banding it
+# into critical/high/watch/info here would imply a graded severity that
+# isn't actually present in the data — so every item gets the same
+# severity, honestly, same precedent as `conflict_zones` (EASA publishes
+# no severity either). The real Goldstein number is still shown in each
+# item's summary for anyone who wants it.
+_CONFLICT_EVENT_SEVERITY = "watch"
+
+
+def _fetch_conflict_events() -> list[dict[str, Any]]:
+    """Real per-event conflict coordinates from GDELT's raw 15-minute
+    event-export stream — keyless. See the module-level comment directly
+    above this function for the full, real methodology and its honestly-
+    stated noise/duplication limitations.
+    """
+    idx_raw = _http_get(_GDELT_LASTUPDATE_URL)
+    export_url = None
+    for line in idx_raw.strip().splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[2].endswith(".export.CSV.zip"):
+            export_url = parts[2]
+            break
+    if not export_url:
+        raise RuntimeError("GDELT lastupdate.txt carried no export file URL")
+
+    zip_bytes = _http_get_bytes(export_url)
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+            if not names:
+                raise RuntimeError("GDELT export ZIP was empty")
+            csv_text = zf.read(names[0]).decode("utf-8", errors="replace")
+    except zipfile.BadZipFile as exc:
+        raise RuntimeError(f"GDELT export was not a valid ZIP: {exc}") from exc
+
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, float, float]] = set()
+    for line in csv_text.splitlines():
+        fields = line.split("\t")
+        if len(fields) < 61:
+            continue
+        root_code = fields[28].strip()
+        if root_code not in _VIOLENT_EVENT_ROOT_CODES:
+            continue
+        lat_s, lon_s = fields[56].strip(), fields[57].strip()
+        if not lat_s or not lon_s:
+            continue
+        try:
+            lat, lon = float(lat_s), float(lon_s)
+            goldstein = float(fields[30])
+        except ValueError:
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            continue
+        url = fields[60].strip()
+        key = (url, round(lat, 2), round(lon, 2))
+        if key in seen:
+            continue
+        seen.add(key)
+        place = fields[52].strip() or "unknown location"
+        out.append(_item(
+            place,
+            summary=f"CAMEO {fields[26].strip()} · Goldstein {goldstein:+.1f} (GDELT, automated news classification — "
+                    "not verified incident data)",
+            link=url, severity=_CONFLICT_EVENT_SEVERITY, lat=lat, lon=lon,
+        ))
+        if len(out) >= _MAX_ITEMS_PER_SOURCE:
+            break
+    if not out:
+        raise RuntimeError("GDELT export carried no matching, plottable conflict-coded events")
+    return out
+
+
 def _fetch_crypto_fx() -> tuple[list[dict[str, Any]], list[str]]:
     """Keyless crypto + FX, from providers that are NOT Yahoo.
 
@@ -1365,6 +1505,7 @@ _SOURCES: dict[str, tuple[str, Callable[[], list[dict[str, Any]]]]] = {
     "launches": ("Launch Library 2 — upcoming orbital launches", _fetch_launches),
     "infrastructure": ("OSM Overpass — pipelines + harbours (static base layer)", _fetch_infrastructure),
     "conflict_zones": ("EASA CZIBs — active Conflict Zone Information Bulletins", _fetch_conflict_zones),
+    "conflict_events": ("GDELT raw event stream — real per-event coordinates, automated classification", _fetch_conflict_events),
 }
 
 

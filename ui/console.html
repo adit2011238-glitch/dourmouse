@@ -1491,6 +1491,10 @@ const MAP_LAYERS = {
   infrastructure: {label:"INFRASTRUCTURE", on:false},
   // v8.26: EASA's own active Conflict Zone Information Bulletins.
   conflict_zones: {label:"CONFLICT ZONES", on:true},
+  // v8.27: GDELT's raw event stream — real per-event coordinates, real
+  // noise (automated classification) — severity="watch" throughout,
+  // already a real bucket in sevColor() below, no new color needed.
+  conflict_events: {label:"CONFLICT EVENTS", on:true},
 };
 const SEV_RANK = {critical:4, high:3, watch:2, info:1};
 function sevColor(s){

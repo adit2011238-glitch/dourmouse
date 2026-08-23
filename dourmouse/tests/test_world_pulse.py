@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import base64
 import http.client
+import io
 import json
 import threading
+import zipfile
 
 import pytest
 
@@ -112,7 +114,15 @@ def _fake_http_get(url: str) -> str:
         return _ENERGY_CHARTS_JSON
     if "easa.europa.eu" in url:
         return _EASA_CZIB_JSON
+    if "gdeltproject.org/gdeltv2/lastupdate.txt" in url:
+        return _GDELT_LASTUPDATE_TXT
     raise AssertionError(f"unexpected url in test: {url}")
+
+
+def _fake_http_get_bytes(url: str) -> bytes:
+    if url.endswith(".export.CSV.zip"):
+        return _GDELT_EXPORT_ZIP
+    raise AssertionError(f"unexpected bytes url in test: {url}")
 
 
 def _fake_http_post(url: str, data: bytes) -> str:
@@ -227,6 +237,55 @@ _ENTSOE_EMPTY_XML = (
     "</GL_MarketDocument>"
 )
 
+# v8.27: real 61-field GDELT 2.0 event-export row shape, verified live on
+# 23 Aug 2026 (see the module comment above _fetch_conflict_events for the
+# real field positions this mirrors exactly). Only the fields the parser
+# actually reads carry real-looking values; everything else is blank,
+# same as plenty of real GDELT rows.
+def _gdelt_row(event_code="190", root_code="19", goldstein="-9.0",
+                place="Test City, Testland", lat="10.0", lon="20.0",
+                url="https://example.test/1"):
+    f = [""] * 61
+    f[26] = event_code   # EventCode
+    f[28] = root_code    # EventRootCode
+    f[30] = goldstein    # GoldsteinScale
+    f[52] = place        # ActionGeo_FullName
+    f[56] = lat           # ActionGeo_Lat
+    f[57] = lon           # ActionGeo_Long
+    f[60] = url           # SOURCEURL
+    return "\t".join(f)
+
+_GDELT_LASTUPDATE_TXT = (
+    "34130 d5c9d3a4 http://data.gdeltproject.org/gdeltv2/20260823183000.export.CSV.zip\n"
+    "53162 35cc9d2d http://data.gdeltproject.org/gdeltv2/20260823183000.mentions.CSV.zip\n"
+    "2752579 7a7b30ae http://data.gdeltproject.org/gdeltv2/20260823183000.gkg.csv.zip\n"
+)
+
+def _make_gdelt_zip(rows):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("20260823183000.export.CSV", "\n".join(rows))
+    return buf.getvalue()
+
+# Mirrors the exact real mix found live: real conflict rows (Gaza,
+# Beirut), a real non-violent-code row that must be filtered out, a
+# duplicate (same url+coords) that must be deduped, and a row with no
+# coordinates that must be skipped.
+_GDELT_EXPORT_ZIP = _make_gdelt_zip([
+    _gdelt_row(place="Gaza, Israel (general), Israel", lat="31.4167", lon="34.3333",
+               url="https://example.test/gaza"),
+    _gdelt_row(place="Gaza, Israel (general), Israel", lat="31.4167", lon="34.3333",
+               url="https://example.test/gaza"),  # exact duplicate — must be deduped
+    _gdelt_row(place="Beirut, Lebanon", lat="33.8719", lon="35.5097",
+               url="https://example.test/beirut"),
+    _gdelt_row(event_code="020", root_code="02", goldstein="3.0",  # non-violent code — must be dropped
+               place="Some Consultation", lat="1.0", lon="1.0", url="https://example.test/consult"),
+    _gdelt_row(place="No Coords Event", lat="", lon="", url="https://example.test/nocoords"),
+])
+_GDELT_EXPORT_ZIP_EMPTY = _make_gdelt_zip([
+    _gdelt_row(event_code="020", root_code="02", place="Only non-violent", url="https://example.test/only"),
+])
+
 
 def _fake_movers(direction="gainers", count=5):
     rows = [
@@ -244,6 +303,7 @@ def _fake_quote(symbol):
 def _hermetic(monkeypatch):
     monkeypatch.setattr(wp, "_http_get", _fake_http_get)
     monkeypatch.setattr(wp, "_http_post", _fake_http_post)
+    monkeypatch.setattr(wp, "_http_get_bytes", _fake_http_get_bytes)
     import dourmouse.live_feeds as lf
 
     monkeypatch.setattr(lf, "market_movers", _fake_movers)
@@ -275,13 +335,14 @@ class TestSnapshot:
         # carry real coordinates, which is what makes the map possible —
         # asserted explicitly rather than by count so a channel silently
         # disappearing still fails this test.
-        # v8.20: seven more channels joined. All sixteen are always
+        # v8.20: seven more channels joined. All seventeen are always
         # REGISTERED (world_pulse_status must report their real state even
         # unconfigured). v8.23: air_quality moved off a key entirely (now
         # Open-Meteo, keyless). v8.24: power_grid did too (energy-charts.info
         # as an always-on keyless base, ENTSO-E merged in only if a token
         # is ALSO configured). v8.26: conflict_zones joined, keyless
-        # (EASA CZIBs) — only ships/wildfires are still NOT CONFIGURED by
+        # (EASA CZIBs). v8.27: conflict_events joined, keyless (GDELT raw
+        # event stream) — only ships/wildfires are still NOT CONFIGURED by
         # default in this fixture, matching the honest default state of a
         # real install with no keys set. See TestNewChannels for the
         # fully-configured path exercised end to end.
@@ -289,12 +350,12 @@ class TestSnapshot:
             "markets", "news", "disasters", "cyber", "conflict", "macro",
             "quakes", "flights",
             "ships", "wildfires", "storms", "air_quality", "power_grid",
-            "launches", "infrastructure", "conflict_zones",
+            "launches", "infrastructure", "conflict_zones", "conflict_events",
         }
         always_on = {
             "markets", "news", "disasters", "cyber", "conflict", "macro",
             "quakes", "flights", "storms", "launches", "infrastructure",
-            "air_quality", "power_grid", "conflict_zones",
+            "air_quality", "power_grid", "conflict_zones", "conflict_events",
         }
         gated = {"ships", "wildfires"}
         for name in always_on:
@@ -361,14 +422,15 @@ class TestDetails:
     def test_status_shape(self):
         st = wp.world_pulse_status()
         assert st["configured"] is True
-        # v8.20/v8.23/v8.24/v8.26: 16 sources registered; 14 always-on (up
-        # by default in this fixture — air_quality since v8.23, power_grid
-        # since v8.24, conflict_zones since v8.26) + 2 key-gated ones
-        # honestly reporting down (NOT CONFIGURED) with no keys set — see
+        # v8.20/v8.23/v8.24/v8.26/v8.27: 17 sources registered; 15
+        # always-on (up by default in this fixture — air_quality since
+        # v8.23, power_grid since v8.24, conflict_zones since v8.26,
+        # conflict_events since v8.27) + 2 key-gated ones honestly
+        # reporting down (NOT CONFIGURED) with no keys set — see
         # TestSnapshot.test_all_sources_aggregate for the exact up/down
         # split by name.
-        assert st["sources_total"] == 16
-        assert st["sources_up"] == 14
+        assert st["sources_total"] == 17
+        assert st["sources_up"] == 15
         assert 5 <= st["pulse_score"] <= 95
 
 
@@ -902,11 +964,67 @@ class TestNewChannels:
         with pytest.raises(RuntimeError, match="no active"):
             wp._fetch_conflict_zones()
 
-    # --- fully-configured integration: all sixteen sources genuinely up ----
+    # --- conflict_events (GDELT raw event stream, keyless) -------------------
 
-    def test_all_sixteen_sources_when_fully_configured(self, monkeypatch):
-        # air_quality and conflict_zones need no key at all (Open-Meteo,
-        # EASA) — only the remaining gated channels need a fake key/token.
+    def test_conflict_events_needs_no_key_at_all(self):
+        out = wp._fetch_conflict_events()
+        assert len(out) > 0
+
+    def test_conflict_events_parses_real_rows_and_dedupes(self):
+        """The fixture has an exact duplicate (same url+coords) which
+        must collapse to one item, a non-violent-code row which must be
+        dropped, and a no-coordinates row which must be skipped — so 5
+        raw fixture rows must produce exactly 2 real items (Gaza, Beirut)."""
+        out = wp._fetch_conflict_events()
+        assert len(out) == 2
+        titles = {it["title"] for it in out}
+        assert "Gaza, Israel (general), Israel" in titles
+        assert "Beirut, Lebanon" in titles
+        for it in out:
+            assert -90 <= it["lat"] <= 90 and -180 <= it["lon"] <= 180
+
+    def test_conflict_events_severity_is_uniform_and_honest(self):
+        """Severity is deliberately NOT banded from GoldsteinScale (see
+        the fetcher's own docstring on why) — every item gets the same
+        real, stated severity, and the real Goldstein number still shows
+        up in the summary text."""
+        out = wp._fetch_conflict_events()
+        severities = {it["severity"] for it in out}
+        assert severities == {wp._CONFLICT_EVENT_SEVERITY}
+        assert any("Goldstein" in it["summary"] for it in out)
+
+    def test_conflict_events_drops_non_violent_codes(self, monkeypatch):
+        """A fixture with ONLY a non-violent CAMEO root code must produce
+        a real, honest empty-result error — never a fabricated item."""
+        monkeypatch.setattr(
+            wp, "_http_get_bytes",
+            lambda url: _GDELT_EXPORT_ZIP_EMPTY if url.endswith(".export.CSV.zip") else b"",
+        )
+        with pytest.raises(RuntimeError, match="no matching"):
+            wp._fetch_conflict_events()
+
+    def test_conflict_events_bad_lastupdate_is_honest_error(self, monkeypatch):
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: "not a real index file" if "lastupdate.txt" in url else _fake_http_get(url),
+        )
+        with pytest.raises(RuntimeError, match="no export file URL"):
+            wp._fetch_conflict_events()
+
+    def test_conflict_events_bad_zip_is_honest_error(self, monkeypatch):
+        monkeypatch.setattr(
+            wp, "_http_get_bytes",
+            lambda url: b"not a real zip file" if url.endswith(".export.CSV.zip") else b"",
+        )
+        with pytest.raises(RuntimeError, match="not a valid ZIP"):
+            wp._fetch_conflict_events()
+
+    # --- fully-configured integration: all seventeen sources genuinely up --
+
+    def test_all_seventeen_sources_when_fully_configured(self, monkeypatch):
+        # air_quality, conflict_zones, and conflict_events need no key at
+        # all (Open-Meteo, EASA, GDELT) — only the remaining gated
+        # channels need a fake key/token.
         monkeypatch.setenv("AISSTREAM_API_KEY", "fake-key")
         monkeypatch.setenv("FIRMS_MAP_KEY", "fake-key")
         monkeypatch.setenv("ENTSOE_API_TOKEN", "fake-token")
@@ -922,7 +1040,7 @@ class TestNewChannels:
         monkeypatch.setattr(wp, "_ws_open", lambda host: fake_sock)
 
         snap = wp.world_pulse_snapshot(force=True)
-        assert len(snap["sources"]) == 16
+        assert len(snap["sources"]) == 17
         for name, src in snap["sources"].items():
             assert src["ok"] is True, f"{name} should be up when fully configured: {src}"
 
@@ -933,7 +1051,7 @@ class TestNewChannels:
         # storms/launches/infrastructure/conflict_zones are always-on and
         # carry real coordinates, so they must be plotted, not listed as
         # unmappable — same bar v8.9 set for quakes/flights.
-        for chan in ("storms", "launches", "infrastructure", "conflict_zones"):
+        for chan in ("storms", "launches", "infrastructure", "conflict_zones", "conflict_events"):
             assert chan in geo["layers"], f"{chan} should be mappable: {geo.get('unmappable')}"
 
 
