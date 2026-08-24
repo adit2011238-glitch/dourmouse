@@ -2309,18 +2309,82 @@ def _run_dispatch_loop(
                 {"role": "tool", "tool_call_id": tool_call.id, "content": result_text}
             )
 
-    exhausted_entry = {
-        "type": "result",
-        "is_error": True,
-        "reason": "max_turns exceeded",
+    # v8.28: the loop ran out of tool-call turns (max_turns) while the model
+    # was still mid-research — observed live on a completely reasonable
+    # question ("latest stable PyTorch version"): 7 web_search calls + 1
+    # fetch_url, never once emitting text, then the old code below returned
+    # final_text="" and the UI rendered a bare "No reply." after burning the
+    # user's whole wait on real tool work with nothing to show for it. A
+    # tool-budget cap must never be allowed to produce an EMPTY answer when
+    # real research already happened — it has to force a synthesis instead.
+    #
+    # Fix: one last LLM call with NO tools available (tools=[] — the model
+    # physically cannot call another one, so it is forced to answer in
+    # text), plus an explicit instruction to use only what has already been
+    # gathered. This reuses the same system-message-injection mechanism the
+    # plan-checkpoint reminder above already uses, just for a different
+    # trigger (turn exhaustion, not plan fixation).
+    forced_entry = {
+        "type": "budget_exhausted",
+        "reason": "max_turns exceeded — forcing a synthesis answer from what was already gathered",
     }
-    transcript.append(exhausted_entry)
-    _emit_event(event_sink, exhausted_entry)
+    transcript.append(forced_entry)
+    _emit_event(event_sink, forced_entry)
+    forced_messages = messages + [
+        {
+            "role": "system",
+            "content": (
+                "[OUT OF TOOL BUDGET] You have used every tool call available "
+                "for this turn. Do not attempt to call any more tools — none "
+                "are available. Answer the user's original question RIGHT "
+                "NOW using only what you already found above. If what you "
+                "gathered is incomplete, give your best answer from it and "
+                "say plainly what remains uncertain — never return an empty "
+                "reply."
+            ),
+        }
+    ]
+    try:
+        forced_response = _call_with_retry(
+            client,
+            model=model,
+            messages=_bounded_context(forced_messages, _MAX_LLM_TOKENS),
+            tools=[],  # no tools offered: the model cannot keep stalling on search
+            config=ctx.config,
+        )
+        forced_text = forced_response.choices[0].message.content or ""
+    except Exception as exc:  # noqa: BLE001 - the forced call itself must never crash the turn
+        forced_text = ""
+        _emit_event(
+            event_sink,
+            {"type": "assistant_text", "text": f"[forced synthesis call failed: {exc}]"},
+        )
+
+    if not forced_text.strip():
+        # Even the forced, tool-free call came back empty (rare) — say so
+        # honestly instead of a silent blank reply (Rule 2.2: no fabricated
+        # success, but also no silent failure the user can't see).
+        tool_names = [e["name"] for e in transcript if e.get("type") == "tool_use"]
+        forced_text = (
+            "I wasn't able to reach a complete answer within my tool budget "
+            f"({len(tool_names)} tool call(s): {', '.join(tool_names) or 'none'}). "
+            "Try rephrasing the question more narrowly, or ask again — a "
+            "second attempt often converges faster."
+        )
+
+    if dlp is not None:
+        forced_text, hits = dlp.redact(forced_text)
+        if hits:
+            forced_text += f"\n[DLP: {len(hits)} secret pattern(s) redacted from model text]"
+
+    entry = {"type": "assistant_text", "text": forced_text}
+    transcript.append(entry)
+    _emit_event(event_sink, entry)
     # Keep the history well-formed for multi-turn chat: after a tool exchange
     # the next turn must NOT begin with a "user" message (OpenAI-compatible
     # APIs reject "tool" then "user" without an intervening assistant).
-    messages.append({"role": "assistant", "content": ""})
-    return {"final_text": "", "transcript": transcript, "messages": messages}
+    messages.append({"role": "assistant", "content": forced_text})
+    return {"final_text": forced_text, "transcript": transcript, "messages": messages}
 
 
 def run_dispatch(

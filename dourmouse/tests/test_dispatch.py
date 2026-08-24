@@ -554,15 +554,58 @@ class TestLoop:
         assert "kaboom" in result["text"]
 
     def test_max_turns_bounds_looping_model(self):
+        # v8.28: a model that never stops calling tools used to run out the
+        # loop and return final_text="" — observed live on a real question
+        # ("latest stable PyTorch version"): 8 real tool calls, then a bare
+        # "No reply." with nothing to show for all that work. The fix forces
+        # one last LLM call with NO tools offered once the budget is spent,
+        # so the model is physically unable to keep looping and must answer
+        # in text. Here the fake client keeps returning a tool-call response
+        # even on that forced call (it doesn't simulate tools=[] narrowing
+        # its own behavior), so this specifically exercises the honest
+        # fallback path: still never an empty final_text.
         tool_call = _FakeToolCall("call_x", "echo", json.dumps({"text": "x"}))
         looping = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))
         client = FakeClient([looping])
 
         report = run_dispatch("loop", _test_registry(), client=client, max_turns=3)
 
-        assert report["final_text"] == ""
-        assert client.chat.completions.calls.__len__() == 3
-        assert report["transcript"][-1]["reason"] == "max_turns exceeded"
+        # Rule 2.2 in practice: a spent tool budget must never look like
+        # silence. Real tool work happened (3 turns' worth) — the user gets
+        # an honest account of that, not a blank box.
+        assert report["final_text"] != ""
+        assert "tool budget" in report["final_text"]
+        # 3 turns to exhaust max_turns, +1 forced tools=[] synthesis call.
+        assert client.chat.completions.calls.__len__() == 4
+        assert client.chat.completions.calls[-1]["tools"] == []
+        exhausted = next(
+            t for t in report["transcript"]
+            if t.get("type") == "budget_exhausted" and "max_turns" in t.get("reason", "")
+        )
+        assert "forcing a synthesis answer" in exhausted["reason"]
+        assert report["transcript"][-1]["type"] == "assistant_text"
+        assert report["transcript"][-1]["text"] == report["final_text"]
+
+    def test_max_turns_forced_call_synthesizes_from_partial_research(self):
+        # The primary case the fix targets: max_turns is spent on real tool
+        # work (unlike the fallback-path test above), and the forced,
+        # tools-stripped call actually comes back with real text — the model
+        # summarizing what it already found instead of continuing to search.
+        # This is what should happen for something like "latest stable
+        # PyTorch version" after a few searches: a real, if imperfect,
+        # answer — never a blank "No reply."
+        tool_call = _FakeToolCall("call_x", "echo", json.dumps({"text": "x"}))
+        looping = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))
+        synthesized = _FakeResponse(
+            _FakeMessage(content="Based on the search results, the answer is X.")
+        )
+        client = FakeClient([looping, looping, looping, synthesized])
+
+        report = run_dispatch("loop", _test_registry(), client=client, max_turns=3)
+
+        assert report["final_text"] == "Based on the search results, the answer is X."
+        assert client.chat.completions.calls.__len__() == 4
+        assert client.chat.completions.calls[-1]["tools"] == []
 
 
 class TestPermissions:

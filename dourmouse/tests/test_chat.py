@@ -145,16 +145,28 @@ class TestMultiTurnMemory:
 
     def test_max_turns_exhaustion_keeps_history_well_formed(self, tmp_path):
         """After max_turns is hit mid tool-loop, the history must not end on
-        a 'tool' message (OpenAI-compatible APIs reject tool->user)."""
+        a 'tool' message (OpenAI-compatible APIs reject tool->user).
+
+        v8.28: the old assertions (final_text=="", last transcript entry's
+        "reason") encoded the bug this fix removed — a spent tool budget
+        used to return a genuinely empty answer. It now forces one last
+        tools-stripped call so the model must synthesize from whatever it
+        already found; the fake client here keeps returning tool_calls even
+        on that forced call, so this exercises the honest-fallback branch.
+        The property this test actually exists to guard — a well-formed
+        history that never ends on a bare 'tool' message — still holds and
+        is still asserted below.
+        """
         tool_call = _FakeToolCall("call_x", "echo", json.dumps({"text": "x"}))
         looping = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))
         client = FakeClient([looping])  # never stops calling tools
         session = ChatSession(_registry(), client=client, session_file=tmp_path / "s4.jsonl")
 
         report = session.ask("loop", max_turns=2)
-        assert report["final_text"] == ""
-        assert report["transcript"][-1]["reason"] == "max_turns exceeded"
+        assert report["final_text"] != ""
+        assert "tool budget" in report["final_text"]
         assert session.messages[-1]["role"] == "assistant"
+        assert session.messages[-1]["content"] == report["final_text"]
 
     def test_resume_reinjects_current_system_prompt(self, tmp_path):
         from dourmouse.dispatch import system_message

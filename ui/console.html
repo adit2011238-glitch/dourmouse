@@ -297,13 +297,22 @@ button,input,textarea,select{font:inherit;color:inherit}
 .card .d{font-size:8.5px;color:var(--blue-deep);line-height:1.5}
 
 /* ---------- transcript ---------- */
-.turn{padding:10px 0;border-top:1px solid rgba(120,175,210,.10)}
+/* v8.28: Claude-like legibility pass, scoped to the chat area specifically
+   (composer, transcript, tool-call blocks) — the four themes and their boot
+   sequences are real, deliberate, separately-shipped work and stay
+   untouched. What actually made every reported bug worse was tiny, dense,
+   shouting-all-caps chrome: 8.5px text at .14em letter-spacing is closer to
+   a HUD readout than a conversation. Bumped size/line-height, eased the
+   letter-spacing, softened the corners — same information, easier to read
+   at the pace an actual conversation happens. */
+.turn{padding:14px 0;border-top:1px solid rgba(120,175,210,.10)}
 .turn:first-child{border-top:none}
-.turn .gut{display:flex;gap:9px;align-items:center;font-size:8.5px;
-  letter-spacing:.14em;color:var(--blue-deep);margin-bottom:5px}
+.turn .gut{display:flex;gap:9px;align-items:center;font-size:9.5px;
+  letter-spacing:.08em;color:var(--blue-deep);margin-bottom:6px}
 .turn .gut .who{color:var(--amber)}
 .turn.you .gut .who{color:var(--blue-hi)}
-.turn .body{font-size:11.5px;line-height:1.7;color:var(--blue-hi);word-break:break-word}
+.turn .gut .tm{color:var(--blue-deep);opacity:.7;font-variant-numeric:tabular-nums}
+.turn .body{font-size:13px;line-height:1.75;color:var(--blue-hi);word-break:break-word}
 .turn.you .body{color:var(--blue);white-space:pre-wrap}
 .turn .body p{margin:0 0 9px}.turn .body p:last-child{margin:0}
 .turn .body ul,.turn .body ol{margin:8px 0;padding-left:19px}
@@ -311,27 +320,38 @@ button,input,textarea,select{font:inherit;color:inherit}
 .turn .body strong{color:var(--amber-hi);font-weight:500}
 .turn .body a{color:var(--amber)}
 .turn .body code{background:rgba(120,175,210,.10);border:1px solid var(--line);
-  padding:1px 4px;border-radius:2px;font-size:10.5px}
-.turn .body pre{background:#050c15;border:1px solid var(--line);border-radius:2px;
-  padding:10px 12px;overflow-x:auto;margin:9px 0;position:relative;font-size:10.5px;line-height:1.6}
+  padding:1px 5px;border-radius:4px;font-size:11px}
+.turn .body pre{background:#050c15;border:1px solid var(--line);border-radius:8px;
+  padding:12px 14px;overflow-x:auto;margin:10px 0;position:relative;font-size:11.5px;line-height:1.65}
 .turn .body pre code{background:none;border:none;padding:0}
-.copybtn{position:absolute;top:5px;right:5px;border:1px solid var(--line-2);background:var(--panel);
-  color:var(--blue-dim);border-radius:2px;padding:3px 8px;font-size:8px;letter-spacing:.12em;
-  cursor:pointer;opacity:0;transition:opacity .12s;min-height:24px}
+.copybtn{position:absolute;top:7px;right:7px;border:1px solid var(--line-2);background:var(--panel);
+  color:var(--blue-dim);border-radius:5px;padding:4px 9px;font-size:8.5px;letter-spacing:.08em;
+  cursor:pointer;opacity:0;transition:opacity .12s;min-height:26px}
 pre:hover .copybtn,.copybtn:focus{opacity:1}
 .copybtn:hover{color:var(--amber);border-color:var(--amber-line)}
-.acts{display:flex;flex-direction:column;gap:3px;margin-bottom:7px}
-.act{display:flex;align-items:center;gap:7px;font-size:8.5px;letter-spacing:.1em;
-  color:var(--blue-deep);border:1px solid var(--line);border-radius:2px;
-  padding:3px 8px;width:fit-content;max-width:100%;background:var(--panel2)}
+.acts{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.actwrap{display:flex;flex-direction:column;align-items:flex-start;max-width:100%}
+.act{display:flex;align-items:center;gap:7px;font-size:9.5px;letter-spacing:.05em;
+  color:var(--blue-deep);border:1px solid var(--line);border-radius:6px;
+  padding:5px 10px;width:fit-content;max-width:100%;background:var(--panel2)}
 .act .nm{color:var(--blue);}
 .act.bad{border-color:var(--bad);color:var(--bad)}
+/* v8.28: tool-call disclosure — collapsed by default (Claude-tool-block
+   style), real arguments/result text on click instead of the old dead
+   "USING: Using a tool" placeholder that could never be expanded. */
+.act.expandable{cursor:pointer}
+.act.expandable:hover{border-color:var(--amber-line);color:var(--amber)}
+.act .car{color:var(--blue-deep);font-size:8px;transition:transform .1s}
+.actdetail{background:#050c15;border:1px solid var(--line);border-top:none;
+  border-radius:0 0 6px 6px;padding:9px 11px;margin:0 0 4px;max-width:100%;
+  overflow-x:auto;font-size:10.5px;line-height:1.6;color:var(--blue-hi);
+  white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto}
 .spin{width:7px;height:7px;border:1px solid var(--line-2);border-top-color:var(--amber);
   border-radius:50%;animation:sp .7s linear infinite;flex:none}
 @keyframes sp{to{transform:rotate(360deg)}}
-.rowacts{display:flex;gap:5px;margin-top:8px}
+.rowacts{display:flex;gap:6px;margin-top:9px}
 .mini{border:1px solid var(--line);background:var(--panel2);color:var(--blue-dim);
-  border-radius:2px;padding:4px 9px;font-size:8px;letter-spacing:.12em;cursor:pointer;min-height:26px}
+  border-radius:6px;padding:5px 11px;font-size:9px;letter-spacing:.06em;cursor:pointer;min-height:28px}
 .mini:hover{color:var(--amber);border-color:var(--amber-line)}
 
 /* ---------- approval ---------- */
@@ -351,8 +371,8 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
 .errbox .t{font-size:9px;letter-spacing:.16em;color:var(--bad);margin-bottom:4px}
 
 /* ---------- composer ---------- */
-.dock{border:1px solid var(--line);border-radius:3px;background:var(--panel);
-  padding:9px 11px;flex:none}
+.dock{border:1px solid var(--line);border-radius:10px;background:var(--panel);
+  padding:10px 13px;flex:none}
 .queue{display:flex;flex-direction:column;gap:4px;margin-bottom:7px}
 .qi{display:flex;align-items:center;gap:8px;font-size:9px;color:var(--blue-dim);
   border:1px dashed var(--line-2);border-radius:2px;padding:5px 9px}
@@ -366,9 +386,9 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
    the primary action of the whole console, off-screen. flex-wrap keeps
    every control inside the viewport at any width. */
 .dockrow{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}
-.hint{font-size:8.5px;letter-spacing:.16em;color:var(--amber);white-space:nowrap;flex:none}
-.chip{padding:5px 9px;border:1px solid var(--line-2);border-radius:2px;font-size:8.5px;
-  letter-spacing:.14em;color:var(--blue-dim);cursor:pointer;min-height:30px;
+.hint{font-size:9px;letter-spacing:.08em;color:var(--amber);white-space:nowrap;flex:none;opacity:.85}
+.chip{padding:5px 10px;border:1px solid var(--line-2);border-radius:6px;font-size:9px;
+  letter-spacing:.08em;color:var(--blue-dim);cursor:pointer;min-height:30px;
   display:inline-flex;align-items:center;gap:5px;flex:none;background:none}
 .chip:hover{border-color:var(--amber-line);color:var(--amber)}
 .chip.on{color:var(--amber);border-color:var(--amber-line);background:var(--amber-soft)}
@@ -378,10 +398,10 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
    forces it onto its own line instead of being crushed. */
 #ta{flex:1 1 190px;min-width:190px;background:none;border:none;outline:none;resize:none;
   color:var(--blue-hi);
-  font-size:10.5px;line-height:1.6;padding:7px 0;max-height:130px;min-height:34px}
+  font-size:12.5px;line-height:1.6;padding:8px 2px;max-height:130px;min-height:36px}
 #ta::placeholder{color:var(--blue-deep)}
-#go{padding:9px 17px;background:var(--amber);color:var(--amber-ink);border:none;border-radius:3px;
-  font-size:9.5px;font-weight:700;letter-spacing:.14em;cursor:pointer;min-height:36px;flex:none}
+#go{padding:9px 18px;background:var(--amber);color:var(--amber-ink);border:none;border-radius:8px;
+  font-size:10px;font-weight:700;letter-spacing:.08em;cursor:pointer;min-height:38px;flex:none}
 #go:hover{background:var(--amber-hi)}
 #stop{display:none;padding:9px 15px;background:none;border:1px solid var(--amber-line);
   color:var(--amber);border-radius:3px;font-size:9px;letter-spacing:.14em;cursor:pointer;
@@ -577,7 +597,7 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
     <section class="pane" id="pane-settings"><div class="panehead">◆ SETTINGS</div>
       <div class="panebody" id="settingsBody"></div></section>
 
-    <section class="pane" id="pane-atlas"><div class="panehead">◆ ATLAS // QUANT</div>
+    <section class="pane" id="pane-atlas"><div class="panehead">◆ WORLD // MONITOR</div>
       <div class="panebody" id="atlasBody"></div></section>
 
     <section class="pane" id="pane-news"><div class="panehead">◆ NEWS // LIVE FEED</div>
@@ -607,7 +627,7 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
   <div class="dock">
     <div class="queue" id="queue"></div>
     <div class="dockrow">
-      <span class="hint">⌘ + ENTER TO BROADCAST</span>
+      <span class="hint">ENTER TO SEND · SHIFT+ENTER FOR NEWLINE</span>
       <button class="chip" id="micChip" title="Switch to voice-only mode">(MIC)</button>
       <textarea id="ta" rows="1" placeholder="Ask anything — or /all &lt;goal&gt; to put every resource on it"></textarea>
       <button class="chip" id="spkChip" title="Speak replies aloud">(SPK)</button>
@@ -630,6 +650,15 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;","
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
 const SCREENS = ["HOME","COMMS","RESEARCH","CODE","MEDIA","SETTINGS","ATLAS","NEWS","VOICE"];
+// v8.28: "ATLAS" is the internal screen id everywhere (pane-atlas, the
+// paintAtlas() dispatch, footer text before this fix) — renaming that
+// identifier would mean touching every reference. But the screen's actual
+// content is 100% World Monitor (air quality, storms, capitals, conflict
+// feeds) and NONE of it is ATLAS's financial-research pipeline, so a user
+// checking "how's the quant research going" landed on disaster data
+// instead — a real, confusing mislabel. This maps the DISPLAYED text only;
+// every internal id/comparison still uses "ATLAS" untouched.
+const SCREEN_LABELS = { ATLAS: "WORLD" };
 const sys = {roster:null,conns:null,server:null,backend:null,memory:null,telemetry:null,version:null,me:null,voice:null};
 let screen = "HOME", busy = false, focusAgent = "", speak = false, voiceMode = false;
 const queue = [];
@@ -640,16 +669,27 @@ SCREENS.forEach((name,i) => {
   const b = document.createElement("button");
   b.className = "tab"; b.type = "button"; b.setAttribute("role","tab");
   b.setAttribute("aria-selected", String(i===0));
-  b.innerHTML = `<span class="dia">◆</span>${name}`;
+  b.innerHTML = `<span class="dia">◆</span>${SCREEN_LABELS[name] || name}`;
+  b.dataset.screen = name;  // real id, independent of the displayed label
   b.onclick = () => show(name);
   tabsEl.appendChild(b);
 });
 function show(name){
+  // v8.28: switching screens used to leave the composer's stale text
+  // sitting in the shared textarea. A user who clicked in mid-string and
+  // typed a fresh, unrelated question got the two interleaved character-by-
+  // character ("how much disk spac" + new text + "e is free...") because
+  // the DOM node persists across screens but its value never reset. Real
+  // users can't tell an old draft from an empty box at a glance, so this
+  // clears it on every screen switch — matching the mental model of a
+  // fresh input per context (the same reason Claude's own composer never
+  // carries a draft into an unrelated conversation).
+  if(screen !== name && ta.value){ ta.value=""; ta.style.height="auto"; }
   screen = name;
-  [...tabsEl.children].forEach(b => b.setAttribute("aria-selected", String(b.textContent.trim().endsWith(name))));
+  [...tabsEl.children].forEach(b => b.setAttribute("aria-selected", String(b.dataset.screen===name)));
   SCREENS.forEach(s => { const p = $("pane-"+s.toLowerCase()); if(p) p.classList.toggle("on", s===name); });
-  $("mastScreen").textContent = "// " + name;
-  $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / 09 — ${name}`;
+  $("mastScreen").textContent = "// " + (SCREEN_LABELS[name] || name);
+  $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / 09 — ${SCREEN_LABELS[name] || name}`;
   if(name==="RESEARCH") paintResearch();
   if(name==="CODE") paintCode();
   if(name==="MEDIA") paintMedia();
@@ -956,6 +996,92 @@ const WORK = {
   remember:["Saving to memory",""],
   recall:["Recalling from memory",""],
   delegate_task:["Delegating a sub-task",""],
+  // v8.28: the map above only ever covered a fraction of the real ~108-tool
+  // roster (general_roster.py + system_access.py) — any tool missing here
+  // fell all the way back to the bare "Using a tool" placeholder, which is
+  // exactly what happened live on a plain disk-space question (system_info
+  // wasn't listed). Filled out the rest of both files' real tool names.
+  system_info:["Checking system status","CPU, memory, disk"],
+  system:["Running a system command",""],
+  check_connections:["Checking connections",""],
+  clipboard_get:["Reading the clipboard",""],
+  clipboard_set:["Writing the clipboard",""],
+  open_path:["Opening a file",""],
+  read_path:["Reading a file",""],
+  write_path:["Writing a file",""],
+  delete_path:["Deleting a file",""],
+  list_path:["Listing files",""],
+  run_privileged_command:["Running a privileged command",""],
+  extract_pdf:["Reading a PDF",""],
+  extract_receipt:["Reading a receipt",""],
+  read_upload:["Reading an uploaded file",""],
+  browser_open:["Opening a page",""],
+  browser_snapshot:["Reading the page",""],
+  browser_extract:["Extracting page content",""],
+  browser_click:["Clicking on the page",""],
+  browser_fill:["Filling a field",""],
+  browser_fill_form:["Filling out a form",""],
+  browser_press:["Pressing a key",""],
+  browser_select:["Selecting an option",""],
+  browser_submit:["Submitting a form",""],
+  browser_wait:["Waiting on the page",""],
+  browser_back:["Going back",""],
+  browser_screenshot:["Taking a screenshot",""],
+  browser_signin:["Signing in",""],
+  browser_creds_list:["Checking saved logins",""],
+  browser_creds_store:["Saving a login",""],
+  browser_creds_forget:["Forgetting a saved login",""],
+  drive_download:["Downloading from Drive",""],
+  list_calendar_events:["Checking your calendar",""],
+  propose_time_slots:["Proposing meeting times",""],
+  gmail_untrash:["Restoring mail from Trash",""],
+  draft_message:["Drafting a message",""],
+  send_message:["Sending a message",""],
+  send_draft:["Sending a draft",""],
+  read_agent_inbox:["Checking agent messages",""],
+  email_own_send:["Sending as itself",""],
+  email_identity_status:["Checking its own email identity",""],
+  read_note:["Reading a note",""],
+  write_note:["Writing a note",""],
+  search_vault:["Searching your notes",""],
+  memory_search_semantic:["Searching memory",""],
+  add_task:["Adding a task",""],
+  complete_task:["Completing a task",""],
+  list_tasks:["Checking your tasks",""],
+  schedule_recurring:["Scheduling a recurring task",""],
+  cancel_schedule:["Cancelling a schedule",""],
+  list_schedules:["Checking scheduled tasks",""],
+  daily_digest:["Building your daily digest",""],
+  deploy:["Deploying",""],
+  diff_preview:["Previewing a diff",""],
+  search_files:["Searching files",""],
+  list_files:["Listing files",""],
+  delete_file:["Deleting a file",""],
+  open_url:["Opening a link",""],
+  claude:["Working in Claude Code",""],
+  codex:["Working in Codex",""],
+  server_status:["Checking the compute node",""],
+  server_chat:["Asking the compute node",""],
+  server_generate:["Generating on the compute node",""],
+  server_offload:["Offloading to the compute node",""],
+  spotify_search:["Searching Spotify",""],
+  spotify_play:["Starting playback",""],
+  spotify_now_playing:["Checking what's playing",""],
+  spotify_playback_control:["Controlling playback",""],
+  spotify_playback_state:["Checking playback state",""],
+  spotify_playlists:["Checking your playlists",""],
+  spotify_recently_played:["Checking recently played",""],
+  spotify_top_tracks:["Checking your top tracks",""],
+  spotify_link:["Linking your Spotify account",""],
+  research_web_search:["Searching the web","Live results with sources"],
+  research_fetch_url:["Reading a web page",""],
+  research_news:["Searching the news",""],
+  research_movers:["Checking market movers",""],
+  research_quote:["Checking a stock quote",""],
+  world_pulse:["Checking world monitor",""],
+  world_pulse_details:["Checking a world monitor event",""],
+  world_correlations:["Cross-checking world monitor signals",""],
+  world_brief:["Building a world monitor brief",""],
 };
 const liveEvents = [];
 function liveAdd(kind, title, sub){
@@ -1011,18 +1137,48 @@ function addYou(text){
 }
 function addReply(){
   const d=document.createElement("div"); d.className="turn";
-  d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span></div>
+  // v8.28: .tm is a live elapsed-time readout, separate from .st (the
+  // stage label like WORKING/GENERATING) so the two can update
+  // independently — a ticking clock the whole time a request is in
+  // flight, since "5 seconds or a minute?" used to be invisible until the
+  // answer either landed or the request had already been running so long
+  // the wait itself became the only signal something was wrong.
+  d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span><span class="tm"></span></div>
     <div class="acts"></div><div class="body"></div><div class="rowacts"></div>`;
   thread.appendChild(d); thread.scrollTop=thread.scrollHeight;
   return {el:d, acts:d.querySelector(".acts"), body:d.querySelector(".body"),
-          row:d.querySelector(".rowacts"), mdl:d.querySelector(".mdl"), st:d.querySelector(".st")};
+          row:d.querySelector(".rowacts"), mdl:d.querySelector(".mdl"), st:d.querySelector(".st"),
+          tm:d.querySelector(".tm")};
 }
-function act(acts,label,name,bad,spin){
+function act(acts,label,name,bad,spin,detail){
+  // v8.28: USING/RESULT chips used to be pure decoration — "Using a tool" /
+  // "Using a tool" twice, dead on click, while the REAL detail (what
+  // arguments were sent, what the tool actually returned) was already
+  // arriving over the wire in e.raw_arguments / e.text and just being
+  // thrown away. A user reading the transcript (not the sidebar Live
+  // Activity feed most people never look at) had no way to know what
+  // actually happened. Now: any chip with real detail gets a disclosure
+  // triangle and expands inline, Claude-tool-block style — collapsed by
+  // default so the transcript stays clean, real content on demand.
+  const wrap=document.createElement("div"); wrap.className="actwrap";
   const a=document.createElement("div"); a.className="act"+(bad?" bad":"");
   if(spin){const s=document.createElement("span");s.className="spin";a.appendChild(s);}
   const l=document.createElement("span"); l.textContent=label; a.appendChild(l);
   if(name){const n=document.createElement("span");n.className="nm";n.textContent=name;a.appendChild(n);}
-  acts.appendChild(a); return a;
+  const trimmed=(detail||"").trim();
+  if(trimmed){
+    a.classList.add("expandable");
+    const car=document.createElement("span"); car.className="car"; car.textContent="▸"; a.appendChild(car);
+    const pre=document.createElement("pre"); pre.className="actdetail"; pre.hidden=true;
+    pre.textContent = trimmed.length>8000
+      ? trimmed.slice(0,8000)+`\n… truncated (${trimmed.length.toLocaleString()} chars total — COPY unavailable past this point)`
+      : trimmed;
+    wrap.appendChild(a); wrap.appendChild(pre);
+    a.onclick=()=>{ pre.hidden=!pre.hidden; car.textContent=pre.hidden?"▸":"▾"; };
+  } else {
+    wrap.appendChild(a);
+  }
+  acts.appendChild(wrap); return a;
 }
 function wireCopies(root){
   root.querySelectorAll("pre").forEach(pre=>{
@@ -1081,6 +1237,11 @@ async function run(text){
   addYou(text); setBusy(true);
   liveClear(); liveAdd("act","Thinking", text.slice(0,80));
   const node = addReply(); node.st.textContent="THINKING";
+  const startedAt = performance.now();
+  node.tm.textContent = "0s";
+  const tick = setInterval(()=>{
+    node.tm.textContent = Math.round((performance.now()-startedAt)/1000) + "s";
+  }, 1000);
   let buf="", stopped=false, dirty=false, painting=false;
   const paint=()=>{ dirty=true; if(painting)return; painting=true;
     setTimeout(()=>{ painting=false; if(!dirty)return; dirty=false;
@@ -1113,11 +1274,16 @@ async function run(text){
           case "plan": act(node.acts,"PLAN",""); liveAdd("act","Planning the steps",""); break;
           case "tool_use": case "function":{
             const nm=e.name||e.tool||"tool"; const w=describeTool(nm);
-            act(node.acts,"USING",transcriptToolLabel(nm),false,true);
+            let argsDetail="";
+            if(e.raw_arguments){
+              try{ argsDetail=JSON.stringify(JSON.parse(e.raw_arguments),null,2); }
+              catch{ argsDetail=e.raw_arguments; }
+            }
+            act(node.acts,"USING",transcriptToolLabel(nm),false,true,argsDetail);
             liveAdd("act", w.t, w.s || nm);
             node.st.textContent="WORKING"; break; }
           case "tool_result": case "result":{
-            const nm=e.name||e.tool||""; act(node.acts,"RESULT",transcriptToolLabel(nm));
+            const nm=e.name||e.tool||""; act(node.acts,"RESULT",transcriptToolLabel(nm),false,false,e.text||"");
             liveAdd("done","Finished "+(WORK[nm]?WORK[nm][0].toLowerCase():nm),"");
             break; }
           case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e); break;
@@ -1141,6 +1307,8 @@ async function run(text){
       liveAdd("err","Request failed",String(err.message||err).slice(0,80));
     }
   }finally{
+    clearInterval(tick);
+    node.tm.textContent = ((performance.now()-startedAt)/1000).toFixed(1) + "s";
     ctrl=null;
     node.body.innerHTML = md(buf) || "<p><em>No reply.</em></p>";
     wireCopies(node.body);
