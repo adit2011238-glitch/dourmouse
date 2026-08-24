@@ -48,3 +48,6 @@ whisper_models/
 .DS_Store
 ._*
 sync_log.txt
+
+# v8.30: runtime artifact of dourmouse/global_memory.py's default store
+global_memory.sqlite3

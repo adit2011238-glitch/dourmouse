@@ -1274,6 +1274,21 @@ class DispatchContext:
     # owns whichever ONE agent it was forced to), so there is nothing to
     # propagate.
     forced_agent: str | None = None
+    # v8.30: True once a model has been deliberately chosen for this run —
+    # an explicit caller override, the fast lane's own cheap/fast pick, or
+    # brain escalation — and must NOT be second-guessed further downstream.
+    # False only for the genuinely generic default-model case, which is
+    # exactly when the per-agent refinement below (once plan_agents is
+    # known) is allowed to act. Two of the three per-agent-model paths
+    # already existed before this: an explicit focus_agent route
+    # (webui.py) and a delegate_task nested run both already resolve
+    # model_for_agent(target) BEFORE calling run_dispatch_messages, so
+    # ctx.model_pinned is True for both and this flag correctly leaves them
+    # alone. The one gap was the plain auto-routed top-level call, where
+    # the target agent literally is not known until AFTER build_plan /
+    # find_agents_for_query run — this field is what lets that case get
+    # refined too, without touching the two paths already working.
+    model_pinned: bool = False
 
     def delegates_used(self) -> int:
         return self.budget[0]
@@ -1534,6 +1549,14 @@ def run_dispatch_messages(
         rbac=rbac,
         parent_context=_build_parent_context(messages),
         forced_agent=forced_agent,
+        # v8.30: pinned whenever anything more specific than the plain
+        # generic default already claimed this model — an explicit caller
+        # override, brain escalation, or the fast lane's own deliberate
+        # cheap/fast pick. Only the genuinely generic case is left open for
+        # the per-agent refinement further down the loop.
+        model_pinned=not (
+            _explicit_model is None and not escalated_brain and not fast_lane
+        ),
     )
     # INVARIANT: at most ONE in-flight run per registry at any instant. The
     # webui guarantees this by serializing chat under session_lock, and
@@ -1821,6 +1844,56 @@ def _append_voice(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _maybe_ingest_memory(
+    depth: int, question: str, answer: str, plan_agents: set[str]
+) -> None:
+    """Real ingestion into global memory — the other half of retrieval
+    above. OFF by default (see global_memory.global_memory_enabled), and
+    only at depth 0: a nested delegate_task run answering on behalf of the
+    parent would otherwise double-store the same real exchange twice.
+    Tags each stored turn with the resolved plan_agents (which real agent
+    actually handled it) rather than a UI screen name — dispatch.py has no
+    notion of which tab was open, but it DOES know which agent ran, which
+    is a more meaningful tag for later retrieval anyway. Swallows its own
+    failures (Rule: an observer must never break the turn it's observing)
+    and never stores an empty answer — nothing to recall from silence."""
+    if depth != 0 or not answer.strip():
+        return
+    from dourmouse.global_memory import global_memory_enabled
+
+    if not global_memory_enabled():
+        return
+    try:
+        from dourmouse.global_memory import get_default_memory
+
+        screen = next(iter(plan_agents), "")
+        get_default_memory().add(f"Q: {question}\nA: {answer}", screen=screen)
+    except Exception:  # noqa: BLE001 - ingestion must never break a turn
+        pass
+
+
+def _append_memory_context(messages: list[dict[str, Any]], context_block: str) -> list[dict[str, Any]]:
+    """Copy of ``messages`` with real retrieved memory prepended to the
+    last user turn — same copy-don't-mutate, last-user-turn-not-system-
+    prompt boundary discipline as ``_append_brief``/``_append_voice``
+    (this backend follows a short instruction on the last user turn
+    reliably; the same instruction in the system prompt gets followed only
+    inconsistently, already proven and pinned by this codebase's own
+    tests). ``context_block`` is real, retrieved text from
+    global_memory.GlobalMemory.retrieve_context_for_prompt() — this
+    function never fabricates or pads it; an empty block is simply not
+    injected (see the caller)."""
+    out = [dict(m) for m in messages]
+    for msg in reversed(out):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and context_block not in content:
+            msg["content"] = f"{context_block}\n\n{content}"
+        break
+    return out
+
+
 # Prompt shapes that ARE lookups: a question wanting one fact or one method.
 _BRIEF_CUES = (
     "what is", "what's", "whats", "what are", "who is", "who's",
@@ -1973,6 +2046,31 @@ def _run_dispatch_loop(
             }
     scoped_tools = _scoped_tool_specs(registry, plan_agents) if plan_agents else []
 
+    # v8.30: per-agent model routing for the ONE case it was never wired
+    # for. An explicit focus_agent route and a delegate_task nested run
+    # both already resolve model_for_agent(target) before ever reaching
+    # here (see DispatchContext.model_pinned's docstring) — this is
+    # specifically the plain auto-routed top-level call, where the target
+    # agent genuinely isn't known until build_plan/find_agents_for_query
+    # run, which is exactly what just happened above. Deliberately
+    # conservative: only acts on a SINGLE, unambiguous plan_agents match —
+    # a multi-agent plan keeps the already-resolved general-purpose model
+    # rather than guessing which step's agent should own the WHOLE run.
+    if (
+        not ctx.model_pinned
+        and ctx.config is not None
+        and len(plan_agents) == 1
+        and hasattr(ctx.config, "model_for_agent")
+    ):
+        routed_model = ctx.config.model_for_agent(next(iter(plan_agents)))
+        if routed_model and routed_model != model:
+            model = routed_model
+            if event_sink is not None and ctx.depth == 0:
+                _emit_event(
+                    event_sink,
+                    {"type": "brain", "model": model, "escalated": False},
+                )
+
     # v5.32: the schemas are scoped above, but the ROSTER PROSE in the system
     # message still described all 31 agents / 161 tools (~12.3k chars) on every
     # turn, while a typical directive touches one or two. Now that plan_agents
@@ -1982,6 +2080,31 @@ def _run_dispatch_loop(
     focused_system = (
         system_message(registry, plan_agents) if plan_agents else None
     )
+
+    # v8.30: unified, embedding-based memory across every screen — real
+    # retrieved past context auto-injected into the prompt, not a tool the
+    # model has to remember to call (the same reason JARVIS's own per-agent
+    # memory is injected rather than callable). OFF by default
+    # (DOURMOUSE_GLOBAL_MEMORY unset) — see global_memory.py's own
+    # docstring for why: this adds a real embedding call before every
+    # top-level turn, and the specific Ollama embedding model it expects
+    # has not been confirmed pulled on every deployment. Retrieved ONCE
+    # here (not per loop iteration) since the question doesn't change
+    # turn to turn within one run; only depth 0 (top-level), matching the
+    # same reasoning ctx.compact_system/assistant_delta streaming already
+    # uses — a nested delegate run gets the parent's own context, not a
+    # second independent retrieval.
+    memory_context = ""
+    if ctx.depth == 0:
+        from dourmouse.global_memory import global_memory_enabled
+
+        if global_memory_enabled():
+            try:
+                from dourmouse.global_memory import get_default_memory
+
+                memory_context = get_default_memory().retrieve_context_for_prompt(str(last_user))
+            except Exception:  # noqa: BLE001 - memory retrieval must never break a turn
+                memory_context = ""
 
     for _ in range(max_turns):
         # Deterministic cost cap BEFORE each LLM call (spec: prevent runaway
@@ -2093,6 +2216,10 @@ def _run_dispatch_loop(
         # behavior is unchanged.
         if getattr(ctx, "voice", False) and bounded:
             bounded = _append_voice(bounded)
+        # v8.30: real retrieved memory, prepended after brief/voice so all
+        # three can stack on the same turn without clobbering each other.
+        if memory_context and bounded:
+            bounded = _append_memory_context(bounded, memory_context)
         # v5.30: the server fast lane tries the Dell first; ANY failure
         # (unreachable, timeout, 500, malformed) falls back to the local
         # fast model — the node can never take the reply down.
@@ -2213,6 +2340,7 @@ def _run_dispatch_loop(
                         transcript[-1]["text"] = text
                     if messages and messages[-1].get("role") == "assistant":
                         messages[-1]["content"] = text
+            _maybe_ingest_memory(ctx.depth, str(last_user), text, plan_agents)
             return {"final_text": text, "transcript": transcript, "messages": messages}
 
         assistant_msg: dict[str, Any] = {
@@ -2384,6 +2512,7 @@ def _run_dispatch_loop(
     # the next turn must NOT begin with a "user" message (OpenAI-compatible
     # APIs reject "tool" then "user" without an intervening assistant).
     messages.append({"role": "assistant", "content": forced_text})
+    _maybe_ingest_memory(ctx.depth, str(last_user), forced_text, plan_agents)
     return {"final_text": forced_text, "transcript": transcript, "messages": messages}
 
 

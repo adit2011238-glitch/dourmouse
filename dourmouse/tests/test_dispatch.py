@@ -748,9 +748,92 @@ class TestModelOverride:
         run_dispatch("check my inbox", registry, client=client)
         assert client.chat.completions.calls[0]["model"] != "qwen3:4b"
 
+    def test_auto_routed_single_agent_match_uses_that_agents_model(self, monkeypatch):
+        # v8.30: the one gap in per-agent model routing — an explicit
+        # focus_agent route and a delegate_task nested run both already
+        # resolved model_for_agent(target) BEFORE this fix, since the
+        # target agent is known up front in both cases. A plain, auto-
+        # routed top-level directive with no focus_agent had no such
+        # signal: the target agent isn't known until AFTER
+        # find_agents_for_query runs, so it always fell back to the
+        # single default model. "check my inbox" deterministically
+        # resolves to exactly one agent (mail, per the test directly
+        # above) with no explicit override and no fast-lane eligibility
+        # (it's agentic, not pure chat) — exactly the case this closes.
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.config import NvidiaConfig
+        from dourmouse.general_roster import build_general_registry
+
+        config = NvidiaConfig(
+            api_key="k", base_url="u", model="nvidia/base-120b",
+            agent_models={"MAIL": "nvidia/mail-tuned-8b"},
+        )
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", registry, client=client, config=config)
+        assert client.chat.completions.calls[0]["model"] == "nvidia/mail-tuned-8b"
+
+    def test_multi_agent_plan_keeps_default_model_not_a_guess(self, monkeypatch):
+        # Deliberately conservative: when the deterministic match resolves
+        # to MORE than one agent, the run keeps the already-resolved
+        # general-purpose model rather than guessing which step should own
+        # the whole run's model choice.
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.config import NvidiaConfig
+        from dourmouse.general_roster import build_general_registry
+
+        config = NvidiaConfig(
+            api_key="k", base_url="u", model="nvidia/base-120b",
+            agent_models={"MAIL": "nvidia/mail-tuned-8b", "TASKS": "nvidia/tasks-tuned-8b"},
+        )
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        # A real multi-step directive: build_plan should split this into
+        # more than one agent (mail + tasks), so no single per-agent model
+        # is unambiguous.
+        run_dispatch(
+            "check my inbox and then add a task to follow up",
+            registry, client=client, config=config,
+        )
+        assert client.chat.completions.calls[0]["model"] == "nvidia/base-120b"
+
         client2 = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
         run_dispatch("just say hi", registry, client=client2, model="nvidia/special-70b")
         assert client2.chat.completions.calls[0]["model"] == "nvidia/special-70b"
+
+    def test_single_agent_routing_with_a_real_event_sink_does_not_crash(self, monkeypatch):
+        # Regression guard: the per-agent routing refinement above used a
+        # bare `depth` where only `ctx.depth` exists inside
+        # _run_dispatch_loop — a real NameError. It was fully masked in
+        # every other test here because none of them passed an
+        # event_sink, so `event_sink is not None and depth == 0` never
+        # evaluated its second operand (Python's `and` short-circuits).
+        # This test exists specifically so a real event_sink is present,
+        # which is what actually exercises the buggy line.
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.config import NvidiaConfig
+        from dourmouse.general_roster import build_general_registry
+
+        config = NvidiaConfig(
+            api_key="k", base_url="u", model="nvidia/base-120b",
+            agent_models={"MAIL": "nvidia/mail-tuned-8b"},
+        )
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        events = []
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "check my inbox"},
+        ]
+        run_dispatch_messages(
+            messages, registry, client=client, config=config,
+            event_sink=lambda e: events.append(e),
+        )
+        assert client.chat.completions.calls[0]["model"] == "nvidia/mail-tuned-8b"
+        brain_events = [e for e in events if e.get("type") == "brain"]
+        assert any(e["model"] == "nvidia/mail-tuned-8b" for e in brain_events)
 
     def test_fast_lane_takes_knowledge_questions(self, monkeypatch):
         """A stable-fact question ("what is the tallest mountain...") answers
@@ -1423,3 +1506,88 @@ class TestBrainEscalation:
         )
         assert model == "fast-model"
         assert escalated is False
+
+
+class TestGlobalMemoryWiring:
+    """v8.30: real retrieval auto-injected into the prompt, real ingestion
+    of the completed turn — both OFF unless DOURMOUSE_GLOBAL_MEMORY=1, and
+    both must never break a turn if memory itself fails."""
+
+    def test_memory_context_is_injected_when_enabled(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_GLOBAL_MEMORY", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+
+        class _FakeMemory:
+            def retrieve_context_for_prompt(self, prompt):
+                return "RELEVANT PAST CONTEXT (from earlier conversations...):\nsomething real"
+
+            def add(self, *a, **k):
+                pass
+
+        monkeypatch.setattr("dourmouse.global_memory.get_default_memory", lambda: _FakeMemory())
+
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", _test_registry(), client=client)
+        sent = client.chat.completions.calls[0]["messages"]
+        user_msg = next(m for m in reversed(sent) if m["role"] == "user")
+        assert "RELEVANT PAST CONTEXT" in user_msg["content"]
+        assert "check my inbox" in user_msg["content"]
+
+    def test_memory_context_absent_when_disabled(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_GLOBAL_MEMORY", raising=False)
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+
+        calls = []
+
+        class _FakeMemory:
+            def retrieve_context_for_prompt(self, prompt):
+                calls.append(prompt)
+                return "should never be reached"
+
+        monkeypatch.setattr("dourmouse.global_memory.get_default_memory", lambda: _FakeMemory())
+
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", _test_registry(), client=client)
+        assert calls == []
+        sent = client.chat.completions.calls[0]["messages"]
+        user_msg = next(m for m in reversed(sent) if m["role"] == "user")
+        assert "RELEVANT PAST CONTEXT" not in user_msg["content"]
+
+    def test_completed_turn_is_ingested_when_enabled(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_GLOBAL_MEMORY", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+
+        added = []
+
+        class _FakeMemory:
+            def retrieve_context_for_prompt(self, prompt):
+                return ""
+
+            def add(self, text, screen=""):
+                added.append((text, screen))
+
+        monkeypatch.setattr("dourmouse.global_memory.get_default_memory", lambda: _FakeMemory())
+
+        client = FakeClient([_FakeResponse(_FakeMessage(content="the inbox is empty"))])
+        run_dispatch("check my inbox", _test_registry(), client=client)
+        assert len(added) == 1
+        text, screen = added[0]
+        assert "check my inbox" in text
+        assert "the inbox is empty" in text
+
+    def test_memory_failure_never_breaks_the_turn(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_GLOBAL_MEMORY", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+
+        class _BoomMemory:
+            def retrieve_context_for_prompt(self, prompt):
+                raise RuntimeError("ollama down")
+
+            def add(self, *a, **k):
+                raise RuntimeError("sqlite locked")
+
+        monkeypatch.setattr("dourmouse.global_memory.get_default_memory", lambda: _BoomMemory())
+
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        report = run_dispatch("check my inbox", _test_registry(), client=client)
+        assert report["final_text"] == "ok"

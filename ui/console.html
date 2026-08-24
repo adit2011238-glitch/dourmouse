@@ -345,6 +345,14 @@ button,input,textarea,select{font:inherit;color:inherit}
   cursor:pointer;opacity:0;transition:opacity .12s;min-height:26px}
 pre:hover .copybtn,.copybtn:focus{opacity:1}
 .copybtn:hover{color:var(--amber);border-color:var(--amber-line)}
+/* v8.30: the tool-call steps disclosure — closed by default, one line,
+   never in the user's way. The individual act() chips inside .acts are
+   unchanged; only whether the LIST is visible at all is new. */
+.stepsToggle{display:inline-flex;align-items:center;gap:5px;background:none;
+  border:none;color:var(--blue-deep);font-size:10px;letter-spacing:.04em;
+  cursor:pointer;padding:2px 0 6px;font-family:var(--mono)}
+.stepsToggle:hover{color:var(--blue-dim)}
+.stepsToggle .car{font-size:8px;transition:transform .1s}
 .acts{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
 .actwrap{display:flex;flex-direction:column;align-items:flex-start;max-width:100%}
 .act{display:flex;align-items:center;gap:7px;font-size:9.5px;letter-spacing:.05em;
@@ -1253,12 +1261,30 @@ function addReply(threadEl){
   // flight, since "5 seconds or a minute?" used to be invisible until the
   // answer either landed or the request had already been running so long
   // the wait itself became the only signal something was wrong.
+  //
+  // v8.30: the user should never SEE a tool call by default — .acts (the
+  // real chip-by-chip detail, still built by act() exactly as before) now
+  // starts hidden behind a single "N steps" disclosure, closed by default.
+  // node.st ("WORKING"/"GENERATING"/"DONE") stays the one always-visible
+  // status line; the per-tool blow-by-blow is opt-in, not on the page by
+  // default. Nothing about act()'s own real-detail expansion changed —
+  // this just gates the whole chip LIST behind one more collapse.
   d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span><span class="tm"></span></div>
-    <div class="acts"></div><div class="body"></div><div class="rowacts"></div>`;
+    <button type="button" class="stepsToggle" style="display:none"><span class="car">▸</span><span class="stepsCount">0</span> steps</button>
+    <div class="acts" style="display:none"></div><div class="body"></div><div class="rowacts"></div>`;
   threadEl.appendChild(d); threadEl.scrollTop=threadEl.scrollHeight;
-  return {el:d, acts:d.querySelector(".acts"), body:d.querySelector(".body"),
+  const stepsToggle=d.querySelector(".stepsToggle"), acts=d.querySelector(".acts");
+  let stepCount=0;
+  stepsToggle.onclick=()=>{
+    const open = acts.style.display!=="none";
+    acts.style.display = open?"none":"flex";
+    stepsToggle.querySelector(".car").textContent = open?"▸":"▾";
+  };
+  return {el:d, acts, body:d.querySelector(".body"),
           row:d.querySelector(".rowacts"), mdl:d.querySelector(".mdl"), st:d.querySelector(".st"),
-          tm:d.querySelector(".tm"), thread:threadEl};
+          tm:d.querySelector(".tm"), thread:threadEl,
+          noteStep(){ stepCount++; stepsToggle.style.display="inline-flex";
+            stepsToggle.querySelector(".stepsCount").textContent=stepCount; }};
 }
 function act(acts,label,name,bad,spin,detail){
   // v8.28: USING/RESULT chips used to be pure decoration — "Using a tool" /
@@ -1391,7 +1417,7 @@ async function run(text){
             node.st.textContent="GENERATING";
             liveAdd("act","Routing", onNode?`compute node · ${shown}`:shown);
             break; }
-          case "plan": act(node.acts,"PLAN",""); liveAdd("act","Planning the steps",""); break;
+          case "plan": act(node.acts,"PLAN",""); node.noteStep(); liveAdd("act","Planning the steps",""); break;
           case "tool_use": case "function":{
             const nm=e.name||e.tool||"tool"; const w=describeTool(nm);
             let argsDetail="";
@@ -1400,22 +1426,24 @@ async function run(text){
               catch{ argsDetail=e.raw_arguments; }
             }
             act(node.acts,"USING",transcriptToolLabel(nm),false,true,argsDetail);
+            node.noteStep();
             liveAdd("act", w.t, w.s || nm);
             node.st.textContent="WORKING"; break; }
           case "tool_result": case "result":{
             const nm=e.name||e.tool||""; act(node.acts,"RESULT",transcriptToolLabel(nm),false,false,e.text||"");
+            node.noteStep();
             liveAdd("done","Finished "+(WORK[nm]?WORK[nm][0].toLowerCase():nm),"");
             break; }
           case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e); break;
           case "assistant_delta": buf+=e.text||""; paint(); break;
           case "assistant_text": if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
-          case "error": act(node.acts,"ERROR",e.message||"",true); liveAdd("err","Error",e.message||""); break;
+          case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;
           case "done": if(e.final_text&&e.final_text.length>buf.length) buf=e.final_text; break;
         }
       }
     }
   }catch(err){
-    if(stopped||err.name==="AbortError"){ act(node.acts,"STOPPED BY YOU",""); liveAdd("err","Stopped by you",""); }
+    if(stopped||err.name==="AbortError"){ act(node.acts,"STOPPED BY YOU",""); node.noteStep(); liveAdd("err","Stopped by you",""); }
     else{
       const s=sys.server||{};
       const b=document.createElement("div"); b.className="errbox";
