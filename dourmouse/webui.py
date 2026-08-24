@@ -1312,6 +1312,66 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.email_identity import identity_status
 
             self._send_json(identity_status())
+        elif path == "/api/gmail/search":
+            # v8.29: COMMS is a real Gmail inbox now, not a general chat
+            # dump — this calls the EXACT SAME gmail_search() the mail
+            # agent's tool uses, completely unmodified, and reshapes its
+            # already-real "- [date] from X | subject (uid N)" text rows
+            # into JSON so the UI can render an actual message list. No LLM
+            # anywhere in this path: a read-only inbox listing doesn't need
+            # one, so there is no inference latency and nothing to
+            # hallucinate. Deliberately read-only and un-gated, matching
+            # gmail_search's own Permission.REGULAR tier — it was never
+            # behind a confirmation gate as a tool either. Sending stays
+            # off this endpoint entirely: gmail_send is
+            # REQUIRES_CONFIRMATION, so compose+send goes through the
+            # normal /api/chat + confirmation-gate flow, never a raw
+            # bypass here.
+            import re
+
+            from dourmouse.google_services import gmail_search
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            query = (qs.get("q") or [""])[0]
+            try:
+                max_results = int((qs.get("max_results") or ["20"])[0])
+            except ValueError:
+                max_results = 20
+            try:
+                raw = gmail_search(query, max_results)
+            except Exception as exc:  # noqa: BLE001 - IMAP/OAuth failures, reported honestly
+                self._send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+            else:
+                rows = []
+                for line in raw.splitlines():
+                    m = re.match(r"^- \[(.*?)\] from (.*?) \| (.*?) \(uid (.+)\)$", line)
+                    if m:
+                        rows.append({
+                            "date": m.group(1), "from": m.group(2),
+                            "subject": m.group(3), "id": m.group(4),
+                        })
+                # Not every real response is a row list — "inbox is empty",
+                # a NOT CONFIGURED message, or a re-auth prompt are all
+                # legitimate non-row outcomes reported honestly to the UI,
+                # not treated as errors.
+                self._send_json({"ok": True, "rows": rows, "raw": raw if not rows else None})
+        elif path == "/api/gmail/read":
+            # v8.29: same discipline as /api/gmail/search — calls the real,
+            # unmodified gmail_read(), read-only, no LLM, no gate (matches
+            # the tool's own Permission.REGULAR tier).
+            from dourmouse.google_services import gmail_read
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            message_id = (qs.get("id") or [""])[0]
+            if not message_id:
+                self._send_json({"ok": False, "error": "id is required"})
+            else:
+                try:
+                    text = gmail_read(message_id)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+                else:
+                    self._send_json({"ok": True, "text": text})
         elif path == "/api/server":
             # v5.26: the DOURMOUSE compute node (Dell) health/latency report.
             from dourmouse.remote_server import server_status

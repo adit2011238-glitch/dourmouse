@@ -253,9 +253,13 @@ button,input,textarea,select{font:inherit;color:inherit}
 .tab .dia{color:var(--amber);font-size:8px}
 
 /* ---------- body grid ---------- */
-.body{flex:1;display:grid;grid-template-columns:196px minmax(0,1fr);gap:9px;min-height:0}
-.rail{border:1px solid var(--line);border-radius:3px;background:var(--panel);
-  display:flex;flex-direction:column;min-height:0;overflow:hidden}
+/* v8.29: Session Stream (the 31-agent roster rail) hidden by request — it
+   was permanent chrome eating a 196px column on every screen for a list
+   almost nobody reads turn to turn. The rail markup and its data feed
+   (paintAgents) are untouched, just not laid out, so nothing about agent
+   status/roster loading was removed, only its always-on visibility. */
+.body{flex:1;display:grid;grid-template-columns:minmax(0,1fr);gap:9px;min-height:0}
+.rail{display:none}
 .railhead{padding:9px 11px;border-bottom:1px solid var(--line);
   font-size:9px;letter-spacing:.18em;color:var(--amber)}
 .railbody{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
@@ -279,6 +283,18 @@ button,input,textarea,select{font:inherit;color:inherit}
 .panehead{padding:10px 14px;border-bottom:1px solid var(--line);
   font-family:var(--display);font-size:12px;letter-spacing:.16em;color:var(--amber);flex:none}
 .panebody{flex:1;overflow-y:auto;padding:14px;min-height:0}
+/* v8.29: each screen (RESEARCH/CODE/NEWS/MEDIA/HOME) now owns its own
+   conversation, independent of the others — asking a question on RESEARCH
+   no longer jumps you to a shared COMMS transcript. .thread sits as a
+   SIBLING of .panebody, not nested inside it, because paintResearch() /
+   paintCode() / etc. all do panebody.innerHTML=... on every repaint (e.g.
+   picking a CODE toolchain) — a thread nested inside would get wiped by
+   that. Hidden until the first real message lands, matching the same
+   empty-state-disappears-once-you're-talking pattern Claude's own composer
+   uses, so the suggestion cards don't fight a live conversation for room. */
+.thread{flex:1;overflow-y:auto;padding:14px;min-height:0;display:none}
+.thread.on{display:block}
+.pane:has(.thread.on) .panebody{display:none}
 
 .lede{font-family:var(--display);font-size:13px;line-height:1.85;color:var(--blue-hi);
   letter-spacing:.06em;margin:0 0 16px;max-width:76ch}
@@ -505,6 +521,67 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
 .row .n{font-size:10px;color:var(--blue-hi);letter-spacing:.08em}
 .row .d{font-size:8.5px;color:var(--blue-deep);margin-top:2px;word-break:break-word}
 .row .s{font-size:8px;letter-spacing:.12em;color:var(--blue-dim);flex:none}
+/* v8.29: COMMS as a real Gmail inbox */
+.mailrow{background:none;border:none;width:100%;text-align:left;cursor:pointer;border-radius:6px}
+.mailrow:hover{background:rgba(120,175,210,.06)}
+.mailrow .n{font-weight:500}
+.mailwhen{font-size:8px;color:var(--blue-deep);flex:none;white-space:nowrap;padding-top:1px}
+.mailopen{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--panel2)}
+.mailopenhead{margin-bottom:9px}
+.mailsubj{font-size:12px;color:var(--blue-hi);font-weight:500;margin-bottom:3px}
+.mailbody{white-space:pre-wrap;font-size:11px;line-height:1.6;color:var(--blue-hi);
+  background:none;border:none;padding:0;margin:0 0 10px;font-family:inherit}
+.mailfield{display:block;width:100%;background:var(--panel2);border:1px solid var(--line-2);
+  color:var(--blue-hi);font-family:var(--mono);font-size:11px;padding:8px 10px;
+  border-radius:6px;margin-bottom:8px;box-sizing:border-box}
+.mailfieldbody{min-height:120px;resize:vertical;line-height:1.6}
+#mSend{padding:8px 18px;background:var(--amber);color:var(--amber-ink);border:none;
+  border-radius:6px;font-size:9.5px;font-weight:700;letter-spacing:.08em;cursor:pointer}
+#mSend:hover{background:var(--amber-hi)}
+
+/* v8.29: PROJECTS bookshelf */
+.shelfpicker{position:absolute;z-index:20;margin-top:4px;background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;padding:6px;min-width:180px;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:2px}
+.shelfpicker .opt{display:flex;align-items:center;padding:7px 9px;border-radius:5px;
+  background:none;border:none;color:var(--blue-hi);font-size:10px;cursor:pointer;text-align:left;width:100%}
+.shelfpicker .opt:hover{background:rgba(120,175,210,.08)}
+.shelfnew{display:flex;gap:5px;margin-top:4px;padding-top:6px;border-top:1px solid var(--line)}
+.shelfnew input{flex:1;background:var(--panel2);border:1px solid var(--line-2);color:var(--blue-hi);
+  font-family:var(--mono);font-size:10px;padding:6px 8px;border-radius:5px;min-width:0}
+.shelf{margin-bottom:24px}
+.shelf:last-child{margin-bottom:0}
+.shelfhead{display:flex;align-items:baseline;gap:9px;margin-bottom:10px}
+.shelfname{font-family:var(--display);font-size:13px;letter-spacing:.08em;color:var(--amber)}
+.shelfcount{font-size:9px;color:var(--blue-deep)}
+.shelfdel{margin-left:auto}
+.shelfrow{display:flex;gap:11px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity}
+.book{flex:none;width:200px;scroll-snap-align:start;border:1px solid var(--line);
+  border-left:3px solid var(--amber-line);border-radius:8px;padding:11px 13px;
+  background:var(--panel2);cursor:pointer;display:flex;flex-direction:column;gap:7px}
+.book:hover{border-color:var(--amber-line);border-left-color:var(--amber)}
+.bookscreen{font-size:7.5px;letter-spacing:.14em;color:var(--amber);width:fit-content;
+  border:1px solid var(--amber-line);border-radius:4px;padding:2px 6px}
+.bookq{font-size:11px;color:var(--blue-hi);line-height:1.4;font-weight:500;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.booka{font-size:9.5px;color:var(--blue-deep);line-height:1.5;flex:1;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.bookfoot{display:flex;align-items:center;justify-content:space-between}
+.bookwhen{font-size:8px;color:var(--blue-deep)}
+.bookx{background:none;border:none;color:var(--blue-deep);cursor:pointer;font-size:11px;
+  padding:2px 4px;border-radius:3px;line-height:1}
+.bookx:hover{color:var(--bad)}
+.bookreader{position:fixed;inset:0;background:rgba(4,8,14,.72);z-index:50;
+  display:flex;align-items:center;justify-content:center;padding:20px}
+.bookreadercard{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  max-width:640px;width:100%;max-height:80vh;overflow-y:auto;padding:18px 20px}
+.bookreaderhead{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:12px;font-size:9px;letter-spacing:.08em;color:var(--blue-deep)}
+.bookreaderq{font-size:13px;color:var(--amber);font-weight:500;margin-bottom:12px;line-height:1.5}
+.bookreadera{font-size:12.5px;line-height:1.7;color:var(--blue-hi)}
+.bookreadera pre{background:#050c15;border:1px solid var(--line);border-radius:8px;
+  padding:12px 14px;overflow-x:auto;margin:10px 0;font-size:11.5px}
+@media (max-width:600px){ .book{width:160px} }
 
 @media (max-width:860px){
   .body{grid-template-columns:1fr}
@@ -580,19 +657,31 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
     </nav>
 
     <section class="pane on" id="pane-home"><div class="panehead">◆ CENTRAL AGENT DISPATCH // ARC CORE</div>
-      <div class="panebody" id="homeBody"></div></section>
+      <div class="panebody" id="homeBody"></div>
+      <div class="thread" id="thread-home"></div></section>
 
-    <section class="pane" id="pane-comms"><div class="panehead">◆ COMMS // TRANSCRIPT</div>
-      <div class="panebody" id="thread"></div></section>
+    <!-- v8.29: COMMS is a real Gmail inbox now, not a general chat dump —
+         everything typed anywhere else used to funnel here regardless of
+         topic. See paintComms() for the real gmail_search/gmail_read/
+         draft_message wiring. No <div class="thread"> on this pane: Gmail
+         has its own message list, not an LLM transcript. -->
+    <section class="pane" id="pane-comms"><div class="panehead">◆ COMMS // GMAIL</div>
+      <div class="panebody" id="commsBody"></div></section>
 
     <section class="pane" id="pane-research"><div class="panehead">◆ RESEARCH // LIVE WEB</div>
-      <div class="panebody" id="researchBody"></div></section>
+      <div class="panebody" id="researchBody"></div>
+      <div class="thread" id="thread-research"></div></section>
 
     <section class="pane" id="pane-code"><div class="panehead">◆ CODE // TOOLCHAIN</div>
-      <div class="panebody" id="codeBody"></div></section>
+      <div class="panebody" id="codeBody"></div>
+      <div class="thread" id="thread-code"></div></section>
 
     <section class="pane" id="pane-media"><div class="panehead">◆ MEDIA</div>
-      <div class="panebody" id="mediaBody"></div></section>
+      <div class="panebody" id="mediaBody"></div>
+      <div class="thread" id="thread-media"></div></section>
+
+    <section class="pane" id="pane-projects"><div class="panehead">◆ PROJECTS // BOOKSHELF</div>
+      <div class="panebody" id="projectsBody"></div></section>
 
     <section class="pane" id="pane-settings"><div class="panehead">◆ SETTINGS</div>
       <div class="panebody" id="settingsBody"></div></section>
@@ -601,7 +690,8 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
       <div class="panebody" id="atlasBody"></div></section>
 
     <section class="pane" id="pane-news"><div class="panehead">◆ NEWS // LIVE FEED</div>
-      <div class="panebody" id="newsBody"></div></section>
+      <div class="panebody" id="newsBody"></div>
+      <div class="thread" id="thread-news"></div></section>
 
     <section class="pane" id="pane-voice"><div class="panehead">◆ VOICE // HANDS-FREE</div>
       <div class="panebody" style="padding:0">
@@ -637,7 +727,7 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
   </div>
 
   <div class="foot">
-    <span id="footL">SCREEN 01 / 09 — HOME</span>
+    <span id="footL">SCREEN 01 / 10 — HOME</span>
     <span>BACKEND: <b id="footBackend">—</b> · NODE: <b id="footNode">—</b></span>
   </div>
 </div>
@@ -649,7 +739,13 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
-const SCREENS = ["HOME","COMMS","RESEARCH","CODE","MEDIA","SETTINGS","ATLAS","NEWS","VOICE"];
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","MEDIA","PROJECTS","SETTINGS","ATLAS","NEWS","VOICE"];
+// v8.29: screens whose composer submissions get their OWN independent
+// thread (a real per-screen conversation, not a shared feed forced onto
+// COMMS). COMMS is deliberately absent — it's a real Gmail inbox now, not
+// an LLM chat surface — so a directive typed while on COMMS, WORLD,
+// SETTINGS, PROJECTS, or VOICE falls back to HOME's own thread instead.
+const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS"];
 // v8.28: "ATLAS" is the internal screen id everywhere (pane-atlas, the
 // paintAtlas() dispatch, footer text before this fix) — renaming that
 // identifier would mean touching every reference. But the screen's actual
@@ -689,10 +785,12 @@ function show(name){
   [...tabsEl.children].forEach(b => b.setAttribute("aria-selected", String(b.dataset.screen===name)));
   SCREENS.forEach(s => { const p = $("pane-"+s.toLowerCase()); if(p) p.classList.toggle("on", s===name); });
   $("mastScreen").textContent = "// " + (SCREEN_LABELS[name] || name);
-  $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / 09 — ${SCREEN_LABELS[name] || name}`;
+  $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / ${String(SCREENS.length).padStart(2,"0")} — ${SCREEN_LABELS[name] || name}`;
+  if(name==="COMMS") paintComms();
   if(name==="RESEARCH") paintResearch();
   if(name==="CODE") paintCode();
   if(name==="MEDIA") paintMedia();
+  if(name==="PROJECTS") paintProjects();
   if(name==="SETTINGS") paintSettings();
   if(name==="ATLAS") paintAtlas();
   if(name==="NEWS") paintNews();
@@ -926,9 +1024,10 @@ function paintHome(){
     </div>
     <div class="cards" id="homeCards"></div>`;
   const cards = [
-    ["COMMS","Open the transcript and broadcast a directive.","COMMS"],
+    ["COMMS","Your Gmail inbox — read, search, reply.","COMMS"],
     ["RESEARCH","Live web search with sources.","RESEARCH"],
     ["CODE","Pick a toolchain and write code.","CODE"],
+    ["PROJECTS","Shelve real work by project.","PROJECTS"],
     ["VOICE","Hands-free, with a live activity feed.","VOICE"],
   ];
   const wrap = $("homeCards");
@@ -1128,14 +1227,25 @@ function transcriptToolLabel(name){
 }
 
 /* ---------------- transcript ---------------- */
-const thread = $("thread"), ta = $("ta"), go = $("go"), stopBtn = $("stop");
+const ta = $("ta"), go = $("go"), stopBtn = $("stop");
 let ctrl = null;
-function addYou(text){
+// v8.29: independent per-screen conversations. Each of THREAD_SCREENS owns
+// its own <div class="thread"> (see the HTML — sibling of that screen's
+// .panebody, not nested, so repainting the toolchain picker etc. can't
+// wipe it). threadFor() resolves which one a message actually belongs in;
+// unhideThread() reveals it and, via the :has() rule above, retires that
+// screen's empty-state suggestion cards the first time it's used.
+function threadFor(screenName){
+  const key = THREAD_SCREENS.includes(screenName) ? screenName : "HOME";
+  return $("thread-" + key.toLowerCase());
+}
+function unhideThread(el){ if(!el.classList.contains("on")) el.classList.add("on"); }
+function addYou(threadEl, text){
   const d=document.createElement("div"); d.className="turn you";
   d.innerHTML=`<div class="gut"><span class="who">YOU</span><span>${new Date().toTimeString().slice(0,8)}</span></div><div class="body"></div>`;
-  d.querySelector(".body").textContent=text; thread.appendChild(d); thread.scrollTop=thread.scrollHeight;
+  d.querySelector(".body").textContent=text; threadEl.appendChild(d); threadEl.scrollTop=threadEl.scrollHeight;
 }
-function addReply(){
+function addReply(threadEl){
   const d=document.createElement("div"); d.className="turn";
   // v8.28: .tm is a live elapsed-time readout, separate from .st (the
   // stage label like WORKING/GENERATING) so the two can update
@@ -1145,10 +1255,10 @@ function addReply(){
   // the wait itself became the only signal something was wrong.
   d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span><span class="tm"></span></div>
     <div class="acts"></div><div class="body"></div><div class="rowacts"></div>`;
-  thread.appendChild(d); thread.scrollTop=thread.scrollHeight;
+  threadEl.appendChild(d); threadEl.scrollTop=threadEl.scrollHeight;
   return {el:d, acts:d.querySelector(".acts"), body:d.querySelector(".body"),
           row:d.querySelector(".rowacts"), mdl:d.querySelector(".mdl"), st:d.querySelector(".st"),
-          tm:d.querySelector(".tm")};
+          tm:d.querySelector(".tm"), thread:threadEl};
 }
 function act(acts,label,name,bad,spin,detail){
   // v8.28: USING/RESULT chips used to be pure decoration — "Using a tool" /
@@ -1233,10 +1343,20 @@ async function submit(){
   while(queue.length){ const n=queue.shift(); paintQueue(); await run(n); }
 }
 async function run(text){
-  if(screen!=="VOICE") show("COMMS");
-  addYou(text); setBusy(true);
+  // v8.29: the request stays on whichever screen it was asked from —
+  // RESEARCH/CODE/MEDIA/NEWS/HOME each keep their own real conversation
+  // now. Asking from a non-thread screen (COMMS/WORLD/SETTINGS/PROJECTS)
+  // falls back to HOME rather than being silently dropped; VOICE keeps its
+  // own separate orb/live-activity display and never gets navigated away,
+  // but the turn is still recorded into HOME's thread so it's there to
+  // review afterward.
+  const targetScreen = THREAD_SCREENS.includes(screen) ? screen : "HOME";
+  if(screen!=="VOICE" && screen!==targetScreen) show(targetScreen);
+  const threadEl = threadFor(targetScreen);
+  unhideThread(threadEl);
+  addYou(threadEl, text); setBusy(true);
   liveClear(); liveAdd("act","Thinking", text.slice(0,80));
-  const node = addReply(); node.st.textContent="THINKING";
+  const node = addReply(threadEl); node.st.textContent="THINKING";
   const startedAt = performance.now();
   node.tm.textContent = "0s";
   const tick = setInterval(()=>{
@@ -1246,7 +1366,7 @@ async function run(text){
   const paint=()=>{ dirty=true; if(painting)return; painting=true;
     setTimeout(()=>{ painting=false; if(!dirty)return; dirty=false;
       node.body.innerHTML=md(buf); wireCopies(node.body);
-      thread.scrollTop=thread.scrollHeight;
+      node.thread.scrollTop=node.thread.scrollHeight;
       if(voiceMode) $("vText").textContent = buf.slice(-600);
     },40); };
   ctrl = new AbortController();
@@ -1320,10 +1440,18 @@ async function run(text){
     rg.textContent = stopped?"CONTINUE":"REGENERATE";
     rg.onclick=()=>{ if(!busy) run(stopped?text+"\n\n(continue)":text); };
     node.row.append(c,rg);
+    // v8.29: shelving a real, completed answer onto a named project —
+    // never offered on a stopped/empty reply, since a shelf is meant to
+    // show things the user actually has, not things that didn't finish.
+    if(buf && !stopped){
+      const sh=document.createElement("button"); sh.className="mini"; sh.type="button"; sh.textContent="SHELVE";
+      sh.onclick=()=>shelvePicker(sh, {screen:targetScreen, question:text, answer:buf, ts:Date.now()});
+      node.row.append(sh);
+    }
     liveAdd(stopped?"err":"done", stopped?"Halted":"Done","");
     setBusy(false);
     if(voiceMode){ $("vText").textContent = buf.slice(-600) || "No reply."; setVoice("idle"); if(speak) say(buf); }
-    thread.scrollTop=thread.scrollHeight;
+    node.thread.scrollTop=node.thread.scrollHeight;
     refresh();
   }
 }
@@ -1371,8 +1499,8 @@ function paintCode(){
     <div class="note" id="toolNote"></div>
     <div class="sec">WHAT THIS DOES</div>
     <div class="note">Selecting a toolchain pins the next directive to that agent
-      (<code>focus_agent</code>). AUTO lets the router choose. Requests still stream into
-      COMMS, and anything destructive still asks for approval.</div>`;
+      (<code>focus_agent</code>). AUTO lets the router choose. Results stay right
+      here, and anything destructive still asks for approval.</div>`;
   $("toolCur").textContent = cur.name;
   const menu=$("toolMenu");
   TOOLS.forEach(t=>{
@@ -1402,10 +1530,253 @@ document.addEventListener("click",e=>{
   if(!e.target.closest(".sel")) { m.classList.remove("on"); const b=$("toolBtn"); if(b) b.setAttribute("aria-expanded","false"); }
 });
 
+/* ---------------- COMMS: real Gmail inbox ----------------
+   v8.29: COMMS used to be wherever every directive landed — a general
+   chat dump wearing an email-shaped label. It's now what the label always
+   promised: a real inbox. Reads (list/open) hit the new deterministic
+   /api/gmail/search + /api/gmail/read endpoints directly — no LLM, no
+   latency, nothing to hallucinate, since gmail_search/gmail_read were
+   never gated tools to begin with. Sending is the one write action here,
+   and it deliberately does NOT get a shortcut: it's routed through the
+   real /api/chat + confirmation-gate pipeline, the exact same path any
+   other REQUIRES_CONFIRMATION tool call takes, so a compose form can never
+   become a way to skip the approval a raw endpoint would have bypassed. */
+function paintComms(){
+  const box = $("commsBody");
+  box.innerHTML = `
+    <div class="toolbar">
+      <input id="mailQ" type="text" placeholder="Search — from:, subject:, or plain words (empty = recent inbox)"
+        style="flex:1;min-width:160px;background:var(--panel2);border:1px solid var(--line-2);
+        color:var(--blue-hi);font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:6px">
+      <button class="chip" type="button" id="mailSearchBtn">SEARCH</button>
+      <button class="chip" type="button" id="mailComposeBtn">COMPOSE</button>
+    </div>
+    <div id="mailCompose" style="display:none;margin-top:10px"></div>
+    <div class="sec">INBOX</div>
+    <div id="mailList"><div class="note">Loading inbox…</div></div>
+    <div id="mailDetail"></div>`;
+  $("mailSearchBtn").onclick = ()=> gmailLoad($("mailQ").value.trim());
+  $("mailQ").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); gmailLoad($("mailQ").value.trim()); } });
+  $("mailComposeBtn").onclick = ()=> paintCompose();
+  gmailLoad("");
+}
+async function gmailLoad(query){
+  const list=$("mailList"); list.innerHTML='<div class="note">Loading…</div>'; $("mailDetail").innerHTML="";
+  let data;
+  try{ data = await api("/api/gmail/search?q="+encodeURIComponent(query)+"&max_results=25"); }
+  catch(e){ list.innerHTML=`<div class="note">Couldn't reach Gmail: ${esc(String(e.message||e))}</div>`; return; }
+  if(!data.ok){ list.innerHTML=`<div class="note">${esc(data.error||"Gmail search failed")}</div>`; return; }
+  if(!data.rows || !data.rows.length){
+    list.innerHTML=`<div class="note">${esc(data.raw || "No messages found.")}</div>`; return;
+  }
+  list.innerHTML="";
+  data.rows.forEach(row=>{
+    const r=document.createElement("button"); r.className="row mailrow"; r.type="button";
+    r.innerHTML=`<span class="dot"></span><div class="g"><div class="n"></div><div class="d"></div></div><span class="mailwhen"></span>`;
+    r.querySelector(".n").textContent=row.from; r.querySelector(".d").textContent=row.subject;
+    r.querySelector(".mailwhen").textContent=row.date;
+    r.onclick=()=>gmailOpen(row);
+    list.appendChild(r);
+  });
+}
+function extractEmail(from){ const m=/<([^>]+)>/.exec(from||""); return m?m[1]:(from||"").trim(); }
+async function gmailOpen(row){
+  const det=$("mailDetail"); det.innerHTML=`<div class="note">Opening…</div>`;
+  let data;
+  try{ data = await api("/api/gmail/read?id="+encodeURIComponent(row.id)); }
+  catch(e){ det.innerHTML=`<div class="note">Couldn't open: ${esc(String(e.message||e))}</div>`; return; }
+  if(!data.ok){ det.innerHTML=`<div class="note">${esc(data.error||"Couldn't open message")}</div>`; return; }
+  det.innerHTML=`<div class="mailopen">
+    <div class="mailopenhead"><div class="mailsubj"></div><div class="d mailfrom"></div></div>
+    <pre class="mailbody"></pre>
+    <div class="toolbar"><button class="chip" type="button" id="mailReplyBtn">REPLY</button></div></div>`;
+  det.querySelector(".mailsubj").textContent = row.subject;
+  det.querySelector(".mailfrom").textContent = `${row.from} · ${row.date}`;
+  det.querySelector(".mailbody").textContent = data.text;
+  $("mailReplyBtn").onclick=()=>paintCompose({to:extractEmail(row.from), subject:"Re: "+row.subject});
+}
+function paintCompose(prefill){
+  prefill=prefill||{};
+  const box=$("mailCompose"); box.style.display="block";
+  box.innerHTML=`<div class="sec">COMPOSE</div>
+    <input id="mTo" type="text" placeholder="To" class="mailfield">
+    <input id="mSubj" type="text" placeholder="Subject" class="mailfield">
+    <textarea id="mBody" placeholder="Message" class="mailfield mailfieldbody"></textarea>
+    <div class="toolbar">
+      <button class="chip" type="button" id="mCancel">CANCEL</button>
+      <button id="mSend">SEND</button>
+    </div>
+    <div id="mStatus" class="note"></div>`;
+  $("mTo").value=prefill.to||""; $("mSubj").value=prefill.subject||""; $("mBody").value=prefill.body||"";
+  $("mCancel").onclick=()=>{ box.style.display="none"; box.innerHTML=""; };
+  $("mSend").onclick=()=>sendMail($("mTo").value.trim(), $("mSubj").value.trim(), $("mBody").value);
+}
+async function sendMail(to, subject, body){
+  const status=$("mStatus");
+  if(!to||!subject){ status.textContent="To and subject are required."; return; }
+  status.textContent="Sending…";
+  const directive = `Send an email to ${to} with subject "${subject}" and this exact body:\n\n${body}`;
+  try{
+    const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({prompt:directive, focus_agent:"mail"})});
+    if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
+    const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
+    for(;;){
+      const {value,done}=await rd.read(); if(done)break;
+      carry+=dec.decode(value,{stream:true});
+      const parts=carry.split("\n"); carry=parts.pop()||"";
+      for(const line of parts){
+        if(!line.startsWith("data:"))continue;
+        let e; try{e=JSON.parse(line.slice(5));}catch{continue;}
+        if(e.type==="confirmation_requested"){
+          // v8.29: gmail_send is REQUIRES_CONFIRMATION at the tool-registry
+          // level (see general_roster.py) — this is the SAME human-approval
+          // gate every other gated action goes through, not a compose-form
+          // shortcut around it.
+          status.innerHTML=`<div class="approve"><div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
+            <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div></div>`;
+          status.querySelector(".p").textContent = e.prompt||"Send this email?";
+          const [yes,no]=status.querySelectorAll("button");
+          yes.onclick=async()=>{ status.textContent="Sending…";
+            try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({id:e.id,approved:true})}); }catch{} };
+          no.onclick=async()=>{ status.textContent="Declined.";
+            try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({id:e.id,approved:false})}); }catch{} };
+        } else if(e.type==="done" && e.final_text){
+          status.textContent = e.final_text;
+        } else if(e.type==="assistant_text" && e.text){
+          status.textContent = e.text;
+        } else if(e.type==="error"){
+          status.textContent = "Error: "+(e.message||"send failed");
+        }
+      }
+    }
+  }catch(err){ status.textContent="Send failed: "+String(err.message||err); }
+}
+
+/* ---------------- PROJECTS: bookshelf ----------------
+   v8.29: "a shelf is meant to show things the user actually has, never
+   things the system merely did" (roadmap note this ships against). There
+   is no server-side project system yet — building one for real (a
+   project_id threaded through every tool call, a picker UI) is its own
+   multi-day roadmap item. This is a real, honest v1 built on what
+   actually exists today: the user explicitly SHELVEs a completed answer
+   from any thread onto a named project (client-side, localStorage — the
+   same established pattern this file already uses for theme/details
+   prefs, not a new hack). Nothing is auto-collected or inferred; every
+   card on every shelf traces to one explicit click.
+
+   Display: a real bookshelf metaphor — one horizontal, scrollable row per
+   project (the same proven pattern behind every "continue watching" rail
+   you've ever used), each item a spine-accented card. Chosen over trying
+   to render literal book-spine graphics, which would be decorative but
+   worse to actually use — horizontal shelves are genuinely fast to scan
+   and scale to any number of items without the page growing tall. */
+const PROJECTS_KEY = "dm_projects_v1";
+function projectsLoad(){
+  try{ return JSON.parse(localStorage.getItem(PROJECTS_KEY) || "{}"); }
+  catch{ return {}; }
+}
+function projectsSave(data){
+  try{ localStorage.setItem(PROJECTS_KEY, JSON.stringify(data)); }
+  catch{ /* private mode: shelf is session-only */ }
+}
+function projectAdd(name, item){
+  const data = projectsLoad();
+  if(!data[name]) data[name] = [];
+  data[name].unshift({...item, id: "i"+Date.now()+Math.random().toString(36).slice(2,7)});
+  projectsSave(data);
+}
+function projectRemoveItem(name, id){
+  const data = projectsLoad();
+  if(!data[name]) return;
+  data[name] = data[name].filter(i=>i.id!==id);
+  if(!data[name].length) delete data[name];
+  projectsSave(data);
+}
+function projectDelete(name){
+  const data = projectsLoad(); delete data[name]; projectsSave(data);
+}
+function shelvePicker(anchor, item){
+  const existing = document.querySelector(".shelfpicker"); if(existing) existing.remove();
+  const names = Object.keys(projectsLoad());
+  const pop = document.createElement("div"); pop.className="shelfpicker";
+  pop.innerHTML = `
+    ${names.map(n=>`<button class="opt" type="button" data-n="${esc(n)}"><span class="on"></span></button>`).join("")}
+    <div class="shelfnew"><input type="text" placeholder="New project…"><button class="chip" type="button">ADD</button></div>`;
+  pop.querySelectorAll(".opt").forEach((b,i)=>{
+    b.querySelector(".on").textContent = names[i];
+    b.onclick=()=>{ projectAdd(names[i], item); pop.remove(); flashShelved(anchor); };
+  });
+  const input = pop.querySelector(".shelfnew input"), addBtn = pop.querySelector(".shelfnew button");
+  const doAdd = ()=>{ const n=input.value.trim(); if(!n) return; projectAdd(n, item); pop.remove(); flashShelved(anchor); };
+  addBtn.onclick = doAdd;
+  input.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); doAdd(); } });
+  anchor.parentNode.style.position = "relative";
+  anchor.parentNode.appendChild(pop);
+  input.focus();
+  const closeOnOutside = e=>{ if(!pop.contains(e.target) && e.target!==anchor){ pop.remove(); document.removeEventListener("click", closeOnOutside); } };
+  setTimeout(()=>document.addEventListener("click", closeOnOutside), 0);
+}
+function flashShelved(anchor){
+  const orig=anchor.textContent; anchor.textContent="SHELVED"; anchor.disabled=true;
+  setTimeout(()=>{ anchor.textContent=orig; anchor.disabled=false; }, 1400);
+}
+function paintProjects(){
+  const box=$("projectsBody");
+  const data=projectsLoad();
+  const names=Object.keys(data);
+  if(!names.length){
+    box.innerHTML=`<div class="note">Nothing shelved yet. Any real answer — from HOME, RESEARCH, CODE,
+      MEDIA, or NEWS — has a SHELVE button once it finishes. Click it to file that answer under a
+      named project; it shows up here, grouped by project, never auto-collected.</div>`;
+    return;
+  }
+  box.innerHTML="";
+  names.forEach(name=>{
+    const items=data[name];
+    const sec=document.createElement("div"); sec.className="shelf";
+    sec.innerHTML=`<div class="shelfhead"><span class="shelfname"></span><span class="shelfcount"></span>
+      <button class="mini shelfdel" type="button">DELETE PROJECT</button></div>
+      <div class="shelfrow"></div>`;
+    sec.querySelector(".shelfname").textContent=name;
+    sec.querySelector(".shelfcount").textContent=`${items.length} item${items.length===1?"":"s"}`;
+    sec.querySelector(".shelfdel").onclick=()=>{ if(confirm(`Delete the "${name}" project? Its ${items.length} shelved item(s) go with it.`)){ projectDelete(name); paintProjects(); } };
+    const row=sec.querySelector(".shelfrow");
+    items.forEach(it=>{
+      const card=document.createElement("div"); card.className="book";
+      card.innerHTML=`<div class="bookscreen"></div><div class="bookq"></div><div class="booka"></div>
+        <div class="bookfoot"><span class="bookwhen"></span><button class="bookx" type="button" title="Remove from shelf">✕</button></div>`;
+      card.querySelector(".bookscreen").textContent = SCREEN_LABELS[it.screen]||it.screen;
+      card.querySelector(".bookq").textContent = it.question;
+      card.querySelector(".booka").textContent = it.answer.replace(/[#*`_]/g,"").slice(0,220);
+      card.querySelector(".bookwhen").textContent = new Date(it.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"});
+      card.querySelector(".bookx").onclick=(e)=>{ e.stopPropagation(); projectRemoveItem(name, it.id); paintProjects(); };
+      card.onclick=()=>bookOpen(it);
+      row.appendChild(card);
+    });
+    box.appendChild(sec);
+  });
+}
+function bookOpen(it){
+  const existing=document.querySelector(".bookreader"); if(existing) existing.remove();
+  const dim=document.createElement("div"); dim.className="bookreader";
+  dim.innerHTML=`<div class="bookreadercard">
+    <div class="bookreaderhead"><span></span><button class="mini" type="button">CLOSE</button></div>
+    <div class="bookreaderq"></div><div class="bookreadera"></div></div>`;
+  dim.querySelector(".bookreaderhead span").textContent = `${SCREEN_LABELS[it.screen]||it.screen} · ${new Date(it.ts).toLocaleString()}`;
+  dim.querySelector(".bookreaderq").textContent = it.question;
+  dim.querySelector(".bookreadera").innerHTML = md(it.answer);
+  dim.querySelector("button").onclick=()=>dim.remove();
+  dim.onclick=(e)=>{ if(e.target===dim) dim.remove(); };
+  document.body.appendChild(dim);
+}
+
 /* ---------------- other panes ---------------- */
 function paintResearch(){
   $("researchBody").innerHTML = `<div class="note">Ask a question below — it routes to the research agent,
-    searches the live web and cites sources. Results stream into COMMS.</div>
+    searches the live web and cites sources. Results stay right here.</div>
     <div class="sec">TRY</div><div class="cards" id="rc"></div>`;
   [["Latest on open-weight models",""],["What happened in the news today",""],["Compare two frameworks",""]]
     .forEach(([q])=>{ const b=document.createElement("button"); b.className="card"; b.type="button";
