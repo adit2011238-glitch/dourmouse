@@ -22,7 +22,9 @@ Covered:
 
 from __future__ import annotations
 
+import http.client
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -277,6 +279,93 @@ class TestBuildComponentEntry:
             _build_component_entry({"name": "x", "description": "d", "width": 1, "height": 1})
 
 
+class TestWriteManifestEntry3DModel:
+    """v(world-monitor-expansion): write_manifest_entry's second shape —
+    a non-empty 'primitives' array persists a 3d_model-kind entry into the
+    SAME manifest file, for the interactive 3D workspace's SAVE action to
+    round-trip through."""
+
+    def _lamp_args(self, **overrides):
+        args = {
+            "name": "toy_lamp",
+            "description": "A simple desk lamp",
+            "primitives": [
+                {"type": "cylinder", "position": [0, 0, 0], "scale": 1,
+                 "material": {"color": "#333333"}},
+                {"type": "sphere", "position": [0, 1, 0], "scale": [0.5, 0.5, 0.5],
+                 "material": {"color": "#ffdd88", "roughness": 0.2}},
+            ],
+        }
+        args.update(overrides)
+        return args
+
+    def test_write_3d_model_then_list_then_read(self, workspace):
+        write_spec = _tool("write_manifest_entry")
+        approved = lambda prompt: True
+        out = _execute_tool(write_spec, self._lamp_args(), approved)
+        assert out.startswith("ADDED")
+
+        manifest_file = workspace / "design_3d" / "ui_manifest.json"
+        data = json.loads(manifest_file.read_text())
+        assert data["toy_lamp"]["kind"] == "3d_model"
+        assert len(data["toy_lamp"]["primitives"]) == 2
+        assert data["toy_lamp"]["primitives"][0]["scale"] == [1.0, 1.0, 1.0]
+        assert "category" not in data["toy_lamp"]
+        assert "dimensions" not in data["toy_lamp"]
+
+        list_out = _tool("list_manifest").handler({})
+        assert "toy_lamp" in list_out
+        assert "3D MODEL" in list_out
+        assert "2 primitive" in list_out
+
+        read_out = _tool("read_manifest_entry").handler({"name": "toy_lamp"})
+        payload = json.loads(read_out)
+        assert payload["toy_lamp"]["primitives"][1]["material"]["roughness"] == 0.2
+
+    def test_write_3d_model_missing_primitives_item_field_errors(self, workspace):
+        write_spec = _tool("write_manifest_entry")
+        approved = lambda prompt: True
+        out = _execute_tool(write_spec, self._lamp_args(primitives=[{"type": "teapot"}]), approved)
+        assert out.startswith("ERROR:")
+        assert "teapot" in out
+
+    def test_write_3d_model_missing_name_errors(self, workspace):
+        write_spec = _tool("write_manifest_entry")
+        approved = lambda prompt: True
+        args = self._lamp_args()
+        del args["name"]
+        out = _execute_tool(write_spec, args, approved)
+        assert out.startswith("ERROR:")
+        assert "name" in out
+
+    def test_confirm_prompt_names_3d_model_shape(self, workspace):
+        write_spec = _tool("write_manifest_entry")
+        prompt = write_spec.confirm_prompt(self._lamp_args())
+        assert "3D model" in prompt
+
+    def test_confirm_prompt_names_component_shape_when_no_primitives(self, workspace):
+        write_spec = _tool("write_manifest_entry")
+        prompt = write_spec.confirm_prompt({
+            "name": "x", "category": "panel", "description": "d", "width": 1, "height": 1,
+        })
+        assert "component spec" in prompt
+
+    def test_plain_ui_component_write_still_works_without_primitives_key(self, workspace):
+        # Regression guard: omitting 'primitives' entirely must still take
+        # the original UI-component path, unaffected by the new branch.
+        write_spec = _tool("write_manifest_entry")
+        approved = lambda prompt: True
+        out = _execute_tool(write_spec, {
+            "name": "glass_hud_panel", "category": "panel", "description": "HUD panel",
+            "width": 320, "height": 180,
+        }, approved)
+        assert out.startswith("ADDED")
+        manifest_file = workspace / "design_3d" / "ui_manifest.json"
+        data = json.loads(manifest_file.read_text())
+        assert data["glass_hud_panel"]["category"] == "panel"
+        assert "kind" not in data["glass_hud_panel"]
+
+
 class TestToolDescriptions:
     """Guards the tightened tool descriptions stay honest and non-generic."""
 
@@ -304,3 +393,218 @@ class TestToolDescriptions:
         spec = _tool("write_manifest_entry")
         assert "overwrite" in spec.description.lower()
         assert "confirmation" in spec.description.lower()
+
+
+# --------------------------------------------------------------------------- #
+# Over-HTTP round trip: this pins the EXACT SSE contract the DESIGN screen's
+# interactive workspaces (ui/console.html, dispatchDesignDirective /
+# saveDesign3DModel / saveDesign2DComponent) depend on — a fake chat client
+# stands in for the real model (no network, no local Ollama dependency;
+# manual browser verification during development found the real local
+# backend can be busy/unresponsive, which is an environment fact, not
+# something a hermetic test should ever depend on). Same FakeClient/server
+# pattern dourmouse/tests/test_webui.py already established for
+# test_confirmation_requires_approval_over_http.
+# --------------------------------------------------------------------------- #
+
+class _FakeFunction:
+    def __init__(self, name: str, arguments: str):
+        self.name = name
+        self.arguments = arguments
+
+
+class _FakeToolCall:
+    def __init__(self, call_id: str, name: str, arguments: str):
+        self.id = call_id
+        self.function = _FakeFunction(name, arguments)
+
+
+class _FakeMessage:
+    def __init__(self, content=None, tool_calls=None):
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _FakeChoice:
+    def __init__(self, message: _FakeMessage):
+        self.message = message
+
+
+class _FakeResponse:
+    def __init__(self, message: _FakeMessage):
+        self.choices = [_FakeChoice(message)]
+
+
+class _FakeCompletions:
+    def __init__(self, responses: list):
+        self._responses = list(responses)
+        self.calls: list = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self._responses) == 1:
+            return self._responses[0]
+        return self._responses.pop(0)
+
+
+class _FakeChat:
+    def __init__(self, completions: _FakeCompletions):
+        self.completions = completions
+
+
+class _FakeClient:
+    def __init__(self, responses: list):
+        self.chat = _FakeChat(_FakeCompletions(responses))
+
+
+@pytest.fixture
+def http_server(monkeypatch, tmp_path):
+    monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+    from dourmouse.webui import run_server
+
+    srv = run_server(build_general_registry(), port=0, client=None, config=None)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    port = srv.server_address[1]
+    yield srv, port
+    srv.shutdown()
+    srv.server_close()
+    thread.join(timeout=2)
+
+
+def _stream_events(port, prompt, focus_agent="design_3d"):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request(
+        "POST",
+        "/api/chat",
+        body=json.dumps({"prompt": prompt, "focus_agent": focus_agent}),
+        headers={"Content-Type": "application/json"},
+    )
+    resp = conn.getresponse()
+    assert resp.status == 200
+    events = []
+    confirm_id = None
+    while True:
+        line = resp.readline()
+        if not line:
+            break
+        if not line.startswith(b"data: "):
+            continue
+        event = json.loads(line[6:])
+        events.append(event)
+        if event["type"] == "confirmation_requested":
+            confirm_id = event["id"]
+            break
+    if confirm_id is not None:
+        conn2 = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn2.request(
+            "POST",
+            "/api/confirm",
+            body=json.dumps({"id": confirm_id, "approved": True}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp2 = conn2.getresponse()
+        assert resp2.status == 200
+        conn2.close()
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                events.append(json.loads(line[6:]))
+    conn.close()
+    return events
+
+
+class TestDesignScreenOverHttp:
+    def test_save_3d_model_tool_result_matches_frontend_parsing_contract(self, http_server):
+        # Mirrors saveDesign3DModel()'s directive in ui/console.html: a
+        # write_manifest_entry call carrying a 'primitives' array.
+        srv, port = http_server
+        payload = {
+            "name": "toy_lamp",
+            "description": "A simple desk lamp",
+            "primitives": [
+                {"type": "cylinder", "position": [0, 0, 0], "scale": [1, 1, 1],
+                 "material": {"color": "#333333", "roughness": 0.5}},
+            ],
+        }
+        srv.session.client = _FakeClient([
+            _FakeResponse(_FakeMessage(
+                content=None,
+                tool_calls=[_FakeToolCall("c1", "write_manifest_entry", json.dumps(payload))],
+            )),
+            _FakeResponse(_FakeMessage(content="Saved.")),
+        ])
+        events = _stream_events(port, "save it", focus_agent="design_3d")
+        types = [e["type"] for e in events]
+        assert "confirmation_requested" in types
+        assert "tool_result" in types
+        assert "done" in types
+
+        write_result = next(e for e in events if e["type"] == "tool_result" and e["name"] == "write_manifest_entry")
+        # EXACTLY what saveDesign3DModel() does client-side: find the
+        # first '{', JSON.parse the remainder, read parsed[name].primitives.
+        raw = write_result["text"]
+        assert raw.startswith("ADDED")
+        parsed = json.loads(raw[raw.index("{"):])
+        assert parsed["toy_lamp"]["kind"] == "3d_model"
+        assert parsed["toy_lamp"]["primitives"] == payload["primitives"]
+
+    def test_load_3d_model_read_result_matches_frontend_parsing_contract(self, http_server):
+        # Pre-seed a 3d_model entry the way SAVE would have left it (same
+        # DOURMOUSE_WORKSPACE the http_server fixture already set for this
+        # test — the running server and this direct handler call resolve
+        # the identical manifest path), then verify loadDesign3DModel()'s
+        # read_manifest_entry parsing contract.
+        srv, port = http_server
+        write_spec = next(t for t in build_design_3d_tool_specs() if t.name == "write_manifest_entry")
+        path = _manifest_path({})
+        _execute_tool(write_spec, {
+            "name": "toy_lamp", "description": "desk lamp",
+            "primitives": [{"type": "sphere", "position": [0, 1, 0], "scale": 1,
+                             "material": {"color": "#ffdd88"}}],
+        }, lambda prompt: True)
+        assert path.is_file()
+
+        srv.session.client = _FakeClient([
+            _FakeResponse(_FakeMessage(
+                content=None,
+                tool_calls=[_FakeToolCall("c1", "read_manifest_entry", json.dumps({"name": "toy_lamp"}))],
+            )),
+            _FakeResponse(_FakeMessage(content="Here it is.")),
+        ])
+        events = _stream_events(port, "load toy_lamp", focus_agent="design_3d")
+        read_result = next(e for e in events if e["type"] == "tool_result" and e["name"] == "read_manifest_entry")
+        # EXACTLY what loadDesign3DModel() does: JSON.parse the whole text,
+        # then parsed[name].primitives.
+        parsed = json.loads(read_result["text"])
+        assert isinstance(parsed["toy_lamp"].get("primitives"), list)
+        assert parsed["toy_lamp"]["primitives"][0]["type"] == "sphere"
+
+    def test_save_ui_component_tool_result_matches_frontend_parsing_contract(self, http_server):
+        # Mirrors saveDesign2DComponent()'s directive: write_manifest_entry
+        # WITHOUT 'primitives' — the original component shape.
+        srv, port = http_server
+        payload = {
+            "name": "glass_hud_panel", "category": "panel", "description": "HUD panel",
+            "width": 320, "height": 180, "color": "#7ea9c9", "opacity": 0.85,
+        }
+        srv.session.client = _FakeClient([
+            _FakeResponse(_FakeMessage(
+                content=None,
+                tool_calls=[_FakeToolCall("c1", "write_manifest_entry", json.dumps(payload))],
+            )),
+            _FakeResponse(_FakeMessage(content="Saved.")),
+        ])
+        events = _stream_events(port, "save it", focus_agent="design_3d")
+        write_result = next(e for e in events if e["type"] == "tool_result" and e["name"] == "write_manifest_entry")
+        raw = write_result["text"]
+        parsed = json.loads(raw[raw.index("{"):])
+        saved = parsed["glass_hud_panel"]
+        # EXACTLY what saveDesign2DComponent()'s verification checks.
+        assert saved["category"] == payload["category"]
+        assert saved["dimensions"]["width"] == payload["width"]
+        assert saved["dimensions"]["height"] == payload["height"]
+        assert saved["color"] == payload["color"]
+        assert "kind" not in saved

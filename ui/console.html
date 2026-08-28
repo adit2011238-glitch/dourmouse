@@ -647,8 +647,63 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
   .tab{min-width:64px;font-size:9px}
   .mast .right{display:none}
 }
+
+/* world-monitor-expansion: DESIGN screen interactive workspaces (3D scene
+   editor + 2D UI layout editor). Additive alongside the existing chat-spec
+   flow above — see paintDesign3d(). */
+.d3dScopeNote{border:1px solid var(--amber-line);background:var(--amber-soft);
+  color:var(--amber);font-size:9.5px;line-height:1.6;letter-spacing:.02em;
+  padding:8px 11px;border-radius:6px;margin-bottom:12px}
+.d3dWorkspace{display:grid;grid-template-columns:1fr 250px;gap:12px;align-items:start}
+@media (max-width:760px){ .d3dWorkspace{grid-template-columns:1fr} }
+.d3dCanvasWrap{border:1px solid var(--line);border-radius:6px;overflow:hidden;
+  background:#05080c;position:relative;height:380px}
+.d3dCanvasWrap canvas{display:block;width:100%;height:100%}
+.d3dCanvasHint{position:absolute;left:9px;bottom:8px;font-size:8px;letter-spacing:.04em;
+  color:var(--blue-dim);background:rgba(4,8,14,.65);padding:4px 8px;border-radius:4px;
+  pointer-events:none;line-height:1.5}
+.d3dEmpty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:10px;color:var(--blue-deep);letter-spacing:.06em;text-align:center;padding:20px}
+.d3dPanel{display:flex;flex-direction:column;gap:9px;min-width:0}
+.d3dField{display:flex;flex-direction:column;gap:3px}
+.d3dField .k{font-size:8px;letter-spacing:.1em;color:var(--blue-dim)}
+.d3dXYZ{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.d3dNum{width:100%;background:var(--panel2);border:1px solid var(--line-2);color:var(--blue-hi);
+  font-family:var(--mono);font-size:10.5px;padding:6px 7px;border-radius:4px;box-sizing:border-box}
+.d3dNum:focus{outline:none;border-color:var(--amber-line)}
+.d3dSwatch{display:flex;gap:6px;align-items:center}
+.d3dSwatch input[type=color]{width:30px;height:26px;padding:0;border:1px solid var(--line-2);
+  border-radius:4px;background:none;cursor:pointer}
+/* 2D UI layout canvas — SVG, matching the flat WORLD map's pointer-event
+   pattern rather than inventing a canvas-2D raycasting scheme. */
+.d2dCanvasWrap{border:1px solid var(--line);border-radius:6px;background:var(--panel2);
+  overflow:hidden}
+.d2dCanvasWrap svg{display:block;width:100%;height:380px}
+.d2dShape{cursor:move}
+.d2dHandle{cursor:nwse-resize}
+.d2dPalette{display:flex;gap:6px;flex-wrap:wrap}
+.d2dRect{stroke:rgba(120,175,210,.55);stroke-width:1}
+.d2dRect.sel{stroke:var(--amber);stroke-width:2}
+.d2dLabel{font-size:9px;fill:#0c1620;pointer-events:none;font-family:var(--mono)}
+.d2dHandleRect{fill:var(--amber);stroke:#000;stroke-width:1}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style>
+<!-- world-monitor-expansion: 3D WORKSPACE dependency. This app has no
+     existing JS-library CDN pattern (fonts are the only external asset
+     dependency, and those are vendored locally under assets/fonts/ — see
+     the @font-face rules above); Three.js follows that same discipline
+     instead of introducing a new one: vendored locally under
+     assets/vendor/three/, served by the existing /assets/<file> static
+     route (dourmouse/webui.py), zero CDN calls, works fully offline. The
+     import map lets the vendored addon files (OrbitControls/
+     TransformControls) resolve their own bare `import ... from 'three'`
+     without rewriting them. -->
+<script type="importmap">
+{"imports": {
+  "three": "/assets/vendor/three/three.module.min.js",
+  "three/addons/": "/assets/vendor/three/addons/"
+}}
+</script>
 </head>
 <body>
 
@@ -2095,20 +2150,53 @@ function paintMedia(){
     <div class="note" style="margin-top:12px">Ask for a track below and the music agent handles it.
       Playback changes ask for approval first.</div>`;
 }
-/* ---------------- DESIGN3D: 3D & UI Design spec catalogue ----------------
+/* ---------------- DESIGN3D: 3D & UI Design ----------------
    A real screen for the design_3d roster agent (general_roster.py /
-   design_3d_ops.py): generate/describe a UI component spec matching the
-   desktop's ui_manifest.json shape, generate/describe a simple 3D model
-   as a primitive composition, and list/read/write the manifest. Every
-   action here is a directive routed through the normal focus_agent +
-   /api/chat + submit() pipeline — the SAME thread/confirmation flow as
-   RESEARCH or CODE, not a shortcut around it. Writing a manifest entry is
-   REQUIRES_CONFIRMATION at the tool-registry level, so approving/declining
-   shows up right in this screen's thread exactly like any other gated
-   tool call. */
+   design_3d_ops.py). Three sub-views, switched by the chip row painted
+   below (same on/off chip pattern as SETTINGS' theme/detail switchers):
+     - CHAT / SPEC CATALOGUE: the original screen, unchanged — generate/
+       describe specs and list/read/write the manifest through the normal
+       focus_agent + /api/chat + submit() pipeline (the SAME thread as
+       RESEARCH or CODE).
+     - 3D WORKSPACE: a REAL interactive Three.js scene editor (see the
+       `<script type="module">` block near the end of <body> — window.Design3D).
+     - 2D UI WORKSPACE: a REAL interactive SVG layout canvas (plain DOM,
+       no library — same pointer-event pattern the WORLD map already uses).
+   Both workspaces' SAVE/LOAD are ADDITIVE alternatives to the chat flow —
+   they still write through write_manifest_entry via /api/chat, with the
+   SAME REQUIRES_CONFIRMATION approval gate, never a shortcut around it
+   (see dispatchDesignDirective below). Nothing here replaces the manifest-
+   listing/request-via-chat flow that was already here. */
+let d3dView = "chat"; // "chat" | "3d" | "2d"
+
 function paintDesign3d(){
   const box = $("design3dBody");
   box.innerHTML = `
+    <div class="d3dScopeNote">Primitive-composition editor — not a mesh/CAD
+      tool. No vertex/face/UV geometry and no real 3D asset file
+      (.obj/.glb/.fbx/.stl) is ever produced anywhere on this screen; a "3D
+      model" here is always just named primitives (box/sphere/cylinder/
+      cone/plane/torus) with position, scale and a material color.</div>
+    <div class="toolbar">
+      <span class="lbl">VIEW</span>
+      <div id="d3dViewRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+    <div id="d3dViewBody"></div>`;
+  const row = $("d3dViewRow");
+  [["chat","SPEC CATALOGUE (CHAT)"],["3d","3D WORKSPACE"],["2d","2D UI WORKSPACE"]].forEach(([id,label])=>{
+    const b=document.createElement("button");
+    b.className="chip"+(id===d3dView?" on":""); b.type="button"; b.textContent=label;
+    b.setAttribute("aria-pressed", String(id===d3dView));
+    b.onclick=()=>{ d3dView=id; paintDesign3d(); };
+    row.appendChild(b);
+  });
+  if(d3dView==="3d") paintDesign3dWorkspace3D();
+  else if(d3dView==="2d") paintDesign3dWorkspace2D();
+  else paintDesign3dChat();
+}
+
+function paintDesign3dChat(){
+  $("d3dViewBody").innerHTML = `
     <div class="note">Real spec generation + cataloguing for the desktop
       spatial_ai_library scaffold (ui_components/ui_manifest.json,
       3d_models/). The design_3d agent can generate a UI component spec,
@@ -2116,10 +2204,6 @@ function paintDesign3d(){
       (box/sphere/cylinder/cone/plane/torus) with position/scale/material,
       list or read the manifest, and write a new entry to it — every write
       asks for approval first, right here in the thread below.</div>
-    <div class="note" style="color:var(--amber);margin-top:6px">NOT a 3D
-      renderer, CAD engine, or mesh generator: no vertex/face geometry and
-      no real 3D asset file (.obj/.glb/.fbx/.stl) is ever produced — only
-      structured specs a human, or a future renderer, can act on.</div>
     <div class="sec">TRY</div>
     <div class="cards" id="d3dCards"></div>
     <div class="sec">NEW UI COMPONENT</div>
@@ -2178,6 +2262,519 @@ function paintDesign3d(){
       `not a real mesh) for: ${desc}`;
     submit();
   };
+}
+
+/* ---------------- shared DESIGN dispatch helper ----------------
+   Both interactive workspaces' SAVE/LOAD route through this — the SAME
+   /api/chat + confirmation-gate pipeline COMMS's sendMail() established
+   (paintCompose/sendMail above), generalized to also surface `tool_result`
+   events. Those carry the REAL string a tool handler returned (dispatch.py
+   emits {"type":"tool_result","name","text"} for every tool call — see
+   design_3d_ops.py's handlers), so a caller can read back exactly what a
+   gated write actually persisted, or what a read actually found, instead
+   of trusting the model's own prose summary of it. */
+async function dispatchDesignDirective(directive, statusEl, opts){
+  opts = opts || {};
+  statusEl.textContent = opts.pending || "Working…";
+  try{
+    const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({prompt:directive, focus_agent:"design_3d"})});
+    if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
+    const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
+    for(;;){
+      const {value,done}=await rd.read(); if(done)break;
+      carry+=dec.decode(value,{stream:true});
+      const parts=carry.split("\n"); carry=parts.pop()||"";
+      for(const line of parts){
+        if(!line.startsWith("data:"))continue;
+        let e; try{e=JSON.parse(line.slice(5));}catch{continue;}
+        if(e.type==="confirmation_requested"){
+          // Same human-approval gate write_manifest_entry always takes
+          // (Permission.REQUIRES_CONFIRMATION in design_3d_ops.py) — no
+          // shortcut around it just because this is a form, not the thread.
+          statusEl.innerHTML=`<div class="approve"><div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
+            <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div></div>`;
+          statusEl.querySelector(".p").textContent = e.prompt||"Write this to the manifest?";
+          const [yes,no]=statusEl.querySelectorAll("button");
+          yes.onclick=async()=>{ statusEl.textContent="Approved — writing…";
+            try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({id:e.id,approved:true})}); }catch{} };
+          no.onclick=async()=>{ statusEl.textContent="Declined.";
+            try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({id:e.id,approved:false})}); }catch{} };
+        } else if(e.type==="tool_result" && opts.onToolResult){
+          opts.onToolResult(e);
+        } else if(e.type==="error"){
+          statusEl.textContent = "Error: "+(e.message||"request failed");
+        } else if(e.type==="done"){
+          // Real bug found live-testing against a local model: without
+          // this, an agent that answers in plain text instead of calling
+          // the expected tool (e.g. it asks a clarifying question, or just
+          // declines) left the status stuck on the "pending" text forever
+          // — the stream closes with no further events, so nothing else
+          // would ever update it. Callers whose onToolResult never fired
+          // get the model's own final_text here as a real explanation
+          // instead of a silent hang.
+          if(opts.onDone) opts.onDone(e.final_text||"");
+        }
+      }
+    }
+  }catch(err){ statusEl.textContent="Failed: "+String(err.message||err); }
+}
+
+/* ================= 3D WORKSPACE ================= */
+function paintDesign3dWorkspace3D(){
+  $("d3dViewBody").innerHTML = `
+    <div class="note">Real interactive Three.js scene editor. Drag to orbit
+      the camera, scroll to zoom, click a primitive to select it, then use
+      the real transform gizmo (Three.js TransformControls) to move/rotate/
+      scale it with the mouse — or type exact numbers on the right.</div>
+    <div class="toolbar">
+      <span class="lbl">ADD</span>
+      <div class="d2dPalette" id="d3dAddRow"></div>
+    </div>
+    <div class="toolbar">
+      <span class="lbl">GIZMO</span>
+      <div style="display:flex;gap:6px" id="d3dModeRow"></div>
+      <button class="chip" type="button" id="d3dDeleteBtn">DELETE SELECTED</button>
+      <button class="chip" type="button" id="d3dClearBtn">CLEAR SCENE</button>
+    </div>
+    <div class="d3dWorkspace">
+      <div class="d3dCanvasWrap" id="d3dCanvasWrap">
+        <div class="d3dCanvasHint">DRAG = orbit · SCROLL = zoom · CLICK = select</div>
+      </div>
+      <div class="d3dPanel">
+        <div class="sec" style="margin:0 0 6px">SELECTED OBJECT</div>
+        <div class="note" id="d3dSelNote">Nothing selected — add a primitive or click one in the scene.</div>
+        <div id="d3dSelFields" style="display:none">
+          <div class="d3dField"><span class="k">POSITION (X Y Z)</span><div class="d3dXYZ">
+            <input class="d3dNum" id="d3dPX" type="number" step="0.1">
+            <input class="d3dNum" id="d3dPY" type="number" step="0.1">
+            <input class="d3dNum" id="d3dPZ" type="number" step="0.1"></div></div>
+          <div class="d3dField"><span class="k">SCALE (X Y Z)</span><div class="d3dXYZ">
+            <input class="d3dNum" id="d3dSX" type="number" step="0.1" min="0.01">
+            <input class="d3dNum" id="d3dSY" type="number" step="0.1" min="0.01">
+            <input class="d3dNum" id="d3dSZ" type="number" step="0.1" min="0.01"></div></div>
+          <div class="d3dField"><span class="k">COLOR</span><div class="d3dSwatch">
+            <input type="color" id="d3dObjColor"><input class="d3dNum" id="d3dObjColorHex" type="text" style="flex:1"></div></div>
+          <div class="note" style="margin-top:2px">The ROTATE gizmo works live
+            in the viewport, but rotation is NOT saved — the manifest's 3D
+            model shape (generate_3d_model_spec / write_manifest_entry) only
+            has position/scale/material, no rotation field.</div>
+        </div>
+        <div class="sec" style="margin:16px 0 6px">MANIFEST</div>
+        <input id="d3dModelName" class="mailfield" type="text" placeholder="Model name (e.g. toy_lamp)">
+        <input id="d3dModelDescField" class="mailfield" type="text" placeholder="Description">
+        <div class="toolbar">
+          <input id="d3dLoadName" class="mailfield" type="text" placeholder="Load by name" style="flex:1;margin-bottom:0">
+          <button class="chip" type="button" id="d3dLoadBtn">LOAD</button>
+        </div>
+        <button type="button" id="d3dSaveBtn" style="width:100%">SAVE TO MANIFEST</button>
+        <div class="note" id="d3dSaveStatus"></div>
+      </div>
+    </div>`;
+  const addRow = $("d3dAddRow");
+  ["box","sphere","cylinder","cone","plane","torus"].forEach(t=>{
+    const b=document.createElement("button"); b.className="chip"; b.type="button";
+    b.textContent="+ "+t.toUpperCase();
+    b.onclick=()=>{ window.Design3D && window.Design3D.addPrimitive(t); };
+    addRow.appendChild(b);
+  });
+  const modeRow = $("d3dModeRow");
+  [["translate","MOVE"],["rotate","ROTATE"],["scale","SCALE"]].forEach(([id,label])=>{
+    const b=document.createElement("button"); b.className="chip"+(id==="translate"?" on":"");
+    b.type="button"; b.textContent=label;
+    b.onclick=()=>{
+      if(!window.Design3D) return;
+      window.Design3D.setMode(id);
+      modeRow.querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b));
+    };
+    modeRow.appendChild(b);
+  });
+  $("d3dDeleteBtn").onclick=()=>{ window.Design3D && window.Design3D.deleteSelected(); };
+  $("d3dClearBtn").onclick=()=>{
+    if(window.Design3D && confirm("Clear the whole 3D scene?")) window.Design3D.clear();
+  };
+
+  const px=$("d3dPX"),py=$("d3dPY"),pz=$("d3dPZ"),
+        sx=$("d3dSX"),sy=$("d3dSY"),sz=$("d3dSZ"),
+        colorPicker=$("d3dObjColor"), colorHex=$("d3dObjColorHex");
+  const pushPos=()=>window.Design3D && window.Design3D.setSelectedPosition([+px.value||0,+py.value||0,+pz.value||0]);
+  const pushScale=()=>window.Design3D && window.Design3D.setSelectedScale([+sx.value||0.01,+sy.value||0.01,+sz.value||0.01]);
+  [px,py,pz].forEach(el=>el.addEventListener("input", pushPos));
+  [sx,sy,sz].forEach(el=>el.addEventListener("input", pushScale));
+  colorPicker.addEventListener("input", ()=>{ colorHex.value=colorPicker.value;
+    window.Design3D && window.Design3D.setSelectedColor(colorPicker.value); });
+  colorHex.addEventListener("change", ()=>{
+    let v = colorHex.value.trim(); if(v && !v.startsWith("#")) v="#"+v;
+    if(!v) return; colorPicker.value=v; window.Design3D && window.Design3D.setSelectedColor(v);
+  });
+
+  // Refresh hook: the module-scope 3D editor calls this on every selection
+  // change AND every live drag frame, so the property panel tracks the
+  // gizmo in real time — not just on mouse-up.
+  window.__d3dOnChange = () => {
+    if(!window.Design3D) return;
+    const sel = window.Design3D.getSelected();
+    const note=$("d3dSelNote"), fields=$("d3dSelFields");
+    if(!note || !fields) return;
+    if(!sel){ note.style.display="block"; fields.style.display="none"; return; }
+    note.style.display="none"; fields.style.display="block";
+    if(document.activeElement!==px) px.value=sel.position[0].toFixed(2);
+    if(document.activeElement!==py) py.value=sel.position[1].toFixed(2);
+    if(document.activeElement!==pz) pz.value=sel.position[2].toFixed(2);
+    if(document.activeElement!==sx) sx.value=sel.scale[0].toFixed(2);
+    if(document.activeElement!==sy) sy.value=sel.scale[1].toFixed(2);
+    if(document.activeElement!==sz) sz.value=sel.scale[2].toFixed(2);
+    if(document.activeElement!==colorHex){ colorPicker.value=sel.color; colorHex.value=sel.color; }
+  };
+
+  $("d3dLoadBtn").onclick=()=>loadDesign3DModel($("d3dLoadName").value.trim());
+  $("d3dSaveBtn").onclick=()=>saveDesign3DModel();
+
+  // The module script (type="module", parsed/executed async) may not have
+  // registered window.Design3D yet on first paint — poll briefly rather
+  // than assume ordering.
+  (function mountWhenReady(){
+    const wrap = $("d3dCanvasWrap");
+    if(!wrap) return; // navigated away already
+    if(window.Design3D){ window.Design3D.mount(wrap); window.__d3dOnChange(); }
+    else setTimeout(mountWhenReady, 60);
+  })();
+}
+
+async function saveDesign3DModel(){
+  const status=$("d3dSaveStatus");
+  if(!window.Design3D){ status.textContent="3D editor not ready yet — try again in a moment."; return; }
+  const state = window.Design3D.getState();
+  if(!state.primitives.length){ status.textContent="Add at least one primitive first."; return; }
+  const name = $("d3dModelName").value.trim();
+  if(!name){ status.textContent="Name the model first."; return; }
+  const desc = $("d3dModelDescField").value.trim();
+  const payload = { name, description: desc, primitives: state.primitives };
+  const directive = `Call write_manifest_entry now with these EXACT arguments — do not `+
+    `alter, round, or omit any value: ${JSON.stringify(payload)}\n\nThis persists a 3D `+
+    `model spec (primitive composition only, still not a real mesh) to the UI design manifest.`;
+  let written = null;
+  await dispatchDesignDirective(directive, status, {
+    pending: "Asking the design_3d agent to write this to the manifest…",
+    onToolResult: (e)=>{ if(e.name==="write_manifest_entry") written=e.text; },
+    onDone: (finalText)=>{ if(written==null) status.textContent = finalText ||
+      "The agent finished without calling write_manifest_entry — nothing was saved."; },
+  });
+  if(written==null) return; // status already reflects declined/error/no tool call
+  if(written.startsWith("ERROR")){ status.textContent = written; return; }
+  const jsonStart = written.indexOf("{");
+  let ok = false, note = "";
+  if(jsonStart >= 0){
+    try{
+      const parsed = JSON.parse(written.slice(jsonStart));
+      const saved = parsed[name];
+      ok = !!(saved && JSON.stringify(saved.primitives)===JSON.stringify(state.primitives));
+      if(!ok) note = " — what was written differs from the scene you edited (the AI may not "+
+        "have transcribed it exactly); LOAD it back to check.";
+    }catch{ note = " — couldn't verify (response wasn't parseable JSON)."; }
+  }
+  status.textContent = ok ? `Saved — manifest entry "${name}" written.`
+    : "Write finished, but verification failed"+note;
+}
+
+async function loadDesign3DModel(name){
+  const status=$("d3dSaveStatus");
+  if(!name){ status.textContent="Enter a model name to load."; return; }
+  if(!window.Design3D){ status.textContent="3D editor not ready yet — try again in a moment."; return; }
+  let raw = null;
+  await dispatchDesignDirective(`Read the manifest entry named "${name}".`, status, {
+    pending: `Reading manifest entry "${name}"…`,
+    onToolResult: (e)=>{ if(e.name==="read_manifest_entry") raw=e.text; },
+    onDone: (finalText)=>{ if(raw==null) status.textContent = finalText ||
+      "The agent finished without calling read_manifest_entry — nothing was loaded."; },
+  });
+  if(raw==null) return;
+  if(raw.startsWith("ERROR")){ status.textContent = raw; return; }
+  let parsed;
+  try{ parsed = JSON.parse(raw); }catch{ status.textContent="Couldn't parse the manifest response."; return; }
+  const entry = parsed[name];
+  if(!entry || !Array.isArray(entry.primitives)){
+    status.textContent = `"${name}" isn't a 3D model entry (no 'primitives' array — `+
+      `it looks like a UI component; try the 2D workspace).`;
+    return;
+  }
+  window.Design3D.loadState(entry.primitives);
+  $("d3dModelName").value = name;
+  $("d3dModelDescField").value = entry.description || "";
+  status.textContent = `Loaded "${name}" — ${entry.primitives.length} primitive(s).`;
+  window.__d3dOnChange && window.__d3dOnChange();
+}
+
+/* ================= 2D UI WORKSPACE ================= */
+// Local-only canvas state — persists across DESIGN sub-tab switches (same
+// as the 3D scene) but is never itself the source of truth: only what
+// SAVE actually writes through write_manifest_entry is real/persisted.
+let d2dShapes = [];       // {id,name,category,description,x,y,width,height,color,opacity}
+let d2dSelected = null;
+let d2dNextId = 1;
+const D2D_CATEGORIES = ["panel","button","toolbar","hud","icon","modal"];
+const D2D_DEFAULT_COLOR = {panel:"#7ea9c9",button:"#f2b73d",toolbar:"#8fa6b8",hud:"#5fbf8a",icon:"#c6d8e6",modal:"#e0685c"};
+
+function paintDesign3dWorkspace2D(){
+  $("d3dViewBody").innerHTML = `
+    <div class="note">Real interactive layout canvas. Pick a category, click
+      the canvas to place it, drag a shape to move it, drag a corner handle
+      to resize it. Position on this canvas is a local layout aid only —
+      the manifest format has no position field, so SAVE persists only the
+      selected shape's category/description/size/color/opacity.</div>
+    <div class="toolbar">
+      <span class="lbl">PLACE</span>
+      <div class="d2dPalette" id="d2dPalette"></div>
+    </div>
+    <div class="d3dWorkspace">
+      <div class="d2dCanvasWrap">
+        <svg id="d2dSvg" viewBox="0 0 640 380" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="d3dPanel">
+        <div class="sec" style="margin:0 0 6px">SELECTED COMPONENT</div>
+        <div class="note" id="d2dSelNote">Nothing selected — place a shape or click one on the canvas.</div>
+        <div id="d2dSelFields" style="display:none">
+          <input id="d2dName" class="mailfield" type="text" placeholder="Name (e.g. glass_hud_panel)">
+          <select id="d2dCategory" class="mailfield"></select>
+          <input id="d2dDesc" class="mailfield" type="text" placeholder="Description">
+          <div class="d3dXYZ" style="margin-bottom:8px">
+            <input class="d3dNum" id="d2dWidth" type="number" min="1" placeholder="W">
+            <input class="d3dNum" id="d2dHeight" type="number" min="1" placeholder="H">
+            <input class="d3dNum" id="d2dOpacity" type="number" min="0" max="1" step="0.05" placeholder="Opacity">
+          </div>
+          <div class="d3dSwatch" style="margin-bottom:8px">
+            <input type="color" id="d2dColor"><input class="d3dNum" id="d2dColorHex" type="text" style="flex:1">
+          </div>
+          <button class="chip" type="button" id="d2dDeleteBtn" style="width:100%">REMOVE FROM CANVAS</button>
+        </div>
+        <div class="sec" style="margin:16px 0 6px">MANIFEST</div>
+        <div class="toolbar">
+          <input id="d2dLoadName" class="mailfield" type="text" placeholder="Load by name" style="flex:1;margin-bottom:0">
+          <button class="chip" type="button" id="d2dLoadBtn">LOAD</button>
+        </div>
+        <button type="button" id="d2dSaveBtn" style="width:100%">SAVE SELECTED TO MANIFEST</button>
+        <div class="note" id="d2dSaveStatus"></div>
+      </div>
+    </div>`;
+  let placingCategory = null;
+  const palette = $("d2dPalette");
+  D2D_CATEGORIES.forEach(cat=>{
+    const b=document.createElement("button"); b.className="chip"; b.type="button";
+    b.textContent="+ "+cat.toUpperCase();
+    b.onclick=()=>{
+      placingCategory = cat;
+      palette.querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b));
+    };
+    palette.appendChild(b);
+  });
+  const catSel = $("d2dCategory");
+  D2D_CATEGORIES.forEach(cat=>{ const o=document.createElement("option"); o.value=cat; o.textContent=cat; catSel.appendChild(o); });
+
+  const svg = $("d2dSvg");
+  svg.addEventListener("click", (ev)=>{
+    const onShape = ev.target.closest(".d2dShape") || ev.target.closest(".d2dHandle");
+    if(placingCategory){
+      if(onShape) return;
+      const pt = svgPoint(svg, ev);
+      const id = d2dNextId++;
+      d2dShapes.push({
+        id, category: placingCategory, name: placingCategory+"_"+id, description: "",
+        x: Math.max(0,pt.x-60), y: Math.max(0,pt.y-36), width: 120, height: 72,
+        color: D2D_DEFAULT_COLOR[placingCategory]||"#7ea9c9", opacity: 1,
+      });
+      d2dSelected = id; placingCategory = null;
+      palette.querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+      renderD2D();
+    } else if(!onShape){
+      d2dSelected = null; renderD2D();
+    }
+  });
+
+  wireD2DPanel();
+  renderD2D();
+}
+
+function svgPoint(svg, ev){
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  return {
+    x: (ev.clientX-rect.left)/rect.width*vb.width + vb.x,
+    y: (ev.clientY-rect.top)/rect.height*vb.height + vb.y,
+  };
+}
+
+function renderD2D(){
+  const svg = $("d2dSvg"); if(!svg) return;
+  const NS = "http://www.w3.org/2000/svg";
+  svg.innerHTML = "";
+  d2dShapes.forEach(s=>{
+    const g = document.createElementNS(NS,"g"); g.setAttribute("class","d2dShape");
+    const rect = document.createElementNS(NS,"rect");
+    rect.setAttribute("x",s.x); rect.setAttribute("y",s.y);
+    rect.setAttribute("width",s.width); rect.setAttribute("height",s.height);
+    rect.setAttribute("fill",s.color); rect.setAttribute("fill-opacity",s.opacity);
+    rect.setAttribute("rx",4);
+    rect.setAttribute("class","d2dRect"+(s.id===d2dSelected?" sel":""));
+    g.appendChild(rect);
+    const label = document.createElementNS(NS,"text");
+    label.setAttribute("x", s.x+7); label.setAttribute("y", s.y+15);
+    label.setAttribute("class","d2dLabel");
+    label.textContent = s.category;
+    g.appendChild(label);
+    g.addEventListener("pointerdown", (ev)=>startDragShape(ev, s));
+    svg.appendChild(g);
+    if(s.id===d2dSelected){
+      [["nw",s.x,s.y],["ne",s.x+s.width,s.y],["sw",s.x,s.y+s.height],["se",s.x+s.width,s.y+s.height]].forEach(([corner,hx,hy])=>{
+        const h = document.createElementNS(NS,"rect");
+        h.setAttribute("class","d2dHandle d2dHandleRect");
+        h.setAttribute("x",hx-5); h.setAttribute("y",hy-5); h.setAttribute("width",10); h.setAttribute("height",10);
+        h.addEventListener("pointerdown", (ev)=>startResizeShape(ev, s, corner));
+        svg.appendChild(h);
+      });
+    }
+  });
+  syncD2DPanel();
+}
+
+function startDragShape(ev, s){
+  ev.stopPropagation(); ev.preventDefault();
+  d2dSelected = s.id; renderD2D();
+  const svg = $("d2dSvg"), start = svgPoint(svg, ev), ox=s.x, oy=s.y;
+  function onMove(mv){ const p=svgPoint(svg,mv); s.x=ox+(p.x-start.x); s.y=oy+(p.y-start.y); renderD2D(); }
+  function onUp(){ window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); }
+  window.addEventListener("pointermove",onMove); window.addEventListener("pointerup",onUp);
+}
+
+function startResizeShape(ev, s, corner){
+  ev.stopPropagation(); ev.preventDefault();
+  const svg = $("d2dSvg"), start = svgPoint(svg, ev);
+  const ox=s.x, oy=s.y, ow=s.width, oh=s.height, MIN=20;
+  function onMove(mv){
+    const p=svgPoint(svg,mv), dx=p.x-start.x, dy=p.y-start.y;
+    let x=ox,y=oy,w=ow,h=oh;
+    if(corner.includes("e")) w = Math.max(MIN, ow+dx);
+    if(corner.includes("s")) h = Math.max(MIN, oh+dy);
+    if(corner.includes("w")){ w = Math.max(MIN, ow-dx); x = ox+(ow-w); }
+    if(corner.includes("n")){ h = Math.max(MIN, oh-dy); y = oy+(oh-h); }
+    s.x=x; s.y=y; s.width=w; s.height=h;
+    renderD2D();
+  }
+  function onUp(){ window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); }
+  window.addEventListener("pointermove",onMove); window.addEventListener("pointerup",onUp);
+}
+
+function wireD2DPanel(){
+  const nameEl=$("d2dName"), catEl=$("d2dCategory"), descEl=$("d2dDesc"),
+    wEl=$("d2dWidth"), hEl=$("d2dHeight"), opEl=$("d2dOpacity"),
+    colorEl=$("d2dColor"), hexEl=$("d2dColorHex");
+  const sel=()=>d2dShapes.find(s=>s.id===d2dSelected);
+  nameEl.addEventListener("input", ()=>{ const s=sel(); if(s) s.name=nameEl.value; });
+  catEl.addEventListener("change", ()=>{ const s=sel(); if(s){ s.category=catEl.value; renderD2D(); } });
+  descEl.addEventListener("input", ()=>{ const s=sel(); if(s) s.description=descEl.value; });
+  wEl.addEventListener("input", ()=>{ const s=sel(); if(s){ s.width=Math.max(1,+wEl.value||1); renderD2D(); } });
+  hEl.addEventListener("input", ()=>{ const s=sel(); if(s){ s.height=Math.max(1,+hEl.value||1); renderD2D(); } });
+  opEl.addEventListener("input", ()=>{ const s=sel(); if(s){ s.opacity=Math.min(1,Math.max(0,+opEl.value)); renderD2D(); } });
+  colorEl.addEventListener("input", ()=>{ const s=sel(); if(s){ s.color=colorEl.value; hexEl.value=colorEl.value; renderD2D(); } });
+  hexEl.addEventListener("change", ()=>{
+    const s=sel(); if(!s) return;
+    let v=hexEl.value.trim(); if(v && !v.startsWith("#")) v="#"+v; if(!v) return;
+    s.color=v; colorEl.value=v; renderD2D();
+  });
+  $("d2dDeleteBtn").onclick=()=>{
+    const s=sel(); if(!s) return;
+    d2dShapes=d2dShapes.filter(x=>x!==s); d2dSelected=null; renderD2D();
+  };
+  $("d2dSaveBtn").onclick=()=>saveDesign2DComponent();
+  $("d2dLoadBtn").onclick=()=>loadDesign2DComponent($("d2dLoadName").value.trim());
+}
+
+function syncD2DPanel(){
+  const note=$("d2dSelNote"), fields=$("d2dSelFields");
+  if(!note || !fields) return;
+  const s = d2dShapes.find(x=>x.id===d2dSelected);
+  if(!s){ note.style.display="block"; fields.style.display="none"; return; }
+  note.style.display="none"; fields.style.display="block";
+  const nameEl=$("d2dName"), descEl=$("d2dDesc"), wEl=$("d2dWidth"), hEl=$("d2dHeight"), opEl=$("d2dOpacity");
+  if(document.activeElement!==nameEl) nameEl.value=s.name;
+  $("d2dCategory").value=s.category;
+  if(document.activeElement!==descEl) descEl.value=s.description;
+  if(document.activeElement!==wEl) wEl.value=Math.round(s.width);
+  if(document.activeElement!==hEl) hEl.value=Math.round(s.height);
+  if(document.activeElement!==opEl) opEl.value=s.opacity;
+  $("d2dColor").value=s.color; $("d2dColorHex").value=s.color;
+}
+
+async function saveDesign2DComponent(){
+  const status=$("d2dSaveStatus");
+  const s = d2dShapes.find(x=>x.id===d2dSelected);
+  if(!s){ status.textContent="Select (or place) a component first."; return; }
+  if(!s.name || !s.name.trim()){ status.textContent="Name the component first."; return; }
+  if(!s.description || !s.description.trim()){ status.textContent="Description is required."; return; }
+  const payload = {
+    name: s.name.trim(), category: s.category, description: s.description.trim(),
+    width: Math.round(s.width), height: Math.round(s.height), color: s.color, opacity: s.opacity,
+  };
+  const directive = `Call write_manifest_entry now with these EXACT arguments — do not `+
+    `alter, round, or omit any value: ${JSON.stringify(payload)}\n\nThis persists a UI `+
+    `component spec to the UI design manifest.`;
+  let written = null;
+  await dispatchDesignDirective(directive, status, {
+    pending: "Asking the design_3d agent to write this to the manifest…",
+    onToolResult: (e)=>{ if(e.name==="write_manifest_entry") written=e.text; },
+    onDone: (finalText)=>{ if(written==null) status.textContent = finalText ||
+      "The agent finished without calling write_manifest_entry — nothing was saved."; },
+  });
+  if(written==null) return;
+  if(written.startsWith("ERROR")){ status.textContent = written; return; }
+  const jsonStart = written.indexOf("{");
+  let ok=false, note="";
+  if(jsonStart>=0){
+    try{
+      const parsed = JSON.parse(written.slice(jsonStart));
+      const saved = parsed[payload.name];
+      ok = !!(saved && saved.category===payload.category && saved.dimensions &&
+        saved.dimensions.width===payload.width && saved.dimensions.height===payload.height &&
+        saved.color===payload.color);
+      if(!ok) note = " — what was written differs from the canvas (the AI may not have "+
+        "transcribed it exactly); LOAD it back to check.";
+    }catch{ note = " — couldn't verify (response wasn't parseable JSON)."; }
+  }
+  status.textContent = ok ? `Saved — manifest entry "${payload.name}" written.`
+    : "Write finished, but verification failed"+note;
+}
+
+async function loadDesign2DComponent(name){
+  const status=$("d2dSaveStatus");
+  if(!name){ status.textContent="Enter a component name to load."; return; }
+  let raw=null;
+  await dispatchDesignDirective(`Read the manifest entry named "${name}".`, status, {
+    pending: `Reading manifest entry "${name}"…`,
+    onToolResult: (e)=>{ if(e.name==="read_manifest_entry") raw=e.text; },
+    onDone: (finalText)=>{ if(raw==null) status.textContent = finalText ||
+      "The agent finished without calling read_manifest_entry — nothing was loaded."; },
+  });
+  if(raw==null) return;
+  if(raw.startsWith("ERROR")){ status.textContent = raw; return; }
+  let parsed;
+  try{ parsed = JSON.parse(raw); }catch{ status.textContent="Couldn't parse the manifest response."; return; }
+  const entry = parsed[name];
+  if(!entry || Array.isArray(entry.primitives) || !entry.dimensions){
+    status.textContent = `"${name}" isn't a UI component entry (looks like a 3D model — `+
+      `try the 3D workspace).`;
+    return;
+  }
+  const dims = entry.dimensions||{};
+  const id = d2dNextId++;
+  d2dShapes.push({
+    id, category: entry.category||"panel", name, description: entry.description||"",
+    x: 40, y: 40, width: dims.width||120, height: dims.height||72,
+    color: entry.color||"#7ea9c9", opacity: entry.opacity!=null?entry.opacity:1,
+  });
+  d2dSelected = id;
+  renderD2D();
+  status.textContent = `Loaded "${name}" onto the canvas.`;
 }
 function paintSettings(){
   const b=sys.backend||{}, s=sys.server||{}, me=sys.me||{}, v=sys.voice||{}, t=sys.telemetry||{};
@@ -3395,6 +3992,269 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => { /* SW unsupported — browser fallback only */ });
 }
 })();
+</script>
+
+<!-- world-monitor-expansion: 3D WORKSPACE scene editor. A real Three.js
+     scene — orbit camera, real primitive meshes, a real TransformControls
+     gizmo — exposed to the classic script above as window.Design3D
+     (mount/addPrimitive/getState/loadState/…), called from
+     paintDesign3dWorkspace3D() in the DESIGN screen. Kept as its own
+     `type="module"` script because the vendored Three.js addons
+     (OrbitControls/TransformControls) are real ES modules with their own
+     `import ... from 'three'` — the importmap in <head> resolves that
+     against the locally-vendored build, no CDN. This module owns ONLY the
+     3D scene; the 2D UI workspace is plain SVG/DOM in the classic script
+     above and needs no library. -->
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+const state = {
+  renderer: null, scene: null, camera: null, orbit: null, gizmo: null,
+  container: null, raf: null, _resizeHandler: null,
+  objects: [],        // [{id, type, mesh}] — mesh instances survive remounts
+  selectedId: null,
+  mode: "translate",  // translate | rotate | scale
+  nextId: 1,
+};
+
+function notifyChange(){
+  if(typeof window.__d3dOnChange === "function"){
+    try{ window.__d3dOnChange(); }catch(e){ /* panel not painted right now */ }
+  }
+}
+
+function makeGeometry(type){
+  switch(type){
+    case "box": return new THREE.BoxGeometry(1,1,1);
+    case "sphere": return new THREE.SphereGeometry(0.6,24,16);
+    case "cylinder": return new THREE.CylinderGeometry(0.5,0.5,1,24);
+    case "cone": return new THREE.ConeGeometry(0.6,1,24);
+    case "plane": return new THREE.PlaneGeometry(1,1);
+    case "torus": return new THREE.TorusGeometry(0.5,0.18,16,32);
+    default: return new THREE.BoxGeometry(1,1,1);
+  }
+}
+
+function addPrimitiveInternal(type, position, scale, colorHex, forcedId){
+  const geo = makeGeometry(type);
+  const mat = new THREE.MeshStandardMaterial({ color: colorHex || "#8899aa", roughness: 0.6, metalness: 0.05 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(position[0]||0, position[1]||0, position[2]||0);
+  mesh.scale.set(Math.max(0.01,scale[0]||1), Math.max(0.01,scale[1]||1), Math.max(0.01,scale[2]||1));
+  if(state.scene) state.scene.add(mesh);
+  const id = forcedId!=null ? forcedId : state.nextId++;
+  if(id >= state.nextId) state.nextId = id+1;
+  const obj = { id, type, mesh };
+  state.objects.push(obj);
+  return obj;
+}
+
+function selectById(id){
+  state.selectedId = id;
+  const found = id==null ? null : state.objects.find(o=>o.id===id);
+  if(state.gizmo){
+    if(found){ state.gizmo.attach(found.mesh); state.gizmo.visible = true; }
+    else { state.gizmo.detach(); state.gizmo.visible = false; }
+  }
+  notifyChange();
+}
+
+function onPointerDown(ev){
+  if(ev.button !== 0) return; // left click only — right/middle stay orbit/pan
+  if(!state.renderer || !state.camera) return;
+  const rect = state.renderer.domElement.getBoundingClientRect();
+  const mouse = new THREE.Vector2(
+    ((ev.clientX-rect.left)/rect.width)*2-1,
+    -((ev.clientY-rect.top)/rect.height)*2+1
+  );
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(mouse, state.camera);
+  if(state.gizmo && state.gizmo.visible){
+    // Let TransformControls own its own handles — don't let our selection
+    // raycast (which only tests primitive meshes, never gizmo meshes)
+    // misread "no hit" on a gizmo click as "clicked empty space, deselect".
+    if(ray.intersectObject(state.gizmo, true).length) return;
+  }
+  const hits = ray.intersectObjects(state.objects.map(o=>o.mesh), false);
+  if(hits.length){
+    const found = state.objects.find(o=>o.mesh===hits[0].object);
+    if(found) selectById(found.id);
+  } else {
+    selectById(null);
+  }
+}
+
+function disposeCurrent(){
+  if(state.raf) cancelAnimationFrame(state.raf);
+  state.raf = null;
+  if(state._resizeHandler){ window.removeEventListener("resize", state._resizeHandler); state._resizeHandler = null; }
+  if(state.orbit){ try{ state.orbit.dispose(); }catch(e){} state.orbit = null; }
+  if(state.gizmo){ try{ state.gizmo.dispose(); }catch(e){} state.gizmo = null; }
+  if(state.renderer){
+    try{ state.renderer.dispose(); }catch(e){}
+    const el = state.renderer.domElement;
+    if(el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  state.renderer = null; state.scene = null; state.camera = null;
+}
+
+function mount(container){
+  disposeCurrent();
+  state.container = container;
+  const hint = container.querySelector(".d3dCanvasHint");
+  container.querySelectorAll("canvas").forEach(c=>c.remove());
+  const w = container.clientWidth || 400, h = container.clientHeight || 380;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(w, h);
+  renderer.setClearColor(0x05080c, 1);
+  container.insertBefore(renderer.domElement, hint || null);
+  state.renderer = renderer;
+
+  const scene = new THREE.Scene();
+  scene.add(new THREE.GridHelper(10, 10, 0x2a3f52, 0x18232e));
+  scene.add(new THREE.AxesHelper(1.6));
+  scene.add(new THREE.HemisphereLight(0xbfd9ea, 0x0a0f14, 1.1));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(3, 5, 4);
+  scene.add(dir);
+  state.scene = scene;
+
+  // Re-attach EXISTING mesh instances (not recreated) — the scene survives
+  // switching DESIGN sub-tabs, same as the 2D workspace's shape array.
+  state.objects.forEach(o => scene.add(o.mesh));
+
+  const camera = new THREE.PerspectiveCamera(50, w/h, 0.1, 200);
+  camera.position.set(4, 3.4, 5);
+  state.camera = camera;
+
+  const orbit = new OrbitControls(camera, renderer.domElement);
+  orbit.enableDamping = true;
+  orbit.dampingFactor = 0.08;
+  orbit.target.set(0, 0.4, 0);
+  state.orbit = orbit;
+
+  const gizmo = new TransformControls(camera, renderer.domElement);
+  gizmo.setMode(state.mode);
+  gizmo.addEventListener("dragging-changed", e => { orbit.enabled = !e.value; });
+  gizmo.addEventListener("objectChange", notifyChange);
+  scene.add(gizmo);
+  state.gizmo = gizmo;
+  const selectedObj = state.selectedId != null ? state.objects.find(o => o.id === state.selectedId) : null;
+  if(selectedObj){ gizmo.attach(selectedObj.mesh); gizmo.visible = true; }
+
+  renderer.domElement.addEventListener("pointerdown", onPointerDown);
+
+  function resize(){
+    if(!state.container || !state.renderer || !state.camera) return;
+    const w2 = state.container.clientWidth || w, h2 = state.container.clientHeight || h;
+    state.camera.aspect = w2/h2;
+    state.camera.updateProjectionMatrix();
+    state.renderer.setSize(w2, h2);
+  }
+  window.addEventListener("resize", resize);
+  state._resizeHandler = resize;
+
+  function loop(){
+    if(!document.body.contains(container)){ disposeCurrent(); return; }
+    if(state.orbit) state.orbit.update();
+    if(state.renderer && state.scene && state.camera) state.renderer.render(state.scene, state.camera);
+    state.raf = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function addPrimitive(type){
+  if(!state.scene) return;
+  const n = state.objects.length;
+  const pos = [ (n % 4) * 1.4 - 2.1, 0.5, Math.floor(n / 4) * 1.4 - 1.4 ];
+  const obj = addPrimitiveInternal(type, pos, [1,1,1], "#8899aa", null);
+  selectById(obj.id);
+}
+
+function deleteSelected(){
+  if(state.selectedId == null) return;
+  const idx = state.objects.findIndex(o => o.id === state.selectedId);
+  if(idx < 0) return;
+  const obj = state.objects[idx];
+  if(state.gizmo){ state.gizmo.detach(); state.gizmo.visible = false; }
+  if(state.scene) state.scene.remove(obj.mesh);
+  obj.mesh.geometry.dispose(); obj.mesh.material.dispose();
+  state.objects.splice(idx, 1);
+  state.selectedId = null;
+  notifyChange();
+}
+
+function clear(){
+  if(state.gizmo){ state.gizmo.detach(); state.gizmo.visible = false; }
+  state.objects.forEach(o => {
+    if(state.scene) state.scene.remove(o.mesh);
+    o.mesh.geometry.dispose(); o.mesh.material.dispose();
+  });
+  state.objects = []; state.selectedId = null; state.nextId = 1;
+  notifyChange();
+}
+
+function setMode(mode){
+  state.mode = mode;
+  if(state.gizmo) state.gizmo.setMode(mode);
+}
+
+function getSelected(){
+  if(state.selectedId == null) return null;
+  const obj = state.objects.find(o => o.id === state.selectedId);
+  if(!obj) return null;
+  return {
+    id: obj.id, type: obj.type,
+    position: obj.mesh.position.toArray(),
+    scale: obj.mesh.scale.toArray(),
+    color: "#" + obj.mesh.material.color.getHexString(),
+  };
+}
+
+function setSelectedPosition(p){
+  const obj = state.objects.find(o => o.id === state.selectedId); if(!obj) return;
+  obj.mesh.position.set(p[0], p[1], p[2]);
+}
+function setSelectedScale(s){
+  const obj = state.objects.find(o => o.id === state.selectedId); if(!obj) return;
+  obj.mesh.scale.set(Math.max(0.01,s[0]), Math.max(0.01,s[1]), Math.max(0.01,s[2]));
+}
+function setSelectedColor(hex){
+  const obj = state.objects.find(o => o.id === state.selectedId); if(!obj) return;
+  try{ obj.mesh.material.color.set(hex); }catch(e){ /* invalid color text — ignore keystroke */ }
+}
+
+function getState(){
+  return {
+    primitives: state.objects.map(o => ({
+      type: o.type,
+      position: o.mesh.position.toArray(),
+      scale: o.mesh.scale.toArray(),
+      material: { color: "#" + o.mesh.material.color.getHexString(), roughness: o.mesh.material.roughness },
+    })),
+  };
+}
+
+function loadState(primitives){
+  clear();
+  (primitives || []).forEach(p => {
+    const pos = Array.isArray(p.position) ? p.position : [0,0,0];
+    const scl = Array.isArray(p.scale) ? p.scale : [1,1,1];
+    const color = (p.material && p.material.color) || "#8899aa";
+    addPrimitiveInternal(p.type, pos, scl, color, null);
+  });
+  notifyChange();
+}
+
+window.Design3D = {
+  mount, addPrimitive, deleteSelected, clear, setMode,
+  getSelected, setSelectedPosition, setSelectedScale, setSelectedColor,
+  getState, loadState,
+};
 </script>
 </body>
 </html>

@@ -32,12 +32,20 @@ Manifest path resolution (CONFIGURABLE, three layers, checked in order):
      ``general_roster.py``'s own ``_workspace_root``).
 
 The manifest file itself is the exact shape the desktop scaffold already
-uses: a flat JSON object of ``name -> {category, description,
-dimensions: {width, height}, color, opacity}``. Nothing here invents a
-different shape or a separate schema for 3D models — no manifest format
-was specified for ``3d_models\\`` (it is currently empty), so
-``generate_3d_model_spec`` only ever returns a spec for the caller to
-review; it does not write one anywhere.
+uses for UI components: a flat JSON object of ``name -> {category,
+description, dimensions: {width, height}, color, opacity}``.
+
+UPDATE (interactive DESIGN workspaces, world-monitor-expansion): a second
+entry shape now lives in the SAME manifest file, additively — a 3D model
+entry (``{"kind": "3d_model", "description", "primitives": [...]}``, the
+exact primitive-composition shape ``generate_3d_model_spec`` already
+returns). ``write_manifest_entry`` now writes either shape: pass a
+non-empty ``primitives`` array to persist a 3D model entry, or omit it to
+persist the original UI-component shape (``category``/``width``/``height``
+become required only in that case — see the handler). Still no real
+mesh/CAD geometry is ever produced or stored anywhere; a 3D model entry is
+still just position/scale/material numbers on named primitives, now with
+somewhere real to live.
 """
 
 from __future__ import annotations
@@ -51,6 +59,7 @@ _MANIFEST_PATH_ENV = "DOURMOUSE_UI_MANIFEST_PATH"
 _DEFAULT_MANIFEST_RELPATH = Path("design_3d") / "ui_manifest.json"
 
 _VALID_PRIMITIVES = {"box", "sphere", "cylinder", "cone", "plane", "torus"}
+_MODEL_KIND = "3d_model"
 
 
 # --------------------------------------------------------------------------- #
@@ -147,44 +156,44 @@ def _generate_ui_component_spec_tool(arguments: dict[str, Any]) -> str:
 # 3D model spec — primitive-composition level ONLY (explicitly not a mesh)
 # --------------------------------------------------------------------------- #
 
-def _generate_3d_model_spec_tool(arguments: dict[str, Any]) -> str:
-    name = str(arguments.get("name") or "").strip()
-    if not name:
-        return "ERROR: generate_3d_model_spec requires a non-empty 'name'."
-    raw_primitives = arguments.get("primitives")
+def _normalize_primitives(raw_primitives: Any) -> list[dict[str, Any]]:
+    """Validate + normalize a primitives array — shared by
+    generate_3d_model_spec and write_manifest_entry's 3D-model path.
+    Raises ValueError with a bare, human-readable reason (no tool-name
+    prefix — each caller formats its own "ERROR: <tool> ..." string) on
+    any bad input."""
     if not isinstance(raw_primitives, list) or not raw_primitives:
-        return (
-            "ERROR: generate_3d_model_spec requires a non-empty 'primitives' "
-            "array — each item describes ONE primitive shape "
-            "(type/position/scale/material)."
+        raise ValueError(
+            "requires a non-empty 'primitives' array — each item describes "
+            "ONE primitive shape (type/position/scale/material)."
         )
     normalized: list[dict[str, Any]] = []
     for i, p in enumerate(raw_primitives):
         if not isinstance(p, dict):
-            return f"ERROR: primitives[{i}] must be an object."
+            raise ValueError(f"primitives[{i}] must be an object.")
         ptype = str(p.get("type") or "").strip().lower()
         if ptype not in _VALID_PRIMITIVES:
-            return (
-                f"ERROR: primitives[{i}].type {ptype!r} is not one of the "
+            raise ValueError(
+                f"primitives[{i}].type {ptype!r} is not one of the "
                 f"supported primitive shapes: {sorted(_VALID_PRIMITIVES)}."
             )
         pos = p.get("position", [0, 0, 0])
         if not (isinstance(pos, list) and len(pos) == 3
                 and all(isinstance(v, (int, float)) for v in pos)):
-            return f"ERROR: primitives[{i}].position must be [x, y, z] numbers."
+            raise ValueError(f"primitives[{i}].position must be [x, y, z] numbers.")
         scale = p.get("scale", [1, 1, 1])
         if isinstance(scale, (int, float)):
             scale = [scale, scale, scale]
         if not (isinstance(scale, list) and len(scale) == 3
                 and all(isinstance(v, (int, float)) for v in scale)):
-            return (
-                f"ERROR: primitives[{i}].scale must be [x, y, z] numbers "
+            raise ValueError(
+                f"primitives[{i}].scale must be [x, y, z] numbers "
                 "(or a single number for uniform scale)."
             )
         material = p.get("material") or {}
         if not isinstance(material, dict):
-            return (
-                f"ERROR: primitives[{i}].material must be an object, e.g. "
+            raise ValueError(
+                f"primitives[{i}].material must be an object, e.g. "
                 "{'color': '#8899aa'}."
             )
         normalized.append({
@@ -196,6 +205,17 @@ def _generate_3d_model_spec_tool(arguments: dict[str, Any]) -> str:
                 "roughness": float(material.get("roughness", 0.5)),
             },
         })
+    return normalized
+
+
+def _generate_3d_model_spec_tool(arguments: dict[str, Any]) -> str:
+    name = str(arguments.get("name") or "").strip()
+    if not name:
+        return "ERROR: generate_3d_model_spec requires a non-empty 'name'."
+    try:
+        normalized = _normalize_primitives(arguments.get("primitives"))
+    except ValueError as exc:
+        return f"ERROR: generate_3d_model_spec {exc}"
     spec = {
         "name": name,
         "description": str(arguments.get("description") or "").strip(),
@@ -208,9 +228,28 @@ def _generate_3d_model_spec_tool(arguments: dict[str, Any]) -> str:
         "produced. Real mesh/CAD generation is OUT OF SCOPE for this tool "
         "and would need a dedicated pipeline (e.g. a headless Blender/CAD "
         "backend, or a mesh-generation API) as separate future work. This "
-        "spec is also NOT written to any manifest — there is no manifest "
-        "schema defined yet for 3d_models\\.\n" + json.dumps(spec, indent=2)
+        "spec CAN be persisted — call write_manifest_entry with this same "
+        "'primitives' array (and 'name') to add it to the UI design "
+        "manifest as a 3d_model-kind entry; it is still never converted "
+        "into real mesh/CAD geometry when that happens.\n"
+        + json.dumps(spec, indent=2)
     )
+
+
+def _build_model_entry(arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Validate + build ONE 3D-model manifest entry (the same
+    primitive-composition shape generate_3d_model_spec returns). Raises
+    ValueError with a plain human-readable reason on any bad input."""
+    name = str(arguments.get("name") or "").strip()
+    if not name:
+        raise ValueError("requires a non-empty 'name'.")
+    normalized = _normalize_primitives(arguments.get("primitives"))
+    entry = {
+        "kind": _MODEL_KIND,
+        "description": str(arguments.get("description") or "").strip(),
+        "primitives": normalized,
+    }
+    return name, entry
 
 
 # --------------------------------------------------------------------------- #
@@ -235,6 +274,13 @@ def _list_manifest_tool(arguments: dict[str, Any]) -> str:
     for name, entry in sorted(data.items()):
         if not isinstance(entry, dict):
             lines.append(f"- {name}: (malformed entry — not an object)")
+            continue
+        if entry.get("kind") == _MODEL_KIND:
+            n_prims = len(entry.get("primitives") or [])
+            lines.append(
+                f"- {name}: 3D MODEL — {n_prims} primitive(s) "
+                f"({entry.get('description', '') or 'no description'})"
+            )
             continue
         dims = entry.get("dimensions") or {}
         lines.append(
@@ -263,6 +309,15 @@ def _read_manifest_entry_tool(arguments: dict[str, Any]) -> str:
     return json.dumps({name: entry}, indent=2)
 
 
+def _is_model_write(arguments: dict[str, Any]) -> bool:
+    """A write is a 3D-model write when a non-empty 'primitives' array is
+    given — same detection the handler uses. Kept as one function so the
+    confirm prompt and the handler can never disagree on which shape a
+    given call is about to write."""
+    prims = arguments.get("primitives")
+    return isinstance(prims, list) and len(prims) > 0
+
+
 def _write_manifest_confirm_prompt(arguments: dict[str, Any]) -> str:
     name = str(arguments.get("name") or "?").strip() or "?"
     path = _manifest_path(arguments)
@@ -271,16 +326,23 @@ def _write_manifest_confirm_prompt(arguments: dict[str, Any]) -> str:
     except ValueError:
         existed = False
     verb = "OVERWRITE the existing" if existed else "ADD a new"
+    what = (
+        "3D model spec (primitive composition — position/scale/material "
+        "only, still not a real mesh)" if _is_model_write(arguments)
+        else "component spec (category/description/dimensions/color/opacity)"
+    )
     return (
         f"{verb} entry {name!r} in the UI manifest at {path}? This writes "
-        "the component spec (category/description/dimensions/color/"
-        "opacity) to that JSON file."
+        f"the {what} to that JSON file."
     )
 
 
 def _write_manifest_entry_tool(arguments: dict[str, Any]) -> str:
     try:
-        name, entry = _build_component_entry(arguments)
+        if _is_model_write(arguments):
+            name, entry = _build_model_entry(arguments)
+        else:
+            name, entry = _build_component_entry(arguments)
     except ValueError as exc:
         return f"ERROR: write_manifest_entry {exc}"
     path = _manifest_path(arguments)
@@ -299,6 +361,31 @@ def _write_manifest_entry_tool(arguments: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # Roster wiring
 # --------------------------------------------------------------------------- #
+
+_PRIMITIVES_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": sorted(_VALID_PRIMITIVES)},
+        "position": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 3,
+            "maxItems": 3,
+        },
+        "scale": {
+            "description": "[x,y,z] or a single number for uniform scale",
+        },
+        "material": {
+            "type": "object",
+            "properties": {
+                "color": {"type": "string"},
+                "roughness": {"type": "number"},
+            },
+        },
+    },
+    "required": ["type"],
+}
+
 
 def build_design_3d_tool_specs() -> list[Any]:
     """ToolSpecs for the ``design_3d`` subagent."""
@@ -353,32 +440,7 @@ def build_design_3d_tool_specs() -> list[Any]:
                     "description": {"type": "string"},
                     "primitives": {
                         "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "type": {
-                                    "type": "string",
-                                    "enum": sorted(_VALID_PRIMITIVES),
-                                },
-                                "position": {
-                                    "type": "array",
-                                    "items": {"type": "number"},
-                                    "minItems": 3,
-                                    "maxItems": 3,
-                                },
-                                "scale": {
-                                    "description": "[x,y,z] or a single number for uniform scale",
-                                },
-                                "material": {
-                                    "type": "object",
-                                    "properties": {
-                                        "color": {"type": "string"},
-                                        "roughness": {"type": "number"},
-                                    },
-                                },
-                            },
-                            "required": ["type"],
-                        },
+                        "items": _PRIMITIVES_ITEM_SCHEMA,
                     },
                 },
                 "required": ["name", "primitives"],
@@ -428,8 +490,16 @@ def build_design_3d_tool_specs() -> list[Any]:
             name="write_manifest_entry",
             description=(
                 "Write (add, or overwrite if the same name already exists) "
-                "ONE component entry into the UI manifest JSON — the same "
-                "shape generate_ui_component_spec produces. REQUIRES human "
+                "ONE entry into the UI manifest JSON. TWO shapes, chosen by "
+                "whether 'primitives' is given: (1) no 'primitives' -> a UI "
+                "COMPONENT entry, the same shape generate_ui_component_spec "
+                "produces — 'category', 'width' and 'height' are required "
+                "in this case. (2) a non-empty 'primitives' array -> a 3D "
+                "MODEL entry (kind: '3d_model'), the same primitive-"
+                "composition shape generate_3d_model_spec produces — pass "
+                "the exact same 'primitives' array that tool validated, "
+                "'category'/'width'/'height' are not used. Still never a "
+                "real mesh/CAD asset in either case. REQUIRES human "
                 "confirmation: this can silently overwrite an existing "
                 "entry with no diff shown."
             ),
@@ -443,9 +513,18 @@ def build_design_3d_tool_specs() -> list[Any]:
                     "height": {"type": "number"},
                     "color": {"type": "string", "default": "#888888"},
                     "opacity": {"type": "number", "default": 1.0},
+                    "primitives": {
+                        "type": "array",
+                        "items": _PRIMITIVES_ITEM_SCHEMA,
+                        "description": (
+                            "Give this (non-empty) to write a 3D model entry "
+                            "instead of a UI component entry — see the tool "
+                            "description."
+                        ),
+                    },
                     "manifest_path": {"type": "string"},
                 },
-                "required": ["name", "category", "description", "width", "height"],
+                "required": ["name"],
             },
             handler=_write_manifest_entry_tool,
             permission=Permission.REQUIRES_CONFIRMATION,

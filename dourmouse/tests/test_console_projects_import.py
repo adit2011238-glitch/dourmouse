@@ -33,7 +33,18 @@ _CONSOLE_HTML = _PROJECT_ROOT / "ui" / "console.html"
 
 def _extract_inline_script() -> str:
     html = _CONSOLE_HTML.read_text(encoding="utf-8")
-    m = re.search(r"<script>(.*)</script>", html, re.S)
+    # world-monitor-expansion: console.html now has a SECOND inline script
+    # too — a `<script type="module">` (the 3D workspace's Three.js scene
+    # editor; ES module imports can't run in a classic script) plus a
+    # `<script type="importmap">`, both after the classic one this helper
+    # has always meant ("the extracted inline script" — see this file's
+    # docstring; other tests here grep it for classic-script-only content
+    # like the fetch to /api/projects/imported). A greedy match here would
+    # span past the classic script's own closing tag all the way to the
+    # LAST </script> in the file, swallowing the intervening tags as
+    # invalid "JS" text. Non-greedy keeps this isolated to the bare
+    # <script> block only, exactly as before.
+    m = re.search(r"<script>(.*?)</script>", html, re.S)
     assert m, "ui/console.html has no inline <script>...</script> block"
     return m.group(1)
 
