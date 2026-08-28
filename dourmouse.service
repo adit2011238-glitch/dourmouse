@@ -1,0 +1,97 @@
+# DOURMOUSE headless dashboard — systemd unit (Linux alternative to the
+# Windows Scheduled Task pattern documented in
+# atlas-strategy-lab/docs/DELL_NODE.md §6, which runs the relay/bridge/worker
+# trio via `schtasks /Create ... /SC ONLOGON /RL HIGHEST /F`). This unit runs
+# a different process (dourmouse.webui, the actual dashboard server, which
+# that schtasks pattern does not cover) but keeps the same discipline:
+#
+#   - Single tracked instance, not a detached double-fork. This codebase's
+#     OWN incident log (atlas-strategy-lab/docs/OPERATIONS_RUNBOOK.md §4.3,
+#     §7) records exactly the failure this avoids: manual restarts of the
+#     shell-detached supervisor (relay/supervise_worker.py, which
+#     double-forks + os.setsid() because launchd couldn't spawn on that
+#     machine's exFAT volume) left an ORPHANED supervisor process running
+#     alongside the new one, both replying to every message. systemd's
+#     cgroup-based process tracking is the fix for that whole failure class:
+#     `systemctl start` on an already-active unit is a no-op (refuses to
+#     double-launch), and `systemctl restart` always stops the tracked PID
+#     before starting a new one — there is no window where two instances
+#     coexist the way the double-fork daemonizer allowed.
+#   - Graceful-stop-then-force-kill, mirroring stop.command's own
+#     `kill $PID` → (if still alive) `kill -9 $PID` fallback. Note:
+#     dourmouse/webui.py's serve_forever() only catches KeyboardInterrupt
+#     (SIGINT) — there is no SIGTERM handler anywhere in this codebase
+#     (verified: `grep -rn SIGTERM dourmouse/` finds nothing), so a plain
+#     SIGTERM already terminates it immediately today under stop.command
+#     too. TimeoutStopSec below exists as the SIGKILL backstop for the case
+#     where it doesn't (e.g. blocked in a slow synchronous call), exactly
+#     like stop.command's second `kill -9` branch.
+#   - Restart=on-failure is the crash-recovery role supervise_worker.py
+#     plays for the worker on the Mac/Dell side — but built into systemd
+#     instead of a second hand-rolled polling process.
+#
+# This does NOT invent new safety behavior for dourmouse.webui itself (no
+# Python file was touched to add one) — it wraps the existing, unmodified
+# entry point in supervision that happens not to have the specific
+# duplicate-process bug this codebase already hit once.
+#
+# Install (edit the paths/User first — these are placeholders, not a real
+# account):
+#   sudo cp dourmouse.service /etc/systemd/system/dourmouse.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now dourmouse
+#   systemctl status dourmouse
+#   journalctl -u dourmouse -f
+#
+# Re-running `daemon-reload` + `restart` after editing this file is the
+# systemd equivalent of schtasks's `/F` (force-recreate) flag — idempotent,
+# no duplicate unit registration.
+
+[Unit]
+Description=DOURMOUSE headless dashboard (dourmouse.webui)
+Documentation=file:///opt/dourmouse/docs/CLOUD_DEPLOYMENT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# CHANGE ME: a dedicated non-root user/group, not your login account.
+#   sudo useradd --system --create-home --home-dir /opt/dourmouse dourmouse
+User=dourmouse
+Group=dourmouse
+
+# CHANGE ME: wherever you cloned the repo on the VPS.
+WorkingDirectory=/opt/dourmouse
+
+# .env holds ANTHROPIC_API_KEY / OPENAI_API_KEY / OLLAMA_BASE_URL (whichever
+# backend this box uses) and DOURMOUSE_ACCESS_TOKEN + DOURMOUSE_HOST if this
+# is reachable beyond localhost — see docs/tailscale.md and
+# docs/CLOUD_DEPLOYMENT.md. Required (unit fails loudly, not silently, if
+# it's missing — safer than starting half-configured).
+EnvironmentFile=/opt/dourmouse/.env
+
+# The venv setup.sh already creates (`python3 -m venv .venv && pip install
+# -r requirements.txt`), run as a module exactly like start.sh's
+# `exec ./.venv/bin/python -m dourmouse.webui`.
+ExecStart=/opt/dourmouse/.venv/bin/python -m dourmouse.webui
+
+Restart=on-failure
+RestartSec=5
+
+# Grace period for a clean shutdown before SIGKILL — see the SIGTERM note
+# above; this is the backstop, not the common case.
+TimeoutStopSec=20
+KillSignal=SIGTERM
+
+# Light sandboxing. ReadWritePaths must cover whatever DOURMOUSE_WORKSPACE /
+# DOURMOUSE_MEMORY_DB point at in .env (workspace/ + data/ + logs/ by
+# convention in this repo — adjust if you've relocated them).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dourmouse/workspace /opt/dourmouse/data /opt/dourmouse/logs
+
+[Install]
+WantedBy=multi-user.target

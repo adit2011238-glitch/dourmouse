@@ -1,0 +1,41 @@
+# Keeps `docker build` from tarring up the whole repo as build context —
+# the Dockerfile only ever COPYs requirements.txt, dourmouse/, and ui/, but
+# without this, Docker still reads and ships everything below to the daemon
+# first (jarvis/ alone is ~4GB on this checkout; dist/ ~5GB).
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets — never enter the build context.
+.env
+.env.*
+!.env.example
+
+# Runtime state — belongs on the docker-compose volume, not the image.
+workspace/
+data/
+logs/
+*.log
+*.pid
+
+# Big, unrelated-to-webui.py trees (see docs/CLOUD_DEPLOYMENT.md for why
+# these specifically don't containerize).
+jarvis/
+dist/
+dourmouse.app/
+atlas-strategy-lab/
+atlas_terminal/
+site/
+training/
+training_data/
+training_config/
+.freebuff/
+*.gguf
+voice_models/
+whisper_models/
+*.onnx

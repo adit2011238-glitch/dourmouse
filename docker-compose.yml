@@ -1,0 +1,44 @@
+# DOURMOUSE headless server — single-service compose file.
+#
+# Usage:
+#   cp .env.example .env.cloud   # then trim it to just what you need (see
+#                                 # docs/CLOUD_DEPLOYMENT.md — most of
+#                                 # .env.example's ~250 lines are desktop-only
+#                                 # features irrelevant to a cloud box)
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# NOT build/run-tested here — no Docker daemon in the environment this was
+# written in. Verify `docker compose up` yourself before relying on it.
+
+services:
+  dourmouse:
+    build: .
+    image: dourmouse:latest
+    restart: unless-stopped
+    ports:
+      # Host:container. Change the host side if 8765 is taken, or bind it
+      # to a Tailscale-only interface (e.g. "100.x.y.z:8765:8765") instead
+      # of all interfaces — see docs/CLOUD_DEPLOYMENT.md.
+      - "8765:8765"
+    env_file:
+      # Must supply at minimum an LLM backend (ANTHROPIC_API_KEY / OPENAI_*
+      # / OLLAMA_BASE_URL — whichever this deployment uses) and
+      # DOURMOUSE_ACCESS_TOKEN if this port reaches beyond localhost.
+      # Never commit this file — it already matches the repo's .gitignore
+      # pattern for .env*.
+      - .env.cloud
+    volumes:
+      # Persists session transcripts + the long-term memory DB across
+      # container restarts/rebuilds. Matches DOURMOUSE_WORKSPACE /
+      # DOURMOUSE_MEMORY_DB set in the Dockerfile.
+      - dourmouse-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  dourmouse-data:
