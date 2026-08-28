@@ -9,11 +9,24 @@ binary, the preloaded subagent tool wiring, and the roster shape.
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 
 from dourmouse import code_backends
 from dourmouse.general_roster import _make_code_tool, build_general_registry
+
+
+@pytest.fixture(autouse=True)
+def _reset_claude_sessions():
+    """The Claude CLI session-continuity map (code_backends._CLAUDE_SESSIONS)
+    is module-level, process-lifetime state by design (see its docstring) —
+    but that means it must NOT leak between tests, several of which share
+    the same cwd key ("." when no cwd is passed) and would otherwise see a
+    stale --resume from a previous test instead of a fresh --session-id."""
+    code_backends._CLAUDE_SESSIONS.clear()
+    yield
+    code_backends._CLAUDE_SESSIONS.clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -273,6 +286,190 @@ class TestClaudeBackend:
 
 
 # --------------------------------------------------------------------------- #
+# Claude CLI session continuity — the CODE screen's real gap
+# --------------------------------------------------------------------------- #
+#
+# Verified live against the installed CLI (2.1.250) before writing this fix:
+# two back-to-back code_backends.run_code_task("claude", ...) calls with no
+# session threading genuinely lost context (the second call, asked "what
+# variable name did I just ask you to remember?", got "No variable given.
+# This first message."). `claude --help` documents -r/--resume <session_id>
+# and --session-id <uuid>, and a live round-trip through those two flags in
+# separate subprocess invocations genuinely recalled a fact from the first
+# call. These tests pin the resulting behavior with a fake subprocess.run
+# (no network / no real CLI needed).
+
+class TestClaudeSessionContinuity:
+    def _fake_run_factory(self, seen: list, proc_factory):
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            return proc_factory(argv)
+
+        return _fake_run
+
+    def test_first_call_mints_a_fresh_session_id(self, monkeypatch):
+        seen: list = []
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(
+            code_backends.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+        )
+        code_backends.run_code_task("claude", "write add", cwd="/tmp/proj")
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/claude"
+        assert argv[1] == "-p"
+        assert "--session-id" in argv
+        sid = argv[argv.index("--session-id") + 1]
+        # a real UUID4, not a placeholder
+        assert uuid.UUID(sid).version == 4
+        assert argv[-1] == "write add"
+        assert code_backends._CLAUDE_SESSIONS["/tmp/proj"] == sid
+
+    def test_second_call_same_cwd_resumes_the_same_session(self, monkeypatch):
+        seen: list = []
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(
+            code_backends.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+        )
+        code_backends.run_code_task("claude", "first turn", cwd="/tmp/proj")
+        code_backends.run_code_task("claude", "second turn", cwd="/tmp/proj")
+        first_sid = seen[0][seen[0].index("--session-id") + 1]
+        assert "--resume" in seen[1]
+        assert seen[1][seen[1].index("--resume") + 1] == first_sid
+        assert seen[1][-1] == "second turn"
+
+    def test_different_cwd_gets_a_different_session(self, monkeypatch):
+        seen: list = []
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(
+            code_backends.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+        )
+        code_backends.run_code_task("claude", "task a", cwd="/tmp/proj-a")
+        code_backends.run_code_task("claude", "task b", cwd="/tmp/proj-b")
+        # both calls are FIRST calls for their respective cwd — both mint,
+        # neither resumes the other's conversation.
+        assert "--session-id" in seen[0]
+        assert "--session-id" in seen[1]
+        sid_a = seen[0][seen[0].index("--session-id") + 1]
+        sid_b = seen[1][seen[1].index("--session-id") + 1]
+        assert sid_a != sid_b
+
+    def test_stale_session_id_recovers_with_one_fresh_retry(self, monkeypatch):
+        """The CLI's real error text when a tracked session id no longer
+        resolves (verified live: `claude -p ... --resume <bogus-uuid>` exits
+        1 with stderr "No conversation found with session ID: <uuid>").
+        Losing that id honestly (e.g. the user pruned local session
+        history) must not hard-fail the whole task — it should forget the
+        dead id and run once more on a fresh conversation."""
+        code_backends._CLAUDE_SESSIONS["/tmp/proj"] = "11111111-1111-1111-1111-111111111111"
+        seen: list = []
+
+        class _StaleProc:
+            returncode = 1
+            stdout = ""
+            stderr = (
+                "No conversation found with session ID: "
+                "11111111-1111-1111-1111-111111111111"
+            )
+
+        class _OkProc:
+            returncode = 0
+            stdout = "recovered"
+            stderr = ""
+
+        calls = {"n": 0}
+
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            calls["n"] += 1
+            return _StaleProc() if calls["n"] == 1 else _OkProc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        out = code_backends.run_code_task("claude", "task", cwd="/tmp/proj")
+        assert out == "recovered"
+        assert len(seen) == 2
+        assert "--resume" in seen[0]  # the stale id was tried first, honestly
+        assert "--session-id" in seen[1]  # then a real fresh one, not a guess
+        # the dead id is gone; a real new one replaces it
+        assert code_backends._CLAUDE_SESSIONS["/tmp/proj"] != "11111111-1111-1111-1111-111111111111"
+
+    def test_stale_session_retries_exactly_once_not_forever(self, monkeypatch):
+        """If the retry ALSO fails, the real error surfaces — no infinite
+        retry loop chasing a CLI that keeps saying no."""
+        code_backends._CLAUDE_SESSIONS["/tmp/proj"] = "11111111-1111-1111-1111-111111111111"
+        seen: list = []
+
+        class _StaleProc:
+            returncode = 1
+            stdout = ""
+            stderr = (
+                "No conversation found with session ID: "
+                "11111111-1111-1111-1111-111111111111"
+            )
+
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            return _StaleProc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        with pytest.raises(RuntimeError, match="exited 1"):
+            code_backends.run_code_task("claude", "task", cwd="/tmp/proj")
+        # exactly one retry: the original --resume attempt, then one fresh
+        # --session-id attempt — never a third call.
+        assert len(seen) == 2
+
+    def test_no_cwd_uses_a_stable_default_key(self, monkeypatch):
+        """cwd=None (the run_code_task default) must still get real
+        continuity across calls, not silently skip session threading."""
+        seen: list = []
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(
+            code_backends.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+        )
+        code_backends.run_code_task("claude", "first")
+        code_backends.run_code_task("claude", "second")
+        assert "--session-id" in seen[0]
+        assert "--resume" in seen[1]
+
+
+# --------------------------------------------------------------------------- #
 # Roster wiring
 # --------------------------------------------------------------------------- #
 
@@ -477,8 +674,9 @@ class TestSharedContextInjection:
         )
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
-        # argv == [cli, "-p", task]
-        assert seen["argv"][2] == "write a fib function"
+        # argv == [cli, "-p", *session_args, task] — task is always last
+        # (session continuity, see TestClaudeSessionContinuity below).
+        assert seen["argv"][-1] == "write a fib function"
 
     def test_hits_get_prepended_to_the_claude_task(self, monkeypatch):
         from dourmouse import shared_rag
@@ -505,7 +703,7 @@ class TestSharedContextInjection:
         )
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
-        sent_task = seen["argv"][2]
+        sent_task = seen["argv"][-1]
         assert "prior note: use pytest" in sent_task
         assert sent_task.endswith("write a fib function")
         # real formatting came from format_merged_result, not a hand-rolled dupe
@@ -565,7 +763,7 @@ class TestSharedContextInjection:
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         out = code_backends.run_code_task("claude", "write a fib function")
         assert out == "ok"
-        assert seen["argv"][2] == "write a fib function"
+        assert seen["argv"][-1] == "write a fib function"
 
     def test_empty_hits_injects_nothing(self, monkeypatch):
         from dourmouse import shared_rag
@@ -588,4 +786,4 @@ class TestSharedContextInjection:
         )
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
-        assert seen["argv"][2] == "write a fib function"
+        assert seen["argv"][-1] == "write a fib function"

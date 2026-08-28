@@ -15,7 +15,12 @@ backend:
   solo with only an NVIDIA key). Honestly NOT CONFIGURED only when no
   key of any kind is set.
 - ``claude`` — the user's real Claude Code CLI (``claude -p``), the same
-  honest subprocess pattern as the dev_coding ``claude_code`` tool.
+  honest subprocess pattern as the dev_coding ``claude_code`` tool. Real
+  conversation continuity across repeated calls: the first call for a given
+  ``cwd`` mints a session id (``--session-id``) and every later call for
+  that same ``cwd`` resumes it (``--resume``) — see the "CODE-screen Claude
+  CLI session continuity" block below for what was actually broken before
+  this and how the fix was verified live.
 - ``codex`` — the user's real Codex CLI (``codex exec``, their ChatGPT
   login), falling back to the OpenAI-compatible API when only a
   ``CODEX_API_KEY`` / ``OPENAI_API_KEY`` is available. CLI-first because
@@ -37,6 +42,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
+import uuid
 from typing import Any
 
 from dourmouse.config import (
@@ -52,6 +59,59 @@ _DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
 # on the user's key (integrate.api.nvidia.com/v1/models).
 _DEEPSEEK_NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash-0731"
 _OUTPUT_CAP = 6_000
+
+# -- CODE-screen Claude CLI session continuity ------------------------------ #
+# Every ``code_claude`` call used to shell out to a brand-new `claude -p`
+# process with zero memory of any previous call — verified live: two
+# back-to-back run_code_task("claude", ...) calls, the second asking "what
+# variable name did I just ask you to remember?", got "No variable given.
+# This first message." The installed CLI (2.1.250) genuinely supports
+# resuming a specific conversation across separate invocations though —
+# `claude --help` documents `-r/--resume <session_id>` and
+# `--session-id <uuid>` (assign an id up front), and a live round-trip
+# (`claude -p ... --session-id <uuid>` then `claude -p ... --resume <uuid>`
+# in a fresh process) genuinely recalled a fact from the first call. This
+# threads that real session id through repeated calls so a CODE-screen
+# conversation with Claude Code feels like ONE conversation, the same way
+# talking to the CLI directly is one conversation.
+#
+# Keyed by cwd, not globally: the CODE screen's tool defaults every call to
+# the same _PROJECT_ROOT cwd (see _make_code_tool), so in practice this is
+# one running conversation per project directory — which also matches how
+# Claude Code itself organizes sessions per project. A lock guards the dict
+# because webui.py's ThreadingHTTPServer and all_hands.py can both reach
+# run_code_task("claude", ...) concurrently.
+_CLAUDE_SESSIONS: dict[str, str] = {}
+_CLAUDE_SESSIONS_LOCK = threading.Lock()
+# Exact substring of the CLI's real stderr (verified live above) when a
+# tracked session id no longer resolves to a real conversation — e.g. the
+# user pruned their local Claude Code session history out from under us.
+_CLAUDE_NO_SESSION_ERR = "No conversation found with session ID"
+
+
+def _claude_session_key(cwd: str | None) -> str:
+    return cwd or "."
+
+
+def _claude_session_args(key: str, *, fresh: bool = False) -> list[str]:
+    """Return the CLI args that continue (or, on ``fresh``, restart) the
+    Claude conversation tracked for ``key``. Never guesses a session id that
+    wasn't actually handed back by a real ``claude`` invocation — the first
+    call for a key mints one via ``--session-id`` and every later call
+    resumes that exact id via ``--resume``."""
+    with _CLAUDE_SESSIONS_LOCK:
+        session_id = None if fresh else _CLAUDE_SESSIONS.get(key)
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+            _CLAUDE_SESSIONS[key] = session_id
+            return ["--session-id", session_id]
+        return ["--resume", session_id]
+
+
+def _forget_claude_session(key: str) -> None:
+    with _CLAUDE_SESSIONS_LOCK:
+        _CLAUDE_SESSIONS.pop(key, None)
+
 
 _CODING_SYSTEM = (
     "You are a coding agent inside the Dourmouse dispatch system. "
@@ -224,6 +284,24 @@ def _inject_shared_context(task: str) -> str:
     return f"{context_block}\n\n{task}"
 
 
+def _run_claude_once(
+    cli: str, task: str, session_args: list[str], *, cwd: str | None, timeout: int
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            [cli, "-p", *session_args, task],
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"claude timed out after {timeout}s (task still running).") from None
+    except OSError as exc:
+        raise RuntimeError(f"could not run the claude CLI: {exc}") from exc
+
+
 def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
     # Lazy import: code_backends must not import general_roster at module
     # load time (general_roster imports code_backends for the new tools).
@@ -237,21 +315,21 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
             "CLAUDE_CODE_CLI=/absolute/path/to/claude in .env. Nothing was run."
         )
     timeout = max(1, min(int(timeout), 600))
-    try:
-        proc = subprocess.run(
-            [cli, "-p", task],
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"claude timed out after {timeout}s (task still running).") from None
-    except OSError as exc:
-        raise RuntimeError(f"could not run the claude CLI: {exc}") from exc
-    out = (proc.stdout or "").strip()
+    session_key = _claude_session_key(cwd)
+    session_args = _claude_session_args(session_key)
+    proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
     err = (proc.stderr or "").strip()
+    if proc.returncode != 0 and "--resume" in session_args and _CLAUDE_NO_SESSION_ERR in err:
+        # Our tracked session id no longer resolves to a real conversation
+        # (e.g. the user pruned Claude Code's local session history out from
+        # under us) — never keep retrying a dead id forever. Forget it and
+        # start one honest fresh conversation instead of hard-failing the
+        # whole task over bookkeeping the caller can't see or fix.
+        _forget_claude_session(session_key)
+        session_args = _claude_session_args(session_key)
+        proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
+        err = (proc.stderr or "").strip()
+    out = (proc.stdout or "").strip()
     if proc.returncode != 0:
         # v8.7: `claude -p` exits 1 with an EMPTY stderr when the CLI is
         # installed but not signed in — the single most likely failure here,
