@@ -1445,6 +1445,25 @@ async function run(text){
             node.noteStep();
             liveAdd("done","Finished "+(WORK[nm]?WORK[nm][0].toLowerCase():nm),"");
             break; }
+          case "delegate_parallel_branch":{
+            // v8.31: delegate_parallel runs several nested branches at
+            // once — each one gets its OWN USING/RESULT chip (same
+            // act()/noteStep() mechanism as every other tool step, just
+            // labeled with which AGENT and which MODEL/backend actually
+            // handled that branch, since several branches can be
+            // in-flight under one "N steps" disclosure at the same time).
+            const modelShown=(e.model||"").split("/").pop()||e.model||"—";
+            const label=`branch ${(e.index??0)+1}/${e.total||"?"} · ${e.agent||"any"} · ${modelShown}`;
+            if(e.phase==="start"){
+              act(node.acts,"USING",label,false,true,e.task||"");
+              node.noteStep();
+              liveAdd("act","Delegating to "+(e.agent||"any"), modelShown);
+            } else if(e.phase==="result"){
+              act(node.acts,"RESULT",label,!e.ok,false, e.ok ? (e.text||"") : ("ERROR: "+(e.error||"")));
+              node.noteStep();
+              liveAdd(e.ok?"done":"err", "Branch finished: "+(e.agent||"any"), modelShown);
+            }
+            break; }
           case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e); break;
           case "assistant_delta": buf+=e.text||""; paint(); break;
           case "assistant_text": if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;

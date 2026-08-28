@@ -105,7 +105,10 @@ class TestRosterShape:
         registry = build_general_registry()
         sub = registry.get_subagent("orchestrator")
         assert sub is not None
-        assert {t.name for t in sub.tools} == {"delegate_task"}
+        # v8.31: delegate_parallel joins delegate_task as the orchestrator's
+        # own native self-dispatch tools — genuinely concurrent fan-out
+        # alongside the existing one-at-a-time nested run.
+        assert {t.name for t in sub.tools} == {"delegate_task", "delegate_parallel"}
 
     def test_confirmation_gated_tools_are_flagged(self):
         registry = build_general_registry()

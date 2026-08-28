@@ -202,7 +202,9 @@ class TestTool:
     def test_tool_not_on_orchestrator(self):
         reg = build_general_registry()
         sub = reg.get_subagent("orchestrator")
-        assert {t.name for t in sub.tools} == {"delegate_task"}  # single-tool contract
+        # v8.31: the orchestrator's tool set grew by one native self-dispatch
+        # tool (delegate_parallel), but publish_artifact still never rides it.
+        assert {t.name for t in sub.tools} == {"delegate_task", "delegate_parallel"}
 
     def test_tool_permission_is_regular(self):
         spec = art.build_artifact_tool_spec()

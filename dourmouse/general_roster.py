@@ -38,9 +38,11 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
@@ -1784,13 +1786,331 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
     )
 
 
+# v8.31: how many CONCURRENT sub-dispatches delegate_parallel will run at
+# once, regardless of how many branches are requested. Deliberately small
+# relative to DispatchContext.max_delegates' own default of 25 TOTAL nested
+# spawns per top-level request — this caps a different resource (how many
+# LLM API calls / CLI subprocesses are genuinely in flight AT THE SAME
+# INSTANT), which matters because this is a personal-assistant deployment:
+# one laptop, one rate-limited NVIDIA API key, and the CLI-shelled-out
+# backends (code_claude, code_codex) each spawn a real OS subprocess. More
+# than a handful of truly simultaneous LLM calls risks degrading every
+# branch at once (rate limits, CPU/thread contention) rather than just
+# queuing the newest one. 6 stays comfortably under a typical per-minute
+# rate-limit tier while still giving a real, visible wall-clock win over
+# calling delegate_task N times in a row. Branches beyond the cap still
+# run — ThreadPoolExecutor just queues them behind the first 6 rather than
+# starting literally all of them at once.
+_MAX_CONCURRENT_DELEGATES = 6
+
+
+def _safe_emit(sink: Callable[[dict[str, Any]], None] | None, entry: dict[str, Any]) -> None:
+    """Same discipline as dispatch._emit_event (kept local rather than
+    reaching into dispatch's private helper): the sink is a pure UI-
+    streaming observer and must never break the dispatch it is observing,
+    so a raising sink is swallowed."""
+    if sink is None:
+        return
+    try:
+        sink(entry)
+    except Exception:  # noqa: BLE001 - observer must never break the run
+        pass
+
+
+def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
+    """The orchestrator's fan-out tool: run SEVERAL nested dispatch runs at
+    once instead of delegate_task's one-at-a-time self-dispatch.
+
+    Each branch is a REAL run_dispatch_messages call — same client, config,
+    confirmation gate, event sink, JobTracker, DLP filter, and RBAC policy
+    as delegate_task's own nested run, and routed the SAME way (a named
+    'agent_or_task' becomes a forced_agent ROUTING DIRECTIVE run on that
+    one subagent's configured model, exactly like delegate_task's
+    'subagent'; an empty one is a free sub-orchestration). The only
+    difference is HOW MANY run at once: delegate_task spawns exactly one
+    nested run per call, delegate_parallel spawns up to
+    _MAX_CONCURRENT_DELEGATES of them concurrently via
+    concurrent.futures.ThreadPoolExecutor — the SAME concurrency primitive
+    this codebase already uses for its own multi-source fan-out
+    (world_pulse.world_pulse_snapshot), rather than introducing asyncio or
+    a bespoke thread scheme where a working pattern already exists.
+
+    Deterministic guards, reused rather than re-derived (Rule 2.8):
+    - Depth: refused outright if ctx.depth >= ctx.max_depth, exactly like
+      delegate_task, checked ONCE before any branch runs.
+    - Budget: ctx.consume_delegate() is called once per branch, ALL of it
+      up front in this (the calling) thread before any worker thread
+      starts. consume_delegate() mutates ctx.budget[0] with no lock of its
+      own (fine for delegate_task's single synchronous call); granting
+      several branches' worth of budget FROM inside concurrent worker
+      threads would itself be a race, so this grants everything sequentially
+      first and only then fans the (already-budgeted) branches out. A
+      fan-out of N branches spends exactly N units of the shared delegate
+      budget — the same total cost N sequential delegate_task calls would
+      have spent — and any branches beyond the remaining budget are
+      refused individually rather than the whole call failing.
+
+    Real concurrency, not sequential-disguised-as-parallel: each branch's
+    OWN nested run_dispatch_messages call blocks its OWN worker thread, so
+    a genuinely slow branch (a long web search, a slow CLI subprocess) does
+    not delay a fast branch's result — the fast one's future resolves and
+    is reported as soon as it finishes, independent of the others still
+    running.
+    """
+
+    def _delegate_parallel(arguments: dict[str, Any]) -> str:
+        ctx = current_dispatch_context(registry)
+        if ctx is None:
+            return (
+                "ERROR: delegate_parallel requires an active dispatch "
+                "context (it can only be called from inside a dispatch run)."
+            )
+        branches_arg = arguments.get("branches")
+        if not isinstance(branches_arg, list) or not branches_arg:
+            return (
+                "ERROR: delegate_parallel requires a non-empty 'branches' "
+                "list of {agent_or_task, instructions} objects."
+            )
+        # Deterministic recursion guard (Rule 2.8) — SAME check as
+        # delegate_task, once, up front: a fan-out already at the depth cap
+        # refuses outright instead of half-running some branches.
+        if ctx.depth >= ctx.max_depth:
+            return (
+                f"REFUSED: maximum delegate depth ({ctx.max_depth}) reached "
+                "— no deeper nesting allowed."
+            )
+        try:
+            nested_turns = max(1, min(int(arguments.get("max_turns", 5)), 8))
+        except (TypeError, ValueError):
+            return "ERROR: max_turns must be an integer."
+
+        parsed: list[tuple[str, str]] = []
+        for i, item in enumerate(branches_arg):
+            if not isinstance(item, dict):
+                return (
+                    f"ERROR: branch {i} must be an object with "
+                    "'agent_or_task' and 'instructions'."
+                )
+            instructions = str(item.get("instructions") or "").strip()
+            if not instructions:
+                return f"ERROR: branch {i} is missing a non-empty 'instructions'."
+            target = str(item.get("agent_or_task") or "").strip()
+            if target and target not in registry.subagent_names:
+                return (
+                    f"ERROR: branch {i} names unknown subagent {target!r} — "
+                    f"cannot delegate. Known: {', '.join(sorted(registry.subagent_names))}"
+                )
+            parsed.append((target, instructions))
+
+        # Budget consumed sequentially, in THIS thread, BEFORE any worker
+        # thread starts — see the guard discussion in the docstring above.
+        granted: list[tuple[str, str]] = []
+        for target, instructions in parsed:
+            if not ctx.consume_delegate():
+                break
+            granted.append((target, instructions))
+        refused_count = len(parsed) - len(granted)
+        if not granted:
+            return (
+                f"REFUSED: delegate budget exhausted (max {ctx.max_delegates} "
+                f"nested runs per top-level request) — 0 of {len(parsed)} "
+                "branches ran."
+            )
+
+        def _run_one(index: int, target: str, instructions: str) -> dict[str, Any]:
+            job_id = None
+            if ctx.jobs is not None:
+                job_id = ctx.jobs.spawn(
+                    task=instructions,
+                    subagent=target or None,
+                    depth=ctx.depth + 1,
+                    parent_id=ctx.current_job_id,
+                )
+            nested_prompt = (
+                f"[ROUTING DIRECTIVE] Complete this task using ONLY the "
+                f"'{target}' subagent and its tools. TASK: {instructions}"
+                if target
+                else instructions
+            )
+            if ctx.parent_context:
+                nested_prompt += (
+                    "\n\n[PARENT CONTEXT — read this; it is what the parent "
+                    "conversation already established]\n" + ctx.parent_context
+                )
+            # v3.1 per-agent models, same resolution delegate_task uses: a
+            # targeted branch runs on THAT agent's configured model,
+            # deterministically known before the branch even starts. An
+            # untargeted (free sub-orchestration) branch has no such single
+            # target to resolve up front — it keeps the parent's ctx.model
+            # as the best-effort label; if THAT branch's own build_plan
+            # later resolves to one agent internally (v8.30's own
+            # per-agent routing, recursively available to any nested run),
+            # it may refine its OWN model further downstream than this
+            # tool can observe from out here — stated plainly rather than
+            # overclaiming precision this call cannot verify.
+            nested_model = None
+            if target and ctx.config is not None:
+                nested_model = ctx.config.model_for_agent(target)
+            reported_model = nested_model or ctx.model
+            nested_messages: list[dict[str, Any]] = [
+                {"role": "system", "content": system_message(registry)},
+                {"role": "user", "content": nested_prompt},
+            ]
+            started = time.perf_counter()
+            _safe_emit(ctx.event_sink, {
+                "type": "delegate_parallel_branch",
+                "phase": "start",
+                "index": index,
+                "total": len(granted),
+                "agent": target or "any",
+                "model": reported_model,
+                "task": instructions,
+            })
+            try:
+                report = run_dispatch_messages(
+                    nested_messages,
+                    registry,
+                    max_turns=nested_turns,
+                    client=ctx.client,
+                    config=ctx.config,
+                    confirmation_gate=ctx.confirmation_gate,
+                    event_sink=ctx.event_sink,
+                    job_tracker=ctx.jobs,
+                    depth=ctx.depth + 1,
+                    max_depth=ctx.max_depth,
+                    budget=ctx.budget,
+                    max_delegates=ctx.max_delegates,
+                    current_job_id=job_id,
+                    cost_budget=ctx.cost_budget,
+                    dlp=ctx.dlp,
+                    rbac=ctx.rbac,
+                    model=nested_model,
+                    forced_agent=target or None,
+                )
+            except Exception as exc:  # honest failure surface (Rule 2.2)
+                if ctx.jobs is not None and job_id:
+                    ctx.jobs.finish(job_id, error=f"nested dispatch failed: {exc}")
+                result = {
+                    "index": index, "agent": target or "any", "job_id": job_id,
+                    "model": reported_model, "ok": False, "text": "",
+                    "error": str(exc),
+                    "elapsed_s": round(time.perf_counter() - started, 2),
+                }
+                _safe_emit(ctx.event_sink, {
+                    "type": "delegate_parallel_branch", "phase": "result", **result,
+                })
+                return result
+
+            final_text = (report.get("final_text") or "").strip()
+            if ctx.jobs is not None and job_id:
+                ctx.jobs.finish(job_id, result=final_text)
+            result = {
+                "index": index, "agent": target or "any", "job_id": job_id,
+                "model": reported_model, "ok": True, "text": final_text,
+                "error": "",
+                "elapsed_s": round(time.perf_counter() - started, 2),
+            }
+            _safe_emit(ctx.event_sink, {
+                "type": "delegate_parallel_branch", "phase": "result", **result,
+            })
+            return result
+
+        max_workers = min(len(granted), _MAX_CONCURRENT_DELEGATES)
+        results: list[dict[str, Any] | None] = [None] * len(granted)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(_run_one, i, target, instructions): i
+                for i, (target, instructions) in enumerate(granted)
+            }
+            for fut in as_completed(futures):
+                i = futures[fut]
+                results[i] = fut.result()
+
+        return _format_delegate_parallel_result(results, refused_count, len(parsed))
+
+    return ToolSpec(
+        name="delegate_parallel",
+        description=(
+            "Spawn SEVERAL nested agent runs against the same roster "
+            "CONCURRENTLY (self-dispatch fan-out): pass 'branches', a list "
+            "of {agent_or_task, instructions} objects — 'agent_or_task' "
+            "names one subagent to route that branch at (like "
+            "delegate_task's 'subagent'), or omit it for a free "
+            "sub-orchestration; 'instructions' is that branch's task. Up "
+            f"to {_MAX_CONCURRENT_DELEGATES} branches run genuinely at "
+            "once (more queue behind that). Same depth/budget guards as "
+            "delegate_task, spent one unit per branch. Use when several "
+            "parts of a request are independent and can be answered in "
+            "parallel (e.g. 'check my inbox AND look up the weather AND "
+            "check disk space') instead of forcing them through one "
+            "sequential nested run."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "branches": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent_or_task": {"type": "string", "default": ""},
+                            "instructions": {"type": "string"},
+                        },
+                        "required": ["instructions"],
+                    },
+                },
+                "max_turns": {"type": "integer", "default": 5},
+            },
+            "required": ["branches"],
+        },
+        handler=_delegate_parallel,
+    )
+
+
+def _format_delegate_parallel_result(
+    results: list[dict[str, Any] | None], refused_count: int, requested_count: int
+) -> str:
+    """Aggregate every branch's tagged result into one coherent response
+    for the calling LLM turn — each branch clearly labeled with the agent
+    AND model/backend that handled it (Rule 2.2: never blur which agent
+    said what into one anonymous blob), in the SAME order the branches
+    were requested (not completion order, which is nondeterministic run
+    to run)."""
+    lines = [
+        f"DELEGATED PARALLEL — {len(results)} branch(es) ran "
+        f"({sum(1 for r in results if r and r['ok'])} succeeded, "
+        f"{sum(1 for r in results if r and not r['ok'])} failed)"
+        + (f", {refused_count} of {requested_count} requested branches "
+           "REFUSED (delegate budget exhausted)" if refused_count else "")
+        + ":"
+    ]
+    for r in results:
+        if r is None:
+            continue
+        header = (
+            f"[branch {r['index']}] agent={r['agent']} model={r['model']} "
+            f"job={r['job_id'] or '(untracked)'} "
+            f"({'OK' if r['ok'] else 'ERROR'}, {r['elapsed_s']}s)"
+        )
+        if r["ok"]:
+            body = r["text"][-_DELEGATE_RESULT_CAP:] or "(no final text — see job for transcript)"
+            if len(r["text"]) > _DELEGATE_RESULT_CAP:
+                body += "\n[result truncated]"
+        else:
+            body = f"ERROR: {r['error']}"
+        lines.append(header + "\n" + body)
+    return "\n\n".join(lines)
+
+
 def build_general_registry() -> DispatchRegistry:
     """Assemble the General-domain subagents (v2.0 Section 4).
 
     Six Section-4 agents, the laptop-wide ``system`` subagent (full
     filesystem/terminal access with the deterministic danger guard), and the
     ``orchestrator`` subagent whose delegate_task tool lets the lead agent
-    spawn NESTED dispatch runs (self-dispatch, depth/budget bounded).
+    spawn NESTED dispatch runs (self-dispatch, depth/budget bounded), and
+    whose delegate_parallel tool (v8.31) does the same but for SEVERAL
+    branches genuinely running at once.
     """
     registry = DispatchRegistry()
     path_note = _sandbox_path_note()
@@ -1799,8 +2119,9 @@ def build_general_registry() -> DispatchRegistry:
         _subagent(
             "orchestrator",
             "Both",
-            "Lead orchestrator — spawns nested agent runs via delegate_task.",
-            [_build_delegate_tool(registry)],
+            "Lead orchestrator — spawns nested agent runs via delegate_task "
+            "(one at a time) or delegate_parallel (several concurrently).",
+            [_build_delegate_tool(registry), _build_delegate_parallel_tool(registry)],
         )
     )
 
@@ -3961,8 +4282,9 @@ def build_general_registry() -> DispatchRegistry:
     # 'next level' gap vs Claude Cowork (live tables, equity curves,
     # formatted reports instead of raw text). The tool writes into the
     # shared ArtifactStore; the web UI renders it live via /api/artifacts.
-    # The orchestrator deliberately stays single-tool (delegate_task) —
-    # publish_artifact rides the agents that actually produce output.
+    # The orchestrator deliberately stays scoped to its own native
+    # self-dispatch tools (delegate_task, delegate_parallel) — publish_artifact
+    # rides the agents that actually produce output.
     from dourmouse.artifacts import build_artifact_tool_spec
 
     _artifact_spec = build_artifact_tool_spec()
@@ -3979,8 +4301,9 @@ def build_general_registry() -> DispatchRegistry:
     # agents, this one is meant to be reachable from anywhere, since any
     # backend answering any subagent's tool-calling turn may want it.
     # The orchestrator is excluded on purpose: it deliberately stays
-    # single-tool (delegate_task only — see the artifact-tool comment
-    # above), so it is not extended here either.
+    # scoped to its own native self-dispatch tools (delegate_task,
+    # delegate_parallel — see the artifact-tool comment above), so it is
+    # not extended here either.
     _shared_memory_spec = registry.lookup("query_shared_memory")
     if _shared_memory_spec is not None:
         for _sub in registry.all_subagents():

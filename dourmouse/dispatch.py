@@ -1301,15 +1301,51 @@ class DispatchContext:
         return True
 
 
+def _registry_ctx_stack(registry: DispatchRegistry) -> list[DispatchContext]:
+    """The nesting stack of in-flight DispatchContexts for this registry —
+    always THIS THREAD's own stack, never shared with any other thread.
+
+    v8.30 and earlier: this was a single plain list (``registry._ctx_stack``)
+    under the documented INVARIANT "at most ONE in-flight run per registry
+    at any instant" — true as long as nesting was purely synchronous (a
+    delegate_task run runs to completion inside the parent's own call
+    stack before the parent's loop resumes). v8.31's delegate_parallel
+    breaks that invariant on purpose: several nested run_dispatch_messages
+    calls are now genuinely in flight AT ONCE, on separate threads, against
+    the SAME registry object. A single shared list would let one thread's
+    push/pop interleave with another's, so ``current_dispatch_context``
+    could hand a tool call in branch A the context that actually belongs
+    to branch B — the delegate_task/delegate_parallel handler inside a
+    parallel branch would then read the WRONG budget/depth/client. A
+    ``threading.local`` gives each thread its own private stack instead:
+    within one thread the old synchronous-nesting invariant still holds
+    exactly as before (that thread's own stack is still "at most one
+    in-flight run's worth of nesting"), and different threads simply never
+    see each other's stacks.
+    """
+    local = getattr(registry, "_ctx_stack_local", None)
+    if local is None:
+        local = threading.local()
+        registry._ctx_stack_local = local
+    stack = getattr(local, "stack", None)
+    if stack is None:
+        stack = []
+        local.stack = stack
+    return stack
+
+
 def current_dispatch_context(registry: DispatchRegistry) -> DispatchContext | None:
-    """The active dispatch context for a registry, or None outside a run.
+    """The active dispatch context for a registry, or None outside a run
+    ON THIS THREAD (see ``_registry_ctx_stack`` for why this is now
+    per-thread rather than per-registry).
 
     run_dispatch_messages pushes one context per (possibly nested) run; the
-    delegate_task handler reads the top of the stack to spawn its nested run
-    with the parent's client/gate/sink. Synchronous nesting means the stack
-    is exactly one per in-flight run.
+    delegate_task/delegate_parallel handlers read the top of the calling
+    thread's stack to spawn their nested run(s) with the parent's
+    client/gate/sink. Synchronous nesting within one thread means that
+    thread's stack top is always its own in-flight run's context.
     """
-    stack = getattr(registry, "_ctx_stack", None)
+    stack = _registry_ctx_stack(registry)
     if not stack:
         return None
     return stack[-1]
@@ -1558,14 +1594,16 @@ def run_dispatch_messages(
             _explicit_model is None and not escalated_brain and not fast_lane
         ),
     )
-    # INVARIANT: at most ONE in-flight run per registry at any instant. The
-    # webui guarantees this by serializing chat under session_lock, and
-    # nesting is synchronous (a delegate runs to completion inside the
-    # parent's loop), so stack[-1] is always the in-flight run's context.
-    stack: list[DispatchContext] = getattr(registry, "_ctx_stack", None)
-    if stack is None:
-        stack = []
-        registry._ctx_stack = stack
+    # INVARIANT: at most ONE in-flight run per registry PER THREAD at any
+    # instant. The webui guarantees this for the top-level chat path by
+    # serializing chat under session_lock, and nesting via delegate_task is
+    # synchronous (a delegate runs to completion inside the parent's loop)
+    # — so within any ONE thread, stack[-1] is always that thread's
+    # in-flight run's context. v8.31's delegate_parallel deliberately runs
+    # several such (synchronous-within-themselves) nested runs concurrently
+    # on DIFFERENT threads, which is exactly why the stack itself is now
+    # thread-local (see _registry_ctx_stack) rather than shared.
+    stack: list[DispatchContext] = _registry_ctx_stack(registry)
     # v8.10 brevity: a lookup-shaped prompt answers short. A nested run also
     # inherits the parent's brief flag — a delegate writing three paragraphs
     # back into a brief parent turn just moves the essay one level down.
@@ -1594,9 +1632,12 @@ def run_dispatch_messages(
         report = _run_dispatch_loop(messages, registry, max_turns, ctx)
     finally:
         stack.pop()
-        if not stack:
-            # Leave no stale stack on the registry for a later fresh run.
-            delattr(registry, "_ctx_stack")
+        # Note: unlike the old shared-list version, there is no
+        # delattr/cleanup needed here — an emptied THREAD-LOCAL stack just
+        # sits there as an empty list for that thread (cheap, and a worker
+        # thread reused by a later ThreadPoolExecutor submission starts
+        # from that same clean empty list, same as a brand new thread
+        # would via threading.local()'s own per-thread default).
     # v5.6: one experience per TOP-LEVEL run feeds the neural orchestrator.
     # A raising sink must never abort the run — it is a pure observer.
     if depth == 0 and experience_sink is not None:

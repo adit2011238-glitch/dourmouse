@@ -16,6 +16,8 @@ from __future__ import annotations
 import http.client
 import json
 import threading
+import time
+from typing import Any
 
 import pytest
 
@@ -611,6 +613,344 @@ class TestRecursiveDispatch:
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "(untracked)" in result["text"]
         assert "nested ok" in result["text"]
+
+
+# --------------------------------------------------------------------------- #
+# v8.31 — delegate_parallel: genuinely concurrent multi-agent fan-out
+# --------------------------------------------------------------------------- #
+
+class _KeyedCompletions:
+    """A thread-safe fake completions endpoint for REAL concurrency tests.
+
+    Unlike _FakeCompletions (a single ordered response queue — fine for
+    delegate_task's purely SEQUENTIAL nesting), delegate_parallel calls
+    this from several threads at once, so responses are looked up by a
+    keyword found in the call's own last-user-turn content rather than by
+    call order, and every read/write of shared state is under one lock.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.calls: list[dict] = []
+        self._by_keyword: dict[str, list[Any]] = {}
+
+    def add(self, keyword: str, response_factory) -> None:
+        """``response_factory`` is a zero-arg callable returning a
+        _FakeResponse — called fresh on each matching request so it can
+        introduce a real, per-call delay (time.sleep) or side effect."""
+        with self._lock:
+            self._by_keyword.setdefault(keyword, []).append(response_factory)
+
+    @staticmethod
+    def _effective_content(content: str) -> str:
+        """Strip the boilerplate delegate_task/delegate_parallel wraps
+        (the '[ROUTING DIRECTIVE] ... TASK: ' prefix, and the
+        '[PARENT CONTEXT]' block appended when the parent's own recent
+        turn is threaded into a nested branch's prompt) down to just the
+        real instructions text — otherwise a keyword like "fan out" that
+        legitimately reappears inside a nested branch's PARENT CONTEXT
+        block would shadow that branch's own, more specific keyword."""
+        marker = "TASK: "
+        idx = content.find(marker)
+        if idx != -1:
+            content = content[idx + len(marker):]
+        boundary = content.find("\n\n[PARENT CONTEXT")
+        if boundary != -1:
+            content = content[:boundary]
+        return content
+
+    def create(self, **kwargs):
+        with self._lock:
+            self.calls.append(kwargs)
+        messages = kwargs.get("messages") or []
+        raw_content = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                raw_content = m.get("content") or ""
+                break
+        content = self._effective_content(raw_content)
+        for keyword, factories in self._by_keyword.items():
+            if keyword in content:
+                with self._lock:
+                    factory = factories.pop(0) if len(factories) > 1 else factories[0]
+                return factory()
+        raise AssertionError(f"_KeyedCompletions: no fake response registered matching: {raw_content!r}")
+
+
+class _KeyedChat:
+    def __init__(self, completions: _KeyedCompletions) -> None:
+        self.completions = completions
+
+
+class _KeyedClient:
+    """Same shape as FakeClient, backed by _KeyedCompletions."""
+
+    def __init__(self) -> None:
+        self.chat = _KeyedChat(_KeyedCompletions())
+
+
+def _delegate_parallel_call(call_id: str, branches: list[dict]) -> _FakeToolCall:
+    return _FakeToolCall(call_id, "delegate_parallel", json.dumps({"branches": branches}))
+
+
+class TestDelegateParallelTool:
+    """Unit-level guards (mirrors TestDelegateTool for delegate_task)."""
+
+    def test_requires_active_dispatch_context(self, registry):
+        spec = next(t for t in registry.get_subagent("orchestrator").tools if t.name == "delegate_parallel")
+        result = spec.handler({"branches": [{"instructions": "hi"}]})
+        assert "requires an active dispatch context" in result
+
+    def test_empty_branches_errors(self, registry, jobs):
+        tool_call = _delegate_parallel_call("c1", [])
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="ok")),
+        ])
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "non-empty 'branches'" in result["text"]
+        assert jobs.count() == 0
+
+    def test_branch_missing_instructions_errors(self, registry, jobs):
+        tool_call = _delegate_parallel_call("c1", [{"agent_or_task": "echo_agent"}])
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="ok")),
+        ])
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "non-empty 'instructions'" in result["text"]
+        assert jobs.count() == 0
+
+    def test_unknown_agent_in_branch_errors(self, registry, jobs):
+        tool_call = _delegate_parallel_call("c1", [{"agent_or_task": "nope", "instructions": "x"}])
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="ok")),
+        ])
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "unknown subagent 'nope'" in result["text"]
+        assert jobs.count() == 0
+
+    def test_depth_cap_refuses_the_whole_fan_out(self, registry, jobs):
+        """SAME guard as delegate_task: at max depth, delegate_parallel
+        refuses outright — no branch runs at all."""
+        tool_call = _delegate_parallel_call(
+            "c1",
+            [
+                {"agent_or_task": "echo_agent", "instructions": "one"},
+                {"agent_or_task": "echo_agent", "instructions": "two"},
+            ],
+        )
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="ok")),
+        ])
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            depth=2, max_depth=2,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "maximum delegate depth (2) reached" in result["text"]
+        assert jobs.count() == 0
+
+    def test_budget_cap_refuses_all_branches_when_exhausted(self, registry, jobs):
+        tool_call = _delegate_parallel_call(
+            "c1",
+            [
+                {"agent_or_task": "echo_agent", "instructions": "one"},
+                {"agent_or_task": "echo_agent", "instructions": "two"},
+            ],
+        )
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="ok")),
+        ])
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            max_delegates=0,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "delegate budget exhausted" in result["text"]
+        assert "0 of 2" in result["text"]
+        assert jobs.count() == 0
+
+    def test_budget_partial_grant_runs_only_what_fits_and_reports_the_rest_refused(self, registry, jobs):
+        """The SAME shared budget delegate_task uses, spent one unit per
+        branch: with only 1 unit left, exactly 1 of 3 requested branches
+        runs and the aggregate honestly reports the other 2 as refused —
+        a real fan-out under a real cap holds, it doesn't silently drop or
+        silently over-run the budget."""
+        tool_call = _delegate_parallel_call(
+            "c1",
+            [
+                {"agent_or_task": "echo_agent", "instructions": "one"},
+                {"agent_or_task": "echo_agent", "instructions": "two"},
+                {"agent_or_task": "echo_agent", "instructions": "three"},
+            ],
+        )
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            # the ONE branch that gets budget answers directly (no tool call)
+            _FakeResponse(_FakeMessage(content="branch answered")),
+            _FakeResponse(_FakeMessage(content="parent done")),
+        ])
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            max_delegates=1,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "1 succeeded" in result["text"]
+        assert "2 of 3 requested branches REFUSED" in result["text"]
+        assert jobs.count() == 1  # only the granted branch spawned a job
+
+
+class TestDelegateParallelConcurrency:
+    """Real concurrency: several nested runs genuinely in flight at once,
+    tagged with their own agent + model, aggregated coherently."""
+
+    def test_branches_tagged_with_their_own_agent_and_model(self, registry, jobs, monkeypatch):
+        """v3.1/v8.30 per-agent model resolution, reused per branch: each
+        branch's result names the REAL agent and REAL configured model
+        that answered it — never blurred into one anonymous blob."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.config import NvidiaConfig
+
+        config = NvidiaConfig(
+            api_key="k", base_url="u", model="nvidia/parent-120b",
+            agent_models={"ECHO_AGENT": "nvidia/echo-agent-70b"},
+        )
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out",
+            lambda: _FakeResponse(_FakeMessage(
+                content=None,
+                tool_calls=[_delegate_parallel_call(
+                    "c1",
+                    [
+                        {"agent_or_task": "echo_agent", "instructions": "say alpha"},
+                        {"instructions": "say beta"},  # free sub-orchestration, no target
+                    ],
+                )],
+            )),
+        )
+        client.chat.completions.add("say alpha", lambda: _FakeResponse(_FakeMessage(content="ALPHA DONE")))
+        client.chat.completions.add("say beta", lambda: _FakeResponse(_FakeMessage(content="BETA DONE")))
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="parent wrap-up")))
+
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, config=config, job_tracker=jobs,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "agent=echo_agent model=nvidia/echo-agent-70b" in result["text"]
+        assert "ALPHA DONE" in result["text"]
+        # the free branch is tagged "any" and reports the parent's own
+        # default model as its best-effort label (see the tool's docstring
+        # for why a free branch's model can't be pinned up front)
+        assert "agent=any model=nvidia/parent-120b" in result["text"]
+        assert "BETA DONE" in result["text"]
+        assert jobs.count() == 2
+
+    def test_slow_branch_does_not_block_a_fast_branch_real_concurrency(self, registry, jobs, monkeypatch):
+        """The decisive proof this is REAL concurrency and not sequential
+        work disguised as parallel: two branches each sleep INSIDE their
+        own fake LLM call. If they ran one at a time the whole tool call
+        would take >= the sum of both sleeps; run concurrently it takes
+        roughly the SLOWER branch alone.
+
+        DOURMOUSE_FAST_LANE pinned off (same reason
+        test_delegate_target_uses_that_agents_model does it): otherwise the
+        very first dispatch call in a process pays a real one-time
+        probe/import cold-start cost unrelated to this feature, which would
+        make the timing assertion flaky. A trivial warm-up call absorbs
+        whatever cold-start cost remains before the timed run starts."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        warmup_client = FakeClient([_FakeResponse(_FakeMessage(content="warm"))])
+        run_dispatch_messages(
+            [{"role": "user", "content": "warm up"}], registry, client=warmup_client,
+        )
+
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out",
+            lambda: _FakeResponse(_FakeMessage(
+                content=None,
+                tool_calls=[_delegate_parallel_call(
+                    "c1",
+                    [
+                        {"agent_or_task": "echo_agent", "instructions": "slow branch"},
+                        {"agent_or_task": "echo_agent", "instructions": "fast branch"},
+                    ],
+                )],
+            )),
+        )
+
+        def _slow():
+            time.sleep(0.35)
+            return _FakeResponse(_FakeMessage(content="SLOW DONE"))
+
+        client.chat.completions.add("slow branch", _slow)
+        client.chat.completions.add(
+            "fast branch", lambda: _FakeResponse(_FakeMessage(content="FAST DONE"))
+        )
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="parent wrap-up")))
+
+        started = time.perf_counter()
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+        elapsed = time.perf_counter() - started
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "SLOW DONE" in result["text"] and "FAST DONE" in result["text"]
+        # Sequential delegate_task-style nesting would cost >= 0.35s for the
+        # slow branch PLUS a second nested run's own overhead for the fast
+        # branch (empirically ~0.7-0.9s total, warm, on this machine).
+        # Genuine concurrency keeps the whole call close to the SLOWER
+        # branch's own delay alone (~0.35s + one run's overhead). 0.65s
+        # sits with real margin on both sides of that gap.
+        assert elapsed < 0.65, f"took {elapsed:.2f}s — branches do not look concurrent"
+
+    def test_concurrency_cap_still_runs_every_granted_branch(self, registry, jobs):
+        """More branches than _MAX_CONCURRENT_DELEGATES (6): the cap bounds
+        how many run AT ONCE, not how many run in total — every granted
+        branch still completes and is reported."""
+        n = 8
+        branches = [
+            {"agent_or_task": "echo_agent", "instructions": f"branch {i}"}
+            for i in range(n)
+        ]
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out",
+            lambda: _FakeResponse(_FakeMessage(
+                content=None,
+                tool_calls=[_delegate_parallel_call("c1", branches)],
+            )),
+        )
+        for i in range(n):
+            client.chat.completions.add(
+                f"branch {i}", (lambda i=i: _FakeResponse(_FakeMessage(content=f"DONE {i}")))
+            )
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="parent wrap-up")))
+
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            max_delegates=n,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert f"{n} branch(es) ran" in result["text"]
+        assert f"{n} succeeded" in result["text"]
+        for i in range(n):
+            assert f"DONE {i}" in result["text"]
+        assert jobs.count() == n
 
 
 # --------------------------------------------------------------------------- #
