@@ -902,6 +902,26 @@ def _semantic_recall_tool(arguments: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _query_shared_memory_tool(arguments: dict[str, Any]) -> str:
+    """The 'shared database all LLMs can use' tool (shared_rag.py): a
+    read-only search across whichever of {local Ollama-embedded
+    GlobalMemory, desktop spatial vault} is actually configured on THIS
+    machine, tagged by source. See shared_rag.py's own docstring for the
+    full merge design and the defensive schema-probing behind the vault
+    half. Honestly NOT CONFIGURED when neither source is enabled."""
+    query = str(arguments.get("query", "") or "").strip()
+    if not query:
+        return "ERROR: query_shared_memory requires a non-empty 'query'."
+    try:
+        top_k = int(arguments.get("top_k", 5))
+    except (TypeError, ValueError):
+        return "ERROR: top_k must be an integer."
+    from dourmouse.shared_rag import format_merged_result, merged_search
+
+    result = merged_search(query, top_k=max(1, min(top_k, 20)))
+    return format_merged_result(query, result)
+
+
 def _search_vault_tool(arguments: dict[str, Any]) -> str:
     query = arguments.get("query", "").strip().lower()
     if not query:
@@ -1255,6 +1275,31 @@ def _build_memory_subagent(registry: DispatchRegistry) -> Subagent:
                 ),
                 parameters={"type": "object", "properties": {}},
                 handler=_daily_digest_tool,
+            ),
+            ToolSpec(
+                name="query_shared_memory",
+                description=(
+                    "Read-only search across the SHARED memory sources "
+                    "configured on this machine: the local Ollama-embedded "
+                    "store (DOURMOUSE_GLOBAL_MEMORY=1) and/or the desktop's "
+                    "much larger spatial vault (DOURMOUSE_SPATIAL_VAULT_PATH), "
+                    "when either is set. Every roster agent can call this — "
+                    "the same shared knowledge base regardless of which "
+                    "backend (nvidia/deepseek/claude/codex/ollama/qwen/glm/"
+                    "kimi) is answering. Honestly reports NOT CONFIGURED "
+                    "when neither source is enabled — never a silent empty "
+                    "result."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "top_k": {"type": "integer", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+                handler=_query_shared_memory_tool,
+                permission=Permission.REGULAR,
             ),
         ],
     )
@@ -3904,5 +3949,24 @@ def build_general_registry() -> DispatchRegistry:
     _artifact_spec = build_artifact_tool_spec()
     for _name in ("research_info", "dev_coding", "rnd", "atlas"):
         registry.extend_subagent(_name, _artifact_spec)
+
+    # -- shared RAG tool (query_shared_memory) -------------------------- #
+    # "a shared database all LLMs can use": query_shared_memory is
+    # registered above on the memory subagent (its natural home, next to
+    # remember/recall/memory_search_semantic) then extended to EVERY other
+    # subagent here via the SAME ToolSpec object identity (matching
+    # extend_subagent's own is-identity contract above) — unlike
+    # publish_artifact, which deliberately rides only the report-producing
+    # agents, this one is meant to be reachable from anywhere, since any
+    # backend answering any subagent's tool-calling turn may want it.
+    # The orchestrator is excluded on purpose: it deliberately stays
+    # single-tool (delegate_task only — see the artifact-tool comment
+    # above), so it is not extended here either.
+    _shared_memory_spec = registry.lookup("query_shared_memory")
+    if _shared_memory_spec is not None:
+        for _sub in registry.all_subagents():
+            if _sub.name == "orchestrator":
+                continue
+            registry.extend_subagent(_sub.name, _shared_memory_spec)
 
     return registry

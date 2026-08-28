@@ -8,3 +8,4 @@ segno>=1.6.0  # v5.13 phone-link QR codes (pure-Python, zero native deps)
 worldmonitor-sdk>=0.1.1  # v5.18 World Monitor tab (country briefs / risk feeds); module-level import
 pywebview>=6.0  # v5.19 desktop shell native window (documented browser fallback without it)
 playwright>=1.40  # v5.25 browser agent (drives the system Google Chrome via channel='chrome' — no browser download)
+faiss-cpu>=1.8.0  # dourmouse/shared_rag.py — reads the desktop's hybrid_vault vector.index (FAISS-named artifact, never confirmed live); imported lazily so its absence never breaks anything else, this pin only matters once that code actually runs where the vault lives

@@ -24,6 +24,7 @@ from dourmouse.general_roster import (
     _list_calendar_events_tool,
     _list_files_tool,
     _propose_time_slots_tool,
+    _query_shared_memory_tool,
     _read_file_tool,
     _read_note_tool,
     _run_python_tool,
@@ -497,3 +498,41 @@ class TestMemory:
         assert "NOT CONFIGURED" in _search_vault_tool({"query": "x"})
         assert "NOT CONFIGURED" in _read_note_tool({"path": "x.md"})
         assert "NOT CONFIGURED" in _write_note_tool({"path": "x.md", "content": "y"})
+
+
+class TestSharedMemoryTool:
+    """query_shared_memory (shared_rag.py): the 'shared database all LLMs
+    can use' tool — registered on the memory subagent and extended to
+    every other subagent (see build_general_registry's own comment)."""
+
+    def test_registered_regular_on_memory_subagent(self):
+        registry = build_general_registry()
+        spec = registry.lookup("query_shared_memory")
+        assert spec is not None
+        assert spec.permission is Permission.REGULAR
+        sub = registry.get_subagent("memory")
+        assert any(t.name == "query_shared_memory" for t in sub.tools)
+
+    def test_extended_to_every_subagent_except_orchestrator(self):
+        registry = build_general_registry()
+        for sub in registry.all_subagents():
+            names = {t.name for t in sub.tools}
+            if sub.name == "orchestrator":
+                assert "query_shared_memory" not in names
+            else:
+                assert "query_shared_memory" in names, f"{sub.name} is missing query_shared_memory"
+
+    def test_empty_query_rejected(self):
+        assert "ERROR" in _query_shared_memory_tool({"query": ""})
+
+    def test_not_configured_when_neither_source_enabled(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_GLOBAL_MEMORY", raising=False)
+        monkeypatch.delenv("DOURMOUSE_SPATIAL_VAULT_PATH", raising=False)
+        result = _query_shared_memory_tool({"query": "anything"})
+        assert result.startswith("NOT CONFIGURED")
+
+    def test_bad_top_k_reported_as_error(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_GLOBAL_MEMORY", raising=False)
+        monkeypatch.delenv("DOURMOUSE_SPATIAL_VAULT_PATH", raising=False)
+        result = _query_shared_memory_tool({"query": "x", "top_k": "not-a-number"})
+        assert result.startswith("ERROR")
