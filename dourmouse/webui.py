@@ -1256,6 +1256,15 @@ class _Handler(BaseHTTPRequestHandler):
             # v4.1 (P6+): Project Memory — repo index status, last scan,
             # recent facts, and ?q= search (all scoped to source='repo').
             self._handle_repo_api()
+        elif path == "/api/projects/imported":
+            # v8.30: real projects discovered from Claude Code's and Codex
+            # CLI's own on-disk session history — a source for the PROJECTS
+            # bookshelf alongside its existing manual (localStorage) shelf.
+            # Read-only against both tools' data; never raises (see
+            # dourmouse/project_import.py for the on-disk formats).
+            from dourmouse.project_import import get_imported_projects
+
+            self._send_json(get_imported_projects())
         elif path == "/api/messages":
             self._handle_messages_api()
         elif path == "/api/voice":
