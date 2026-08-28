@@ -118,10 +118,19 @@ class TestClaudeCodexDiscovery:
 
     def test_claude_signin_never_guesses_from_projects_dir(self, tmp_path, monkeypatch):
         """A populated ~/.claude/projects is NOT evidence of a session — an
-        earlier fix used it and went straight back to a false green."""
+        earlier fix used it and went straight back to a false green.
+
+        Also isolates the real macOS Keychain check (a later fix for the
+        same "no cheap portable signal" problem, this time for macOS) —
+        without this, the test picks up whatever the REAL host's real
+        Keychain state happens to be, which is exactly the kind of
+        leaking-real-state-into-a-test bug this test itself exists to
+        guard against for the file-based signal.
+        """
         home = tmp_path / ".claude"
         (home / "projects" / "some-project").mkdir(parents=True)
         monkeypatch.setattr(conn.Path, "expanduser", lambda self: home)
+        monkeypatch.setattr(conn.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()))
         assert conn._claude_signin() == "unknown"
 
     def test_codex_requires_cli_and_login(self, monkeypatch):

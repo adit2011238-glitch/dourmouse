@@ -40,6 +40,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -90,14 +91,35 @@ def _claude_signin() -> str:
     earlier attempt here read a non-empty ``projects/`` directory as proof
     and went straight back to a false green.
 
-    There is no cheap, portable, reliable signal. So this reports 'yes' only
-    on hard evidence (a credentials file) and 'unknown' otherwise, and the
-    caller says so plainly rather than inventing a verdict in either
-    direction.
+    Real gap found and fixed live on a real Mac: the same class of problem
+    exists on macOS too — Claude Code stores its session in the Keychain
+    (service "Claude Code-credentials"), not a file, so the file check alone
+    reported 'unknown' for a genuinely signed-in CLI that had just been
+    proven to work end-to-end. ``security find-generic-password`` (macOS's
+    own, always-present CLI) confirms an ENTRY EXISTS without ever reading
+    or printing the secret value itself — read-only, cheap, real evidence,
+    same "hard evidence only" standard as the file check.
+
+    There is still no cheap, portable, reliable signal on every platform.
+    So this reports 'yes' only on hard evidence (a credentials file, or a
+    real macOS Keychain entry) and 'unknown' otherwise, and the caller says
+    so plainly rather than inventing a verdict in either direction.
     """
     home = Path("~/.claude").expanduser()
     for name in (".credentials.json", "credentials.json"):
         if (home / name).exists():
+            return "yes"
+    if sys.platform == "darwin":
+        try:
+            proc = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials"],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return "unknown"
+        if proc.returncode == 0:
             return "yes"
     return "unknown"
 
