@@ -203,9 +203,40 @@ class TestOrchestratorModelSetting:
         monkeypatch.delenv("DOURMOUSE_MODEL_ORCHESTRATOR", raising=False)
         from dourmouse.config import load_nvidia_config, save_orchestrator_model_setting
 
-        save_orchestrator_model_setting("nvidia/persisted-choice")
+        save_orchestrator_model_setting("nvidia/persisted-choice", backend="nvidia")
         cfg = load_nvidia_config()
         assert cfg.model_for_agent("orchestrator") == "nvidia/persisted-choice"
+
+    def test_persisted_setting_without_backend_tag_never_auto_applies(self, monkeypatch, tmp_path):
+        """Real bug, found live: a bare model string with no backend tag
+        used to be applied to WHATEVER backend was active at read time —
+        e.g. an Ollama model id ("qwen3:8b") silently handed to NVIDIA's
+        real API, which 404'd and killed the orchestrator with no visible
+        error. An untagged save must never auto-apply anywhere; it falls
+        through to that backend's normal default instead."""
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
+        monkeypatch.delenv("DOURMOUSE_MODEL_ORCHESTRATOR", raising=False)
+        from dourmouse.config import load_nvidia_config, save_orchestrator_model_setting
+
+        save_orchestrator_model_setting("qwen3:8b")  # no backend= given
+        cfg = load_nvidia_config()
+        assert cfg.model_for_agent("orchestrator") != "qwen3:8b"
+
+    def test_persisted_setting_from_a_different_backend_never_leaks_across(self, monkeypatch, tmp_path):
+        """The exact cross-backend leak this whole fix exists to close:
+        a model persisted FOR ollama must never be read back by nvidia's
+        (or omniroute's) model_for_agent, even though all three share the
+        same underlying storage file."""
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
+        monkeypatch.delenv("DOURMOUSE_MODEL_ORCHESTRATOR", raising=False)
+        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
+        from dourmouse.config import load_nvidia_config, save_orchestrator_model_setting
+
+        save_orchestrator_model_setting("qwen3:8b", backend="ollama")
+        cfg = load_nvidia_config()
+        assert cfg.model_for_agent("orchestrator") != "qwen3:8b"
 
     def test_env_override_still_wins_over_persisted_setting(self, monkeypatch, tmp_path):
         self._isolate(monkeypatch, tmp_path)
@@ -217,7 +248,11 @@ class TestOrchestratorModelSetting:
         cfg = load_nvidia_config()
         assert cfg.model_for_agent("orchestrator") == "nvidia/env-wins"
 
-    def test_persisted_setting_also_applies_on_ollama_and_omniroute(self, monkeypatch, tmp_path):
+    def test_persisted_setting_applies_only_to_its_own_saved_backend(self, monkeypatch, tmp_path):
+        """Each backend's persisted choice is independent — saving one
+        does not affect, and is not affected by, the others. This is the
+        corrected version of the old (buggy) "applies everywhere" test:
+        that behavior is exactly the cross-backend leak this fix closes."""
         self._isolate(monkeypatch, tmp_path)
         from dourmouse.config import (
             load_ollama_config,
@@ -227,9 +262,18 @@ class TestOrchestratorModelSetting:
 
         monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
         monkeypatch.delenv("DOURMOUSE_OMNIROUTE_MODEL_ORCHESTRATOR", raising=False)
-        save_orchestrator_model_setting("some/persisted-model")
-        assert load_ollama_config().model_for_agent("orchestrator") == "some/persisted-model"
-        assert load_omniroute_config().model_for_agent("orchestrator") == "some/persisted-model"
+
+        save_orchestrator_model_setting("ollama/persisted-choice", backend="ollama")
+        assert load_ollama_config().model_for_agent("orchestrator") == "ollama/persisted-choice"
+        # Saving for ollama must not make omniroute pick it up too.
+        assert load_omniroute_config().model_for_agent("orchestrator") != "ollama/persisted-choice"
+
+        save_orchestrator_model_setting("omniroute/persisted-choice", backend="omniroute")
+        assert load_omniroute_config().model_for_agent("orchestrator") == "omniroute/persisted-choice"
+        # The later omniroute save supersedes ollama's — only the most
+        # recent backend tag is trusted, matching the single-storage-slot
+        # design (one persisted choice at a time, tagged with its backend).
+        assert load_ollama_config().model_for_agent("orchestrator") != "ollama/persisted-choice"
 
 
 # --------------------------------------------------------------------------- #

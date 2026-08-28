@@ -3459,15 +3459,45 @@ class _Handler(BaseHTTPRequestHandler):
                 return bool(entry["configured"]), str(entry["model"]), str(entry["detail"])
         return False, "", f"unknown backend {backend!r}"
 
+    def _active_llm_backend_name(self) -> str:
+        """The REAL, currently-active backend identity ('nvidia'/'ollama'/
+        'omniroute'/''), read from the actual resolved config object on
+        self.server.config rather than re-deriving DOURMOUSE_LLM_BACKEND's
+        'auto' resolution logic a second time (that logic already ran once,
+        in config.load_llm_config(), to build self.server.config — asking
+        again here could disagree with it, e.g. if Ollama's reachability
+        changed between the two checks). Empty string when the server has
+        no config object (a state config.py's own callers already handle
+        by degrading, never guessing) — deliberately not a default guess.
+        """
+        from dourmouse import config as cfg_mod
+
+        cfg = getattr(self.server, "config", None)
+        if isinstance(cfg, cfg_mod.NvidiaConfig):
+            return "nvidia"
+        if isinstance(cfg, cfg_mod.OllamaConfig):
+            return "ollama"
+        if isinstance(cfg, cfg_mod.OmniRouteConfig):
+            return "omniroute"
+        return ""
+
     def _handle_orchestrator_model_get(self) -> None:
         """GET /api/settings/orchestrator-model."""
         from dourmouse import config as cfg_mod
 
         persisted = cfg_mod.orchestrator_model_setting()
+        persisted_backend = cfg_mod.orchestrator_backend_setting()
         env_override = os.environ.get("DOURMOUSE_MODEL_ORCHESTRATOR", "").strip()
+        # Real bug fixed here: a persisted model with no matching backend
+        # tag (or a backend tag that isn't the CURRENTLY ACTIVE one) is
+        # never actually applied by model_for_agent — reporting it as
+        # "persisted"/active would be a lie the UI can't tell apart from a
+        # setting that genuinely took effect. Report it honestly instead.
+        active_backend = self._active_llm_backend_name()
+        persisted_is_live = bool(persisted) and persisted_backend == active_backend
         if env_override:
             current, source = env_override, "env_override"
-        elif persisted:
+        elif persisted_is_live:
             current, source = persisted, "persisted"
         elif os.environ.get("NVIDIA_API_KEY", "").strip():
             # The stated default: nothing chosen yet AND an NVIDIA key is
@@ -3486,6 +3516,9 @@ class _Handler(BaseHTTPRequestHandler):
             "current": current,
             "source": source,
             "persisted": persisted or None,
+            "persisted_backend": persisted_backend or None,
+            "active_backend": active_backend or None,
+            "persisted_is_live": persisted_is_live,
             "backends": self._orchestrator_backend_catalog(),
         })
 
@@ -3506,8 +3539,33 @@ class _Handler(BaseHTTPRequestHandler):
 
         body = self._read_json_body()
         model = str(body.get("model") or "").strip()
-        backend = str(body.get("backend") or "").strip()
+        backend = str(body.get("backend") or "").strip().lower()
         configured: bool | None = None
+        # Real bug fixed here: the catalog GET also lists deepseek/qwen/
+        # glm/kimi/codex/claude — real backends, but reached through
+        # code_backends.py/cn_backends.py for the CODE screen's OWN
+        # toolchain picker, a totally separate dispatch path from the
+        # orchestrator's config.model_for_agent(). Picking one of them
+        # HERE used to silently persist a value that model_for_agent could
+        # never apply to any of NvidiaConfig/OllamaConfig/OmniRouteConfig —
+        # a save that reported success but changed nothing. Refuse it
+        # honestly instead of accepting an impossible choice.
+        _CORE_ORCHESTRATOR_BACKENDS = {"nvidia", "ollama", "omniroute"}
+        if backend and backend not in _CORE_ORCHESTRATOR_BACKENDS:
+            catalog_names = {e["name"] for e in self._orchestrator_backend_catalog()}
+            if backend in catalog_names:
+                self._send_json({
+                    "ok": False,
+                    "detail": (
+                        f"{backend!r} can't be the orchestrator's model — it's reached "
+                        "through the CODE screen's own toolchain picker, not this "
+                        "setting. The orchestrator (the routing brain behind every "
+                        "screen) only runs on nvidia, ollama, or omniroute."
+                    ),
+                })
+            else:
+                self._send_json({"ok": False, "detail": f"unknown backend {backend!r}"})
+            return
         if not model and backend:
             configured, model, detail = self._resolve_orchestrator_backend_model(backend)
             if not model:
@@ -3516,7 +3574,11 @@ class _Handler(BaseHTTPRequestHandler):
         if not model:
             self._send_json({"ok": False, "detail": "provide either 'backend' or 'model'"})
             return
-        result = cfg_mod.save_orchestrator_model_setting(model)
+        # A raw model-id override (no backend) can't be safety-checked
+        # against any backend, so it's persisted un-tagged — see
+        # save_orchestrator_model_setting's own docstring for why an
+        # untagged value is never auto-applied by model_for_agent.
+        result = cfg_mod.save_orchestrator_model_setting(model, backend=backend)
         if configured is not None:
             result["configured"] = configured
         self._send_json(result)

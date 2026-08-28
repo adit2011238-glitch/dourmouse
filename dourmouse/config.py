@@ -204,7 +204,7 @@ class NvidiaConfig:
         if key and key in self.agent_models:
             return self.agent_models[key]
         if key == "ORCHESTRATOR":
-            persisted = orchestrator_model_setting()
+            persisted = _persisted_model_for_backend("nvidia")
             if persisted:
                 return persisted
         if key and key in _NVIDIA_AGENT_DEFAULTS:
@@ -365,7 +365,7 @@ class OllamaConfig:
         if key and key in self.agent_models:
             return self.agent_models[key]
         if key == "ORCHESTRATOR":
-            persisted = orchestrator_model_setting()
+            persisted = _persisted_model_for_backend("ollama")
             if persisted:
                 return persisted
         if key and key in _OLLAMA_FAST_DISPATCH:
@@ -467,7 +467,7 @@ class OmniRouteConfig:
         if key and key in self.agent_models:
             return self.agent_models[key]
         if key == "ORCHESTRATOR":
-            persisted = orchestrator_model_setting()
+            persisted = _persisted_model_for_backend("omniroute")
             if persisted:
                 return persisted
         return self.model
@@ -586,6 +586,21 @@ def backend_identity(config: Any) -> tuple[str, bool]:
 #: collide or silently overwrite one another.
 ORCHESTRATOR_MODEL_SETTING_KEY = "DOURMOUSE_ORCHESTRATOR_MODEL"
 
+#: Real bug found and fixed live: the model string alone is not enough —
+#: "qwen3:8b" is meaningless to NvidiaConfig and "nvidia/llama-3.3-..." is
+#: meaningless to OllamaConfig, but the old code applied whatever was
+#: persisted to WHICHEVER backend config object happened to be active at
+#: read time, with no cross-check. Concretely: the Settings picker was used
+#: while testing the "ollama" chip, persisting model="qwen3:8b"; later the
+#: active backend was switched to nvidia (DOURMOUSE_LLM_BACKEND=nvidia) —
+#: NvidiaConfig then sent "qwen3:8b" to NVIDIA's real API, which correctly
+#: 404'd on a model id it has never heard of, and the orchestrator went
+#: silently dead. This key records WHICH backend the persisted model
+#: belongs to, so each backend's model_for_agent can refuse to apply a
+#: persisted value that isn't its own (see _persisted_model_for_backend
+#: below) rather than trusting a bare string blindly.
+ORCHESTRATOR_BACKEND_SETTING_KEY = "DOURMOUSE_ORCHESTRATOR_BACKEND"
+
 
 def _read_user_config_file() -> dict[str, str]:
     """Parse the user's config .env file into a dict. Never raises."""
@@ -611,12 +626,59 @@ def orchestrator_model_setting() -> str:
     Returns "" (honest empty, never a guess) when nothing has been saved
     yet — callers fall through to whatever default applies next. See
     ``ORCHESTRATOR_MODEL_SETTING_KEY`` for the storage key.
+
+    NOTE: this alone is not safe to apply to an arbitrary backend config —
+    see ``orchestrator_backend_setting()`` and ``_persisted_model_for_backend``
+    below. Kept for backward compatibility (webui.py's GET endpoint still
+    reports the raw persisted model regardless of backend, honestly, as
+    "persisted" rather than "active").
     """
     return _read_user_config_file().get(ORCHESTRATOR_MODEL_SETTING_KEY, "").strip()
 
 
-def save_orchestrator_model_setting(model: str) -> dict[str, Any]:
-    """Persist the orchestrator's chosen model to the user's config file.
+def orchestrator_backend_setting() -> str:
+    """Which backend ('nvidia'/'ollama'/'omniroute') the persisted
+    orchestrator model actually belongs to. Empty when unset — a value
+    saved before this fix existed (or written by hand) has no backend tag,
+    and is treated as untrustworthy by ``_persisted_model_for_backend``
+    rather than guessed at.
+    """
+    return _read_user_config_file().get(ORCHESTRATOR_BACKEND_SETTING_KEY, "").strip().lower()
+
+
+def _persisted_model_for_backend(backend_name: str) -> str:
+    """The persisted orchestrator model, but ONLY if it was actually saved
+    FOR this backend. Real bug this exists to prevent: a model id from one
+    backend (e.g. Ollama's "qwen3:8b") silently applied to a totally
+    different backend's config (NVIDIA), which then sends it to that
+    backend's real API and gets a real 404 — the orchestrator going dead
+    with no visible error to the user. Returns "" (never a guess) when the
+    persisted backend tag doesn't match, is missing (untagged legacy
+    value), or nothing is persisted at all.
+    """
+    model = orchestrator_model_setting()
+    if not model:
+        return ""
+    saved_backend = orchestrator_backend_setting()
+    if saved_backend != backend_name:
+        return ""
+    return model
+
+
+def save_orchestrator_model_setting(model: str, backend: str = "") -> dict[str, Any]:
+    """Persist the orchestrator's chosen model (and which backend it
+    belongs to) to the user's config file.
+
+    ``backend`` should be the real backend identity ('nvidia'/'ollama'/
+    'omniroute') the model was resolved against — the webui handler always
+    has this (it's how it resolved the model in the first place via the
+    backend catalog). Left empty only for a manual raw-model-id override
+    with no known backend — in that case the value is persisted but
+    ``_persisted_model_for_backend`` will never apply it to any backend
+    automatically (an untagged value is untrustworthy by the same rule
+    that protects against the cross-backend bug), so
+    ``DOURMOUSE_MODEL_ORCHESTRATOR`` (the plain env override) is the right
+    tool for a genuinely backend-agnostic manual pin.
 
     Merges with whatever is already in that file (same rule
     firstrun.save_config follows) so this never clobbers other saved
@@ -626,6 +688,7 @@ def save_orchestrator_model_setting(model: str) -> dict[str, Any]:
     back as JSON.
     """
     model = (model or "").strip()
+    backend = (backend or "").strip().lower()
     if not model:
         return {"ok": False, "detail": "no model given"}
     path = user_env_path()
@@ -633,6 +696,13 @@ def save_orchestrator_model_setting(model: str) -> dict[str, Any]:
         user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         existing[ORCHESTRATOR_MODEL_SETTING_KEY] = model
+        if backend:
+            existing[ORCHESTRATOR_BACKEND_SETTING_KEY] = backend
+        else:
+            # A raw manual override with no known backend invalidates any
+            # PREVIOUS backend tag too — an untagged model must never keep
+            # riding a stale tag from an earlier, different save.
+            existing.pop(ORCHESTRATOR_BACKEND_SETTING_KEY, None)
         body = [
             "# Dourmouse configuration — written by first-run setup / settings.",
             "# This file holds credentials. Keep it to yourself; it is never",
@@ -647,7 +717,7 @@ def save_orchestrator_model_setting(model: str) -> dict[str, Any]:
             pass
     except OSError as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
-    return {"ok": True, "detail": "saved", "model": model, "path": str(path)}
+    return {"ok": True, "detail": "saved", "model": model, "backend": backend or None, "path": str(path)}
 
 
 # --------------------------------------------------------------------------- #
