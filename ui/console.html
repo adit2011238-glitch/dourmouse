@@ -2206,6 +2206,11 @@ function paintSettings(){
       <div class="d">${esc(b.backend||"")} · ${esc(b.base_url||"")}</div></div></div>
     <div class="row"><div class="g"><div class="n">Compute node</div>
       <div class="d">${s.online?`${esc(s.node)} · ${esc(s.model)} · ${s.latency_ms}ms`:"offline"}</div></div></div>
+    <div class="toolbar">
+      <span class="lbl">ORCHESTRATOR MODEL</span>
+      <div id="orchModelRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+    <div class="note" id="orchModelNote">Loading…</div>
     <div class="sec">MEMORY</div>
     <div class="row"><div class="g"><div class="n">${m.count!=null?`${m.count} facts stored`:"—"}</div>
       <div class="d">${m.active?"learning loop on":esc(m.gate||"")}</div></div></div>
@@ -2261,6 +2266,62 @@ function paintSettings(){
     btn.onclick = () => { detailsSet(val); paintSettings(); };
     detRow.appendChild(btn);
   });
+
+  /* Orchestrator model picker (round-2 fix): GET/POST
+     /api/settings/orchestrator-model already existed with no UI wired to
+     it — a real gap, not a stub. GET returns {current, source, persisted,
+     backends:[{name,configured,model,detail}]}; POST accepts
+     {backend:"<name>"} (server resolves that backend's real model) and
+     persists it through the existing config-file mechanism, no reload
+     needed since model_for_agent("orchestrator") reads the persisted
+     value fresh on every call. Only CONFIGURED backends are offered as
+     clickable choices — an unconfigured one is shown, greyed, with why. */
+  (async () => {
+    const row = $("orchModelRow"), note = $("orchModelNote");
+    if (!row) return;
+    try {
+      const r = await fetch("/api/settings/orchestrator-model");
+      const j = await r.json();
+      row.innerHTML = "";
+      (j.backends || []).forEach(be => {
+        const btn = document.createElement("button");
+        const on = j.current === be.model || (be.configured && j.source !== "env_override" && j.persisted === be.name);
+        btn.className = "chip" + (on ? " on" : "") + (be.configured ? "" : " disabled");
+        btn.type = "button";
+        btn.textContent = be.name.toUpperCase();
+        btn.disabled = !be.configured;
+        btn.title = be.configured ? (be.model || "") : (be.detail || "not configured");
+        btn.setAttribute("aria-pressed", String(on));
+        btn.onclick = async () => {
+          note.textContent = "Saving…";
+          try {
+            const rr = await fetch("/api/settings/orchestrator-model", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({backend: be.name}),
+            });
+            const jj = await rr.json();
+            note.textContent = jj.ok
+              ? `Now: ${jj.model}${jj.configured === false ? " (saved, but not configured yet)" : ""}`
+              : "Could not save: " + (jj.error || "unknown error");
+          } catch (err) {
+            note.textContent = "Save failed: " + (err.message || err);
+          }
+          paintSettings();
+        };
+        row.appendChild(btn);
+      });
+      const srcLabel = {
+        env_override: "pinned by an environment variable — change that to move it",
+        persisted: "set here in Settings",
+        default_nvidia: "the built-in default",
+        default_active_backend: "the built-in default",
+      }[j.source] || "";
+      note.textContent = `Currently: ${j.current || "—"}${srcLabel ? " · " + srcLabel : ""}`;
+    } catch (err) {
+      note.textContent = "Could not load orchestrator model options: " + (err.message || err);
+    }
+  })();
 
   /* v8.13: history import. Synchronous — verified live at ~3s for the
      user's real 81-session/116MB history, well inside a click-and-wait —
