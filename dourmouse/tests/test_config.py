@@ -84,11 +84,17 @@ class TestNvidiaConfigLoading:
             "RESEARCH_INFO": "nvidia/r1-70b",
             "CODE_NVIDIA": "nvidia/code-llama-70b",
         }
-        # Case-insensitive lookup on the agent name; unknown falls to default.
+        # Case-insensitive lookup on the agent name; env override wins even
+        # over the agent's own built-in default (research_info has one —
+        # see TestNvidiaAgentDefaults below — and the env value still wins).
         assert cfg.model_for_agent("research_info") == "nvidia/r1-70b"
         assert cfg.model_for_agent("RESEARCH_INFO") == "nvidia/r1-70b"
         assert cfg.model_for_agent("code_nvidia") == "nvidia/code-llama-70b"
-        assert cfg.model_for_agent("news") == "nvidia/default-120b"
+        # "markets" has no env override AND no built-in default -> falls
+        # all the way through to NVIDIA_MODEL. ("news" no longer belongs
+        # here: it now has a real built-in default, world-monitor-expansion,
+        # tested in TestNvidiaAgentDefaults.)
+        assert cfg.model_for_agent("markets") == "nvidia/default-120b"
         assert cfg.model_for_agent("") == "nvidia/default-120b"
         assert cfg.model_for_agent(None) == "nvidia/default-120b"
 
@@ -98,7 +104,131 @@ class TestNvidiaConfigLoading:
         monkeypatch.delenv("DOURMOUSE_MODEL_RESEARCH_INFO", raising=False)
         cfg = load_nvidia_config()
         assert cfg.agent_models == {}
+        # "markets" has no built-in default either (see TestNvidiaAgentDefaults) -
+        # a genuinely unmapped agent, unlike research_info/orchestrator/etc.
         assert cfg.model_for_agent("markets") == "nvidia/one-model"
+
+
+# --------------------------------------------------------------------------- #
+# world-monitor-expansion — real per-agent NVIDIA defaults +
+# persisted orchestrator-model setting.
+# --------------------------------------------------------------------------- #
+class TestNvidiaAgentDefaults:
+    """Every agent used to silently fall back to NVIDIA_MODEL; these pin
+    the real built-in defaults now in place (config._NVIDIA_AGENT_DEFAULTS)
+    and their precedence under DOURMOUSE_MODEL_<AGENT> env overrides."""
+
+    def test_builtin_defaults_apply_without_any_override(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
+        monkeypatch.setenv("NVIDIA_MODEL", "nvidia/one-model")
+        for name in (
+            "DOURMOUSE_MODEL_ORCHESTRATOR",
+            "DOURMOUSE_MODEL_RESEARCH_INFO",
+            "DOURMOUSE_MODEL_DEV_CODING",
+            "DOURMOUSE_MODEL_COMMS",
+            "DOURMOUSE_MODEL_MAIL",
+            "DOURMOUSE_MODEL_NEWS",
+            "DOURMOUSE_MODEL_WORLDMONITOR",
+            "DOURMOUSE_ORCHESTRATOR_MODEL",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        cfg = load_nvidia_config()
+        assert cfg.model_for_agent("orchestrator") == "nvidia/llama-3.3-nemotron-super-49b-v1"
+        assert cfg.model_for_agent("research_info") == "nvidia/llama-3.1-nemotron-ultra-253b-v1"
+        assert cfg.model_for_agent("dev_coding") == "nvidia/code-llama-70b"
+        for agent in ("comms", "mail", "news", "worldmonitor"):
+            assert cfg.model_for_agent(agent) == "deepseek-ai/deepseek-v4-flash-0731"
+        # code_* family is NOT in the defaults dict — resolved via
+        # code_backends.py instead, so it stays on the plain default here.
+        assert cfg.model_for_agent("code_nvidia") == "nvidia/one-model"
+
+    def test_env_override_wins_over_builtin_default(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
+        monkeypatch.setenv("DOURMOUSE_MODEL_ORCHESTRATOR", "nvidia/custom-orchestrator")
+        monkeypatch.delenv("DOURMOUSE_ORCHESTRATOR_MODEL", raising=False)
+        cfg = load_nvidia_config()
+        assert cfg.model_for_agent("orchestrator") == "nvidia/custom-orchestrator"
+
+
+class TestOrchestratorModelSetting:
+    """Persisted (not just env) orchestrator model choice — the backend
+    half of the Settings UI's orchestrator-model picker. See
+    config.orchestrator_model_setting / save_orchestrator_model_setting."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_nothing_saved_returns_empty(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import orchestrator_model_setting
+
+        assert orchestrator_model_setting() == ""
+
+    def test_save_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import orchestrator_model_setting, save_orchestrator_model_setting
+
+        result = save_orchestrator_model_setting("nvidia/my-chosen-model")
+        assert result["ok"] is True
+        assert orchestrator_model_setting() == "nvidia/my-chosen-model"
+
+    def test_save_merges_with_existing_file(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_orchestrator_model_setting, user_env_path
+
+        path = user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("NVIDIA_API_KEY=nvapi-existing\n", encoding="utf-8")
+        save_orchestrator_model_setting("nvidia/my-chosen-model")
+        contents = path.read_text(encoding="utf-8")
+        assert "NVIDIA_API_KEY=nvapi-existing" in contents
+        assert "DOURMOUSE_ORCHESTRATOR_MODEL=nvidia/my-chosen-model" in contents
+
+    def test_empty_model_rejected(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_orchestrator_model_setting
+
+        result = save_orchestrator_model_setting("   ")
+        assert result["ok"] is False
+
+    def test_model_for_agent_reads_persisted_setting(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
+        monkeypatch.delenv("DOURMOUSE_MODEL_ORCHESTRATOR", raising=False)
+        from dourmouse.config import load_nvidia_config, save_orchestrator_model_setting
+
+        save_orchestrator_model_setting("nvidia/persisted-choice")
+        cfg = load_nvidia_config()
+        assert cfg.model_for_agent("orchestrator") == "nvidia/persisted-choice"
+
+    def test_env_override_still_wins_over_persisted_setting(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
+        monkeypatch.setenv("DOURMOUSE_MODEL_ORCHESTRATOR", "nvidia/env-wins")
+        from dourmouse.config import load_nvidia_config, save_orchestrator_model_setting
+
+        save_orchestrator_model_setting("nvidia/persisted-choice")
+        cfg = load_nvidia_config()
+        assert cfg.model_for_agent("orchestrator") == "nvidia/env-wins"
+
+    def test_persisted_setting_also_applies_on_ollama_and_omniroute(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import (
+            load_ollama_config,
+            load_omniroute_config,
+            save_orchestrator_model_setting,
+        )
+
+        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
+        monkeypatch.delenv("DOURMOUSE_OMNIROUTE_MODEL_ORCHESTRATOR", raising=False)
+        save_orchestrator_model_setting("some/persisted-model")
+        assert load_ollama_config().model_for_agent("orchestrator") == "some/persisted-model"
+        assert load_omniroute_config().model_for_agent("orchestrator") == "some/persisted-model"
 
 
 # --------------------------------------------------------------------------- #

@@ -1143,6 +1143,16 @@ class _Handler(BaseHTTPRequestHandler):
             # v5.22.14: real host telemetry (mem/cpu/load) — replaces the
             # previously SIMULATED MEM_LOAD + metrics micro-bars (audit fix).
             self._send_json(_system_telemetry())
+        elif path == "/api/settings/orchestrator-model":
+            # world-monitor-expansion: backend half of the orchestrator
+            # model picker — a Settings UI agent calls this to build the
+            # picker. See config.py's persisted-setting section for the
+            # storage design and _orchestrator_backend_catalog for how
+            # "configured" is determined (real probes/env checks only).
+            try:
+                self._handle_orchestrator_model_get()
+            except Exception as exc:  # noqa: BLE001 - a settings read must never 500
+                self._send_json({"current": None, "backends": [], "error": str(exc)[:200]})
         elif path == "/api/setup/status":
             # v8.9 first-run setup. Every field is a REAL probe (is Ollama
             # actually answering, is a key actually present) — setup must
@@ -1712,6 +1722,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_confirm()
         elif parsed.path == "/api/role":
             self._handle_role()
+        elif parsed.path == "/api/settings/orchestrator-model":
+            # world-monitor-expansion: persists the orchestrator's chosen
+            # model (see config.save_orchestrator_model_setting). Behind
+            # the normal auth gate above, unlike /api/setup/* — this is a
+            # post-first-run settings change, not the bootstrap flow.
+            self._handle_orchestrator_model_post()
         elif parsed.path == "/api/feedback":
             self._handle_feedback()
         elif parsed.path == "/api/speech":
@@ -3026,6 +3042,162 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "detail": "unknown setup action"}, status=404)
         except Exception as exc:  # noqa: BLE001 - setup must never 500
             self._send_json({"ok": False, "detail": str(exc)[:200]}, status=200)
+
+    # -- world-monitor-expansion: orchestrator model setting -------------- #
+    #
+    # Backend half of a Settings UI picker being built separately (another
+    # agent), for "which model does the top-level orchestrator run on".
+    # GET returns the current effective value plus a real availability
+    # catalog; POST persists a choice via config.save_orchestrator_model_
+    # setting, which config.model_for_agent("orchestrator") then reads back
+    # fresh from disk on the orchestrator's next turn (see config.py's own
+    # docstring for the full precedence: env override > persisted setting >
+    # built-in default > plain default model).
+
+    def _orchestrator_backend_catalog(self) -> list[dict[str, Any]]:
+        """Real availability of every backend the orchestrator-model
+        setting can point at: the 3 core system backends load_llm_config()
+        already chooses among (nvidia/ollama/omniroute), plus the wider
+        coding-family menu code_backends.py / cn_backends.py already wire
+        up for the code_* agents (deepseek/qwen/glm/kimi/codex/claude) —
+        surfaced here too since a user may reasonably want the orchestrator
+        itself pointed at one of them.
+
+        Every entry is a REAL probe or a REAL env-var check (Rule 2.2) — a
+        backend with no key/CLI/reachable server reports configured=False
+        WITH the real reason, never omitted and never guessed.
+        """
+        from dourmouse import code_backends
+        from dourmouse import config as cfg_mod
+
+        entries: list[dict[str, Any]] = []
+
+        nvidia_key = bool(os.environ.get("NVIDIA_API_KEY", "").strip())
+        entries.append({
+            "name": "nvidia",
+            "configured": nvidia_key,
+            "model": os.environ.get("NVIDIA_MODEL", "").strip() or cfg_mod.NVIDIA_DEFAULT_MODEL,
+            "detail": "NVIDIA_API_KEY set" if nvidia_key else "NVIDIA_API_KEY not set",
+        })
+        try:
+            ollama_ok = cfg_mod.ollama_available(timeout=0.75)
+        except Exception:  # noqa: BLE001 - a probe must never break the endpoint
+            ollama_ok = False
+        entries.append({
+            "name": "ollama",
+            "configured": ollama_ok,
+            "model": os.environ.get("OLLAMA_MODEL", "").strip() or cfg_mod.OLLAMA_DEFAULT_MODEL,
+            "detail": "local server answered" if ollama_ok
+                      else "local Ollama server not reachable at 127.0.0.1:11434",
+        })
+        try:
+            omni_ok = cfg_mod.omniroute_available(timeout=0.75)
+        except Exception:  # noqa: BLE001 - a probe must never break the endpoint
+            omni_ok = False
+        entries.append({
+            "name": "omniroute",
+            "configured": omni_ok,
+            "model": os.environ.get("OMNIROUTE_MODEL", "").strip() or cfg_mod.OMNIROUTE_DEFAULT_MODEL,
+            "detail": "gateway answered" if omni_ok else "OmniRoute gateway not reachable",
+        })
+
+        for name in ("deepseek", "qwen", "glm", "kimi", "codex"):
+            try:
+                _base, _key, model = code_backends.load_backend(name)
+                entries.append({"name": name, "configured": True, "model": model, "detail": "configured"})
+            except RuntimeError as exc:
+                entries.append({"name": name, "configured": False, "model": "", "detail": str(exc)[:200]})
+
+        # claude: routed via the CLI, not load_backend() — code_backends.py
+        # has no "claude" branch (_run_claude shells out directly). Probe
+        # the CLI the same way run_code_task's claude path does.
+        try:
+            from dourmouse.general_roster import _find_claude_cli
+
+            cli = _find_claude_cli()
+            entries.append({
+                "name": "claude",
+                "configured": cli is not None,
+                "model": "",
+                "detail": ("Claude Code CLI found on PATH" if cli is not None
+                           else "Claude Code CLI ('claude') not found on PATH"),
+            })
+        except Exception as exc:  # noqa: BLE001 - a probe must never break the endpoint
+            entries.append({"name": "claude", "configured": False, "model": "", "detail": str(exc)[:200]})
+
+        return entries
+
+    def _resolve_orchestrator_backend_model(self, backend: str) -> tuple[bool, str, str]:
+        """(configured, model, detail) for one backend name from the SAME
+        catalog _orchestrator_backend_catalog builds — used by the POST
+        handler to resolve a {"backend": "<name>"} choice server-side."""
+        name = (backend or "").strip().lower()
+        for entry in self._orchestrator_backend_catalog():
+            if entry["name"] == name:
+                return bool(entry["configured"]), str(entry["model"]), str(entry["detail"])
+        return False, "", f"unknown backend {backend!r}"
+
+    def _handle_orchestrator_model_get(self) -> None:
+        """GET /api/settings/orchestrator-model."""
+        from dourmouse import config as cfg_mod
+
+        persisted = cfg_mod.orchestrator_model_setting()
+        env_override = os.environ.get("DOURMOUSE_MODEL_ORCHESTRATOR", "").strip()
+        if env_override:
+            current, source = env_override, "env_override"
+        elif persisted:
+            current, source = persisted, "persisted"
+        elif os.environ.get("NVIDIA_API_KEY", "").strip():
+            # The stated default: nothing chosen yet AND an NVIDIA key is
+            # configured -> default to that backend's model.
+            current = os.environ.get("NVIDIA_MODEL", "").strip() or cfg_mod.NVIDIA_DEFAULT_MODEL
+            source = "default_nvidia"
+        else:
+            cfg = self.server.config
+            current = (
+                cfg.model_for_agent("orchestrator")
+                if cfg is not None and hasattr(cfg, "model_for_agent")
+                else None
+            )
+            source = "default_active_backend"
+        self._send_json({
+            "current": current,
+            "source": source,
+            "persisted": persisted or None,
+            "backends": self._orchestrator_backend_catalog(),
+        })
+
+    def _handle_orchestrator_model_post(self) -> None:
+        """POST /api/settings/orchestrator-model.
+
+        Body is either ``{"backend": "<name>"}`` (resolved server-side to
+        that backend's real current model, via the same catalog GET
+        returns) or ``{"model": "<raw model id>"}`` (a manual override for
+        a specific model id the catalog doesn't enumerate, e.g. a different
+        NVIDIA NIM model). Saving does NOT require the backend to already
+        be configured — the setting may point at something the user hasn't
+        finished setting up yet; the response says so honestly via
+        ``configured`` instead of blocking the save (degrade honestly,
+        never crash — same rule every backend loader in this file follows).
+        """
+        from dourmouse import config as cfg_mod
+
+        body = self._read_json_body()
+        model = str(body.get("model") or "").strip()
+        backend = str(body.get("backend") or "").strip()
+        configured: bool | None = None
+        if not model and backend:
+            configured, model, detail = self._resolve_orchestrator_backend_model(backend)
+            if not model:
+                self._send_json({"ok": False, "detail": detail})
+                return
+        if not model:
+            self._send_json({"ok": False, "detail": "provide either 'backend' or 'model'"})
+            return
+        result = cfg_mod.save_orchestrator_model_setting(model)
+        if configured is not None:
+            result["configured"] = configured
+        self._send_json(result)
 
     def _handle_memory_api(self) -> None:
         """v2.9: honest Store & Learn stats for the dashboard.

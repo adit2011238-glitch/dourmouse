@@ -17,6 +17,34 @@ then NVIDIA. The opt-in keeps the local-first privacy guarantee (Rule 2.6):
 prompts never leave the machine for a third-party free provider without an
 explicit choice — the explicit ``omniroute`` backend is always available
 for users who want it.
+
+world-monitor-expansion: two additions to the ``DOURMOUSE_MODEL_<AGENT>``
+per-agent routing mechanism, which existed but shipped with nothing
+actually plugged into it (every agent silently ran on the one default
+model unless a user hand-set an env var):
+
+1. Real default per-agent models for the NVIDIA backend
+   (``_NVIDIA_AGENT_DEFAULTS`` below) — orchestrator/research_info/
+   dev_coding/comms/mail/news/worldmonitor now route to genuinely
+   different NVIDIA NIM models out of the box, still fully overridable
+   per-agent via ``DOURMOUSE_MODEL_<AGENT>`` (checked first) or en masse
+   via ``NVIDIA_MODEL``. See the dict's own docstring for exactly which
+   model was chosen for which agent and why. Ollama already had a
+   (narrower) version of this for its ORCHESTRATOR fast-dispatch case
+   (``_OLLAMA_FAST_DISPATCH``, below); OmniRoute deliberately gets no
+   baked-in defaults — its ``auto`` model already does dynamic per-request
+   routing, so a hardcoded per-agent override would just be guessing at
+   gateway-specific model tags with no way to verify them from here.
+2. ``orchestrator_model_setting()`` / ``save_orchestrator_model_setting()``:
+   a persisted (not just env-var) choice of orchestrator model, read fresh
+   from the user's config file on every ``model_for_agent("orchestrator")``
+   call — so a change made through the Settings UI's
+   ``/api/settings/orchestrator-model`` endpoint (webui.py) takes effect on
+   the orchestrator's next turn, no process restart required. Sits between
+   the env-var override and the NVIDIA default tier: env var still wins
+   when set (an operator's explicit env config should never be silently
+   shadowed by a UI click), the persisted setting wins over the built-in
+   default otherwise.
 """
 
 from __future__ import annotations
@@ -27,6 +55,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -157,13 +186,29 @@ class NvidiaConfig:
     def model_for_agent(self, agent: str | None) -> str:
         """The NVIDIA model a specific subagent runs on (deterministic).
 
-        Precedence: a DOURMOUSE_MODEL_<AGENT_UPPERCASE> env override for that
-        exact agent, else the run's default ``model``. Case-insensitive on
-        the agent name (env keys are normalized to uppercase at load).
+        Precedence, highest first:
+        1. ``DOURMOUSE_MODEL_<AGENT_UPPERCASE>`` env override for that exact
+           agent (``agent_models``) — an operator's explicit env config
+           always wins.
+        2. For ``orchestrator`` only: the persisted orchestrator-model
+           setting (``orchestrator_model_setting()``), read fresh from disk
+           so a change made through the Settings UI applies on the very
+           next turn.
+        3. The built-in per-agent default (``_NVIDIA_AGENT_DEFAULTS``).
+        4. The run's default ``model``.
+
+        Case-insensitive on the agent name (env keys are normalized to
+        uppercase at load).
         """
         key = (agent or "").strip().upper()
         if key and key in self.agent_models:
             return self.agent_models[key]
+        if key == "ORCHESTRATOR":
+            persisted = orchestrator_model_setting()
+            if persisted:
+                return persisted
+        if key and key in _NVIDIA_AGENT_DEFAULTS:
+            return _NVIDIA_AGENT_DEFAULTS[key]
         return self.model
 
 
@@ -174,6 +219,58 @@ _NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 # instead of duplicating them and drifting.
 NVIDIA_DEFAULT_BASE_URL = _NVIDIA_DEFAULT_BASE_URL
 NVIDIA_DEFAULT_MODEL = _NVIDIA_DEFAULT_MODEL
+
+# world-monitor-expansion: REAL default per-agent NVIDIA models. Until this,
+# every agent silently ran on NVIDIA_MODEL because DOURMOUSE_MODEL_<AGENT>
+# was a real, tested mechanism (test_config.py) nobody had populated with
+# defaults. Still fully overridable — DOURMOUSE_MODEL_<AGENT> (agent_models,
+# checked first in model_for_agent below) always wins, and any agent not
+# listed here keeps running on NVIDIA_MODEL exactly as before.
+#
+# Every id below is a REAL model id already referenced somewhere else in
+# this codebase — none invented for this change:
+#   - orchestrator: "nvidia/llama-3.3-nemotron-super-49b-v1" — the same
+#     Nemotron-Super family as NVIDIA_MODEL's 120B default, at 49B. This is
+#     the looping dispatch brain that pays its model cost every single
+#     turn, so it gets the smaller/faster member of the family — the same
+#     reasoning _OLLAMA_FAST_DISPATCH below already applies on the Ollama
+#     backend. This exact id already appears in test_config.py as a
+#     plausible NVIDIA model id; it has NOT been verified live from this
+#     sandbox (no network access here) — same honesty caveat cn_backends.py
+#     already carries for its own researched model choices. Re-check
+#     against a live NVIDIA_API_KEY before relying on it.
+#   - research_info: "nvidia/llama-3.1-nemotron-ultra-253b-v1" — not a new
+#     choice: this is the exact NVIDIA_MODEL atlas_lab.py and
+#     atlas_proposals.py already default to for real ATLAS research work.
+#     Reused here (the "strong model" tier) rather than inventing a second
+#     "research-grade" id nobody has exercised.
+#   - dev_coding: "nvidia/code-llama-70b" — .env.example already documents
+#     this exact id (line ~150) as the intended coding-tuned choice for
+#     DOURMOUSE_MODEL_DEV_CODING; it just sat there commented out, never
+#     actually applied as a default until now. NOTE: this covers only the
+#     general dev_coding subagent's own reasoning calls. The dedicated
+#     code_nvidia / code_deepseek / code_claude / code_codex / code_ollama
+#     agents do NOT go through model_for_agent at all — each resolves its
+#     own model via code_backends.py's load_backend() (its own per-backend
+#     default + honest NOT CONFIGURED handling), so they are deliberately
+#     left OUT of this dict rather than given a second, competing default.
+#   - comms / mail / news / worldmonitor: "deepseek-ai/deepseek-v4-flash-0731"
+#     — the ONE model id in this entire codebase marked "verified live on
+#     the user's key" (code_backends.py's _DEEPSEEK_NVIDIA_MODEL, checked
+#     against integrate.api.nvidia.com/v1/models). These are the lighter,
+#     higher-volume screens (chat/mail triage, headline summarizing, map
+#     pulse text) — a cheap/fast "flash" model is the right tier, and
+#     reusing an id this codebase has already verified beats guessing at
+#     another one.
+_NVIDIA_AGENT_DEFAULTS = {
+    "ORCHESTRATOR": "nvidia/llama-3.3-nemotron-super-49b-v1",
+    "RESEARCH_INFO": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+    "DEV_CODING": "nvidia/code-llama-70b",
+    "COMMS": "deepseek-ai/deepseek-v4-flash-0731",
+    "MAIL": "deepseek-ai/deepseek-v4-flash-0731",
+    "NEWS": "deepseek-ai/deepseek-v4-flash-0731",
+    "WORLDMONITOR": "deepseek-ai/deepseek-v4-flash-0731",
+}
 
 
 def load_nvidia_config() -> NvidiaConfig:
@@ -258,10 +355,19 @@ class OllamaConfig:
     agent_models: dict[str, str] = field(default_factory=dict)
 
     def model_for_agent(self, agent: str | None) -> str:
-        """The Ollama model a specific subagent runs on (deterministic)."""
+        """The Ollama model a specific subagent runs on (deterministic).
+
+        Same precedence as NvidiaConfig.model_for_agent: env override, then
+        (orchestrator only) the persisted orchestrator-model setting, then
+        the built-in fast-dispatch default, then the run's default model.
+        """
         key = (agent or "").strip().upper()
         if key and key in self.agent_models:
             return self.agent_models[key]
+        if key == "ORCHESTRATOR":
+            persisted = orchestrator_model_setting()
+            if persisted:
+                return persisted
         if key and key in _OLLAMA_FAST_DISPATCH:
             return _OLLAMA_FAST_DISPATCH[key]
         return self.model
@@ -353,11 +459,17 @@ class OmniRouteConfig:
         request, so per-agent speed tuning is done with
         ``DOURMOUSE_OMNIROUTE_MODEL_<AGENT>`` (e.g.
         ``DOURMOUSE_OMNIROUTE_MODEL_ORCHESTRATOR=auto/best-coding`` for the
-        looping brain).
+        looping brain). The persisted orchestrator-model setting (see
+        NvidiaConfig.model_for_agent) still applies here — same precedence,
+        env override first, persisted setting second, ``self.model`` last.
         """
         key = (agent or "").strip().upper()
         if key and key in self.agent_models:
             return self.agent_models[key]
+        if key == "ORCHESTRATOR":
+            persisted = orchestrator_model_setting()
+            if persisted:
+                return persisted
         return self.model
 
 
@@ -407,6 +519,99 @@ def omniroute_available(timeout: float = 1.0) -> bool:
             return resp.status == 200
     except (urllib.error.URLError, OSError, TimeoutError, ValueError):
         return False
+
+
+# --------------------------------------------------------------------------- #
+# world-monitor-expansion — persisted orchestrator model setting (backend
+# half; a Settings UI is being built separately to call this).
+#
+# This is a RUNTIME-CHANGEABLE setting, not just another env var: a user
+# picks a model through /api/settings/orchestrator-model (webui.py) and it
+# applies on the orchestrator's next turn, no process restart. It reuses the
+# EXACT storage format firstrun.py already established (a flat KEY=VALUE
+# ``.env`` file at ``user_env_path()``, merge-on-write) rather than inventing
+# a second settings format — the two read/write functions below duplicate
+# firstrun.save_config's small merge-and-write loop instead of importing it,
+# because firstrun.save_config's key allowlist is deliberately narrow (only
+# the first-run wizard's own keys) and this key does not belong in it.
+#
+# Read is done FRESH FROM DISK on every call (not from os.environ, which is
+# only populated once at process start by the ``load_dotenv`` calls at the
+# top of this module) — that is what makes the setting apply live. The
+# tradeoff, same one firstrun.py accepts for the same file: a disk read per
+# call to model_for_agent("orchestrator"). That runs once per orchestrator
+# turn, not per token, so the cost is negligible.
+# --------------------------------------------------------------------------- #
+
+#: The key this setting is stored under in the user's config .env file.
+#: Deliberately distinct from DOURMOUSE_MODEL_ORCHESTRATOR (the existing
+#: env-only per-agent override, which still takes precedence over this —
+#: see model_for_agent's docstrings above) so the two mechanisms never
+#: collide or silently overwrite one another.
+ORCHESTRATOR_MODEL_SETTING_KEY = "DOURMOUSE_ORCHESTRATOR_MODEL"
+
+
+def _read_user_config_file() -> dict[str, str]:
+    """Parse the user's config .env file into a dict. Never raises."""
+    path = user_env_path()
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            values[k.strip()] = v.strip()
+    except OSError:
+        return {}
+    return values
+
+
+def orchestrator_model_setting() -> str:
+    """The persisted orchestrator model choice, read fresh from disk.
+
+    Returns "" (honest empty, never a guess) when nothing has been saved
+    yet — callers fall through to whatever default applies next. See
+    ``ORCHESTRATOR_MODEL_SETTING_KEY`` for the storage key.
+    """
+    return _read_user_config_file().get(ORCHESTRATOR_MODEL_SETTING_KEY, "").strip()
+
+
+def save_orchestrator_model_setting(model: str) -> dict[str, Any]:
+    """Persist the orchestrator's chosen model to the user's config file.
+
+    Merges with whatever is already in that file (same rule
+    firstrun.save_config follows) so this never clobbers other saved
+    settings — including a first-run-wizard NVIDIA_API_KEY sitting right
+    next to it. Returns ``{"ok": False, "detail": ...}`` on a bad input or
+    a write failure — never raises, so a webui handler can send it straight
+    back as JSON.
+    """
+    model = (model or "").strip()
+    if not model:
+        return {"ok": False, "detail": "no model given"}
+    path = user_env_path()
+    try:
+        user_config_dir().mkdir(parents=True, exist_ok=True)
+        existing = _read_user_config_file()
+        existing[ORCHESTRATOR_MODEL_SETTING_KEY] = model
+        body = [
+            "# Dourmouse configuration — written by first-run setup / settings.",
+            "# This file holds credentials. Keep it to yourself; it is never",
+            "# bundled into a build or uploaded anywhere.",
+            "",
+        ]
+        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        return {"ok": False, "detail": f"could not write config: {exc}"}
+    return {"ok": True, "detail": "saved", "model": model, "path": str(path)}
 
 
 # --------------------------------------------------------------------------- #
