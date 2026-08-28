@@ -20,6 +20,11 @@ backend:
   login), falling back to the OpenAI-compatible API when only a
   ``CODEX_API_KEY`` / ``OPENAI_API_KEY`` is available. CLI-first because
   that is exactly what the CODEX connection status probe measures.
+- ``qwen`` / ``glm`` / ``kimi`` — cheap/free-tier Chinese-lab
+  OpenAI-compatible backends (Alibaba Qwen, Zhipu GLM, Moonshot Kimi),
+  resolved by ``dourmouse.cn_backends.load_backend`` — see that module
+  for per-provider env vars and free-tier caveats. First step toward a
+  "team of subagents" spread across many providers.
 
 Every path returns REAL output or an honest error (Rules 2.1 / 2.2): a
 missing key/CLI is NOT CONFIGURED, an API/CLI failure surfaces the real
@@ -126,9 +131,17 @@ def load_backend(backend: str) -> tuple[str, str, str]:
         ).strip()
         model = os.environ.get("CODEX_MODEL", "gpt-5-codex").strip()
         return base, key, model
+    if name in ("qwen", "dashscope", "glm", "zhipu", "z.ai", "zai", "kimi", "moonshot"):
+        # Chinese-lab OpenAI-compatible backends live in their own module
+        # (kept out of this file to avoid a China-specific block growing
+        # here) but return the same (base_url, api_key, model) contract, so
+        # _run_openai_compat below runs them exactly like nvidia/deepseek.
+        from dourmouse.cn_backends import load_backend as _load_cn_backend
+
+        return _load_cn_backend(name)
     raise RuntimeError(
         f"ERROR: unknown code backend {backend!r} — use 'ollama', 'nvidia', "
-        "'deepseek', 'codex' or 'claude'."
+        "'deepseek', 'codex', 'claude', 'qwen', 'glm' or 'kimi'."
     )
 
 
