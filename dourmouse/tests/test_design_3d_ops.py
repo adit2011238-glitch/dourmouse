@@ -275,3 +275,32 @@ class TestBuildComponentEntry:
     def test_raises_on_missing_category(self):
         with pytest.raises(ValueError, match="category"):
             _build_component_entry({"name": "x", "description": "d", "width": 1, "height": 1})
+
+
+class TestToolDescriptions:
+    """Guards the tightened tool descriptions stay honest and non-generic."""
+
+    def test_generate_ui_component_spec_gives_category_guidance(self):
+        spec = _tool("generate_ui_component_spec")
+        assert "category" in spec.description.lower()
+        # not just "a string" -- gives the model real examples to anchor on
+        assert "panel" in spec.description.lower()
+
+    def test_read_manifest_entry_describes_path_resolution_and_honesty(self):
+        spec = _tool("read_manifest_entry")
+        # was a one-line stub ("Read ONE entry from the UI manifest by
+        # name."); must now match its siblings' level of detail on path
+        # resolution and honest-error behavior.
+        assert "manifest_path" in spec.description
+        assert "DOURMOUSE_UI_MANIFEST_PATH" in spec.description
+        assert "error" in spec.description.lower()
+
+    def test_generate_3d_model_spec_still_disclaims_mesh_output(self):
+        spec = _tool("generate_3d_model_spec")
+        assert "mesh" in spec.description.lower()
+        assert ".obj" in spec.description and ".glb" in spec.description
+
+    def test_write_manifest_entry_still_warns_about_silent_overwrite(self):
+        spec = _tool("write_manifest_entry")
+        assert "overwrite" in spec.description.lower()
+        assert "confirmation" in spec.description.lower()

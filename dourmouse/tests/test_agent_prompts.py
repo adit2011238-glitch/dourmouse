@@ -1,16 +1,21 @@
 """Validation tests for dourmouse/agent_prompts.py.
 
-AGENT_SYSTEM_PROMPTS is NOT wired into dispatch.py yet (that is a separate,
-later step) -- this file only guards the dict's own integrity so a bad
-extraction can't quietly ship:
+AGENT_SYSTEM_PROMPTS is wired into dispatch.py as of v8.31 (commit
+3ae24a3) -- dispatch.py splices a bespoke prompt in alongside the generic
+roster prose whenever a turn resolves to exactly one agent that has an
+entry here. This file guards the dict's own integrity so a bad entry
+can't quietly ship:
 
 - every key is a real subagent actually registered in the live registry
   (build_general_registry() + the ``system`` subagent it adds), so a typo'd
   or since-removed agent name can never sit in the dict unnoticed.
-- every value is non-empty (a real extracted prompt, not a placeholder).
-- every value actually looks like one of the PDF's prompts ("You are the
-  Dourmouse/DOURMOUSE [<name>] Agent, ...") and names the same agent as its
-  own dict key, catching a block copied under the wrong key.
+- every value is non-empty (a real prompt, not a placeholder).
+- every value actually looks like one of the house-style prompts ("You are
+  the Dourmouse/DOURMOUSE [<name>] Agent, ...") and names the same agent as
+  its own dict key, catching a block copied under the wrong key.
+- design_3d (the one hand-written, non-PDF entry) is checked a bit more
+  specifically: it must stay honest about NOT being a renderer/mesh
+  generator, matching design_3d_ops.py's own scope disclaimer.
 """
 
 from __future__ import annotations
@@ -65,3 +70,26 @@ def test_dict_covers_a_real_subset_of_the_31_agent_roster() -> None:
     # subset of whatever is registered today.
     assert AGENT_SYSTEM_PROMPTS
     assert set(AGENT_SYSTEM_PROMPTS).issubset(real_names)
+
+
+def test_design_3d_is_registered_and_covered() -> None:
+    # design_3d is the one hand-written (non-PDF) entry -- guard that it's
+    # actually a real registered agent and actually has a prompt, same as
+    # every other key, so this doesn't silently regress if the roster
+    # wiring in general_roster.py ever changes.
+    assert "design_3d" in _real_agent_names()
+    assert "design_3d" in AGENT_SYSTEM_PROMPTS
+
+
+def test_design_3d_prompt_is_honest_about_scope() -> None:
+    # Real feedback from a live demo: the generic roster prose alone routed
+    # correctly but framed responses weakly. The bespoke prompt must stay
+    # consistent with design_3d_ops.py's own "not a renderer/mesh
+    # generator" scope disclaimer rather than contradicting or softening it.
+    prompt = AGENT_SYSTEM_PROMPTS["design_3d"]
+    lowered = prompt.lower()
+    assert "not a 3d renderer" in lowered or "not a renderer" in lowered
+    assert "mesh" in lowered and "cad" in lowered
+    assert ".obj" in lowered and ".glb" in lowered
+    assert "confirmation" in lowered
+    assert "write_manifest_entry" in prompt

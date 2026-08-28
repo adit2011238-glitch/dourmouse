@@ -310,9 +310,13 @@ def build_design_3d_tool_specs() -> list[Any]:
             description=(
                 "Generate/describe a UI component spec matching the desktop "
                 "ui_manifest.json shape EXACTLY: {category, description, "
-                "dimensions: {width, height}, color, opacity}. Deterministic "
-                "validation, no model in the loop. Returns the spec as a "
-                "preview — call write_manifest_entry to actually persist it."
+                "dimensions: {width, height}, color, opacity}. 'category' is "
+                "a free-text label describing the component kind (e.g. "
+                "panel, button, toolbar, hud, icon, modal) — pick one that "
+                "actually matches what was asked for, don't default to a "
+                "generic label. Deterministic validation, no model in the "
+                "loop. Returns the spec as a preview only — nothing is "
+                "written anywhere until write_manifest_entry is called."
             ),
             parameters={
                 "type": "object",
@@ -400,7 +404,16 @@ def build_design_3d_tool_specs() -> list[Any]:
         ),
         ToolSpec(
             name="read_manifest_entry",
-            description="Read ONE entry from the UI manifest by name.",
+            description=(
+                "Read ONE entry from the UI manifest by exact name. Reads "
+                "the manifest at 'manifest_path' if given, else "
+                "DOURMOUSE_UI_MANIFEST_PATH, else the default "
+                "design_3d/ui_manifest.json location — same resolution "
+                "order as list_manifest and write_manifest_entry. Reports "
+                "an honest error (with the list of known names) if the "
+                "manifest file doesn't exist yet or the name isn't in it — "
+                "never fabricates an entry."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
