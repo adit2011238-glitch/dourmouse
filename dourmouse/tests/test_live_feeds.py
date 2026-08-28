@@ -280,7 +280,9 @@ class TestPreloadedAgents:
         # news_search joined the agent so that live "what happened with X"
         # questions (sport, elections) have a correct destination; without it
         # they routed into stock_quote and died on a Yahoo 404.
-        assert tools == {"news_headlines", "news_search"}
+        # query_shared_memory (shared_rag.py) rides every non-orchestrator
+        # subagent — see build_general_registry's own comment.
+        assert tools == {"news_headlines", "news_search", "query_shared_memory"}
 
     def test_markets_agent_tools(self):
         registry = build_general_registry()
@@ -305,10 +307,13 @@ class TestPreloadedAgents:
         # collisions, so the write tool lives there, not on mail).
         # v8.4: archive / trash / untrash. All three are reversible and
         # confirmation-gated; permanent deletion is deliberately absent.
+        # query_shared_memory (shared_rag.py) rides every non-orchestrator
+        # subagent — see build_general_registry's own comment.
         assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send",
                 "gmail_archive", "gmail_trash", "gmail_untrash",
                 "drive_read", "drive_search",
-                "email_identity_status", "email_own_send"} == tools
+                "email_identity_status", "email_own_send",
+                "query_shared_memory"} == tools
 
     def test_tasks_agent_tools(self):
         registry = build_general_registry()

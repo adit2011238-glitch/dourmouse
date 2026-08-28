@@ -172,4 +172,6 @@ class TestAppBoot:
         registry = build_general_registry()
         assert "atlas_ui" in registry.subagent_names
         sub = registry.get_subagent("atlas_ui")
-        assert {t.name for t in sub.tools} == {"atlas_terminal_status"}
+        # query_shared_memory (shared_rag.py) rides every non-orchestrator
+        # subagent — see build_general_registry's own comment.
+        assert {t.name for t in sub.tools} == {"atlas_terminal_status", "query_shared_memory"}

@@ -301,7 +301,9 @@ class TestMessengerTools:
         sub = reg.get_subagent("messenger")
         assert sub is not None
         names = {t.name for t in sub.tools}
-        assert names == {"send_message", "read_agent_inbox"}
+        # query_shared_memory (shared_rag.py) rides every non-orchestrator
+        # subagent — see build_general_registry's own comment.
+        assert names == {"send_message", "read_agent_inbox", "query_shared_memory"}
         assert "messenger" in reg.subagent_names
 
 

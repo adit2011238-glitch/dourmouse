@@ -284,9 +284,11 @@ class TestCodingSubagents:
 
     def test_each_coding_agent_has_its_backend_tool(self):
         registry = build_general_registry()
-        assert {t.name for t in registry.get_subagent("code_nvidia").tools} == {"code_nvidia"}
-        assert {t.name for t in registry.get_subagent("code_deepseek").tools} == {"code_deepseek"}
-        assert {t.name for t in registry.get_subagent("code_claude").tools} == {"code_claude"}
+        # query_shared_memory (shared_rag.py) rides every non-orchestrator
+        # subagent — see build_general_registry's own comment.
+        assert {t.name for t in registry.get_subagent("code_nvidia").tools} == {"code_nvidia", "query_shared_memory"}
+        assert {t.name for t in registry.get_subagent("code_deepseek").tools} == {"code_deepseek", "query_shared_memory"}
+        assert {t.name for t in registry.get_subagent("code_claude").tools} == {"code_claude", "query_shared_memory"}
 
     def test_tool_names_globally_unique_across_roster(self):
         """A tool NAME maps to exactly ONE spec object across the roster.

@@ -33,6 +33,9 @@ _BROWSER_TOOLS = {
     "browser_creds_list",
     "browser_creds_forget",
     "browser_signin",
+    # query_shared_memory (shared_rag.py) rides every non-orchestrator
+    # subagent — see build_general_registry's own comment.
+    "query_shared_memory",
 }
 
 
