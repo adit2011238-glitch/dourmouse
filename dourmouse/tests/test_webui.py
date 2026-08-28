@@ -648,6 +648,82 @@ class TestVisionKillSwitchEndpoint:
         assert data["ok"] is False
 
 
+class TestWorkspaceRoute:
+    """GET /workspace, /workspace.html — serves ui/workspace.html, the
+    Vision floating multi-window workspace (world-monitor-expansion)."""
+
+    def _get(self, port: int, path: str) -> tuple[int, str, bytes]:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        ctype = resp.getheader("Content-Type", "")
+        body = resp.read()
+        status = resp.status
+        conn.close()
+        return status, ctype, body
+
+    def test_workspace_serves_html(self, server):
+        srv, port = server
+        status, ctype, body = self._get(port, "/workspace")
+        assert status == 200
+        assert "html" in ctype
+        assert b"DOURMOUSE" in body.upper() or b"dourmouse" in body.lower()
+
+    def test_workspace_html_alias_serves_same_file(self, server):
+        srv, port = server
+        status, ctype, body = self._get(port, "/workspace.html")
+        assert status == 200
+        assert "html" in ctype
+
+
+class TestVoiceCommandEndpoint:
+    """POST /api/voice/command — the one real place
+    dourmouse.voice_commands.parse_voice_command runs server-side."""
+
+    def _post(self, port: int, text: str) -> tuple[int, dict]:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/voice/command",
+            body=json.dumps({"text": text}), headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        status = resp.status
+        conn.close()
+        return status, data
+
+    def test_recognized_email_command(self, server):
+        srv, port = server
+        status, data = self._post(port, "email sam saying running late")
+        assert status == 200
+        assert data["ok"] is True
+        assert data["recognized"] is True
+        assert data["command"]["action"] == "email"
+        assert data["command"]["args"] == {"person": "sam", "message": "running late"}
+
+    def test_recognized_open_panel_command(self, server):
+        srv, port = server
+        status, data = self._post(port, "open the mail panel")
+        assert status == 200
+        assert data["recognized"] is True
+        assert data["command"]["action"] == "open_panel"
+        assert data["command"]["args"] == {"panel": "mail"}
+
+    def test_unrecognized_text_reports_not_recognized_not_an_error(self, server):
+        srv, port = server
+        status, data = self._post(port, "what's the weather like")
+        assert status == 200
+        assert data["ok"] is True
+        assert data["recognized"] is False
+        assert "command" not in data
+
+    def test_empty_text_reports_not_recognized(self, server):
+        srv, port = server
+        status, data = self._post(port, "")
+        assert status == 200
+        assert data["recognized"] is False
+
+
 class TestSseChat:
     def _stream_events(self, port, prompt):
         """POST /api/chat and read the SSE stream into a list of events."""

@@ -1331,6 +1331,15 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_static("app.html")
         elif path in ("/map", "/map.html"):
             self._serve_static("map.html")
+        elif path in ("/workspace", "/workspace.html"):
+            # world-monitor-expansion: the Vision floating multi-window
+            # workspace (item 1 of the task) — real draggable/resizable
+            # panels (Gmail/companion chat/research/world map), hand-
+            # gesture window control, and voice commands. A new file
+            # (ui/workspace.html) rather than folding into console.html's
+            # already-370KB single script, matching how ui/index.html (the
+            # HUD) already sits alongside it as its own page.
+            self._serve_static("workspace.html")
         elif path in ("/atlas-lab", "/atlas-lab.html"):
             # v5.22.6: the dedicated ATLAS window — a second DOURMOUSE that
             # is ONLY the strategy lab (live GitHub-synced leaderboard).
@@ -2083,6 +2092,12 @@ class _Handler(BaseHTTPRequestHandler):
             # reads (dourmouse.tray.load_state/save_state), so a flip here
             # is honored everywhere, not a second competing notion of state.
             self._handle_vision_kill_switch_post()
+        elif parsed.path == "/api/voice/command":
+            # world-monitor-expansion: parses one utterance against the
+            # Vision workspace's bounded voice-command grammar (see
+            # dourmouse/voice_commands.py). Read-only/stateless — never
+            # performs the action itself.
+            self._handle_voice_command_post()
         elif parsed.path == "/api/feedback":
             self._handle_feedback()
         elif parsed.path == "/api/speech":
@@ -4084,6 +4099,27 @@ class _Handler(BaseHTTPRequestHandler):
                 },
             }
         )
+
+    def _handle_voice_command_post(self) -> None:
+        """world-monitor-expansion: POST /api/voice/command — the ONE real
+        place dourmouse.voice_commands.parse_voice_command runs, so
+        ui/workspace.html's browser JS never re-implements the grammar
+        client-side. Body: {"text": "<utterance>"}. Deterministic parse,
+        never an LLM call (Rule 2.8) — this endpoint only recognizes and
+        structures the fixed 4-command grammar; it does not itself perform
+        any action. {"ok": true, "recognized": false} (not a 400) when the
+        text is real but doesn't match the grammar — the caller's own
+        honest fallback (route it to the companion agent as ordinary chat)
+        is a normal outcome, not an error."""
+        from dourmouse.voice_commands import parse_voice_command
+
+        body = self._read_json_body()
+        text = str(body.get("text") or "")
+        cmd = parse_voice_command(text)
+        if cmd is None:
+            self._send_json({"ok": True, "recognized": False})
+            return
+        self._send_json({"ok": True, "recognized": True, "command": cmd.to_dict()})
 
     def _handle_atlas_run(self) -> None:
         """v5.4: POST /api/atlas/run — start one managed ATLAS command.

@@ -143,7 +143,7 @@ class TestNvidiaAgentDefaults:
         assert cfg.model_for_agent("orchestrator") == "nvidia/nemotron-3-nano-30b-a3b"
         assert cfg.model_for_agent("research_info") == "nvidia/llama-3.1-nemotron-ultra-253b-v1"
         assert cfg.model_for_agent("dev_coding") == "meta/codellama-70b"
-        for agent in ("comms", "mail", "news", "worldmonitor"):
+        for agent in ("comms", "mail", "news", "worldmonitor", "companion"):
             assert cfg.model_for_agent(agent) == "deepseek-ai/deepseek-v4-flash-0731"
         # code_* family is NOT in the defaults dict — resolved via
         # code_backends.py instead, so it stays on the plain default here.

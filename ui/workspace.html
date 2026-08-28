@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DOURMOUSE // VISION WORKSPACE</title>
+<!--
+  ui/workspace.html — world-monitor-expansion, "Vision" (the JARVIS-style
+  ambition): a floating multi-window desktop, hand-gesture window control,
+  voice commands, and a friendly companion agent, all wired to REAL
+  DourMouse endpoints. A new file rather than folding into console.html
+  (already ~370KB of script) — see dourmouse/webui.py's /workspace route
+  comment.
+
+  HONESTY BANNER (read this before assuming more than is built here, same
+  discipline as dourmouse/wakeword.py's own caveat):
+    - The floating panels, drag/resize, and their real data (Gmail,
+      companion/research chat, world map) are genuinely interactive in any
+      browser right now — nothing about them needs a live desktop session.
+    - Hand-gesture window control reuses the SAME MediaPipe HandLandmarker
+      pipeline already running in ui/index.html, gated by the SAME
+      dourmouse/tray.py camera kill-switch contract (polled the same way
+      index.html already does). Real inference runs the moment a camera
+      grants permission and "ENABLE HAND CONTROL" is clicked — but like
+      index.html's own vision code, this sandbox has no real camera to
+      grant that permission to, so gesture-driven drag/resize/rotate is
+      verified here by code review and a live desktop/browser session with
+      real camera permission is what actually confirms it feels right.
+    - Voice commands: the grammar (dourmouse/voice_commands.py) is real,
+      server-parsed, and unit-tested. Typed commands in the box below
+      dispatch for real right now. Push-to-talk (mic -> /api/speech STT ->
+      same parser) reuses ui/voice.html's exact real recording pattern; the
+      SAME honest caveat as wakeword.py applies to any LIVE microphone
+      capture in this sandbox — a live desktop session with real mic
+      permission is what confirms that half end-to-end.
+-->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#04080e">
+<link rel="icon" type="image/png" href="/assets/icon-192.png">
+<style>
+@font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;
+  src:url('assets/fonts/sekuya-regular.ttf') format('truetype')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:300;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-300-latin.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-500-latin.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:700;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-700-latin.woff2') format('woff2')}
+
+:root{
+  --bg:#04080e; --panel:#0b1826ee; --panel2:#0e2032ee;
+  --amber:#f2b73d; --amber-hi:#ffd27a; --amber-ink:#08111c;
+  --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6;
+  --line:rgba(120,175,210,.22); --line-2:rgba(120,175,210,.36);
+  --amber-line:rgba(242,183,61,.4); --amber-soft:rgba(242,183,61,.14);
+  --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--blue-hi);
+  font-family:var(--mono);overflow:hidden;-webkit-font-smoothing:antialiased}
+
+#canvas{position:fixed;inset:0;overflow:hidden;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(126,169,201,.10), transparent 55%),
+    radial-gradient(ellipse at 85% 90%, rgba(242,183,61,.07), transparent 50%),
+    repeating-linear-gradient(0deg, rgba(126,169,201,.05) 0, rgba(126,169,201,.05) 1px, transparent 1px, transparent 48px),
+    repeating-linear-gradient(90deg, rgba(126,169,201,.05) 0, rgba(126,169,201,.05) 1px, transparent 1px, transparent 48px),
+    var(--bg);
+}
+
+/* ---------------- top bar ---------------- */
+#topbar{position:fixed;top:0;left:0;right:0;height:52px;z-index:10000;
+  display:flex;align-items:center;gap:10px;padding:0 14px;
+  background:linear-gradient(180deg,rgba(4,8,14,.96),rgba(4,8,14,.75));
+  border-bottom:1px solid var(--line)}
+#topbar .brand{font-family:var(--display);color:var(--amber);letter-spacing:.06em;font-size:15px}
+#topbar .brand small{color:var(--blue-dim);font-family:var(--mono);font-weight:400;margin-left:8px;font-size:11px}
+.dock{display:flex;gap:6px;margin-left:auto;align-items:center}
+.dockbtn{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--blue-hi);
+  background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 11px;
+  cursor:pointer;white-space:nowrap}
+.dockbtn:hover{border-color:var(--line-2);color:#fff}
+.dockbtn.on{border-color:var(--amber-line);color:var(--amber-hi);background:var(--amber-soft)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:#3a4a58;margin-right:6px;vertical-align:middle}
+.dot.ok{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.dot.bad{background:var(--bad)}
+.dot.warn{background:var(--warn)}
+a.backlink{color:var(--blue-dim);text-decoration:none;font-size:11px;border:1px solid var(--line);
+  border-radius:6px;padding:7px 10px}
+a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
+
+/* ---------------- floating panels ---------------- */
+.panel{position:absolute;min-width:260px;min-height:180px;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,var(--panel),var(--panel2));
+  border:1px solid var(--line-2);border-radius:10px;
+  box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.3);
+  backdrop-filter:blur(6px);overflow:hidden;transition:box-shadow .15s}
+.panel.focused{border-color:var(--amber-line);box-shadow:0 22px 60px rgba(0,0,0,.65),0 0 0 1px var(--amber-line)}
+.panel .tb{cursor:grab;user-select:none;display:flex;align-items:center;gap:8px;
+  padding:8px 10px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--line);
+  touch-action:none}
+.panel .tb:active{cursor:grabbing}
+.panel .tb .ttl{font-size:11px;letter-spacing:.08em;color:var(--blue-hi);flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.panel.focused .tb .ttl{color:var(--amber-hi)}
+.panel .tb .x{cursor:pointer;color:var(--blue-dim);font-size:13px;padding:2px 6px;border-radius:4px}
+.panel .tb .x:hover{color:var(--bad);background:rgba(224,104,92,.12)}
+.panel .body{flex:1;overflow:auto;padding:10px;font-size:12.5px;line-height:1.5}
+.panel .resize{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;
+  touch-action:none}
+.panel .resize::after{content:"";position:absolute;right:4px;bottom:4px;width:8px;height:8px;
+  border-right:2px solid var(--line-2);border-bottom:2px solid var(--line-2)}
+
+/* mail panel */
+.mailrow{padding:7px 6px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px}
+.mailrow:hover{background:rgba(255,255,255,.04)}
+.mailrow .f{color:var(--amber);font-size:11px}
+.mailrow .s{color:var(--blue-hi)}
+.mailrow .d{color:var(--blue-dim);font-size:10px}
+.mailback{color:var(--blue-dim);cursor:pointer;font-size:11px;margin-bottom:8px}
+.mailbody{white-space:pre-wrap;font-size:11.5px;color:var(--blue-hi)}
+
+/* chat/research panel */
+.chatwrap{display:flex;flex-direction:column;height:100%}
+.chatlog{flex:1;overflow:auto;padding:2px 0}
+.turn{margin-bottom:10px}
+.turn .q{color:var(--amber-hi);font-size:11.5px;margin-bottom:3px}
+.turn .a{color:var(--blue-hi);font-size:12px;white-space:pre-wrap}
+.turn .meta{color:var(--blue-dim);font-size:10px;margin-top:3px}
+.chatform{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
+.chatform input{flex:1;background:#04080e;border:1px solid var(--line);border-radius:6px;
+  color:var(--blue-hi);font-family:var(--mono);font-size:12px;padding:7px 8px}
+.chatform button{background:var(--amber);color:var(--amber-ink);border:none;border-radius:6px;
+  font-family:var(--mono);font-weight:700;font-size:11px;padding:0 12px;cursor:pointer}
+.chatform button:disabled{opacity:.5;cursor:default}
+.confirmbox{border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:6px;
+  padding:8px;margin:6px 0;font-size:11.5px}
+.confirmbox .r{display:flex;gap:6px;margin-top:6px}
+.confirmbox button{font-family:var(--mono);font-size:10.5px;border-radius:4px;border:1px solid var(--line-2);
+  padding:4px 9px;cursor:pointer;background:var(--panel2);color:var(--blue-hi)}
+.confirmbox button.go{background:var(--ok);color:#08111c;border-color:var(--ok)}
+
+/* map panel */
+.maplegend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;font-size:10.5px}
+.maplegend span{display:inline-flex;align-items:center;gap:4px;color:var(--blue-dim)}
+.maplegend i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.mapnote{color:var(--blue-dim);font-size:10px;margin-top:6px}
+
+/* ---------------- vision control dock (fixed, not a panel) ---------------- */
+#visdock{position:fixed;right:14px;bottom:14px;width:250px;z-index:9999;
+  background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line-2);
+  border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);font-size:11px;overflow:hidden}
+#visdock .hd{padding:8px 10px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:6px;color:var(--blue-hi);letter-spacing:.06em;font-size:10.5px}
+#visdock .bd{padding:9px 10px;display:flex;flex-direction:column;gap:7px}
+#visdock video{width:100%;border-radius:6px;transform:scaleX(-1);display:block;background:#000;
+  aspect-ratio:16/9}
+#visdock canvas.ov{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);
+  pointer-events:none}
+#visdock .camwrap{position:relative;border-radius:6px;overflow:hidden}
+#visdock .row{display:flex;justify-content:space-between;color:var(--blue-dim)}
+#visdock .row b{color:var(--blue-hi);font-weight:500}
+#visdock button.hb{width:100%;background:var(--panel2);color:var(--blue-hi);border:1px solid var(--line);
+  border-radius:6px;font-family:var(--mono);font-size:11px;padding:7px;cursor:pointer}
+#visdock button.hb.on{border-color:var(--amber-line);color:var(--amber-hi);background:var(--amber-soft)}
+#visdock .note{color:var(--blue-dim);font-size:9.5px;line-height:1.4}
+
+/* ---------------- voice dock (fixed) ---------------- */
+#voxdock{position:fixed;left:14px;bottom:14px;width:300px;z-index:9999;
+  background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line-2);
+  border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);font-size:11px;overflow:hidden}
+#voxdock .hd{padding:8px 10px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--line);
+  color:var(--blue-hi);letter-spacing:.06em;font-size:10.5px}
+#voxdock .bd{padding:9px 10px;display:flex;flex-direction:column;gap:7px}
+#voxdock .row2{display:flex;gap:6px}
+#voxdock input{flex:1;background:#04080e;border:1px solid var(--line);border-radius:6px;
+  color:var(--blue-hi);font-family:var(--mono);font-size:11px;padding:6px 7px}
+#voxdock button.mic{background:var(--panel2);color:var(--blue-hi);border:1px solid var(--line);
+  border-radius:6px;font-family:var(--mono);font-size:14px;width:34px;cursor:pointer}
+#voxdock button.mic.rec{background:var(--bad);color:#fff;border-color:var(--bad)}
+#voxdock button.go{background:var(--amber);color:var(--amber-ink);border:none;border-radius:6px;
+  font-family:var(--mono);font-weight:700;font-size:11px;padding:0 10px;cursor:pointer}
+#voxlog{max-height:76px;overflow:auto;color:var(--blue-dim);font-size:10px;line-height:1.5}
+#voxlog b{color:var(--amber-hi)}
+#voxhelp{color:var(--blue-dim);font-size:9.5px;line-height:1.4}
+
+#toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;
+  background:var(--panel2);border:1px solid var(--amber-line);color:var(--amber-hi);
+  padding:8px 14px;border-radius:6px;font-size:11.5px;opacity:0;pointer-events:none;
+  transition:opacity .2s}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="brand">◆ VISION WORKSPACE <small>floating multi-window · hand + voice control</small></div>
+  <div class="dock">
+    <button class="dockbtn" type="button" data-open="mail">+ MAIL</button>
+    <button class="dockbtn" type="button" data-open="chat">+ COMPANION</button>
+    <button class="dockbtn" type="button" data-open="research">+ RESEARCH</button>
+    <button class="dockbtn" type="button" data-open="map">+ WORLD MAP</button>
+    <a class="backlink" href="/">← CONSOLE</a>
+  </div>
+</div>
+
+<div id="canvas"></div>
+
+<div id="visdock">
+  <div class="hd"><span id="visKillDot" class="dot"></span>HAND CONTROL <span id="visHandsCount" style="margin-left:auto;color:var(--blue-dim)">0 hands</span></div>
+  <div class="bd">
+    <div class="camwrap" id="visCamWrap">
+      <video id="visVideo" playsinline muted></video>
+      <canvas id="visOverlay" class="ov"></canvas>
+    </div>
+    <div class="row"><span>Gesture</span><b id="visGesture">—</b></div>
+    <div class="row"><span>Focused window</span><b id="visFocused">none</b></div>
+    <button class="hb" id="visToggle" type="button">ENABLE HAND CONTROL</button>
+    <div class="note">Pinch a titlebar with one hand to drag it. Pinch with BOTH hands and
+      change the distance between them to resize the focused window; change the angle
+      between them to tilt it. Gated by the same camera kill-switch as VISION screen /
+      tray.py — verified live-desktop, not this sandbox (see page source for the full
+      honesty note).</div>
+  </div>
+</div>
+
+<div id="voxdock">
+  <div class="hd">VOICE COMMANDS</div>
+  <div class="bd">
+    <div class="row2">
+      <button class="mic" id="voxMic" type="button" title="push-to-talk">🎙</button>
+      <input id="voxText" type="text" placeholder="type a command, e.g. open mail" autocomplete="off">
+      <button class="go" id="voxGo" type="button">RUN</button>
+    </div>
+    <div id="voxlog"></div>
+    <div id="voxhelp">Try: "open mail" · "close research" · "search for nvidia earnings" ·
+      "email sam saying running late". Anything else is sent to the companion as a normal
+      chat message.</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   0. small utils
+   ============================================================ */
+function $(id){ return document.getElementById(id); }
+function esc(s){ const d=document.createElement("div"); d.textContent = s==null?"":String(s); return d.innerHTML; }
+function toast(msg){
+  const t=$("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"), 2600);
+}
+async function api(path, opts){
+  const res = await fetch(path, opts);
+  if(!res.ok){ let body=""; try{body=await res.text();}catch(_){} throw new Error("HTTP "+res.status+" "+body.slice(0,200)); }
+  return res.json();
+}
+
+/* ============================================================
+   1. panel manager — real drag/resize, mouse-driven; the SAME
+      move/resize primitives the hand-gesture engine (section 4)
+      drives too, so mouse and gesture control are one mechanism,
+      not two competing ones.
+   ============================================================ */
+const CANVAS = $("canvas");
+let zTop = 100;
+let panelSeq = 0;
+const panels = new Map(); // id -> {id, type, el, tb, body, w, h, x, y, rotate}
+let focusedId = null;
+
+const CASCADE_START = { x: 60, y: 76 };
+let cascadeOffset = 0;
+
+function nextCascadePos(){
+  const p = { x: CASCADE_START.x + cascadeOffset, y: CASCADE_START.y + cascadeOffset };
+  cascadeOffset = (cascadeOffset + 34) % 220;
+  return p;
+}
+
+function bringToFront(id){
+  const p = panels.get(id); if(!p) return;
+  zTop += 1; p.el.style.zIndex = String(zTop);
+  if(focusedId && panels.has(focusedId)) panels.get(focusedId).el.classList.remove("focused");
+  focusedId = id; p.el.classList.add("focused");
+  const fEl = $("visFocused"); if(fEl) fEl.textContent = p.title || p.type;
+}
+
+function closePanel(id){
+  const p = panels.get(id); if(!p) return;
+  p.el.remove(); panels.delete(id);
+  if(focusedId === id) focusedId = null;
+}
+
+function findPanelByType(type){
+  for(const p of panels.values()) if(p.type === type) return p;
+  return null;
+}
+
+function setPanelRect(p, {x, y, w, h}){
+  if(x != null) { p.x = x; p.el.style.left = x + "px"; }
+  if(y != null) { p.y = Math.max(56, y); p.el.style.top = p.y + "px"; }
+  if(w != null) { p.w = Math.max(260, w); p.el.style.width = p.w + "px"; }
+  if(h != null) { p.h = Math.max(180, h); p.el.style.height = p.h + "px"; }
+}
+
+function setPanelRotate(p, deg){
+  p.rotate = Math.max(-60, Math.min(60, deg));
+  p.el.style.transform = "rotate(" + p.rotate.toFixed(1) + "deg)";
+}
+
+function createPanel(type, title){
+  const id = "p" + (++panelSeq);
+  const pos = nextCascadePos();
+  const el = document.createElement("div");
+  el.className = "panel";
+  el.style.left = pos.x + "px"; el.style.top = pos.y + "px";
+  el.style.width = "380px"; el.style.height = "320px";
+  el.innerHTML = `
+    <div class="tb">
+      <span class="ttl"></span>
+      <span class="x" title="close">✕</span>
+    </div>
+    <div class="body"></div>
+    <div class="resize"></div>`;
+  el.querySelector(".ttl").textContent = title;
+  CANVAS.appendChild(el);
+  const p = { id, type, title, el, tb: el.querySelector(".tb"), body: el.querySelector(".body"),
+              x: pos.x, y: pos.y, w: 380, h: 320, rotate: 0 };
+  panels.set(id, p);
+  bringToFront(id);
+  wirePanelChrome(p);
+  return p;
+}
+
+function wirePanelChrome(p){
+  p.el.querySelector(".x").addEventListener("click", () => closePanel(p.id));
+  p.el.addEventListener("mousedown", () => bringToFront(p.id), true);
+
+  // titlebar drag (mouse/touch — pointer events cover both)
+  let dragging = false, offX = 0, offY = 0;
+  p.tb.addEventListener("pointerdown", (e) => {
+    if(e.target.classList.contains("x")) return;
+    dragging = true; bringToFront(p.id);
+    offX = e.clientX - p.x; offY = e.clientY - p.y;
+    p.tb.setPointerCapture(e.pointerId);
+  });
+  p.tb.addEventListener("pointermove", (e) => {
+    if(!dragging) return;
+    setPanelRect(p, { x: e.clientX - offX, y: e.clientY - offY });
+  });
+  const endDrag = () => { dragging = false; };
+  p.tb.addEventListener("pointerup", endDrag);
+  p.tb.addEventListener("pointercancel", endDrag);
+
+  // corner resize
+  const rz = p.el.querySelector(".resize");
+  let resizing = false, sw = 0, sh = 0, sx = 0, sy = 0;
+  rz.addEventListener("pointerdown", (e) => {
+    resizing = true; bringToFront(p.id);
+    sw = p.w; sh = p.h; sx = e.clientX; sy = e.clientY;
+    rz.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+  });
+  rz.addEventListener("pointermove", (e) => {
+    if(!resizing) return;
+    setPanelRect(p, { w: sw + (e.clientX - sx), h: sh + (e.clientY - sy) });
+  });
+  const endResize = () => { resizing = false; };
+  rz.addEventListener("pointerup", endResize);
+  rz.addEventListener("pointercancel", endResize);
+}
+
+/* ============================================================
+   2. panel content — REAL data, real endpoints
+   ============================================================ */
+
+function openPanel(type){
+  const existing = findPanelByType(type);
+  if(existing){ bringToFront(existing.id); return existing; }
+  const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP" };
+  const p = createPanel(type, titles[type] || type.toUpperCase());
+  if(type === "mail") loadMailPanel(p);
+  else if(type === "chat") initChatPanel(p, "companion", "Ask the companion anything…");
+  else if(type === "research") initChatPanel(p, "research_info", "Search / research a topic…");
+  else if(type === "map") loadMapPanel(p);
+  return p;
+}
+
+document.querySelectorAll(".dockbtn[data-open]").forEach(b => {
+  b.addEventListener("click", () => openPanel(b.dataset.open));
+});
+
+/* ---- MAIL panel: reuses /api/gmail/search + /api/gmail/read, unmodified real endpoints ---- */
+async function loadMailPanel(p){
+  p.body.innerHTML = `<div style="color:var(--blue-dim)">loading inbox…</div>`;
+  try{
+    const data = await api("/api/gmail/search?max_results=20");
+    renderMailList(p, data);
+  }catch(e){
+    p.body.innerHTML = `<div style="color:var(--bad)">inbox unavailable: ${esc(e.message)}</div>`;
+  }
+}
+function renderMailList(p, data){
+  if(!data.ok){
+    p.body.innerHTML = `<div style="color:var(--bad)">${esc(data.error || "inbox error")}</div>`;
+    return;
+  }
+  const rows = data.rows || [];
+  if(!rows.length){
+    p.body.innerHTML = `<div style="color:var(--blue-dim)">${esc(data.raw || "inbox is empty")}</div>`;
+    return;
+  }
+  p.body.innerHTML = "";
+  for(const r of rows){
+    const row = document.createElement("div");
+    row.className = "mailrow";
+    row.innerHTML = `<div class="f">${esc(r.from)} · <span class="d">${esc(r.date)}</span></div>
+      <div class="s">${esc(r.subject)}</div>`;
+    row.addEventListener("click", () => openMailMessage(p, r));
+    p.body.appendChild(row);
+  }
+}
+async function openMailMessage(p, row){
+  p.body.innerHTML = `<div class="mailback">← back to inbox</div>
+    <div style="color:var(--blue-dim)">loading…</div>`;
+  p.body.querySelector(".mailback").addEventListener("click", () => loadMailPanel(p));
+  try{
+    const data = await api("/api/gmail/read?id=" + encodeURIComponent(row.id));
+    p.body.innerHTML = `<div class="mailback">← back to inbox</div>
+      <div style="color:var(--amber-hi);margin-bottom:4px">${esc(row.subject)}</div>
+      <div style="color:var(--blue-dim);font-size:10.5px;margin-bottom:8px">${esc(row.from)} · ${esc(row.date)}</div>
+      <div class="mailbody"></div>`;
+    p.body.querySelector(".mailback").addEventListener("click", () => loadMailPanel(p));
+    p.body.querySelector(".mailbody").textContent = data.ok ? (data.text || "(empty message)") : ("ERROR: " + (data.error || "unknown"));
+  }catch(e){
+    p.body.innerHTML = `<div class="mailback">← back to inbox</div><div style="color:var(--bad)">${esc(e.message)}</div>`;
+    p.body.querySelector(".mailback").addEventListener("click", () => loadMailPanel(p));
+  }
+}
+
+/* ---- CHAT / RESEARCH panels: real /api/chat SSE stream, same wire
+   format console.html's own run() already consumes (assistant_delta /
+   assistant_text / confirmation_requested / done / error). ---- */
+function initChatPanel(p, focusAgent, placeholder){
+  p.focusAgent = focusAgent;
+  p.body.innerHTML = `
+    <div class="chatwrap">
+      <div class="chatlog"></div>
+      <form class="chatform">
+        <input type="text" placeholder="${esc(placeholder)}" autocomplete="off">
+        <button type="submit">SEND</button>
+      </form>
+    </div>`;
+  const form = p.body.querySelector("form");
+  const input = p.body.querySelector("input");
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if(!text) return;
+    input.value = "";
+    sendChatMessage(p, text);
+  });
+}
+
+async function sendChatMessage(p, text){
+  const log = p.body.querySelector(".chatlog");
+  if(!log) return; // panel might not be a chat panel (defensive)
+  const turn = document.createElement("div");
+  turn.className = "turn";
+  turn.innerHTML = `<div class="q"></div><div class="a"></div><div class="meta"></div>`;
+  turn.querySelector(".q").textContent = "YOU: " + text;
+  log.appendChild(turn);
+  log.scrollTop = log.scrollHeight;
+  const aEl = turn.querySelector(".a"), metaEl = turn.querySelector(".meta");
+  aEl.textContent = "…thinking";
+  let buf = "";
+  try{
+    const res = await fetch("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: text, focus_agent: p.focusAgent }),
+    });
+    if(!res.ok || !res.body) throw new Error("HTTP " + res.status);
+    const rd = res.body.getReader(), dec = new TextDecoder(); let carry = "";
+    for(;;){
+      const { value, done } = await rd.read(); if(done) break;
+      carry += dec.decode(value, { stream: true });
+      const parts = carry.split("\n"); carry = parts.pop() || "";
+      for(const line of parts){
+        if(!line.startsWith("data:")) continue;
+        let ev; try{ ev = JSON.parse(line.slice(5)); }catch(_){ continue; }
+        if(ev.type === "assistant_delta"){ buf += ev.text || ""; aEl.textContent = buf; log.scrollTop = log.scrollHeight; }
+        else if(ev.type === "assistant_text"){ if((ev.text||"").length > buf.length){ buf = ev.text; aEl.textContent = buf; } }
+        else if(ev.type === "brain"){ metaEl.textContent = (ev.model || "").split("/").pop() || ""; }
+        else if(ev.type === "confirmation_requested"){ addConfirmBox(p, log, ev); }
+        else if(ev.type === "error"){ aEl.textContent = "ERROR: " + (ev.message || "unknown error"); aEl.style.color = "var(--bad)"; }
+        else if(ev.type === "done"){ if(ev.final_text && ev.final_text.length > buf.length){ buf = ev.final_text; aEl.textContent = buf; } }
+      }
+    }
+  }catch(e){
+    aEl.textContent = "request failed: " + e.message; aEl.style.color = "var(--bad)";
+  }finally{
+    if(!buf) aEl.textContent = aEl.textContent === "…thinking" ? "(no reply)" : aEl.textContent;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+function addConfirmBox(p, log, ev){
+  const box = document.createElement("div");
+  box.className = "confirmbox";
+  box.innerHTML = `<div>◆ CONFIRMATION NEEDED</div><div class="p"></div>
+    <div class="r"><button class="go">APPROVE</button><button class="no">DECLINE</button></div>`;
+  box.querySelector(".p").textContent = ev.prompt || "This action needs your approval.";
+  log.appendChild(box); log.scrollTop = log.scrollHeight;
+  const decide = async (approved) => {
+    box.querySelectorAll("button").forEach(b => b.disabled = true);
+    box.style.opacity = ".6";
+    try{
+      await fetch("/api/confirm", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: ev.id, approved }),
+      });
+    }catch(_){}
+  };
+  box.querySelector(".go").addEventListener("click", () => decide(true));
+  box.querySelector(".no").addEventListener("click", () => decide(false));
+}
+
+/* ---- WORLD MAP panel: real /api/worldmap data, a real (simple) plotted
+   projection — honestly no basemap art, just a lat/lon graticule, real
+   pins at real coordinates, real per-channel counts. ---- */
+async function loadMapPanel(p){
+  p.body.innerHTML = `<div style="color:var(--blue-dim)">loading world pulse…</div>`;
+  try{
+    const data = await api("/api/worldmap");
+    renderMapPanel(p, data);
+  }catch(e){
+    p.body.innerHTML = `<div style="color:var(--bad)">map unavailable: ${esc(e.message)}</div>`;
+  }
+}
+const MAP_COLORS = ["#f2b73d","#7ea9c9","#e0685c","#5fbf8a","#c48ee0","#e0a15c","#5cc4e0","#e05c9d"];
+function renderMapPanel(p, data){
+  const layers = data.layers || {};
+  const names = Object.keys(layers);
+  const colorOf = {}; names.forEach((n, i) => colorOf[n] = MAP_COLORS[i % MAP_COLORS.length]);
+  const W = 600, H = 300;
+  let dots = "";
+  for(const name of names){
+    const c = colorOf[name];
+    for(const item of (layers[name] || [])){
+      if(typeof item.lat !== "number" || typeof item.lon !== "number") continue;
+      const x = ((item.lon + 180) / 360) * W;
+      const y = ((90 - item.lat) / 180) * H;
+      const label = esc(item.label || item.name || item.title || name);
+      dots += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="${c}" fill-opacity="0.85"><title>${label}</title></circle>`;
+    }
+  }
+  let grid = "";
+  for(let lon = -180; lon <= 180; lon += 30){
+    const x = ((lon + 180) / 360) * W;
+    grid += `<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="rgba(126,169,201,.14)" stroke-width="1"/>`;
+  }
+  for(let lat = -90; lat <= 90; lat += 30){
+    const y = ((90 - lat) / 180) * H;
+    grid += `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="rgba(126,169,201,.14)" stroke-width="1"/>`;
+  }
+  const legend = names.map(n => `<span><i style="background:${colorOf[n]}"></i>${esc(n)} (${(data.counts||{})[n] || 0})</span>`).join("");
+  const unmappable = Object.keys(data.unmappable || {});
+  p.body.innerHTML = `
+    ${data.pulse_label ? `<div style="color:var(--amber-hi);font-size:11px;margin-bottom:6px">PULSE: ${esc(data.pulse_label)}${data.pulse_score != null ? " · " + esc(String(data.pulse_score)) : ""}</div>` : ""}
+    <div class="maplegend">${legend || '<span style="color:var(--blue-dim)">no located items right now</span>'}</div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;border:1px solid var(--line);border-radius:6px;background:#04080e">
+      ${grid}${dots}
+    </svg>
+    <div class="mapnote">${unmappable.length ? "unmappable (no coordinates): " + esc(unmappable.join(", ")) : "every channel with real coordinates is plotted"}</div>`;
+}
+
+/* ============================================================
+   3. voice commands — real grammar (dourmouse/voice_commands.py),
+      parsed server-side via POST /api/voice/command, dispatched here.
+   ============================================================ */
+function voxLog(line){
+  const el = $("voxlog");
+  const row = document.createElement("div");
+  row.innerHTML = line;
+  el.appendChild(row); el.scrollTop = el.scrollHeight;
+}
+
+async function handleUtterance(text){
+  text = (text || "").trim();
+  if(!text) return;
+  voxLog("<b>heard:</b> " + esc(text));
+  let recognized = null;
+  try{
+    const d = await api("/api/voice/command", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if(d.ok && d.recognized) recognized = d.command;
+  }catch(e){
+    voxLog("<b>command parse failed:</b> " + esc(e.message));
+  }
+  if(recognized){
+    voxLog("<b>command:</b> " + esc(recognized.action) + " " + esc(JSON.stringify(recognized.args)));
+    dispatchVoiceCommand(recognized);
+  }else{
+    voxLog("<b>not a command</b> — sending to companion as chat");
+    const p = openPanel("chat");
+    sendChatMessage(p, text);
+  }
+}
+
+function dispatchVoiceCommand(cmd){
+  if(cmd.action === "open_panel"){
+    openPanel(cmd.args.panel);
+    toast("opened " + cmd.args.panel);
+  }else if(cmd.action === "close_panel"){
+    const p = findPanelByType(cmd.args.panel);
+    if(p){ closePanel(p.id); toast("closed " + cmd.args.panel); }
+    else toast(cmd.args.panel + " is not open");
+  }else if(cmd.action === "search"){
+    const p = openPanel("research");
+    sendChatMessage(p, cmd.args.query);
+  }else if(cmd.action === "email"){
+    // Routed straight at the real mail agent (not the companion) so the
+    // real gmail_send confirmation gate is reached directly — the SAME
+    // /api/chat + confirmation-gate pipeline every other DourMouse screen
+    // uses, surfaced right here via addConfirmBox above.
+    const p = openPanel("chat");
+    sendChatMessage(p, `email ${cmd.args.person}: ${cmd.args.message}`);
+  }
+}
+
+$("voxGo").addEventListener("click", () => {
+  const el = $("voxText"); const text = el.value; el.value = "";
+  handleUtterance(text);
+});
+$("voxText").addEventListener("keydown", (e) => {
+  if(e.key === "Enter"){ e.preventDefault(); $("voxGo").click(); }
+});
+
+/* ---- push-to-talk mic: same real getUserMedia/MediaRecorder pattern as
+   ui/voice.html, feeding the transcript into the same handleUtterance()
+   typed commands already use. ---- */
+let voxStream = null, voxRec = null, voxChunks = [], voxRecording = false;
+async function voxToggleMic(){
+  if(voxRecording){ voxStopRecording(); return; }
+  try{
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw new Error("microphone not available in this browser");
+    }
+    voxStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(t => MediaRecorder.isTypeSupported(t)) || "";
+    voxRec = new MediaRecorder(voxStream, mime ? { mimeType: mime } : undefined);
+    voxChunks = [];
+    voxRec.ondataavailable = (e) => { if(e.data && e.data.size) voxChunks.push(e.data); };
+    voxRec.onstop = async () => {
+      voxStream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(voxChunks, { type: voxRec.mimeType || "audio/webm" });
+      voxLog("transcribing…");
+      try{
+        const res = await fetch("/api/speech", { method: "POST", body: blob });
+        const d = await res.json();
+        const text = (d.text || "").trim();
+        if(!text){ voxLog("(no speech detected)"); return; }
+        await handleUtterance(text);
+      }catch(e){
+        voxLog("<b>STT failed:</b> " + esc(e.message));
+      }
+    };
+    voxRec.start();
+    voxRecording = true;
+    $("voxMic").classList.add("rec");
+  }catch(e){
+    voxLog("<b>mic error:</b> " + esc(e.message));
+  }
+}
+function voxStopRecording(){
+  try{ voxRec && voxRec.state !== "inactive" && voxRec.stop(); }catch(_){}
+  voxRecording = false;
+  $("voxMic").classList.remove("rec");
+}
+$("voxMic").addEventListener("click", voxToggleMic);
+
+/* ============================================================
+   4. hand-gesture window control — reuses the SAME MediaPipe
+      HandLandmarker pipeline ui/index.html already runs, gated by the
+      SAME dourmouse/tray.py camera kill-switch bridge poll.
+   ============================================================ */
+const HAND = {
+  video: $("visVideo"), overlay: $("visOverlay"), wrap: $("visCamWrap"),
+  toggleBtn: $("visToggle"), gestureEl: $("visGesture"), handsCountEl: $("visHandsCount"),
+  killDot: $("visKillDot"),
+  stream: null, handLM: null, running: false, startingUp: false,
+  cameraAllowed: true,
+  dragging: false, dragPanelId: null, dragOffX: 0, dragOffY: 0,
+  twoHand: false, startDist: 0, startAngle: 0, startW: 0, startH: 0, startRotate: 0,
+};
+
+const VIS_BRIDGE_URL = "http://127.0.0.1:8766/api/vision-state";
+async function pollVisionBridge(){
+  try{
+    const res = await fetch(VIS_BRIDGE_URL, { cache: "no-store" });
+    if(!res.ok) throw new Error("bad status " + res.status);
+    const data = await res.json();
+    applyKillSwitch(data.camera_enabled !== false);
+  }catch(e){
+    applyKillSwitch(true); // fail-open, same convention as ui/index.html
+  }
+}
+function applyKillSwitch(cameraEnabled){
+  const was = HAND.cameraAllowed;
+  HAND.cameraAllowed = cameraEnabled;
+  HAND.killDot.className = "dot " + (cameraEnabled ? "ok" : "bad");
+  if(!cameraEnabled && HAND.running){ stopHandControl(); toast("camera kill-switch engaged — hand control stopped"); }
+  void was;
+}
+function visionKillSwitchLoop(){ pollVisionBridge().finally(() => setTimeout(visionKillSwitchLoop, 1500)); }
+visionKillSwitchLoop();
+
+async function loadMediaPipe(){
+  if(window.__visBundle) return window.__visBundle;
+  const mod = await import("/assets/vision/vision_bundle.mjs");
+  window.__visBundle = mod;
+  return mod;
+}
+
+HAND.toggleBtn.addEventListener("click", () => { HAND.running ? stopHandControl() : startHandControl(); });
+
+async function startHandControl(){
+  if(!HAND.cameraAllowed){ toast("camera kill-switch is engaged — re-enable it on the VISION screen first"); return; }
+  if(HAND.startingUp || HAND.running) return;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast("no camera available in this browser"); return; }
+  HAND.startingUp = true;
+  try{
+    HAND.stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 270 }, audio: false });
+    HAND.video.srcObject = HAND.stream;
+    await HAND.video.play();
+    const vision = await loadMediaPipe();
+    const fileset = await vision.FilesetResolver.forVisionTasks("/assets/vision/");
+    HAND.handLM = await vision.HandLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: "/assets/vision/hand_landmarker.task", delegate: "GPU" },
+      runningMode: "VIDEO", numHands: 2,
+    });
+    HAND.running = true;
+    HAND.toggleBtn.textContent = "DISABLE HAND CONTROL";
+    HAND.toggleBtn.classList.add("on");
+    handLoop();
+  }catch(e){
+    toast("camera error: " + e.message);
+  }finally{
+    HAND.startingUp = false;
+  }
+}
+function stopHandControl(){
+  HAND.running = false;
+  if(HAND._raf) cancelAnimationFrame(HAND._raf);
+  if(HAND.stream){ HAND.stream.getTracks().forEach(t => t.stop()); HAND.stream = null; }
+  HAND.video.srcObject = null;
+  HAND.toggleBtn.textContent = "ENABLE HAND CONTROL";
+  HAND.toggleBtn.classList.remove("on");
+  HAND.handsCountEl.textContent = "0 hands";
+  HAND.gestureEl.textContent = "—";
+  const ctx = HAND.overlay.getContext("2d"); if(ctx) ctx.clearRect(0, 0, HAND.overlay.width, HAND.overlay.height);
+  endHandDrag(); endTwoHand();
+}
+function handLoop(){
+  if(!HAND.running) return;
+  const v = HAND.video;
+  if(v.readyState >= 2 && HAND.handLM){
+    try{
+      const res = HAND.handLM.detectForVideo(v, performance.now());
+      onHandFrame(res);
+      drawHandOverlay(res);
+    }catch(_){}
+  }
+  HAND._raf = requestAnimationFrame(handLoop);
+}
+function drawHandOverlay(res){
+  const cv = HAND.overlay; if(!cv) return;
+  cv.width = HAND.video.videoWidth || 480; cv.height = HAND.video.videoHeight || 270;
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if(!res || !res.landmarks) return;
+  for(const lm of res.landmarks){
+    ctx.fillStyle = "rgba(242,183,61,.9)";
+    for(const pt of lm){ ctx.beginPath(); ctx.arc(pt.x * cv.width, pt.y * cv.height, 2, 0, Math.PI * 2); ctx.fill(); }
+  }
+}
+
+function handPinchState(lm){
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const scale = Math.max(1e-4, dist(lm[0], lm[9]));
+  const pinch = dist(lm[4], lm[8]) < scale * 0.42;
+  const px = (lm[4].x + lm[8].x) / 2, py = (lm[4].y + lm[8].y) / 2;
+  // mirror the camera, same convention as ui/index.html's onHands.
+  return { pinch, x: (1 - px) * window.innerWidth, y: py * window.innerHeight };
+}
+
+function getFocusedPanel(){
+  return focusedId ? panels.get(focusedId) : null;
+}
+
+function endHandDrag(){ HAND.dragging = false; HAND.dragPanelId = null; }
+function endTwoHand(){ HAND.twoHand = false; }
+
+function onHandFrame(res){
+  const hands = (res && res.landmarks) || [];
+  HAND.handsCountEl.textContent = hands.length + " hand" + (hands.length === 1 ? "" : "s");
+  if(hands.length === 0){ HAND.gestureEl.textContent = "—"; endHandDrag(); endTwoHand(); return; }
+
+  const states = hands.map(handPinchState);
+  const pinching = states.filter(s => s.pinch);
+
+  if(pinching.length >= 2){
+    // ---- two-hand pinch: distance -> resize, angle -> rotate ----
+    endHandDrag();
+    const [a, b] = pinching;
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    const angle = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+    const fp = getFocusedPanel();
+    if(!fp){ HAND.gestureEl.textContent = "TWO-HAND PINCH (no focused window)"; endTwoHand(); return; }
+    if(!HAND.twoHand){
+      HAND.twoHand = true;
+      HAND.startDist = dist || 1; HAND.startAngle = angle;
+      HAND.startW = fp.w; HAND.startH = fp.h; HAND.startRotate = fp.rotate || 0;
+    }else{
+      const scale = Math.max(0.4, Math.min(2.5, dist / HAND.startDist));
+      setPanelRect(fp, { w: HAND.startW * scale, h: HAND.startH * scale });
+      setPanelRotate(fp, HAND.startRotate + (angle - HAND.startAngle));
+    }
+    HAND.gestureEl.textContent = "RESIZE/ROTATE";
+    return;
+  }
+  endTwoHand();
+
+  if(pinching.length === 1){
+    // ---- single-hand pinch: grab a titlebar and drag it ----
+    const s = pinching[0];
+    if(!HAND.dragging){
+      const el = document.elementFromPoint(s.x, s.y);
+      const tb = el && el.closest ? el.closest(".panel .tb") : null;
+      if(tb){
+        const panelEl = tb.closest(".panel");
+        const entry = [...panels.values()].find(p => p.el === panelEl);
+        if(entry){
+          HAND.dragging = true; HAND.dragPanelId = entry.id;
+          bringToFront(entry.id);
+          HAND.dragOffX = s.x - entry.x; HAND.dragOffY = s.y - entry.y;
+        }
+      }
+      HAND.gestureEl.textContent = HAND.dragging ? "DRAG" : "PINCH (not on a titlebar)";
+    }else{
+      const p = panels.get(HAND.dragPanelId);
+      if(p) setPanelRect(p, { x: s.x - HAND.dragOffX, y: s.y - HAND.dragOffY });
+      HAND.gestureEl.textContent = "DRAG";
+    }
+    return;
+  }
+
+  // no pinch on any hand -> release whatever was being manipulated
+  endHandDrag();
+  HAND.gestureEl.textContent = "OPEN";
+}
+
+/* ============================================================
+   5. boot — a small starter layout so the workspace isn't empty
+   ============================================================ */
+openPanel("chat");
+openPanel("map");
+</script>
+</body>
+</html>

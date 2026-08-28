@@ -99,6 +99,8 @@ class TestRosterShape:
             "browser",  # v5.25: real headless-Chrome agent (signup/login)
             "compute",  # v5.26: the Dell compute node (LAN inference + failover)
             "design_3d",  # 3D & UI Design — spec generation + manifest cataloguing
+            "companion",  # world-monitor-expansion: friendly-persona counterpart
+                          # to orchestrator, for the Vision workspace chat panel
         }
 
     def test_orchestrator_exposes_delegate_task(self):
@@ -109,6 +111,17 @@ class TestRosterShape:
         # own native self-dispatch tools — genuinely concurrent fan-out
         # alongside the existing one-at-a-time nested run.
         assert {t.name for t in sub.tools} == {"delegate_task", "delegate_parallel"}
+
+    def test_companion_mirrors_orchestrators_dispatch_tools(self):
+        # world-monitor-expansion: companion is not a second orchestrator
+        # with different plumbing — same delegate_task/delegate_parallel
+        # tool pair, nothing else (no query_shared_memory, see
+        # TestSharedMemoryTool above). Only its name/persona/model differ.
+        registry = build_general_registry()
+        sub = registry.get_subagent("companion")
+        assert sub is not None
+        assert {t.name for t in sub.tools} == {"delegate_task", "delegate_parallel"}
+        assert sub.domain == "Both"
 
     def test_confirmation_gated_tools_are_flagged(self):
         registry = build_general_registry()
@@ -521,10 +534,14 @@ class TestSharedMemoryTool:
         assert any(t.name == "query_shared_memory" for t in sub.tools)
 
     def test_extended_to_every_subagent_except_orchestrator(self):
+        # world-monitor-expansion: "companion" (the Vision workspace's
+        # friendly-persona counterpart to the orchestrator) joins the
+        # exclusion for the same reason orchestrator is excluded — see
+        # build_general_registry's own comment on this loop.
         registry = build_general_registry()
         for sub in registry.all_subagents():
             names = {t.name for t in sub.tools}
-            if sub.name == "orchestrator":
+            if sub.name in ("orchestrator", "companion"):
                 assert "query_shared_memory" not in names
             else:
                 assert "query_shared_memory" in names, f"{sub.name} is missing query_shared_memory"

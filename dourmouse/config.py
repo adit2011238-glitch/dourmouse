@@ -266,6 +266,17 @@ NVIDIA_DEFAULT_MODEL = _NVIDIA_DEFAULT_MODEL
 #     screens (chat/mail triage, headline summarizing, map pulse text) — a
 #     cheap/fast "flash" model is the right tier, and reusing an id this
 #     codebase has already verified beats guessing at another one.
+#   - companion (Vision workspace chat panel, world-monitor-expansion): the
+#     same "deepseek-ai/deepseek-v4-flash-0731" flash tier as comms/mail/
+#     news/worldmonitor, for the same reasoning — a conversational,
+#     casual-tone companion answering live in a chat panel is exactly the
+#     "lighter, higher-volume" turn-taking shape those agents already run
+#     on, not a heavy multi-step research/reasoning workload. It reuses the
+#     one id this codebase has already verified live rather than guessing
+#     at a new one for what is, underneath the persona, the same
+#     delegate_task/delegate_parallel self-dispatch tool pair the
+#     orchestrator runs (see general_roster.py's "companion" registration)
+#     — only the system prompt and the model differ.
 #
 # CAVEAT carried forward honestly (systematic backend verification,
 # 2026-08-29): /v1/models listing this key's real catalog works (HTTP 200),
@@ -284,6 +295,7 @@ _NVIDIA_AGENT_DEFAULTS = {
     "MAIL": "deepseek-ai/deepseek-v4-flash-0731",
     "NEWS": "deepseek-ai/deepseek-v4-flash-0731",
     "WORLDMONITOR": "deepseek-ai/deepseek-v4-flash-0731",
+    "COMPANION": "deepseek-ai/deepseek-v4-flash-0731",
 }
 
 

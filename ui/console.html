@@ -340,6 +340,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .card{border:1px solid var(--line);border-radius:2px;padding:11px 13px;background:var(--panel2);
   cursor:pointer;text-align:left;min-height:44px;transition:border-color .12s}
 .card:hover{border-color:var(--amber-line)}
+.cards a.card{display:block;text-decoration:none;color:inherit}
 .card .h{font-size:9.5px;letter-spacing:.14em;color:var(--amber);margin-bottom:4px}
 .card .d{font-size:8.5px;color:var(--blue-deep);line-height:1.5}
 
@@ -1958,6 +1959,19 @@ async function paintVision(){
     <div class="sec">RELATED</div>
     <div class="cards" id="visionRelated"></div>`;
   const rel = $("visionRelated");
+  // world-monitor-expansion: the Vision floating multi-window workspace —
+  // real draggable/resizable panels (Gmail/companion/research/world map),
+  // hand-gesture window control, and voice commands, all wired to real
+  // endpoints. A new page (ui/workspace.html), not a console screen, since
+  // it needs the whole viewport as a free-floating desktop.
+  const wbtn = document.createElement("a");
+  wbtn.className = "card"; wbtn.href = "/workspace"; wbtn.target = "_blank";
+  wbtn.rel = "noopener";
+  wbtn.innerHTML = `<div class="h">◆ OPEN VISION WORKSPACE</div>
+    <div class="d">Floating multi-window desktop — drag/resize real panels
+    with your mouse or (camera-permitting) your hands, or drive it by
+    voice. Opens in a new tab.</div>`;
+  rel.appendChild(wbtn);
   const dbtn = document.createElement("button");
   dbtn.className = "card"; dbtn.type = "button";
   dbtn.innerHTML = `<div class="h">3D &amp; UI DESIGN</div>

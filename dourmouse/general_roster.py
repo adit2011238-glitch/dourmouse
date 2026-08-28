@@ -2126,13 +2126,53 @@ def build_general_registry() -> DispatchRegistry:
     registry = DispatchRegistry()
     path_note = _sandbox_path_note()
 
+    # delegate_task/delegate_parallel are built ONCE and the SAME ToolSpec
+    # objects are shared between "orchestrator" and "companion" below (the
+    # registry enforces global tool-name uniqueness by object identity —
+    # see DispatchRegistry.register_subagent — the exact same pattern
+    # extend_subagent uses elsewhere for publish_artifact/
+    # query_shared_memory), not two competing tools that happen to share a
+    # name.
+    _delegate_tool = _build_delegate_tool(registry)
+    _delegate_parallel_tool = _build_delegate_parallel_tool(registry)
+
     registry.register_subagent(
         _subagent(
             "orchestrator",
             "Both",
             "Lead orchestrator — spawns nested agent runs via delegate_task "
             "(one at a time) or delegate_parallel (several concurrently).",
-            [_build_delegate_tool(registry), _build_delegate_parallel_tool(registry)],
+            [_delegate_tool, _delegate_parallel_tool],
+        )
+    )
+
+    # -- companion (Vision workspace) ----------------------------------- #
+    # world-monitor-expansion: the friendly, casual-tone counterpart to
+    # "orchestrator" the Vision workspace's chat panel talks to (the task
+    # brief's own words: "a conversational AI that acts as an orchestration
+    # agent but has a more friendly and casual tone"). Deliberately NOT a
+    # second orchestrator with different plumbing — it shares the EXACT
+    # SAME delegate_task/delegate_parallel ToolSpec objects orchestrator
+    # just registered (built once, above), which read the live
+    # DispatchContext and never hardcode a calling agent name (see their
+    # own docstrings), so it can do everything the orchestrator can
+    # (delegate to any real subagent, fan out with delegate_parallel)
+    # through the ONE real dispatch path this codebase has. Only two
+    # things differ from "orchestrator": its name/persona (the bespoke
+    # system prompt at AGENT_SYSTEM_PROMPTS["companion"] in
+    # agent_prompts.py, spliced in by dispatch.py's existing single-agent
+    # match — no dispatch.py change needed) and its model
+    # (_NVIDIA_AGENT_DEFAULTS["COMPANION"] in config.py). Excluded from the
+    # query_shared_memory extension loop below on purpose, same as
+    # "orchestrator" — see that loop's own comment.
+    registry.register_subagent(
+        _subagent(
+            "companion",
+            "Both",
+            "Friendly, casual-tone companion agent for the Vision workspace's "
+            "chat panel — same delegate_task/delegate_parallel self-dispatch "
+            "reach as the orchestrator, different persona and model.",
+            [_delegate_tool, _delegate_parallel_tool],
         )
     )
 
@@ -4311,14 +4351,15 @@ def build_general_registry() -> DispatchRegistry:
     # publish_artifact, which deliberately rides only the report-producing
     # agents, this one is meant to be reachable from anywhere, since any
     # backend answering any subagent's tool-calling turn may want it.
-    # The orchestrator is excluded on purpose: it deliberately stays
-    # scoped to its own native self-dispatch tools (delegate_task,
-    # delegate_parallel — see the artifact-tool comment above), so it is
-    # not extended here either.
+    # The orchestrator (and companion, its Vision-workspace counterpart —
+    # see its registration above) are excluded on purpose: both deliberately
+    # stay scoped to their own native self-dispatch tools (delegate_task,
+    # delegate_parallel — see the artifact-tool comment above), so neither
+    # is extended here either.
     _shared_memory_spec = registry.lookup("query_shared_memory")
     if _shared_memory_spec is not None:
         for _sub in registry.all_subagents():
-            if _sub.name == "orchestrator":
+            if _sub.name in ("orchestrator", "companion"):
                 continue
             registry.extend_subagent(_sub.name, _shared_memory_spec)
 
