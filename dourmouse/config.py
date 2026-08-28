@@ -227,45 +227,59 @@ NVIDIA_DEFAULT_MODEL = _NVIDIA_DEFAULT_MODEL
 # checked first in model_for_agent below) always wins, and any agent not
 # listed here keeps running on NVIDIA_MODEL exactly as before.
 #
-# Every id below is a REAL model id already referenced somewhere else in
-# this codebase — none invented for this change:
-#   - orchestrator: "nvidia/llama-3.3-nemotron-super-49b-v1" — the same
-#     Nemotron-Super family as NVIDIA_MODEL's 120B default, at 49B. This is
-#     the looping dispatch brain that pays its model cost every single
-#     turn, so it gets the smaller/faster member of the family — the same
-#     reasoning _OLLAMA_FAST_DISPATCH below already applies on the Ollama
-#     backend. This exact id already appears in test_config.py as a
-#     plausible NVIDIA model id; it has NOT been verified live from this
-#     sandbox (no network access here) — same honesty caveat cn_backends.py
-#     already carries for its own researched model choices. Re-check
-#     against a live NVIDIA_API_KEY before relying on it.
-#   - research_info: "nvidia/llama-3.1-nemotron-ultra-253b-v1" — not a new
-#     choice: this is the exact NVIDIA_MODEL atlas_lab.py and
-#     atlas_proposals.py already default to for real ATLAS research work.
-#     Reused here (the "strong model" tier) rather than inventing a second
-#     "research-grade" id nobody has exercised.
-#   - dev_coding: "nvidia/code-llama-70b" — .env.example already documents
-#     this exact id (line ~150) as the intended coding-tuned choice for
-#     DOURMOUSE_MODEL_DEV_CODING; it just sat there commented out, never
-#     actually applied as a default until now. NOTE: this covers only the
-#     general dev_coding subagent's own reasoning calls. The dedicated
-#     code_nvidia / code_deepseek / code_claude / code_codex / code_ollama
-#     agents do NOT go through model_for_agent at all — each resolves its
-#     own model via code_backends.py's load_backend() (its own per-backend
-#     default + honest NOT CONFIGURED handling), so they are deliberately
-#     left OUT of this dict rather than given a second, competing default.
+# Every id below is a REAL model id, live-checked against
+# integrate.api.nvidia.com/v1/models on 2026-08-29 with the real
+# NVIDIA_API_KEY from this repo's .env — none invented, none merely
+# "referenced somewhere else in the codebase" (that was the bug: several
+# ids below WERE only that, and never actually existed on NVIDIA's side):
+#   - orchestrator: "nvidia/llama-3.3-nemotron-super-49b-v1" was RETIRED —
+#     confirmed absent from the live catalog (systematic backend
+#     verification, world-monitor-expansion). NVIDIA no longer publishes a
+#     smaller "Nemotron-Super" sibling to sit next to NVIDIA_MODEL's 120B
+#     default, so the family-sibling reasoning from the original choice no
+#     longer applies either. Replaced with "nvidia/nemotron-3-nano-30b-a3b"
+#     — a real, live-confirmed id, and the current Nemotron-3 generation's
+#     purpose-built small/fast tier ("nano", "a3b" = ~3B active params via
+#     MoE), which fits the looping dispatch brain's "pays its model cost
+#     every turn" requirement at least as well as the retired 49B pick did.
+#   - research_info: "nvidia/llama-3.1-nemotron-ultra-253b-v1" — confirmed
+#     present in the live catalog. Not a new choice: this is the exact
+#     NVIDIA_MODEL atlas_lab.py and atlas_proposals.py already default to
+#     for real ATLAS research work, reused here as the "strong model" tier.
+#   - dev_coding: "nvidia/code-llama-70b" never existed as an NVIDIA-owned
+#     id — confirmed absent from the live catalog. The real model is
+#     Meta's CodeLlama, served under NVIDIA NIM as "meta/codellama-70b"
+#     (confirmed present) — likely what was actually meant when this default
+#     (and the matching .env.example line) was first written with the wrong
+#     vendor prefix. NOTE: this covers only the general dev_coding
+#     subagent's own reasoning calls. The dedicated code_nvidia /
+#     code_deepseek / code_claude / code_codex / code_ollama agents do NOT
+#     go through model_for_agent at all — each resolves its own model via
+#     code_backends.py's load_backend() (its own per-backend default +
+#     honest NOT CONFIGURED handling), so they are deliberately left OUT of
+#     this dict rather than given a second, competing default.
 #   - comms / mail / news / worldmonitor: "deepseek-ai/deepseek-v4-flash-0731"
-#     — the ONE model id in this entire codebase marked "verified live on
-#     the user's key" (code_backends.py's _DEEPSEEK_NVIDIA_MODEL, checked
-#     against integrate.api.nvidia.com/v1/models). These are the lighter,
-#     higher-volume screens (chat/mail triage, headline summarizing, map
-#     pulse text) — a cheap/fast "flash" model is the right tier, and
-#     reusing an id this codebase has already verified beats guessing at
-#     another one.
+#     — confirmed present in the live catalog. The ONE model id in this
+#     entire codebase marked "verified live on the user's key"
+#     (code_backends.py's _DEEPSEEK_NVIDIA_MODEL) before this pass, and
+#     re-confirmed present now. These are the lighter, higher-volume
+#     screens (chat/mail triage, headline summarizing, map pulse text) — a
+#     cheap/fast "flash" model is the right tier, and reusing an id this
+#     codebase has already verified beats guessing at another one.
+#
+# CAVEAT carried forward honestly (systematic backend verification,
+# 2026-08-29): /v1/models listing this key's real catalog works (HTTP 200),
+# but every real chat-completion call against this key currently returns
+# HTTP 403 "Authorization failed" — for every model tried, including ones
+# confirmed present above. That is an external, account-side NVIDIA
+# problem (the key can list models but cannot invoke inference right now),
+# not a stale-id bug and not fixable in this code. "Present in the live
+# catalog" below means exactly that — presence, not a successful live
+# completion — until that 403 clears. See test_live_model_catalogs.py.
 _NVIDIA_AGENT_DEFAULTS = {
-    "ORCHESTRATOR": "nvidia/llama-3.3-nemotron-super-49b-v1",
+    "ORCHESTRATOR": "nvidia/nemotron-3-nano-30b-a3b",
     "RESEARCH_INFO": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-    "DEV_CODING": "nvidia/code-llama-70b",
+    "DEV_CODING": "meta/codellama-70b",
     "COMMS": "deepseek-ai/deepseek-v4-flash-0731",
     "MAIL": "deepseek-ai/deepseek-v4-flash-0731",
     "NEWS": "deepseek-ai/deepseek-v4-flash-0731",
@@ -313,7 +327,16 @@ def load_nvidia_config() -> NvidiaConfig:
 # --------------------------------------------------------------------------- #
 
 _OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
-_OLLAMA_DEFAULT_MODEL = "qwen3:8b"
+# world-monitor-expansion (systematic backend verification, 2026-08-29): was
+# "qwen3:8b" — same never-pulled-model bug class as DOURMOUSE_FAST_MODEL's
+# old "qwen3:4b" default (see model_check.py's docstring). Confirmed live
+# via `curl 127.0.0.1:11434/api/tags` on this machine: no "qwen3:*" model is
+# installed at all, and the real .env doesn't set OLLAMA_MODEL to it either
+# — this box's actual OLLAMA_MODEL=qwen2.5:7b. Replaced with "qwen2.5:7b":
+# already the one Ollama model this codebase has verified live elsewhere
+# (_OLLAMA_FAST_DISPATCH below), and re-confirmed live again in this pass
+# (a real /api/chat call returned a real answer, not a 404).
+_OLLAMA_DEFAULT_MODEL = "qwen2.5:7b"
 
 # Public aliases (same convention as the NVIDIA defaults above).
 OLLAMA_DEFAULT_BASE_URL = _OLLAMA_DEFAULT_BASE_URL
@@ -754,10 +777,19 @@ def fast_lane_enabled(value: str | None = None) -> bool:
 
 def fast_lane_model() -> str:
     """DOURMOUSE_FAST_MODEL: the small model used for simple responses.
-    Default qwen3:4b (2.5GB, several times faster than qwen3:8b on this
-    class of machine). Falls back to the default on empty/whitespace.
+
+    world-monitor-expansion (systematic backend verification, 2026-08-29):
+    the hardcoded fallback here was still "qwen3:4b" — the EXACT model id
+    model_check.py's own regression test (test_model_check.py,
+    "test_detects_the_qwen3_4b_mismatch") documents as the original
+    never-pulled-model incident that module exists to catch. The incident
+    was only ever patched by setting DOURMOUSE_FAST_MODEL in .env; this
+    fallback default itself was never fixed, so a machine with the env var
+    unset (or a fresh install) would hit the identical bug again. Default
+    is now "qwen2.5:7b" — confirmed installed on this machine and
+    re-verified live in this pass via a real /api/chat call.
     """
-    return os.environ.get("DOURMOUSE_FAST_MODEL", "qwen3:4b").strip() or "qwen3:4b"
+    return os.environ.get("DOURMOUSE_FAST_MODEL", "qwen2.5:7b").strip() or "qwen2.5:7b"
 
 
 def fast_lane_server_enabled(value: str | None = None) -> bool:

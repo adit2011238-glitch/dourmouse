@@ -51,10 +51,16 @@ class TestOllamaConfig:
         cfg = load_ollama_config()
         assert cfg.api_key == ""  # keyless — the local-first guarantee
         assert cfg.base_url == "http://127.0.0.1:11434/v1"
-        assert cfg.model == "qwen3:8b"
-        assert cfg.model_for_agent("news") == "qwen3:8b"
-        assert cfg.model_for_agent(None) == "qwen3:8b"
-        assert cfg.model_for_agent("") == "qwen3:8b"
+        # world-monitor-expansion (systematic backend verification): was
+        # "qwen3:8b" — never pulled on the real dev machine, same bug class
+        # as DOURMOUSE_FAST_MODEL's old qwen3:4b default (model_check.py).
+        # config._OLLAMA_DEFAULT_MODEL is now "qwen2.5:7b" (confirmed
+        # installed + live-verified); pinning the literal here on purpose,
+        # same as before, so a future silent default drift still fails loud.
+        assert cfg.model == "qwen2.5:7b"
+        assert cfg.model_for_agent("news") == "qwen2.5:7b"
+        assert cfg.model_for_agent(None) == "qwen2.5:7b"
+        assert cfg.model_for_agent("") == "qwen2.5:7b"
 
     def test_env_overrides(self, monkeypatch):
         monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:9999/v1")

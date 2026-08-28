@@ -134,9 +134,15 @@ class TestNvidiaAgentDefaults:
         ):
             monkeypatch.delenv(name, raising=False)
         cfg = load_nvidia_config()
-        assert cfg.model_for_agent("orchestrator") == "nvidia/llama-3.3-nemotron-super-49b-v1"
+        # world-monitor-expansion (systematic backend verification,
+        # 2026-08-29): the two old ids here ("nvidia/llama-3.3-nemotron-
+        # super-49b-v1", "nvidia/code-llama-70b") were confirmed RETIRED /
+        # NEVER-REAL against a live integrate.api.nvidia.com/v1/models call
+        # — see config._NVIDIA_AGENT_DEFAULTS' docstring for the full
+        # cross-check and replacement reasoning.
+        assert cfg.model_for_agent("orchestrator") == "nvidia/nemotron-3-nano-30b-a3b"
         assert cfg.model_for_agent("research_info") == "nvidia/llama-3.1-nemotron-ultra-253b-v1"
-        assert cfg.model_for_agent("dev_coding") == "nvidia/code-llama-70b"
+        assert cfg.model_for_agent("dev_coding") == "meta/codellama-70b"
         for agent in ("comms", "mail", "news", "worldmonitor"):
             assert cfg.model_for_agent(agent) == "deepseek-ai/deepseek-v4-flash-0731"
         # code_* family is NOT in the defaults dict — resolved via
