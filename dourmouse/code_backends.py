@@ -190,6 +190,40 @@ def _run_openai_compat(
     return text
 
 
+def _inject_shared_context(task: str) -> str:
+    """v8.31: the CLI-shelled-out backends (Claude Code CLI, Codex CLI)
+    don't speak the ToolSpec protocol — unlike every other subagent, whose
+    LLM call gets ``query_shared_memory`` as a real callable tool
+    (general_roster.py's ``_query_shared_memory_tool``), a shelled-out CLI
+    process can only ever see what is in its ``task`` argv string. This
+    injects real retrieved shared-memory context into that string BEFORE
+    the subprocess runs, mirroring ``dispatch._append_memory_context``'s
+    own prepend-onto-the-last-user-turn pattern (front of the text, not
+    buried mid-prompt — the same reason that function gives for why a
+    short instruction on the user turn is followed more reliably than one
+    in a system prompt).
+
+    Swallows any lookup failure and returns ``task`` UNCHANGED — an
+    observer/retrieval helper must never break the task it is enriching,
+    same rule ``dispatch._maybe_ingest_memory`` and
+    ``shared_rag.merged_search`` itself already follow. When shared memory
+    is NOT_CONFIGURED on this machine (neither ``DOURMOUSE_GLOBAL_MEMORY``
+    nor ``DOURMOUSE_SPATIAL_VAULT_PATH`` set — the common case today),
+    ``merged_search`` honestly finds no source to consult and this
+    injects nothing: no placeholder, no fabricated context.
+    """
+    try:
+        from dourmouse.shared_rag import format_merged_result, merged_search
+
+        result = merged_search(task, top_k=5)
+    except Exception:  # noqa: BLE001 - injection must never break the task
+        return task
+    if not result.hits:
+        return task
+    context_block = format_merged_result(task, result)
+    return f"{context_block}\n\n{task}"
+
+
 def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
     # Lazy import: code_backends must not import general_roster at module
     # load time (general_roster imports code_backends for the new tools).
@@ -305,10 +339,15 @@ def run_code_task(
         raise RuntimeError("run_code_task requires a non-empty 'task'.")
     name = (backend or "").strip().lower()
     if name == "claude":
-        return _run_claude(task, cwd=cwd, timeout=timeout)
+        # v8.31: inject real shared-memory context before the CLI ever
+        # sees the task — see _inject_shared_context's own docstring for
+        # why this is scoped to the CLI-shelled-out backends only.
+        return _run_claude(_inject_shared_context(task), cwd=cwd, timeout=timeout)
     if name in ("codex", "openai_codex"):
         # v8.7: CLI first (what the CODEX status light measures), API key
-        # only as a fallback — see _run_codex.
-        return _run_codex(task, cwd=cwd, timeout=timeout)
+        # only as a fallback — see _run_codex. v8.31: same shared-memory
+        # injection as the claude branch above, before either the CLI or
+        # its API fallback runs.
+        return _run_codex(_inject_shared_context(task), cwd=cwd, timeout=timeout)
     base_url, api_key, model = load_backend(name)
     return _run_openai_compat(base_url, api_key, model, task, timeout)

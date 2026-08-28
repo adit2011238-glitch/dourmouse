@@ -2077,9 +2077,36 @@ def _run_dispatch_loop(
     # is known, precompute a focused system prompt — applied AT THE API
     # BOUNDARY below, next to the fast lane, so the authoritative messages stay
     # byte-identical for persistence and later turns.
-    focused_system = (
-        system_message(registry, plan_agents) if plan_agents else None
-    )
+    #
+    # v8.31: bespoke per-agent system prompts (dourmouse/agent_prompts.py,
+    # commit 3ae24a3) ride the SAME "resolves to exactly ONE agent"
+    # detection v8.30's per-agent model routing already uses above — when
+    # plan_agents is a single, unambiguous match AND that agent has a
+    # hand-written prompt, splice it in ALONGSIDE (not instead of)
+    # _SYSTEM_PROMPT: the base orchestrator rules carry real governance
+    # (confirmation-gating, honest NOT CONFIGURED/REFUSED reporting, no
+    # fabrication, response style) that every turn must keep regardless of
+    # which agent is doing the work — dropping them for a bespoke persona
+    # would be a regression, not a refinement. No bespoke prompt for the
+    # agent, or more than one agent in play (nothing single to own the
+    # prompt): fall back to the existing generic roster prompt exactly as
+    # v8.30 left it.
+    bespoke_agent_prompt = None
+    if len(plan_agents) == 1:
+        from dourmouse.agent_prompts import AGENT_SYSTEM_PROMPTS
+
+        bespoke_agent_prompt = AGENT_SYSTEM_PROMPTS.get(next(iter(plan_agents)))
+    if bespoke_agent_prompt:
+        focused_system = (
+            _SYSTEM_PROMPT
+            + "\n\nAGENT-SPECIFIC INSTRUCTIONS (bespoke, extracted from "
+            "agent prompts.pdf for this turn's single resolved agent):\n\n"
+            + bespoke_agent_prompt
+        )
+    elif plan_agents:
+        focused_system = system_message(registry, plan_agents)
+    else:
+        focused_system = None
 
     # v8.30: unified, embedding-based memory across every screen — real
     # retrieved past context auto-injected into the prompt, not a tool the

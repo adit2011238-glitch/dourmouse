@@ -974,6 +974,91 @@ class TestModelOverride:
         assert client.chat.completions.calls[0]["model"] == "nvidia/forced-70b"
 
 
+class TestBespokeAgentPrompts:
+    """v8.31: dourmouse/agent_prompts.py's AGENT_SYSTEM_PROMPTS wired into
+    the SAME single-agent detection v8.30's per-agent model routing uses.
+    A single, unambiguous plan_agents match with a covered agent gets its
+    bespoke prompt spliced onto the base orchestrator rules; an uncovered
+    agent or a multi-agent turn keeps the existing generic roster prompt."""
+
+    def test_single_covered_agent_gets_bespoke_prompt(self, monkeypatch):
+        # "check my inbox" deterministically resolves to exactly one agent
+        # (mail), which IS covered by AGENT_SYSTEM_PROMPTS.
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.agent_prompts import AGENT_SYSTEM_PROMPTS
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", registry, client=client)
+        sent = client.chat.completions.calls[0]["messages"]
+        system_content = sent[0]["content"]
+        # base orchestrator governance rules must still be present
+        assert "Lead Orchestrator" in system_content
+        assert "CONFIRMATION REQUIRED" in system_content
+        # AND the bespoke mail prompt was spliced in
+        assert AGENT_SYSTEM_PROMPTS["mail"] in system_content
+
+    def test_uncovered_single_agent_keeps_generic_roster_prompt(self, monkeypatch):
+        # "add a task to buy milk" deterministically resolves to exactly
+        # one agent (tasks), which is NOT covered by AGENT_SYSTEM_PROMPTS
+        # (see the coverage-gap list in agent_prompts.py's own docstring).
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.agent_prompts import AGENT_SYSTEM_PROMPTS
+        from dourmouse.general_roster import build_general_registry
+
+        assert "tasks" not in AGENT_SYSTEM_PROMPTS
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("add a task to buy milk", registry, client=client)
+        sent = client.chat.completions.calls[0]["messages"]
+        system_content = sent[0]["content"]
+        assert "Lead Orchestrator" in system_content
+        assert "AGENT-SPECIFIC INSTRUCTIONS" not in system_content
+        for bespoke in AGENT_SYSTEM_PROMPTS.values():
+            assert bespoke not in system_content
+
+    def test_multi_agent_turn_keeps_generic_roster_prompt(self, monkeypatch):
+        # A real multi-step directive resolves to more than one agent
+        # (mail + tasks) — no single owning prompt, same conservatism as
+        # v8.30's per-agent model routing.
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.agent_prompts import AGENT_SYSTEM_PROMPTS
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch(
+            "check my inbox and then add a task to follow up",
+            registry, client=client,
+        )
+        sent = client.chat.completions.calls[0]["messages"]
+        system_content = sent[0]["content"]
+        assert "Lead Orchestrator" in system_content
+        assert "AGENT-SPECIFIC INSTRUCTIONS" not in system_content
+        assert AGENT_SYSTEM_PROMPTS["mail"] not in system_content
+
+    def test_forced_agent_single_covered_agent_also_gets_bespoke_prompt(self):
+        # forced_agent (delegate_task's nested ROUTING DIRECTIVE runs) also
+        # collapses plan_agents to exactly one agent — same detection, same
+        # splice, exercised directly rather than through the planner.
+        from dourmouse.agent_prompts import AGENT_SYSTEM_PROMPTS
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "do the research task"},
+        ]
+        run_dispatch_messages(
+            messages, registry, client=client, forced_agent="research_info",
+        )
+        sent = client.chat.completions.calls[0]["messages"]
+        assert AGENT_SYSTEM_PROMPTS["research_info"] in sent[0]["content"]
+
+
 class TestRealClientConstruction:
     def test_builds_client_from_env_config_when_none_injected(self, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "nvidia")  # v4.0: explicit backend

@@ -445,3 +445,147 @@ class TestClaudeSignInError:
         msg = str(exc.value)
         assert "rate limit exceeded" in msg
         assert "NOT SIGNED IN" not in msg
+
+
+# --------------------------------------------------------------------------- #
+# v8.31 — shared-memory context injection for the CLI-shelled-out backends
+# --------------------------------------------------------------------------- #
+
+class TestSharedContextInjection:
+    """The CLI-shelled-out backends (code_claude, code_codex) don't speak
+    the ToolSpec protocol, so ``_inject_shared_context`` prepends real
+    retrieved shared-memory context onto the task string BEFORE the CLI
+    subprocess runs, mirroring ``dispatch._append_memory_context``'s own
+    prepend pattern. See ``code_backends._inject_shared_context``."""
+
+    def test_not_configured_injects_nothing_for_claude(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_GLOBAL_MEMORY", raising=False)
+        monkeypatch.delenv("DOURMOUSE_SPATIAL_VAULT_PATH", raising=False)
+        seen: dict[str, object] = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return _Proc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        code_backends.run_code_task("claude", "write a fib function")
+        # argv == [cli, "-p", task]
+        assert seen["argv"][2] == "write a fib function"
+
+    def test_hits_get_prepended_to_the_claude_task(self, monkeypatch):
+        from dourmouse import shared_rag
+
+        fake_result = shared_rag.MergedResult(
+            hits=[{"score": 0.9, "source": "local", "text": "prior note: use pytest"}],
+            sources_used=["local"],
+            warnings=[],
+        )
+        monkeypatch.setattr(shared_rag, "merged_search", lambda q, **k: fake_result)
+        seen: dict[str, object] = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return _Proc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        code_backends.run_code_task("claude", "write a fib function")
+        sent_task = seen["argv"][2]
+        assert "prior note: use pytest" in sent_task
+        assert sent_task.endswith("write a fib function")
+        # real formatting came from format_merged_result, not a hand-rolled dupe
+        assert "SHARED MEMORY SEARCH" in sent_task
+
+    def test_hits_get_prepended_to_the_codex_task(self, monkeypatch):
+        from dourmouse import shared_rag
+
+        fake_result = shared_rag.MergedResult(
+            hits=[{"score": 0.8, "source": "spatial_vault", "text": "desktop vault note"}],
+            sources_used=["spatial_vault"],
+            warnings=[],
+        )
+        monkeypatch.setattr(shared_rag, "merged_search", lambda q, **k: fake_result)
+        seen: dict[str, object] = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return _Proc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_codex_cli", lambda: "/usr/bin/codex"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        code_backends.run_code_task("codex", "write add function")
+        # argv == [cli, "exec", task, "--skip-git-repo-check"]
+        sent_task = seen["argv"][2]
+        assert "desktop vault note" in sent_task
+        assert sent_task.endswith("write add function")
+
+    def test_lookup_failure_is_swallowed_task_unchanged(self, monkeypatch):
+        from dourmouse import shared_rag
+
+        def _boom(q, **k):
+            raise RuntimeError("vault exploded")
+
+        monkeypatch.setattr(shared_rag, "merged_search", _boom)
+        seen: dict[str, object] = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return _Proc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        out = code_backends.run_code_task("claude", "write a fib function")
+        assert out == "ok"
+        assert seen["argv"][2] == "write a fib function"
+
+    def test_empty_hits_injects_nothing(self, monkeypatch):
+        from dourmouse import shared_rag
+
+        empty_result = shared_rag.MergedResult(hits=[], sources_used=["local"], warnings=[])
+        monkeypatch.setattr(shared_rag, "merged_search", lambda q, **k: empty_result)
+        seen: dict[str, object] = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            return _Proc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        code_backends.run_code_task("claude", "write a fib function")
+        assert seen["argv"][2] == "write a fib function"
