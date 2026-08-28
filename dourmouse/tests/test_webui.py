@@ -375,6 +375,176 @@ class TestHttpEndpoints:
         conn.close()
 
 
+class TestVisionStatusEndpoint:
+    """GET /api/vision/status — honest status roll-up for overlay.py,
+    tray.py, wakeword.py, vision_bridge.py, proactive.py."""
+
+    def _get(self, port: int) -> dict:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/vision/status")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read())
+        conn.close()
+        return data
+
+    def test_returns_all_five_sections(self, server):
+        srv, port = server
+        data = self._get(port)
+        for key in ("kill_switch", "overlay", "tray", "wakeword", "vision_bridge", "proactive"):
+            assert key in data, key
+
+    def test_kill_switch_defaults_both_armed_on_fresh_workspace(self, server):
+        """No privacy_state.json written yet -> honest defaults (both
+        enabled), matching tray.load_state()'s own documented default."""
+        srv, port = server
+        data = self._get(port)
+        assert data["kill_switch"]["mic_enabled"] is True
+        assert data["kill_switch"]["camera_enabled"] is True
+        # tray.py's section carries the SAME real state, not a second copy.
+        assert data["tray"]["kill_switch"]["mic_enabled"] is True
+        assert data["tray"]["kill_switch"]["camera_enabled"] is True
+
+    def test_kill_switch_reflects_real_persisted_state(self, server, tmp_path):
+        """Writing the real on-disk flag (the same file tray.py/overlay.py
+        share) must change what this endpoint reports — this is a real
+        disk read, not a fabricated status."""
+        import dourmouse.tray as tray_module
+
+        srv, port = server
+        state_path = tmp_path / "ws" / "privacy_state.json"
+        tray_module.save_state(
+            tray_module.KillSwitchState(mic_enabled=False, camera_enabled=True, updated_at="x"),
+            state_path,
+        )
+        data = self._get(port)
+        assert data["kill_switch"]["mic_enabled"] is False
+        assert data["kill_switch"]["camera_enabled"] is True
+
+    def test_overlay_and_tray_running_state_is_honestly_unknown(self, server):
+        """Neither is started by this web server or the native launcher —
+        the endpoint must say "unknown", never fabricate on/off."""
+        srv, port = server
+        data = self._get(port)
+        assert data["overlay"]["running"] == "unknown"
+        assert data["tray"]["running"] == "unknown"
+
+    def test_wakeword_disabled_by_default_and_listening_unknown(self, server, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_WAKEWORD", raising=False)
+        srv, port = server
+        data = self._get(port)
+        assert data["wakeword"]["enabled"] is False
+        assert data["wakeword"]["listening"] == "unknown"
+        # honesty caveat about unverified live mic capture must be surfaced
+        assert "microphone" in data["wakeword"]["note"].lower()
+
+    def test_vision_bridge_unreachable_reports_honestly(self, server, monkeypatch):
+        """No dourmouse.tray process is running in this test, so nothing is
+        actually listening on the configured bridge port -> reachable must
+        be False with a real error, never a fabricated True."""
+        monkeypatch.setenv("DOURMOUSE_VISION_BRIDGE_PORT", "18766")
+        srv, port = server
+        data = self._get(port)
+        assert data["vision_bridge"]["configured_port"] == 18766
+        assert data["vision_bridge"]["reachable"] is False
+        assert data["vision_bridge"]["state"] is None
+        assert data["vision_bridge"]["error"]
+
+    def test_vision_bridge_reachable_reports_real_live_state(self, server, monkeypatch):
+        """Start a REAL VisionBridgeServer and confirm the endpoint's probe
+        genuinely reaches it and relays its real state, not a canned one."""
+        from dourmouse.tray import KillSwitchState
+        from dourmouse.vision_bridge import VisionBridgeServer
+
+        bridge = VisionBridgeServer(
+            state_reader=lambda: KillSwitchState(mic_enabled=False, camera_enabled=False, updated_at="t"),
+            port=0,
+        )
+        ok, detail = bridge.start()
+        assert ok, detail
+        try:
+            monkeypatch.setenv("DOURMOUSE_VISION_BRIDGE_PORT", str(bridge.port))
+            srv, port = server
+            data = self._get(port)
+            assert data["vision_bridge"]["reachable"] is True
+            assert data["vision_bridge"]["state"]["mic_enabled"] is False
+            assert data["vision_bridge"]["state"]["camera_enabled"] is False
+        finally:
+            bridge.stop()
+
+    def test_proactive_allowlist_and_wiring_flags(self, server, monkeypatch):
+        srv, port = server
+        data = self._get(port)
+        assert set(data["proactive"]["allowed_alert_kinds"]) == {"system", "world", "atlas"}
+        assert "market" not in data["proactive"]["allowed_alert_kinds"]
+        assert isinstance(data["proactive"]["events_hub_present"], bool)
+        assert isinstance(data["proactive"]["env_enabled"], bool)
+
+    def test_proactive_env_disabled_is_reflected(self, server, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_PROACTIVE_SURFACE", "0")
+        srv, port = server
+        data = self._get(port)
+        assert data["proactive"]["env_enabled"] is False
+
+
+class TestVisionKillSwitchEndpoint:
+    """POST /api/vision/kill-switch — a real toggle onto the SAME shared
+    state file dourmouse/tray.py's KillSwitch owns."""
+
+    def _post(self, port: int, body: dict) -> tuple[int, dict]:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/vision/kill-switch",
+            body=json.dumps(body), headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        status = resp.status
+        conn.close()
+        return status, data
+
+    def _get_status(self, port: int) -> dict:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/vision/status")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        return data
+
+    def test_kill_all_flips_both_off_and_persists(self, server, tmp_path):
+        srv, port = server
+        status, data = self._post(port, {"action": "kill_all"})
+        assert status == 200
+        assert data["ok"] is True
+        assert data["kill_switch"]["mic_enabled"] is False
+        assert data["kill_switch"]["camera_enabled"] is False
+        # a fresh GET /api/vision/status must see the SAME real write, not a
+        # second copy of the truth.
+        follow_up = self._get_status(port)
+        assert follow_up["kill_switch"]["mic_enabled"] is False
+        assert follow_up["kill_switch"]["camera_enabled"] is False
+
+    def test_set_mic_toggles_independently(self, server):
+        srv, port = server
+        status, data = self._post(port, {"action": "set_mic", "enabled": False})
+        assert status == 200
+        assert data["kill_switch"]["mic_enabled"] is False
+        assert data["kill_switch"]["camera_enabled"] is True
+
+    def test_set_camera_toggles_independently(self, server):
+        srv, port = server
+        status, data = self._post(port, {"action": "set_camera", "enabled": False})
+        assert status == 200
+        assert data["kill_switch"]["camera_enabled"] is False
+        assert data["kill_switch"]["mic_enabled"] is True
+
+    def test_unknown_action_is_rejected_400(self, server):
+        srv, port = server
+        status, data = self._post(port, {"action": "bogus"})
+        assert status == 400
+        assert data["ok"] is False
+
+
 class TestSseChat:
     def _stream_events(self, port, prompt):
         """POST /api/chat and read the SSE stream into a list of events."""

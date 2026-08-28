@@ -1085,6 +1085,60 @@ def _qr_svg(url: str) -> str:
         return ""
 
 
+#: Cache + in-flight registry for GET /api/vision/status dependency probes
+#: (overlay's pywebview, tray's pystray+Pillow, wakeword's openwakeword +
+#: sounddevice). These are real import probes, not fabricated — but real,
+#: once per PROCESS is enough: whether a package is installed cannot change
+#: while this server is running, and importing ``openwakeword`` (its ONNX
+#: runtime) genuinely took several seconds to over ten in this sandbox on
+#: first import — probing it fresh, and synchronously, on every poll would
+#: turn an honest status endpoint into a multi-second (or worse) stall.
+#: Each probe runs on its own daemon thread the first time it's needed;
+#: ``_vision_dependency_status`` waits only up to a shared time budget and
+#: reports None (never a fabricated True/False) if the probe is still
+#: genuinely unresolved when the budget runs out — the thread keeps running
+#: in the background and every request after it gets the real cached answer.
+_VISION_DEPENDENCY_CACHE: dict[str, bool] = {}
+_VISION_PROBE_THREADS: dict[str, threading.Thread] = {}
+_VISION_PROBE_LOCK = threading.Lock()
+
+
+def _vision_dependency_start(key: str, probe: Callable[[], Any]) -> None:
+    """Kick off (or no-op if already resolved/running) a background probe."""
+    if key in _VISION_DEPENDENCY_CACHE:
+        return
+    with _VISION_PROBE_LOCK:
+        if key in _VISION_DEPENDENCY_CACHE or key in _VISION_PROBE_THREADS:
+            return
+
+        def _run() -> None:
+            try:
+                probe()
+                _VISION_DEPENDENCY_CACHE[key] = True
+            except Exception:  # noqa: BLE001 -- any probe failure reads as "not available"
+                _VISION_DEPENDENCY_CACHE[key] = False
+
+        thread = threading.Thread(
+            target=_run, daemon=True, name=f"dourmouse-vision-probe-{key}"
+        )
+        _VISION_PROBE_THREADS[key] = thread
+        thread.start()
+
+
+def _vision_dependency_status(key: str, deadline: float) -> bool | None:
+    """The real answer if it's known; otherwise waits until ``deadline``
+    (a ``time.monotonic()`` value shared across this request's several
+    probes, so N probes cost at most one time budget, not N of them) and
+    returns None — an honest "still checking", not a guess — if the probe
+    hasn't resolved by then."""
+    if key in _VISION_DEPENDENCY_CACHE:
+        return _VISION_DEPENDENCY_CACHE[key]
+    thread = _VISION_PROBE_THREADS.get(key)
+    if thread is not None:
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    return _VISION_DEPENDENCY_CACHE.get(key)
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "AtlasDourmouseWebUI/0.1"
 
@@ -1534,6 +1588,11 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.browser_agent import browser_status
 
             self._send_json(browser_status())
+        elif path == "/api/vision/status":
+            # world-monitor-expansion: honest status roll-up for the Vision
+            # family (overlay/tray/wakeword/vision_bridge/proactive) — see
+            # _handle_vision_status for what's real vs honestly unknown.
+            self._handle_vision_status()
         elif path == "/api/browser/activity":
             # v5.25: the browser agent's activity ring buffer.
             from dourmouse.browser_agent import browser_activity
@@ -1983,6 +2042,14 @@ class _Handler(BaseHTTPRequestHandler):
             # the normal auth gate above, unlike /api/setup/* — this is a
             # post-first-run settings change, not the bootstrap flow.
             self._handle_orchestrator_model_post()
+        elif parsed.path == "/api/vision/kill-switch":
+            # world-monitor-expansion: a REAL toggle for dourmouse/tray.py's
+            # privacy kill switch, reachable from the browser console even
+            # when the native tray icon process isn't running — writes the
+            # exact same shared state file every module in the Vision family
+            # reads (dourmouse.tray.load_state/save_state), so a flip here
+            # is honored everywhere, not a second competing notion of state.
+            self._handle_vision_kill_switch_post()
         elif parsed.path == "/api/feedback":
             self._handle_feedback()
         elif parsed.path == "/api/speech":
@@ -3674,6 +3741,242 @@ class _Handler(BaseHTTPRequestHandler):
             )
         except Exception as exc:  # noqa: BLE001 -- honest 500, never crash the connection
             self._send_json({"configured": True, "error": str(exc)}, status=500)
+
+    def _handle_vision_status(self) -> None:
+        """world-monitor-expansion: GET /api/vision/status — an honest
+        status roll-up for the Vision family: dourmouse/overlay.py,
+        dourmouse/tray.py, dourmouse/wakeword.py, dourmouse/vision_bridge.py,
+        dourmouse/proactive.py.
+
+        The load-bearing honesty fact this endpoint must not paper over:
+        THIS process (webui.py, what a browser talks to) does not itself
+        start overlay.py, tray.py, or wakeword.py — they are standalone
+        ``python -m dourmouse.<module>`` processes (or, for proactive.py
+        only, wired into dourmouse.desktop's NATIVE launcher, not this one).
+        So "is it actually running right now" is genuinely unobservable from
+        a stateless HTTP request for three of the five, and each field below
+        says exactly that instead of guessing. Two fields ARE real live
+        reads: the kill-switch state (a shared on-disk file every module in
+        this family reads) and the vision-bridge reachability (a real
+        loopback HTTP probe, same one ui/index.html's browser poller makes).
+        """
+        from dourmouse.desktop import _import_webview
+        from dourmouse.tray import _import_pystray
+        from dourmouse.tray import load_state as _load_kill_switch_state
+        from dourmouse.wakeword import (
+            _capture_available,
+            _inference_available,
+            wakeword_enabled,
+            wakeword_model,
+            wakeword_threshold,
+        )
+
+        kill_switch = _load_kill_switch_state()
+
+        def _require_inference() -> None:
+            if not _inference_available():
+                raise RuntimeError("openwakeword not installed")
+
+        def _require_capture() -> None:
+            if not _capture_available():
+                raise RuntimeError("sounddevice not installed")
+
+        # Kick off every dependency probe concurrently (each a no-op after
+        # its first call, ever, in this process — see
+        # _vision_dependency_start) and wait for at most ONE shared time
+        # budget total, not one per probe — openwakeword's first import
+        # alone can take several seconds in this sandbox, and four
+        # sequential waits would make that four times worse.
+        _vision_dependency_start("overlay_webview", _import_webview)
+        _vision_dependency_start("tray_pystray", _import_pystray)
+        _vision_dependency_start("wakeword_inference", _require_inference)
+        _vision_dependency_start("wakeword_capture", _require_capture)
+        _deadline = time.monotonic() + 1.2
+        overlay_dependency_ok = _vision_dependency_status("overlay_webview", _deadline)
+        tray_dependency_ok = _vision_dependency_status("tray_pystray", _deadline)
+        inference_ok = _vision_dependency_status("wakeword_inference", _deadline)
+        capture_ok = _vision_dependency_status("wakeword_capture", _deadline)
+
+        def _tri(value: bool | None) -> Any:
+            return value if value is not None else "checking — retry shortly"
+
+        # overlay.py: no started-here wiring and no process registry
+        # anywhere records whether `python -m dourmouse.overlay` is live —
+        # honest "unknown", not a guess. The one thing we CAN check is
+        # whether its one real dependency is installed.
+        overlay = {
+            "dependency_installed": _tri(overlay_dependency_ok),
+            "running": "unknown",
+            "note": (
+                "always-on-top status window; not started by this web "
+                "server or by the native desktop launcher — only runs when "
+                "someone launches `.venv/bin/python -m dourmouse.overlay` "
+                "in a live desktop session. Whether it's on screen right "
+                "now cannot be determined from an HTTP request."
+            ),
+        }
+
+        # tray.py: same shape as overlay — the kill-switch STATE it owns is
+        # real (above); whether the tray icon PROCESS is alive is not
+        # observable here.
+        tray = {
+            "dependency_installed": _tri(tray_dependency_ok),
+            "running": "unknown",
+            "kill_switch": {
+                "mic_enabled": kill_switch.mic_enabled,
+                "camera_enabled": kill_switch.camera_enabled,
+                "updated_at": kill_switch.updated_at or None,
+            },
+            "note": (
+                "the kill-switch state above is real — it's the same "
+                "on-disk file every reader in this family shares. Whether "
+                "the tray icon process itself is running (`.venv/bin/"
+                "python -m dourmouse.tray`) is not observable from here."
+            ),
+        }
+
+        # wakeword.py: same honest shape as wakeword.wakeword_status().
+        # Nothing in this repo auto-starts a WakeWordListener, so
+        # "listening" is unknown by the same logic as overlay/tray above.
+        wakeword = {
+            "enabled": wakeword_enabled(),
+            "inference_engine": (
+                "openwakeword" if inference_ok else "checking" if inference_ok is None
+                else "not-configured"
+            ),
+            "capture_engine": (
+                "sounddevice" if capture_ok else "checking" if capture_ok is None
+                else "not-configured"
+            ),
+            "model": wakeword_model(),
+            "threshold": wakeword_threshold(),
+        }
+        wakeword["listening"] = "unknown"
+        wakeword["note"] = (
+            "wake-word detection itself (openWakeWord ONNX inference on "
+            "synthetic frames) is genuinely verified in this sandbox; the "
+            "CONTINUOUS MICROPHONE CAPTURE loop is not — every sample "
+            "sounddevice returned here was silence, the signature of a "
+            "process never granted real macOS microphone (TCC) permission. "
+            "Confirming a real spoken wake word fires needs a live desktop "
+            "session with mic permission actually granted."
+        )
+
+        # vision_bridge.py: a REAL loopback probe, not a guess — the exact
+        # request ui/index.html's browser-side poller makes.
+        from dourmouse.vision_bridge import bridge_port
+
+        port = bridge_port()
+        vb_reachable = False
+        vb_state: dict[str, Any] | None = None
+        vb_error = None
+        try:
+            import urllib.error
+            import urllib.request
+
+            req_url = f"http://127.0.0.1:{port}/api/vision-state"
+            with urllib.request.urlopen(req_url, timeout=0.5) as resp:  # noqa: S310 -- loopback only
+                vb_state = json.loads(resp.read().decode("utf-8"))
+                vb_reachable = True
+        except (OSError, ValueError, urllib.error.URLError) as exc:
+            vb_error = str(exc)
+        vision_bridge = {
+            "configured_port": port,
+            "reachable": vb_reachable,
+            "state": vb_state,
+            "error": None if vb_reachable else (
+                vb_error or "no vision bridge reachable on this port"
+            ),
+            "note": (
+                "started by dourmouse/tray.py alongside its tray icon "
+                "(TrayApp.run -> _start_vision_bridge), not by this web "
+                "server. reachable=false most often just means tray.py "
+                "isn't running right now, matching this bridge's own "
+                "documented fail-open default."
+            ),
+        }
+
+        # proactive.py: the allowlist itself is real and static; whether it
+        # is actually WIRED to interrupt depends on running inside
+        # dourmouse.desktop's native launcher (not this browser-facing
+        # server) with its own SSE hub and env gate, both checkable here.
+        from dourmouse.proactive import ALLOWED_ALERT_KINDS
+
+        proactive_env_enabled = os.environ.get("DOURMOUSE_PROACTIVE_SURFACE", "1") != "0"
+        events_hub = getattr(self.server, "events_broadcast", None)
+        proactive = {
+            "allowed_alert_kinds": list(ALLOWED_ALERT_KINDS),
+            "env_enabled": proactive_env_enabled,
+            "events_hub_present": events_hub is not None,
+            "wired": "unknown — only true inside a live native desktop "
+                     "session (dourmouse.desktop), never in this browser-"
+                     "facing web server",
+            "note": (
+                "of the three allowed kinds, only \"system\" has a real "
+                "add_alert(...) call site in this codebase today (the "
+                "ATLAS-run-started handler); \"world\" and \"atlas\" are "
+                "wired and ready but nothing currently produces them."
+            ),
+        }
+
+        self._send_json(
+            {
+                "kill_switch": {
+                    "mic_enabled": kill_switch.mic_enabled,
+                    "camera_enabled": kill_switch.camera_enabled,
+                    "updated_at": kill_switch.updated_at or None,
+                },
+                "overlay": overlay,
+                "tray": tray,
+                "wakeword": wakeword,
+                "vision_bridge": vision_bridge,
+                "proactive": proactive,
+            }
+        )
+
+    def _handle_vision_kill_switch_post(self) -> None:
+        """world-monitor-expansion: POST /api/vision/kill-switch.
+
+        Body: ``{"action": "kill_all"}`` (both off, no confirmation — the
+        exact same one-call semantics as tray.KillSwitch.kill_all(), which
+        is what TrayApp's own "Kill camera + mic NOW" menu item calls) or
+        ``{"action": "set_mic", "enabled": bool}`` / ``{"action":
+        "set_camera", "enabled": bool}``.
+
+        This calls dourmouse.tray.KillSwitch directly — the SAME class the
+        native tray icon uses — so a flip from the browser writes the exact
+        shared state file every module in this family reads, and is honored
+        everywhere, whether or not the tray icon process happens to be
+        running. Unknown/malformed actions are rejected 400, never silently
+        ignored.
+        """
+        from dourmouse.tray import KillSwitch
+
+        body = self._read_json_body()
+        action = str(body.get("action") or "").strip()
+        ks = KillSwitch()
+        if action == "kill_all":
+            state = ks.kill_all()
+        elif action == "set_mic":
+            state = ks.set_mic(bool(body.get("enabled")))
+        elif action == "set_camera":
+            state = ks.set_camera(bool(body.get("enabled")))
+        else:
+            self._send_json(
+                {"ok": False, "error": "action must be one of: kill_all, set_mic, set_camera"},
+                status=400,
+            )
+            return
+        self._send_json(
+            {
+                "ok": True,
+                "kill_switch": {
+                    "mic_enabled": state.mic_enabled,
+                    "camera_enabled": state.camera_enabled,
+                    "updated_at": state.updated_at or None,
+                },
+            }
+        )
 
     def _handle_atlas_run(self) -> None:
         """v5.4: POST /api/atlas/run — start one managed ATLAS command.

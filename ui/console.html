@@ -654,6 +654,12 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
 .d3dScopeNote{border:1px solid var(--amber-line);background:var(--amber-soft);
   color:var(--amber);font-size:9.5px;line-height:1.6;letter-spacing:.02em;
   padding:8px 11px;border-radius:6px;margin-bottom:12px}
+/* world-monitor-expansion: VISION screen — same honesty-banner treatment
+   as DESIGN's d3dScopeNote above, generically named since it's reused for
+   a different screen's scope note (real vs needs-a-live-desktop-session). */
+.scopeNote{border:1px solid var(--amber-line);background:var(--amber-soft);
+  color:var(--amber);font-size:9.5px;line-height:1.6;letter-spacing:.02em;
+  padding:8px 11px;border-radius:6px;margin-bottom:12px}
 .d3dWorkspace{display:grid;grid-template-columns:1fr 250px;gap:12px;align-items:start}
 @media (max-width:760px){ .d3dWorkspace{grid-template-columns:1fr} }
 .d3dCanvasWrap{border:1px solid var(--line);border-radius:6px;overflow:hidden;
@@ -796,6 +802,14 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
       <div class="panebody" id="codeBody"></div>
       <div class="thread" id="thread-code"></div></section>
 
+    <!-- VISION: honest status surface for the "Vision — the more ambitious
+         version" family (dourmouse/overlay.py, tray.py, wakeword.py,
+         vision_bridge.py, proactive.py). Not a THREAD_SCREENS entry — this
+         is a real status-and-control panel (kill switch, capability
+         reports), not an LLM chat surface. See paintVision(). -->
+    <section class="pane" id="pane-vision"><div class="panehead">◆ VISION // OVERLAY · TRAY · WAKE-WORD · HAND-TRACKING · PROACTIVE</div>
+      <div class="panebody" id="visionBody"></div></section>
+
     <section class="pane" id="pane-media"><div class="panehead">◆ MEDIA</div>
       <div class="panebody" id="mediaBody"></div>
       <div class="thread" id="thread-media"></div></section>
@@ -868,12 +882,15 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
-const SCREENS = ["HOME","COMMS","RESEARCH","CODE","MEDIA","PROJECTS","SETTINGS","ATLAS","NEWS","DESIGN3D","VOICE"];
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","NEWS","DESIGN3D","VOICE"];
 // v8.29: screens whose composer submissions get their OWN independent
 // thread (a real per-screen conversation, not a shared feed forced onto
 // COMMS). COMMS is deliberately absent — it's a real Gmail inbox now, not
 // an LLM chat surface — so a directive typed while on COMMS, WORLD,
-// SETTINGS, PROJECTS, or VOICE falls back to HOME's own thread instead.
+// SETTINGS, PROJECTS, VISION, or VOICE falls back to HOME's own thread
+// instead. VISION joins that list for the same reason as COMMS: it's a
+// real status-and-control surface (kill switch, capability reports), not
+// an LLM chat surface.
 const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS","DESIGN3D"];
 // v8.28: "ATLAS" is the internal screen id everywhere (pane-atlas, the
 // paintAtlas() dispatch, footer text before this fix) — renaming that
@@ -968,6 +985,7 @@ function show(name){
   if(name==="COMMS") paintComms();
   if(name==="RESEARCH") paintResearch();
   if(name==="CODE") paintCode();
+  if(name==="VISION") paintVision();
   if(name==="MEDIA") paintMedia();
   if(name==="PROJECTS") paintProjects();
   if(name==="SETTINGS") paintSettings();
@@ -1207,6 +1225,7 @@ function paintHome(){
     ["COMMS","Your Gmail inbox — read, search, reply.","COMMS"],
     ["RESEARCH","Live web search with sources.","RESEARCH"],
     ["CODE","Pick a toolchain and write code.","CODE"],
+    ["VISION","Kill switch, overlay, wake-word, hand-tracking status.","VISION"],
     ["PROJECTS","Shelve real work by project.","PROJECTS"],
     ["DESIGN","Generate UI/3D specs and catalogue them.","DESIGN3D"],
     ["VOICE","Hands-free, with a live activity feed.","VOICE"],
@@ -1764,6 +1783,166 @@ document.addEventListener("click",e=>{
   const m=$("toolMenu"); if(!m) return;
   if(!e.target.closest(".sel")) { m.classList.remove("on"); const b=$("toolBtn"); if(b) b.setAttribute("aria-expanded","false"); }
 });
+
+/* ---------------- VISION ----------------
+   world-monitor-expansion: this is the fix for a real, confirmed gap —
+   dourmouse/overlay.py (always-on-top status window), dourmouse/tray.py
+   (system tray + camera/mic kill switch), dourmouse/wakeword.py (local
+   wake-word listener), dourmouse/vision_bridge.py (continuous hand-
+   tracking bridge + kill-switch reach), and dourmouse/proactive.py
+   (proactive alert popups) were all real, shipped modules with NO web
+   console surface reporting their status — SCREENS had no "VISION" entry
+   at all, which is the actual reason a user couldn't find any of this.
+
+   Every field rendered here comes straight from GET /api/vision/status
+   (dourmouse/webui.py::_handle_vision_status) — a real status roll-up
+   that degrades honestly (unknown / not-configured / "checking…") instead
+   of guessing. The load-bearing fact worth repeating in the UI itself,
+   not just the code comments: THIS browser console is not the process
+   that starts overlay.py, tray.py, or wakeword.py — those are native/
+   background pieces that only do anything real inside a live DESKTOP
+   session (`.venv/bin/python -m dourmouse.<module>`, or the packaged
+   desktop app). This screen can flip the real kill-switch file and read
+   real status; it cannot make a native window appear in a browser tab. */
+function visDotCls(v){ return v===true ? "ok" : v===false ? "no" : ""; }
+
+async function paintVision(){
+  const box = $("visionBody");
+  box.innerHTML = `
+    <div class="scopeNote">Overlay, tray, wake-word listening, and continuous
+      hand-tracking are native/background pieces of the DOURMOUSE desktop
+      app — most of them only do anything once that actual desktop app
+      (not just this browser console) is running on a live session with
+      camera/mic permission granted. Wake-word's own honesty note (from
+      dourmouse/wakeword.py): real ONNX inference is verified in this
+      sandbox, but the CONTINUOUS MICROPHONE CAPTURE loop returned only
+      silence here — the signature of a process never granted real macOS
+      microphone permission — so a live desktop session is what actually
+      confirms it fires on a spoken wake word. Vision-bridge's own honesty
+      note (from dourmouse/vision_bridge.py): its kill-switch reach only
+      works into an in-progress browser session while dourmouse/tray.py is
+      actually running. This screen reports the real, current status of
+      each — never a decorative guess.</div>
+    <div id="visionKillSwitch"></div>
+    <div class="sec">OVERLAY // ALWAYS-ON-TOP STATUS WINDOW</div>
+    <div id="visionOverlay"></div>
+    <div class="sec">TRAY // SYSTEM TRAY ICON</div>
+    <div id="visionTray"></div>
+    <div class="sec">WAKE-WORD // LOCAL LISTENER</div>
+    <div id="visionWakeword"></div>
+    <div class="sec">HAND-TRACKING BRIDGE // KILL-SWITCH REACH</div>
+    <div id="visionBridge"></div>
+    <div class="sec">PROACTIVE SURFACING // ALERT POPUPS</div>
+    <div id="visionProactive"></div>
+    <div class="sec">RELATED</div>
+    <div class="cards" id="visionRelated"></div>`;
+  const rel = $("visionRelated");
+  const dbtn = document.createElement("button");
+  dbtn.className = "card"; dbtn.type = "button";
+  dbtn.innerHTML = `<div class="h">3D &amp; UI DESIGN</div>
+    <div class="d">Spatial/UI spec generation — conceptually part of this
+    same Vision ambition. Opens the DESIGN screen.</div>`;
+  dbtn.onclick = () => show("DESIGN3D");
+  rel.appendChild(dbtn);
+
+  let data;
+  try {
+    data = await api("/api/vision/status");
+  } catch (e) {
+    $("visionKillSwitch").innerHTML = `<div class="note">Vision status
+      unavailable: ${esc(e.message)}</div>`;
+    return;
+  }
+  renderVisionKillSwitch(data.kill_switch || {});
+  renderVisionOverlay(data.overlay || {});
+  renderVisionTray(data.tray || {});
+  renderVisionWakeword(data.wakeword || {});
+  renderVisionBridge(data.vision_bridge || {});
+  renderVisionProactive(data.proactive || {});
+}
+
+function renderVisionKillSwitch(ks){
+  $("visionKillSwitch").innerHTML = `
+    <div class="sec">KILL SWITCH // MIC + CAMERA</div>
+    <div class="row"><span class="dot ${visDotCls(ks.mic_enabled)}"></span>
+      <div class="g"><div class="n">MIC ${ks.mic_enabled ? "ARMED" : "KILLED"}</div>
+      <div class="d">real shared state — the same on-disk file dourmouse/tray.py's
+        tray icon and dourmouse/overlay.py both read</div></div>
+      <button class="chip" type="button" id="visMicBtn">${ks.mic_enabled ? "KILL MIC" : "ENABLE MIC"}</button></div>
+    <div class="row"><span class="dot ${visDotCls(ks.camera_enabled)}"></span>
+      <div class="g"><div class="n">CAMERA ${ks.camera_enabled ? "ARMED" : "KILLED"}</div>
+      <div class="d">updated_at: ${esc(ks.updated_at || "never")}</div></div>
+      <button class="chip" type="button" id="visCamBtn">${ks.camera_enabled ? "KILL CAMERA" : "ENABLE CAMERA"}</button></div>
+    <div class="toolbar"><button class="chip" type="button" id="visKillAllBtn">⨯ KILL CAMERA + MIC NOW</button></div>
+    <div class="note">Flipping this here writes the real kill-switch file
+      directly — no tray icon process needs to be running for the flag
+      itself to change. It only reaches an IN-PROGRESS continuous capture
+      session (browser hand-tracking, a live wake-word listener) while
+      dourmouse/tray.py's vision bridge is actually running; otherwise the
+      new state takes effect the next time one tries to start.</div>`;
+  $("visMicBtn").onclick = () => visionKillSwitchAction({action: "set_mic", enabled: !ks.mic_enabled});
+  $("visCamBtn").onclick = () => visionKillSwitchAction({action: "set_camera", enabled: !ks.camera_enabled});
+  $("visKillAllBtn").onclick = () => visionKillSwitchAction({action: "kill_all"});
+}
+
+async function visionKillSwitchAction(body){
+  try {
+    await api("/api/vision/kill-switch", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+  } catch (e) { /* repaint below shows real current state either way */ }
+  paintVision();
+}
+
+function renderVisionOverlay(o){
+  const dep = o.dependency_installed;
+  $("visionOverlay").innerHTML = `
+    <div class="row"><span class="dot ${visDotCls(dep)}"></span>
+      <div class="g"><div class="n">pywebview ${dep === true ? "installed" : dep === false ? "NOT installed" : String(dep)}</div>
+      <div class="d">running: ${esc(String(o.running))}</div>
+      <div class="d">${esc(o.note || "")}</div></div></div>`;
+}
+
+function renderVisionTray(t){
+  const dep = t.dependency_installed;
+  $("visionTray").innerHTML = `
+    <div class="row"><span class="dot ${visDotCls(dep)}"></span>
+      <div class="g"><div class="n">pystray + Pillow ${dep === true ? "installed" : dep === false ? "NOT installed" : String(dep)}</div>
+      <div class="d">running: ${esc(String(t.running))}</div>
+      <div class="d">${esc(t.note || "")}</div></div></div>`;
+}
+
+function renderVisionWakeword(w){
+  $("visionWakeword").innerHTML = `
+    <div class="row"><span class="dot ${w.enabled ? "ok" : ""}"></span>
+      <div class="g"><div class="n">DOURMOUSE_WAKEWORD ${w.enabled ? "ON" : "OFF (default)"}</div>
+      <div class="d">model: ${esc(w.model || "—")} · threshold: ${esc(String(w.threshold))}</div>
+      <div class="d">inference: ${esc(w.inference_engine || "—")} · capture: ${esc(w.capture_engine || "—")}</div>
+      <div class="d">listening: ${esc(String(w.listening))}</div>
+      <div class="d">${esc(w.note || "")}</div></div></div>`;
+}
+
+function renderVisionBridge(v){
+  $("visionBridge").innerHTML = `
+    <div class="row"><span class="dot ${visDotCls(v.reachable)}"></span>
+      <div class="g"><div class="n">port ${esc(String(v.configured_port))} — ${v.reachable ? "REACHABLE (live probe)" : "unreachable"}</div>
+      <div class="d">${v.reachable && v.state
+        ? `mic_enabled: ${esc(String(v.state.mic_enabled))} · camera_enabled: ${esc(String(v.state.camera_enabled))}`
+        : esc(v.error || "")}</div>
+      <div class="d">${esc(v.note || "")}</div></div></div>`;
+}
+
+function renderVisionProactive(p){
+  const kinds = (p.allowed_alert_kinds || []).join(", ");
+  $("visionProactive").innerHTML = `
+    <div class="row"><span class="dot ${p.env_enabled ? "ok" : "no"}"></span>
+      <div class="g"><div class="n">env ${p.env_enabled ? "ENABLED" : "DISABLED (DOURMOUSE_PROACTIVE_SURFACE=0)"}</div>
+      <div class="d">allowed kinds: ${esc(kinds)}</div>
+      <div class="d">events hub present: ${esc(String(p.events_hub_present))} · wired: ${esc(String(p.wired))}</div>
+      <div class="d">${esc(p.note || "")}</div></div></div>`;
+}
 
 /* ---------------- COMMS: real Gmail inbox ----------------
    v8.29: COMMS used to be wherever every directive landed — a general
