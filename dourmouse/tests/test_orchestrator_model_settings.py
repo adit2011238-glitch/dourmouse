@@ -36,7 +36,15 @@ def server(monkeypatch, tmp_path):
     monkeypatch.setattr(config_module, "ollama_available", lambda **_: False)
     monkeypatch.setattr(config_module, "omniroute_available", lambda **_: False)
     monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
-    for name in ("NVIDIA_API_KEY", "NVIDIA_MODEL", "DOURMOUSE_MODEL_ORCHESTRATOR"):
+    # OLLAMA_MODEL/OMNIROUTE_MODEL too: a real .env on the host (this repo's
+    # own dev .env, in particular) can legitimately override these away
+    # from the module's hardcoded *_DEFAULT_MODEL constants — tests that
+    # assert against the constant need the env NOT leaking in, same reason
+    # the other three are already cleared here.
+    for name in (
+        "NVIDIA_API_KEY", "NVIDIA_MODEL", "DOURMOUSE_MODEL_ORCHESTRATOR",
+        "OLLAMA_MODEL", "OMNIROUTE_MODEL",
+    ):
         monkeypatch.delenv(name, raising=False)
     srv = run_server(_echo_registry(), port=0, client=None, config=None)
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
