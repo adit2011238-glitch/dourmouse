@@ -1269,10 +1269,18 @@
   .vis-gesture-table td { font-family: var(--font-mono); font-size: 10px; padding: 5px 2px;
     border-bottom: 1px solid rgba(var(--cyan-rgb), var(--a10)); color: var(--text-dim); }
   .vis-gesture-table td:first-child { color: var(--text); width: 40%; }
-  .vis-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .vis-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   .dm-btn.big { padding: 10px 20px; font-size: 11px; }
   .vis-cam-off { position: absolute; inset: 0; display: grid; place-items: center;
     font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; color: var(--text-dim); }
+  /* Vision stage 5: continuous mode + kill-switch reach status */
+  .vis-continuous { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono);
+    font-size: 10px; letter-spacing: .1em; color: var(--text-dim); cursor: pointer; }
+  .vis-continuous input { accent-color: var(--cyan-bright); }
+  .vis-kill-status { font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em;
+    color: var(--text-dim); margin-left: auto; }
+  .vis-kill-status.armed { color: var(--cyan-bright); }
+  .vis-kill-status.killed { color: #e0413a; }
 
   /* ================= v5.25 BROWSER — Chrome agent + mail identity ========= */
   .br-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 18px; }
@@ -4245,7 +4253,11 @@ const __runV524 = () => {
     cursor: document.getElementById('visCursor'),
     startBtn: document.getElementById('visStart'),
     stopBtn: document.getElementById('visStop'),
+    continuousBox: document.getElementById('visContinuous'),
+    killStatusEl: document.getElementById('visKillStatus'),
     stream: null, handLM: null, faceDM: null, running: false,
+    startingUp: false,      // re-entrancy guard for the continuous auto-start path
+    cameraAllowed: true,    // last known tray kill-switch camera state (fail-open — see below)
   };
   /* ---- v5.29: advanced gesture engine ----
      Robust per-finger geometry (rotation-invariant), a hysteresis state
@@ -4562,10 +4574,97 @@ const __runV524 = () => {
   function hasMediaPipeSupport() {
     return typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
   }
+
+  /* ---- v8.20 (Vision stage 5): continuous tracking + kill-switch reach ----
+     Two independent additions over the button-gated version above:
+     1. CONTINUOUS mode (persisted checkbox) — once armed, tracking starts
+        on its own (on load, and again after a kill-switch cycle) instead
+        of requiring a manual click every time. Purely a client-side
+        convenience: it still goes through the SAME startVision() gate
+        below, so it can never bypass the kill switch.
+     2. A poller against dourmouse.vision_bridge (dourmouse/tray.py's
+        loopback HTTP bridge, default http://127.0.0.1:8766) that is THE
+        real reach mechanism: it force-stops an in-progress session the
+        instant tray.py's "Kill camera + mic NOW" is clicked, not merely
+        refuses the next start. See dourmouse/vision_bridge.py for the
+        server half and exactly why it is a second small server rather than
+        a route on this app's own server.
+     Fail-open when the bridge is unreachable (tray.py simply isn't
+     running): matches tray.KillSwitchState's own default (both enabled) —
+     see applyVisionBridgeState below and vision_bridge.py's module
+     docstring for why this is the existing house convention, not a new
+     policy invented here. */
+  const VIS_BRIDGE_URL = 'http://127.0.0.1:8766/api/vision-state';
+  const VIS_BRIDGE_POLL_MS = 1500;
+  const VIS_CONTINUOUS_KEY = 'dourmouse.vision.continuous';
+
+  function loadContinuousPref() {
+    try { return localStorage.getItem(VIS_CONTINUOUS_KEY) === '1'; } catch (_) { return false; }
+  }
+  function saveContinuousPref(v) {
+    try { localStorage.setItem(VIS_CONTINUOUS_KEY, v ? '1' : '0'); } catch (_) {}
+  }
+
+  function applyVisionBridgeState(cameraEnabled, micEnabled, unreachable) {
+    const wasAllowed = VISION.cameraAllowed;
+    VISION.cameraAllowed = cameraEnabled;
+    if (VISION.killStatusEl) {
+      VISION.killStatusEl.className = 'vis-kill-status' + (unreachable ? '' : (cameraEnabled ? ' armed' : ' killed'));
+      VISION.killStatusEl.textContent = unreachable
+        ? 'KILL-SWITCH: bridge unreachable (tray not running)'
+        : 'KILL-SWITCH: camera ' + (cameraEnabled ? 'armed' : 'KILLED') + (micEnabled ? '' : ' · mic KILLED');
+    }
+    if (!cameraEnabled && VISION.running) {
+      // THE reach: an in-progress session is force-stopped here, not just
+      // refused on its next start.
+      stopVision();
+      setVisState('faceEl', 'CAMERA KILLED');
+    }
+    if (cameraEnabled && !wasAllowed && VISION.continuousBox && VISION.continuousBox.checked
+        && !VISION.userStopped && !VISION.running) {
+      // re-armed while continuous mode wants tracking on and the user never
+      // explicitly clicked Stop themselves -- resume automatically.
+      startVision();
+    }
+  }
+
+  async function pollVisionBridge() {
+    try {
+      const res = await fetch(VIS_BRIDGE_URL, { cache: 'no-store' });
+      if (!res.ok) throw new Error('bad status ' + res.status);
+      const data = await res.json();
+      applyVisionBridgeState(data.camera_enabled !== false, data.mic_enabled !== false, false);
+    } catch (e) {
+      applyVisionBridgeState(true, true, true);
+    }
+  }
+  function visionKillSwitchLoop() {
+    pollVisionBridge().finally(() => setTimeout(visionKillSwitchLoop, VIS_BRIDGE_POLL_MS));
+  }
+
+  if (VISION.continuousBox) {
+    VISION.continuousBox.checked = loadContinuousPref();
+    VISION.continuousBox.addEventListener('change', () => {
+      saveContinuousPref(VISION.continuousBox.checked);
+      if (VISION.continuousBox.checked) { VISION.userStopped = false; startVision(); }
+    });
+  }
+
   VISION.startBtn && VISION.startBtn.addEventListener('click', startVision);
-  VISION.stopBtn && VISION.stopBtn.addEventListener('click', stopVision);
+  VISION.stopBtn && VISION.stopBtn.addEventListener('click', () => stopVision({ userInitiated: true }));
   async function startVision() {
     if (!hasMediaPipeSupport()) { setVisState('faceEl', 'NO CAMERA'); return; }
+    if (!VISION.cameraAllowed) {
+      // Vision stage 5's other non-negotiable: the continuous path (and
+      // the manual button, for consistency) never opens the camera while
+      // the tray's kill switch says no.
+      setVisState('faceEl', 'CAMERA KILLED');
+      if (VISION.hint) VISION.hint.textContent = 'VISION: camera kill-switch is engaged (tray) — re-enable it to start.';
+      return;
+    }
+    if (VISION.startingUp || VISION.running) return;
+    VISION.startingUp = true;
+    VISION.userStopped = false;
     try {
       VISION.stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 }, audio: false });
       VISION.video.srcObject = VISION.stream;
@@ -4595,6 +4694,8 @@ const __runV524 = () => {
     } catch (e) {
       setVisState('faceEl', 'CAMERA DENIED');
       if (VISION.hint) VISION.hint.textContent = 'VISION: ' + (e && e.message ? e.message : String(e));
+    } finally {
+      VISION.startingUp = false;
     }
   }
   let visionRaf = null;
@@ -4619,7 +4720,14 @@ const __runV524 = () => {
     }
     visionRaf = requestAnimationFrame(visionLoop);
   }
-  function stopVision() {
+  function stopVision(opts) {
+    opts = opts || {};
+    // userInitiated: true ONLY on an explicit Stop-button click -- it is
+    // what stops the continuous auto-resume in applyVisionBridgeState from
+    // fighting a click the user actually made. A kill-switch-triggered
+    // stop (userInitiated left false) is exactly the case continuous mode
+    // SHOULD resume from once the switch is re-armed.
+    if (opts.userInitiated) VISION.userStopped = true;
     VISION.running = false;
     if (visionRaf) cancelAnimationFrame(visionRaf);
     if (VISION.stream) { VISION.stream.getTracks().forEach(t => t.stop()); VISION.stream = null; }
@@ -4631,7 +4739,20 @@ const __runV524 = () => {
     const cv = VISION.overlay; if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
   }
   if (VISION.stopBtn) VISION.stopBtn.disabled = true;
-  window.__vision = { start: startVision, stop: stopVision };
+  window.__vision = { start: startVision, stop: stopVision, pollBridge: pollVisionBridge };
+
+  // The kill-switch poller runs unconditionally, independent of which SPA
+  // route is currently visible (dourmouse's route() only toggles
+  // style.display, it never tears down this section — see route() in this
+  // same file) -- matching "continuous... whenever the camera indicator
+  // would be lit, not only while [on] the explicit [vision view]".
+  visionKillSwitchLoop();
+  if (VISION.continuousBox && VISION.continuousBox.checked) {
+    // Wait for the very first real bridge read before auto-starting, so a
+    // genuinely-killed switch is honored from the first frame rather than
+    // racing ahead on the fail-open default.
+    pollVisionBridge().then(() => { if (VISION.cameraAllowed) startVision(); });
+  }
 };
 // v5.24 debug: mark each section as it completes so a mid-module throw is
 // visible from the console instead of silently dying.
@@ -4854,6 +4975,8 @@ __probeMark('registered');
         <div class="vis-actions">
           <button class="dm-btn big" id="visStart">START CAMERA</button>
           <button class="dm-btn big ghost" id="visStop">STOP</button>
+          <label class="vis-continuous"><input type="checkbox" id="visContinuous"> CONTINUOUS</label>
+          <div class="vis-kill-status" id="visKillStatus">KILL-SWITCH: —</div>
         </div>
       </div>
       <div>

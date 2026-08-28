@@ -340,46 +340,89 @@ class DesktopBridge:
         """v5.22.9: open the dedicated ALL HANDS window for one run.
 
         One window per run id (reused/brought to front, never duplicated —
-        the same dedupe pattern as open_agent). Falls back honestly to
-        False when no run id was given (the page then shows recent runs).
+        the same dedupe pattern as open_agent, now via open_task_window).
+        Falls back honestly to False when no run id was given (the page
+        then shows recent runs).
         """
         run_id = (run_id or "").strip()
         if not run_id:
             return False
-        win = self._agent_windows.get(f"allhands:{run_id}")
-        if win is not None and not getattr(win, "closed", False):
-            win.show()
-            return True
         title = f"ALL HANDS // {(goal or run_id).strip()[:28].upper()}"
-        win = self._webview.create_window(
-            title,
-            f"{self._base_url}/all-hands?run={run_id}",
-            width=980,
-            height=760,
-            min_size=(720, 540),
+        return self.open_task_window(
+            f"allhands:{run_id}", f"/all-hands?run={run_id}", title=title
         )
-        self._agent_windows[f"allhands:{run_id}"] = win
-        return True
 
     def open_map(self) -> None:
         self._map_window.show()
+
+    # -- Vision stage 6: generalized multi-window opener ------------------ #
+    #
+    # open_agent() and open_all_hands() below were the proof this pattern
+    # works (each keys its own window into ``self._agent_windows`` by name/
+    # run-id, reuses it on repeat calls, recreates it if the user closed it).
+    # open_task_window() is that SAME pattern pulled out and generalized so
+    # any future "task" — not just a subagent or an ALL HANDS run — gets its
+    # own real, independently movable/resizable native window on request,
+    # without a bespoke bridge method for every new task kind. Both existing
+    # methods are now thin wrappers over it (unchanged signatures/return
+    # types — console.html and any other caller of window.pywebview.api
+    # keeps working exactly as before).
+    #
+    # ``path`` is not restricted to the handful of dedicated server routes
+    # (``/agent/<name>``, ``/all-hands?run=<id>``, ``/atlas-lab``, ``/map``)
+    # — it can equally be one of index.html's own SPA hash routes (e.g.
+    # ``/#/world``, ``/#/atlas``, ``/#/markets`` — see VIEW_CYCLE in
+    # ui/index.html), since ``{base_url}{path}`` for a hash path simply loads
+    # the SAME single-page app and lets its client-side router land on that
+    # view. That is what makes this "ANY running task", not "map and ATLAS
+    # plus whatever gets a new server route later": every view already
+    # reachable in the app can be popped into its own window today.
+    def open_task_window(
+        self,
+        task_id: str,
+        path: str,
+        *,
+        title: str | None = None,
+        width: int = 980,
+        height: int = 760,
+        min_size: tuple[int, int] = (720, 540),
+    ) -> bool:
+        """Open (or focus) a real native window for one arbitrary task.
+
+        ``task_id`` is any caller-chosen dedupe key (e.g. an agent name, an
+        ALL HANDS run id, a SPA route) — one window per id, reused and
+        brought to front on repeat calls, transparently recreated if the
+        user closed it. Returns False honestly (no window touched) for an
+        empty id or a path that isn't a same-origin path/hash (guards
+        against a bad caller trying to open an arbitrary external URL
+        through this bridge — window creation stays scoped to this app's
+        own server, exactly like every other DesktopBridge window today).
+        """
+        task_id = (task_id or "").strip()
+        path = (path or "").strip()
+        if not task_id or not path or not path.startswith(("/", "#")):
+            return False
+        if not path.startswith("/"):
+            path = "/" + path  # "#/world" -> "/#/world"
+        win = self._agent_windows.get(task_id)
+        if win is not None and not getattr(win, "closed", False):
+            win.show()  # already open -> bring to front, don't duplicate
+            return True
+        win = self._webview.create_window(
+            (title or task_id.upper())[:80],
+            f"{self._base_url}{path}",
+            width=width,
+            height=height,
+            min_size=min_size,
+        )
+        self._agent_windows[task_id] = win
+        return True
 
     def open_agent(self, name: str) -> None:
         name = (name or "").strip()
         if not name:
             return
-        win = self._agent_windows.get(name)
-        if win is not None and not getattr(win, "closed", False):
-            win.show()  # already open -> bring to front, don't duplicate
-            return
-        win = self._webview.create_window(
-            f"AGENT // {name.upper()}",
-            f"{self._base_url}/agent/{name}",
-            width=980,
-            height=760,
-            min_size=(720, 540),
-        )
-        self._agent_windows[name] = win
+        self.open_task_window(name, f"/agent/{name}", title=f"AGENT // {name.upper()}")
 
     def open_all_agents(self, names) -> None:
         """v2.8: open EVERY registered agent's own live window at startup.
@@ -707,6 +750,7 @@ def launch(
     # returns via the browser-fallback must not trip a NameError on cleanup
     # (reviewer-guard: the pre-existing fallback test catches this).
     notifier_sink = None
+    proactive_sink = None
     events_hub = getattr(server, "events_broadcast", None)
     try:
         loader = webview_loader or _import_webview
@@ -810,6 +854,28 @@ def launch(
 
             notifier_sink = _HubSink()
             events_hub.register(notifier_sink)
+        # Vision stage 7: proactive surfacing — a SECOND, independent
+        # consumer of the SAME alert feed above, filtered to a short
+        # hardcoded allowlist (dourmouse.proactive.ALLOWED_ALERT_KINDS) and
+        # rendered as a real small dismissible popup window instead of (as
+        # well as) a native notification. Env-gated like the notifier above:
+        # DOURMOUSE_PROACTIVE_SURFACE=0 disables.
+        if os.environ.get("DOURMOUSE_PROACTIVE_SURFACE", "1") != "0" \
+                and events_hub is not None:
+            from dourmouse.proactive import ProactiveSurfacer, default_popup_factory
+
+            surfacer = ProactiveSurfacer(url, default_popup_factory(webview))
+
+            class _ProactiveSink:
+                """Minimal SSE-stream-shaped sink for the broadcast hub —
+                same shape as _HubSink above, a second independent
+                registration on the same hub."""
+
+                def emit(self, payload: dict[str, Any]) -> None:  # noqa: N802 -- SSE API
+                    surfacer.on_event(payload)
+
+            proactive_sink = _ProactiveSink()
+            events_hub.register(proactive_sink)
         # Brand the native app before starting the window loop — sets the
         # Dock icon and menu-bar name to "DourMouse" instead of "Python".
         _brand_native_app()
@@ -827,6 +893,11 @@ def launch(
         if notifier_sink is not None and events_hub is not None:
             try:
                 events_hub.unregister(notifier_sink)
+            except Exception:  # noqa: BLE001 -- cleanup is best-effort
+                pass
+        if proactive_sink is not None and events_hub is not None:
+            try:
+                events_hub.unregister(proactive_sink)
             except Exception:  # noqa: BLE001 -- cleanup is best-effort
                 pass
         if server.live_runtime is not None:

@@ -305,3 +305,90 @@ class TestLaunch:
         assert code == 1
         out = capsys.readouterr().out
         assert "NOT CONFIGURED" in out
+
+
+# --------------------------------------------------------------------------- #
+# Vision stage 5: run() starts the vision kill-switch reach bridge
+# --------------------------------------------------------------------------- #
+
+class _FakeBridge:
+    def __init__(self, state_reader, ok=True):
+        self.state_reader = state_reader
+        self.started = False
+        self.stopped = False
+        self._ok = ok
+
+    def start(self):
+        self.started = True
+        return (self._ok, "listening on 127.0.0.1:8766" if self._ok else "could not bind")
+
+    def stop(self):
+        self.stopped = True
+
+
+class TestVisionBridgeHook:
+    def test_run_starts_the_bridge_before_the_blocking_icon_loop(self, tmp_path, capsys):
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+        bridges = []
+
+        def fake_bridge_factory(state_reader):
+            b = _FakeBridge(state_reader)
+            bridges.append(b)
+            return b
+
+        class _FakeIcon:
+            def run(self):
+                pass  # non-blocking stand-in for pystray.Icon.run()
+
+        app = tray.TrayApp(kill_switch=ks, bridge_factory=fake_bridge_factory)
+        app._icon_factory = lambda: (None, None, None)
+        app._build_icon = lambda: _FakeIcon()
+        app.run()
+        assert len(bridges) == 1
+        assert bridges[0].started is True
+        assert bridges[0].stopped is True  # stopped on the way out of run()
+        assert "vision bridge" in capsys.readouterr().out
+
+    def test_bridge_state_reader_reflects_live_kill_switch(self, tmp_path):
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+        seen_readers = []
+
+        def fake_bridge_factory(state_reader):
+            seen_readers.append(state_reader)
+            return _FakeBridge(state_reader)
+
+        app = tray.TrayApp(kill_switch=ks, bridge_factory=fake_bridge_factory)
+        app._start_vision_bridge()
+        ks.kill_all()
+        # the SAME live KillSwitch instance backs the reader passed to the
+        # bridge -- a kill after the bridge started must be visible through it
+        assert seen_readers[0]().mic_enabled is False
+        assert seen_readers[0]().camera_enabled is False
+
+    def test_bridge_bind_failure_is_non_fatal_to_the_tray(self, tmp_path, capsys):
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+
+        def failing_bridge_factory(state_reader):
+            return _FakeBridge(state_reader, ok=False)
+
+        app = tray.TrayApp(kill_switch=ks, bridge_factory=failing_bridge_factory)
+        app._start_vision_bridge()  # must not raise
+        assert "could not bind" in capsys.readouterr().out
+
+    def test_bridge_factory_exception_is_non_fatal_to_the_tray(self, tmp_path, capsys):
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+
+        def blowing_up_factory(state_reader):
+            raise RuntimeError("boom")
+
+        app = tray.TrayApp(kill_switch=ks, bridge_factory=blowing_up_factory)
+        app._start_vision_bridge()  # must not raise
+        assert "non-fatal" in capsys.readouterr().out
+
+    def test_default_bridge_factory_builds_a_real_vision_bridge_server(self, tmp_path):
+        from dourmouse.vision_bridge import VisionBridgeServer
+
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+        app = tray.TrayApp(kill_switch=ks)
+        bridge = app._bridge_factory(lambda: ks.state)
+        assert isinstance(bridge, VisionBridgeServer)

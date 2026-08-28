@@ -232,13 +232,45 @@ class TrayApp:
     session, not runnable in this environment). Tests exercise the former
     and the action handlers directly; ``run()`` itself is uncovered here by
     necessity and needs a live desktop session to confirm.
+
+    v8.20 (Vision stage 5): ``run()`` also starts the vision kill-switch
+    reach bridge (dourmouse.vision_bridge) on a background thread, bound to
+    this same ``KillSwitch`` instance's live state — so
+    ``ui/index.html``'s continuous camera loop can reach in and force-stop
+    an in-progress browser session the instant "Kill camera + mic NOW" is
+    clicked, not just refuse the NEXT session. Best-effort and non-fatal: if
+    the bridge's port is already taken (another tray process, or something
+    else on the machine), the tray icon itself still starts — see
+    ``_start_vision_bridge``.
     """
 
     def __init__(self, kill_switch: KillSwitch | None = None,
-                 icon_factory: Callable[[], tuple[Any, Any, Any]] | None = None) -> None:
+                 icon_factory: Callable[[], tuple[Any, Any, Any]] | None = None,
+                 bridge_factory: Callable[[Callable[[], "KillSwitchState"]], Any] | None = None) -> None:
         self._kill_switch = kill_switch or KillSwitch()
         self._icon_factory = icon_factory or _import_pystray
         self._icon: Any = None
+        self._bridge_factory = bridge_factory or self._default_bridge_factory
+        self._bridge: Any = None
+
+    @staticmethod
+    def _default_bridge_factory(state_reader: Callable[[], "KillSwitchState"]) -> Any:
+        from dourmouse.vision_bridge import VisionBridgeServer
+
+        return VisionBridgeServer(state_reader=state_reader)
+
+    def _start_vision_bridge(self) -> None:
+        """Start the vision kill-switch reach bridge. Never raises — a bind
+        failure is logged and the tray keeps running without the browser
+        reach (the kill switch's OWN state file still works for every other
+        reader, e.g. dourmouse/overlay.py; only the browser-session force-
+        stop is degraded)."""
+        try:
+            self._bridge = self._bridge_factory(lambda: self._kill_switch.state)
+            ok, detail = self._bridge.start()
+            print(f"[TRAY] vision bridge: {detail}")
+        except Exception as exc:  # noqa: BLE001 -- the tray icon must outlive this
+            print(f"[TRAY] vision bridge failed to start (non-fatal): {exc}")
 
     def _title(self) -> str:
         s = self._kill_switch.state
@@ -308,9 +340,21 @@ class TrayApp:
     def run(self) -> None:
         """Blocking: enters the OS tray event loop. Needs a live desktop
         session — cannot run headlessly, and was not runnable/verifiable in
-        this sandboxed environment."""
-        self._icon = self._build_icon()
-        self._icon.run()
+        this sandboxed environment. The vision bridge (v8.20) IS started
+        here for real before the blocking call — its own start/stop and
+        HTTP handling are genuinely verified headlessly (see
+        dourmouse/tests/test_vision_bridge.py); only ``icon.run()`` itself
+        needs a live desktop."""
+        self._start_vision_bridge()
+        try:
+            self._icon = self._build_icon()
+            self._icon.run()
+        finally:
+            if self._bridge is not None:
+                try:
+                    self._bridge.stop()
+                except Exception:  # noqa: BLE001 -- shutdown must never raise
+                    pass
 
 
 def launch() -> int:

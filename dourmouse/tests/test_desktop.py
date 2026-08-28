@@ -214,6 +214,54 @@ class TestNativeWindowLaunch:
         titles = [w.title for w in fake.windows]
         assert "AGENT // ECHO_AGENT" in titles
 
+    def test_proactive_surfacer_registers_on_the_real_sse_hub_by_default(self, monkeypatch):
+        """Vision stage 7: launch() must wire a ProactiveSurfacer onto the
+        SAME real hub the notifier uses, and unregister it again on
+        shutdown -- exercised against the REAL _SSEBroadcast (not a fake),
+        since that's what dourmouse.webui.run_server actually creates."""
+        fake = _FakeWebview()
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        seen_hubs = []
+        real_register = None
+
+        from dourmouse.webui import _SSEBroadcast
+
+        real_register = _SSEBroadcast.register
+
+        def spying_register(self, stream):
+            seen_hubs.append(stream)
+            return real_register(self, stream)
+
+        monkeypatch.setattr(_SSEBroadcast, "register", spying_register)
+        code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
+        assert code == 0
+        # both the notifier sink and the proactive sink registered
+        assert len(seen_hubs) == 2
+        emit_capable = [s for s in seen_hubs if hasattr(s, "emit")]
+        assert len(emit_capable) == 2
+
+    def test_proactive_surfacer_disabled_via_env(self, monkeypatch):
+        fake = _FakeWebview()
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        monkeypatch.setenv("DOURMOUSE_PROACTIVE_SURFACE", "0")
+
+        from dourmouse.webui import _SSEBroadcast
+
+        real_register = _SSEBroadcast.register
+        seen_hubs = []
+
+        def spying_register(self, stream):
+            seen_hubs.append(stream)
+            return real_register(self, stream)
+
+        monkeypatch.setattr(_SSEBroadcast, "register", spying_register)
+        code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
+        assert code == 0
+        # only the notifier sink registered -- proactive surfacing opted out
+        assert len(seen_hubs) == 1
+
     def test_bridge_opens_map_window(self, monkeypatch):
         fake = _FakeWebview()
         monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
@@ -251,6 +299,99 @@ class TestNativeWindowLaunch:
         monkeypatch.setattr(fake, "start", _probe_and_start)
         code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
         assert code == 0
+
+
+# --------------------------------------------------------------------------- #
+# Vision stage 6: generalized multi-window opener
+# --------------------------------------------------------------------------- #
+
+class TestGeneralizedTaskWindows:
+    def _bridge(self):
+        fake = _FakeWebview()
+        map_window = fake.create_window("AGENT ORCHESTRATION MAP", "http://x/map", hidden=True)
+        bridge = desktop.DesktopBridge(map_window, fake, "http://127.0.0.1:9999")
+        return bridge, fake
+
+    def test_opens_a_window_for_an_arbitrary_task_id(self):
+        bridge, fake = self._bridge()
+        ok = bridge.open_task_window("world-monitor", "/#/world", title="WORLD MONITOR")
+        assert ok is True
+        win = next(w for w in fake.windows if w.title == "WORLD MONITOR")
+        assert win.url == "http://127.0.0.1:9999/#/world"
+
+    def test_reuses_the_same_window_on_repeat_calls(self):
+        bridge, fake = self._bridge()
+        bridge.open_task_window("world-monitor", "/#/world")
+        bridge.open_task_window("world-monitor", "/#/world")
+        matching = [w for w in fake.windows if w.url.endswith("/#/world")]
+        assert len(matching) == 1
+        assert matching[0].shown is True  # brought to front on the 2nd call
+
+    def test_recreates_after_the_user_closed_it(self):
+        bridge, fake = self._bridge()
+        bridge.open_task_window("t1", "/#/atlas")
+        first = next(w for w in fake.windows if w.url.endswith("/#/atlas"))
+        first.closed = True
+        bridge.open_task_window("t1", "/#/atlas")
+        matching = [w for w in fake.windows if w.url.endswith("/#/atlas")]
+        assert len(matching) == 2  # a fresh window was created, not reused
+
+    def test_hash_route_is_prefixed_with_slash(self):
+        bridge, _fake = self._bridge()
+        bridge.open_task_window("t1", "#/markets")
+        win = next(w for w in _fake.windows if "markets" in w.url)
+        assert win.url.endswith("/#/markets")
+
+    def test_default_title_is_the_task_id_uppercased(self):
+        bridge, fake = self._bridge()
+        bridge.open_task_window("mail-watch", "/#/alerts")
+        win = next(w for w in fake.windows if w.url.endswith("/#/alerts"))
+        assert win.title == "MAIL-WATCH"
+
+    def test_empty_task_id_is_refused(self):
+        bridge, fake = self._bridge()
+        before = len(fake.windows)
+        assert bridge.open_task_window("", "/#/world") is False
+        assert len(fake.windows) == before
+
+    def test_non_path_non_hash_is_refused(self):
+        """Guards the bridge against opening an arbitrary external URL --
+        window creation stays scoped to this app's own server."""
+        bridge, fake = self._bridge()
+        before = len(fake.windows)
+        assert bridge.open_task_window("evil", "https://example.com") is False
+        assert len(fake.windows) == before
+
+    def test_open_agent_delegates_to_open_task_window(self):
+        bridge, fake = self._bridge()
+        bridge.open_agent("researcher")
+        win = next(w for w in fake.windows if w.url.endswith("/agent/researcher"))
+        assert win.title == "AGENT // RESEARCHER"
+        # reuse semantics preserved through the delegation
+        bridge.open_agent("researcher")
+        assert len([w for w in fake.windows if w.url.endswith("/agent/researcher")]) == 1
+
+    def test_open_all_hands_delegates_to_open_task_window(self):
+        bridge, fake = self._bridge()
+        ok = bridge.open_all_hands("run-42", goal="ship the thing")
+        assert ok is True
+        win = next(w for w in fake.windows if w.url.endswith("/all-hands?run=run-42"))
+        assert "SHIP THE THING" in win.title
+        assert bridge.open_all_hands("") is False  # unchanged honest-empty behaviour
+
+    def test_windows_from_different_task_kinds_all_coexist(self):
+        """The generalization must not collapse distinct task kinds into one
+        window -- an agent window, an ALL HANDS window, and an arbitrary
+        hash-route window must all be independently trackable at once."""
+        bridge, fake = self._bridge()
+        bridge.open_agent("researcher")
+        bridge.open_all_hands("run-1")
+        bridge.open_task_window("world-monitor", "/#/world")
+        urls = {w.url for w in fake.windows}
+        assert any(u.endswith("/agent/researcher") for u in urls)
+        assert any(u.endswith("/all-hands?run=run-1") for u in urls)
+        assert any(u.endswith("/#/world") for u in urls)
+        assert len(bridge._agent_windows) == 3
 
 
 # --------------------------------------------------------------------------- #

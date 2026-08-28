@@ -7,3 +7,11 @@ faster-whisper>=1.0
 # layout + synthesize_wav). Older versions make the endpoint report NOT
 # CONFIGURED honestly.
 piper-tts>=1.6
+# Vision stage 4 (dourmouse/wakeword.py) — local, open-weight wake-word
+# detection (ONNX, runs on onnxruntime which requirements.txt/piper already
+# pull in) + the mic-capture side (PortAudio bindings; real Core Audio
+# device access verified on macOS in this project's .venv). Without these
+# wheels dourmouse.wakeword.wakeword_status() reports NOT CONFIGURED
+# honestly and dourmouse.wakeword.launch() refuses to start.
+openwakeword>=0.6.0
+sounddevice>=0.5.0
