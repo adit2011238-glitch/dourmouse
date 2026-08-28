@@ -623,6 +623,23 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
   padding:12px 14px;overflow-x:auto;margin:10px 0;font-size:11.5px}
 @media (max-width:600px){ .book{width:160px} }
 
+/* world-monitor-expansion: PROJECTS bookshelf, IMPORTED source (Claude
+   Code + Codex CLI real on-disk session history via
+   GET /api/projects/imported — dourmouse/project_import.py). Additive:
+   a second shelf below the existing manual one, reusing .book/.shelf*
+   for the card shape and adding only the fields the manual shelf never
+   had — a real filesystem path and an honest "path no longer exists"
+   flag, so an imported card can never be mistaken for a manually-shelved
+   one at a glance. */
+.book.imported{cursor:default}
+.ipath{font-size:9px;color:var(--blue-deep);line-height:1.4;word-break:break-all;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.istat{font-size:9px;color:var(--blue-dim)}
+.book.gone{border-left-color:var(--bad)}
+.book.gone .ipath{color:var(--bad)}
+.goneflag{font-size:7.5px;letter-spacing:.1em;color:var(--bad);
+  border:1px solid var(--bad);border-radius:4px;padding:2px 6px;width:fit-content}
+
 @media (max-width:860px){
   .body{grid-template-columns:1fr}
   .rail{display:none}
@@ -1888,39 +1905,163 @@ function flashShelved(anchor){
 }
 function paintProjects(){
   const box=$("projectsBody");
+  box.innerHTML="";
   const data=projectsLoad();
   const names=Object.keys(data);
   if(!names.length){
-    box.innerHTML=`<div class="note">Nothing shelved yet. Any real answer — from HOME, RESEARCH, CODE,
-      MEDIA, or NEWS — has a SHELVE button once it finishes. Click it to file that answer under a
-      named project; it shows up here, grouped by project, never auto-collected.</div>`;
+    const note=document.createElement("div"); note.className="note";
+    note.textContent="Nothing shelved yet. Any real answer — from HOME, RESEARCH, CODE, "+
+      "MEDIA, or NEWS — has a SHELVE button once it finishes. Click it to file that answer under a "+
+      "named project; it shows up here, grouped by project, never auto-collected.";
+    box.appendChild(note);
+  } else {
+    names.forEach(name=>{
+      const items=data[name];
+      const sec=document.createElement("div"); sec.className="shelf";
+      sec.innerHTML=`<div class="shelfhead"><span class="shelfname"></span><span class="shelfcount"></span>
+        <button class="mini shelfdel" type="button">DELETE PROJECT</button></div>
+        <div class="shelfrow"></div>`;
+      sec.querySelector(".shelfname").textContent=name;
+      sec.querySelector(".shelfcount").textContent=`${items.length} item${items.length===1?"":"s"}`;
+      sec.querySelector(".shelfdel").onclick=()=>{ if(confirm(`Delete the "${name}" project? Its ${items.length} shelved item(s) go with it.`)){ projectDelete(name); paintProjects(); } };
+      const row=sec.querySelector(".shelfrow");
+      items.forEach(it=>{
+        const card=document.createElement("div"); card.className="book";
+        card.innerHTML=`<div class="bookscreen"></div><div class="bookq"></div><div class="booka"></div>
+          <div class="bookfoot"><span class="bookwhen"></span><button class="bookx" type="button" title="Remove from shelf">✕</button></div>`;
+        card.querySelector(".bookscreen").textContent = SCREEN_LABELS[it.screen]||it.screen;
+        card.querySelector(".bookq").textContent = it.question;
+        card.querySelector(".booka").textContent = it.answer.replace(/[#*`_]/g,"").slice(0,220);
+        card.querySelector(".bookwhen").textContent = new Date(it.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"});
+        card.querySelector(".bookx").onclick=(e)=>{ e.stopPropagation(); projectRemoveItem(name, it.id); paintProjects(); };
+        card.onclick=()=>bookOpen(it);
+        row.appendChild(card);
+      });
+      box.appendChild(sec);
+    });
+  }
+
+  // world-monitor-expansion: IMPORTED — a second, additive bookshelf
+  // source: real projects Claude Code and/or Codex CLI have actually
+  // touched, discovered from their own on-disk session history (never
+  // from anything the user explicitly shelved — see paintImportedShelf
+  // below). Always rendered, even when the manual shelf above is empty
+  // or non-empty, and never replaces it.
+  paintImportedShelf(box);
+}
+
+/* ---------------- PROJECTS: imported source (Claude Code + Codex CLI) ---
+   GET /api/projects/imported (dourmouse/project_import.py) walks both
+   tools' own real on-disk session history and returns a deduped project
+   list — see that module's docstring for the exact response shape. This
+   renders it as its own shelf, clearly attributed to source ("via Claude
+   Code" / "via Codex" / "via both"), with an honest degraded state when
+   neither tool's history is found on this machine, and an honest
+   "path no longer exists" treatment for a project whose folder has since
+   moved or been deleted — never presented identically to a project that
+   still exists on disk. */
+function paintImportedShelf(box){
+  const sec=document.createElement("div"); sec.className="shelf"; sec.id="importedShelf";
+  sec.innerHTML=`<div class="shelfhead"><span class="shelfname">IMPORTED — CLAUDE CODE &amp; CODEX CLI</span>
+    <span class="shelfcount" id="importedCount"></span>
+    <button class="mini" type="button" id="importedRefreshBtn">REFRESH</button></div>
+    <div id="importedBody"><div class="note">Loading imported project history…</div></div>`;
+  box.appendChild(sec);
+  $("importedRefreshBtn").onclick=loadImportedProjects;
+  loadImportedProjects();
+}
+async function loadImportedProjects(){
+  const body=$("importedBody"); if(!body) return;  // screen navigated away before this resolved
+  const btn=$("importedRefreshBtn");
+  if(btn) btn.disabled=true;
+  body.innerHTML=`<div class="note">Loading imported project history…</div>`;
+  let r;
+  try{ r = await api("/api/projects/imported"); }
+  catch(e){
+    if($("importedBody")){
+      $("importedBody").innerHTML = `<div class="note">Could not load imported project history — ${esc(String(e.message||e))}.</div>`;
+    }
+    if($("importedRefreshBtn")) $("importedRefreshBtn").disabled=false;
     return;
   }
-  box.innerHTML="";
-  names.forEach(name=>{
-    const items=data[name];
-    const sec=document.createElement("div"); sec.className="shelf";
-    sec.innerHTML=`<div class="shelfhead"><span class="shelfname"></span><span class="shelfcount"></span>
-      <button class="mini shelfdel" type="button">DELETE PROJECT</button></div>
-      <div class="shelfrow"></div>`;
-    sec.querySelector(".shelfname").textContent=name;
-    sec.querySelector(".shelfcount").textContent=`${items.length} item${items.length===1?"":"s"}`;
-    sec.querySelector(".shelfdel").onclick=()=>{ if(confirm(`Delete the "${name}" project? Its ${items.length} shelved item(s) go with it.`)){ projectDelete(name); paintProjects(); } };
-    const row=sec.querySelector(".shelfrow");
-    items.forEach(it=>{
-      const card=document.createElement("div"); card.className="book";
-      card.innerHTML=`<div class="bookscreen"></div><div class="bookq"></div><div class="booka"></div>
-        <div class="bookfoot"><span class="bookwhen"></span><button class="bookx" type="button" title="Remove from shelf">✕</button></div>`;
-      card.querySelector(".bookscreen").textContent = SCREEN_LABELS[it.screen]||it.screen;
-      card.querySelector(".bookq").textContent = it.question;
-      card.querySelector(".booka").textContent = it.answer.replace(/[#*`_]/g,"").slice(0,220);
-      card.querySelector(".bookwhen").textContent = new Date(it.ts).toLocaleDateString(undefined,{month:"short",day:"numeric"});
-      card.querySelector(".bookx").onclick=(e)=>{ e.stopPropagation(); projectRemoveItem(name, it.id); paintProjects(); };
-      card.onclick=()=>bookOpen(it);
-      row.appendChild(card);
-    });
-    box.appendChild(sec);
+  if($("importedRefreshBtn")) $("importedRefreshBtn").disabled=false;
+  renderImportedProjects(r);
+}
+function importedSourceLabel(sources){
+  const has=(t)=>Array.isArray(sources)&&sources.includes(t);
+  if(has("claude_code")&&has("codex_cli")) return "VIA BOTH";
+  if(has("claude_code")) return "VIA CLAUDE CODE";
+  if(has("codex_cli")) return "VIA CODEX";
+  return (sources||[]).join(", ")||"—";
+}
+function importedRelTime(iso){
+  if(!iso) return "no recorded activity";
+  const t=Date.parse(iso);
+  if(Number.isNaN(t)) return "unknown";
+  const mins=Math.floor((Date.now()-t)/60000);
+  if(mins<1) return "just now";
+  if(mins<60) return `${mins}m ago`;
+  const hrs=Math.floor(mins/60);
+  if(hrs<24) return `${hrs}h ago`;
+  const days=Math.floor(hrs/24);
+  if(days<30) return `${days}d ago`;
+  return new Date(t).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
+}
+function renderImportedProjects(r){
+  const body=$("importedBody"); if(!body) return;  // screen navigated away before this resolved
+  const countEl=$("importedCount");
+  const projects=(r&&r.projects)||[];
+  const cc=(r&&r.claude_code)||{}, cx=(r&&r.codex_cli)||{};
+  if(countEl) countEl.textContent = projects.length ? `${projects.length} project${projects.length===1?"":"s"}` : "";
+
+  // Honest degradation (Rule 2.2): neither tool's history is on this
+  // machine at all — a clear message, never a silent empty shelf.
+  if(!cc.configured && !cx.configured){
+    body.innerHTML = `<div class="note">Neither Claude Code (${esc(cc.root||"~/.claude/projects")}) `+
+      `nor Codex CLI (${esc(cx.db||"~/.codex/state_5.sqlite")}) session history was found on this `+
+      `machine — nothing to import yet. Use Claude Code or Codex CLI here and REFRESH.</div>`;
+    return;
+  }
+  if(!projects.length){
+    const parts=[
+      cc.configured ? "Claude Code: found, no sessions yet" : "Claude Code: not found on this machine",
+      cx.configured ? "Codex CLI: found, no sessions yet" : "Codex CLI: not found on this machine",
+    ];
+    body.innerHTML = `<div class="note">${esc(parts.join(" · "))}.</div>`;
+    return;
+  }
+
+  body.innerHTML="";
+  const row=document.createElement("div"); row.className="shelfrow";
+  projects.forEach(p=>{
+    const gone = p.exists===false;
+    const card=document.createElement("div");
+    card.className = "book imported" + (gone ? " gone" : "");
+    card.title = p.path;
+    card.innerHTML = `<div class="bookscreen"></div><div class="bookq"></div>
+      <div class="ipath"></div><div class="istat"></div>
+      <div class="bookfoot"><span class="bookwhen"></span><span class="goneflag" hidden>PATH GONE</span></div>`;
+    card.querySelector(".bookscreen").textContent = importedSourceLabel(p.sources);
+    card.querySelector(".bookq").textContent = p.title || p.path;
+    card.querySelector(".ipath").textContent = p.path;
+    card.querySelector(".istat").textContent = p.stat + (p.git_branch ? ` · ${p.git_branch}` : "");
+    card.querySelector(".bookwhen").textContent = importedRelTime(p.last_active);
+    if(gone) card.querySelector(".goneflag").hidden = false;
+    row.appendChild(card);
   });
+  body.appendChild(row);
+
+  // Per-source configuration state stays visible even when results exist
+  // — e.g. only Claude Code is installed here, Codex CLI genuinely never
+  // ran on this machine, which is worth saying rather than hiding.
+  const notes=[];
+  if(!cc.configured) notes.push("Claude Code history not found on this machine");
+  if(!cx.configured) notes.push("Codex CLI history not found on this machine");
+  if(notes.length){
+    const note=document.createElement("div"); note.className="note"; note.style.marginTop="8px";
+    note.textContent = notes.join(" · ") + ".";
+    body.appendChild(note);
+  }
 }
 function bookOpen(it){
   const existing=document.querySelector(".bookreader"); if(existing) existing.remove();

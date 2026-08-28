@@ -4320,17 +4320,20 @@ def run_server(
     # world-monitor-expansion (UX pass item 5): warm server-side caches for
     # COMMS (Gmail inbox listing) and WORLD (world_pulse), started at BOOT
     # rather than lazily on first screen visit, so both feel instant by the
-    # time a user opens the console. Gated the SAME way as LiveRuntime/
-    # SchedulerRunner just above — live_polling and live_enabled() — rather
-    # than under ``reporting``: unlike start_health_warmer() (self-gated on
-    # whether a compute node URL is even configured), these two would
-    # otherwise open a real IMAP connection / hit live world_pulse sources
-    # the first time their loop ticks, which is exactly the live-network
-    # behavior the live_polling gate exists to keep out of hermetic tests
-    # (reporting=True alone is NOT enough here — test_reporter_wired_via_
+    # time a user opens the console. Gated on BOTH ``reporting`` (the flag
+    # start_health_warmer() and the other real-serving-path-only threads
+    # use, just below) AND live_polling/live_enabled() (the same gate
+    # LiveRuntime/SchedulerRunner use just above) — neither alone is
+    # narrow enough: test_live_runtime.py calls run_server(live_polling=
+    # True) with reporting at its False default (live_polling alone would
+    # have opened a REAL IMAP connection / hit live world_pulse sources in
+    # that test — caught live: it left a real warmer thread running that
+    # then starved a later test of its OWN, monkeypatched thread because
+    # start_*_warmer() is idempotent), and test_reporter_wired_via_
     # run_server calls run_server(reporting=True) with live_polling at its
-    # False default and must stay network-free).
-    if live_polling and live_enabled():
+    # False default (reporting alone would have opened them there). Only
+    # the real serving path (serve_forever) sets both True by default.
+    if reporting and live_polling and live_enabled():
         start_world_pulse_warmer()
         start_gmail_inbox_warmer()
     # v4.0: proactive daily briefing (automation engine). Env-gated by
