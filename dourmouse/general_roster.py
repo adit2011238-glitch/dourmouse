@@ -1952,6 +1952,13 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
             if target and ctx.config is not None:
                 nested_model = ctx.config.model_for_agent(target)
             reported_model = nested_model or ctx.model
+            # world-monitor-expansion (UX pass item 1): same real backend
+            # identity the top-level "brain" event now carries — the
+            # config object is the same one for every branch (they all
+            # share ctx.config), so the backend never differs branch to
+            # branch even though the MODEL string can.
+            from dourmouse.config import backend_identity as _backend_identity
+            reported_backend, reported_local = _backend_identity(ctx.config)
             nested_messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_message(registry)},
                 {"role": "user", "content": nested_prompt},
@@ -1964,6 +1971,8 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                 "total": len(granted),
                 "agent": target or "any",
                 "model": reported_model,
+                "backend": reported_backend,
+                "local": reported_local,
                 "task": instructions,
             })
             try:
@@ -1992,7 +2001,8 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                     ctx.jobs.finish(job_id, error=f"nested dispatch failed: {exc}")
                 result = {
                     "index": index, "agent": target or "any", "job_id": job_id,
-                    "model": reported_model, "ok": False, "text": "",
+                    "model": reported_model, "backend": reported_backend,
+                    "local": reported_local, "ok": False, "text": "",
                     "error": str(exc),
                     "elapsed_s": round(time.perf_counter() - started, 2),
                 }
@@ -2006,7 +2016,8 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                 ctx.jobs.finish(job_id, result=final_text)
             result = {
                 "index": index, "agent": target or "any", "job_id": job_id,
-                "model": reported_model, "ok": True, "text": final_text,
+                "model": reported_model, "backend": reported_backend,
+                "local": reported_local, "ok": True, "text": final_text,
                 "error": "",
                 "elapsed_s": round(time.perf_counter() - started, 2),
             }

@@ -834,6 +834,41 @@ class TestModelOverride:
         assert client.chat.completions.calls[0]["model"] == "nvidia/mail-tuned-8b"
         brain_events = [e for e in events if e.get("type") == "brain"]
         assert any(e["model"] == "nvidia/mail-tuned-8b" for e in brain_events)
+        # UX pass item 1: the per-agent-routed refinement's own "brain"
+        # event carries the SAME real backend identity as the initial one
+        # — it's still ctx.config (NvidiaConfig here), only the MODEL
+        # string changed.
+        refined = next(e for e in brain_events if e["model"] == "nvidia/mail-tuned-8b")
+        assert refined["backend"] == "nvidia"
+        assert refined["local"] is False
+
+    def test_initial_brain_event_reports_ollama_local(self, monkeypatch):
+        """world-monitor-expansion (UX pass item 1): the plain top-level
+        "brain" event (emitted once per top-level run, before any per-
+        agent refinement) carries real backend identity too — an
+        OllamaConfig reports local, not just NVIDIA reporting cloud
+        (covered by the sibling test above)."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.config import OllamaConfig
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        config = OllamaConfig(model="qwen3:8b")
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        events: list[dict] = []
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "just say hi"},
+        ]
+        run_dispatch_messages(
+            messages, registry, client=client, config=config,
+            event_sink=lambda e: events.append(e),
+        )
+        brain_events = [e for e in events if e.get("type") == "brain"]
+        assert brain_events
+        assert brain_events[0]["backend"] == "ollama"
+        assert brain_events[0]["local"] is True
 
     def test_fast_lane_takes_knowledge_questions(self, monkeypatch):
         """A stable-fact question ("what is the tallest mountain...") answers
@@ -892,6 +927,55 @@ class TestModelOverride:
         run_dispatch("what is 2+2", registry, client=client)
         # the Dell answered; the LOCAL fake client must NOT have been called
         assert client.chat.completions.calls == []
+
+    def test_fast_lane_server_brain_event_reports_ollama_local(self, monkeypatch):
+        """world-monitor-expansion (UX pass item 1): the Dell compute node
+        literally runs Ollama (remote_server.py's own docstring: "MAIN
+        DOURMOUSE -> ... -> Ollama") — backend_identity() can't see that
+        from ``config`` alone (config is whatever the MAIN backend is), so
+        the server_lane branch is special-cased to report ("ollama", True)
+        exactly like any other Ollama call, never NVIDIA/cloud just
+        because that happens to be the primary configured backend."""
+        import time
+
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
+        monkeypatch.setenv("DOURMOUSE_SERVER_URL", "http://192.168.1.108:8000")
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE_SERVER", "1")
+        from dourmouse import remote_server as rs
+
+        with rs._health_lock:
+            rs._health_cache["at"] = time.monotonic()
+            rs._health_cache["online"] = True
+        monkeypatch.setattr(
+            rs.DourmouseServerClient, "chat",
+            lambda self, messages, temperature=None: {
+                "success": True, "response": "4", "model": "qwen3:1.7b",
+                "node": "Node-01", "latency_ms": 300,
+            },
+        )
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        # No config passed — same as the sibling test above: the Dell
+        # answers directly, so the (fake) client's own completions are
+        # never called regardless of what config would have resolved to.
+        client = FakeClient([_FakeResponse(_FakeMessage(content="4"))])
+        events: list[dict] = []
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "what is 2+2"},
+        ]
+        run_dispatch_messages(
+            messages, registry, client=client, event_sink=lambda e: events.append(e),
+        )
+        assert client.chat.completions.calls == []  # the Dell answered, not the local client
+        brain = next(e for e in events if e.get("type") == "brain")
+        assert brain["model"].startswith("server:")
+        assert brain["backend"] == "ollama"
+        assert brain["local"] is True
 
     def test_fast_lane_server_falls_back_to_local_on_failure(self, monkeypatch):
         """v5.30: if the Dell is configured+online per cache but the actual

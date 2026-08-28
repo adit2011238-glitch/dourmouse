@@ -8,6 +8,7 @@ from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
     OmniRouteConfig,
+    backend_identity,
     llm_backend,
     load_guardrail_config,
     load_llm_config,
@@ -336,3 +337,33 @@ class TestOmniRouteConfig:
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-fake-test-key")
         cfg = load_llm_config()
         assert isinstance(cfg, NvidiaConfig)
+
+
+class TestBackendIdentity:
+    """world-monitor-expansion (UX pass item 1): the console's per-response
+    model/local indicator classifies by the config object's real TYPE —
+    never guessed from a model-name string — so these pin the contract
+    backend_identity() promises."""
+
+    def test_ollama_is_local(self):
+        assert backend_identity(OllamaConfig()) == ("ollama", True)
+
+    def test_nvidia_is_cloud(self):
+        cfg = NvidiaConfig(api_key="k", base_url="https://integrate.api.nvidia.com/v1", model="m")
+        assert backend_identity(cfg) == ("nvidia", False)
+
+    def test_omniroute_is_cloud_despite_localhost_gateway(self):
+        """OmniRoute's gateway process listens on 127.0.0.1, but it exists
+        to forward requests to REMOTE free-tier providers — it must not be
+        misclassified as local just because its own base_url looks local."""
+        cfg = OmniRouteConfig()
+        assert "127.0.0.1" in cfg.base_url  # the gateway really is local...
+        assert backend_identity(cfg) == ("omniroute", False)  # ...but generation isn't
+
+    def test_none_config_is_honestly_unknown(self):
+        """A caller with no config attached (mostly tests / a bare client)
+        reports unknown rather than guessing local or cloud."""
+        assert backend_identity(None) == ("unknown", False)
+
+    def test_unrecognized_object_is_honestly_unknown(self):
+        assert backend_identity(object()) == ("unknown", False)

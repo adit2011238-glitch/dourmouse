@@ -78,7 +78,7 @@
    rules, and serif titles carrying the hierarchy instead of glow. */
 [data-theme="aether"] .card,[data-theme="aether"] .pane,
 [data-theme="aether"] .dock,[data-theme="aether"] .rail{border-radius:12px}
-[data-theme="aether"] .tabs .tab{border-radius:8px}
+[data-theme="aether"] .tabbar .tab{border-radius:8px}
 [data-theme="aether"] .paneh,[data-theme="aether"] h1,[data-theme="aether"] .title{
   font-family:var(--display);letter-spacing:-.01em;text-transform:none}
 [data-theme="aether"] body{background:var(--bg)}
@@ -241,16 +241,47 @@ button,input,textarea,select{font:inherit;color:inherit}
 .mast .right b{color:var(--blue-hi);font-weight:500}
 
 /* ---------- tabs ---------- */
-.tabs{display:flex;gap:0;border:1px solid var(--line);border-radius:3px;overflow:hidden;flex-wrap:wrap}
+/* world-monitor-expansion (UX pass item 2): 11 flat SCREENS tabs at
+   min-width:78px wrapped onto 2-3 rows on a normal (non-mobile) browser
+   width — the literal "messy" the live-demo feedback named (see the JS
+   below for how the row is now split). ``.tabbar`` is the bordered/
+   rounded outer shell (what ``.tabs`` alone used to be); ``.tabs`` holds
+   only the primary row now, and ``.tabsMoreWrap`` is a flex sibling so
+   its dropdown can escape ``.tabbar``'s own corner-clipping instead of
+   being clipped by it (``.tabbar`` no longer sets overflow:hidden itself
+   — see the two explicit corner-radius rules below for how the rounded-
+   corner look is kept without it). */
+.tabbar{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:3px}
+.tabbar .tab:first-child{border-top-left-radius:3px;border-bottom-left-radius:3px}
+#tabsMoreBtn{border-top-right-radius:3px;border-bottom-right-radius:3px}
+.tabs{display:flex;gap:0;flex:1 1 auto;min-width:0}
 .tab{flex:1 1 auto;min-width:78px;min-height:34px;padding:9px 6px;background:none;border:none;
   border-right:1px solid var(--line);cursor:pointer;color:var(--blue-dim);
   font-size:9.5px;letter-spacing:.16em;white-space:nowrap;
   display:flex;align-items:center;justify-content:center;gap:6px;transition:background .12s,color .12s}
-.tab:last-child{border-right:none}
+.tabs .tab:last-child{border-right:none}
 .tab:hover{background:rgba(120,175,210,.07);color:var(--blue-hi)}
 .tab[aria-selected="true"]{background:var(--amber-soft);color:var(--amber);
   box-shadow:inset 0 -2px 0 var(--amber)}
 .tab .dia{color:var(--amber);font-size:8px}
+.tabsMoreWrap{position:relative;flex:none}
+#tabsMoreBtn{border-left:1px solid var(--line);min-width:74px}
+.tabsMoreMenu{position:absolute;top:calc(100% + 4px);right:0;z-index:40;
+  min-width:170px;border:1px solid var(--line-2);background:var(--panel);border-radius:3px;
+  box-shadow:0 12px 34px -14px #000;display:none;flex-direction:column;overflow:hidden}
+.tabsMoreMenu.on{display:flex}
+.tabopt{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:none;
+  border-bottom:1px solid var(--line);background:none;cursor:pointer;color:var(--blue-dim);
+  font-size:9.5px;letter-spacing:.14em;text-align:left}
+.tabopt:last-child{border-bottom:none}
+.tabopt:hover{background:rgba(120,175,210,.07);color:var(--blue-hi)}
+.tabopt[aria-selected="true"]{background:var(--amber-soft);color:var(--amber)}
+.tabopt .dia{color:var(--amber);font-size:8px}
+@media (max-width:560px){
+  .tabsMoreMenu{position:static;min-width:0;width:100%;margin-top:0;box-shadow:none;
+    border:none;border-top:1px solid var(--line)}
+  .tabbar{flex-wrap:wrap}
+}
 
 /* ---------- body grid ---------- */
 /* v8.29: Session Stream (the 31-agent roster rail) hidden by request — it
@@ -328,6 +359,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .turn .gut .who{color:var(--amber)}
 .turn.you .gut .who{color:var(--blue-hi)}
 .turn .gut .tm{color:var(--blue-deep);opacity:.7;font-variant-numeric:tabular-nums}
+.turn .gut .mdl.local{color:var(--ok)}
 .turn .body{font-size:13px;line-height:1.75;color:var(--blue-hi);word-break:break-word}
 .turn.you .body{color:var(--blue);white-space:pre-wrap}
 .turn .body p{margin:0 0 9px}.turn .body p:last-child{margin:0}
@@ -655,7 +687,15 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
     </span>
   </div>
 
-  <div class="tabs" role="tablist" id="tabs"></div>
+  <div class="tabbar">
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="tabsMoreWrap" id="tabsMoreWrap">
+      <button type="button" class="tab" id="tabsMoreBtn" role="tab" aria-haspopup="listbox" aria-expanded="false" aria-selected="false">
+        <span class="dia">◆</span>MORE<span style="color:var(--blue-deep)">▾</span>
+      </button>
+      <div class="tabsMoreMenu" id="tabsMoreMenu" role="listbox"></div>
+    </div>
+  </div>
 
   <div class="body">
     <nav class="rail" id="rail" aria-label="Session stream">
@@ -777,15 +817,54 @@ let screen = "HOME", busy = false, focusAgent = "", speak = false, voiceMode = f
 const queue = [];
 
 /* ---------------- tabs ---------------- */
+// world-monitor-expansion (UX pass item 2): real user feedback after a
+// live demo called 11 flat top-level tabs "messy" — verified live: at
+// min-width:78px/tab, 11 of them (858px) wraps onto 2-3 rows on any
+// normal (non-ultrawide) browser window, not just mobile. Split into a
+// primary row (the 5 screens most turns actually touch — the chat
+// surface, the real inbox, financial research, the coding toolchain, and
+// world monitoring) plus a "MORE" overflow for the rest, using the SAME
+// .sel/.selbtn/.selmenu-style dropdown interaction CODE's own toolchain
+// picker (paintCode(), below) already established, rather than inventing
+// a new pattern. SCREENS itself, SCREEN_LABELS, THREAD_SCREENS, and
+// show()'s screen-switching logic are ALL UNCHANGED — every one of the
+// 11 screens is still reachable by exactly the same show(name) call this
+// always used; only which DOM element represents its tab button moved.
+const PRIMARY_SCREENS = ["HOME","COMMS","RESEARCH","CODE","ATLAS"];
+const OVERFLOW_SCREENS = SCREENS.filter(s => !PRIMARY_SCREENS.includes(s));
 const tabsEl = $("tabs");
-SCREENS.forEach((name,i) => {
+const tabsMoreBtn = $("tabsMoreBtn"), tabsMoreMenu = $("tabsMoreMenu");
+function buildTabButton(name, className, role){
   const b = document.createElement("button");
-  b.className = "tab"; b.type = "button"; b.setAttribute("role","tab");
-  b.setAttribute("aria-selected", String(i===0));
+  b.className = className; b.type = "button"; b.setAttribute("role", role);
+  b.setAttribute("aria-selected", String(name===screen));
   b.innerHTML = `<span class="dia">◆</span>${SCREEN_LABELS[name] || name}`;
   b.dataset.screen = name;  // real id, independent of the displayed label
+  return b;
+}
+PRIMARY_SCREENS.forEach(name => {
+  const b = buildTabButton(name, "tab", "tab");
   b.onclick = () => show(name);
   tabsEl.appendChild(b);
+});
+OVERFLOW_SCREENS.forEach(name => {
+  const b = buildTabButton(name, "tabopt", "option");
+  b.onclick = () => {
+    show(name);
+    tabsMoreMenu.classList.remove("on");
+    tabsMoreBtn.setAttribute("aria-expanded", "false");
+  };
+  tabsMoreMenu.appendChild(b);
+});
+tabsMoreBtn.onclick = () => {
+  const on = tabsMoreMenu.classList.toggle("on");
+  tabsMoreBtn.setAttribute("aria-expanded", String(on));
+};
+document.addEventListener("click", e => {
+  if(!e.target.closest("#tabsMoreWrap")){
+    tabsMoreMenu.classList.remove("on");
+    tabsMoreBtn.setAttribute("aria-expanded", "false");
+  }
 });
 function show(name){
   // v8.28: switching screens used to leave the composer's stale text
@@ -799,7 +878,18 @@ function show(name){
   // carries a draft into an unrelated conversation).
   if(screen !== name && ta.value){ ta.value=""; ta.style.height="auto"; }
   screen = name;
-  [...tabsEl.children].forEach(b => b.setAttribute("aria-selected", String(b.dataset.screen===name)));
+  // v8.29 nav redesign: tab buttons for a given screen now live in one of
+  // TWO containers (the primary row or the MORE dropdown) instead of
+  // always being a direct child of #tabs, so this selects by [data-screen]
+  // across both rather than iterating tabsEl.children. The MORE trigger
+  // itself gets aria-selected too — it has no data-screen (it isn't a
+  // screen), so it needs its own line — showing the SAME amber "active"
+  // treatment every other tab gets whenever the current screen is one of
+  // the ones tucked inside it, so "where am I" never goes ambiguous just
+  // because a screen moved into the overflow menu.
+  document.querySelectorAll("#tabsMoreWrap [data-screen], #tabs [data-screen]")
+    .forEach(b => b.setAttribute("aria-selected", String(b.dataset.screen===name)));
+  tabsMoreBtn.setAttribute("aria-selected", String(OVERFLOW_SCREENS.includes(name)));
   SCREENS.forEach(s => { const p = $("pane-"+s.toLowerCase()); if(p) p.classList.toggle("on", s===name); });
   $("mastScreen").textContent = "// " + (SCREEN_LABELS[name] || name);
   $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / ${String(SCREENS.length).padStart(2,"0")} — ${SCREEN_LABELS[name] || name}`;
@@ -1222,6 +1312,19 @@ function describeTool(name){
   return w ? {t:w[0], s:w[1]} : {t:"Using "+name, s:""};
 }
 
+/* world-monitor-expansion (UX pass item 1): honest per-response model +
+   local/cloud tag. ``e.local`` comes straight from the dispatch layer's
+   real backend identity (dourmouse/config.py backend_identity() —
+   Ollama=local, everything else=cloud), never guessed from the model
+   name here. ``e.local`` is undefined for non-model "brain" markers
+   (e.g. the /all slash-command placeholder) — rendered as nothing rather
+   than a fabricated guess. */
+function localCloudSuffix(e){
+  if(e && e.local===true) return " · local";
+  if(e && e.local===false) return " · cloud";
+  return "";
+}
+
 /* v8.12: agent/tool names in the TRANSCRIPT (roadmap "hide agent names
    behind a show-details toggle" — HANDOFF's own reasoning: "when
    something misbehaves, knowing which agent ran is the difference
@@ -1424,9 +1527,11 @@ async function run(text){
           case "brain":{
             const raw=e.model||""; const onNode=raw.startsWith("server:");
             const shown=raw.replace(/^server:/,"").split("/").pop()||"—";
-            node.mdl.textContent = onNode?`${(sys.server&&sys.server.node)||"NODE"} · ${shown}`:shown;
+            const kind=localCloudSuffix(e);
+            node.mdl.textContent = (onNode?`${(sys.server&&sys.server.node)||"NODE"} · ${shown}`:shown)+kind;
+            node.mdl.classList.toggle("local", e.local===true);
             node.st.textContent="GENERATING";
-            liveAdd("act","Routing", onNode?`compute node · ${shown}`:shown);
+            liveAdd("act","Routing", (onNode?`compute node · ${shown}`:shown)+kind);
             break; }
           case "plan": act(node.acts,"PLAN",""); node.noteStep(); liveAdd("act","Planning the steps",""); break;
           case "tool_use": case "function":{
@@ -1453,7 +1558,7 @@ async function run(text){
             // handled that branch, since several branches can be
             // in-flight under one "N steps" disclosure at the same time).
             const modelShown=(e.model||"").split("/").pop()||e.model||"—";
-            const label=`branch ${(e.index??0)+1}/${e.total||"?"} · ${e.agent||"any"} · ${modelShown}`;
+            const label=`branch ${(e.index??0)+1}/${e.total||"?"} · ${e.agent||"any"} · ${modelShown}${localCloudSuffix(e)}`;
             if(e.phase==="start"){
               act(node.acts,"USING",label,false,true,e.task||"");
               node.noteStep();
@@ -2228,6 +2333,13 @@ function orthoProject(lat, lon, R, cx, cy){
 
 let mapData = null;      // the live snapshot from /api/worldmap
 let activeGeo = null;    // what's actually being drawn — live, or a scrubbed-to historical snapshot
+// world-monitor-expansion (UX pass item 3): a real, empty geo shape so
+// drawMap() can render the base map (landmass + graticule — both static,
+// need zero backend data) on the FIRST paint, before /api/worldmap has
+// even been asked for, instead of drawMap() bailing out with a blank
+// #mapWrap until data lands. Never mutated — always a fresh {} literal
+// wherever it's read, so no accidental cross-talk with real mapData.
+const EMPTY_GEO = {layers:{}, unmappable:{}};
 let mapView = "flat";    // "flat" | "globe"
 let mapHistoryRange = [];
 let pinnedCards = [];    // click-to-pin compare list, keyed by chan+title+lat+lon
@@ -2249,22 +2361,28 @@ function countryRingsProjected(rings, projector){
     .filter(r => r.filter(p => p).length >= 3);
 }
 
+// world-monitor-expansion (UX pass item 3): verified live — WORLD used to
+// show ONE "Loading world monitor…" line for the whole pane and replace
+// the entire box only once /api/worldmap resolved, so the map itself
+// (landmass + graticule, both static — need zero backend data) never
+// appeared until the fetch finished. paintAtlas() now renders the full
+// skeleton (toolbar, base map, section headers) SYNCHRONOUSLY on every
+// screen-switch — drawMap() draws real landmass immediately via
+// EMPTY_GEO when there's no mapData yet — and the world_pulse-derived
+// bits (pulse score, layer counts, ranked list, "N located items" note)
+// carry their own "Loading items…" state scoped to just those elements
+// until the fetch resolves. loadScrubber/loadCorrelations/loadRegions
+// were already independent self-fetching panels (each shows its own
+// "Loading…"/"Checking…" already) — they now simply START at skeleton
+// time instead of waiting behind the worldmap fetch, so they load in
+// parallel rather than serially.
 async function paintAtlas(){
   const box = $("atlasBody");
-  box.innerHTML = '<div class="note">Loading world monitor…</div>';
-  try{ mapData = await api("/api/worldmap"); }
-  catch(e){
-    box.innerHTML = `<div class="note">World monitor unreachable — ${esc(String(e.message||e))}</div>`;
-    return;
-  }
-  activeGeo = mapData;
   pinnedCards = [];
-  const counts = mapData.counts || {};
-  const total = Object.values(counts).reduce((a,b)=>a+b, 0);
   box.innerHTML = `
     <div class="toolbar">
       <span class="lbl">PULSE</span>
-      <span class="chip on" id="mapPulse"></span>
+      <span class="chip on" id="mapPulse">loading…</span>
       <span class="lbl">VIEW</span>
       <button class="chip on" type="button" id="viewFlat">FLAT</button>
       <button class="chip" type="button" id="viewGlobe">GLOBE</button>
@@ -2292,10 +2410,10 @@ async function paintAtlas(){
     </div>
     <div id="mapWrap" style="position:relative;border:1px solid var(--line);
       background:var(--panel);overflow:hidden"></div>
-    <div class="note" id="mapNote"></div>
+    <div class="note" id="mapNote">Loading items…</div>
     <div class="note" id="mapBrief" style="display:none"></div>
     <div class="sec">STRONGEST SIGNALS</div>
-    <div id="mapList"></div>
+    <div id="mapList"><div class="note">Loading items…</div></div>
     <div class="sec">PINNED — click any point to compare</div>
     <div id="mapPinned"></div>
     <div class="sec">CROSS-CHANNEL PROXIMITY</div>
@@ -2303,7 +2421,6 @@ async function paintAtlas(){
     <div class="sec">WATCH REGIONS</div>
     <div id="mapRegions"><div class="note">Loading…</div></div>`;
 
-  $("mapPulse").textContent = `${mapData.pulse_score ?? "—"} ${mapData.pulse_label || ""}`.trim();
   $("viewFlat").onclick = () => {
     mapView = "flat";
     $("viewFlat").classList.add("on"); $("viewGlobe").classList.remove("on");
@@ -2333,24 +2450,42 @@ async function paintAtlas(){
   $("econBlocSelect").value = econBloc;
   $("econBlocSelect").onchange = e => { econBloc = e.target.value; drawMap(); };
 
-  const lrow = $("mapLayers");
-  Object.entries(MAP_LAYERS).forEach(([k,cfg]) => {
-    const n = counts[k] || 0;
-    const b = document.createElement("button");
-    b.className = "chip" + (cfg.on && n ? " on" : "");
-    b.type = "button";
-    b.disabled = !n;
-    b.textContent = `${cfg.label} ${n}`;
-    b.setAttribute("aria-pressed", String(!!(cfg.on && n)));
-    b.onclick = () => { cfg.on = !cfg.on; paintAtlas(); };
-    lrow.appendChild(b);
-  });
-
-  drawMap();
+  buildLayersRow();     // LAYERS row from whatever mapData is cached (real counts, or all-0 pre-load)
+  drawMap();            // real landmass/graticule NOW, from EMPTY_GEO if mapData isn't in yet
   renderPinned();
   loadScrubber();
   loadCorrelations();
   loadRegions();
+
+  // Already have a snapshot (revisiting the screen) — paint it straight
+  // away, no loading flash, then still refresh in the background so a
+  // stale cached snapshot doesn't linger silently.
+  if(mapData){ renderAtlasData(); }
+  try{
+    mapData = await api("/api/worldmap");
+  }catch(e){
+    if(!activeGeo){
+      $("mapNote").textContent = `World monitor unreachable — ${esc(String(e.message||e))}`;
+      $("mapList").innerHTML = "";
+    }
+    return;
+  }
+  activeGeo = mapData;
+  renderAtlasData();
+}
+
+/* The world_pulse-derived half of paintAtlas — everything that needs
+   REAL data from /api/worldmap, split out so it can run once immediately
+   (a cached revisit) and again after every fresh fetch, without rebuilding
+   the whole toolbar (which would drop mid-flight interactions like the
+   view toggle or an in-progress scrub). */
+function renderAtlasData(){
+  if(!mapData) return;
+  const counts = mapData.counts || {};
+  const total = Object.values(counts).reduce((a,b)=>a+b, 0);
+  $("mapPulse").textContent = `${mapData.pulse_score ?? "—"} ${mapData.pulse_label || ""}`.trim();
+  buildLayersRow();
+  drawMap();
 
   /* Say plainly which channels cannot be mapped and why. */
   const un = mapData.unmappable || {};
@@ -2366,7 +2501,7 @@ async function paintAtlas(){
     (list||[]).forEach(i => all.push({...i, chan}));
   });
   all.sort((a,b) => (SEV_RANK[b.severity]||0) - (SEV_RANK[a.severity]||0));
-  const listBox = $("mapList");
+  const listBox = $("mapList"); if(!listBox) return;
   listBox.innerHTML = "";
   all.slice(0,8).forEach(i => {
     const r = document.createElement("div"); r.className = "row";
@@ -2380,10 +2515,29 @@ async function paintAtlas(){
   });
 }
 
+function buildLayersRow(){
+  const lrow = $("mapLayers"); if(!lrow) return;
+  const counts = (mapData && mapData.counts) || {};
+  lrow.innerHTML = "";
+  Object.entries(MAP_LAYERS).forEach(([k,cfg]) => {
+    const n = counts[k] || 0;
+    const b = document.createElement("button");
+    b.className = "chip" + (cfg.on && n ? " on" : "");
+    b.type = "button";
+    b.disabled = !n;
+    b.textContent = `${cfg.label} ${n}`;
+    b.setAttribute("aria-pressed", String(!!(cfg.on && n)));
+    b.onclick = () => { cfg.on = !cfg.on; renderAtlasData(); };
+    lrow.appendChild(b);
+  });
+}
+
 function drawMap(){
   const wrap = $("mapWrap"); if(!wrap) return;
-  const geo = activeGeo || mapData;
-  if(!geo) return;
+  // UX pass item 3: EMPTY_GEO (not a bail-out) so the base map still
+  // renders — landmass + graticule, zero markers — on the very first
+  // paint, before world_pulse data has arrived.
+  const geo = activeGeo || mapData || EMPTY_GEO;
   const pts = [];
   Object.entries(geo.layers||{}).forEach(([chan,list]) => {
     if(!MAP_LAYERS[chan] || !MAP_LAYERS[chan].on) return;

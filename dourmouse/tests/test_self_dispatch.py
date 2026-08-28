@@ -859,6 +859,42 @@ class TestDelegateParallelConcurrency:
         assert "BETA DONE" in result["text"]
         assert jobs.count() == 2
 
+    def test_branch_events_carry_real_backend_identity(self, registry, jobs, monkeypatch):
+        """world-monitor-expansion (UX pass item 1): every
+        delegate_parallel_branch event (both start and result phases) now
+        carries the SAME real backend/local classification the top-level
+        "brain" event does — from config.backend_identity(), the config
+        object's real TYPE, never guessed from the model string. All
+        branches share ctx.config, so the backend is identical branch to
+        branch even though the reported MODEL string can differ."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        from dourmouse.config import OllamaConfig
+
+        config = OllamaConfig(agent_models={"ECHO_AGENT": "qwen3:8b"})
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out",
+            lambda: _FakeResponse(_FakeMessage(
+                content=None,
+                tool_calls=[_delegate_parallel_call(
+                    "c1", [{"agent_or_task": "echo_agent", "instructions": "say alpha"}],
+                )],
+            )),
+        )
+        client.chat.completions.add("say alpha", lambda: _FakeResponse(_FakeMessage(content="ALPHA DONE")))
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="parent wrap-up")))
+
+        events: list[dict[str, Any]] = []
+        run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, config=config,
+            job_tracker=jobs, event_sink=lambda e: events.append(e),
+        )
+        branch_events = [e for e in events if e.get("type") == "delegate_parallel_branch"]
+        assert len(branch_events) == 2  # start + result
+        for e in branch_events:
+            assert e["backend"] == "ollama"
+            assert e["local"] is True
+
     def test_slow_branch_does_not_block_a_fast_branch_real_concurrency(self, registry, jobs, monkeypatch):
         """The decisive proof this is REAL concurrency and not sequential
         work disguised as parallel: two branches each sleep INSIDE their

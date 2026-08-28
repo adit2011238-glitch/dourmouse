@@ -49,6 +49,7 @@ from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
     OmniRouteConfig,
+    backend_identity,
     brief_mode_enabled,
     fast_lane_enabled,
     fast_lane_model,
@@ -1542,6 +1543,17 @@ def run_dispatch_messages(
         )
         if server_lane:
             model = f"server:{server_model()}"
+    # world-monitor-expansion (UX pass item 1): real backend identity for
+    # the console's per-response model/local indicator. The Dell compute
+    # node (server_lane) is a special case backend_identity() can't see
+    # from ``config`` alone — the config object is whatever the MAIN
+    # backend is (often NVIDIA), but the Dell literally runs Ollama (see
+    # remote_server.py's own docstring: "MAIN DOURMOUSE -> ... -> Ollama"),
+    # so it is reported local exactly like any other Ollama call.
+    if server_lane:
+        backend_name, backend_local = "ollama", True
+    else:
+        backend_name, backend_local = backend_identity(config)
     # The chosen brain is surfaced honestly so the UI can show which model
     # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
     # of the tree: nested delegate runs ride the parent's event sink, so a
@@ -1555,6 +1567,8 @@ def run_dispatch_messages(
                 "type": "brain",
                 "model": model,
                 "escalated": escalated_brain,
+                "backend": backend_name,
+                "local": backend_local,
             },
         )
 
@@ -2107,9 +2121,20 @@ def _run_dispatch_loop(
         if routed_model and routed_model != model:
             model = routed_model
             if event_sink is not None and ctx.depth == 0:
+                # Same backend as the run's original "brain" event (the
+                # config object doesn't change, only the model string
+                # model_for_agent resolves within it) — backend_identity()
+                # again, not re-guessed.
+                _routed_backend, _routed_local = backend_identity(ctx.config)
                 _emit_event(
                     event_sink,
-                    {"type": "brain", "model": model, "escalated": False},
+                    {
+                        "type": "brain",
+                        "model": model,
+                        "escalated": False,
+                        "backend": _routed_backend,
+                        "local": _routed_local,
+                    },
                 )
 
     # v5.32: the schemas are scoped above, but the ROSTER PROSE in the system

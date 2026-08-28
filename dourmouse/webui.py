@@ -42,6 +42,7 @@ import os
 import re
 import sys
 import threading
+import time
 import traceback
 import urllib.parse
 from datetime import datetime
@@ -510,6 +511,244 @@ def _effective_model(config: Any | None, agent: str) -> str:
     if config is not None and hasattr(config, "model_for_agent"):
         return config.model_for_agent(agent)
     return "default"
+
+
+# --------------------------------------------------------------------------- #
+# world-monitor-expansion (UX pass item 5) — server-side warm cache for
+# COMMS (Gmail inbox listing) and WORLD (world_pulse), refreshed on a
+# background interval so the UI reads a warm cache instantly instead of
+# paying a live IMAP/feed round trip on every screen open. Mirrors
+# remote_server.py's start_health_warmer() EXACTLY: module-level
+# lock + Event + Thread, an idempotent start_*(), a stop_*() that joins,
+# a loop that swallows every exception (a warmer crash must never take
+# the app down) and refreshes at TTL/2 (a full window of margin before
+# the cache would otherwise go stale) via Event.wait() so a stop is
+# honoured immediately instead of after a full interval.
+# --------------------------------------------------------------------------- #
+
+def _world_pulse_ttl() -> float:
+    """Same env var + default as world_pulse.py's own (private) _ttl() —
+    duplicated rather than imported so this stays a read of world_pulse's
+    PUBLIC contract (its TTL is documented, stable env-var behavior) and
+    never reaches into its internals."""
+    try:
+        return float(os.environ.get("DOURMOUSE_WORLD_PULSE_TTL", "120"))
+    except ValueError:
+        return 120.0
+
+
+_world_pulse_warmer_thread: threading.Thread | None = None
+_world_pulse_warmer_stop = threading.Event()
+_world_pulse_warmer_lock = threading.Lock()
+
+
+def start_world_pulse_warmer() -> bool:
+    """Background thread that keeps world_pulse's own cache warm.
+
+    world_pulse.world_pulse_snapshot() already caches (default 120s TTL,
+    DOURMOUSE_WORLD_PULSE_TTL) — see its module docstring's own real
+    rate-limit awareness (Yahoo 429s, ECB's keyless/unthrottled endpoint,
+    etc.) for why that TTL exists — but until now that cache only ever
+    refreshed lazily, on whichever request happened to arrive after it
+    went stale, so THAT request paid the full multi-source fetch cost
+    (world_pulse.py's own ThreadPoolExecutor across every configured
+    source). This warmer proactively refreshes at TTL/2 = 60s by default
+    so the WORLD screen and /api/worldmap always read an already-warm
+    cache — 60s is a real, deliberate choice: it stays well inside
+    world_pulse's own 120s TTL window (never lets the cache actually go
+    stale between passes, the same margin start_health_warmer() uses),
+    while not re-hitting every upstream feed source more often than the
+    120s TTL was already judged safe for (Yahoo's documented rate limits
+    among them) — the interval tracks whatever DOURMOUSE_WORLD_PULSE_TTL
+    is set to, not a second, independently-drifting constant.
+
+    Idempotent; returns True if a thread is running when it returns.
+    Opt out with DOURMOUSE_WORLD_PULSE_WARMER=0.
+    """
+    if os.environ.get("DOURMOUSE_WORLD_PULSE_WARMER", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        return False
+    global _world_pulse_warmer_thread
+    with _world_pulse_warmer_lock:
+        if _world_pulse_warmer_thread is not None and _world_pulse_warmer_thread.is_alive():
+            return True
+        _world_pulse_warmer_stop.clear()
+
+        def _loop() -> None:
+            from dourmouse.world_pulse import world_pulse_snapshot
+
+            while not _world_pulse_warmer_stop.is_set():
+                try:
+                    world_pulse_snapshot(force=True)
+                except Exception:  # noqa: BLE001,S110 - a warmer must never crash the app
+                    pass
+                _world_pulse_warmer_stop.wait(max(_world_pulse_ttl() / 2.0, 1.0))
+
+        _world_pulse_warmer_thread = threading.Thread(
+            target=_loop, name="dourmouse-world-pulse-warmer", daemon=True
+        )
+        _world_pulse_warmer_thread.start()
+        return True
+
+
+def stop_world_pulse_warmer(timeout: float = 2.0) -> None:
+    global _world_pulse_warmer_thread
+    _world_pulse_warmer_stop.set()
+    with _world_pulse_warmer_lock:
+        thread = _world_pulse_warmer_thread
+        _world_pulse_warmer_thread = None
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout)
+
+
+def _gmail_inbox_ttl() -> float:
+    try:
+        return float(os.environ.get("DOURMOUSE_GMAIL_INBOX_TTL", "180"))
+    except ValueError:
+        return 180.0
+
+
+def _gmail_inbox_max_results() -> int:
+    try:
+        return int(os.environ.get("DOURMOUSE_GMAIL_INBOX_MAX", "25"))
+    except ValueError:
+        return 25
+
+
+#: The warm cache itself — one entry, the "" query "recent inbox" view
+#: /api/gmail/search's own handler already special-cases (see google_
+#: services.gmail_search's own "empty query browses the most recent
+#: messages" docstring). A REAL user search (any non-empty q) always
+#: bypasses this cache entirely and hits Gmail live — caching an
+#: arbitrary search query would be a much bigger, riskier feature
+#: (unbounded cache growth, staleness on a query someone expects fresh
+#: results from) that item 5 never asked for; only the listing COMMS
+#: shows on open needs to feel instant.
+_gmail_inbox_cache_lock = threading.Lock()
+_gmail_inbox_cache: dict[str, Any] = {"at": 0.0, "max_results": None, "payload": None}
+
+
+def _fetch_gmail_inbox_payload(max_results: int) -> dict[str, Any]:
+    """The real (uncached) "" query listing, shaped exactly like
+    /api/gmail/search's own JSON contract below. Never raises — every
+    failure (NOT CONFIGURED, IMAP down, ...) is gmail_search's own honest
+    text, reported through the same {"ok": False, "error": ...} shape the
+    live endpoint already uses."""
+    from dourmouse.google_services import gmail_search
+
+    try:
+        raw = gmail_search("", max_results)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    rows = []
+    for line in raw.splitlines():
+        m = re.match(r"^- \[(.*?)\] from (.*?) \| (.*?) \(uid (.+)\)$", line)
+        if m:
+            rows.append({
+                "date": m.group(1), "from": m.group(2),
+                "subject": m.group(3), "id": m.group(4),
+            })
+    return {"ok": True, "rows": rows, "raw": raw if not rows else None}
+
+
+def _gmail_inbox_cache_get(max_results: int) -> dict[str, Any] | None:
+    """The warm cache's payload if present, fresh, and for the SAME
+    max_results the caller actually wants — else None. Never fetches: a
+    None here means the caller is on a genuine cold start (nothing has
+    warmed this yet) and must do its own one-off live fetch."""
+    now = time.monotonic()
+    with _gmail_inbox_cache_lock:
+        c = _gmail_inbox_cache
+        if (
+            c["payload"] is not None
+            and c["max_results"] == max_results
+            and (now - c["at"]) < _gmail_inbox_ttl()
+        ):
+            return c["payload"]
+    return None
+
+
+def _gmail_inbox_cache_refresh(max_results: int) -> dict[str, Any]:
+    """Always does the real (uncached) fetch and stores the result as the
+    new warm-cache entry. Called by the warmer loop on its interval, and
+    also by a request that hit a genuine cold start (see the endpoint
+    below) so that ONE unlucky first request still gets a real answer
+    instead of an empty cache forever."""
+    payload = _fetch_gmail_inbox_payload(max_results)
+    with _gmail_inbox_cache_lock:
+        _gmail_inbox_cache["at"] = time.monotonic()
+        _gmail_inbox_cache["max_results"] = max_results
+        _gmail_inbox_cache["payload"] = payload
+    return payload
+
+
+_gmail_warmer_thread: threading.Thread | None = None
+_gmail_warmer_stop = threading.Event()
+_gmail_warmer_lock = threading.Lock()
+
+
+def start_gmail_inbox_warmer() -> bool:
+    """Background thread that keeps the COMMS "recent inbox" listing warm.
+
+    gmail_search() has no cache of its own — every call opens a fresh
+    IMAP connection and logs in (see google_services._imap()), which is
+    real per-call cost AND the kind of frequent-login pattern mail
+    providers rate-limit/flag if hammered. 180s (DOURMOUSE_GMAIL_INBOX_TTL)
+    is the deliberate choice here: an inbox listing is far less time-
+    critical than world_pulse's hazard data (a new email landing 1-2
+    minutes before the cache catches up is a non-event, unlike a storm
+    / conflict update), so the interval leans toward fewer IMAP logins
+    rather than toward freshness — refreshed at half that (90s), the
+    same TTL/2 margin convention as every other warmer here, so a request
+    is never the one that hits an expired entry and pays the live cost.
+
+    A REAL search (any non-empty query) is never affected by this warmer
+    or its cache — see _gmail_inbox_cache's own docstring.
+
+    Idempotent; returns True if a thread is running when it returns.
+    Opt out with DOURMOUSE_GMAIL_WARMER=0 — also silently a no-op when
+    Gmail itself isn't configured (gmail_configured() checks the address
+    + app password are set), so a fresh install with no mail account
+    connected never opens a socket or logs a spurious failure.
+    """
+    if os.environ.get("DOURMOUSE_GMAIL_WARMER", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        return False
+    from dourmouse.google_services import gmail_configured
+
+    if not gmail_configured():
+        return False
+    global _gmail_warmer_thread
+    with _gmail_warmer_lock:
+        if _gmail_warmer_thread is not None and _gmail_warmer_thread.is_alive():
+            return True
+        _gmail_warmer_stop.clear()
+
+        def _loop() -> None:
+            while not _gmail_warmer_stop.is_set():
+                try:
+                    _gmail_inbox_cache_refresh(_gmail_inbox_max_results())
+                except Exception:  # noqa: BLE001,S110 - a warmer must never crash the app
+                    pass
+                _gmail_warmer_stop.wait(max(_gmail_inbox_ttl() / 2.0, 1.0))
+
+        _gmail_warmer_thread = threading.Thread(
+            target=_loop, name="dourmouse-gmail-inbox-warmer", daemon=True
+        )
+        _gmail_warmer_thread.start()
+        return True
+
+
+def stop_gmail_inbox_warmer(timeout: float = 2.0) -> None:
+    global _gmail_warmer_thread
+    _gmail_warmer_stop.set()
+    with _gmail_warmer_lock:
+        thread = _gmail_warmer_thread
+        _gmail_warmer_thread = None
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout)
 
 
 def build_roster_payload(
@@ -1356,6 +1595,22 @@ class _Handler(BaseHTTPRequestHandler):
                 max_results = int((qs.get("max_results") or ["20"])[0])
             except ValueError:
                 max_results = 20
+            # world-monitor-expansion (UX pass item 5): the "" query — the
+            # "recent inbox" view COMMS opens with — reads the warm cache
+            # start_gmail_inbox_warmer() keeps refreshed in the background
+            # instead of paying a live IMAP round trip on every screen
+            # open. A REAL search (non-empty q) always goes straight to
+            # gmail_search live, below, exactly as before — caching an
+            # arbitrary query was never what this item asked for. A cache
+            # miss here means a genuine cold start (server just booted,
+            # the warmer hasn't completed its first pass, or the warmer
+            # is disabled/unconfigured) — _gmail_inbox_cache_refresh does
+            # the SAME real fetch inline, once, and warms the cache for
+            # every request after it.
+            if not query.strip():
+                cached = _gmail_inbox_cache_get(max_results)
+                self._send_json(cached if cached is not None else _gmail_inbox_cache_refresh(max_results))
+                return
             try:
                 raw = gmail_search(query, max_results)
             except Exception as exc:  # noqa: BLE001 - IMAP/OAuth failures, reported honestly
@@ -4062,6 +4317,22 @@ def run_server(
     if live_polling and live_enabled():
         server.scheduler_runner = SchedulerRunner(registry, server.tracker, bus=server.bus)
         server.scheduler_runner.start()
+    # world-monitor-expansion (UX pass item 5): warm server-side caches for
+    # COMMS (Gmail inbox listing) and WORLD (world_pulse), started at BOOT
+    # rather than lazily on first screen visit, so both feel instant by the
+    # time a user opens the console. Gated the SAME way as LiveRuntime/
+    # SchedulerRunner just above — live_polling and live_enabled() — rather
+    # than under ``reporting``: unlike start_health_warmer() (self-gated on
+    # whether a compute node URL is even configured), these two would
+    # otherwise open a real IMAP connection / hit live world_pulse sources
+    # the first time their loop ticks, which is exactly the live-network
+    # behavior the live_polling gate exists to keep out of hermetic tests
+    # (reporting=True alone is NOT enough here — test_reporter_wired_via_
+    # run_server calls run_server(reporting=True) with live_polling at its
+    # False default and must stay network-free).
+    if live_polling and live_enabled():
+        start_world_pulse_warmer()
+        start_gmail_inbox_warmer()
     # v4.0: proactive daily briefing (automation engine). Env-gated by
     # DOURMOUSE_REPORT (default on); tests opt out via reporting=False.
     from dourmouse.report import DailyReporter

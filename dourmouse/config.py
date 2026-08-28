@@ -522,6 +522,42 @@ def omniroute_available(timeout: float = 1.0) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# world-monitor-expansion — real backend identity for the console's per-
+# response model/local indicator (UX pass, live-demo feedback item 1).
+# --------------------------------------------------------------------------- #
+
+def backend_identity(config: Any) -> tuple[str, bool]:
+    """(backend_name, is_local) for a loaded LLM backend config object.
+
+    ``is_local`` is True ONLY for Ollama — self-hosted, keyless, nothing
+    leaves this machine (Rule 2.6). Every other backend, including
+    OmniRoute (its gateway process happens to listen on 127.0.0.1, but it
+    exists to forward requests to REMOTE free-tier providers — see
+    ``OmniRouteConfig``'s own docstring — so it is honestly cloud, not
+    local), reports False.
+
+    Classification is the config object's real TYPE — exactly the object
+    ``_build_client`` (dispatch.py) already switches on to decide whether
+    to build the native Ollama client or a generic OpenAI-compatible one —
+    never a guess from a model-name string pattern (a "qwen3:8b"-shaped
+    name is an Ollama convention, but nothing stops an operator from
+    naming a DOURMOUSE_MODEL_<AGENT> override that way on another
+    backend, so the string alone is not proof of anything).
+
+    ``config`` is ``None`` for the rare caller that supplies its own
+    ``client`` without a config (mostly tests) — reported as
+    ``("unknown", False)`` rather than guessed.
+    """
+    if isinstance(config, OllamaConfig):
+        return "ollama", True
+    if isinstance(config, NvidiaConfig):
+        return "nvidia", False
+    if isinstance(config, OmniRouteConfig):
+        return "omniroute", False
+    return "unknown", False
+
+
+# --------------------------------------------------------------------------- #
 # world-monitor-expansion — persisted orchestrator model setting (backend
 # half; a Settings UI is being built separately to call this).
 #

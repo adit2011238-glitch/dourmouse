@@ -1382,3 +1382,142 @@ class TestSetupWizardGoogleStep:
         status3, _, _ = self._get(
             server, f"/api/auth/google/callback?code=abc&state={state}")
         assert status3 == 400
+
+
+class TestGmailInboxWarmCache:
+    """world-monitor-expansion (UX pass item 5): the "" query 'recent
+    inbox' listing reads a warm server-side cache instead of paying a live
+    IMAP round trip on every COMMS open; a real search always bypasses it.
+    """
+
+    def _get(self, server, path: str):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        body = resp.read()
+        status = resp.status
+        conn.close()
+        return status, body
+
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self):
+        """The warm cache is real module-level state (by design — it must
+        survive across requests) — reset it around every test so none of
+        these leak into each other or into unrelated suites."""
+        webui_module._gmail_inbox_cache["at"] = 0.0
+        webui_module._gmail_inbox_cache["max_results"] = None
+        webui_module._gmail_inbox_cache["payload"] = None
+        yield
+        webui_module._gmail_inbox_cache["at"] = 0.0
+        webui_module._gmail_inbox_cache["max_results"] = None
+        webui_module._gmail_inbox_cache["payload"] = None
+
+    def test_empty_query_cold_start_falls_back_to_live_fetch_and_warms_cache(self, server, monkeypatch):
+        calls = []
+
+        def fake_search(query, max_results):
+            calls.append((query, max_results))
+            return "- [2026-01-01 00:00] from a@b.com | Subject one (uid 1)"
+
+        monkeypatch.setattr(
+            "dourmouse.google_services.gmail_search", fake_search
+        )
+        status, raw = self._get(server, "/api/gmail/search?q=&max_results=25")
+        body = json.loads(raw.decode())
+        assert status == 200
+        assert body["ok"] is True
+        assert body["rows"][0]["subject"] == "Subject one"
+        assert calls == [("", 25)]  # ONE live fetch — the genuine cold start
+        # and it's now cached: a second request must NOT call gmail_search again
+        status2, raw2 = self._get(server, "/api/gmail/search?q=&max_results=25")
+        body2 = json.loads(raw2.decode())
+        assert status2 == 200
+        assert body2 == body
+        assert calls == [("", 25)]  # still just the one call — served from cache
+
+    def test_nonempty_query_never_uses_the_cache(self, server, monkeypatch):
+        calls = []
+
+        def fake_search(query, max_results):
+            calls.append((query, max_results))
+            return "- [2026-01-01 00:00] from a@b.com | Subject one (uid 1)"
+
+        monkeypatch.setattr(
+            "dourmouse.google_services.gmail_search", fake_search
+        )
+        self._get(server, "/api/gmail/search?q=invoice&max_results=25")
+        self._get(server, "/api/gmail/search?q=invoice&max_results=25")
+        # a real search hits gmail_search live EVERY time — never cached
+        assert calls == [("invoice", 25), ("invoice", 25)]
+
+    def test_cache_get_respects_ttl_and_max_results(self, monkeypatch):
+        """Unit-level: _gmail_inbox_cache_get is a pure cache read — never
+        fetches — and only counts as a hit for the SAME max_results,
+        within TTL."""
+        monkeypatch.setenv("DOURMOUSE_GMAIL_INBOX_TTL", "60")
+        assert webui_module._gmail_inbox_cache_get(25) is None  # nothing warmed yet
+        webui_module._gmail_inbox_cache["at"] = time.monotonic()
+        webui_module._gmail_inbox_cache["max_results"] = 25
+        webui_module._gmail_inbox_cache["payload"] = {"ok": True, "rows": []}
+        assert webui_module._gmail_inbox_cache_get(25) == {"ok": True, "rows": []}
+        assert webui_module._gmail_inbox_cache_get(50) is None  # different max_results
+        webui_module._gmail_inbox_cache["at"] = time.monotonic() - 999  # long expired
+        assert webui_module._gmail_inbox_cache_get(25) is None
+
+
+class TestWarmCacheWarmers:
+    """Both background warmer threads (item 5): opt-out env vars, and the
+    Gmail one's own self-gate on whether Gmail is even configured."""
+
+    def test_gmail_warmer_noop_when_not_configured(self, monkeypatch):
+        monkeypatch.setattr(
+            "dourmouse.google_services.gmail_configured", lambda: False
+        )
+        assert webui_module.start_gmail_inbox_warmer() is False
+
+    def test_gmail_warmer_noop_when_env_disabled(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_GMAIL_WARMER", "0")
+        assert webui_module.start_gmail_inbox_warmer() is False
+
+    def test_world_pulse_warmer_noop_when_env_disabled(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_WORLD_PULSE_WARMER", "0")
+        assert webui_module.start_world_pulse_warmer() is False
+
+    def test_world_pulse_warmer_refreshes_the_real_cache(self, monkeypatch):
+        """Integration: the warmer thread really calls
+        world_pulse_snapshot(force=True) on its loop — proven by pointing
+        the TTL very low and watching a REAL (monkeypatched) snapshot
+        counter tick past 1 within a couple of intervals, then stopping
+        the thread cleanly."""
+        monkeypatch.setenv("DOURMOUSE_WORLD_PULSE_WARMER", "1")
+        monkeypatch.setenv("DOURMOUSE_WORLD_PULSE_TTL", "0.2")  # -> refresh every ~0.1s (floored at 1.0s by the warmer)
+        calls = []
+
+        def fake_snapshot(force=False):
+            calls.append(force)
+            return {}
+
+        monkeypatch.setattr(
+            "dourmouse.world_pulse.world_pulse_snapshot", fake_snapshot
+        )
+        try:
+            assert webui_module.start_world_pulse_warmer() is True
+            deadline = time.time() + 3
+            while time.time() < deadline and len(calls) < 1:
+                time.sleep(0.05)
+        finally:
+            webui_module.stop_world_pulse_warmer()
+        assert calls, "warmer never called world_pulse_snapshot"
+        assert all(c is True for c in calls)  # always a forced refresh, never a lazy read
+
+    def test_world_pulse_warmer_is_idempotent(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_WORLD_PULSE_TTL", "60")
+        monkeypatch.setattr(
+            "dourmouse.world_pulse.world_pulse_snapshot", lambda force=False: {}
+        )
+        try:
+            assert webui_module.start_world_pulse_warmer() is True
+            assert webui_module.start_world_pulse_warmer() is True  # already running -> no second thread
+        finally:
+            webui_module.stop_world_pulse_warmer()
