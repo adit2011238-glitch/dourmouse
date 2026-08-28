@@ -1,21 +1,30 @@
 """ui/console.html — PROJECTS bookshelf, IMPORTED (Claude Code + Codex CLI)
 source (world-monitor-expansion).
 
-``GET /api/projects/imported`` (dourmouse/project_import.py, tested
-separately in test_project_import.py) is a real, already-tested backend
-endpoint. This file covers the frontend-only work of wiring it into the
+Originally wired to ``GET /api/projects/imported`` (project_import.py's raw
+on-demand scan, d77f7a8). The PROJECTS bookshelf reorg switched this half
+of the bookshelf to the richer, persisted ``dourmouse/project_bookkeeper.py``
+pair instead — ``GET /api/projects/bookkeeper`` for the cheap initial read,
+``POST /api/projects/bookkeeper/refresh`` for the explicit REFRESH action —
+both real, already-tested backend endpoints (test_project_bookkeeper.py).
+This file covers the frontend-only work of wiring that pair into the
 existing PROJECTS bookshelf in ui/console.html: real syntax on the
-extracted inline script (Rule 2.1 — no fabricated pass), and that the
-real behavior this task called for is actually present in the source —
-fetching the endpoint, attributing each card to its source tool(s), an
-honest "path no longer exists" treatment, and honest text for the
-endpoint's own degradation states — rather than a silent empty shelf.
+extracted inline script (Rule 2.1 — no fabricated pass), and that the real
+behavior this task called for is actually present in the source — fetching
+the right endpoints, attributing each card to its source tool(s), showing
+the bookkeeper's own real per-project context and last-refreshed honesty,
+an active/stale grouping, an honest "path no longer exists" treatment, and
+honest text for the endpoints' own degradation states — rather than a
+silent empty shelf.
 
 No headless browser here (none is available in this suite); DOM behavior
 that would need one is out of scope for this file, matching how the rest
 of ui/console.html's frontend logic is tested elsewhere in this repo
 (test_ui_local.py checks index.html/map.html/agent.html/login.html the
-same way — source-level, not execution-level).
+same way — source-level, not execution-level). It WAS live-verified once,
+manually, via a real dourmouse.webui server against fixture Claude Code
+session history (see this task's own commit/session notes) — this file is
+the durable, repeatable regression coverage for that same wiring.
 """
 
 from __future__ import annotations
@@ -70,12 +79,16 @@ class TestConsoleScriptSyntax:
 
 
 class TestImportedProjectsShelf:
-    """The real markers a genuine wiring of GET /api/projects/imported
-    into the PROJECTS bookshelf must have — not a mockup."""
+    """The real markers a genuine wiring of the bookkeeper endpoints into
+    the PROJECTS bookshelf must have — not a mockup."""
 
-    def test_fetches_the_real_endpoint(self):
+    def test_fetches_the_real_endpoints(self):
         script = _extract_inline_script()
-        assert '"/api/projects/imported"' in script
+        # Cheap initial read (a persisted-file read on the backend, never a
+        # rescan — see project_bookkeeper.py) vs. the explicit, real refresh
+        # action — two different endpoints, not one re-fetched twice.
+        assert '"/api/projects/bookkeeper"' in script
+        assert '"/api/projects/bookkeeper/refresh"' in script
 
     def test_wired_into_projects_screen_load(self):
         script = _extract_inline_script()
@@ -89,8 +102,33 @@ class TestImportedProjectsShelf:
 
     def test_has_a_real_refresh_action(self):
         script = _extract_inline_script()
+        # The REFRESH button must trigger the explicit POST /refresh path
+        # (refreshBookkeeperProjects), not just a second GET of the same
+        # possibly-stale cached file.
         assert 'id="importedRefreshBtn"' in script
-        assert "importedRefreshBtn" in script and "onclick=loadImportedProjects" in script
+        assert "onclick=refreshBookkeeperProjects" in script
+        assert "function refreshBookkeeperProjects(" in script
+        assert 'method:"POST"' in script and "/api/projects/bookkeeper/refresh" in script
+
+    def test_shows_real_context_and_last_refreshed(self):
+        script = _extract_inline_script()
+        # The whole reason for the switch off the raw scan: a real,
+        # per-project extractive context line, plus the bookkeeper's own
+        # last_refreshed honesty surfaced in the shelf header.
+        assert 'id="importedRefreshedAt"' in script
+        assert "r.last_refreshed" in script
+        assert 'card.querySelector(".bookctx")' in script
+        assert "p.context" in script
+
+    def test_groups_active_vs_stale(self):
+        script = _extract_inline_script()
+        # A real, functional split — not decorative: a stale/archived
+        # project (old, or exists:false) is filtered into its own
+        # collapsed row, distinct from the plain active row.
+        assert "function bookkeeperIsStale(" in script
+        assert "STALE_AFTER_DAYS" in script
+        assert "p.exists===false" in script
+        assert "staleToggle" in script
 
     def test_attributes_each_card_to_its_source(self):
         script = _extract_inline_script()

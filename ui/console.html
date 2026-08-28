@@ -640,6 +640,19 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
 .goneflag{font-size:7.5px;letter-spacing:.1em;color:var(--bad);
   border:1px solid var(--bad);border-radius:4px;padding:2px 6px;width:fit-content}
 
+/* PROJECTS bookshelf reorg (world-monitor-expansion): the bookkeeper's own
+   real per-project context line, the "last refreshed" honesty readout in
+   the shelf header, and the collapsed stale/archived row's toggle button.
+   Reuses .note's muted tone for .bookctx.empty rather than inventing a new
+   color — an honestly-empty context is the same kind of "nothing here yet"
+   state .note already speaks for. */
+.bookctx{font-size:9.5px;color:var(--blue-hi);line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bookctx.empty{color:var(--blue-deep);font-style:italic}
+.shelfmeta{font-size:8.5px;color:var(--blue-deep);letter-spacing:.04em;margin-left:auto;margin-right:9px}
+.staleToggle{margin:2px 0 9px;width:fit-content}
+.stalerow{opacity:.8}
+
 @media (max-width:860px){
   .body{grid-template-columns:1fr}
   .rail{display:none}
@@ -1710,6 +1723,114 @@ async function run(text){
   }
 }
 
+/* ---------------- session restore ----------------
+   16f59ef shipped GET /api/session/current (dourmouse/webui.py) — the
+   live ChatSession's own turn-by-turn transcript, straight off the ledger
+   chat.py has always persisted to workspace/sessions/<id>.jsonl. Nothing
+   on the frontend ever called it back, so a browser reload always started
+   HOME's thread blank even though the backend had every turn on disk.
+   This is that missing read path.
+
+   Scope: HOME's thread ONLY. THREAD_SCREENS' other threads (RESEARCH/
+   CODE/MEDIA/NEWS/DESIGN3D) are client-only DOM state with no server-side
+   session of their own to restore from — /api/session/current is the ONE
+   long-lived server-side ChatSession, which is exactly what HOME's thread
+   already maps to (see run()'s own fallback-to-HOME comment above).
+
+   A 404 is the honest "no turns recorded yet" case (fresh install, or a
+   session file nothing has been asked in), not an error — render nothing,
+   silently. Any other failure (network, malformed JSON) degrades the same
+   way: a failed restore must never surface as a visible error stacked on
+   top of an otherwise-working console.
+*/
+function restoreTranscriptEvent(node, e){
+  // Same case-by-case dispatch as run()'s own live SSE switch above, minus
+  // the cases that only mean something while a turn is actively streaming
+  // (assistant_delta/assistant_text/done — turn.final_text already carries
+  // the finished answer) and minus the interactive approval box: addApproval
+  // wires its APPROVE/DECLINE buttons to POST /api/confirm against this
+  // turn's confirmation id, which is long since resolved by the time a page
+  // reload restores it — showing it again would invite clicking a dead
+  // action. confirmation_requested/confirmation_resolved instead render as
+  // plain, inert chips carrying the same real prompt/tool/approved fields.
+  // Every case that produces a real, inspectable chip live produces the
+  // identical chip on restore.
+  switch(e.type){
+    case "brain":{
+      const raw=e.model||""; const onNode=raw.startsWith("server:");
+      const shown=raw.replace(/^server:/,"").split("/").pop()||"—";
+      const kind=localCloudSuffix(e);
+      node.mdl.textContent = (onNode?`${(sys.server&&sys.server.node)||"NODE"} · ${shown}`:shown)+kind;
+      node.mdl.classList.toggle("local", e.local===true);
+      break; }
+    case "plan": act(node.acts,"PLAN",""); node.noteStep(); break;
+    case "tool_use": case "function":{
+      const nm=e.name||e.tool||"tool";
+      let argsDetail="";
+      if(e.raw_arguments){
+        try{ argsDetail=JSON.stringify(JSON.parse(e.raw_arguments),null,2); }
+        catch{ argsDetail=e.raw_arguments; }
+      }
+      act(node.acts,"USING",transcriptToolLabel(nm),false,false,argsDetail);
+      node.noteStep(); break; }
+    case "tool_result": case "result":{
+      const nm=e.name||e.tool||""; act(node.acts,"RESULT",transcriptToolLabel(nm),false,false,e.text||"");
+      node.noteStep(); break; }
+    case "delegate_parallel_branch":{
+      const modelShown=(e.model||"").split("/").pop()||e.model||"—";
+      const label=`branch ${(e.index??0)+1}/${e.total||"?"} · ${e.agent||"any"} · ${modelShown}${localCloudSuffix(e)}`;
+      if(e.phase==="start"){ act(node.acts,"USING",label,false,false,e.task||""); node.noteStep(); }
+      else if(e.phase==="result"){ act(node.acts,"RESULT",label,!e.ok,false, e.ok ? (e.text||"") : ("ERROR: "+(e.error||""))); node.noteStep(); }
+      break; }
+    case "confirmation_requested":
+      act(node.acts,"APPROVAL REQUESTED",e.tool||"",false,false,e.prompt||""); node.noteStep(); break;
+    case "confirmation_resolved":
+      act(node.acts,e.approved?"APPROVED":"DECLINED",e.tool||"",!e.approved); node.noteStep(); break;
+    case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); break;
+  }
+}
+function restoreReplyTail(node, text, buf, targetScreen){
+  // The same trailing-button set run() attaches to a real finished reply
+  // (COPY always; SHELVE only for a real, non-empty answer) so a restored
+  // turn behaves identically to one that just streamed in — REGENERATE
+  // re-runs the exact same directive through the normal run() path.
+  const c=document.createElement("button"); c.className="mini"; c.type="button"; c.textContent="COPY";
+  c.onclick=async()=>{try{await navigator.clipboard.writeText(buf);c.textContent="COPIED";setTimeout(()=>c.textContent="COPY",1200);}catch{}};
+  const rg=document.createElement("button"); rg.className="mini"; rg.type="button"; rg.textContent="REGENERATE";
+  rg.onclick=()=>{ if(!busy) run(text); };
+  node.row.append(c,rg);
+  if(buf){
+    const sh=document.createElement("button"); sh.className="mini"; sh.type="button"; sh.textContent="SHELVE";
+    sh.onclick=()=>shelvePicker(sh, {screen:targetScreen, question:text, answer:buf, ts:Date.now()});
+    node.row.append(sh);
+  }
+}
+async function restoreSession(){
+  let data;
+  try{
+    const r = await fetch("/api/session/current");
+    if(r.status===404) return;   // honest empty-session case — nothing to restore
+    if(!r.ok) return;            // any other failure: silent, never a visible error
+    data = await r.json();
+  }catch{ return; }
+  if(!data || !data.ok || !Array.isArray(data.turns) || !data.turns.length) return;
+  const threadEl = threadFor("HOME");
+  unhideThread(threadEl);
+  data.turns.forEach(turn=>{
+    addYou(threadEl, turn.user||"");
+    const node = addReply(threadEl);
+    (turn.transcript||[]).forEach(e=>{ try{ restoreTranscriptEvent(node,e); }catch{} });
+    node.acts.querySelectorAll(".spin").forEach(x=>x.remove());
+    const buf = turn.final_text||"";
+    node.body.innerHTML = md(buf) || "<p><em>No reply.</em></p>";
+    wireCopies(node.body);
+    node.st.textContent = "DONE";
+    node.tm.textContent = turn.elapsed_ms!=null ? (turn.elapsed_ms/1000).toFixed(1)+"s" : "";
+    restoreReplyTail(node, turn.user||"", buf, "HOME");
+  });
+  threadEl.scrollTop = threadEl.scrollHeight;
+}
+
 ta.addEventListener("input",()=>{ta.style.height="auto";ta.style.height=Math.min(ta.scrollHeight,130)+"px";
   go.textContent = busy?"QUEUE":"SEND_DIRECTIVE";});
 ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();} });
@@ -2185,41 +2306,79 @@ function paintProjects(){
 }
 
 /* ---------------- PROJECTS: imported source (Claude Code + Codex CLI) ---
-   GET /api/projects/imported (dourmouse/project_import.py) walks both
-   tools' own real on-disk session history and returns a deduped project
-   list — see that module's docstring for the exact response shape. This
-   renders it as its own shelf, clearly attributed to source ("via Claude
-   Code" / "via Codex" / "via both"), with an honest degraded state when
-   neither tool's history is found on this machine, and an honest
-   "path no longer exists" treatment for a project whose folder has since
-   moved or been deleted — never presented identically to a project that
-   still exists on disk. */
+   world-monitor-expansion, PROJECTS bookshelf reorg: was
+   GET /api/projects/imported (project_import.py's raw on-demand scan,
+   d77f7a8) — real, but per-project it only ever had a path/stat/last-
+   active, nothing about WHAT was actually worked on. Switched to
+   GET /api/projects/bookkeeper + POST /api/projects/bookkeeper/refresh
+   (dourmouse/project_bookkeeper.py, 6043517) — same underlying project
+   list (bookkeeper's own source of truth IS project_import, unchanged),
+   layered with a real one-line extractive ``context`` per project and an
+   honest, always-visible ``last_refreshed`` timestamp. GET here is the
+   cheap persisted-file read the bookkeeper module documents (no rescan);
+   REFRESH explicitly POSTs /refresh — real incremental work, never just a
+   re-fetch of the same possibly-stale cache, matching the module's own
+   staleness-is-never-silent design.
+
+   Grouping: real user feedback ("organize the projects bookshelf properly
+   and practically") wanted more than one long flat list. Projects are
+   already sorted newest-first server-side (_public_view in
+   project_bookkeeper.py) — kept, verified live below — but now also split
+   into a plain ACTIVE row (touched in the last STALE_AFTER_DAYS days, and
+   still on disk) and a collapsed ARCHIVED/STALE row (older, or exists:
+   false) so a bookshelf with months of history doesn't bury this week's
+   real projects under last year's. The same "path no longer exists"
+   treatment from before is kept, now inside whichever row it lands in. */
+const STALE_AFTER_DAYS = 14;
 function paintImportedShelf(box){
   const sec=document.createElement("div"); sec.className="shelf"; sec.id="importedShelf";
-  sec.innerHTML=`<div class="shelfhead"><span class="shelfname">IMPORTED — CLAUDE CODE &amp; CODEX CLI</span>
+  sec.innerHTML=`<div class="shelfhead"><span class="shelfname">PROJECTS — CLAUDE CODE &amp; CODEX CLI</span>
     <span class="shelfcount" id="importedCount"></span>
+    <span class="shelfmeta" id="importedRefreshedAt"></span>
     <button class="mini" type="button" id="importedRefreshBtn">REFRESH</button></div>
-    <div id="importedBody"><div class="note">Loading imported project history…</div></div>`;
+    <div id="importedBody"><div class="note">Loading project history…</div></div>`;
   box.appendChild(sec);
-  $("importedRefreshBtn").onclick=loadImportedProjects;
+  $("importedRefreshBtn").onclick=refreshBookkeeperProjects;
   loadImportedProjects();
 }
 async function loadImportedProjects(){
+  // The cheap path: GET /api/projects/bookkeeper is a persisted-file read,
+  // never a rescan (see project_bookkeeper.py's own module docstring) —
+  // this is what runs on every PROJECTS visit. Explicit staleness-busting
+  // work only happens via refreshBookkeeperProjects() below, on request.
   const body=$("importedBody"); if(!body) return;  // screen navigated away before this resolved
-  const btn=$("importedRefreshBtn");
-  if(btn) btn.disabled=true;
-  body.innerHTML=`<div class="note">Loading imported project history…</div>`;
+  body.innerHTML=`<div class="note">Loading project history…</div>`;
   let r;
-  try{ r = await api("/api/projects/imported"); }
+  try{ r = await api("/api/projects/bookkeeper"); }
   catch(e){
     if($("importedBody")){
-      $("importedBody").innerHTML = `<div class="note">Could not load imported project history — ${esc(String(e.message||e))}.</div>`;
+      $("importedBody").innerHTML = `<div class="note">Could not load project history — ${esc(String(e.message||e))}.</div>`;
     }
-    if($("importedRefreshBtn")) $("importedRefreshBtn").disabled=false;
     return;
   }
-  if($("importedRefreshBtn")) $("importedRefreshBtn").disabled=false;
-  renderImportedProjects(r);
+  renderBookkeeperProjects(r);
+}
+async function refreshBookkeeperProjects(){
+  // The explicit, real refresh: POST /api/projects/bookkeeper/refresh runs
+  // project_bookkeeper.refresh() — a genuine incremental rescan (context is
+  // only re-extracted for a project whose last_active moved since the last
+  // checkpoint), not a second read of the same cached file loadImportedProjects()
+  // already showed.
+  const btn=$("importedRefreshBtn");
+  if(btn){ btn.disabled=true; btn.textContent="REFRESHING…"; }
+  try{
+    const res = await fetch("/api/projects/bookkeeper/refresh",{method:"POST"});
+    const r = await res.json();
+    if(!res.ok || r.ok===false){
+      if($("importedBody")) $("importedBody").innerHTML = `<div class="note">Refresh failed — ${esc(r.error||("HTTP "+res.status))}.</div>`;
+      return;
+    }
+    renderBookkeeperProjects(r);
+  }catch(e){
+    if($("importedBody")) $("importedBody").innerHTML = `<div class="note">Refresh failed — ${esc(String(e.message||e))}.</div>`;
+  }finally{
+    if($("importedRefreshBtn")){ $("importedRefreshBtn").disabled=false; $("importedRefreshBtn").textContent="REFRESH"; }
+  }
 }
 function importedSourceLabel(sources){
   const has=(t)=>Array.isArray(sources)&&sources.includes(t);
@@ -2241,12 +2400,55 @@ function importedRelTime(iso){
   if(days<30) return `${days}d ago`;
   return new Date(t).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
 }
-function renderImportedProjects(r){
+function bookkeeperIsStale(p){
+  // exists:false (the folder moved or was deleted) is always archived,
+  // regardless of how recently it was touched — a real project you can no
+  // longer open is not "active" in any practical sense. Otherwise: no
+  // recorded activity, or nothing in STALE_AFTER_DAYS, is archived.
+  if(p.exists===false) return true;
+  if(!p.last_active) return true;
+  const t=Date.parse(p.last_active);
+  if(Number.isNaN(t)) return true;
+  return (Date.now()-t) > STALE_AFTER_DAYS*86400000;
+}
+function bookkeeperCard(p){
+  const gone = p.exists===false;
+  const card=document.createElement("div");
+  card.className = "book imported" + (gone ? " gone" : "");
+  card.title = p.path;
+  card.innerHTML = `<div class="bookscreen"></div><div class="bookq"></div>
+    <div class="bookctx"></div><div class="ipath"></div><div class="istat"></div>
+    <div class="bookfoot"><span class="bookwhen"></span><span class="goneflag" hidden>PATH GONE</span></div>`;
+  card.querySelector(".bookscreen").textContent = importedSourceLabel(p.sources);
+  card.querySelector(".bookq").textContent = p.name || p.path;
+  // real per-project context (project_bookkeeper.py's own extractive
+  // summary) — the whole reason this shelf moved off the raw scan. Honest
+  // empty state when nothing has been captured yet, never a blank card.
+  const ctxEl = card.querySelector(".bookctx");
+  ctxEl.textContent = p.context || "No captured context yet";
+  ctxEl.classList.toggle("empty", !p.context);
+  ctxEl.title = p.context_source && p.context_source!=="none" ? `via ${p.context_source}` : "";
+  card.querySelector(".ipath").textContent = p.path;
+  card.querySelector(".istat").textContent = p.stat + (p.git_branch ? ` · ${p.git_branch}` : "");
+  card.querySelector(".bookwhen").textContent = importedRelTime(p.last_active);
+  if(gone) card.querySelector(".goneflag").hidden = false;
+  return card;
+}
+function renderBookkeeperProjects(r){
   const body=$("importedBody"); if(!body) return;  // screen navigated away before this resolved
-  const countEl=$("importedCount");
+  const countEl=$("importedCount"), metaEl=$("importedRefreshedAt");
   const projects=(r&&r.projects)||[];
   const cc=(r&&r.claude_code)||{}, cx=(r&&r.codex_cli)||{};
   if(countEl) countEl.textContent = projects.length ? `${projects.length} project${projects.length===1?"":"s"}` : "";
+  // Staleness is never silent (project_bookkeeper.py's own stated design):
+  // every render shows the record's real last_refreshed, honestly, even
+  // when it's "never".
+  if(metaEl){
+    metaEl.textContent = r && r.last_refreshed
+      ? `LAST REFRESHED ${importedRelTime(r.last_refreshed)}`
+      : "NEVER REFRESHED";
+    metaEl.title = r && r.last_refreshed ? new Date(r.last_refreshed).toLocaleString() : "";
+  }
 
   // Honest degradation (Rule 2.2): neither tool's history is on this
   // machine at all — a clear message, never a silent empty shelf.
@@ -2266,24 +2468,30 @@ function renderImportedProjects(r){
   }
 
   body.innerHTML="";
-  const row=document.createElement("div"); row.className="shelfrow";
-  projects.forEach(p=>{
-    const gone = p.exists===false;
-    const card=document.createElement("div");
-    card.className = "book imported" + (gone ? " gone" : "");
-    card.title = p.path;
-    card.innerHTML = `<div class="bookscreen"></div><div class="bookq"></div>
-      <div class="ipath"></div><div class="istat"></div>
-      <div class="bookfoot"><span class="bookwhen"></span><span class="goneflag" hidden>PATH GONE</span></div>`;
-    card.querySelector(".bookscreen").textContent = importedSourceLabel(p.sources);
-    card.querySelector(".bookq").textContent = p.title || p.path;
-    card.querySelector(".ipath").textContent = p.path;
-    card.querySelector(".istat").textContent = p.stat + (p.git_branch ? ` · ${p.git_branch}` : "");
-    card.querySelector(".bookwhen").textContent = importedRelTime(p.last_active);
-    if(gone) card.querySelector(".goneflag").hidden = false;
-    row.appendChild(card);
-  });
-  body.appendChild(row);
+  const active = projects.filter(p=>!bookkeeperIsStale(p));
+  const stale = projects.filter(bookkeeperIsStale);
+
+  if(active.length){
+    const row=document.createElement("div"); row.className="shelfrow";
+    active.forEach(p=>row.appendChild(bookkeeperCard(p)));
+    body.appendChild(row);
+  } else {
+    const note=document.createElement("div"); note.className="note";
+    note.textContent = `No project active in the last ${STALE_AFTER_DAYS} days.`;
+    body.appendChild(note);
+  }
+
+  if(stale.length){
+    const tgl=document.createElement("button"); tgl.className="mini staleToggle"; tgl.type="button";
+    const staleRow=document.createElement("div"); staleRow.className="shelfrow stalerow"; staleRow.style.display="none";
+    let open=false;
+    const setLabel=()=>{ tgl.textContent = `${open?"▾ HIDE":"▸ SHOW"} ${stale.length} STALE / ARCHIVED`; };
+    setLabel();
+    tgl.onclick=()=>{ open=!open; staleRow.style.display = open?"flex":"none"; setLabel(); };
+    stale.forEach(p=>staleRow.appendChild(bookkeeperCard(p)));
+    body.appendChild(tgl);
+    body.appendChild(staleRow);
+  }
 
   // Per-source configuration state stays visible even when results exist
   // — e.g. only Claude Code is installed here, Codex CLI genuinely never
@@ -4160,6 +4368,10 @@ else document.documentElement.setAttribute("data-theme","arc");
   if(!storedTheme){ openPicker(); }
   else if(!booted){ runBoot(storedTheme); }
   try{ sessionStorage.setItem("dm_booted_v1","1"); }catch{}
+  // Independent of the boot art overlay above (#boot is a full-screen
+  // layer, not part of the thread DOM) — restoring HOME's thread never
+  // waits on or interferes with it.
+  restoreSession();
 })();
 ta.focus();
 
