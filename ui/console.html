@@ -694,6 +694,15 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
     <section class="pane" id="pane-settings"><div class="panehead">◆ SETTINGS</div>
       <div class="panebody" id="settingsBody"></div></section>
 
+    <!-- 3D & UI Design: a real spec-generation + manifest-cataloguing screen
+         for the desktop spatial_ai_library scaffold (ui_manifest.json,
+         3d_models/). Every request routes through the normal /api/chat
+         dispatch at the design_3d agent — same thread/confirmation pipeline
+         as every other THREAD_SCREENS entry, not a shortcut around it. -->
+    <section class="pane" id="pane-design3d"><div class="panehead">◆ 3D &amp; UI DESIGN // SPEC CATALOGUE</div>
+      <div class="panebody" id="design3dBody"></div>
+      <div class="thread" id="thread-design3d"></div></section>
+
     <section class="pane" id="pane-atlas"><div class="panehead">◆ WORLD // MONITOR</div>
       <div class="panebody" id="atlasBody"></div></section>
 
@@ -747,13 +756,13 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
-const SCREENS = ["HOME","COMMS","RESEARCH","CODE","MEDIA","PROJECTS","SETTINGS","ATLAS","NEWS","VOICE"];
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","MEDIA","PROJECTS","SETTINGS","ATLAS","NEWS","DESIGN3D","VOICE"];
 // v8.29: screens whose composer submissions get their OWN independent
 // thread (a real per-screen conversation, not a shared feed forced onto
 // COMMS). COMMS is deliberately absent — it's a real Gmail inbox now, not
 // an LLM chat surface — so a directive typed while on COMMS, WORLD,
 // SETTINGS, PROJECTS, or VOICE falls back to HOME's own thread instead.
-const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS"];
+const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS","DESIGN3D"];
 // v8.28: "ATLAS" is the internal screen id everywhere (pane-atlas, the
 // paintAtlas() dispatch, footer text before this fix) — renaming that
 // identifier would mean touching every reference. But the screen's actual
@@ -762,7 +771,7 @@ const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS"];
 // checking "how's the quant research going" landed on disaster data
 // instead — a real, confusing mislabel. This maps the DISPLAYED text only;
 // every internal id/comparison still uses "ATLAS" untouched.
-const SCREEN_LABELS = { ATLAS: "WORLD" };
+const SCREEN_LABELS = { ATLAS: "WORLD", DESIGN3D: "DESIGN" };
 const sys = {roster:null,conns:null,server:null,backend:null,memory:null,telemetry:null,version:null,me:null,voice:null};
 let screen = "HOME", busy = false, focusAgent = "", speak = false, voiceMode = false;
 const queue = [];
@@ -802,6 +811,7 @@ function show(name){
   if(name==="SETTINGS") paintSettings();
   if(name==="ATLAS") paintAtlas();
   if(name==="NEWS") paintNews();
+  if(name==="DESIGN3D") paintDesign3d();
   if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
   else if(voiceMode && name!=="VOICE"){ voiceMode = false; $("micChip").classList.remove("on"); }
 }
@@ -1036,6 +1046,7 @@ function paintHome(){
     ["RESEARCH","Live web search with sources.","RESEARCH"],
     ["CODE","Pick a toolchain and write code.","CODE"],
     ["PROJECTS","Shelve real work by project.","PROJECTS"],
+    ["DESIGN","Generate UI/3D specs and catalogue them.","DESIGN3D"],
     ["VOICE","Hands-free, with a live activity feed.","VOICE"],
   ];
   const wrap = $("homeCards");
@@ -1818,6 +1829,90 @@ function paintMedia(){
       <div class="n">${c&&c.ok?"Linked":"Not linked"}</div><div class="d">${esc((c&&c.detail)||"")}</div></div></div>
     <div class="note" style="margin-top:12px">Ask for a track below and the music agent handles it.
       Playback changes ask for approval first.</div>`;
+}
+/* ---------------- DESIGN3D: 3D & UI Design spec catalogue ----------------
+   A real screen for the design_3d roster agent (general_roster.py /
+   design_3d_ops.py): generate/describe a UI component spec matching the
+   desktop's ui_manifest.json shape, generate/describe a simple 3D model
+   as a primitive composition, and list/read/write the manifest. Every
+   action here is a directive routed through the normal focus_agent +
+   /api/chat + submit() pipeline — the SAME thread/confirmation flow as
+   RESEARCH or CODE, not a shortcut around it. Writing a manifest entry is
+   REQUIRES_CONFIRMATION at the tool-registry level, so approving/declining
+   shows up right in this screen's thread exactly like any other gated
+   tool call. */
+function paintDesign3d(){
+  const box = $("design3dBody");
+  box.innerHTML = `
+    <div class="note">Real spec generation + cataloguing for the desktop
+      spatial_ai_library scaffold (ui_components/ui_manifest.json,
+      3d_models/). The design_3d agent can generate a UI component spec,
+      describe a simple 3D model as a composition of primitives
+      (box/sphere/cylinder/cone/plane/torus) with position/scale/material,
+      list or read the manifest, and write a new entry to it — every write
+      asks for approval first, right here in the thread below.</div>
+    <div class="note" style="color:var(--amber);margin-top:6px">NOT a 3D
+      renderer, CAD engine, or mesh generator: no vertex/face geometry and
+      no real 3D asset file (.obj/.glb/.fbx/.stl) is ever produced — only
+      structured specs a human, or a future renderer, can act on.</div>
+    <div class="sec">TRY</div>
+    <div class="cards" id="d3dCards"></div>
+    <div class="sec">NEW UI COMPONENT</div>
+    <input id="d3dName" class="mailfield" type="text" placeholder="Name (e.g. glass_hud_panel)">
+    <input id="d3dCategory" class="mailfield" type="text" placeholder="Category (e.g. panel, toolbar, menu)">
+    <input id="d3dDesc" class="mailfield" type="text" placeholder="Description">
+    <div class="toolbar">
+      <input id="d3dWidth" class="mailfield" type="number" placeholder="Width" style="flex:1;min-width:80px">
+      <input id="d3dHeight" class="mailfield" type="number" placeholder="Height" style="flex:1;min-width:80px">
+      <input id="d3dColor" class="mailfield" type="text" placeholder="Color (#7ea9c9)" style="flex:1;min-width:80px">
+      <input id="d3dOpacity" class="mailfield" type="number" step="0.05" min="0" max="1" placeholder="Opacity 0-1" style="flex:1;min-width:80px">
+    </div>
+    <div class="toolbar">
+      <button type="button" id="d3dGenBtn">GENERATE &amp; SAVE TO MANIFEST</button>
+    </div>
+    <div class="sec">3D MODEL SPEC (primitive-level — not a real mesh)</div>
+    <textarea id="d3dModelDesc" class="mailfield mailfieldbody" placeholder="Describe the model as primitives, e.g. &quot;a desk lamp: a cylinder base at 0,0,0 and a sphere shade at 0,1,0&quot;"></textarea>
+    <div class="toolbar">
+      <button class="chip" type="button" id="d3dModelBtn">DESCRIBE 3D MODEL SPEC</button>
+    </div>`;
+  const cards = [
+    ["List the manifest", "See everything already catalogued.",
+      "List every entry currently in the UI design manifest."],
+    ["Read one entry", "Look up a component by name.",
+      "Read the manifest entry named glass_hud_panel."],
+  ];
+  const wrap = $("d3dCards");
+  cards.forEach(([h,d,prompt])=>{
+    const b=document.createElement("button"); b.className="card"; b.type="button";
+    b.innerHTML=`<div class="h"></div><div class="d"></div>`;
+    b.querySelector(".h").textContent=h; b.querySelector(".d").textContent=d;
+    b.onclick=()=>{ focusAgent="design_3d"; ta.value=prompt; submit(); };
+    wrap.appendChild(b);
+  });
+  $("d3dGenBtn").onclick=()=>{
+    const name=$("d3dName").value.trim(), category=$("d3dCategory").value.trim(),
+      desc=$("d3dDesc").value.trim(), width=$("d3dWidth").value.trim(),
+      height=$("d3dHeight").value.trim(), color=$("d3dColor").value.trim(),
+      opacity=$("d3dOpacity").value.trim();
+    if(!name||!category||!desc||!width||!height){
+      alert("Name, category, description, width and height are required.");
+      return;
+    }
+    let directive = `Generate a UI component spec named "${name}" in category `+
+      `"${category}" with description "${desc}", width ${width}, height ${height}`;
+    if(color) directive += `, color ${color}`;
+    if(opacity) directive += `, opacity ${opacity}`;
+    directive += `. Then write it to the UI design manifest as a new entry.`;
+    focusAgent="design_3d"; ta.value=directive; submit();
+  };
+  $("d3dModelBtn").onclick=()=>{
+    const desc=$("d3dModelDesc").value.trim();
+    if(!desc){ alert("Describe the model first."); return; }
+    focusAgent="design_3d";
+    ta.value = `Generate a 3D model spec (primitive composition only — `+
+      `not a real mesh) for: ${desc}`;
+    submit();
+  };
 }
 function paintSettings(){
   const b=sys.backend||{}, s=sys.server||{}, me=sys.me||{}, v=sys.voice||{}, t=sys.telemetry||{};

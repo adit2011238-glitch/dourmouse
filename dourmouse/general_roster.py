@@ -3936,6 +3936,25 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    # -- 3D & UI Design agent ------------------------------------------ #
+    # Real spec-generation + cataloguing tools for the desktop
+    # spatial_ai_library scaffold (ui_components/ui_manifest.json,
+    # 3d_models/). Deterministic (Rule 2.8), honestly NOT a mesh/CAD
+    # generator (Rule 2.2) — see design_3d_ops.py's module docstring.
+    from dourmouse.design_3d_ops import build_design_3d_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "design_3d",
+            "General",
+            "3D & UI Design — generates/describes UI component and "
+            "primitive-level 3D model specs and catalogues them into a "
+            "ui_manifest.json-shaped manifest at a configurable path. "
+            "NOT a renderer, CAD engine, or mesh generator.",
+            build_design_3d_tool_specs(),
+        )
+    )
+
     # -- v5.8 artifact renderer ---------------------------------------- #
     # Every research/coding/report agent can publish a structured artifact
     # (markdown / table / series) rendered beside the chat — the biggest

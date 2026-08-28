@@ -98,6 +98,7 @@ class TestRosterShape:
             "docs",  # v5.x: Google Sheets/Drive link-shared access
             "browser",  # v5.25: real headless-Chrome agent (signup/login)
             "compute",  # v5.26: the Dell compute node (LAN inference + failover)
+            "design_3d",  # 3D & UI Design — spec generation + manifest cataloguing
         }
 
     def test_orchestrator_exposes_delegate_task(self):
@@ -144,6 +145,9 @@ class TestRosterShape:
             # same full-laptop scope; delete_path was already gated.
             "write_note",
             "write_path",
+            # design_3d: can silently overwrite an existing named manifest
+            # entry with no diff shown, same rationale as write_note.
+            "write_manifest_entry",
         }
 
     def test_internet_tools_registered(self):
