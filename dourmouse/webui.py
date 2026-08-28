@@ -1411,6 +1411,24 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(self.server.list_sessions())
         elif path == "/api/sessions/recent":
             self._send_json(self.server.list_recent_sessions())
+        elif path == "/api/session/current":
+            # v8.31: reload-survival groundwork. The live ChatSession
+            # already persists every turn to workspace/sessions/<id>.jsonl
+            # (chat.py's _persist, hash-chained); nothing ever read it back
+            # for the UI, so a browser reload always rebuilt a blank thread
+            # even though the SAME session id kept showing in the footer.
+            # This is that missing read path — the CURRENT session's full
+            # turn-by-turn transcript, straight off the ledger this server
+            # is already writing.
+            result = self.server.get_session_transcript(None)
+            self._send_json(result, status=200 if result.get("ok") else 404)
+        elif path.startswith("/api/session/"):
+            # Same shape, for any past session by id (the "name" field
+            # /api/sessions already lists, minus the .jsonl suffix) — lets a
+            # future "reopen this old thread" UI reuse the identical path.
+            session_id = urllib.parse.unquote(path[len("/api/session/"):])
+            result = self.server.get_session_transcript(session_id)
+            self._send_json(result, status=200 if result.get("ok") else 404)
         elif path == "/api/jobs":
             self._send_json(
                 {"jobs": self.server.jobs.snapshot(), "count": self.server.jobs.count()}
@@ -1568,6 +1586,21 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.project_import import get_imported_projects
 
             self._send_json(get_imported_projects())
+        elif path == "/api/projects/bookkeeper":
+            # world-monitor-expansion: the persisted project bookkeeper —
+            # real per-project name/context/last-activity, layered on top
+            # of /api/projects/imported above and incrementally refreshed
+            # (see dourmouse/project_bookkeeper.py). A plain GET here is a
+            # cheap file read, not a rescan; POST
+            # /api/projects/bookkeeper/refresh forces one.
+            from dourmouse.project_bookkeeper import get_bookkeeper
+
+            try:
+                self._send_json(get_bookkeeper())
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({
+                    "last_refreshed": None, "projects": [], "error": str(exc)[:200],
+                })
         elif path == "/api/messages":
             self._handle_messages_api()
         elif path == "/api/voice":
@@ -2077,6 +2110,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(exc)}, status=400)
                 return
             self._send_json({"ok": True, "task": task})
+        elif parsed.path == "/api/projects/bookkeeper/refresh":
+            # world-monitor-expansion: force the incremental refresh
+            # described in dourmouse/project_bookkeeper.py — real work
+            # only for projects whose last_active moved since the last
+            # persisted checkpoint; everything else is served from the
+            # persisted record as-is.
+            from dourmouse.project_bookkeeper import refresh as refresh_bookkeeper
+
+            try:
+                self._send_json({"ok": True, **refresh_bookkeeper()})
+            except Exception as exc:  # noqa: BLE001 - honest, never a 500
+                self._send_json({"ok": False, "error": str(exc)[:200]}, status=500)
         elif parsed.path == "/api/world/regions":
             # v8.20 watch regions: create. Same deterministic-CRUD shape as
             # /api/tasks above — no LLM in this path, real validation errors
@@ -4444,8 +4489,19 @@ def run_server(
     freebuff_events: bool = False,
     state=None,
     auth=None,
+    session_file: Path | str | None = None,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns the running ThreadingHTTPServer.
+
+    ``session_file`` (v8.31): which on-disk session ledger the server's
+    live ``ChatSession`` writes to and resumes from. None (default,
+    unchanged) mints a fresh ``session_<timestamp>.jsonl`` every call, same
+    as before this parameter existed — every existing caller (desktop.py,
+    the test suite) is unaffected. A caller that wants a conversation to
+    survive a process RESTART, not just a browser reload, passes the same
+    path back in (e.g. the most recent ``workspace/sessions/*.jsonl``);
+    ChatSession.__init__ already knows how to resume one (``_load_state``)
+    — this just gives run_server a way to hand it one.
 
     ``live_polling`` (v2.8): when True (and DOURMOUSE_LIVE is not disabled),
     an always-on LiveRuntime is started against the server's own tracker,
@@ -4537,6 +4593,70 @@ def run_server(
             )
         return {"sessions": out}
 
+    _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+    def _get_session_transcript(session_id: str | None) -> dict[str, Any]:
+        """Full turn-by-turn transcript for one session (reload survival).
+
+        ``session_id`` None means "whichever session this server process is
+        currently running" — ``server.session`` is the live ``ChatSession``,
+        already durably appending one hash-chained record per turn to
+        ``session_file`` (chat.py's ``_persist``, unchanged). A page reload
+        keeps the same server process (same footer SESSION id, confirmed
+        live), so the live object's own ``session_file`` IS the reload
+        target — no directory scan, no guessing which file is "current".
+
+        A concrete ``session_id`` is any past session's file stem (exactly
+        what /api/sessions already lists as ``name`` minus ``.jsonl``),
+        read the same way, for a future "reopen an old thread" UI.
+
+        Reuses the existing ledger format wholesale (no new storage, no
+        second persistence path) — each returned "turn" is one JSONL record
+        as chat.py already writes it: ``user`` text, ``final_text`` reply,
+        and the raw ``transcript`` of tool_use/tool_result/assistant_text
+        events from that turn, which is exactly what the console's own
+        addYou()/addReply()/act() already know how to render live.
+        """
+        import os
+
+        if session_id is None:
+            target = Path(server.session.session_file)
+        else:
+            if not _SESSION_ID_RE.match(session_id):
+                return {"ok": False, "error": "invalid session id"}
+            raw = os.environ.get("DOURMOUSE_WORKSPACE")
+            root = Path(raw).expanduser() if raw else _PROJECT_ROOT / "workspace"
+            sessions_dir = (root / "sessions").resolve()
+            candidate = (sessions_dir / f"{session_id}.jsonl").resolve()
+            # Defense in depth beyond the regex above: the resolved path
+            # must stay inside sessions_dir (session_id is untrusted
+            # request input reaching straight into a filesystem path).
+            if sessions_dir != candidate.parent:
+                return {"ok": False, "error": "invalid session id"}
+            target = candidate
+        if not target.is_file():
+            return {"ok": False, "error": "session not found", "id": target.stem}
+        turns: list[dict[str, Any]] = []
+        try:
+            for line in target.read_text(encoding="utf-8", errors="replace").splitlines():
+                if not line.strip():
+                    continue
+                rec = json.loads(line)
+                turns.append(
+                    {
+                        "turn": rec.get("turn"),
+                        "timestamp": rec.get("timestamp"),
+                        "elapsed_ms": rec.get("elapsed_ms"),
+                        "user": rec.get("user", ""),
+                        "final_text": rec.get("final_text", ""),
+                        "transcript": rec.get("transcript", []),
+                        "interventions": rec.get("interventions", []),
+                    }
+                )
+        except (json.JSONDecodeError, OSError) as exc:
+            return {"ok": False, "error": f"could not read session: {exc}", "id": target.stem}
+        return {"ok": True, "id": target.stem, "turns": turns}
+
     # Validate configuration BEFORE any side effect: an invalid DOURMOUSE_ROLE
     # must fail loudly before a socket is ever bound (institutional: no
     # partially-initialized service).
@@ -4616,6 +4736,7 @@ def run_server(
         server.bus.on_post(_mirror_to_memory)
     server.list_sessions = _list_sessions
     server.list_recent_sessions = _list_recent_sessions
+    server.get_session_transcript = _get_session_transcript
     # v5.8: the artifact renderer store. Defaults to the process singleton
     # (tools publish into the same store the HUD reads); tests pass a fresh
     # one for isolation, exactly like bus/memory.
@@ -4658,6 +4779,7 @@ def run_server(
     server.confirm_resolver = None  # set per-chat via gate resolver closure
     server.session = ChatSession(
         registry,
+        session_file=Path(session_file) if session_file is not None else None,
         client=client,
         config=config,
         job_tracker=server.jobs,

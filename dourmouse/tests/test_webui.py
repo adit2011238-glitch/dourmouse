@@ -12,6 +12,7 @@ import http.client
 import json
 import threading
 import time
+import urllib.parse
 
 import pytest
 
@@ -373,6 +374,108 @@ class TestHttpEndpoints:
         resp = conn.getresponse()
         assert resp.status == 404
         conn.close()
+
+
+class TestSessionTranscriptEndpoint:
+    """GET /api/session/current and /api/session/<id> — reload-survival
+    groundwork: the live ChatSession already writes one hash-chained JSONL
+    record per turn (chat.py's _persist); these endpoints are the first
+    thing that ever reads it back for a UI to rebuild a thread with."""
+
+    def _get(self, port: int, path: str) -> tuple[int, dict]:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        return resp.status, data
+
+    def test_current_reflects_a_real_turn_just_run(self, server):
+        """Drive one real turn through /api/chat, then confirm
+        /api/session/current returns it — proving this reads the SAME
+        ledger _persist() writes, not a second/fabricated store."""
+        srv, port = server
+        srv.session.client = FakeClient(
+            [_FakeResponse(_FakeMessage(content="hello back"))]
+        )
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat",
+            body=json.dumps({"prompt": "hello there"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        while resp.readline():
+            pass
+        conn.close()
+        assert resp.status == 200
+
+        status, data = self._get(port, "/api/session/current")
+        assert status == 200
+        assert data["ok"] is True
+        assert data["id"] == srv.session.session_file.stem
+        assert len(data["turns"]) == 1
+        turn = data["turns"][0]
+        assert turn["user"] == "hello there"
+        assert turn["final_text"] == "hello back"
+
+    def test_current_before_any_turn_is_empty_not_missing(self, server):
+        """A brand-new session file doesn't exist on disk until the first
+        turn persists — current must say so honestly (ok:false, not a
+        fabricated empty transcript), matching _persist()'s real timing."""
+        srv, port = server
+        status, data = self._get(port, "/api/session/current")
+        assert status == 404
+        assert data["ok"] is False
+
+    def test_by_id_reads_a_past_sessions_full_turn_shape(self, server, tmp_path):
+        """A concrete id (the same 'name' minus .jsonl that /api/sessions
+        already lists) returns that file's real records, tool transcript
+        included — not just the first/last-line summary /api/sessions/recent
+        gives."""
+        sessions_dir = tmp_path / "ws" / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        (sessions_dir / "session_20260801_000000.jsonl").write_text(
+            json.dumps(
+                {
+                    "turn": 0,
+                    "user": "run the echo tool",
+                    "final_text": "done",
+                    "transcript": [{"type": "tool_use", "name": "echo", "raw_arguments": "{}"}],
+                }
+            )
+            + "\n"
+        )
+        srv, port = server
+        status, data = self._get(port, "/api/session/session_20260801_000000")
+        assert status == 200
+        assert data["ok"] is True
+        assert data["id"] == "session_20260801_000000"
+        assert len(data["turns"]) == 1
+        assert data["turns"][0]["user"] == "run the echo tool"
+        assert data["turns"][0]["transcript"] == [
+            {"type": "tool_use", "name": "echo", "raw_arguments": "{}"}
+        ]
+
+    def test_unknown_id_is_404_not_500(self, server):
+        srv, port = server
+        status, data = self._get(port, "/api/session/session_no_such_file")
+        assert status == 404
+        assert data["ok"] is False
+
+    def test_path_traversal_id_is_rejected(self, server):
+        """session_id reaches straight into a filesystem path — anything
+        outside [A-Za-z0-9_-] must be refused before it ever touches disk,
+        the same discipline as the static-asset traversal guard above."""
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/session/" + urllib.parse.quote("../../../etc/passwd"))
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert resp.status == 404
+        assert data["ok"] is False
+        assert "invalid" in data["error"]
 
 
 class TestVisionStatusEndpoint:
