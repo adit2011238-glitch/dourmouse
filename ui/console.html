@@ -354,6 +354,23 @@ button,input,textarea,select{font:inherit;color:inherit}
 .card .h{font-size:9.5px;letter-spacing:.14em;color:var(--amber);margin-bottom:4px}
 .card .d{font-size:8.5px;color:var(--blue-deep);line-height:1.5}
 
+/* v13: NEEDS ATTENTION panel (see paintAttention()) — deliberately louder
+   than the metrics grid it sits above (a --bad left border, not just
+   another neutral row), since the whole point is that these items are
+   easy to miss when buried in scrolled-past chat history. */
+.attnpanel{border:1px solid var(--bad);border-left-width:3px;border-radius:2px;
+  margin-bottom:16px;overflow:hidden}
+.attnhead{padding:8px 12px;font-size:9.5px;letter-spacing:.14em;color:var(--bad);
+  background:var(--panel2);border-bottom:1px solid var(--line)}
+.attnrow{display:flex;align-items:center;gap:10px;padding:8px 12px;
+  border-bottom:1px solid var(--line);flex-wrap:wrap}
+.attnrow:last-child{border-bottom:none}
+.attnkind{font-size:8px;letter-spacing:.1em;color:var(--bad);
+  border:1px solid var(--bad);border-radius:2px;padding:2px 6px;white-space:nowrap}
+.attnscreen{font-size:8px;letter-spacing:.1em;color:var(--blue-dim)}
+.attnsum{font-size:10px;color:var(--blue-hi);flex:1;min-width:160px}
+.attnat{font-size:8px;color:var(--blue-deep)}
+
 /* ---------- transcript ---------- */
 /* v8.28: Claude-like legibility pass, scoped to the chat area specifically
    (composer, transcript, tool-call blocks) — the four themes and their boot
@@ -1206,8 +1223,9 @@ async function refresh(){
     g("roster","/api/roster"), g("conns","/api/connections"), g("server","/api/server"),
     g("backend","/api/backend"), g("memory","/api/memory"), g("telemetry","/api/telemetry"),
     g("version","/api/version"), g("me","/api/auth/me"), g("voice","/api/voice"),
+    g("attention","/api/attention"),
   ]);
-  paintMast(); paintAgents(); paintHome();
+  paintMast(); paintAgents(); paintHome(); paintAttention();
 }
 function paintMast(){
   const t = sys.telemetry||{}, b = sys.backend||{}, s = sys.server||{};
@@ -1238,6 +1256,7 @@ function paintHome(){
   $("homeBody").innerHTML = `
     <p class="lede">${rost.length} AGENTS MOUNTED. ${okN} OF ${Object.keys(c).length} CONNECTIONS LIVE.
       ${s.online?`COMPUTE NODE ${esc(s.node)} ONLINE AT ${s.latency_ms}MS.`:"COMPUTE NODE OFFLINE — RUNNING ON THE CONFIGURED BACKEND."}</p>
+    <div id="attnBox"></div>
     <div class="metrics">
       <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"—"} FACTS</span></div>
       <div class="metric"><span class="k">LEARNING</span><span class="v">${m.active?"ON":"OFF"}</span></div>
@@ -1259,6 +1278,73 @@ function paintHome(){
     const b=document.createElement("button"); b.className="card"; b.type="button";
     b.innerHTML=`<div class="h">${h}</div><div class="d">${d}</div>`;
     b.onclick=()=>show(go); wrap.appendChild(b);
+  });
+}
+
+/* ---------------- NEEDS ATTENTION ----------------
+   v13: a fabricated no-tool RESEARCH answer, a NOT CONFIGURED tool, or a
+   timed-out CLI call used to land quietly inside one turn's own reply
+   text with nothing surfacing it anywhere else — invisible unless the
+   user happened to scroll back through a specific screen's history and
+   read that exact reply. GET /api/attention (dourmouse/webui.py's
+   AttentionQueue, a pure observer fed from the same event stream every
+   chat turn already emits) is the backend half; this renders it as a
+   dismissible list on HOME, refreshed by the same 30s refresh() cycle
+   every other HOME metric already rides. Renders nothing at all — no
+   empty box, no "all clear" banner — when there is genuinely nothing to
+   flag, so a healthy system doesn't grow a permanent empty panel. */
+const ATTENTION_LABELS = {
+  not_configured: "NOT CONFIGURED",
+  tool_error: "TOOL ERROR",
+  timeout: "TIMED OUT",
+  error: "ERROR",
+  budget_exhausted: "BUDGET EXHAUSTED",
+  ungrounded_answer: "UNGROUNDED ANSWER",
+  incomplete_plan: "INCOMPLETE PLAN",
+};
+function paintAttention(){
+  const box = $("attnBox");
+  if(!box) return;  // only HOME has this container
+  const data = sys.attention || {items: [], count: 0};
+  const items = data.items || [];
+  if(!items.length){ box.innerHTML = ""; return; }
+  const rows = items.map(it => {
+    const label = ATTENTION_LABELS[it.kind] || it.kind.toUpperCase();
+    return `<div class="attnrow" data-id="${it.id}">
+      <span class="attnkind">${esc(label)}</span>
+      <span class="attnscreen">${esc(it.screen)}</span>
+      <span class="attnsum"></span>
+      <span class="attnat">${esc((it.at||"").slice(11,19))}</span>
+      <button class="mini attndismiss" type="button" data-id="${it.id}">DISMISS</button>
+      <button class="mini attngo" type="button" data-screen="${esc(it.screen)}">GO</button>
+    </div>`;
+  }).join("");
+  box.innerHTML = `<div class="attnpanel">
+    <div class="attnhead">◆ NEEDS ATTENTION (${items.length})</div>
+    ${rows}
+  </div>`;
+  // Summaries set via textContent, not the template above, so a tool's
+  // own error text (real, untrusted data straight from a tool_result)
+  // can never inject markup into this panel.
+  box.querySelectorAll(".attnrow").forEach((row, i) => {
+    row.querySelector(".attnsum").textContent = items[i].summary;
+  });
+  box.querySelectorAll(".attndismiss").forEach(btn => {
+    btn.onclick = async () => {
+      const id = parseInt(btn.dataset.id, 10);
+      try {
+        await fetch("/api/attention/dismiss", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({id}),
+        });
+      } catch {}
+      sys.attention = {items: items.filter(it => it.id !== id), count: items.length - 1};
+      paintAttention();
+    };
+  });
+  box.querySelectorAll(".attngo").forEach(btn => {
+    btn.onclick = () => show(btn.dataset.screen);
   });
 }
 

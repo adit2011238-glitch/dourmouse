@@ -383,6 +383,104 @@ class ActivityTracker:
             }
 
 
+class AttentionQueue:
+    """v13: cross-screen "needs attention" feed.
+
+    Real gap this closes, found live: a fabricated no-tool RESEARCH answer,
+    a NOT CONFIGURED tool, or a timed-out CLI call each land quietly in one
+    turn's own reply text — nothing surfaces them anywhere else, so a caveat
+    on turn 4 of a scrolled-past CODE conversation is invisible unless the
+    user happens to scroll back and read that exact reply carefully. This is
+    a pure observer, fed from the same event_sink every chat turn already
+    emits (see webui.py's ``sink()`` closure) — it NEVER affects dispatch,
+    matching ActivityTracker's own established convention just above.
+    In-memory only, bounded, process-lifetime — restarting the server
+    clears it, same tradeoff ActivityTracker already accepts.
+    """
+
+    _MAX_ITEMS = 50
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._items: list[dict[str, Any]] = []
+        self._next_id = 1
+
+    def _add(self, kind: str, summary: str, screen: str, detail: str = "") -> None:
+        with self._lock:
+            item = {
+                "id": self._next_id,
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "kind": kind,
+                "summary": summary[:400],
+                "screen": screen or "HOME",
+                "detail": detail[:2000],
+                "dismissed": False,
+            }
+            self._next_id += 1
+            self._items.append(item)
+            if len(self._items) > self._MAX_ITEMS:
+                del self._items[: len(self._items) - self._MAX_ITEMS]
+
+    def on_event(self, entry: dict[str, Any], screen: str = "HOME") -> None:
+        """Observer hook — swallow everything so a bug here can never break
+        a real chat turn (Rule: an observer must never affect execution)."""
+        try:
+            self._record(entry, screen)
+        except Exception:
+            pass
+
+    def _record(self, entry: dict[str, Any], screen: str) -> None:
+        etype = entry.get("type")
+        if etype == "tool_result":
+            text = entry.get("text") or ""
+            name = entry.get("name") or "tool"
+            if text.startswith("NOT CONFIGURED:"):
+                self._add("not_configured", f"{name}: {text[len('NOT CONFIGURED:'):].strip()}", screen, text)
+            elif text.startswith("ERROR:"):
+                self._add("tool_error", f"{name}: {text[len('ERROR:'):].strip()}", screen, text)
+            elif "timed out" in text.lower():
+                self._add("timeout", f"{name} timed out", screen, text)
+        elif etype == "error":
+            self._add("error", str(entry.get("message") or "an error occurred"), screen)
+        elif etype == "budget_exhausted":
+            self._add("budget_exhausted", str(entry.get("reason") or "tool budget exhausted"), screen)
+        elif etype == "done":
+            final_text = entry.get("final_text") or ""
+            if "[DOURMOUSE: Grounded Mode was on" in final_text:
+                self._add(
+                    "ungrounded_answer",
+                    "Answered with zero tool calls despite Grounded Mode being on",
+                    screen,
+                    final_text,
+                )
+            elif "[DOURMOUSE: plan step(s) not executed via tools" in final_text:
+                self._add(
+                    "incomplete_plan",
+                    "A plan step was claimed done without ever calling its tool",
+                    screen,
+                    final_text,
+                )
+
+    def snapshot(self, include_dismissed: bool = False) -> list[dict[str, Any]]:
+        with self._lock:
+            items = list(self._items)
+        if not include_dismissed:
+            items = [i for i in items if not i["dismissed"]]
+        return list(reversed(items))  # newest first
+
+    def dismiss(self, item_id: int) -> bool:
+        with self._lock:
+            for item in self._items:
+                if item["id"] == item_id:
+                    item["dismissed"] = True
+                    return True
+        return False
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items.clear()
+
+
 class _SSEStream:
     """Wraps a response for Server-Sent-Events writes (thread-safe)."""
 
@@ -1442,6 +1540,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(
                 {"jobs": self.server.jobs.snapshot(), "count": self.server.jobs.count()}
             )
+        elif path == "/api/attention":
+            # v13: the cross-screen "needs attention" feed — see
+            # AttentionQueue's own docstring for the gap this closes.
+            items = self.server.attention.snapshot()
+            self._send_json({"items": items, "count": len(items)})
         elif path == "/api/budget":
             self._send_json(
                 {
@@ -2086,6 +2189,15 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_chat()
         elif parsed.path == "/api/confirm":
             self._handle_confirm()
+        elif parsed.path == "/api/attention/dismiss":
+            body = self._read_json_body()
+            try:
+                item_id = int(body.get("id"))
+            except (TypeError, ValueError):
+                self._send_json({"ok": False, "detail": "id must be an integer"})
+            else:
+                ok = self.server.attention.dismiss(item_id)
+                self._send_json({"ok": ok})
         elif parsed.path == "/api/role":
             self._handle_role()
         elif parsed.path == "/api/settings/orchestrator-model":
@@ -2745,6 +2857,7 @@ class _Handler(BaseHTTPRequestHandler):
         def sink(entry: dict[str, Any]) -> None:
             stream.emit(entry)
             self.server.tracker.on_event(entry)
+            self.server.attention.on_event(entry, screen=screen)
 
         # ONE shared gate per server. The wiring (emit swap + resolver) and
         # the run must be atomic under session_lock so a concurrent request
@@ -4798,6 +4911,7 @@ def run_server(
     # is live (ollama/nvidia/default) without re-resolving per request.
     server.backend_label = _backend_label(config)
     server.tracker = ActivityTracker(registry)
+    server.attention = AttentionQueue()
     server.jobs = JobTracker()
     server.memory = memory  # v2.9: long-term store for the learning loop
     # v3.0: the inter-agent message bus. Defaults to the process singleton so
