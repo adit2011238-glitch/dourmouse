@@ -69,7 +69,21 @@ def user_config_dir() -> Path:
     bundle deliberately ships no ``.env`` (shipping one would hand the
     builder's own API keys to everyone who installs it). Config therefore
     lives in a per-user directory that survives updates and uninstalls.
+
+    v13 (hermetic-test-caught, real bug): with no override, every test on
+    this machine that touched orchestrator-model settings or Grounded Mode
+    was silently reading the REAL developer's ``.env`` — live settings
+    toggled ON during earlier manual verification (DOURMOUSE_GROUNDED_MODE=1
+    from Grounded Mode's own live test) leaked into unrelated hermetic
+    tests, causing spurious extra dispatch turns and exhausting fake
+    clients sized for the untouched-setting case. DOURMOUSE_CONFIG_DIR lets
+    tests redirect this the same way DOURMOUSE_WORKSPACE already isolates
+    the workspace root (see conftest.py's ``_workspace_isolated``) — unset
+    in production, so real installs are unaffected.
     """
+    override = os.environ.get("DOURMOUSE_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
         return Path(base) / "Dourmouse"

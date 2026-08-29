@@ -327,6 +327,22 @@ def server_status() -> dict[str, Any]:
     if not server_enabled():
         base["error"] = "compute node disabled (DOURMOUSE_SERVER_ENABLED=0)"
         return base
+    if not server_url_configured():
+        # v13 (test-caught, real bug): this was the ONE caller of the Dell
+        # client that never checked server_url_configured() before probing
+        # — dispatch.py's fast lane and the health warmer both already
+        # gate on it (see their own call sites), and this module's own
+        # docstring for server_url_configured() explicitly warns against
+        # exactly this: "must never probe the DEFAULT address on a machine
+        # that never opted into the Dell". A machine that never set
+        # DOURMOUSE_SERVER_URL was paying a real 2s+ (occasionally much
+        # longer — LAN ARP resolution for an unclaimed private IP can
+        # outlast the userspace socket timeout) network stall on every
+        # SETUP panel load / /api/setup poll, for a node it never asked
+        # about. Honest "not configured", zero network I/O, matching every
+        # other real caller.
+        base["error"] = "compute node not configured (set DOURMOUSE_SERVER_URL to use it)"
+        return base
     now = time.monotonic()
     with _health_lock:
         fresh_offline = (

@@ -1655,8 +1655,35 @@ def world_pulse_details(source: str) -> dict[str, Any]:
 
 
 def world_pulse_status() -> dict[str, Any]:
-    """Small health view for connections/setup (fast, cached). Never raises."""
-    snap = world_pulse_snapshot()
+    """Small health view for connections/setup (fast, cached). Never raises.
+
+    v13 (test-caught, real bug): this called world_pulse_snapshot(), which
+    on a COLD cache (no prior poll yet — exactly the state of a freshly
+    started server, and exactly what a hermetic test's first call always
+    is) does a real, synchronous 17-source network fan-out that can take
+    up to _SOURCE_TIMEOUT+2 (~10s) per straggling source. That directly
+    contradicted this function's own docstring ("fast, cached") and made
+    /api/setup — a panel whose entire purpose is a quick capability
+    checklist — block for up to ~10s on its very first call after every
+    Dourmouse launch. Reads the cache directly instead: a warm cache (the
+    World Monitor screen or the news-stream poller normally keeps it warm)
+    is still instant, and a genuinely cold one reports an honest
+    "not yet polled" status rather than triggering the expensive fetch
+    itself. Callers that DO want a live snapshot (world_pulse_snapshot/
+    world_pulse_geo/world_pulse_details) are unaffected.
+    """
+    with _cache_lock:
+        snap = _cache["snapshot"]
+    if snap is None:
+        return {
+            "configured": True,
+            "online": False,
+            "sources_up": 0,
+            "sources_total": _SOURCE_COUNT,
+            "pulse_score": None,
+            "pulse_label": "not yet polled",
+            "generated_at": None,
+        }
     return {
         "configured": True,
         "online": bool(snap["sources"]),

@@ -37,3 +37,23 @@ def _neuro_off(monkeypatch):
     DOURMOUSE_NET=1 + DOURMOUSE_NET_DIR=<tmp> inside the test.
     """
     monkeypatch.setenv("DOURMOUSE_NET", "0")
+
+
+@pytest.fixture(autouse=True)
+def _user_config_isolated(tmp_path_factory, monkeypatch):
+    """v13 (hermetic-test-caught, real bug): every test touching
+    orchestrator-model settings, Grounded Mode, or (new) the MCP bridge's
+    config file was silently reading/writing the REAL developer's
+    ``~/Library/Application Support/Dourmouse/.env`` via
+    config.user_config_dir() — no isolation existed for it at all, unlike
+    DOURMOUSE_WORKSPACE above. Concretely caught: DOURMOUSE_GROUNDED_MODE=1,
+    persisted during Grounded Mode's own earlier live verification on this
+    machine, leaked into unrelated dispatch tests and silently added an
+    extra grounded-mode nudge turn, exhausting fake clients sized for the
+    setting-off case (test_planner.py::TestPlanEventInTranscript). Same
+    fixed-short-basename reasoning as _workspace_isolated above: a bare
+    "cfg" avoids leaking the test name as a query-meaningful token should
+    anything ever embed this path into a tool description the way
+    _sandbox_path_note does for the workspace root.
+    """
+    monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path_factory.mktemp("cfg")))

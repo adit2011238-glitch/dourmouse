@@ -145,6 +145,18 @@ _DOMAIN_ROUTE: dict[str, str] = {
     "spreadsheet": "docs",
     "spreadsheets": "docs",
     "drive": "docs",
+    # v13 (hermetic-test-caught): "write a python script that prints
+    # primes" tied 3-way between dev_coding/atlas/design_3d once the neural
+    # net's live-learned tie-break was correctly disabled for tests
+    # (DOURMOUSE_NET=0) — the deterministic fallback alone had no way to
+    # prefer the actually write-capable dev_coding over atlas_refresh_store
+    # ("store" satisfies the "write" verb-capability stem) or design_3d
+    # (whose own tools mention "script"). "python" only ever appears in
+    # dev_coding's and atlas's real tool text (atlas's is an internal
+    # implementation detail of its FX backfill, not a capability it
+    # offers) — an unambiguous, high-confidence domain word for coding,
+    # same category as "terminal"/"disk"/"cpu" above.
+    "python": "dev_coding",
 }
 
 # Stop words that are ALSO strong domain words must not be stripped — the

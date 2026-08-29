@@ -193,8 +193,26 @@ class TestNativeWindowLaunch:
         assert main.url.startswith("http://127.0.0.1:")
         assert map_win.url.endswith("/map")
         assert map_win.kwargs.get("hidden") is True
-        # The ATLAS window is the dedicated strategy lab, visible, sized.
+        # v8.9: the ATLAS strategy-lab window is ALSO created hidden by
+        # default now — two windows appearing unbidden at launch reads as a
+        # malfunction to anyone who didn't build this (see desktop.py's own
+        # comment on this change). It's still pre-created (the thread-safe
+        # window-creation pattern) and revealed on demand through the
+        # bridge, or at launch via DOURMOUSE_OPEN_ATLAS_LAB=1 (see the
+        # dedicated opt-in test below) — this test pins the new default.
         assert atlas.url.endswith("/atlas-lab")
+        assert atlas.kwargs.get("hidden") is True
+
+    def test_launch_atlas_lab_opt_in_env_var_makes_it_visible(self, monkeypatch):
+        """DOURMOUSE_OPEN_ATLAS_LAB=1 restores the pre-v8.9 behavior: the
+        ATLAS window opens visible at launch instead of hidden."""
+        fake = _FakeWebview()
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        monkeypatch.setenv("DOURMOUSE_OPEN_ATLAS_LAB", "1")
+        code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
+        assert code == 0
+        atlas = next(w for w in fake.windows if w.title.startswith("ATLAS"))
         assert atlas.kwargs.get("hidden") is not True
 
     def test_launch_open_all_windows_opt_out(self, monkeypatch):

@@ -420,6 +420,13 @@ class TestDetails:
         assert "unknown source" in det["error"]
 
     def test_status_shape(self):
+        # v13: world_pulse_status() no longer force-fetches on a cold cache
+        # (see its own docstring — that used to make /api/setup block for
+        # up to ~10s on every fresh launch). It now reads whatever snapshot
+        # is already cached, so this test warms it explicitly first, the
+        # same way the World Monitor screen / news-stream poller does in
+        # production before anything reads status.
+        wp.world_pulse_snapshot()
         st = wp.world_pulse_status()
         assert st["configured"] is True
         # v8.20/v8.23/v8.24/v8.26/v8.27: 17 sources registered; 15
@@ -432,6 +439,28 @@ class TestDetails:
         assert st["sources_total"] == 17
         assert st["sources_up"] == 15
         assert 5 <= st["pulse_score"] <= 95
+
+    def test_status_on_a_cold_cache_is_honest_and_instant(self, monkeypatch):
+        """The specific bug this fixes: a cold cache must report honestly
+        and immediately, never trigger the expensive live fetch itself."""
+        import time
+
+        def _boom(*a, **k):
+            raise AssertionError("world_pulse_status must not fetch on a cold cache")
+
+        monkeypatch.setattr(wp, "_http_get", _boom)
+        monkeypatch.setattr(wp, "_http_post", _boom)
+        monkeypatch.setattr(wp, "_http_get_bytes", _boom)
+        t0 = time.monotonic()
+        st = wp.world_pulse_status()
+        assert time.monotonic() - t0 < 1.0
+        assert st["configured"] is True
+        assert st["online"] is False
+        assert st["sources_up"] == 0
+        assert st["sources_total"] == 17
+        assert st["pulse_score"] is None
+        assert st["pulse_label"] == "not yet polled"
+        assert st["generated_at"] is None
 
 
 class TestWiring:
