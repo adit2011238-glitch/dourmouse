@@ -14,6 +14,7 @@ import textwrap
 
 import pytest
 
+from dourmouse import general_roster
 from dourmouse.general_roster import (
     _codex_code_tool as run_tool,
     _find_codex_cli as find_cli,
@@ -155,6 +156,12 @@ class TestToolBehavior:
         assert "non-zero" in result
 
     def test_timeout_reports_honestly(self, tmp_path, monkeypatch):
+        # v13: the real floor is now 20s (see _MIN_CLI_DELEGATE_TIMEOUT's
+        # own docstring in general_roster.py) — lowered here just for this
+        # test so it stays fast; the floor itself is covered by
+        # test_timeout_seconds_floored_at_twenty below without any real
+        # sleep at all.
+        monkeypatch.setattr(general_roster, "_MIN_CLI_DELEGATE_TIMEOUT", 1)
         fake = _write_fake_cli(
             tmp_path,
             """#!/bin/sh
@@ -171,6 +178,30 @@ class TestToolBehavior:
         monkeypatch.setenv("CODEX_CLI", fake)
         result = run_tool({"task": "x", "timeout_seconds": 9999})
         assert "EXIT CODE: 0" in result
+
+    def test_timeout_seconds_floored_at_twenty(self, monkeypatch):
+        """v13: same fix as claude_code (see that test file's own
+        docstring) applied to codex_code — no real sleep, subprocess.run
+        itself is faked."""
+        seen_timeouts: list = []
+
+        class _OkProc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            seen_timeouts.append(kwargs.get("timeout"))
+            return _OkProc()
+
+        monkeypatch.setattr(general_roster, "_find_codex_cli", lambda: "/usr/bin/codex")
+        monkeypatch.setattr(general_roster.subprocess, "run", _fake_run)
+
+        run_tool({"task": "x", "timeout_seconds": 1})
+        assert seen_timeouts == [20]
+
+        run_tool({"task": "x", "timeout_seconds": 45})
+        assert seen_timeouts == [20, 45]  # a real, sane value passes through unchanged
 
     def test_non_integer_timeout_errors(self, tmp_path, monkeypatch):
         fake = _write_fake_cli(tmp_path, "#!/bin/sh\necho ok\n")

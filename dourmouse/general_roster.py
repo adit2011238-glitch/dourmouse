@@ -131,6 +131,19 @@ def _vault_root() -> Path:
 
 _CLAUDE_OUTPUT_CAP = 20_000
 
+# v13: real floor for claude_code/codex_code's timeout_seconds. Live-observed
+# self-sabotage: after a genuinely slow ~90s claude_code call, a weak local
+# orchestrator model (qwen2.5:7b) narrated "let me try again with a shorter
+# timeout", retried with a tiny value, watched it time out in ~1s (a real
+# CLI cold-starts in more time than that alone), then gave up on the tool
+# entirely and fabricated the final answer itself instead of honestly
+# reporting the failure. The old floor was 1 second — technically valid,
+# practically guaranteed to fail for any real CLI invocation. 20s is still
+# short enough for a quick task to return well under it, but long enough
+# that a timeout means the CLI is actually stuck, not that the budget was
+# never survivable in the first place.
+_MIN_CLI_DELEGATE_TIMEOUT = 20
+
 # -- claude_code tool session continuity ------------------------------------ #
 # The SAME statelessness bug as the CODE screen's code_claude backend (see
 # code_backends.py's own "CODE-screen Claude CLI session continuity" block
@@ -269,7 +282,7 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
             "run and no result was fabricated."
         )
     try:
-        timeout = max(1, min(int(arguments.get("timeout_seconds", 300)), 600))
+        timeout = max(_MIN_CLI_DELEGATE_TIMEOUT, min(int(arguments.get("timeout_seconds", 300)), 600))
     except (TypeError, ValueError):
         return "ERROR: timeout_seconds must be an integer."
     cwd = (arguments.get("cwd") or str(_PROJECT_ROOT)).strip()
@@ -381,7 +394,7 @@ def _codex_code_tool(arguments: dict[str, Any]) -> str:
             "fabricated."
         )
     try:
-        timeout = max(1, min(int(arguments.get("timeout_seconds", 300)), 600))
+        timeout = max(_MIN_CLI_DELEGATE_TIMEOUT, min(int(arguments.get("timeout_seconds", 300)), 600))
     except (TypeError, ValueError):
         return "ERROR: timeout_seconds must be an integer."
     cwd = (arguments.get("cwd") or str(_PROJECT_ROOT)).strip()
@@ -2709,7 +2722,7 @@ def build_general_registry() -> DispatchRegistry:
                         "properties": {
                             "task": {"type": "string"},
                             "cwd": {"type": "string", "default": str(_PROJECT_ROOT)},
-                            "timeout_seconds": {"type": "integer", "default": 300},
+                            "timeout_seconds": {"type": "integer", "default": 300, "minimum": 20, "description": "Real floor is 20s -- a real CLI cold-start alone rarely finishes faster; a smaller value is silently raised to 20 rather than guaranteeing a timeout."},
                         },
                         "required": ["task"],
                     },
@@ -2735,7 +2748,7 @@ def build_general_registry() -> DispatchRegistry:
                         "properties": {
                             "task": {"type": "string"},
                             "cwd": {"type": "string", "default": str(_PROJECT_ROOT)},
-                            "timeout_seconds": {"type": "integer", "default": 300},
+                            "timeout_seconds": {"type": "integer", "default": 300, "minimum": 20, "description": "Real floor is 20s -- a real CLI cold-start alone rarely finishes faster; a smaller value is silently raised to 20 rather than guaranteeing a timeout."},
                         },
                         "required": ["task"],
                     },
