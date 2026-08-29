@@ -225,6 +225,7 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <div class="row"><span>Gesture</span><b id="visGesture">—</b></div>
     <div class="row"><span>Focused window</span><b id="visFocused">none</b></div>
     <div class="row"><span>Signal</span><b id="visSignal">—</b></div>
+    <div class="row"><span>Delegate</span><b id="visDelegate">—</b></div>
     <button class="hb" id="visToggle" type="button">ENABLE HAND CONTROL</button>
     <div class="note">Pinch a titlebar with one hand to drag it. Pinch with BOTH hands and
       change the distance between them to resize the focused window; change the angle
@@ -232,7 +233,12 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
       tray.py — verified live-desktop, not this sandbox (see page source for the full
       honesty note). Raw landmarks are EMA-smoothed and pinch has real on/off hysteresis
       (see LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO below) — SIGNAL
-      above reports NOISY when smoothing is actively correcting a jittery frame.</div>
+      above reports NOISY when smoothing is actively correcting a jittery frame. DELEGATE
+      tries GPU first and falls back to CPU automatically (see startHandControl below) —
+      an embedded desktop webview's GPU compute support is real but frequently degraded or
+      absent compared to a normal browser tab, and MediaPipe's GPU delegate then either
+      fails outright or silently produces near-zero real detections, which reads to a user
+      as "hand tracking doesn't work" with no visible error at all.</div>
   </div>
 </div>
 
@@ -703,7 +709,7 @@ $("voxMic").addEventListener("click", voxToggleMic);
 const HAND = {
   video: $("visVideo"), overlay: $("visOverlay"), wrap: $("visCamWrap"),
   toggleBtn: $("visToggle"), gestureEl: $("visGesture"), handsCountEl: $("visHandsCount"),
-  killDot: $("visKillDot"), signalEl: $("visSignal"),
+  killDot: $("visKillDot"), signalEl: $("visSignal"), delegateEl: $("visDelegate"),
   stream: null, handLM: null, running: false, startingUp: false,
   cameraAllowed: true,
   dragging: false, dragPanelId: null, dragOffX: 0, dragOffY: 0,
@@ -782,6 +788,25 @@ async function loadMediaPipe(){
 
 HAND.toggleBtn.addEventListener("click", () => { HAND.running ? stopHandControl() : startHandControl(); });
 
+/* Real bug fixed here: this used to hard-code delegate:"GPU" with no
+   fallback. A packaged desktop app's embedded webview (WebView2 on
+   Windows, WKWebView on macOS) frequently has degraded or absent GPU
+   compute support compared to a normal Chrome/Edge/Safari tab — MediaPipe's
+   GPU delegate then either rejects createFromOptions outright, or (worse)
+   "succeeds" while silently returning near-zero real hand detections every
+   frame. Either way the user sees no visible error, just hand tracking
+   that "doesn't really work" — exactly the reported symptom. CPU (WASM
+   SIMD) is slower per frame but has no such silent-failure mode across
+   webview runtimes, so it's the honest, reliable fallback: try GPU first
+   (best case: full frame rate on a capable runtime), retry CPU on ANY
+   failure, and surface which one actually won so this is diagnosable
+   instead of another silent guess. */
+async function _createHandLandmarker(vision, fileset, delegate){
+  return vision.HandLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: "/assets/vision/hand_landmarker.task", delegate },
+    runningMode: "VIDEO", numHands: 2,
+  });
+}
 async function startHandControl(){
   if(!HAND.cameraAllowed){ toast("camera kill-switch is engaged — re-enable it on the VISION screen first"); return; }
   if(HAND.startingUp || HAND.running) return;
@@ -793,10 +818,14 @@ async function startHandControl(){
     await HAND.video.play();
     const vision = await loadMediaPipe();
     const fileset = await vision.FilesetResolver.forVisionTasks("/assets/vision/");
-    HAND.handLM = await vision.HandLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: "/assets/vision/hand_landmarker.task", delegate: "GPU" },
-      runningMode: "VIDEO", numHands: 2,
-    });
+    let delegateUsed = "GPU";
+    try{
+      HAND.handLM = await _createHandLandmarker(vision, fileset, "GPU");
+    }catch(gpuErr){
+      delegateUsed = "CPU";
+      HAND.handLM = await _createHandLandmarker(vision, fileset, "CPU");
+    }
+    HAND.delegateEl.textContent = delegateUsed;
     HAND.running = true;
     HAND.toggleBtn.textContent = "DISABLE HAND CONTROL";
     HAND.toggleBtn.classList.add("on");
@@ -809,6 +838,12 @@ async function startHandControl(){
 }
 function stopHandControl(){
   HAND.running = false;
+  // Pre-existing leak, fixed in passing: HAND.handLM used to just be
+  // overwritten on the next startHandControl() with no .close() on the old
+  // instance — MediaPipe's own API for releasing its WASM/GPU resources.
+  // Repeated enable/disable cycles (exactly what a user testing hand
+  // tracking does) would accumulate live instances instead of freeing them.
+  if(HAND.handLM){ try{ HAND.handLM.close(); }catch(_){} HAND.handLM = null; }
   if(HAND._raf) cancelAnimationFrame(HAND._raf);
   if(HAND.stream){ HAND.stream.getTracks().forEach(t => t.stop()); HAND.stream = null; }
   HAND.video.srcObject = null;
@@ -817,6 +852,7 @@ function stopHandControl(){
   HAND.handsCountEl.textContent = "0 hands";
   HAND.gestureEl.textContent = "—";
   HAND.signalEl.textContent = "—";
+  HAND.delegateEl.textContent = "—";
   resetHandSmoothing(); HAND.lastHandCount = 0;
   const ctx = HAND.overlay.getContext("2d"); if(ctx) ctx.clearRect(0, 0, HAND.overlay.width, HAND.overlay.height);
   endHandDrag(); endTwoHand();

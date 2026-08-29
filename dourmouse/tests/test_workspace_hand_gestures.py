@@ -375,6 +375,41 @@ class TestWorkspaceScriptSyntax:
         )
 
 
+class TestHandLandmarkerDelegateFallback:
+    """v13: a real bug fixed — startHandControl() used to hard-code
+    delegate:"GPU" with no fallback. A packaged desktop app's embedded
+    webview (WebView2/WKWebView) frequently has degraded or absent GPU
+    compute support versus a normal browser tab: MediaPipe's GPU delegate
+    then either rejects createFromOptions outright, or silently returns
+    near-zero real detections every frame — either way the user sees no
+    error, just hand tracking that "doesn't really work". Fix: try GPU,
+    catch ANY failure, retry CPU (WASM SIMD — no such silent-failure mode),
+    and surface which one actually won."""
+
+    def test_gpu_tried_first_with_a_cpu_fallback_on_failure(self):
+        script = _extract_inline_script()
+        fn = _extract_function(script, "startHandControl")
+        assert 'await _createHandLandmarker(vision, fileset, "GPU")' in fn
+        assert 'await _createHandLandmarker(vision, fileset, "CPU")' in fn
+        # The CPU retry must be reachable ONLY from a catch around the GPU
+        # attempt — i.e. genuinely a fallback, not just two calls in a row.
+        gpu_idx = fn.index('await _createHandLandmarker(vision, fileset, "GPU")')
+        catch_idx = fn.index("catch(gpuErr)")
+        cpu_idx = fn.index('await _createHandLandmarker(vision, fileset, "CPU")')
+        assert gpu_idx < catch_idx < cpu_idx
+
+    def test_active_delegate_is_surfaced_to_the_user(self):
+        script = _extract_inline_script()
+        fn = _extract_function(script, "startHandControl")
+        assert "HAND.delegateEl.textContent = delegateUsed" in fn
+
+    def test_stop_resets_the_delegate_readout_and_closes_the_old_instance(self):
+        script = _extract_inline_script()
+        fn = _extract_function(script, "stopHandControl")
+        assert 'HAND.delegateEl.textContent = "—"' in fn
+        assert "HAND.handLM.close()" in fn
+
+
 class TestLandmarkSmoothingConstants:
     def test_alpha_is_a_named_documented_constant_in_range(self):
         script = _extract_inline_script()
