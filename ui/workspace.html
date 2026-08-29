@@ -893,6 +893,19 @@ function handPinchState(lm, wasPinching, viewW, viewH){
   return { pinch, x: (1 - px) * viewW, y: py * viewH, scale };
 }
 
+// Real bug found and fixed (flagged, not fixed, by the smoothing/hysteresis
+// pass): Math.atan2 returns degrees in (-180, 180], and a plain subtraction
+// (angleNow - start.angle) jumps by ~360deg the instant the two-hand angle
+// crosses that boundary -- e.g. start=179, now=-179 (hands only rotated 2deg
+// further) gives a raw delta of -358 instead of +2, snapping the panel to a
+// near-opposite rotation. Normalized into (-180, 180] so the delta always
+// reflects the SHORTEST real rotation between the two angles.
+function angleDelta(now, start){
+  let d = now - start;
+  d = ((d + 180) % 360 + 360) % 360 - 180;
+  return d;
+}
+
 // Two-hand pinch distance/angle -> resize/rotate target. `start` is the
 // {dist, angle, w, h, rotate} snapshot captured the frame the second pinch
 // engaged. Same clamp numbers as the original inline code (0.4-2.5x
@@ -902,7 +915,7 @@ function computeTwoHandTransform(distNow, angleNow, start){
   return {
     w: start.w * scale,
     h: start.h * scale,
-    rotate: start.rotate + (angleNow - start.angle),
+    rotate: start.rotate + angleDelta(angleNow, start.angle),
   };
 }
 

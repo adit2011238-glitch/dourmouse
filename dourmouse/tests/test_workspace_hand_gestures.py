@@ -60,6 +60,7 @@ _GESTURE_FUNCS = [
     "smoothLandmarks",
     "computeJitter",
     "handPinchState",
+    "angleDelta",
     "computeTwoHandTransform",
     "computeDragTarget",
 ]
@@ -224,6 +225,28 @@ const out = {};
   out.rotate = {
     plus40: rotatedDelta(40),
     minus40: rotatedDelta(-40),
+  };
+
+  // The wraparound case the comment above deliberately steered clear of —
+  // now a REAL regression test now that angleDelta() fixes it. A horizontal
+  // A0h/B0h pair sits the base angle right on the +-180 boundary; a small
+  // +-4 degree rotation must still report a small, correctly-signed delta,
+  // not the ~320-360 degree jump the old plain-subtraction formula gave.
+  const midH = { x: 0.5, y: 0.5 };
+  const A0h = { x: 0.35, y: 0.5 }, B0h = { x: 0.65, y: 0.5 };
+  const baseH = twoHandDistAngle(A0h, B0h);
+  const panelStartH = { dist: baseH.dist, angle: baseH.angle, w: 380, h: 320, rotate: 0 };
+  function rotatedDeltaH(thetaDeg){
+    const theta = thetaDeg * Math.PI / 180;
+    const Ar = rotatePoint(A0h, midH, theta), Br = rotatePoint(B0h, midH, theta);
+    const now = twoHandDistAngle(Ar, Br);
+    const t = computeTwoHandTransform(now.dist, now.angle, panelStartH);
+    return t.rotate - panelStartH.rotate;
+  }
+  out.wraparound = {
+    baseAngle: baseH.angle,
+    plus4: rotatedDeltaH(4),
+    minus4: rotatedDeltaH(-4),
   };
 }
 
@@ -429,6 +452,33 @@ class TestSyntheticTwoHandRotation:
         # rotating the two hands the opposite way must rotate the panel
         # the opposite way too — same sign convention, flipped input.
         assert (r["plus40"] > 0) != (r["minus40"] > 0)
+
+
+class TestAngleWraparound:
+    """Real bug found and fixed after the smoothing/hysteresis pass shipped:
+    computeTwoHandTransform's plain `angleNow - angleStart` subtraction jumps
+    by ~360deg the instant the two-hand angle crosses the atan2 +-180deg
+    boundary. The original test suite explicitly documented this case and
+    steered its base angle away from the boundary to avoid it (see the
+    driver's own comment) — this class is the regression test for the real
+    fix (angleDelta), placed directly on that boundary."""
+
+    def test_base_angle_is_actually_near_the_180_boundary(self, gesture_math_results):
+        # Sanity check that this scenario actually exercises the boundary —
+        # a wrong test fixture asserting nothing meaningful would be worse
+        # than no test at all.
+        r = gesture_math_results["wraparound"]
+        assert abs(abs(r["baseAngle"]) - 180) < 1.0, r
+
+    def test_small_rotation_near_the_boundary_gives_a_small_delta(self, gesture_math_results):
+        r = gesture_math_results["wraparound"]
+        # A +-4 degree hand rotation must report a small delta close to
+        # +-4 degrees — NOT the ~320-360 degree jump the old plain
+        # subtraction would have produced right at this boundary.
+        assert abs(abs(r["plus4"]) - 4) < 1.5, r
+        assert abs(abs(r["minus4"]) - 4) < 1.5, r
+        assert abs(r["plus4"]) < 10, r
+        assert abs(r["minus4"]) < 10, r
 
 
 class TestSyntheticNoisyPinchNoFlicker:
