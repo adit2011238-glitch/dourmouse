@@ -354,6 +354,53 @@ button,input,textarea,select{font:inherit;color:inherit}
 .card .h{font-size:9.5px;letter-spacing:.14em;color:var(--amber);margin-bottom:4px}
 .card .d{font-size:8.5px;color:var(--blue-deep);line-height:1.5}
 
+/* v13 — GLOBE screen: a deliberately different visual register from the
+   rest of this HUD-styled console. The rest of the app is sharp-edged,
+   monospace, high-density (that's the "operator console" identity and
+   it's staying — this is a scoped experiment, not a redesign). This one
+   card borrows from Apple's own materials language (translucent "glass",
+   generous corner radius, a system-style sans stack, soft motion) because
+   it's presenting something categorically different: a link out to a
+   real, separate photorealistic 3D application, not another data table.
+   -webkit-backdrop-filter is required for Safari; both are harmless
+   no-ops on a browser too old to support blur (the card still reads
+   fine as a plain translucent panel). */
+.glasswrap{display:flex;align-items:center;justify-content:center;height:100%;min-height:420px;padding:32px;
+  background:radial-gradient(circle at 30% 20%, rgba(80,140,220,.12), transparent 60%),
+             radial-gradient(circle at 80% 80%, rgba(60,200,180,.08), transparent 55%),
+             var(--panel)}
+.glasscard{max-width:460px;width:100%;padding:28px 30px;border-radius:20px;
+  background:rgba(255,255,255,.045);
+  -webkit-backdrop-filter:blur(24px) saturate(140%);backdrop-filter:blur(24px) saturate(140%);
+  border:1px solid rgba(255,255,255,.09);
+  box-shadow:0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,sans-serif;
+  color:var(--blue-hi)}
+.glasscard h2{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px;
+  display:flex;align-items:center;gap:9px}
+.glasscard h2 .eye{font-size:22px;line-height:1;filter:drop-shadow(0 0 6px rgba(100,200,255,.5))}
+.glasscard p{font-size:13.5px;line-height:1.55;color:var(--blue-deep);margin:0 0 16px}
+.glasscard .steps{font-size:12.5px;line-height:1.7;background:rgba(0,0,0,.18);border-radius:12px;
+  padding:12px 14px;margin:0 0 16px;font-family:var(--mono);color:var(--blue-hi)}
+.glasscard .steps code{color:#8fd3ff}
+.glassbtnrow{display:flex;gap:10px}
+.glassbtn{flex:1;border:none;border-radius:12px;padding:11px 16px;font-size:13px;font-weight:600;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,sans-serif;
+  cursor:pointer;transition:transform .12s ease, opacity .12s ease}
+.glassbtn:active{transform:scale(.97)}
+.glassbtn.primary{background:linear-gradient(180deg,#4aa3ff,#2f7ee0);color:#fff}
+.glassbtn.primary:hover{opacity:.92}
+.glassbtn.secondary{background:rgba(255,255,255,.08);color:var(--blue-hi)}
+.glassbtn.secondary:hover{background:rgba(255,255,255,.13)}
+.globeframe{width:100%;height:100%;min-height:520px;border:0;display:block;background:#000}
+.globetoolbar{display:flex;align-items:center;gap:10px;padding:8px 12px;
+  background:rgba(255,255,255,.04);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--line)}
+.globetoolbar .dot{width:7px;height:7px;border-radius:50%;background:#3ecf6e;box-shadow:0 0 6px #3ecf6e}
+.globetoolbar .lbl2{font-size:10.5px;letter-spacing:.08em;color:var(--blue-hi);font-family:var(--mono)}
+.globetoolbar a{margin-left:auto;font-size:10.5px;color:var(--blue-hi);text-decoration:none;font-family:var(--mono)}
+.globetoolbar a:hover{color:var(--amber)}
+
 /* v13: NEEDS ATTENTION panel (see paintAttention()) — deliberately louder
    than the metrics grid it sits above (a --bad left border, not just
    another neutral row), since the whole point is that these items are
@@ -880,6 +927,9 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
     <section class="pane" id="pane-atlas"><div class="panehead">◆ WORLD // MONITOR</div>
       <div class="panebody" id="atlasBody"></div></section>
 
+    <section class="pane" id="pane-globe"><div class="panehead">◆ GLOBE // GOD'S EYE VIEW</div>
+      <div class="panebody" id="globeBody" style="padding:0"></div></section>
+
     <section class="pane" id="pane-news"><div class="panehead">◆ NEWS // LIVE FEED</div>
       <div class="panebody" id="newsBody"></div>
       <div class="thread" id="thread-news"></div></section>
@@ -930,7 +980,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
-const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","NEWS","DESIGN3D","VOICE"];
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE"];
 // v8.29: screens whose composer submissions get their OWN independent
 // thread (a real per-screen conversation, not a shared feed forced onto
 // COMMS). COMMS is deliberately absent — it's a real Gmail inbox now, not
@@ -948,7 +998,7 @@ const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS","DESIGN3D"];
 // checking "how's the quant research going" landed on disaster data
 // instead — a real, confusing mislabel. This maps the DISPLAYED text only;
 // every internal id/comparison still uses "ATLAS" untouched.
-const SCREEN_LABELS = { ATLAS: "WORLD", DESIGN3D: "DESIGN" };
+const SCREEN_LABELS = { ATLAS: "WORLD", DESIGN3D: "DESIGN", GLOBE: "EYE" };
 const sys = {roster:null,conns:null,server:null,backend:null,memory:null,telemetry:null,version:null,me:null,voice:null};
 let screen = "HOME", busy = false, focusAgent = "", speak = false, voiceMode = false;
 const queue = [];
@@ -974,7 +1024,7 @@ const _NEWS_FEED_CAP = 200;
 // show()'s screen-switching logic are ALL UNCHANGED — every one of the
 // 11 screens is still reachable by exactly the same show(name) call this
 // always used; only which DOM element represents its tab button moved.
-const PRIMARY_SCREENS = ["HOME","COMMS","RESEARCH","CODE","ATLAS"];
+const PRIMARY_SCREENS = ["HOME","COMMS","RESEARCH","CODE","ATLAS","GLOBE"];
 const OVERFLOW_SCREENS = SCREENS.filter(s => !PRIMARY_SCREENS.includes(s));
 const tabsEl = $("tabs");
 const tabsMoreBtn = $("tabsMoreBtn"), tabsMoreMenu = $("tabsMoreMenu");
@@ -1056,6 +1106,7 @@ function show(name){
   if(name==="PROJECTS") paintProjects();
   if(name==="SETTINGS") paintSettings();
   if(name==="ATLAS") paintAtlas();
+  if(name==="GLOBE") paintGlobe();
   if(name==="NEWS") paintNews();
   if(name==="DESIGN3D") paintDesign3d();
   if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
@@ -4587,6 +4638,68 @@ function newsToast(item){
   t.onclick = () => { show("NEWS"); t.remove(); };
   box.appendChild(t);
   setTimeout(() => { t.remove(); }, 15000);
+}
+/* ---------------- GLOBE — God's Eye View integration (v13) ----------------
+   God's Eye View (github.com/bilawalsidhu/gods-eye-view) is a real,
+   separate open-source Node/Vite/Cesium application — a photorealistic 3D
+   globe with live OSINT layers (aircraft, ships, satellites, earthquakes,
+   public cameras) plus hands-free voice control. It is NOT ported into
+   Dourmouse's Python backend (a different stack entirely, and it's already
+   a complete, working app) — it runs as its own dev server
+   (gods-eye-view/, `npm run dev`, default port 4173) and this screen embeds
+   it, the same "separate process, linked in" pattern Dourmouse already
+   uses for the Freebuff/ATLAS bridges. A no-cors HEAD-ish fetch decides
+   which of two states to render: running (a live iframe) or not (an
+   instructions card telling the user the one command to start it — this
+   console never launches another dev server itself). */
+const GODS_EYE_URL = "http://localhost:4173/";
+async function paintGlobe(){
+  const box = $("globeBody");
+  box.innerHTML = `<div class="note" style="padding:14px">Checking for a running God's Eye View instance…</div>`;
+  let reachable = false;
+  try{
+    // no-cors: we can't read the response (different origin, by design —
+    // this console never needs to inspect it, only know it answered), but
+    // a fetch to a genuinely unreachable host rejects, which is all the
+    // signal this needs.
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 1500);
+    await fetch(GODS_EYE_URL, { mode: "no-cors", signal: ctrl.signal });
+    clearTimeout(t);
+    reachable = true;
+  }catch{ reachable = false; }
+
+  if(!reachable){
+    box.innerHTML = `
+      <div class="glasswrap">
+        <div class="glasscard">
+          <h2><span class="eye">🌐</span> God's Eye View isn't running</h2>
+          <p>A separate app — a photorealistic 3D globe with live aircraft, ships,
+             satellites, earthquakes and public cameras. It runs on its own,
+             right next to Dourmouse.</p>
+          <div class="steps">cd <code>gods-eye-view</code><br>npm run dev -- --host localhost --port 4173</div>
+          <p style="margin-bottom:0">First time only: copy <code style="color:#8fd3ff">.env.example</code>
+             to <code style="color:#8fd3ff">.env</code> and add a Google Maps API key
+             (the one 🔴 metered key it needs — everything else is free or optional).</p>
+          <div class="glassbtnrow" style="margin-top:16px">
+            <button class="glassbtn primary" type="button" id="globeRecheck">Check again</button>
+            <button class="glassbtn secondary" type="button" id="globeOpenTab">Open in new tab</button>
+          </div>
+        </div>
+      </div>`;
+    $("globeRecheck").onclick = paintGlobe;
+    $("globeOpenTab").onclick = () => window.open(GODS_EYE_URL, "_blank");
+    return;
+  }
+
+  box.innerHTML = `
+    <div class="globetoolbar">
+      <span class="dot"></span>
+      <span class="lbl2">GOD'S EYE VIEW — LIVE</span>
+      <a href="${esc(GODS_EYE_URL)}" target="_blank" rel="noopener">open in new tab ↗</a>
+    </div>
+    <iframe class="globeframe" id="globeFrame" src="${esc(GODS_EYE_URL)}"
+      allow="microphone; fullscreen" title="God's Eye View"></iframe>`;
 }
 async function paintNews(){
   const box = $("newsBody");
