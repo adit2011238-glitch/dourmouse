@@ -268,6 +268,40 @@ class TestPersistence:
         assert r["final_text"] == "Two."
         assert resumed._turn_count == 2
 
+    def test_record_slash_does_not_raise_and_numbers_turn(self, tmp_path):
+        # Regression: record_slash() used to raise NameError on every call
+        # (dead tail code referenced undefined `report`/`elapsed_ms`), a
+        # traceback silently swallowed at the webui.py call site.
+        client = FakeClient([_FakeResponse(_FakeMessage(content="One."))])
+        session_file = tmp_path / "slash.jsonl"
+        session = ChatSession(_registry(), client=client, session_file=session_file)
+
+        session.ask("first turn")
+        assert session._turn_count == 1
+
+        session.record_slash("/claude hello", "backend output", tools=["slash:claude"])
+        assert session._turn_count == 2
+
+        lines = session_file.read_text(encoding="utf-8").strip().splitlines()
+        slash_record = json.loads(lines[-1])
+        # "turn" numbers THIS turn (matches ask()'s pre-persist increment),
+        # not the previous one.
+        assert slash_record["turn"] == 2
+        assert slash_record["user"] == "/claude hello"
+        assert slash_record["final_text"] == "backend output"
+        assert {"type": "tool_use", "name": "slash:claude", "raw_arguments": "{}"} in \
+            slash_record["transcript"]
+
+    def test_record_slash_as_first_turn(self, tmp_path):
+        session_file = tmp_path / "slash_first.jsonl"
+        session = ChatSession(_registry(), client=FakeClient([]), session_file=session_file)
+
+        session.record_slash("/all status", "ok")
+        assert session._turn_count == 1
+        record = json.loads(session_file.read_text(encoding="utf-8").strip().splitlines()[0])
+        assert record["turn"] == 1
+        assert record["user"] == "/all status"
+
     def test_corrupt_state_raises_not_silent(self, tmp_path):
         session_file = tmp_path / "session.jsonl"
         (tmp_path / "session.messages.json").write_text("{not json")

@@ -349,35 +349,15 @@ class ChatSession:
             {"type": "tool_use", "name": t, "raw_arguments": "{}"}
             for t in (tools or [])
         ]
+        # Increment BEFORE _persist so the audit record's "turn" matches
+        # ask()'s ordering (v199) — the persisted record numbers this turn,
+        # not the previous one.
+        self._turn_count += 1
         self._persist(
             prompt,
             {"final_text": final_text, "transcript": transcript},
             elapsed_ms=0.0,
         )
-        self._turn_count += 1
-        self.session_file.parent.mkdir(parents=True, exist_ok=True)
-        interventions = [
-            e
-            for e in report.get("transcript", [])
-            if e.get("type") in ("confirmation_requested", "confirmation_resolved")
-        ]
-        record: dict[str, Any] = {
-            "turn": self._turn_count,
-            "timestamp": datetime.now().isoformat(),
-            "elapsed_ms": elapsed_ms,
-            "user": prompt,
-            "final_text": report.get("final_text", ""),
-            "interventions": interventions,
-            "role_changes": list(self.role_changes),
-            "transcript": report.get("transcript", []),
-            "prev_hash": self._prev_hash,
-        }
-        record["hash"] = _record_hash(record)
-        with self.session_file.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
-        self._prev_hash = record["hash"]
-        # Snapshot the full message state for resumability.
-        self._state_file.write_text(json.dumps(self.messages))
 
 
 # --------------------------------------------------------------------------- #
