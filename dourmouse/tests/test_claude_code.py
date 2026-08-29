@@ -10,10 +10,13 @@ behavior (Rule 2.2 — no silent stub, no fabricated result).
 from __future__ import annotations
 
 import os
+import re
 import textwrap
+import uuid
 
 import pytest
 
+from dourmouse import general_roster
 from dourmouse.general_roster import build_general_registry
 from dourmouse.general_roster import _claude_code_tool as run_tool
 from dourmouse.general_roster import _find_claude_cli as find_cli
@@ -22,6 +25,18 @@ from dourmouse.general_roster import _find_claude_cli as find_cli
 @pytest.fixture
 def registry():
     return build_general_registry()
+
+
+@pytest.fixture(autouse=True)
+def _reset_claude_code_sessions():
+    """general_roster._CLAUDE_CODE_SESSIONS is module-level, process-lifetime
+    state by design (see its docstring) — but that means it must NOT leak
+    between tests, several of which share the same cwd key and would
+    otherwise see a stale --resume from a previous test instead of a fresh
+    --session-id."""
+    general_roster._CLAUDE_CODE_SESSIONS.clear()
+    yield
+    general_roster._CLAUDE_CODE_SESSIONS.clear()
 
 
 def _write_fake_cli(tmp_path, script: str) -> str:
@@ -142,7 +157,14 @@ class TestToolBehavior:
         monkeypatch.setenv("CLAUDE_CODE_CLI", fake)
         result = run_tool({"task": "explain this bug", "cwd": str(tmp_path)})
         assert "EXIT CODE: 0" in result
-        assert "ARGV: -p explain this bug" in result
+        # First call for this cwd mints a real session id via --session-id
+        # (see TestSessionContinuity below) — assert the shape rather than
+        # a fixed string since the uuid is random each run.
+        match = re.search(
+            r"ARGV: -p --session-id ([0-9a-f-]{36}) explain this bug", result
+        )
+        assert match, result
+        assert uuid.UUID(match.group(1)).version == 4
         assert f"CWD: {tmp_path}" in result
 
     def test_nonzero_exit_surfaces_stderr(self, tmp_path, monkeypatch):
@@ -223,3 +245,180 @@ class TestToolBehavior:
         monkeypatch.setenv("CLAUDE_CODE_CLI", str(fake))
         result = run_tool({"task": "x"})
         assert "ERROR" in result
+
+
+class TestSessionContinuity:
+    """Mirrors code_backends.py's TestClaudeSessionContinuity — the same
+    real fix (mint a session id via --session-id on the first call for a
+    key, --resume it on every later call, forget-and-retry-once on a stale
+    id), live-verified against the same installed CLI, applied to this
+    SEPARATE call path: dev_coding's claude_code tool via _run_cli_delegate,
+    not code_backends._run_claude. Monkeypatches subprocess.run directly
+    (rather than this file's usual fake-CLI-script fixtures) so the exact
+    argv shape and the multi-call session bookkeeping can be asserted
+    precisely, the same way test_code_backends.py does it."""
+
+    def _fake_run_factory(self, seen: list, proc_factory):
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            return proc_factory(argv)
+
+        return _fake_run
+
+    def test_first_call_mints_a_fresh_session_id(self, monkeypatch):
+        seen: list = []
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(general_roster, "_find_claude_cli", lambda: "/usr/bin/claude")
+        monkeypatch.setattr(
+            general_roster.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+        )
+        run_tool({"task": "write add", "cwd": "/tmp/proj"})
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/claude"
+        assert argv[1] == "-p"
+        assert "--session-id" in argv
+        sid = argv[argv.index("--session-id") + 1]
+        # a real UUID4, not a placeholder
+        assert uuid.UUID(sid).version == 4
+        assert argv[-1] == "write add"
+        assert general_roster._CLAUDE_CODE_SESSIONS["/tmp/proj"] == sid
+
+    def test_second_call_same_cwd_resumes_the_same_session(self, monkeypatch):
+        seen: list = []
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(general_roster, "_find_claude_cli", lambda: "/usr/bin/claude")
+        monkeypatch.setattr(
+            general_roster.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+        )
+        run_tool({"task": "first turn", "cwd": "/tmp/proj"})
+        run_tool({"task": "second turn", "cwd": "/tmp/proj"})
+        first_sid = seen[0][seen[0].index("--session-id") + 1]
+        assert "--resume" in seen[1]
+        assert seen[1][seen[1].index("--resume") + 1] == first_sid
+        assert seen[1][-1] == "second turn"
+
+    def test_different_cwd_gets_a_different_session(self, monkeypatch):
+        seen: list = []
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(general_roster, "_find_claude_cli", lambda: "/usr/bin/claude")
+        monkeypatch.setattr(
+            general_roster.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+        )
+        run_tool({"task": "task a", "cwd": "/tmp/proj-a"})
+        run_tool({"task": "task b", "cwd": "/tmp/proj-b"})
+        # both calls are FIRST calls for their respective cwd — both mint,
+        # neither resumes the other's conversation.
+        assert "--session-id" in seen[0]
+        assert "--session-id" in seen[1]
+        sid_a = seen[0][seen[0].index("--session-id") + 1]
+        sid_b = seen[1][seen[1].index("--session-id") + 1]
+        assert sid_a != sid_b
+
+    def test_stale_session_id_recovers_with_one_fresh_retry(self, monkeypatch):
+        """The CLI's real error text when a tracked session id no longer
+        resolves (verified live in code_backends.py's original diagnosis:
+        `claude -p ... --resume <bogus-uuid>` exits 1 with stderr "No
+        conversation found with session ID: <uuid>"). Losing that id
+        honestly (e.g. the user pruned local session history) must not
+        hard-fail the whole task — it should forget the dead id and run
+        once more on a fresh conversation."""
+        general_roster._CLAUDE_CODE_SESSIONS["/tmp/proj"] = (
+            "11111111-1111-1111-1111-111111111111"
+        )
+        seen: list = []
+
+        class _StaleProc:
+            returncode = 1
+            stdout = ""
+            stderr = (
+                "No conversation found with session ID: "
+                "11111111-1111-1111-1111-111111111111"
+            )
+
+        class _OkProc:
+            returncode = 0
+            stdout = "recovered"
+            stderr = ""
+
+        calls = {"n": 0}
+
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            calls["n"] += 1
+            return _StaleProc() if calls["n"] == 1 else _OkProc()
+
+        monkeypatch.setattr(general_roster, "_find_claude_cli", lambda: "/usr/bin/claude")
+        monkeypatch.setattr(general_roster.subprocess, "run", _fake_run)
+        result = run_tool({"task": "task", "cwd": "/tmp/proj"})
+        assert "recovered" in result
+        assert len(seen) == 2
+        assert "--resume" in seen[0]  # the stale id was tried first, honestly
+        assert "--session-id" in seen[1]  # then a real fresh one, not a guess
+        # the dead id is gone; a real new one replaces it
+        assert (
+            general_roster._CLAUDE_CODE_SESSIONS["/tmp/proj"]
+            != "11111111-1111-1111-1111-111111111111"
+        )
+
+    def test_stale_session_retries_exactly_once_not_forever(self, monkeypatch):
+        """If the retry ALSO fails, the real error surfaces — no infinite
+        retry loop chasing a CLI that keeps saying no."""
+        general_roster._CLAUDE_CODE_SESSIONS["/tmp/proj"] = (
+            "11111111-1111-1111-1111-111111111111"
+        )
+        seen: list = []
+
+        class _StaleProc:
+            returncode = 1
+            stdout = ""
+            stderr = (
+                "No conversation found with session ID: "
+                "11111111-1111-1111-1111-111111111111"
+            )
+
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            return _StaleProc()
+
+        monkeypatch.setattr(general_roster, "_find_claude_cli", lambda: "/usr/bin/claude")
+        monkeypatch.setattr(general_roster.subprocess, "run", _fake_run)
+        result = run_tool({"task": "task", "cwd": "/tmp/proj"})
+        assert "EXIT CODE: 1" in result
+        # exactly one retry: the original --resume attempt, then one fresh
+        # --session-id attempt — never a third call.
+        assert len(seen) == 2
+
+    def test_no_cwd_uses_a_stable_default_key(self, monkeypatch):
+        """The tool's default cwd (str(_PROJECT_ROOT), not None) must still
+        get real continuity across calls, not silently skip session
+        threading just because the caller omitted 'cwd'."""
+        seen: list = []
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(general_roster, "_find_claude_cli", lambda: "/usr/bin/claude")
+        monkeypatch.setattr(
+            general_roster.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+        )
+        run_tool({"task": "first"})
+        run_tool({"task": "second"})
+        assert "--session-id" in seen[0]
+        assert "--resume" in seen[1]

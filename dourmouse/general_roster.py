@@ -38,10 +38,12 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -128,6 +130,57 @@ def _vault_root() -> Path:
 # --------------------------------------------------------------------------- #
 
 _CLAUDE_OUTPUT_CAP = 20_000
+
+# -- claude_code tool session continuity ------------------------------------ #
+# The SAME statelessness bug as the CODE screen's code_claude backend (see
+# code_backends.py's own "CODE-screen Claude CLI session continuity" block
+# for the live diagnosis: two back-to-back calls with zero memory of each
+# other, and the live-verified fix — the installed CLI genuinely supports
+# `--session-id <uuid>` to mint a conversation and `--resume <uuid>` to
+# continue it across separate `claude -p` subprocesses). Re-diagnosed here
+# live for this SEPARATE code path — dev_coding's claude_code tool shells
+# out via _run_cli_delegate, not code_backends._run_claude — and confirmed
+# to have the identical gap: _claude_code_tool built `[cli, "-p", task]"`
+# with no session args at all, so every call was a brand-new conversation.
+#
+# Kept as its own module-level session map rather than importing/sharing
+# code_backends._CLAUDE_SESSIONS: that map is keyed by cwd for the CODE
+# screen's tool, and this is a DIFFERENT Dourmouse-side caller (the DEV
+# AGENT subagent's claude_code tool, invoked through _run_cli_delegate).
+# Merging the two pools would mean a call from one toolchain option resumes
+# a conversation actually started by the other — surprising cross-talk
+# neither caller asked for. Same pattern, separate state, per key by cwd.
+_CLAUDE_CODE_SESSIONS: dict[str, str] = {}
+_CLAUDE_CODE_SESSIONS_LOCK = threading.Lock()
+# Exact substring of the CLI's real stderr (verified live in code_backends.py's
+# original diagnosis) when a tracked session id no longer resolves to a real
+# conversation — e.g. the user pruned their local Claude Code session history.
+_CLAUDE_CODE_NO_SESSION_ERR = "No conversation found with session ID"
+
+
+def _claude_code_session_key(cwd: str) -> str:
+    return cwd or "."
+
+
+def _claude_code_session_args(key: str, *, fresh: bool = False) -> list[str]:
+    """Return the CLI args that continue (or, on ``fresh``, restart) the
+    claude_code conversation tracked for ``key``. Never guesses a session id
+    that wasn't actually handed back by a real ``claude`` invocation — the
+    first call for a key mints one via ``--session-id`` and every later call
+    resumes that exact id via ``--resume`` (same contract as
+    code_backends._claude_session_args)."""
+    with _CLAUDE_CODE_SESSIONS_LOCK:
+        session_id = None if fresh else _CLAUDE_CODE_SESSIONS.get(key)
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+            _CLAUDE_CODE_SESSIONS[key] = session_id
+            return ["--session-id", session_id]
+        return ["--resume", session_id]
+
+
+def _forget_claude_code_session(key: str) -> None:
+    with _CLAUDE_CODE_SESSIONS_LOCK:
+        _CLAUDE_CODE_SESSIONS.pop(key, None)
 
 
 def _find_claude_cli() -> str | None:
@@ -220,9 +273,11 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         return "ERROR: timeout_seconds must be an integer."
     cwd = (arguments.get("cwd") or str(_PROJECT_ROOT)).strip()
-    return _run_cli_delegate(
+    session_key = _claude_code_session_key(cwd)
+    session_args = _claude_code_session_args(session_key)
+    result = _run_cli_delegate(
         cli=cli,
-        argv=[cli, "-p", task],
+        argv=[cli, "-p", *session_args, task],
         cli_name="claude",
         tool_label="claude_code",
         display_name="Claude Code",
@@ -230,11 +285,59 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
         timeout=timeout,
         output_cap_attr="_CLAUDE_OUTPUT_CAP",
     )
+    exit_line = result.split("\n", 1)[0]
+    if (
+        "--resume" in session_args
+        and exit_line != "EXIT CODE: 0"
+        and _CLAUDE_CODE_NO_SESSION_ERR in result
+    ):
+        # Our tracked session id no longer resolves to a real conversation
+        # (e.g. the user pruned Claude Code's local session history out from
+        # under us) — never keep retrying a dead id forever. Forget it and
+        # start one honest fresh conversation instead of hard-failing the
+        # whole task over bookkeeping the caller can't see or fix. Same
+        # recovery as code_backends._run_claude, exactly one retry.
+        _forget_claude_code_session(session_key)
+        session_args = _claude_code_session_args(session_key)
+        result = _run_cli_delegate(
+            cli=cli,
+            argv=[cli, "-p", *session_args, task],
+            cli_name="claude",
+            tool_label="claude_code",
+            display_name="Claude Code",
+            cwd=cwd,
+            timeout=timeout,
+            output_cap_attr="_CLAUDE_OUTPUT_CAP",
+        )
+    return result
 
 
 # --------------------------------------------------------------------------- #
 # Codex — delegate coding work to the user's real Codex CLI (v5.3)
 # --------------------------------------------------------------------------- #
+#
+# NOT given the same session-continuity fix as claude_code above. Checked
+# live against the actually-installed CLI (codex-cli 0.144.6) before
+# assuming the fix would even transfer: `codex exec --help` has no
+# claude-style "--session-id <uuid> to mint, --resume <uuid> to continue"
+# flag pair. Continuing a prior `codex exec` conversation is a SEPARATE
+# subcommand, `codex exec resume <session_id> [prompt]`, and that id is
+# never chosen by the caller up front — it's only learned AFTER a call
+# completes, via the `thread.started` event in `codex exec --json`'s event
+# stream (confirmed live: `codex exec "..." --json` emitted
+# `{"type":"thread.started","thread_id":"<uuid>"}` before the turn ran; the
+# live account also happened to be usage-limited at diagnosis time, which
+# is exactly the kind of honest external failure this tool is supposed to
+# surface, not paper over). Wiring that in would mean switching this tool's
+# argv to `--json`, parsing the event stream for the thread id AND the
+# final response text instead of returning _run_cli_delegate's plain
+# stdout/stderr, and reworking codex_code's whole output contract —
+# genuinely a different shape of fix, not a drop-in application of the
+# claude_code pattern. code_backends.py's own `_run_codex` (the CODE
+# screen's codex backend) also does not thread a session id today, so
+# leaving codex_code as a fresh conversation per call keeps both codex call
+# paths consistent with each other rather than fixing one and not the
+# other. Left for a dedicated follow-up.
 
 _CODEX_OUTPUT_CAP = 20_000
 
