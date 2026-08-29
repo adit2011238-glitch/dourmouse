@@ -824,6 +824,13 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
     </nav>
 
     <section class="pane on" id="pane-home"><div class="panehead">◆ CENTRAL AGENT DISPATCH // ARC CORE</div>
+      <!-- v13: attnBox sits OUTSIDE .panebody on purpose — see paintAttention()'s
+           own comment. .panebody is hidden by the same CSS rule that retires
+           HOME's dashboard once a conversation starts (by design, for the
+           dashboard); NEEDS ATTENTION is not a getting-started suggestion, it's
+           an ongoing signal that must survive a live thread the same way
+           #pane-code's toolchain picker already does. -->
+      <div id="attnBox"></div>
       <div class="panebody" id="homeBody"></div>
       <div class="thread" id="thread-home"></div></section>
 
@@ -1273,7 +1280,6 @@ function paintHome(){
   $("homeBody").innerHTML = `
     <p class="lede">${rost.length} AGENTS MOUNTED. ${okN} OF ${Object.keys(c).length} CONNECTIONS LIVE.
       ${s.online?`COMPUTE NODE ${esc(s.node)} ONLINE AT ${s.latency_ms}MS.`:"COMPUTE NODE OFFLINE — RUNNING ON THE CONFIGURED BACKEND."}</p>
-    <div id="attnBox"></div>
     <div class="metrics">
       <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"—"} FACTS</span></div>
       <div class="metric"><span class="k">LEARNING</span><span class="v">${m.active?"ON":"OFF"}</span></div>
