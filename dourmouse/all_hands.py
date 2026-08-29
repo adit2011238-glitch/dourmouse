@@ -237,14 +237,26 @@ class AllHandsRunner:
                 "summary": (result or "")[:240],
             })
         except Exception as exc:  # noqa: BLE001 -- an honest red card
+            # v13: real bug fixed here, live-caught through an actual /all
+            # directive against codex — a genuine, honest error ("You've
+            # hit your usage limit... try again at Sep 17th, 2026") sat at
+            # the END of the real exception text (a CLI error message is a
+            # boilerplate banner + the full echoed prompt FIRST, then the
+            # actual failure reason — exactly why _run_codex/_run_claude's
+            # own `err[-2000:]` already keeps the TAIL, not the head, of
+            # real CLI stderr). Truncating with `[:600]`/`[:240]` here
+            # threw that away again one layer up, showing the boilerplate
+            # banner and cutting off before the one line that actually
+            # explained what went wrong. `[-600:]`/`[-240:]` keeps the
+            # part that matters.
             self._set_brain(run_id, key, {
                 "status": "error",
-                "error": str(exc)[:600],
+                "error": str(exc)[-600:],
                 "elapsed": round(time.monotonic() - started, 1),
             })
             self._emit(run_id, {
                 "type": "allhands", "brain": key, "status": "error",
-                "error": str(exc)[:240],
+                "error": str(exc)[-240:],
             })
 
     def _synthesize(self, run_id: str, goal: str) -> None:
@@ -274,24 +286,50 @@ class AllHandsRunner:
                 f"USER GOAL: {goal}\n\n"
                 f"WORKER CONTRIBUTIONS:\n" + "\n\n".join(parts)
             )
+        # v13: real bug fixed here, live-caught through an actual /all
+        # directive — the synthesizer was hardcoded to "nvidia" with no
+        # fallback. NVIDIA is currently 403'ing on every real inference
+        # call (external, account-level, documented elsewhere in this
+        # codebase) — live result before this fix: CLAUDE answered
+        # correctly ("Paris.") in 7.6s, every other brain reported an
+        # honest error, and the synthesis came back completely EMPTY,
+        # because the one hardcoded synth backend was the one that's
+        # currently dead. The entire point of All-Hands is the merged
+        # final answer; a run where a real brain succeeded but the user
+        # sees nothing at all is the worst possible failure mode for this
+        # feature specifically. Fixed with an honest try-nvidia-then-
+        # ollama fallback — nvidia stays first choice (fast, hosted,
+        # matches this module's own stated design intent in its docstring)
+        # but a failure no longer means silence.
+        synth_backend_used = "nvidia"
         try:
             synthesis = _default_brain(synth_task, system=_SYNTH_SYSTEM,
                                        force_backend="nvidia")
-            with self._lock:
-                run = self._runs[run_id]
-                run["synthesis"] = synthesis[:_SYNTH_CAP]
-                run["status"] = "done"
-                run["finished"] = _now()
-            self._emit(run_id, {"type": "allhands", "status": "done",
-                                "synthesis": run["synthesis"]})
-        except Exception as exc:  # noqa: BLE001 -- the run still reports honestly
-            with self._lock:
-                run = self._runs[run_id]
-                run["status"] = "done"
-                run["error"] = f"synthesis failed: {exc}"
-                run["finished"] = _now()
-            self._emit(run_id, {"type": "allhands", "status": "done",
-                                "error": run["error"]})
+        except Exception as nvidia_exc:
+            try:
+                synth_backend_used = "ollama"
+                synthesis = _default_brain(synth_task, system=_SYNTH_SYSTEM,
+                                           force_backend="ollama")
+            except Exception as exc:  # noqa: BLE001 -- the run still reports honestly
+                with self._lock:
+                    run = self._runs[run_id]
+                    run["status"] = "done"
+                    run["error"] = (
+                        f"synthesis failed on both nvidia ({nvidia_exc}) "
+                        f"and its ollama fallback ({exc})"
+                    )
+                    run["finished"] = _now()
+                self._emit(run_id, {"type": "allhands", "status": "done",
+                                    "error": run["error"]})
+                return
+        with self._lock:
+            run = self._runs[run_id]
+            run["synthesis"] = synthesis[:_SYNTH_CAP]
+            run["synth_backend"] = synth_backend_used
+            run["status"] = "done"
+            run["finished"] = _now()
+        self._emit(run_id, {"type": "allhands", "status": "done",
+                            "synthesis": run["synthesis"]})
 
     # -- helpers --------------------------------------------------------- #
 
@@ -343,12 +381,33 @@ def _default_brain(task: str, *, system: str | None = None,
         # The web brain must search the GOAL, never the system wrapper —
         # strip the "GOAL/TASK: " marker if a wrapped task ever lands here
         # (reviewer-hardened).
-        _, _, marker, goal = task.partition("GOAL/TASK: ")
-        query = (goal or marker or task).strip()
+        #
+        # v13: real bug fixed here, live-caught through an actual /all
+        # directive — str.partition() returns exactly a 3-tuple
+        # (before, sep, after), never 4 values. Every call to this branch
+        # raised "ValueError: not enough values to unpack (expected 4, got
+        # 3)" before this fix, meaning the web brain has been silently
+        # crashing (reported honestly as an error, per the try/except in
+        # _run_brain — but crashing all the same) on every single All-Hands
+        # run since whenever this line was written.
+        before, _, goal = task.partition("GOAL/TASK: ")
+        query = (goal or before or task).strip()
         return _web_search_tool({"query": query})
     wrapped = f"{system}\n\nGOAL/TASK: {task}"
-    if backend == "claude":
-        return code_backends.run_code_task("claude", wrapped, timeout=min(int(_BRAIN_TIMEOUT), 600))
+    if backend in ("claude", "codex", "openai_codex"):
+        # v13: real bug fixed here — codex used to fall straight through to
+        # the raw API-key path below (load_backend + _run_openai_compat),
+        # reporting "NOT CONFIGURED: Codex needs EITHER the Codex CLI
+        # signed in... OR CODEX_API_KEY/OPENAI_API_KEY" even when the real
+        # Codex CLI IS signed in (confirmed live via /api/connections:
+        # "Codex CLI codex-cli 0.144.6 - logged in (chatgpt)") — because it
+        # never actually tried the CLI. run_code_task's own docstring says
+        # exactly this: CLI first (what the CODEX connection status
+        # measures), the API key only as a fallback. claude was already
+        # special-cased to use run_code_task; codex belongs in the same
+        # branch, not the raw API-only path meant for backends with no CLI
+        # of their own (nvidia/deepseek/qwen/glm/kimi).
+        return code_backends.run_code_task(backend, wrapped, timeout=min(int(_BRAIN_TIMEOUT), 600))
     base, api_key, model = code_backends.load_backend(backend)
     return code_backends._run_openai_compat(base, api_key, model, wrapped,
                                             timeout=min(int(_BRAIN_TIMEOUT), 600))
