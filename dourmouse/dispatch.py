@@ -1275,6 +1275,14 @@ class DispatchContext:
     # owns whichever ONE agent it was forced to), so there is nothing to
     # propagate.
     forced_agent: str | None = None
+    # v13: Grounded Mode (config.grounded_mode_enabled()) for THIS run — a
+    # user-controllable setting, not inferred from the prompt. See
+    # _MAX_GROUNDED_NUDGES's own comment for the mechanism and the live bug
+    # this exists to catch (an agent with real tools available answering
+    # with zero of them, presented as if it had researched). Inherited by
+    # nested delegate runs the same way ``voice``/``brief`` are — a
+    # delegate answering on grounded mode's behalf must honor it too.
+    grounded: bool = False
     # v8.30: True once a model has been deliberately chosen for this run —
     # an explicit caller override, the fast lane's own cheap/fast pick, or
     # brain escalation — and must NOT be second-guessed further downstream.
@@ -1630,6 +1638,15 @@ def run_dispatch_messages(
     # a nested run started by delegate_task has no ``voice=`` of its own to
     # pass, so it picks up the parent's.
     ctx.voice = voice or (bool(stack) and stack[-1].voice)
+    # v13: Grounded Mode is a persisted user SETTING, not a per-call param —
+    # unlike voice/brief there is no caller-supplied override to OR against;
+    # every top-level turn reads the current setting fresh (live, no
+    # restart, same contract as orchestrator_model_setting()), and a nested
+    # delegate run inherits it from its parent on the stack exactly like
+    # voice/brief do.
+    from dourmouse.config import grounded_mode_enabled
+
+    ctx.grounded = grounded_mode_enabled() or (bool(stack) and stack[-1].grounded)
     if fast_lane:
         # The lane still runs the loop (pure-chat exits after ONE call since
         # tools are empty), but the API boundary sees the compact system
@@ -1771,6 +1788,17 @@ _MAX_TEXT_ONLY_NUDGE_CHARS = 240
 # reminder listing the unexecuted steps, so multi-step chains cannot silently
 # end half-finished.
 _MAX_PLAN_REMINDERS = 1
+
+# v13 Grounded Mode (config.grounded_mode_enabled(), off by default — see
+# that function's own docstring for the live-reproduced bug this exists to
+# catch): when a turn had real tools available (scoped_tools non-empty —
+# some agent genuinely matched) but the model's first final answer used
+# ZERO of them, give it exactly ONE honest chance to correct itself before
+# accepting the answer as-is with a caveat. Deliberately only one, unlike
+# the plan-checkpoint's own budget — this is a lighter-touch nudge for a
+# turn that was never a multi-step plan in the first place, so an
+# unresponsive model shouldn't burn multiple round-trips on it.
+_MAX_GROUNDED_NUDGES = 1
 
 
 # Knowledge questions the local model can answer directly from its weights.
@@ -2044,6 +2072,7 @@ def _run_dispatch_loop(
     rbac = ctx.rbac
     nudges = 0
     plan_reminders = 0
+    grounded_nudges = 0
     # v13: repeat-call guard for expensive, session-stateful CLI delegates.
     # Live bug this fixes: a weak local orchestrator model (e.g. qwen2.5:7b,
     # the fallback once NVIDIA broke) regularly can't tell a completed
@@ -2419,6 +2448,33 @@ def _run_dispatch_loop(
             ):
                 nudges += 1
                 continue
+            # v13 Grounded Mode (see _MAX_GROUNDED_NUDGES's own comment):
+            # real tools were genuinely offered this turn (scoped_tools
+            # non-empty — some agent actually matched) but the model never
+            # called a single one. Live-reproduced root cause this guards:
+            # a RESEARCH-routed turn answering a factual question from
+            # stale parametric memory in zero tool calls, presented with no
+            # indication it wasn't grounded. Off by default; only engages
+            # when the user has explicitly turned Grounded Mode on.
+            grounded_violation = (
+                ctx.grounded and tools_used == 0 and bool(scoped_tools)
+            )
+            if grounded_violation and grounded_nudges < _MAX_GROUNDED_NUDGES:
+                grounded_nudges += 1
+                reminder = (
+                    "[GROUNDED MODE] You answered with zero tool calls, but "
+                    "real tools were available this turn. If this task "
+                    "genuinely needs one (e.g. a live fact, current data, a "
+                    "file, or a search) call it now. If no tool was "
+                    "actually needed, say so explicitly and explain briefly "
+                    "why, so the user can tell a deliberate no-tool answer "
+                    "apart from one that skipped grounding by mistake."
+                )
+                messages.append({"role": "system", "content": reminder})
+                reminder_entry = {"type": "grounded_reminder"}
+                transcript.append(reminder_entry)
+                _emit_event(event_sink, reminder_entry)
+                continue
             # Fabrication case (exit path): a text-only message ends the run
             # even when the plan still has unexecuted steps. The most common
             # failure is the model CLAIMING a step is done without ever
@@ -2450,6 +2506,22 @@ def _run_dispatch_loop(
                         transcript[-1]["text"] = text
                     if messages and messages[-1].get("role") == "assistant":
                         messages[-1]["content"] = text
+            # v13 Grounded Mode: the nudge budget above is spent and the
+            # model STILL used zero tools despite real ones being offered.
+            # Never let this pass silently as if it had been researched —
+            # append the same kind of honest caveat the plan-based check
+            # above uses, so the user can see this specific answer wasn't
+            # grounded rather than trusting it at face value.
+            if ctx.grounded and tools_used == 0 and bool(scoped_tools):
+                text += (
+                    "\n\n[DOURMOUSE: Grounded Mode was on and this answer used "
+                    "zero tool calls despite real tools being available — "
+                    "treat it as unverified, not as a live lookup result]"
+                )
+                if transcript and transcript[-1].get("type") == "assistant_text":
+                    transcript[-1]["text"] = text
+                if messages and messages[-1].get("role") == "assistant":
+                    messages[-1]["content"] = text
             _maybe_ingest_memory(ctx.depth, str(last_user), text, plan_agents)
             return {"final_text": text, "transcript": transcript, "messages": messages}
 

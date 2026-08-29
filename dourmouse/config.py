@@ -756,6 +756,78 @@ def save_orchestrator_model_setting(model: str, backend: str = "") -> dict[str, 
 
 
 # --------------------------------------------------------------------------- #
+# v13 — Grounded Mode: user-controllable "must actually use a tool" strictness
+# --------------------------------------------------------------------------- #
+#
+# Real gap this closes, found live on 29 August 2026 by actually typing into
+# the running console rather than reading code: asked through RESEARCH (no
+# forced_agent pinned, an ordinary conversational turn), the orchestrator
+# answered "the current version of Python 3 is 3.11" — wrong for the date,
+# and answered after 56.6 real seconds with ZERO tool calls, despite the
+# RESEARCH screen's own UI text promising "searches the live web and cites
+# sources." dispatch.py already HAS an honest fabrication-guard for this
+# shape of problem (the "[DOURMOUSE: plan step(s) not executed via tools]"
+# caveat) — but it only fires `if plan:`, and a plain conversational turn
+# routed at a specific agent frequently has no `plan` object at all, so
+# nothing verifies a "research" answer actually used a real tool before
+# being presented as one.
+#
+# Deliberately NOT auto-enabled and NOT scoped to specific agent names: a
+# blanket "you used zero tools, are you sure?" nudge fired unconditionally
+# would produce real false positives on every genuinely tool-free
+# conversational reply sharing this same code path (not just RESEARCH) —
+# "what's 2+2" pinned to any agent doesn't need a tool call, and nudging it
+# anyway wastes a real LLM round-trip for nothing. Grounded Mode is instead
+# a user-facing, off-by-default SETTING (mirrors the orchestrator-model
+# picker's own persisted-setting pattern above): when ON, a focus_agent
+# turn whose pinned agent genuinely HAS at least one real tool available
+# but returns a text-only final answer with ZERO tool_use events gets ONE
+# honest nudge asking the model to either call a tool now or say plainly
+# why none was needed (see dispatch.py's own use of this flag for the exact
+# mechanism) — never a silent block, never a fabricated retry, just the
+# same "give it one honest chance to correct itself" pattern the existing
+# plan-reminder mechanism already uses.
+
+GROUNDED_MODE_SETTING_KEY = "DOURMOUSE_GROUNDED_MODE"
+
+
+def grounded_mode_enabled() -> bool:
+    """Whether Grounded Mode is currently on, read fresh from disk (same
+    live-without-restart contract as orchestrator_model_setting()). Off by
+    default — an explicit "1"/"true"/"yes"/"on" (case-insensitive) is the
+    only way to enable it; anything else, including unset, is honestly off.
+    """
+    raw = _read_user_config_file().get(GROUNDED_MODE_SETTING_KEY, "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def save_grounded_mode_setting(enabled: bool) -> dict[str, Any]:
+    """Persist the Grounded Mode toggle. Same merge-on-write .env file as
+    save_orchestrator_model_setting() — never clobbers other saved
+    settings. Never raises; a write failure is reported honestly."""
+    path = user_env_path()
+    try:
+        user_config_dir().mkdir(parents=True, exist_ok=True)
+        existing = _read_user_config_file()
+        existing[GROUNDED_MODE_SETTING_KEY] = "1" if enabled else "0"
+        body = [
+            "# Dourmouse configuration — written by first-run setup / settings.",
+            "# This file holds credentials. Keep it to yourself; it is never",
+            "# bundled into a build or uploaded anywhere.",
+            "",
+        ]
+        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        return {"ok": False, "detail": f"could not write config: {exc}"}
+    return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
+
+
+# --------------------------------------------------------------------------- #
 # v4.0 — Multi-device access (spec Phase 9)
 # --------------------------------------------------------------------------- #
 

@@ -173,3 +173,38 @@ class TestOrchestratorModelPost:
         assert status == 200
         assert data["current"] == "nvidia/round-trip"
         assert data["source"] == "persisted"
+
+
+class TestGroundedModeEndpoints:
+    """v13: /api/settings/grounded-mode GET + POST — same real-HTTP,
+    isolated-user-config discipline as the orchestrator-model tests above."""
+
+    def test_get_defaults_to_off(self, server):
+        srv, port = server
+        status, data = _get(port, "/api/settings/grounded-mode")
+        assert status == 200
+        assert data["enabled"] is False
+
+    def test_post_true_then_get_reflects_it(self, server):
+        srv, port = server
+        status, post_data = _post(port, "/api/settings/grounded-mode", {"enabled": True})
+        assert status == 200
+        assert post_data["ok"] is True
+        status, data = _get(port, "/api/settings/grounded-mode")
+        assert status == 200
+        assert data["enabled"] is True
+
+    def test_post_false_turns_it_back_off(self, server):
+        srv, port = server
+        _post(port, "/api/settings/grounded-mode", {"enabled": True})
+        _post(port, "/api/settings/grounded-mode", {"enabled": False})
+        status, data = _get(port, "/api/settings/grounded-mode")
+        assert status == 200
+        assert data["enabled"] is False
+
+    def test_post_missing_field_defaults_falsy_not_an_error(self, server):
+        srv, port = server
+        status, data = _post(port, "/api/settings/grounded-mode", {})
+        assert status == 200
+        assert data["ok"] is True
+        assert data["enabled"] is False

@@ -1473,6 +1473,16 @@ class _Handler(BaseHTTPRequestHandler):
                 self._handle_orchestrator_model_get()
             except Exception as exc:  # noqa: BLE001 - a settings read must never 500
                 self._send_json({"current": None, "backends": [], "error": str(exc)[:200]})
+        elif path == "/api/settings/grounded-mode":
+            # v13: backend half of the Grounded Mode toggle — off by
+            # default, see config.grounded_mode_enabled's own docstring for
+            # the live bug this exists to catch.
+            try:
+                from dourmouse.config import grounded_mode_enabled
+
+                self._send_json({"enabled": grounded_mode_enabled()})
+            except Exception as exc:  # noqa: BLE001 - a settings read must never 500
+                self._send_json({"enabled": False, "error": str(exc)[:200]})
         elif path == "/api/setup/status":
             # v8.9 first-run setup. Every field is a REAL probe (is Ollama
             # actually answering, is a key actually present) — setup must
@@ -2084,6 +2094,11 @@ class _Handler(BaseHTTPRequestHandler):
             # the normal auth gate above, unlike /api/setup/* — this is a
             # post-first-run settings change, not the bootstrap flow.
             self._handle_orchestrator_model_post()
+        elif parsed.path == "/api/settings/grounded-mode":
+            # v13: persists the Grounded Mode toggle (see
+            # config.save_grounded_mode_setting). Same post-first-run
+            # settings-change auth posture as the orchestrator-model POST.
+            self._handle_grounded_mode_post()
         elif parsed.path == "/api/vision/kill-switch":
             # world-monitor-expansion: a REAL toggle for dourmouse/tray.py's
             # privacy kill switch, reachable from the browser console even
@@ -3651,6 +3666,15 @@ class _Handler(BaseHTTPRequestHandler):
         result = cfg_mod.save_orchestrator_model_setting(model, backend=backend)
         if configured is not None:
             result["configured"] = configured
+        self._send_json(result)
+
+    def _handle_grounded_mode_post(self) -> None:
+        """POST /api/settings/grounded-mode. Body: {"enabled": bool}."""
+        from dourmouse import config as cfg_mod
+
+        body = self._read_json_body()
+        enabled = bool(body.get("enabled"))
+        result = cfg_mod.save_grounded_mode_setting(enabled)
         self._send_json(result)
 
     def _handle_memory_api(self) -> None:

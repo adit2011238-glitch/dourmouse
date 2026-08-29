@@ -282,6 +282,66 @@ class TestOrchestratorModelSetting:
         assert load_ollama_config().model_for_agent("orchestrator") != "ollama/persisted-choice"
 
 
+class TestGroundedModeSetting:
+    """Persisted (not just env), off-by-default Grounded Mode toggle — the
+    backend half of the Settings UI's grounded-mode switch. See
+    config.grounded_mode_enabled / save_grounded_mode_setting."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_off_by_default(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import grounded_mode_enabled
+
+        assert grounded_mode_enabled() is False
+
+    def test_save_true_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import grounded_mode_enabled, save_grounded_mode_setting
+
+        result = save_grounded_mode_setting(True)
+        assert result["ok"] is True
+        assert grounded_mode_enabled() is True
+
+    def test_save_false_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import grounded_mode_enabled, save_grounded_mode_setting
+
+        save_grounded_mode_setting(True)
+        save_grounded_mode_setting(False)
+        assert grounded_mode_enabled() is False
+
+    def test_save_merges_with_existing_file(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_grounded_mode_setting, user_env_path
+
+        path = user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("NVIDIA_API_KEY=nvapi-existing\n", encoding="utf-8")
+        save_grounded_mode_setting(True)
+        contents = path.read_text(encoding="utf-8")
+        assert "NVIDIA_API_KEY=nvapi-existing" in contents
+        assert "DOURMOUSE_GROUNDED_MODE=1" in contents
+
+    def test_garbage_value_in_file_reads_as_off(self, monkeypatch, tmp_path):
+        """Honest degrade, matching this module's own rule elsewhere: an
+        unrecognized value is never guessed true, only an explicit
+        1/true/yes/on counts."""
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import grounded_mode_enabled, user_env_path
+
+        path = user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("DOURMOUSE_GROUNDED_MODE=maybe\n", encoding="utf-8")
+        assert grounded_mode_enabled() is False
+
+
 # --------------------------------------------------------------------------- #
 # v5.10 — OmniRoute free-tier gateway backend
 # --------------------------------------------------------------------------- #

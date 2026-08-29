@@ -3239,6 +3239,11 @@ function paintSettings(){
       <div id="orchModelRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
     <div class="note" id="orchModelNote">Loading…</div>
+    <div class="toolbar">
+      <span class="lbl">GROUNDED MODE</span>
+      <div id="groundedRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+    <div class="note" id="groundedNote">Loading…</div>
     <div class="sec">MEMORY</div>
     <div class="row"><div class="g"><div class="n">${m.count!=null?`${m.count} facts stored`:"—"}</div>
       <div class="d">${m.active?"learning loop on":esc(m.gate||"")}</div></div></div>
@@ -3329,9 +3334,17 @@ function paintSettings(){
               body: JSON.stringify({backend: be.name}),
             });
             const jj = await rr.json();
+            // Real bug fixed here: the backend's refusal reason (e.g.
+            // "'claude' can't be the orchestrator's model — it's reached
+            // through the CODE screen's own toolchain picker...") comes
+            // back as `detail`, not `error` — this read the wrong field,
+            // so every refusal silently displayed "unknown error" and the
+            // actual, helpful explanation was thrown away. This is the
+            // real root of "picking Claude/Codex here doesn't work" —
+            // it DOES respond, honestly, it just never reached the user.
             note.textContent = jj.ok
               ? `Now: ${jj.model}${jj.configured === false ? " (saved, but not configured yet)" : ""}`
-              : "Could not save: " + (jj.error || "unknown error");
+              : "Could not save: " + (jj.detail || jj.error || "unknown error");
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
           }
@@ -3348,6 +3361,58 @@ function paintSettings(){
       note.textContent = `Currently: ${j.current || "—"}${srcLabel ? " · " + srcLabel : ""}`;
     } catch (err) {
       note.textContent = "Could not load orchestrator model options: " + (err.message || err);
+    }
+  })();
+
+  /* v13: Grounded Mode toggle. Off by default — real bug this exists to
+     catch: a plain conversational turn routed toward an agent (RESEARCH,
+     live-observed) can answer with zero tool calls despite real tools
+     being available, presented with no indication it wasn't grounded. ON
+     asks the model once to either use a tool or say plainly why none was
+     needed; if it still doesn't, the final answer carries an honest
+     caveat rather than silently passing as researched. See
+     dispatch.py's _MAX_GROUNDED_NUDGES comment for the full mechanism. */
+  (async () => {
+    const row = $("groundedRow"), note = $("groundedNote");
+    if (!row) return;
+    try {
+      const r = await fetch("/api/settings/grounded-mode");
+      const j = await r.json();
+      row.innerHTML = "";
+      [[false, "OFF"], [true, "ON"]].forEach(([val, label]) => {
+        const btn = document.createElement("button");
+        const on = j.enabled === val;
+        btn.className = "chip" + (on ? " on" : "");
+        btn.type = "button"; btn.textContent = label;
+        btn.setAttribute("aria-pressed", String(on));
+        btn.onclick = async () => {
+          note.textContent = "Saving…";
+          try {
+            const rr = await fetch("/api/settings/grounded-mode", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({enabled: val}),
+            });
+            const jj = await rr.json();
+            note.textContent = jj.ok
+              ? (val
+                  ? "On — a zero-tool answer now gets one honest nudge, then a caveat if it still skips grounding."
+                  : "Off — answers are never flagged for skipping tool use.")
+              : "Could not save: " + (jj.detail || "unknown error");
+          } catch (err) {
+            note.textContent = "Save failed: " + (err.message || err);
+          }
+          paintSettings();
+        };
+        row.appendChild(btn);
+      });
+      if (!note.textContent || note.textContent === "Loading…") {
+        note.textContent = j.enabled
+          ? "On — a zero-tool answer gets one honest nudge, then a caveat if it still skips grounding."
+          : "Off — answers are never flagged for skipping tool use.";
+      }
+    } catch (err) {
+      note.textContent = "Could not load Grounded Mode: " + (err.message || err);
     }
   })();
 

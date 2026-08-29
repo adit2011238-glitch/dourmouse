@@ -1143,6 +1143,113 @@ class TestBespokeAgentPrompts:
         assert AGENT_SYSTEM_PROMPTS["research_info"] in sent[0]["content"]
 
 
+class TestGroundedMode:
+    """v13: user-controllable Grounded Mode (config.grounded_mode_enabled()).
+    Live bug this exists to catch: asked through RESEARCH with no
+    forced_agent, the orchestrator answered a factual question wrong and
+    stale after 56.6s with ZERO tool calls, despite the screen's own UI
+    promising "searches the live web and cites sources" — nothing verified
+    a "research" answer actually used a real tool. Off by default (these
+    tests always monkeypatch the setting explicitly, never relying on
+    whatever the real dev machine's .env happens to contain)."""
+
+    def test_off_by_default_zero_tools_no_nudge_no_caveat(self, monkeypatch):
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: False)
+        registry = _test_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="just an answer"))])
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "x"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent",
+        )
+        assert report["final_text"] == "just an answer"
+        assert len(client.chat.completions.calls) == 1  # no nudge round-trip
+
+    def test_on_zero_tools_nudges_once_then_caveats(self, monkeypatch):
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = _test_registry()
+        client = FakeClient(
+            [
+                _FakeResponse(_FakeMessage(content="first try, no tool")),
+                _FakeResponse(_FakeMessage(content="second try, still no tool")),
+            ]
+        )
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "x"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent",
+        )
+        # Exactly one nudge round-trip (the _MAX_GROUNDED_NUDGES=1 budget).
+        assert len(client.chat.completions.calls) == 2
+        second_call_messages = client.chat.completions.calls[1]["messages"]
+        assert any(
+            m["role"] == "system" and "[GROUNDED MODE]" in m["content"]
+            for m in second_call_messages
+        )
+        # Budget spent, still zero tools -> the final answer carries an
+        # honest caveat rather than being presented as grounded.
+        assert "second try, still no tool" in report["final_text"]
+        assert "Grounded Mode was on" in report["final_text"]
+        assert "zero tool calls" in report["final_text"]
+
+    def test_on_but_a_real_tool_was_used_no_caveat(self, monkeypatch):
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = _test_registry()
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(
+                        tool_calls=[
+                            _FakeToolCall("1", "echo", json.dumps({"text": "hi"}))
+                        ]
+                    )
+                ),
+                _FakeResponse(_FakeMessage(content="answered using the tool")),
+            ]
+        )
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "x"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent",
+        )
+        assert report["final_text"] == "answered using the tool"
+        assert "GROUNDED MODE" not in report["final_text"]
+        assert "Grounded Mode" not in report["final_text"]
+
+    def test_on_but_the_forced_agent_has_no_tools_never_nudges(self, monkeypatch):
+        # Nothing was ever offered to call -> a zero-tool answer is the only
+        # possible outcome and must not be treated as a violation.
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = DispatchRegistry()
+        registry.register_subagent(
+            Subagent(name="toolless", domain="Test", description="no tools", tools=())
+        )
+        client = FakeClient([_FakeResponse(_FakeMessage(content="a plain reply"))])
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "x"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="toolless",
+        )
+        assert report["final_text"] == "a plain reply"
+        assert len(client.chat.completions.calls) == 1
+
+
 class TestRealClientConstruction:
     def test_builds_client_from_env_config_when_none_injected(self, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "nvidia")  # v4.0: explicit backend
