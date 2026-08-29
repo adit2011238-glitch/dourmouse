@@ -821,6 +821,50 @@ class TestSseChat:
         models = [c["model"] for c in srv.session.client.chat.completions.calls]
         assert models and all(m == "nvidia/echo-70b" for m in models)
 
+    def test_focus_agent_with_commas_never_gets_split_into_a_multi_agent_plan(self, server):
+        """v13: a real bug fixed here, live-caught through an actual
+        directive against the CODE screen's "docs" toolchain — a request
+        with real commas in it ("make a slideshow explaining X, Y, and Z.
+        Create it in my Drive.") used to get cut by build_plan()'s
+        comma-splitting fallback into multiple fragments routed to
+        DIFFERENT WRONG agents, because focus_agent only ever wrapped the
+        prompt in a "[ROUTING DIRECTIVE]..." sentence and never set the
+        real forced_agent dispatch.py already built to bypass exactly this
+        (see run_dispatch_messages' own forced_agent docstring). A real
+        forced_agent turn must produce ZERO "plan" transcript events —
+        build_plan() must never run at all when an agent is pinned."""
+        srv, port = server
+        srv.session.client = FakeClient(
+            [_FakeResponse(_FakeMessage(content="done"))]
+        )
+        # This test's server fixture registers "echo_agent" — any real
+        # subagent name works identically for this assertion.
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat",
+            body=json.dumps({
+                "prompt": "make a slideshow explaining what this is, how it "
+                          "works, and what it does. Create it in my drive.",
+                "focus_agent": "echo_agent",
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        events = []
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                events.append(json.loads(line[6:]))
+        conn.close()
+        assert resp.status == 200
+        assert not any(e.get("type") == "plan" for e in events), (
+            "focus_agent turn produced a 'plan' event — build_plan() ran "
+            "despite an agent being pinned, meaning forced_agent never "
+            "reached dispatch.py"
+        )
+
     def test_chat_without_focus_uses_session_default_model(self, server, monkeypatch):
         """No focus_agent -> the session's default config model drives the
         run (no per-agent override injected). Fast lane pinned off — this

@@ -124,6 +124,7 @@ class ChatSession:
         voice: bool = False,
         display_text: str | None = None,
         screen: str = "HOME",
+        forced_agent: str | None = None,
     ) -> dict[str, Any]:
         """Send one user turn; returns the dispatch report.
 
@@ -152,6 +153,24 @@ class ChatSession:
         (HOME/RESEARCH/CODE/...) — persisted so restore can put a turn back
         on the thread it actually belongs to instead of flattening every
         screen's conversation onto HOME.
+
+        ``forced_agent`` (v13): a real bug fixed here, live-caught through
+        an actual directive against the CODE screen's "docs" toolchain —
+        webui.py wraps a focus_agent turn's prompt into a "[ROUTING
+        DIRECTIVE] Complete this task using ONLY the '<agent>' subagent..."
+        sentence, but this method never threaded a REAL forced_agent
+        through to dispatch.py's own run_dispatch_messages(forced_agent=...)
+        — the ONE mechanism dispatch.py already built specifically to
+        bypass build_plan()'s comma-splitting fallback (its own docstring
+        names this exact failure mode: a task description with commas gets
+        cut into nonsense fragments routed to the WRONG agents). Every
+        focus_agent-pinned request from ANY screen's toolchain picker was
+        relying purely on the wrapped SENTENCE being read correctly by the
+        model — live-reproduced: a 4-sentence slideshow request with real
+        commas in it got split into 3 fragments routed to 'tasks',
+        'worldmonitor', and 'docs' instead of running as one directive on
+        'docs'. forced_agent now makes the routing decision authoritative
+        at the dispatch level, not just a hopeful sentence in the prompt.
         """
         prompt = prompt.strip()
         if not prompt:
@@ -198,6 +217,7 @@ class ChatSession:
                 rbac=self.rbac,
                 model=model,
                 voice=voice,
+                forced_agent=forced_agent,
                 # v5.6 neural orchestration: every top-level turn feeds the
                 # neural orchestrator (delayed import — a disabled gate is a
                 # no-op, and the sink can never break the turn).

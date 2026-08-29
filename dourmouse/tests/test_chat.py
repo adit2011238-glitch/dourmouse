@@ -234,6 +234,52 @@ class TestFailurePaths:
         assert record["final_text"] == ""
 
 
+class TestForcedAgentThreadsThrough:
+    """v13: a real bug fixed here, live-caught through an actual directive
+    against the CODE screen's "docs" toolchain (a slideshow request with
+    real commas in it) — ask() never threaded a REAL forced_agent through
+    to dispatch.py's own run_dispatch_messages(forced_agent=...), the ONE
+    mechanism dispatch.py already built specifically to bypass
+    build_plan()'s comma-splitting fallback. Every focus_agent-pinned
+    request from any screen's toolchain picker was relying purely on the
+    webui.py-wrapped "[ROUTING DIRECTIVE]..." sentence being read
+    correctly by the model instead of the dispatch-level mechanism meant
+    for exactly this. Live-reproduced: a 3-sentence request with commas
+    got split into 3 fragments routed to 'tasks'/'worldmonitor'/'docs'
+    instead of running as one directive on 'docs'."""
+
+    def test_forced_agent_reaches_run_dispatch_messages(self, monkeypatch, tmp_path):
+        captured = {}
+
+        def spy(messages, registry, **kwargs):
+            captured.update(kwargs)
+            return {"final_text": "ok", "transcript": [], "messages": messages}
+
+        monkeypatch.setattr("dourmouse.chat.run_dispatch_messages", spy)
+        session = ChatSession(
+            _registry(), client=FakeClient([]), session_file=tmp_path / "s.jsonl",
+        )
+        session.ask("do the task, with commas, in it", forced_agent="docs")
+        assert captured.get("forced_agent") == "docs"
+
+    def test_no_forced_agent_passes_none_unchanged(self, monkeypatch, tmp_path):
+        """An ordinary AUTO-routed turn (no focus_agent pinned) must keep
+        build_plan()'s normal routing — forced_agent must default to None,
+        not silently pin something."""
+        captured = {}
+
+        def spy(messages, registry, **kwargs):
+            captured.update(kwargs)
+            return {"final_text": "ok", "transcript": [], "messages": messages}
+
+        monkeypatch.setattr("dourmouse.chat.run_dispatch_messages", spy)
+        session = ChatSession(
+            _registry(), client=FakeClient([]), session_file=tmp_path / "s2.jsonl",
+        )
+        session.ask("just a normal question")
+        assert captured.get("forced_agent") is None
+
+
 class TestPersistence:
     def test_audit_log_and_state_snapshot_written(self, tmp_path):
         client = FakeClient([_FakeResponse(_FakeMessage(content="Saved."))])

@@ -1545,6 +1545,25 @@ class _Handler(BaseHTTPRequestHandler):
             # AttentionQueue's own docstring for the gap this closes.
             items = self.server.attention.snapshot()
             self._send_json({"items": items, "count": len(items)})
+        elif path == "/api/news":
+            # v13: the NEWS screen's catch-up read on page load — live
+            # updates after that arrive over GET /api/events (the same
+            # broadcast hub the HUD already uses), which is what
+            # dourmouse.news_stream.NewsStreamWatcher pushes onto when
+            # news_stream=True. Honest empty state when the watcher never
+            # started (news_stream=False — every test server, by design).
+            watcher = getattr(self.server, "news_watcher", None)
+            if watcher is None:
+                self._send_json({"items": [], "status": None, "running": False})
+            else:
+                qs = urllib.parse.parse_qs(parsed.query)
+                try:
+                    limit = int(qs.get("limit", ["50"])[0])
+                except ValueError:
+                    limit = 50
+                important_only = qs.get("important", ["0"])[0] in ("1", "true")
+                items = watcher.recent(limit=limit, important_only=important_only)
+                self._send_json({"items": items, "status": watcher.status(), "running": True})
         elif path == "/api/budget":
             self._send_json(
                 {
@@ -2949,6 +2968,19 @@ class _Handler(BaseHTTPRequestHandler):
                     voice=voice_channel,
                     display_text=raw_prompt,
                     screen=screen,
+                    # v13: a real bug fixed here, live-caught through an
+                    # actual directive against the CODE screen's "docs"
+                    # toolchain — this used to rely PURELY on the wrapped
+                    # "[ROUTING DIRECTIVE]..." sentence above being read
+                    # correctly by the model, never on the real forced_agent
+                    # mechanism dispatch.py already built to bypass
+                    # build_plan()'s comma-splitting fallback. Live-
+                    # reproduced: a slideshow request with real commas in
+                    # it got split into 3 fragments routed to the wrong
+                    # agents. `focus_agent` is already validated above
+                    # against the real subagent_names, so passing it
+                    # straight through is safe.
+                    forced_agent=focus_agent or None,
                 )
             except Exception as exc:  # surface real failures to the UI
                 error_msg = str(exc)
@@ -4670,6 +4702,8 @@ def run_server(
     neuro: bool = False,
     artifacts=None,
     freebuff_events: bool = False,
+    news_stream: bool = False,
+    news_stream_poll_interval: float | None = None,
     state=None,
     auth=None,
     session_file: Path | str | None = None,
@@ -4710,6 +4744,15 @@ def run_server(
     activity (turn started/finished, created, status change) to every HUD
     connected via GET /api/events. Tests keep it False (default) so the
     suite never touches the Freebuff app.
+
+    ``news_stream`` (v13): when True, a background NewsStreamWatcher polls
+    real disaster/conflict/news feeds (dourmouse.news_stream, reusing
+    world_pulse.py's own already-proven fetchers) on a fixed interval and
+    broadcasts every new item to the same GET /api/events hub — the
+    backend half of "our own customizable news mile app within Dourmouse
+    that updates without us having to prompt" (verbatim from the task that
+    motivated this). Tests keep it False (default) so the suite never
+    touches the network.
     """
 
     def _list_sessions() -> dict[str, Any]:
@@ -5078,6 +5121,19 @@ def run_server(
             server.events_broadcast.broadcast
         )
         server.freebuff_watcher.start()
+    server.news_watcher = None
+    if news_stream:
+        from dourmouse.news_stream import NewsStreamWatcher
+
+        watcher_kwargs: dict[str, Any] = {}
+        if news_stream_poll_interval is not None:
+            # Test seam only — the real serving path never sets this, so
+            # production always gets NewsStreamWatcher's own real default.
+            watcher_kwargs["poll_interval"] = news_stream_poll_interval
+        server.news_watcher = NewsStreamWatcher(
+            server.events_broadcast.broadcast, **watcher_kwargs
+        )
+        server.news_watcher.start()
     if neuro:
         try:
             from dourmouse.orch_net import orch_enabled
@@ -5149,6 +5205,8 @@ def serve_forever(
         neuro=True,
         # v5.9: the real serving path surfaces live Freebuff thread activity.
         freebuff_events=True,
+        # v13: the real serving path runs the forever-refreshing news feed.
+        news_stream=True,
     )
     print(f"Dourmouse UI running at http://{host}:{port}")
     print(f"Registry: {', '.join(sorted(registry.subagent_names))}")
@@ -5200,6 +5258,8 @@ def serve_forever(
             server.daily_reporter.stop()
         if server.freebuff_watcher is not None:
             server.freebuff_watcher.stop()
+        if server.news_watcher is not None:
+            server.news_watcher.stop()
         if server.memory is not None:
             server.memory.close()
         server.server_close()
