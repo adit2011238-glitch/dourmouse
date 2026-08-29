@@ -24,8 +24,15 @@
       grants permission and "ENABLE HAND CONTROL" is clicked — but like
       index.html's own vision code, this sandbox has no real camera to
       grant that permission to, so gesture-driven drag/resize/rotate is
-      verified here by code review and a live desktop/browser session with
-      real camera permission is what actually confirms it feels right.
+      verified here by an EMA-smoothing + pinch-hysteresis fix
+      (LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO,
+      section 4 below) confirmed against a synthetic-landmark Node harness
+      (dourmouse/tests/test_workspace_hand_gestures.py extracts and
+      actually EXECUTES the real gesture-math functions with fabricated
+      landmark sequences — not just node --check) — a live desktop/browser
+      session with real camera permission and a real human hand is still
+      what confirms it FEELS right; the math being correct on synthetic
+      input is not the same as good real-world feel.
     - Voice commands: the grammar (dourmouse/voice_commands.py) is real,
       server-parsed, and unit-tested. Typed commands in the box below
       dispatch for real right now. Push-to-talk (mic -> /api/speech STT ->
@@ -217,12 +224,15 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     </div>
     <div class="row"><span>Gesture</span><b id="visGesture">—</b></div>
     <div class="row"><span>Focused window</span><b id="visFocused">none</b></div>
+    <div class="row"><span>Signal</span><b id="visSignal">—</b></div>
     <button class="hb" id="visToggle" type="button">ENABLE HAND CONTROL</button>
     <div class="note">Pinch a titlebar with one hand to drag it. Pinch with BOTH hands and
       change the distance between them to resize the focused window; change the angle
       between them to tilt it. Gated by the same camera kill-switch as VISION screen /
       tray.py — verified live-desktop, not this sandbox (see page source for the full
-      honesty note).</div>
+      honesty note). Raw landmarks are EMA-smoothed and pinch has real on/off hysteresis
+      (see LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO below) — SIGNAL
+      above reports NOISY when smoothing is actively correcting a jittery frame.</div>
   </div>
 </div>
 
@@ -693,12 +703,54 @@ $("voxMic").addEventListener("click", voxToggleMic);
 const HAND = {
   video: $("visVideo"), overlay: $("visOverlay"), wrap: $("visCamWrap"),
   toggleBtn: $("visToggle"), gestureEl: $("visGesture"), handsCountEl: $("visHandsCount"),
-  killDot: $("visKillDot"),
+  killDot: $("visKillDot"), signalEl: $("visSignal"),
   stream: null, handLM: null, running: false, startingUp: false,
   cameraAllowed: true,
   dragging: false, dragPanelId: null, dragOffX: 0, dragOffY: 0,
   twoHand: false, startDist: 0, startAngle: 0, startW: 0, startH: 0, startRotate: 0,
+  // per-hand-slot (index in res.landmarks, NOT tracked handedness — same
+  // positional convention the pre-existing two-hand pinch code already
+  // relies on for pinching[0]/pinching[1]) EMA + hysteresis memory.
+  smoothLM: [null, null], pinchState: [false, false], lastHandCount: 0,
 };
+
+/* ---- landmark smoothing --------------------------------------------
+   Raw MediaPipe landmark output is genuinely noisy frame-to-frame,
+   especially at the 480x270 capture resolution requested above — this is
+   the diagnosed root cause of jittery drag/resize/rotate. An EMA is
+   applied to every raw landmark point BEFORE any distance/midpoint math
+   (pinch detection, drag delta, two-hand distance/angle) reads it, so
+   nothing downstream ever sees the raw jitter — smoothing only the final
+   drag position would still leave pinch-detection reading noisy raw
+   distances.
+     smoothed = smoothed*alpha + raw*(1-alpha)
+   alpha is the weight kept from the PREVIOUS smoothed value, so higher
+   alpha = more damping = more lag; lower alpha = more responsive = less
+   damping. 0.6 sits in the "responsiveness-weighted" 0.5-0.7 range
+   generally used for hand-tracking UIs: it visibly kills single-frame
+   jitter while a genuine, sustained hand movement still catches up within
+   2-3 frames (~70-100ms at 30fps) — low enough lag to feel direct, high
+   enough smoothing that noise near the pinch threshold (see hysteresis
+   below) stops flipping every frame. */
+const LANDMARK_SMOOTH_ALPHA = 0.6;
+
+/* ---- pinch hysteresis ------------------------------------------------
+   The old code had one threshold (ratio < 0.42) so noise sitting near
+   that boundary could flip `pinch` true/false every other frame, starting
+   and stopping a drag erratically. Fix: two thresholds — a Schmitt
+   trigger. Pinch ENGAGES only once the thumb-index distance (relative to
+   hand scale) drops under PINCH_ENGAGE_RATIO, and does not RELEASE again
+   until it opens back up past the wider PINCH_RELEASE_RATIO. Noise that
+   never crosses the far threshold can no longer flip the state.
+   Chosen over ui/index.html's "hold N consecutive frames" hysteresis
+   (GS.NEED/GS.count in that file's discrete-gesture engine) because that
+   pattern adds a fixed frame-delay to EVERY engage and release, discrete
+   or not. A dual threshold only costs latency to signal that is actually
+   oscillating near the boundary — the exact failure being fixed — and
+   leaves a clean, deliberate pinch-to-grab feeling immediate, which
+   matters more here than for a one-shot discrete gesture. */
+const PINCH_ENGAGE_RATIO = 0.42;  // the old single, flicker-prone cutoff
+const PINCH_RELEASE_RATIO = 0.55; // must open back up past this to release
 
 const VIS_BRIDGE_URL = "http://127.0.0.1:8766/api/vision-state";
 async function pollVisionBridge(){
@@ -764,6 +816,8 @@ function stopHandControl(){
   HAND.toggleBtn.classList.remove("on");
   HAND.handsCountEl.textContent = "0 hands";
   HAND.gestureEl.textContent = "—";
+  HAND.signalEl.textContent = "—";
+  resetHandSmoothing(); HAND.lastHandCount = 0;
   const ctx = HAND.overlay.getContext("2d"); if(ctx) ctx.clearRect(0, 0, HAND.overlay.width, HAND.overlay.height);
   endHandDrag(); endTwoHand();
 }
@@ -791,13 +845,71 @@ function drawHandOverlay(res){
   }
 }
 
-function handPinchState(lm){
+/* ---- pure gesture-math (no DOM/window references) — extracted so a
+   synthetic-landmark Node harness can execute them directly against
+   fabricated frames; see dourmouse/tests/test_workspace_hand_gestures.py
+   for what that harness actually proves with real numbers. ---- */
+
+// EMA on one {x,y} point. prevSmoothed==null (first frame for this
+// hand-slot) passes the raw point straight through — nothing to damp yet.
+function emaPoint(prevSmoothed, raw, alpha){
+  if(!prevSmoothed) return { x: raw.x, y: raw.y };
+  return {
+    x: prevSmoothed.x * alpha + raw.x * (1 - alpha),
+    y: prevSmoothed.y * alpha + raw.y * (1 - alpha),
+  };
+}
+// Apply emaPoint across a full 21-point landmark array.
+function smoothLandmarks(prevArr, rawLm, alpha){
+  const out = new Array(rawLm.length);
+  for(let i = 0; i < rawLm.length; i++){
+    out[i] = emaPoint(prevArr ? prevArr[i] : null, rawLm[i], alpha);
+  }
+  return out;
+}
+// Average per-landmark displacement the smoothing pass just introduced,
+// normalized by hand scale — a real measure of how much correction is
+// happening this frame, not a decorative number. Used to drive the
+// SIGNAL indicator (section 4b below).
+function computeJitter(rawLm, smoothedLm, scale){
+  let sum = 0;
+  for(let i = 0; i < rawLm.length; i++){
+    sum += Math.hypot(rawLm[i].x - smoothedLm[i].x, rawLm[i].y - smoothedLm[i].y);
+  }
+  return (sum / rawLm.length) / Math.max(1e-4, scale);
+}
+
+// Pinch distance/midpoint + hysteresis. wasPinching is this hand-slot's
+// previous frame state; viewW/viewH are passed in (rather than read from
+// `window`) so this function has zero DOM dependency and is directly
+// callable from a bare Node harness.
+function handPinchState(lm, wasPinching, viewW, viewH){
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const scale = Math.max(1e-4, dist(lm[0], lm[9]));
-  const pinch = dist(lm[4], lm[8]) < scale * 0.42;
+  const ratio = dist(lm[4], lm[8]) / scale;
+  const pinch = wasPinching ? (ratio < PINCH_RELEASE_RATIO) : (ratio < PINCH_ENGAGE_RATIO);
   const px = (lm[4].x + lm[8].x) / 2, py = (lm[4].y + lm[8].y) / 2;
   // mirror the camera, same convention as ui/index.html's onHands.
-  return { pinch, x: (1 - px) * window.innerWidth, y: py * window.innerHeight };
+  return { pinch, x: (1 - px) * viewW, y: py * viewH, scale };
+}
+
+// Two-hand pinch distance/angle -> resize/rotate target. `start` is the
+// {dist, angle, w, h, rotate} snapshot captured the frame the second pinch
+// engaged. Same clamp numbers as the original inline code (0.4-2.5x
+// scale; rotate itself is clamped by setPanelRotate on the way out).
+function computeTwoHandTransform(distNow, angleNow, start){
+  const scale = Math.max(0.4, Math.min(2.5, distNow / (start.dist || 1)));
+  return {
+    w: start.w * scale,
+    h: start.h * scale,
+    rotate: start.rotate + (angleNow - start.angle),
+  };
+}
+
+// Single-hand drag target from the pinch midpoint and the grab offset
+// captured when the drag started.
+function computeDragTarget(s, offX, offY){
+  return { x: s.x - offX, y: s.y - offY };
 }
 
 function getFocusedPanel(){
@@ -807,12 +919,43 @@ function getFocusedPanel(){
 function endHandDrag(){ HAND.dragging = false; HAND.dragPanelId = null; }
 function endTwoHand(){ HAND.twoHand = false; }
 
-function onHandFrame(res){
-  const hands = (res && res.landmarks) || [];
-  HAND.handsCountEl.textContent = hands.length + " hand" + (hands.length === 1 ? "" : "s");
-  if(hands.length === 0){ HAND.gestureEl.textContent = "—"; endHandDrag(); endTwoHand(); return; }
+function resetHandSmoothing(){
+  HAND.smoothLM = [null, null];
+  HAND.pinchState = [false, false];
+}
 
-  const states = hands.map(handPinchState);
+function onHandFrame(res){
+  const rawHands = (res && res.landmarks) || [];
+  HAND.handsCountEl.textContent = rawHands.length + " hand" + (rawHands.length === 1 ? "" : "s");
+
+  // A hand appearing/disappearing means slot 0/1 no longer necessarily
+  // refers to the same physical hand as last frame — start smoothing and
+  // hysteresis fresh rather than blend across a hand-identity change.
+  if(rawHands.length !== HAND.lastHandCount) resetHandSmoothing();
+  HAND.lastHandCount = rawHands.length;
+
+  if(rawHands.length === 0){ HAND.gestureEl.textContent = "—"; HAND.signalEl.textContent = "—"; endHandDrag(); endTwoHand(); return; }
+
+  // ---- EMA-smooth every raw landmark BEFORE any distance/midpoint math
+  // reads it (see LANDMARK_SMOOTH_ALPHA doc above) — smoothing only the
+  // final drag position would still leave pinch-detection reading raw,
+  // jittery distances. ----
+  let jitterSum = 0;
+  const hands = rawHands.map((lm, i) => {
+    const smoothed = smoothLandmarks(HAND.smoothLM[i], lm, LANDMARK_SMOOTH_ALPHA);
+    const scale = Math.max(1e-4, Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y));
+    jitterSum += computeJitter(lm, smoothed, scale);
+    HAND.smoothLM[i] = smoothed;
+    return smoothed;
+  });
+  const avgJitter = jitterSum / hands.length;
+  HAND.signalEl.textContent = avgJitter > 0.02 ? "NOISY (smoothing active)" : "STABLE";
+
+  const states = hands.map((lm, i) => {
+    const s = handPinchState(lm, HAND.pinchState[i], window.innerWidth, window.innerHeight);
+    HAND.pinchState[i] = s.pinch;
+    return s;
+  });
   const pinching = states.filter(s => s.pinch);
 
   if(pinching.length >= 2){
@@ -828,9 +971,12 @@ function onHandFrame(res){
       HAND.startDist = dist || 1; HAND.startAngle = angle;
       HAND.startW = fp.w; HAND.startH = fp.h; HAND.startRotate = fp.rotate || 0;
     }else{
-      const scale = Math.max(0.4, Math.min(2.5, dist / HAND.startDist));
-      setPanelRect(fp, { w: HAND.startW * scale, h: HAND.startH * scale });
-      setPanelRotate(fp, HAND.startRotate + (angle - HAND.startAngle));
+      const t = computeTwoHandTransform(dist, angle, {
+        dist: HAND.startDist, angle: HAND.startAngle,
+        w: HAND.startW, h: HAND.startH, rotate: HAND.startRotate,
+      });
+      setPanelRect(fp, { w: t.w, h: t.h });
+      setPanelRotate(fp, t.rotate);
     }
     HAND.gestureEl.textContent = "RESIZE/ROTATE";
     return;
@@ -855,7 +1001,7 @@ function onHandFrame(res){
       HAND.gestureEl.textContent = HAND.dragging ? "DRAG" : "PINCH (not on a titlebar)";
     }else{
       const p = panels.get(HAND.dragPanelId);
-      if(p) setPanelRect(p, { x: s.x - HAND.dragOffX, y: s.y - HAND.dragOffY });
+      if(p){ const t = computeDragTarget(s, HAND.dragOffX, HAND.dragOffY); setPanelRect(p, t); }
       HAND.gestureEl.textContent = "DRAG";
     }
     return;
