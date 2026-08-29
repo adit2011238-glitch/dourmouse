@@ -464,7 +464,16 @@ class TestClaudeSessionContinuity:
         sid = argv[argv.index("--session-id") + 1]
         # a real UUID4, not a placeholder
         assert uuid.UUID(sid).version == 4
-        assert argv[-1] == "write add"
+        # v13: task lands right after the session args, not necessarily
+        # last — real --mcp-config/--allowedTools flags now ride after it
+        # (see _run_claude_once). They must never ride BEFORE it:
+        # --allowedTools takes a variadic value list and a trailing prompt
+        # would be silently swallowed into it (live-caught on the real
+        # CLI: `claude -p --allowedTools "mcp__dourmouse__*" "say hello"`
+        # really does error "Input must be provided either through stdin
+        # or as a prompt argument" — it ate "say hello" as another tool
+        # name).
+        assert argv[argv.index("--session-id") + 2] == "write add"
         assert code_backends._CLAUDE_SESSIONS["/tmp/proj"] == sid
 
     def test_second_call_same_cwd_resumes_the_same_session(self, monkeypatch):
@@ -486,7 +495,9 @@ class TestClaudeSessionContinuity:
         first_sid = seen[0][seen[0].index("--session-id") + 1]
         assert "--resume" in seen[1]
         assert seen[1][seen[1].index("--resume") + 1] == first_sid
-        assert seen[1][-1] == "second turn"
+        # v13: task lands right after --resume's value — see the sibling
+        # test above for why order (not "last") is what matters here.
+        assert seen[1][seen[1].index("--resume") + 2] == "second turn"
 
     def test_different_cwd_gets_a_different_session(self, monkeypatch):
         seen: list = []
@@ -809,9 +820,13 @@ class TestSharedContextInjection:
         )
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
-        # argv == [cli, "-p", *session_args, task] — task is always last
-        # (session continuity, see TestClaudeSessionContinuity below).
-        assert seen["argv"][-1] == "write a fib function"
+        # argv == [cli, "-p", *session_args, task, *mcp_args] — task rides
+        # right after the session args, not necessarily last (v13: real
+        # --mcp-config/--allowedTools flags ride after it — see
+        # TestClaudeSessionContinuity below for why they can't ride
+        # before).
+        argv = seen["argv"]
+        assert argv[argv.index("--session-id") + 2] == "write a fib function"
 
     def test_hits_get_prepended_to_the_claude_task(self, monkeypatch):
         from dourmouse import shared_rag
@@ -838,7 +853,8 @@ class TestSharedContextInjection:
         )
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
-        sent_task = seen["argv"][-1]
+        argv = seen["argv"]
+        sent_task = argv[argv.index("--session-id") + 2]
         assert "prior note: use pytest" in sent_task
         assert sent_task.endswith("write a fib function")
         # real formatting came from format_merged_result, not a hand-rolled dupe
@@ -898,7 +914,8 @@ class TestSharedContextInjection:
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         out = code_backends.run_code_task("claude", "write a fib function")
         assert out == "ok"
-        assert seen["argv"][-1] == "write a fib function"
+        argv = seen["argv"]
+        assert argv[argv.index("--session-id") + 2] == "write a fib function"
 
     def test_empty_hits_injects_nothing(self, monkeypatch):
         from dourmouse import shared_rag
@@ -921,4 +938,5 @@ class TestSharedContextInjection:
         )
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
-        assert seen["argv"][-1] == "write a fib function"
+        argv = seen["argv"]
+        assert argv[argv.index("--session-id") + 2] == "write a fib function"

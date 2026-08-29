@@ -566,19 +566,34 @@ class DispatchRegistry:
 
 
 def _scoped_tool_specs(
-    registry: DispatchRegistry, agent_names: set[str]
+    registry: DispatchRegistry, agent_names: set[str], *, include_delegate: bool = True
 ) -> list[dict[str, Any]]:
-    """Full tool schemas ONLY for the named agents (plus the orchestrator's
-    delegate tool, so mid-task delegation stays possible).
+    """Full tool schemas ONLY for the named agents (plus, by default, the
+    orchestrator's delegate tool, so mid-task delegation stays possible).
 
     The roster description in the system message still names every agent and
     tool, so planning is unaffected — this only shrinks the schema payload.
     Sending all 60 schemas costs ~80s of cold prefill (measured live: 5,457
     tokens @ 67 t/s = 81s before the first token) and dwarfs the actual
     conversation; scoped, a plain question prefills in ~18s cold / ~1s warm.
+
+    ``include_delegate=False`` (used for a forced_agent run — see this
+    function's own call site) drops the orchestrator's delegate_task/
+    delegate_parallel from the scoped set entirely. Real bug this fixes,
+    live-reproduced: a forced_agent run scoped to e.g. code_claude (a
+    subagent whose ONLY real tool happens to be a tool of the SAME name)
+    still exposed delegate_task pointing at a target that ALSO named
+    "code_claude" — a weak local orchestrator model, given a choice between
+    calling the tool directly and delegating to "the code_claude subagent"
+    by name, picked delegate_task, which opened a NESTED forced_agent run
+    scoped to code_claude again... recursing to the hard depth cap (3)
+    without ever calling the real tool once. forced_agent's own docstring
+    already promises a "hard-scoped to exactly one subagent's tools" run;
+    dropping delegate access here is what actually makes that true.
     """
     names = set(agent_names)
-    names.add("orchestrator")
+    if include_delegate:
+        names.add("orchestrator")
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for sub in registry.all_subagents():
@@ -2145,7 +2160,11 @@ def _run_dispatch_loop(
             plan_agents = {
                 m["name"] for m in matches if m["score"] >= 3
             }
-    scoped_tools = _scoped_tool_specs(registry, plan_agents) if plan_agents else []
+    scoped_tools = (
+        _scoped_tool_specs(registry, plan_agents, include_delegate=not ctx.forced_agent)
+        if plan_agents
+        else []
+    )
 
     # v8.30: per-agent model routing for the ONE case it was never wired
     # for. An explicit focus_agent route and a delegate_task nested run

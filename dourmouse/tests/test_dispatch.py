@@ -1142,6 +1142,52 @@ class TestBespokeAgentPrompts:
         sent = client.chat.completions.calls[0]["messages"]
         assert AGENT_SYSTEM_PROMPTS["research_info"] in sent[0]["content"]
 
+    def test_forced_agent_never_exposes_delegate_task(self):
+        """v13 (live-reproduced, real bug): a forced_agent run scoped to
+        code_claude — a subagent whose only real tool happens to share its
+        name — still exposed delegate_task alongside it. A weak local
+        orchestrator model, given a choice between calling code_claude
+        directly and delegating to "the code_claude subagent" by name,
+        picked delegate_task, which opened a NESTED forced_agent run
+        scoped to code_claude again — recursing to the hard depth cap
+        without ever calling the real tool once (reproduced live through
+        the actual /api/chat endpoint: 4 delegate_task calls, then
+        "REFUSED: maximum delegate depth (3) reached", zero real work
+        done). forced_agent's own docstring promises a run "hard-scoped to
+        exactly one subagent's tools" — delegate_task reaching a second
+        subagent (even itself) breaks that promise."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "list my tasks"},
+        ]
+        run_dispatch_messages(
+            messages, registry, client=client, forced_agent="code_claude",
+        )
+        tools = client.chat.completions.calls[0]["tools"]
+        names = {t["function"]["name"] for t in tools}
+        assert "code_claude" in names
+        assert "delegate_task" not in names
+        assert "delegate_parallel" not in names
+
+    def test_non_forced_run_still_exposes_delegate_task(self):
+        """The fix above must not remove delegate_task from the NORMAL
+        (non-forced) top-level path — mid-task delegation is a real,
+        intentional capability there (see _scoped_tool_specs's own
+        docstring)."""
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox and then add a task to follow up", registry, client=client)
+        tools = client.chat.completions.calls[0]["tools"]
+        names = {t["function"]["name"] for t in tools}
+        assert "delegate_task" in names
+
 
 class TestGroundedMode:
     """v13: user-controllable Grounded Mode (config.grounded_mode_enabled()).

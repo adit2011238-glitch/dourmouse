@@ -323,7 +323,15 @@ class TestSessionContinuity:
         sid = argv[argv.index("--session-id") + 1]
         # a real UUID4, not a placeholder
         assert uuid.UUID(sid).version == 4
-        assert argv[-1] == "write add"
+        # v13: the task must land immediately after the session args — NOT
+        # necessarily last, since real --mcp-config/--allowedTools flags
+        # (see _claude_code_mcp_args) now ride after it. They must never
+        # ride BEFORE it: --allowedTools takes a variadic value list and a
+        # trailing prompt would be silently swallowed into it (live-caught:
+        # `claude -p --allowedTools "mcp__dourmouse__*" "say hello"` really
+        # does error "Input must be provided either through stdin or as a
+        # prompt argument" — the CLI ate "say hello" as another tool name).
+        assert argv[argv.index("--session-id") + 2] == "write add"
         assert general_roster._CLAUDE_CODE_SESSIONS["/tmp/proj"] == sid
 
     def test_second_call_same_cwd_resumes_the_same_session(self, monkeypatch):
@@ -343,7 +351,9 @@ class TestSessionContinuity:
         first_sid = seen[0][seen[0].index("--session-id") + 1]
         assert "--resume" in seen[1]
         assert seen[1][seen[1].index("--resume") + 1] == first_sid
-        assert seen[1][-1] == "second turn"
+        # v13: task lands right after --resume's value, not necessarily
+        # last — see the sibling test above for why order matters here.
+        assert seen[1][seen[1].index("--resume") + 2] == "second turn"
 
     def test_different_cwd_gets_a_different_session(self, monkeypatch):
         seen: list = []

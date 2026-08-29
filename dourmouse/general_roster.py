@@ -291,7 +291,7 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
     mcp_args = _claude_code_mcp_args()
     result = _run_cli_delegate(
         cli=cli,
-        argv=[cli, "-p", *session_args, *mcp_args, task],
+        argv=[cli, "-p", *session_args, task, *mcp_args],
         cli_name="claude",
         tool_label="claude_code",
         display_name="Claude Code",
@@ -315,7 +315,7 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
         session_args = _claude_code_session_args(session_key)
         result = _run_cli_delegate(
             cli=cli,
-            argv=[cli, "-p", *session_args, *mcp_args, task],
+            argv=[cli, "-p", *session_args, task, *mcp_args],
             cli_name="claude",
             tool_label="claude_code",
             display_name="Claude Code",

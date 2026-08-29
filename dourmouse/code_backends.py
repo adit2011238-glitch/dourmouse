@@ -334,7 +334,7 @@ def _run_claude_once(
         mcp_args = []
     try:
         return subprocess.run(
-            [cli, "-p", *session_args, *mcp_args, task],
+            [cli, "-p", *session_args, task, *mcp_args],
             cwd=cwd,
             stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
             capture_output=True,
