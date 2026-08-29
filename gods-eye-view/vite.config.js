@@ -7330,6 +7330,142 @@ function normalizeAisTimestamp(value) {
  * plugins, configures the dev server host/port, and exposes selected
  * API keys to the client as import.meta.env defines.
  */
+/**
+ * Vite plugin: remote action bridge for external controllers (Dourmouse).
+ *
+ * The globe's own real action interface — createGevActionRunner() in
+ * src/voice/gevActions.js — already exists and already runs every
+ * navigation/layer/style/tracking verb the voice control system uses. It
+ * is a live, in-page JS function bound to the actual Cesium viewer
+ * instance, so nothing OUTSIDE the browser tab (a Python backend
+ * included) can call it directly. This plugin is the bridge: an external
+ * caller POSTs an action to this dev server, the ALREADY-OPEN browser
+ * tab (src/dourmouseBridge.js) polls for it, executes it against the
+ * real runner, and posts the real result back — the server request
+ * blocks until that real result arrives (or times out), so the external
+ * caller gets one synchronous round trip with a genuine outcome, never a
+ * fire-and-forget guess.
+ *
+ * In-memory only (no queue persistence) — this is a same-machine, one
+ * operator tool, not a durable job system. A restart drops anything
+ * in flight, which is the honest behavior for "the tab that was
+ * supposed to run this is gone anyway."
+ */
+function dourmouseActionBridgeProxy() {
+  /** @type {Map<string, {name: string, args: any, createdAt: number}>} */
+  const _pending = new Map();
+  /** @type {Map<string, (result: any) => void>} */
+  const _waiters = new Map();
+  const _MAX_QUEUE = 50; // a runaway caller queues forever otherwise
+  const _RESULT_TIMEOUT_MS = 15000;
+
+  function install(middlewares) {
+    // External caller (Dourmouse) submits one action and waits for the
+    // real result.
+    middlewares.use('/api/dourmouse/action', async (req, res) => {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Method Not Allowed' }));
+        return;
+      }
+      let body;
+      try {
+        const raw = await readRequestBodyCapped(req, 8192);
+        body = JSON.parse(raw.toString('utf-8') || '{}');
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid JSON body' }));
+        return;
+      }
+      const name = typeof body?.name === 'string' ? body.name.trim() : '';
+      if (!name) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: "'name' is required (the gevActions action name)" }));
+        return;
+      }
+      if (_pending.size >= _MAX_QUEUE) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'action queue full — no browser tab appears to be draining it' }));
+        return;
+      }
+      const id = randomUUID();
+      _pending.set(id, { name, args: body.args && typeof body.args === 'object' ? body.args : {}, createdAt: Date.now() });
+      const resultPromise = new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          _waiters.delete(id);
+          _pending.delete(id); // stale — a late browser result must not resurrect it
+          resolve({ ok: false, error: `timed out after ${_RESULT_TIMEOUT_MS}ms waiting for a connected God's Eye View tab to run '${name}'` });
+        }, _RESULT_TIMEOUT_MS);
+        _waiters.set(id, (result) => { clearTimeout(timer); resolve(result); });
+      });
+      const result = await resultPromise;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    });
+
+    // The open browser tab polls this to pick up work — real long-poll,
+    // not a tight spin loop: holds the request for a couple seconds so an
+    // idle tab isn't hammering the dev server every 100ms for nothing.
+    middlewares.use('/api/dourmouse/pending', async (req, res) => {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Method Not Allowed' }));
+        return;
+      }
+      const deadline = Date.now() + 2000;
+      let batch = [];
+      while (Date.now() < deadline) {
+        if (_pending.size > 0) {
+          batch = [..._pending.entries()].map(([id, item]) => ({ id, name: item.name, args: item.args }));
+          for (const { id } of batch) _pending.delete(id);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ actions: batch }));
+    });
+
+    // The browser tab reports back what actually happened.
+    middlewares.use('/api/dourmouse/result', async (req, res) => {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Method Not Allowed' }));
+        return;
+      }
+      let body;
+      try {
+        const raw = await readRequestBodyCapped(req, 65536);
+        body = JSON.parse(raw.toString('utf-8') || '{}');
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid JSON body' }));
+        return;
+      }
+      const id = typeof body?.id === 'string' ? body.id : '';
+      const waiter = id && _waiters.get(id);
+      if (waiter) {
+        _waiters.delete(id);
+        waiter(body.result ?? { ok: false, error: 'browser reported no result payload' });
+      }
+      // 200 either way — a result for an already-timed-out/unknown id is
+      // not the browser's fault and must not read as a failed request.
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ received: Boolean(waiter) }));
+    });
+  }
+
+  return {
+    name: 'dourmouse-action-bridge',
+    configureServer(server) {
+      install(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      install(server.middlewares);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   // Load only this checkout's dotenv files. Shell/Keychain values still win,
   // and no sibling workspace is consulted implicitly.
@@ -7360,6 +7496,7 @@ export default defineConfig(({ mode }) => {
       trackBackfillProxies(),
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),
+      dourmouseActionBridgeProxy(),
     ],
     server: {
       host: env.HOST || 'localhost',

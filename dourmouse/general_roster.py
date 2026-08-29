@@ -1514,6 +1514,76 @@ def _make_code_tool(backend: str) -> ToolSpec:
 
 
 # --------------------------------------------------------------------------- #
+# God's Eye View globe control (v13)
+# --------------------------------------------------------------------------- #
+
+# The real, complete action vocabulary gevActions.js's runGevAction()
+# understands (extracted from its own `name === '...'` dispatch — never
+# hand-maintained separately, so this can't silently drift stale). Listed
+# in the tool description below so the model has real options rather than
+# guessing action names.
+_GODS_EYE_ACTIONS = (
+    "adjust_camera_zoom", "analyst_query", "annotate_map", "clear_annotations",
+    "control_cctv", "control_cockpit", "control_radio", "control_scene",
+    "fly_route", "fly_to_location", "frame_overhead", "get_current_view_state",
+    "get_entity_context", "move_camera", "next_iss_pass", "select_nearest_aircraft",
+    "set_context_mode", "set_detection", "set_hud", "set_layer_visibility",
+    "set_map_stack", "set_panel_open", "set_post_processing", "set_visual_style",
+    "show_data_layers_menu", "stop_tracking", "track_entity", "zoom_to_globe",
+)
+
+
+def _globe_control_tool_spec() -> ToolSpec:
+    def handler(arguments: dict[str, Any]) -> str:
+        from dourmouse.gods_eye import run_globe_action
+
+        name = (arguments.get("name") or "").strip()
+        if not name:
+            return "ERROR: globe_control requires a non-empty 'name' (the action to run)."
+        args = arguments.get("args")
+        if args is not None and not isinstance(args, dict):
+            return "ERROR: 'args' must be an object if provided."
+        try:
+            result = run_globe_action(name, args or {})
+        except RuntimeError as exc:
+            return f"GLOBE CONTROL (reported honestly): {exc}"
+        return f"GLOBE CONTROL RESULT ({name}): {json.dumps(result)}"
+
+    return ToolSpec(
+        name="globe_control",
+        description=(
+            "Run a real action against the live God's Eye View 3D globe "
+            "(the console's EYE screen) — track a flight/ship, fly the camera "
+            "somewhere, toggle a data layer, change visual style, etc. Real "
+            "known action names: " + ", ".join(_GODS_EYE_ACTIONS) + ". Honest "
+            "NOT CONFIGURED if gods-eye-view's dev server isn't running, or an "
+            "honest timeout message if the server is up but no browser tab has "
+            "the globe open."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "enum": list(_GODS_EYE_ACTIONS),
+                    "description": "the gevActions.js action to run",
+                },
+                "args": {
+                    "type": "object",
+                    "description": (
+                        "action-specific arguments, e.g. {\"layerId\": \"flights\", "
+                        "\"enabled\": true} for set_layer_visibility, or "
+                        "{\"query\": \"united 123\"} for track_entity"
+                    ),
+                },
+            },
+            "required": ["name"],
+        },
+        handler=handler,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Live-intelligence tools (v2.3) — news / markets / mail / tasks
 # --------------------------------------------------------------------------- #
 
@@ -2883,6 +2953,24 @@ def build_general_registry() -> DispatchRegistry:
             "Coding",
             "Coding via your real Claude Code CLI (claude -p).",
             [_make_code_tool("claude")],
+        )
+    )
+
+    # -- v13 God's Eye View globe control ------------------------------ #
+    # Real control of the live 3D globe embedded in the console's EYE
+    # screen — see dourmouse/gods_eye.py's own module docstring for the
+    # full bridge (gevActions.js's real action runner <- browser long-poll
+    # <- this HTTP call). Honestly NOT CONFIGURED when the separate
+    # gods-eye-view dev server isn't running; never fabricates a "done".
+    registry.register_subagent(
+        _subagent(
+            "globe",
+            "World",
+            "Control the live 3D globe (God's Eye View) — track a flight/ship, "
+            "zoom, toggle a data layer, change visual style. Read-only viewing "
+            "needs no tool; this is for actually MOVING the camera or changing "
+            "what's shown.",
+            [_globe_control_tool_spec()],
         )
     )
 

@@ -101,6 +101,7 @@ class TestRosterShape:
             "design_3d",  # 3D & UI Design — spec generation + manifest cataloguing
             "companion",  # world-monitor-expansion: friendly-persona counterpart
                           # to orchestrator, for the Vision workspace chat panel
+            "globe",  # v13: God's Eye View 3D globe control
         }
 
     def test_orchestrator_exposes_delegate_task(self):
@@ -560,3 +561,60 @@ class TestSharedMemoryTool:
         monkeypatch.delenv("DOURMOUSE_SPATIAL_VAULT_PATH", raising=False)
         result = _query_shared_memory_tool({"query": "x", "top_k": "not-a-number"})
         assert result.startswith("ERROR")
+
+
+# --------------------------------------------------------------------------- #
+# God's Eye View globe control (v13)
+# --------------------------------------------------------------------------- #
+
+class TestGlobeControlTool:
+    def _tool(self):
+        registry = build_general_registry()
+        sub = registry.get_subagent("globe")
+        return next(t for t in sub.tools if t.name == "globe_control")
+
+    def test_globe_subagent_registered(self):
+        registry = build_general_registry()
+        sub = registry.get_subagent("globe")
+        assert sub is not None
+        assert {t.name for t in sub.tools} == {"globe_control", "query_shared_memory"}
+
+    def test_requires_a_name(self):
+        tool = self._tool()
+        assert tool.handler({}).startswith("ERROR")
+
+    def test_args_must_be_an_object(self):
+        tool = self._tool()
+        result = tool.handler({"name": "zoom_to_globe", "args": "not an object"})
+        assert result.startswith("ERROR")
+
+    def test_calls_run_globe_action_and_formats_the_real_result(self, monkeypatch):
+        seen = {}
+
+        def _fake_run(name, args):
+            seen["name"] = name
+            seen["args"] = args
+            return {"ok": True, "action": name}
+
+        monkeypatch.setattr("dourmouse.gods_eye.run_globe_action", _fake_run)
+        tool = self._tool()
+        result = tool.handler({"name": "set_layer_visibility", "args": {"layerId": "flights", "enabled": True}})
+        assert seen == {"name": "set_layer_visibility", "args": {"layerId": "flights", "enabled": True}}
+        assert "set_layer_visibility" in result
+        assert '"ok": true' in result
+
+    def test_not_configured_is_reported_honestly_not_fabricated(self, monkeypatch):
+        def _boom(name, args):  # noqa: ARG001
+            raise RuntimeError("NOT CONFIGURED: God's Eye View's dev server is not reachable")
+
+        monkeypatch.setattr("dourmouse.gods_eye.run_globe_action", _boom)
+        tool = self._tool()
+        result = tool.handler({"name": "zoom_to_globe"})
+        assert "NOT CONFIGURED" in result
+
+    def test_known_actions_listed_in_the_schema_enum(self):
+        tool = self._tool()
+        enum = tool.parameters["properties"]["name"]["enum"]
+        assert "zoom_to_globe" in enum
+        assert "track_entity" in enum
+        assert "set_layer_visibility" in enum

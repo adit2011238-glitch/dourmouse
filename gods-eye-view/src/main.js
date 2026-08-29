@@ -32,6 +32,7 @@ import {
 } from './renderGovernor.js';
 import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
+import { startDourmouseBridge } from './dourmouseBridge.js';
 
 initLogoGaze();
 
@@ -325,6 +326,13 @@ async function init() {
       requestRender: governorRequestRender,
     };
     window.__godsEyeView.voiceCommands = initGevVoiceCommands({ viewer, styleManager, dataManager, sceneDirector, annotations });
+    // v13: Dourmouse remote-control bridge — long-polls for actions an
+    // external Dourmouse directive queued and runs them through the SAME
+    // real action runner voice control just wired above
+    // (window.__godsEyeView.voiceCommands.runner). See
+    // src/dourmouseBridge.js and vite.config.js's
+    // dourmouseActionBridgeProxy() for the other two-thirds of this.
+    startDourmouseBridge();
 
   } catch (error) {
     console.error("God's Eye View initialization failed:", error);

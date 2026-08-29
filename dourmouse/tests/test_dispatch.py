@@ -1371,6 +1371,7 @@ class TestEndToEndThroughGeneralRoster:
             "design_3d",  # 3D & UI Design — spec generation + manifest cataloguing
             "companion",  # world-monitor-expansion: friendly-persona counterpart
                           # to orchestrator, for the Vision workspace chat panel
+            "globe",  # v13: God's Eye View 3D globe control
         }
 
     def test_trading_subagent_added_later_dispatchable(self):
