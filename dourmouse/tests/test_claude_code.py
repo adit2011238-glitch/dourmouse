@@ -159,9 +159,13 @@ class TestToolBehavior:
         assert "EXIT CODE: 0" in result
         # First call for this cwd mints a real session id via --session-id
         # (see TestSessionContinuity below) — assert the shape rather than
-        # a fixed string since the uuid is random each run.
+        # a fixed string since the uuid is random each run. v13: real
+        # --mcp-config/--allowedTools args now ride along too (see
+        # _claude_code_mcp_args) — tolerate whatever lands between the
+        # session args and the task text rather than asserting their exact
+        # absence.
         match = re.search(
-            r"ARGV: -p --session-id ([0-9a-f-]{36}) explain this bug", result
+            r"ARGV: -p --session-id ([0-9a-f-]{36}) .*explain this bug", result
         )
         assert match, result
         assert uuid.UUID(match.group(1)).version == 4
@@ -456,3 +460,38 @@ class TestSessionContinuity:
         run_tool({"task": "second"})
         assert "--session-id" in seen[0]
         assert "--resume" in seen[1]
+
+
+# --------------------------------------------------------------------------- #
+# MCP bridge wiring (v13) — claude_code gets the same --mcp-config/
+# --allowedTools access as code_backends._run_claude, via the shared,
+# process-cached config file (_claude_code_mcp_args reads it from
+# code_backends._ensure_mcp_config_path so both callers agree).
+# --------------------------------------------------------------------------- #
+
+class TestClaudeCodeMcpWiring:
+    def test_argv_carries_real_mcp_flags(self, tmp_path, monkeypatch):
+        from dourmouse import code_backends
+
+        monkeypatch.setattr(code_backends, "user_config_dir", lambda: tmp_path)
+        code_backends._mcp_config_path_cache = None
+        fake = _write_fake_cli(tmp_path, '#!/bin/sh\necho "ARGV: $*"')
+        monkeypatch.setenv("CLAUDE_CODE_CLI", fake)
+        result = run_tool({"task": "explain this bug", "cwd": str(tmp_path)})
+        assert "--mcp-config" in result
+        assert str(tmp_path / "mcp-config.json") in result
+        assert "--allowedTools mcp__dourmouse__*" in result
+        code_backends._mcp_config_path_cache = None
+
+    def test_a_broken_mcp_setup_never_blocks_claude_code(self, monkeypatch):
+        """_claude_code_mcp_args itself swallows errors (see its own
+        docstring) — this pins that it degrades to an empty list rather
+        than raising, so a broken MCP setup never stops claude_code's own
+        core job."""
+        def _boom():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("dourmouse.code_backends._ensure_mcp_config_path", _boom)
+        from dourmouse.general_roster import _claude_code_mcp_args
+
+        assert _claude_code_mcp_args() == []

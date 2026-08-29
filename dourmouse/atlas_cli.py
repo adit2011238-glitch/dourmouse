@@ -348,6 +348,105 @@ def _atlas_fx_backfill_tool(arguments: dict[str, Any]) -> str:
     return _format_cli_run("FX-BACKFILL", argv, 3600)
 
 
+def _atlas_champions_tool(arguments: dict[str, Any]) -> str:
+    path = (arguments.get("path") or "atlas/data/champions.json").strip()
+    try:
+        top = int(arguments.get("top", 10))
+    except (TypeError, ValueError):
+        return "ERROR: top must be an integer."
+    return _format_cli_run("CHAMPIONS", ["champions", path, "--top", str(top)], 60)
+
+
+def _atlas_meta_model_tool(arguments: dict[str, Any]) -> str:
+    argv = ["meta-model"]
+    experiment_db = (arguments.get("experiment_db") or "").strip()
+    if experiment_db:
+        argv += ["--experiment-db", experiment_db]
+    if arguments.get("json"):
+        argv += ["--json"]
+    return _format_cli_run("META-MODEL", argv, 120)
+
+
+def _atlas_coverage_tool(arguments: dict[str, Any]) -> str:
+    argv = ["coverage"]
+    store_dir = (arguments.get("store_dir") or "").strip()
+    if store_dir:
+        argv += ["--store-dir", store_dir]
+    return _format_cli_run("COVERAGE", argv, 120)
+
+
+def _atlas_adjustments_tool(arguments: dict[str, Any]) -> str:
+    argv = ["adjustments"]
+    store_dir = (arguments.get("store_dir") or "").strip()
+    if store_dir:
+        argv += ["--store-dir", store_dir]
+    return _format_cli_run("ADJUSTMENTS", argv, 120)
+
+
+def _atlas_verify_audit_tool(arguments: dict[str, Any]) -> str:
+    path = (arguments.get("path") or "").strip()
+    if not path:
+        return "ERROR: atlas_verify_audit requires 'path' (the audit log to verify)."
+    return _format_cli_run("VERIFY-AUDIT", ["verify-audit", path], 120)
+
+
+def _atlas_refresh_store_tool(arguments: dict[str, Any]) -> str:
+    symbols = (arguments.get("symbols") or "").strip()
+    if not symbols:
+        return "ERROR: atlas_refresh_store requires 'symbols' (comma-separated, e.g. SPY,EURUSD=X)."
+    argv = ["refresh-store", "--symbols", symbols]
+    for param, flag in (("db", "--db"), ("cache_dir", "--cache-dir"), ("interval", "--interval")):
+        value = (arguments.get(param) or "").strip()
+        if value:
+            argv += [flag, value]
+    try:
+        lookback = int(arguments.get("lookback_days", 0))
+    except (TypeError, ValueError):
+        return "ERROR: lookback_days must be an integer."
+    if lookback:
+        argv += ["--lookback-days", str(lookback)]
+    return _format_cli_run("REFRESH-STORE", argv, 600)
+
+
+def _atlas_literature_cycle_tool(arguments: dict[str, Any]) -> str:
+    argv = ["literature-cycle"]
+    for param, flag in (
+        ("claims", "--claims"),
+        ("trial_registry", "--trial-registry"),
+        ("experiment_db", "--experiment-db"),
+        ("cutoff_date", "--cutoff-date"),
+        ("weighting", "--weighting"),
+    ):
+        value = (arguments.get(param) or "").strip()
+        if value:
+            argv += [flag, value]
+    for param, flag in (
+        ("limit", "--limit"),
+        ("prior_trials", "--prior-trials"),
+        ("max_workers", "--max-workers"),
+        ("lookback_years", "--lookback-years"),
+    ):
+        try:
+            value = int(arguments.get(param, 0))
+        except (TypeError, ValueError):
+            return f"ERROR: {param} must be an integer."
+        if value:
+            argv += [flag, str(value)]
+    if arguments.get("realism"):
+        argv += ["--realism"]
+        try:
+            capital = int(arguments.get("capital", 0))
+        except (TypeError, ValueError):
+            return "ERROR: capital must be an integer."
+        if capital:
+            argv += ["--capital", str(capital)]
+    if arguments.get("no_orthogonalize"):
+        argv += ["--no-orthogonalize"]
+    if arguments.get("meta_model"):
+        argv += ["--meta-model"]
+    return _format_cli_run("LITERATURE-CYCLE", argv, 3600)
+
+
 def build_atlas_cli_specs() -> list[Any]:
     """The v5.4 CLI-bridge ToolSpecs for the ``atlas`` subagent."""
     return [
@@ -450,6 +549,93 @@ def build_atlas_cli_specs() -> list[Any]:
             "or a specific date. Returns the real report text — never a summary.",
             _atlas_read_report_tool,
             {"date": {"type": "string", "description": "optional report date YYYY-MM-DD (default: newest)"}},
+        ),
+        _spec(
+            "atlas_champions",
+            "Print ATLAS's real champion leaderboard (atlas champions) — the "
+            "candidates that survived the full acceptance gate, if any. "
+            "Read-only.",
+            _atlas_champions_tool,
+            {
+                "path": {"type": "string", "description": "champion store path (default: atlas/data/champions.json)"},
+                "top": {"type": "integer", "default": 10, "description": "how many to show"},
+            },
+        ),
+        _spec(
+            "atlas_meta_model",
+            "What ATLAS's literature loop has learned so far (atlas "
+            "meta-model): per-category pass rates, saturation, and the "
+            "fraction of a claimed Sharpe the platform actually realizes. "
+            "Read-only.",
+            _atlas_meta_model_tool,
+            {
+                "experiment_db": {"type": "string", "description": "experiment database path (default: the CLI's own default)"},
+                "json": {"type": "boolean", "default": False, "description": "emit the full report instead of the table"},
+            },
+        ),
+        _spec(
+            "atlas_coverage",
+            "Rebuild and print the permanent market-data store's coverage "
+            "table (atlas coverage). Read-only against the store; writes "
+            "only a cache rebuild.",
+            _atlas_coverage_tool,
+            {"store_dir": {"type": "string", "description": "store directory (default: the CLI's own default)"}},
+        ),
+        _spec(
+            "atlas_adjustments",
+            "Print the permanent store's corporate-action manifest (atlas "
+            "adjustments) — splits/dividends the store has recorded. "
+            "Read-only.",
+            _atlas_adjustments_tool,
+            {"store_dir": {"type": "string", "description": "store directory (default: the CLI's own default)"}},
+        ),
+        _spec(
+            "atlas_verify_audit",
+            "Verify one audit log's hash chain (atlas verify-audit) — "
+            "confirms a research log has not been tampered with or "
+            "truncated. Read-only.",
+            _atlas_verify_audit_tool,
+            {"path": {"type": "string", "description": "path to the audit log to verify"}},
+            ["path"],
+        ),
+        _spec(
+            "atlas_refresh_store",
+            "Refresh ATLAS's permanent keyless market-data store from Yahoo "
+            "(atlas refresh-store) for the given symbols. Idempotent "
+            "network operation.",
+            _atlas_refresh_store_tool,
+            {
+                "symbols": {"type": "string", "description": "comma-separated symbols, e.g. SPY,EURUSD=X"},
+                "db": {"type": "string", "description": "SQLite store path"},
+                "cache_dir": {"type": "string", "description": "scratch cache dir used by the downloader"},
+                "interval": {"type": "string", "description": "bar interval: 1d (default) or an intraday interval (1m,5m,15m,30m,60m,90m,1h)"},
+                "lookback_days": {"type": "integer", "description": "limit history length"},
+            },
+            ["symbols"],
+        ),
+        _spec(
+            "atlas_literature_cycle",
+            "Run one REAL ATLAS literature-driven hypothesis cycle "
+            "(atlas literature-cycle) — backtests curated academic claims "
+            "as one pre-registered batch and restates every acceptance on "
+            "the residual after a factor model. Paper-only, no execution. "
+            "Long-running (compute-heavy); prefer a bounded 'limit'.",
+            _atlas_literature_cycle_tool,
+            {
+                "claims": {"type": "string", "description": "path to the claims JSON (default: the CLI's own curated set)"},
+                "limit": {"type": "integer", "description": "universe size (most liquid first)"},
+                "trial_registry": {"type": "string", "description": "SQLite path accumulating trials across cycles (honest deflation)"},
+                "experiment_db": {"type": "string", "description": "SQLite path to persist this cycle into, for atlas_meta_model"},
+                "cutoff_date": {"type": "string", "description": "point-in-time universe cutoff YYYY-MM-DD (avoids the whole-history survivorship bug)"},
+                "lookback_years": {"type": "integer", "description": "years of trailing liquidity for the point-in-time universe (needs cutoff_date)"},
+                "prior_trials": {"type": "integer", "description": "trials already spent in earlier cycles (ignored when trial_registry holds more)"},
+                "max_workers": {"type": "integer", "description": "evaluate hypotheses concurrently (threads)"},
+                "realism": {"type": "boolean", "default": False, "description": "route the book through the portfolio optimizer + realistic costs/fills/risk report"},
+                "capital": {"type": "integer", "description": "capital the result is quoted at (only meaningful with realism)"},
+                "weighting": {"type": "string", "description": "equal_weight, inverse_vol, risk_parity, or min_variance (only meaningful with realism)"},
+                "no_orthogonalize": {"type": "boolean", "default": False, "description": "skip the factor-explanation check (NOT recommended — acceptances then measure raw return, not factor-independent return)"},
+                "meta_model": {"type": "boolean", "default": False, "description": "after the cycle, also print the meta-model over every cycle in experiment_db"},
+            },
         ),
     ]
 

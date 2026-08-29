@@ -29,6 +29,18 @@ def _reset_claude_sessions():
     code_backends._CLAUDE_SESSIONS.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_mcp_config_cache():
+    """_ensure_mcp_config_path() caches its result for the LIFE OF THE
+    PROCESS by design (the file's content never changes mid-run — see its
+    own docstring) — but that same caching would leak a path from one
+    test's monkeypatched user_config_dir() into a later test that expects
+    a fresh write. Reset around every test."""
+    code_backends._mcp_config_path_cache = None
+    yield
+    code_backends._mcp_config_path_cache = None
+
+
 # --------------------------------------------------------------------------- #
 # Fake OpenAI-compatible client (no network)
 # --------------------------------------------------------------------------- #
@@ -283,6 +295,129 @@ class TestClaudeBackend:
         monkeypatch.setattr("dourmouse.general_roster._find_claude_cli", lambda: fake)
         with pytest.raises(RuntimeError, match="exited 3"):
             code_backends.run_code_task("claude", "task", cwd=str(tmp_path), timeout=30)
+
+
+# --------------------------------------------------------------------------- #
+# MCP bridge wiring (v13) — Claude gets --mcp-config/--allowedTools on every
+# real invocation from this module; Codex gets a one-time `codex mcp add`
+# registration instead (no per-call flag exists — verified live via
+# `codex exec --help`/`codex --help`, see mcp_bridge.ensure_codex_mcp_registered's
+# own docstring).
+# --------------------------------------------------------------------------- #
+
+class TestClaudeMcpWiring:
+    def test_ensure_mcp_config_path_writes_a_real_config_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(code_backends, "user_config_dir", lambda: tmp_path)
+        path = code_backends._ensure_mcp_config_path()
+        assert os.path.isfile(path)
+        assert path == str(tmp_path / "mcp-config.json")
+
+    def test_ensure_mcp_config_path_is_cached_not_rewritten_every_call(self, tmp_path, monkeypatch):
+        calls = []
+        real_dir = tmp_path
+
+        def _tracked_dir():
+            calls.append(1)
+            return real_dir
+
+        monkeypatch.setattr(code_backends, "user_config_dir", _tracked_dir)
+        first = code_backends._ensure_mcp_config_path()
+        second = code_backends._ensure_mcp_config_path()
+        assert first == second
+        assert calls == [1]  # user_config_dir() consulted once, not twice
+
+    def test_claude_invocation_carries_real_mcp_flags(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(code_backends, "user_config_dir", lambda: tmp_path)
+        fake = _write_fake_cli(tmp_path, 'echo "ARGV: $*"')
+        monkeypatch.setattr("dourmouse.general_roster._find_claude_cli", lambda: fake)
+        out = code_backends.run_code_task("claude", "write code", cwd=str(tmp_path), timeout=30)
+        assert "--mcp-config" in out
+        assert str(tmp_path / "mcp-config.json") in out
+        assert "--allowedTools mcp__dourmouse__*" in out
+
+    def test_a_broken_mcp_config_never_blocks_the_coding_task(self, tmp_path, monkeypatch):
+        """Best-effort by design (see _run_claude_once's own comment): if
+        building the MCP config raises for any reason, claude still runs —
+        just without Dourmouse tool access for that one call."""
+        def _boom():
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(code_backends, "user_config_dir", _boom)
+        fake = _write_fake_cli(tmp_path, 'echo "ARGV: $*"')
+        monkeypatch.setattr("dourmouse.general_roster._find_claude_cli", lambda: fake)
+        out = code_backends.run_code_task("claude", "write code", cwd=str(tmp_path), timeout=30)
+        assert "--mcp-config" not in out
+        assert "ARGV:" in out  # the call itself still happened
+
+
+class TestCodexMcpRegistration:
+    def test_ensure_codex_mcp_registered_skips_add_when_already_listed(self, monkeypatch):
+        from dourmouse import mcp_bridge
+
+        calls = []
+
+        class _Listed:
+            stdout = "dourmouse   /usr/bin/python -m dourmouse.mcp_bridge  enabled\n"
+
+        def _fake_run(argv, **kwargs):
+            calls.append(argv)
+            return _Listed()
+
+        monkeypatch.setattr(mcp_bridge.subprocess, "run", _fake_run)
+        mcp_bridge.ensure_codex_mcp_registered("/usr/bin/codex")
+        assert calls == [["/usr/bin/codex", "mcp", "list"]]  # never re-added
+
+    def test_ensure_codex_mcp_registered_adds_when_missing(self, monkeypatch):
+        from dourmouse import mcp_bridge
+
+        calls = []
+
+        class _Empty:
+            stdout = "Name  Command\n"
+
+        def _fake_run(argv, **kwargs):
+            calls.append(argv)
+            return _Empty()
+
+        monkeypatch.setattr(mcp_bridge.subprocess, "run", _fake_run)
+        mcp_bridge.ensure_codex_mcp_registered("/usr/bin/codex")
+        assert calls[0] == ["/usr/bin/codex", "mcp", "list"]
+        assert calls[1][:3] == ["/usr/bin/codex", "mcp", "add"]
+        assert "dourmouse" in calls[1]
+        assert "-m" in calls[1] and "dourmouse.mcp_bridge" in calls[1]
+
+    def test_a_broken_codex_cli_never_raises(self, monkeypatch):
+        from dourmouse import mcp_bridge
+
+        def _boom(argv, **kwargs):
+            raise OSError("no such file")
+
+        monkeypatch.setattr(mcp_bridge.subprocess, "run", _boom)
+        mcp_bridge.ensure_codex_mcp_registered("/usr/bin/codex")  # must not raise
+
+    def test_codex_code_tool_registers_before_running(self, tmp_path, monkeypatch):
+        from dourmouse import general_roster
+
+        registered = []
+        monkeypatch.setattr(
+            "dourmouse.mcp_bridge.ensure_codex_mcp_registered",
+            lambda cli: registered.append(cli),
+        )
+        fake = _write_fake_cli(tmp_path, "echo ok")
+        monkeypatch.setattr(general_roster, "_find_codex_cli", lambda: fake)
+        general_roster._codex_code_tool({"task": "x", "cwd": str(tmp_path)})
+        assert registered == [fake]
+
+    def test_run_code_task_codex_also_registers(self, tmp_path, monkeypatch):
+        registered = []
+        monkeypatch.setattr(
+            "dourmouse.mcp_bridge.ensure_codex_mcp_registered",
+            lambda cli: registered.append(cli),
+        )
+        fake = _write_fake_cli(tmp_path, "echo ok")
+        monkeypatch.setattr("dourmouse.general_roster._find_codex_cli", lambda: fake)
+        code_backends.run_code_task("codex", "x", cwd=str(tmp_path), timeout=30)
+        assert registered == [fake]
 
 
 # --------------------------------------------------------------------------- #

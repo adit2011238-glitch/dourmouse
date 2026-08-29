@@ -196,6 +196,13 @@ class TestToolBehavior:
 
         monkeypatch.setattr(general_roster, "_find_codex_cli", lambda: "/usr/bin/codex")
         monkeypatch.setattr(general_roster.subprocess, "run", _fake_run)
+        # v13: codex_code now also does a best-effort MCP registration
+        # check (see ensure_codex_mcp_registered) before running the real
+        # task — irrelevant to what THIS test asserts (the exec call's own
+        # timeout flooring), so it's stubbed out rather than counted.
+        from dourmouse import mcp_bridge
+
+        monkeypatch.setattr(mcp_bridge, "ensure_codex_mcp_registered", lambda cli: None)
 
         run_tool({"task": "x", "timeout_seconds": 1})
         assert seen_timeouts == [20]

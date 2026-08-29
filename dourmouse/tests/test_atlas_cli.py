@@ -240,6 +240,103 @@ class TestToolHandlers:
             out = fn(args)
             assert "NOT CONFIGURED" in out
 
+    def test_champions_default_path(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_champions_tool({})
+        assert "atlas champions atlas/data/champions.json --top 10" in out
+
+    def test_champions_custom_path_and_top(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_champions_tool({"path": "custom.json", "top": 3})
+        assert "atlas champions custom.json --top 3" in out
+
+    def test_meta_model_bare(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_meta_model_tool({})
+        assert "atlas meta-model" in out
+        assert "--experiment-db" not in out
+
+    def test_meta_model_with_db_and_json(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_meta_model_tool({"experiment_db": "exp.db", "json": True})
+        assert "--experiment-db exp.db" in out
+        assert "--json" in out
+
+    def test_coverage_bare(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_coverage_tool({})
+        assert "atlas coverage" in out
+
+    def test_coverage_store_dir(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_coverage_tool({"store_dir": "mystore"})
+        assert "--store-dir mystore" in out
+
+    def test_adjustments_bare(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_adjustments_tool({})
+        assert "atlas adjustments" in out
+
+    def test_verify_audit_requires_path(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_verify_audit_tool({})
+        assert "ERROR" in out and "path" in out
+
+    def test_verify_audit_argv(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_verify_audit_tool({"path": "audit.log"})
+        assert "atlas verify-audit audit.log" in out
+
+    def test_refresh_store_requires_symbols(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_refresh_store_tool({})
+        assert "ERROR" in out and "symbols" in out
+
+    def test_refresh_store_argv(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_refresh_store_tool(
+            {"symbols": "SPY,EURUSD=X", "interval": "5m", "lookback_days": 30}
+        )
+        assert "--symbols SPY,EURUSD=X" in out
+        assert "--interval 5m" in out
+        assert "--lookback-days 30" in out
+
+    def test_literature_cycle_bare(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_literature_cycle_tool({})
+        assert "atlas literature-cycle" in out
+        assert "--realism" not in out
+
+    def test_literature_cycle_full_argv(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_literature_cycle_tool(
+            {
+                "limit": 200,
+                "trial_registry": "trials.db",
+                "experiment_db": "experiments.db",
+                "cutoff_date": "2020-01-01",
+                "lookback_years": 5,
+                "realism": True,
+                "capital": 10_000_000,
+                "weighting": "equal_weight",
+                "meta_model": True,
+            }
+        )
+        assert "--limit 200" in out
+        assert "--trial-registry trials.db" in out
+        assert "--experiment-db experiments.db" in out
+        assert "--cutoff-date 2020-01-01" in out
+        assert "--lookback-years 5" in out
+        assert "--realism" in out
+        assert "--capital 10000000" in out
+        assert "--weighting equal_weight" in out
+        assert "--meta-model" in out
+
+    def test_literature_cycle_bad_int(self, tmp_path, monkeypatch):
+        _fake_atlas(tmp_path, monkeypatch)
+        out = atlas_cli._atlas_literature_cycle_tool({"limit": "not-a-number"})
+        assert "ERROR" in out and "limit" in out
+
 
 class TestBuildSpecs:
     def test_spec_names(self):
@@ -254,6 +351,13 @@ class TestBuildSpecs:
             "atlas_fx_daily",
             "atlas_fx_backfill",
             "atlas_read_report",
+            "atlas_champions",
+            "atlas_meta_model",
+            "atlas_coverage",
+            "atlas_adjustments",
+            "atlas_verify_audit",
+            "atlas_refresh_store",
+            "atlas_literature_cycle",
         } <= names
 
     def test_atlas_subagent_carries_cli_tools(self):

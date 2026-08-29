@@ -288,9 +288,10 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
     cwd = (arguments.get("cwd") or str(_PROJECT_ROOT)).strip()
     session_key = _claude_code_session_key(cwd)
     session_args = _claude_code_session_args(session_key)
+    mcp_args = _claude_code_mcp_args()
     result = _run_cli_delegate(
         cli=cli,
-        argv=[cli, "-p", *session_args, task],
+        argv=[cli, "-p", *session_args, *mcp_args, task],
         cli_name="claude",
         tool_label="claude_code",
         display_name="Claude Code",
@@ -314,7 +315,7 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
         session_args = _claude_code_session_args(session_key)
         result = _run_cli_delegate(
             cli=cli,
-            argv=[cli, "-p", *session_args, task],
+            argv=[cli, "-p", *session_args, *mcp_args, task],
             cli_name="claude",
             tool_label="claude_code",
             display_name="Claude Code",
@@ -323,6 +324,21 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
             output_cap_attr="_CLAUDE_OUTPUT_CAP",
         )
     return result
+
+
+def _claude_code_mcp_args() -> list[str]:
+    """--mcp-config/--allowedTools args giving this Claude Code CLI call
+    real access to Dourmouse's own tool registry (see mcp_bridge.py) — the
+    SAME config file code_backends._run_claude uses (one file per process,
+    cached there), so claude_code and code_claude never disagree about
+    what Claude can reach. Best-effort: a broken/missing MCP setup must
+    never break claude_code's own core job (delegating a coding task)."""
+    try:
+        from dourmouse.code_backends import _MCP_ALLOWED_TOOLS, _ensure_mcp_config_path
+
+        return ["--mcp-config", _ensure_mcp_config_path(), "--allowedTools", _MCP_ALLOWED_TOOLS]
+    except Exception:  # noqa: BLE001 - best-effort, see docstring above
+        return []
 
 
 # --------------------------------------------------------------------------- #
@@ -398,6 +414,14 @@ def _codex_code_tool(arguments: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         return "ERROR: timeout_seconds must be an integer."
     cwd = (arguments.get("cwd") or str(_PROJECT_ROOT)).strip()
+    try:
+        from dourmouse.mcp_bridge import ensure_codex_mcp_registered
+
+        ensure_codex_mcp_registered(cli)
+    except Exception:  # noqa: BLE001 - best-effort, same reasoning as
+        # _claude_code_mcp_args above: registration must never block the
+        # actual coding task.
+        pass
     return _run_cli_delegate(
         cli=cli,
         argv=[cli, "exec", task, "--skip-git-repo-check"],

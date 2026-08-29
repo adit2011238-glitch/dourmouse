@@ -50,6 +50,7 @@ from dourmouse.config import (
     NVIDIA_DEFAULT_BASE_URL,
     load_nvidia_config,
     load_ollama_config,
+    user_config_dir,
 )
 
 _DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
@@ -87,6 +88,42 @@ _CLAUDE_SESSIONS_LOCK = threading.Lock()
 # tracked session id no longer resolves to a real conversation — e.g. the
 # user pruned their local Claude Code session history out from under us.
 _CLAUDE_NO_SESSION_ERR = "No conversation found with session ID"
+
+# -- MCP bridge wiring (v13) ------------------------------------------------ #
+# Gives every `claude` invocation from this module (code_claude, and any
+# other run_code_task("claude", ...) caller) REAL, live access to Dourmouse's
+# own tool registry via --mcp-config, not just its own generic bash/file
+# tools. See mcp_bridge.py's own module docstring for the full rationale and
+# the excluded-tool-name list (delegate_*/code_*/claude_code/codex_code —
+# recursion risk, never exposed). Verified live on this machine: a manual
+# `claude -p ... --mcp-config <path> --allowedTools "mcp__dourmouse__*"`
+# call genuinely invoked the real list_tasks/world_pulse tools and returned
+# real data, and the wildcard allowedTools pattern (rather than one flag per
+# tool name) was confirmed live to actually match.
+_MCP_ALLOWED_TOOLS = "mcp__dourmouse__*"
+_mcp_config_path_cache: str | None = None
+_mcp_config_lock = threading.Lock()
+
+
+def _ensure_mcp_config_path() -> str:
+    """Return the path to a real, up-to-date --mcp-config JSON, writing it
+    once per process (cached) rather than once per call — the file's
+    content only depends on sys.executable, which never changes mid-run.
+    Lives in user_config_dir(), the same per-user, survives-updates
+    location every other piece of Dourmouse config uses (config.py's own
+    user_env_path) — never beside the package, which is read-only in a
+    frozen build."""
+    global _mcp_config_path_cache
+    with _mcp_config_lock:
+        if _mcp_config_path_cache is not None:
+            return _mcp_config_path_cache
+        from dourmouse.mcp_bridge import build_mcp_config_file
+
+        path = user_config_dir() / "mcp-config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        build_mcp_config_file(path)
+        _mcp_config_path_cache = str(path)
+        return _mcp_config_path_cache
 
 
 def _claude_session_key(cwd: str | None) -> str:
@@ -287,9 +324,17 @@ def _inject_shared_context(task: str) -> str:
 def _run_claude_once(
     cli: str, task: str, session_args: list[str], *, cwd: str | None, timeout: int
 ) -> subprocess.CompletedProcess[str]:
+    mcp_args: list[str] = []
+    try:
+        mcp_args = ["--mcp-config", _ensure_mcp_config_path(), "--allowedTools", _MCP_ALLOWED_TOOLS]
+    except Exception:  # noqa: BLE001 - best-effort: a broken MCP config must
+        # never stop coding from working at all; Claude just runs without
+        # Dourmouse tool access for this one call (its own bash/file tools
+        # are untouched either way).
+        mcp_args = []
     try:
         return subprocess.run(
-            [cli, "-p", *session_args, task],
+            [cli, "-p", *session_args, *mcp_args, task],
             cwd=cwd,
             stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
             capture_output=True,
@@ -369,6 +414,14 @@ def _run_codex(task: str, *, cwd: str | None, timeout: int) -> str:
         # NOT CONFIGURED naming both routes when no key is set either.
         base_url, api_key, model = load_backend("codex")
         return _run_openai_compat(base_url, api_key, model, task, timeout)
+    try:
+        from dourmouse.mcp_bridge import ensure_codex_mcp_registered
+
+        ensure_codex_mcp_registered(cli)
+    except Exception:  # noqa: BLE001 - best-effort, same reasoning as the
+        # Claude MCP wiring above: a registration failure must never break
+        # a coding task that doesn't even need Dourmouse's own tools.
+        pass
     timeout = max(1, min(int(timeout), 600))
     try:
         proc = subprocess.run(
