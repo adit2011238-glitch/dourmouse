@@ -29,6 +29,7 @@ same wiring.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -228,3 +229,88 @@ class TestAvgTurnLatencyLabel:
     def test_all_slash_commands_shows_dash_not_a_fabricated_zero(self, tmp_path):
         sys_value = '{session: {ok: true, turns: [{elapsed_ms: 0.0}, {elapsed_ms: 0.0}]}}'
         assert self._run(tmp_path, sys_value) == "—"
+
+
+class TestCodeToolDefaultAndPersistence:
+    """v13: the CODE screen's toolchain pin now survives a reload (real
+    gap fixed, flagged earlier this session) and defaults to
+    "code_claude" rather than "" AUTO — the user's own explicit
+    instruction, given real measured numbers from this same session: local
+    Ollama under real system load logged 33-94s per completion (ollama's
+    own access log), NVIDIA is externally 403'ing on every real call, and
+    Claude Code CLI is the one backend confirmed both signed-in and fast
+    (7.6-8.1s per real call). Real Node execution against the extracted
+    functions with a synthetic `localStorage`, same discipline this file's
+    other pure-function tests already use."""
+
+    def _extract_key(self) -> str:
+        script = _extract_inline_script()
+        m = re.search(r'const CODE_TOOL_KEY = "([^"]+)";', script)
+        assert m, "CODE_TOOL_KEY constant not found in ui/console.html's inline script"
+        return m.group(1)
+
+    def _extract(self) -> str:
+        script = _extract_inline_script()
+        parts = []
+        for name in ("function codeToolGet(){", "function codeToolSet(t){"):
+            i = script.index(name)
+            depth = 0
+            j = i
+            started = False
+            while j < len(script):
+                if script[j] == "{":
+                    depth += 1
+                    started = True
+                elif script[j] == "}":
+                    depth -= 1
+                    if started and depth == 0:
+                        j += 1
+                        break
+                j += 1
+            parts.append(script[i:j])
+        return "\n".join(parts)
+
+    def _run(self, tmp_path, driver_tail: str) -> str:
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node not on PATH in this environment")
+        fake_storage = (
+            "const _store = {};\n"
+            "const localStorage = {\n"
+            "  getItem: k => (k in _store ? _store[k] : null),\n"
+            "  setItem: (k, v) => { _store[k] = String(v); },\n"
+            "};\n"
+            # The real CODE_TOOL_KEY constant declared alongside these
+            # functions in the actual source — extracted separately so a
+            # typo/rename in either place shows up as a real failure here.
+            + f'const CODE_TOOL_KEY = {json.dumps(self._extract_key())};\n'
+        )
+        driver = f"{fake_storage}\n{self._extract()}\n{driver_tail}"
+        js_file = tmp_path / "code_tool.js"
+        js_file.write_text(driver, encoding="utf-8")
+        result = subprocess.run(
+            [node, str(js_file)], capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    def test_defaults_to_code_claude_when_nothing_stored(self, tmp_path):
+        assert self._run(tmp_path, "console.log(codeToolGet());") == "code_claude"
+
+    def test_set_then_get_round_trips(self, tmp_path):
+        out = self._run(
+            tmp_path,
+            'codeToolSet("code_ollama"); console.log(codeToolGet());',
+        )
+        assert out == "code_ollama"
+
+    def test_explicit_auto_choice_persists_as_empty_string_not_the_default(self, tmp_path):
+        """A user who deliberately picks AUTO (id "") must stay on AUTO
+        after a reload — the "code_claude" fallback is ONLY for genuinely
+        untouched storage (the `!== null` check), never a re-guess
+        overriding an explicit empty choice."""
+        out = self._run(
+            tmp_path,
+            'codeToolSet(""); console.log(JSON.stringify(codeToolGet()));',
+        )
+        assert out == '""'

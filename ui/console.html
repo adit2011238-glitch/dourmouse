@@ -1021,6 +1021,17 @@ function show(name){
   // fresh input per context (the same reason Claude's own composer never
   // carries a draft into an unrelated conversation).
   if(screen !== name && ta.value){ ta.value=""; ta.style.height="auto"; }
+  // v13: real bug fixed here — focusAgent is one global, sticky variable
+  // shared across every screen. Now that CODE defaults its own pin to
+  // "code_claude" (not "" AUTO) on load, leaving CODE without resetting
+  // this would silently carry the pin into whatever screen comes next —
+  // e.g. typing a plain question on HOME right after visiting CODE would
+  // route it to the Claude Code CLI subagent, which has NO access to
+  // Dourmouse's own tools (read_inbox, world_pulse, gmail_send, ...), only
+  // generic coding tools. Reset on leaving CODE; RESEARCH/DESIGN3D/NEWS's
+  // own suggestion-card clicks still set focusAgent themselves right
+  // before calling submit(), so this never fights those.
+  if(screen === "CODE" && name !== "CODE") focusAgent = "";
   screen = name;
   // v8.29 nav redesign: tab buttons for a given screen now live in one of
   // TWO containers (the primary row or the MORE dropdown) instead of
@@ -1999,7 +2010,27 @@ const TOOLS = [
   {id:"dev_coding", name:"DEV AGENT", desc:"Full toolset: run, read, edit, diff, deploy.", conn:null},
   {id:"freebuff", name:"FREEBUFF", desc:"Dispatch into a Freebuff thread.", conn:"freebuff"},
 ];
-let codeTool = "";
+/* v13: the toolchain pin now survives a reload — real gap fixed, flagged
+   live earlier this session ("reload also resets codeTool back to AUTO,
+   silently losing whatever toolchain had been pinned"). Same try/catch
+   localStorage pattern themeGet/themeSet already use. Defaults to
+   "code_claude" (not "" AUTO) on a fresh install/cleared storage — the
+   user's own explicit instruction: local Ollama under real system load
+   measured 33-94s per completion live this session (ollama's own access
+   log), NVIDIA is externally 403'ing on every real call, and Claude Code
+   CLI is the one backend confirmed both signed-in and fast (7.6-8.1s per
+   real call, same session) — so it is the sane default, not a neutral
+   "let the router decide" starting point that would just land back on
+   the slow local model. */
+const CODE_TOOL_KEY = "dm_code_tool_v1";
+function codeToolGet(){
+  try{
+    const t = localStorage.getItem(CODE_TOOL_KEY);
+    return t !== null ? t : "code_claude";
+  }catch{ return "code_claude"; }
+}
+function codeToolSet(t){ try{ localStorage.setItem(CODE_TOOL_KEY, t); }catch{} }
+let codeTool = codeToolGet();
 function toolAvail(t){
   if(!t.conn) return true;
   const c = (sys.conns||{})[t.conn];
@@ -2034,7 +2065,7 @@ function paintCode(){
       <span><span class="on"></span><span class="od"></span></span>`;
     b.querySelector(".on").textContent = t.name;
     b.querySelector(".od").textContent = t.desc + (av===false ? " — not available" : "");
-    b.onclick=()=>{ codeTool=t.id; focusAgent=t.id; menu.classList.remove("on");
+    b.onclick=()=>{ codeTool=t.id; codeToolSet(t.id); focusAgent=t.id; menu.classList.remove("on");
       $("toolBtn").setAttribute("aria-expanded","false"); paintCode(); };
     menu.appendChild(b);
   });
