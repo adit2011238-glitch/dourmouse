@@ -165,3 +165,66 @@ class TestSessionRestore:
         assert m
         body = m.group(1)
         assert ': "HOME"' in body
+
+
+class TestAvgTurnLatencyLabel:
+    """v13: the HOME "AVG TURN TIME" metric — reuses chat.py's own
+    per-turn elapsed_ms (already persisted, /api/session/current), no new
+    timing mechanism. Real Node execution against the extracted function
+    with a synthetic `sys` global, same discipline
+    test_workspace_hand_gestures.py already established for pure functions
+    in this codebase's frontend code."""
+
+    def _extract(self) -> str:
+        script = _extract_inline_script()
+        m = re.search(r"function avgTurnLatencyLabel\(\)\{.*?\n\}\n", script, re.S)
+        assert m, "avgTurnLatencyLabel() not found in ui/console.html's inline script"
+        return m.group(0)
+
+    def _run(self, tmp_path, sys_value: str) -> str:
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node not on PATH in this environment")
+        driver = f"let sys = {sys_value};\n{self._extract()}\nconsole.log(avgTurnLatencyLabel());"
+        js_file = tmp_path / "avg_latency.js"
+        js_file.write_text(driver, encoding="utf-8")
+        result = subprocess.run(
+            [node, str(js_file)], capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    def test_no_session_yet_shows_dash(self, tmp_path):
+        assert self._run(tmp_path, "{session: null}") == "—"
+
+    def test_404_shaped_session_shows_dash(self, tmp_path):
+        assert self._run(tmp_path, '{session: {ok: false}}') == "—"
+
+    def test_empty_turns_shows_dash(self, tmp_path):
+        assert self._run(tmp_path, '{session: {ok: true, turns: []}}') == "—"
+
+    def test_sub_second_average_shown_in_ms(self, tmp_path):
+        sys_value = '{session: {ok: true, turns: [{elapsed_ms: 400}, {elapsed_ms: 600}]}}'
+        assert self._run(tmp_path, sys_value) == "500ms"
+
+    def test_multi_second_average_shown_in_seconds_one_decimal(self, tmp_path):
+        sys_value = '{session: {ok: true, turns: [{elapsed_ms: 18900}, {elapsed_ms: 6900}]}}'
+        assert self._run(tmp_path, sys_value) == "12.9s"
+
+    def test_turns_missing_elapsed_ms_are_excluded_from_the_average(self, tmp_path):
+        sys_value = '{session: {ok: true, turns: [{elapsed_ms: null}, {elapsed_ms: 800}]}}'
+        assert self._run(tmp_path, sys_value) == "800ms"
+
+    def test_slash_command_zero_elapsed_turns_do_not_skew_the_average(self, tmp_path):
+        """chat.py's record_slash() persists elapsed_ms=0.0 ON PURPOSE
+        (slash commands bypass the LLM loop entirely, see its own
+        docstring) — a real bug caught before shipping: filtering only
+        `!= null` would have kept these as genuine 0ms turns and dragged a
+        real average toward zero. No genuine LLM turn ever lands on
+        exactly 0ms, so `> 0` is the honest exclusion."""
+        sys_value = '{session: {ok: true, turns: [{elapsed_ms: 0.0}, {elapsed_ms: 800}]}}'
+        assert self._run(tmp_path, sys_value) == "800ms"
+
+    def test_all_slash_commands_shows_dash_not_a_fabricated_zero(self, tmp_path):
+        sys_value = '{session: {ok: true, turns: [{elapsed_ms: 0.0}, {elapsed_ms: 0.0}]}}'
+        assert self._run(tmp_path, sys_value) == "—"

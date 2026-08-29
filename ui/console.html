@@ -1223,9 +1223,26 @@ async function refresh(){
     g("roster","/api/roster"), g("conns","/api/connections"), g("server","/api/server"),
     g("backend","/api/backend"), g("memory","/api/memory"), g("telemetry","/api/telemetry"),
     g("version","/api/version"), g("me","/api/auth/me"), g("voice","/api/voice"),
-    g("attention","/api/attention"),
+    g("attention","/api/attention"), g("session","/api/session/current"),
   ]);
   paintMast(); paintAgents(); paintHome(); paintAttention();
+}
+/* v13: average real turn latency, real HTTP request/response measurements
+   already persisted per-turn in the session ledger (chat.py's own
+   elapsed_ms — nothing new recorded here) — reuses /api/session/current
+   rather than adding a second timing mechanism. "—" on a brand-new
+   session (404, no turns yet) rather than a fabricated 0s. Slash-command
+   turns (record_slash) persist elapsed_ms=0.0 on purpose (they bypass the
+   LLM loop entirely) — `> 0`, not `!= null`, so those don't silently drag
+   a real average toward zero; no genuine LLM turn ever actually lands on
+   exactly 0ms. */
+function avgTurnLatencyLabel(){
+  const s = sys.session;
+  if(!s || !s.ok || !Array.isArray(s.turns) || !s.turns.length) return "—";
+  const withTiming = s.turns.filter(t => t.elapsed_ms != null && t.elapsed_ms > 0);
+  if(!withTiming.length) return "—";
+  const avg = withTiming.reduce((sum,t) => sum + t.elapsed_ms, 0) / withTiming.length;
+  return avg >= 1000 ? (avg/1000).toFixed(1)+"s" : Math.round(avg)+"ms";
 }
 function paintMast(){
   const t = sys.telemetry||{}, b = sys.backend||{}, s = sys.server||{};
@@ -1261,6 +1278,7 @@ function paintHome(){
       <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"—"} FACTS</span></div>
       <div class="metric"><span class="k">LEARNING</span><span class="v">${m.active?"ON":"OFF"}</span></div>
       <div class="metric"><span class="k">CONNECTIONS</span><span class="v">${okN}/${Object.keys(c).length}</span></div>
+      <div class="metric"><span class="k">AVG TURN TIME</span><span class="v">${esc(avgTurnLatencyLabel())}</span></div>
       <div class="metric"><span class="k">VERSION</span><span class="v">${esc((sys.version||{}).current||"—")}</span></div>
     </div>
     <div class="cards" id="homeCards"></div>`;
