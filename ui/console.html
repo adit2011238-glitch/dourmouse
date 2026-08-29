@@ -952,6 +952,13 @@ const SCREEN_LABELS = { ATLAS: "WORLD", DESIGN3D: "DESIGN" };
 const sys = {roster:null,conns:null,server:null,backend:null,memory:null,telemetry:null,version:null,me:null,voice:null};
 let screen = "HOME", busy = false, focusAgent = "", speak = false, voiceMode = false;
 const queue = [];
+/* v13: the NEWS screen's live feed state — see startNewsStream() and
+   paintNews() below. newsFeed accumulates newest-first, capped so an
+   all-day session never grows this unbounded; newsWatcherStatus is the
+   server's own honest running/last_poll_ok report (never a decorative
+   "connected" dot — if the backend watcher isn't running, this says so). */
+let newsFeed = [], newsWatcherStatus = null;
+const _NEWS_FEED_CAP = 200;
 
 /* ---------------- tabs ---------------- */
 // world-monitor-expansion (UX pass item 2): real user feedback after a
@@ -4501,14 +4508,102 @@ async function renderRegionList(){
   });
 }
 
+/* v13: real bug fixed here — the NEWS screen was a static "ask below"
+   placeholder with nothing self-updating, despite the explicit ask for
+   "our own customizable news mile app within Dourmouse that updates
+   without us having to prompt" and important events that "immediately
+   hit" as they happen. Backend: dourmouse/news_stream.py's
+   NewsStreamWatcher, a real background poller over already-proven
+   world_pulse.py sources (GDACS disasters, GDELT conflict events, Google
+   News), pushing over the SAME real-time broadcast hub (GET /api/events)
+   this console never previously subscribed to at all. This is that
+   subscription, plus the actual live-updating screen.
+
+   newsToast() fires for "important" items (severity critical/high — a
+   REAL signal each source already computes, not an invented keyword
+   score) regardless of which screen is currently open, so "hits
+   immediately" is true even when you're not looking at NEWS. */
+let _newsEventSource = null;
+function startNewsStream(){
+  if(_newsEventSource) return;  // idempotent — boot calls this exactly once
+  try{
+    _newsEventSource = new EventSource("/api/events");
+    _newsEventSource.onmessage = (ev) => {
+      let data; try{ data = JSON.parse(ev.data); }catch{ return; }
+      if(data.type !== "news_item") return;  // the hub carries other event kinds too
+      const item = data.item;
+      newsFeed.unshift(item);
+      if(newsFeed.length > _NEWS_FEED_CAP) newsFeed.length = _NEWS_FEED_CAP;
+      if(screen === "NEWS") paintNews();
+      if(item.important) newsToast(item);
+    };
+    // EventSource auto-reconnects on its own after a network blip — no
+    // manual retry loop needed, matching the browser's own real behavior
+    // rather than reimplementing it.
+  }catch{}
+}
+function newsToast(item){
+  let box = $("newsToastBox");
+  if(!box){
+    box = document.createElement("div"); box.id = "newsToastBox";
+    box.style.cssText = "position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:340px";
+    document.body.appendChild(box);
+  }
+  const t = document.createElement("div"); t.className = "attnpanel"; t.style.cssText = "cursor:pointer";
+  t.innerHTML = `<div class="attnhead">◆ IMPORTANT — ${esc((item.channel||"").toUpperCase())}</div>
+    <div class="attnrow"><span class="attnsum"></span></div>`;
+  t.querySelector(".attnsum").textContent = item.title;
+  t.onclick = () => { show("NEWS"); t.remove(); };
+  box.appendChild(t);
+  setTimeout(() => { t.remove(); }, 15000);
+}
 async function paintNews(){
-  $("newsBody").innerHTML='<div class="note">Ask for headlines below — the news agent fetches them live.</div>'+
-    '<div class="sec">TRY</div><div class="cards" id="nc"></div>';
+  const box = $("newsBody");
+  const st = newsWatcherStatus;
+  const statusLine = st === null
+    ? '<div class="note">Checking the news watcher’s status…</div>'
+    : !st.running
+    ? '<div class="note">The background news watcher is not running on this server — showing manual search only.</div>'
+    : `<div class="note">Live — polling disasters/conflict events/world news every ${Math.round((st.status&&st.status.poll_interval_seconds)||180)}s. Last poll: ${st.status && st.status.last_poll_ok===false ? "failed (retrying)" : "ok"}.</div>`;
+  const feedRows = newsFeed.length
+    ? newsFeed.slice(0, 60).map(it => {
+        const badge = it.important ? '<span class="attnkind">IMPORTANT</span>' : "";
+        return `<div class="row"><div class="g">
+          <div class="n"></div>
+          <div class="d"></div>
+        </div>${badge}</div>`;
+      }).join("")
+    : '<div class="note">No live items yet — the watcher polls its sources on a fixed interval; the first batch lands within a few minutes of server start.</div>';
+  box.innerHTML = `◆ LIVE FEED${statusLine}
+    <div id="newsFeedList">${feedRows}</div>
+    <div class="sec">TRY</div><div class="cards" id="nc"></div>`;
+  // Text set via textContent, not the template above, so a source's own
+  // untrusted title/summary text can never inject markup here (same rule
+  // paintAttention() already follows for tool-result-derived text).
+  if(newsFeed.length){
+    box.querySelectorAll("#newsFeedList .row").forEach((row, i) => {
+      const it = newsFeed[i];
+      row.querySelector(".n").textContent = `[${(it.channel||"").toUpperCase()}] ${it.title}`;
+      row.querySelector(".d").textContent = it.summary || it.at || "";
+      if(it.link){ row.style.cursor = "pointer"; row.onclick = () => window.open(it.link, "_blank", "noopener"); }
+    });
+  }
   [["Top headlines now","news_headlines"],["Search a story","news_search"]].forEach(([q])=>{
     const b=document.createElement("button"); b.className="card"; b.type="button";
     b.innerHTML=`<div class="h">${esc(q)}</div>`;
     b.onclick=()=>{ focusAgent="news"; ta.value=q; submit(); }; $("nc").appendChild(b);
   });
+  try{
+    const r = await fetch("/api/news?limit=60");
+    const j = await r.json();
+    newsWatcherStatus = j;
+    if(Array.isArray(j.items) && j.items.length && !newsFeed.length){
+      // First load only — live pushes own the feed after this; a second
+      // catch-up fetch mid-session would duplicate items already pushed.
+      newsFeed = j.items;
+      paintNews();
+    }
+  }catch{}
 }
 
 /* ---------------- VOICE ---------------- */
@@ -4582,6 +4677,7 @@ else document.documentElement.setAttribute("data-theme","arc");
 (async () => {
   await refresh();
   setInterval(refresh, 30000);
+  startNewsStream();
   let booted = false;
   try{ booted = sessionStorage.getItem("dm_booted_v1") === "1"; }catch{}
   if(!storedTheme){ openPicker(); }
