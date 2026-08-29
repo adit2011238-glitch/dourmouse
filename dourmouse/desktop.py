@@ -53,6 +53,97 @@ def _pick_port() -> int:
         return _DEFAULT_PORT
 
 
+# -- Vision helper auto-start (v13) ------------------------------------------
+# Real gap found and fixed here: dourmouse/tray.py (system tray + camera/mic
+# kill switch + the vision_bridge hand-tracking reaches into), overlay.py
+# (the always-on-top ambient status window — its own docstring: "not
+# something you open, something that is simply there"), and wakeword.py
+# (the local wake-word listener) are all real, tested, shipped modules —
+# but NOTHING launched any of them. A user opening the packaged desktop app
+# got a VISION screen whose entire dashboard honestly reported "not
+# running" for every single row, forever, because nothing ever started
+# what it was reporting on. Each is independently runnable
+# (`.venv/bin/python -m dourmouse.<module>`) but expecting a non-technical
+# user to open three extra terminals to get the feature they see in the UI
+# is not a real product. This starts each as its own subprocess (not a
+# thread — each owns a blocking native event loop of its own: pystray's
+# icon.run(), a second pywebview window, a continuous mic-capture loop —
+# and pywebview in particular only tolerates one .start() per process) the
+# same way `npm run dev` starts a dev server without the user typing it
+# manually. Best-effort per helper: one failing to start (missing
+# pystray/pyaudio, no display, whatever) never blocks the other two or the
+# main app — this mirrors every other "real result or honest degrade,
+# never block the app" contract in this codebase.
+_VISION_AUTOSTART_ENV = "DOURMOUSE_VISION_AUTOSTART"
+_VISION_HELPER_MODULES = ("dourmouse.tray", "dourmouse.overlay", "dourmouse.wakeword")
+
+
+def vision_autostart_enabled() -> bool:
+    raw = os.environ.get(_VISION_AUTOSTART_ENV, "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _spawn_vision_helper(module: str, port: int) -> subprocess.Popen | None:
+    """Launch one helper module as a real background subprocess. Returns
+    the Popen handle, or None on any failure to start (never raises —
+    Rule 2.1/2.2 concern here is about the MAIN app's own startup, which
+    must never fail because an optional ambient helper couldn't). Output
+    is captured (DEVNULL) rather than left to inherit this process's
+    stdout — three extra chatty subprocesses interleaving with
+    "[DESKTOP] ..." lines would make the main app's own console output
+    unreadable; each module already degrades honestly to its caller (exit
+    code / self-contained window), not to stdout text a user is expected
+    to read."""
+    env = dict(os.environ)
+    env[_PORT_ENV] = str(port)
+    try:
+        return subprocess.Popen(
+            [sys.executable, "-m", module],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        print(f"[DESKTOP] vision helper {module!r} could not start: {exc}")
+        return None
+
+
+def _start_vision_helpers(port: int) -> list[subprocess.Popen]:
+    """Best-effort launch of every vision helper; see this section's own
+    module-level comment for why these are subprocesses, not threads."""
+    procs: list[subprocess.Popen] = []
+    for module in _VISION_HELPER_MODULES:
+        proc = _spawn_vision_helper(module, port)
+        if proc is not None:
+            procs.append(proc)
+    return procs
+
+
+def _stop_vision_helpers(procs: list[subprocess.Popen]) -> None:
+    """Graceful terminate, then a bounded wait, then kill — the same
+    escalation every process-supervision code in this codebase uses
+    (atlas_command.py's AtlasRunManager included). Best-effort: a helper
+    that's already dead or unkillable must never stop the main app's own
+    shutdown from completing."""
+    for proc in procs:
+        try:
+            if proc.poll() is not None:
+                continue  # already exited on its own
+            proc.terminate()
+        except Exception:  # noqa: BLE001 - shutdown must never raise
+            pass
+    for proc in procs:
+        try:
+            proc.wait(timeout=3)
+        except Exception:  # noqa: BLE001 - covers subprocess.TimeoutExpired
+            # and any other polling failure; escalate to kill either way
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001 - best-effort
+                pass
+
+
 def _import_webview() -> Any:
     """Lazy import so the module works (and tests run) without pywebview."""
     try:
@@ -676,6 +767,7 @@ def launch(
     live_polling: bool = True,
     open_all_windows: bool = False,
     deep_link: str | None = None,
+    vision_autostart: bool | None = None,
 ) -> int:
     """Launch the DOURMOUSE desktop app. Returns a process exit code.
 
@@ -694,6 +786,11 @@ def launch(
     completed session (DOURMOUSE_LEARN=0 honestly disables it, see
     learn.open_default_store). Hermetic tests pass an explicit store or
     set DOURMOUSE_LEARN=0.
+    ``vision_autostart`` (v13): spawn tray.py/overlay.py/wakeword.py as
+    real background subprocesses so the VISION screen has something real
+    to report on. None (default) follows DOURMOUSE_VISION_AUTOSTART (on
+    unless explicitly set to 0/false/no/off) — see
+    vision_autostart_enabled(). Hermetic tests pass False explicitly.
     """
     # v8.9: in the packaged Windows build every child process would open its
     # own console window, so launching the app flashed up a terminal beside
@@ -744,6 +841,11 @@ def launch(
         print(
             f"[DESKTOP] {server.live_runtime.poll_count} always-on live agent poll loop(s) running"
         )
+
+    autostart = vision_autostart_enabled() if vision_autostart is None else vision_autostart
+    vision_procs: list[subprocess.Popen] = _start_vision_helpers(actual_port) if autostart else []
+    if autostart:
+        print(f"[DESKTOP] {len(vision_procs)}/{len(_VISION_HELPER_MODULES)} vision helper(s) started")
 
     # The notification sink and its hub are initialized OUTSIDE the try so
     # the finally block can always reference them — a loader failure that
@@ -890,6 +992,7 @@ def launch(
             return _fallback_to_browser(url, f"Native window could not start: {exc}")
         return 0
     finally:
+        _stop_vision_helpers(vision_procs)
         if notifier_sink is not None and events_hub is not None:
             try:
                 events_hub.unregister(notifier_sink)

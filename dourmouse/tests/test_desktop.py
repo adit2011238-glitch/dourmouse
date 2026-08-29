@@ -24,6 +24,19 @@ from dourmouse.tests.test_webui import _echo_registry
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture(autouse=True)
+def _no_real_vision_helpers(monkeypatch):
+    """v13: desktop.launch() now spawns tray.py/overlay.py/wakeword.py as
+    real subprocesses by default (see vision_autostart_enabled()) — every
+    existing test in this file calls launch() without knowing that's new,
+    and none of them should actually open a system tray icon / native
+    overlay window / start a mic-capture listener as a side effect of a
+    hermetic unit test. Forced off here for the whole file; the dedicated
+    TestVisionAutostart class below opts back in per-test with a fake
+    spawn function to test the feature itself without real subprocesses."""
+    monkeypatch.setenv(desktop._VISION_AUTOSTART_ENV, "0")
+
+
 def _usable_bash() -> str | None:
     """Return a real bash executable, or None if only the WSL stub exists.
 
@@ -761,3 +774,143 @@ class TestPackaging:
     def test_build_app_command_uses_osacompile(self):
         builder = (_PROJECT_ROOT / "build_app.command").read_text(encoding="utf-8")
         assert "osacompile" in builder
+
+
+# --------------------------------------------------------------------------- #
+# Vision helper auto-start (v13) — real bug fixed: nothing ever launched
+# tray.py/overlay.py/wakeword.py, so the VISION screen honestly reported
+# "not running" for everything, forever, on a normal app launch.
+# --------------------------------------------------------------------------- #
+
+class TestVisionAutostartConfig:
+    def test_on_by_default(self, monkeypatch):
+        monkeypatch.delenv(desktop._VISION_AUTOSTART_ENV, raising=False)
+        assert desktop.vision_autostart_enabled() is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "False", "no", "off", "OFF"])
+    def test_explicit_off_values(self, monkeypatch, value):
+        monkeypatch.setenv(desktop._VISION_AUTOSTART_ENV, value)
+        assert desktop.vision_autostart_enabled() is False
+
+    def test_explicit_on_value(self, monkeypatch):
+        monkeypatch.setenv(desktop._VISION_AUTOSTART_ENV, "1")
+        assert desktop.vision_autostart_enabled() is True
+
+
+class _FakePopen:
+    """Records the argv/env it was launched with; poll()/wait()/terminate()/
+    kill() behave like a process that's still running until told otherwise."""
+
+    instances: list["_FakePopen"] = []
+
+    def __init__(self, argv, **kwargs):
+        self.argv = argv
+        self.env = kwargs.get("env")
+        self.terminated = False
+        self.killed = False
+        self._exited = False
+        _FakePopen.instances.append(self)
+
+    def poll(self):
+        return 0 if self._exited else None
+
+    def terminate(self):
+        self.terminated = True
+        self._exited = True
+
+    def kill(self):
+        self.killed = True
+        self._exited = True
+
+    def wait(self, timeout=None):
+        return 0
+
+
+@pytest.fixture(autouse=True)
+def _reset_fake_popen():
+    _FakePopen.instances = []
+    yield
+    _FakePopen.instances = []
+
+
+class TestSpawnVisionHelpers:
+    def test_spawns_all_three_modules_with_the_real_port(self, monkeypatch):
+        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
+        procs = desktop._start_vision_helpers(9999)
+        assert len(procs) == 3
+        modules = {p.argv[-1] for p in procs}
+        assert modules == set(desktop._VISION_HELPER_MODULES)
+        for p in procs:
+            assert p.argv[0] == sys.executable
+            assert "-m" in p.argv
+            assert p.env[desktop._PORT_ENV] == "9999"
+
+    def test_a_failing_helper_does_not_block_the_others(self, monkeypatch):
+        calls = []
+
+        def _flaky_popen(argv, **kwargs):
+            calls.append(argv)
+            if "dourmouse.tray" in argv:
+                raise OSError("no such thing")
+            return _FakePopen(argv, **kwargs)
+
+        monkeypatch.setattr(desktop.subprocess, "Popen", _flaky_popen)
+        procs = desktop._start_vision_helpers(9999)
+        assert len(calls) == 3  # every module was attempted
+        assert len(procs) == 2  # tray's failure didn't stop overlay/wakeword
+
+    def test_stop_terminates_then_waits(self, monkeypatch):
+        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
+        procs = desktop._start_vision_helpers(9999)
+        desktop._stop_vision_helpers(procs)
+        assert all(p.terminated for p in procs)
+        assert not any(p.killed for p in procs)  # graceful wait succeeded
+
+    def test_stop_kills_a_process_that_wont_wait(self, monkeypatch):
+        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
+        procs = desktop._start_vision_helpers(9999)
+        procs[0].wait = lambda timeout=None: (_ for _ in ()).throw(subprocess.TimeoutExpired("x", timeout))
+        desktop._stop_vision_helpers(procs)
+        assert procs[0].killed is True
+
+    def test_stop_skips_an_already_exited_process(self, monkeypatch):
+        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
+        procs = desktop._start_vision_helpers(9999)
+        procs[0]._exited = True
+        desktop._stop_vision_helpers(procs)
+        assert procs[0].terminated is False  # never re-terminated a dead process
+
+
+class TestLaunchWithVisionAutostart:
+    def test_launch_spawns_helpers_by_default(self, monkeypatch):
+        fake = _FakeWebview()
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        monkeypatch.delenv(desktop._VISION_AUTOSTART_ENV, raising=False)
+        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
+        code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
+        assert code == 0
+        assert len(_FakePopen.instances) == 3
+        # the launch's own finally block must have cleaned them all up
+        assert all(p.terminated for p in _FakePopen.instances)
+
+    def test_launch_respects_explicit_false(self, monkeypatch):
+        fake = _FakeWebview()
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
+        code = desktop.launch(
+            _echo_registry(), port=0, webview_loader=_loader(fake), vision_autostart=False
+        )
+        assert code == 0
+        assert _FakePopen.instances == []
+
+    def test_launch_respects_env_var_off(self, monkeypatch):
+        fake = _FakeWebview()
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        monkeypatch.setenv(desktop._VISION_AUTOSTART_ENV, "0")
+        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
+        code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
+        assert code == 0
+        assert _FakePopen.instances == []
