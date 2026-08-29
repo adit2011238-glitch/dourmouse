@@ -2692,6 +2692,14 @@ class _Handler(BaseHTTPRequestHandler):
         # Captured before any focus_agent routing-directive wrapping below,
         # so the "just say send" intercept sees exactly what the user typed.
         raw_prompt = prompt
+        # v13: which console screen this directive was sent from (HOME,
+        # CODE, RESEARCH, ...) — the frontend now sends this so a reload's
+        # session-restore can put the turn back on its own thread instead of
+        # flattening every screen's conversation onto HOME (see chat.py's
+        # ask()/_persist() docstrings for the other half of this fix).
+        # Missing/blank from an older client build degrades to HOME, which
+        # is that client's only real thread anyway.
+        screen = (body.get("screen") or "HOME").strip() or "HOME"
         focus_agent = (body.get("focus_agent") or "").strip()
         if focus_agent and focus_agent not in self.server.registry.subagent_names:
             self._send_json(
@@ -2811,6 +2819,8 @@ class _Handler(BaseHTTPRequestHandler):
                     event_sink=sink,
                     model=model_override,
                     voice=voice_channel,
+                    display_text=raw_prompt,
+                    screen=screen,
                 )
             except Exception as exc:  # surface real failures to the UI
                 error_msg = str(exc)
@@ -4684,6 +4694,20 @@ def run_server(
                         "timestamp": rec.get("timestamp"),
                         "elapsed_ms": rec.get("elapsed_ms"),
                         "user": rec.get("user", ""),
+                        # v13: the raw, unwrapped text the user actually typed
+                        # (rec.get("user") is what the MODEL saw — for a
+                        # focus_agent turn that's the internal "[ROUTING
+                        # DIRECTIVE] ..." wrapper, which used to leak straight
+                        # into the restored transcript). Older records predate
+                        # this field entirely; fall back to "user" so they
+                        # still restore exactly as before.
+                        "display_text": rec.get("display_text") or rec.get("user", ""),
+                        # v13: which console screen this turn belongs to, so
+                        # restore can put it back on its own thread instead of
+                        # flattening every screen onto HOME. Older records
+                        # predate this too; default HOME matches their only
+                        # actual behavior before per-screen restore existed.
+                        "screen": rec.get("screen") or "HOME",
                         "final_text": rec.get("final_text", ""),
                         "transcript": rec.get("transcript", []),
                         "interventions": rec.get("interventions", []),

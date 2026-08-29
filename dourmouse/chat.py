@@ -122,6 +122,8 @@ class ChatSession:
         event_sink: Callable[[dict[str, Any]], None] | None = None,
         model: str | None = None,
         voice: bool = False,
+        display_text: str | None = None,
+        screen: str = "HOME",
     ) -> dict[str, Any]:
         """Send one user turn; returns the dispatch report.
 
@@ -135,10 +137,26 @@ class ChatSession:
         UI, not the typed one, so the reply is shaped to be spoken instead
         of read. Defaults False, so an existing caller that never passes it
         gets the unchanged text-channel behavior.
+
+        v13: ``prompt`` is what the MODEL sees — for a focus_agent route,
+        webui.py wraps it in a "[ROUTING DIRECTIVE] ..." instruction before
+        it ever reaches here, and that wrapped text used to be the ONLY copy
+        persisted, so a reloaded page's session-restore showed the raw
+        internal instruction to the user verbatim instead of what they
+        actually typed. ``display_text`` is the ORIGINAL, unwrapped user
+        text — persisted alongside ``prompt`` purely for restore/UI display;
+        it never touches ``self.messages`` or the model. Falls back to
+        ``prompt`` when the caller doesn't have a separate display form
+        (e.g. no focus_agent was pinned, so the two are identical anyway).
+        ``screen`` (v13) is which console screen the turn was asked from
+        (HOME/RESEARCH/CODE/...) — persisted so restore can put a turn back
+        on the thread it actually belongs to instead of flattening every
+        screen's conversation onto HOME.
         """
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("ask() requires a non-empty prompt")
+        display_text = (display_text or prompt).strip()
         # The whole budget envelope is per request-tree, not per session:
         # restart calls, cost AND the clock at the start of every turn.
         # Without this, a long-lived session crosses the 40-call/$1 caps and
@@ -198,7 +216,7 @@ class ChatSession:
             # never silently loses the turn that was already in memory.
             self._turn_count += 1
             elapsed_ms = round((time.monotonic() - started) * 1000, 1)
-            self._persist(prompt, report, elapsed_ms)
+            self._persist(prompt, report, elapsed_ms, display_text=display_text, screen=screen)
             # v2.9 Store & Learn: auto-ingest the completed turn into the
             # long-term store (idempotent upsert). Only when the turn actually
             # completed with an answer — we never learn from a failed turn
@@ -300,7 +318,14 @@ class ChatSession:
         self.messages = loaded
         self._turn_count = sum(1 for m in self.messages if m["role"] == "user")
 
-    def _persist(self, prompt: str, report: dict[str, Any], elapsed_ms: float) -> None:
+    def _persist(
+        self,
+        prompt: str,
+        report: dict[str, Any],
+        elapsed_ms: float,
+        display_text: str | None = None,
+        screen: str = "HOME",
+    ) -> None:
         """Append one hash-chained, tamper-evident audit record (spec:
         immutable audit trail & logging).
 
@@ -309,6 +334,13 @@ class ChatSession:
         edit to any past record breaks every subsequent link — detectable with
         ``verify_session_audit()``. Also records wall-clock latency and every
         human intervention (confirmation requested/resolved) from the turn.
+
+        ``user`` stays the exact text the model saw (unchanged — anything
+        reading this ledger as ground truth for what was SENT must keep
+        seeing that). ``display_text``/``screen`` are new (v13), additive
+        fields purely for UI restore; a record without them (anything
+        persisted before this change) just means restore falls back to
+        ``user`` and "HOME", same as it always did.
         """
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
         interventions = [
@@ -321,6 +353,8 @@ class ChatSession:
             "timestamp": datetime.now().isoformat(),
             "elapsed_ms": elapsed_ms,
             "user": prompt,
+            "display_text": display_text or prompt,
+            "screen": screen or "HOME",
             "final_text": report.get("final_text", ""),
             "interventions": interventions,
             "role_changes": list(self.role_changes),

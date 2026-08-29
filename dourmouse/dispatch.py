@@ -2044,6 +2044,23 @@ def _run_dispatch_loop(
     rbac = ctx.rbac
     nudges = 0
     plan_reminders = 0
+    # v13: repeat-call guard for expensive, session-stateful CLI delegates.
+    # Live bug this fixes: a weak local orchestrator model (e.g. qwen2.5:7b,
+    # the fallback once NVIDIA broke) regularly can't tell a completed
+    # single-shot task apart from one still pending, and re-issues the exact
+    # same claude_code/codex_code call a second time in the same turn. Each
+    # of those tools now carries session continuity (--session-id/--resume),
+    # so a blind re-run doesn't just waste ~40-80s re-spawning a real CLI —
+    # it replays the SAME instruction into the SAME live conversation a
+    # second time, and the model's own final answer then glues both
+    # returned payloads together with no separator (observed live:
+    # "OK-CLAUDEOK-CLAUDE" from one "say OK-CLAUDE" task). Only these two
+    # tools are guarded — they're the only ones where identical (name,
+    # arguments) is both detectable AND unambiguously wasteful to repeat;
+    # arbitrary tools (email, search, clock) can legitimately want a second
+    # real call with the same arguments.
+    _DEDUP_GUARDED_TOOLS = {"claude_code", "codex_code"}
+    _seen_tool_calls: dict[tuple[str, str], str] = {}
     # Deterministic tool->owner map: plans name SUBAGENTS but the model calls
     # TOOLS, so the loop ties them together to tell when a plan step has
     # actually been executed.
@@ -2505,12 +2522,37 @@ def _run_dispatch_loop(
                             f"ERROR: invalid arguments for '{name}': {validation_error}"
                         )
                     else:
-                        try:
-                            result_text = _execute_tool(
-                                spec, arguments, confirmation_gate, ledger=transcript
+                        dedup_key = (
+                            (name, json.dumps(arguments, sort_keys=True, default=str))
+                            if name in _DEDUP_GUARDED_TOOLS
+                            else None
+                        )
+                        prior_result = (
+                            _seen_tool_calls.get(dedup_key) if dedup_key else None
+                        )
+                        if prior_result is not None:
+                            # Same tool + identical arguments already ran this
+                            # turn — reuse the real prior result instead of
+                            # replaying the instruction into the same live
+                            # CLI session a second time (see the guard's
+                            # docstring above the loop for the bug this
+                            # prevents).
+                            result_text = (
+                                "[DOURMOUSE: identical call already made this "
+                                f"turn — not re-running '{name}' a second time "
+                                "with the same arguments; reusing that result]\n"
+                                + prior_result
                             )
-                        except Exception as exc:  # surface handler errors honestly
-                            result_text = f"ERROR: tool '{name}' failed: {exc}"
+                        else:
+                            try:
+                                result_text = _execute_tool(
+                                    spec, arguments, confirmation_gate, ledger=transcript
+                                )
+                            except Exception as exc:  # surface handler errors honestly
+                                result_text = f"ERROR: tool '{name}' failed: {exc}"
+                            else:
+                                if dedup_key:
+                                    _seen_tool_calls[dedup_key] = result_text
 
             # DLP at the API boundary: redact credential-shaped text from tool
             # results before they reach the model or the audit transcript.

@@ -1763,3 +1763,121 @@ class TestGlobalMemoryWiring:
         client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
         report = run_dispatch("check my inbox", _test_registry(), client=client)
         assert report["final_text"] == "ok"
+
+
+class TestRepeatToolCallGuard:
+    """v13: a weak orchestrator model regularly can't tell a completed
+    single-shot task apart from one still pending and re-issues the exact
+    same claude_code/codex_code call a second time — live-observed:
+    'reply with the exact text OK-CLAUDE' came back as 'OK-CLAUDEOK-CLAUDE'
+    because the tool genuinely ran twice and the model glued both real
+    results together. Only claude_code/codex_code are guarded (see the
+    guard's own comment in dispatch.py for why)."""
+
+    def _registry_with(self, name: str) -> tuple[DispatchRegistry, list[int]]:
+        calls: list[int] = []
+
+        def handler(args):
+            calls.append(1)
+            return f"CALL-{len(calls)}: {args.get('task')}"
+
+        r = DispatchRegistry()
+        r.register_subagent(
+            Subagent(
+                name="dev_coding",
+                domain="Test",
+                description="coding delegate",
+                tools=(
+                    ToolSpec(
+                        name=name,
+                        description=f"{name} delegate",
+                        parameters={
+                            "type": "object",
+                            "properties": {"task": {"type": "string"}},
+                            "required": ["task"],
+                        },
+                        handler=handler,
+                    ),
+                ),
+            )
+        )
+        return r, calls
+
+    def test_identical_repeat_call_is_not_re_executed(self):
+        registry, calls = self._registry_with("claude_code")
+        args = json.dumps({"task": "reply with the exact text OK-CLAUDE"})
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(
+                        tool_calls=[_FakeToolCall("1", "claude_code", args)]
+                    )
+                ),
+                _FakeResponse(
+                    _FakeMessage(
+                        tool_calls=[_FakeToolCall("2", "claude_code", args)]
+                    )
+                ),
+                _FakeResponse(_FakeMessage(content="OK-CLAUDE")),
+            ]
+        )
+        report = run_dispatch("say ok", registry, client=client, max_turns=5)
+        # The real handler ran exactly once, not twice.
+        assert len(calls) == 1
+        # The second (duplicate) call's tool result told the model it was
+        # reused rather than replaying a real CLI call.
+        tool_results = [
+            e["text"] for e in report["transcript"] if e.get("type") == "tool_result"
+        ]
+        assert tool_results[0] == "CALL-1: reply with the exact text OK-CLAUDE"
+        assert "identical call already made this turn" in tool_results[1]
+        assert "CALL-1: reply with the exact text OK-CLAUDE" in tool_results[1]
+
+    def test_different_arguments_are_not_deduped(self):
+        registry, calls = self._registry_with("codex_code")
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(
+                        tool_calls=[
+                            _FakeToolCall(
+                                "1", "codex_code", json.dumps({"task": "task A"})
+                            )
+                        ]
+                    )
+                ),
+                _FakeResponse(
+                    _FakeMessage(
+                        tool_calls=[
+                            _FakeToolCall(
+                                "2", "codex_code", json.dumps({"task": "task B"})
+                            )
+                        ]
+                    )
+                ),
+                _FakeResponse(_FakeMessage(content="done")),
+            ]
+        )
+        run_dispatch("do two things", registry, client=client, max_turns=5)
+        # Different arguments -> both real calls run, guard never fires.
+        assert len(calls) == 2
+
+    def test_unguarded_tools_still_repeat_freely(self):
+        """Only claude_code/codex_code are guarded — an ordinary tool (e.g.
+        checking email twice) must keep re-running every time, since a
+        second real call CAN legitimately return something new."""
+        registry, calls = self._registry_with("echo")
+        args = json.dumps({"task": "same text"})
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(tool_calls=[_FakeToolCall("1", "echo", args)])
+                ),
+                _FakeResponse(
+                    _FakeMessage(tool_calls=[_FakeToolCall("2", "echo", args)])
+                ),
+                _FakeResponse(_FakeMessage(content="done")),
+            ]
+        )
+        run_dispatch("echo twice", registry, client=client, max_turns=5)
+        assert len(calls) == 2

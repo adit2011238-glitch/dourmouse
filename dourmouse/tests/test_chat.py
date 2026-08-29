@@ -302,6 +302,53 @@ class TestPersistence:
         assert record["turn"] == 1
         assert record["user"] == "/all status"
 
+    def test_display_text_and_screen_persisted_separately_from_wrapped_prompt(self, tmp_path):
+        """v13: a real bug fixed — webui.py wraps a focus_agent turn's
+        prompt into a "[ROUTING DIRECTIVE] Complete this task using ONLY
+        the '<agent>' subagent..." instruction before calling ask(), and
+        that wrapped text used to be the ONLY thing persisted — a page
+        reload's session-restore then showed the internal wrapper to the
+        user verbatim instead of what they actually typed. `user` must
+        still be the exact wrapped text the model saw (unchanged — the
+        audit ledger's contract for "what was sent" doesn't change);
+        `display_text`/`screen` are additive fields for restore only."""
+        client = FakeClient([_FakeResponse(_FakeMessage(content="OK-CLAUDE"))])
+        session_file = tmp_path / "wrapped.jsonl"
+        session = ChatSession(_registry(), client=client, session_file=session_file)
+
+        wrapped = (
+            "[ROUTING DIRECTIVE] Complete this task using ONLY the "
+            "'code_claude' subagent and its tools; do not use any other "
+            "subagent's tools. TASK: reply with the exact text OK-CLAUDE"
+        )
+        session.ask(
+            wrapped,
+            display_text="reply with the exact text OK-CLAUDE",
+            screen="CODE",
+        )
+
+        record = json.loads(session_file.read_text(encoding="utf-8").strip().splitlines()[0])
+        assert record["user"] == wrapped
+        assert record["display_text"] == "reply with the exact text OK-CLAUDE"
+        assert record["screen"] == "CODE"
+        # The wrapped text is still what the model actually saw.
+        assert session.messages[1] == {"role": "user", "content": wrapped}
+
+    def test_display_text_and_screen_default_when_not_given(self, tmp_path):
+        """An ordinary AUTO-routed turn (no focus_agent, so webui.py never
+        builds a wrapper) passes neither kwarg — must persist exactly as it
+        always did, falling back to the plain prompt and HOME."""
+        client = FakeClient([_FakeResponse(_FakeMessage(content="hi"))])
+        session_file = tmp_path / "plain.jsonl"
+        session = ChatSession(_registry(), client=client, session_file=session_file)
+
+        session.ask("say hi")
+
+        record = json.loads(session_file.read_text(encoding="utf-8").strip().splitlines()[0])
+        assert record["user"] == "say hi"
+        assert record["display_text"] == "say hi"
+        assert record["screen"] == "HOME"
+
     def test_corrupt_state_raises_not_silent(self, tmp_path):
         session_file = tmp_path / "session.jsonl"
         (tmp_path / "session.messages.json").write_text("{not json")

@@ -456,6 +456,47 @@ class TestSessionTranscriptEndpoint:
         assert data["turns"][0]["transcript"] == [
             {"type": "tool_use", "name": "echo", "raw_arguments": "{}"}
         ]
+        # A record written before v13 (display_text/screen didn't exist yet)
+        # must still resolve both — falling back to "user" and "HOME",
+        # matching this exact record's only real behavior before the fields
+        # existed.
+        assert data["turns"][0]["display_text"] == "run the echo tool"
+        assert data["turns"][0]["screen"] == "HOME"
+
+    def test_focus_agent_turn_persists_raw_text_and_screen_separately(self, server):
+        """v13: a real bug fixed — a focus_agent turn's `user` field is the
+        internal "[ROUTING DIRECTIVE] ..." wrapper webui.py builds before
+        calling session.ask(); `display_text` must stay the raw text the
+        user actually typed, and `screen` must be whatever the request
+        said, so the console's session-restore can show/re-file it
+        correctly instead of leaking the wrapper onto the wrong thread."""
+        srv, port = server
+        srv.session.client = FakeClient(
+            [_FakeResponse(_FakeMessage(content="OK-CLAUDE"))]
+        )
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat",
+            body=json.dumps({
+                "prompt": "reply with the exact text OK-CLAUDE",
+                "focus_agent": "echo_agent",
+                "screen": "CODE",
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        while resp.readline():
+            pass
+        conn.close()
+        assert resp.status == 200
+
+        status, data = self._get(port, "/api/session/current")
+        assert status == 200
+        turn = data["turns"][0]
+        assert turn["user"].startswith("[ROUTING DIRECTIVE]")
+        assert "reply with the exact text OK-CLAUDE" in turn["user"]
+        assert turn["display_text"] == "reply with the exact text OK-CLAUDE"
+        assert turn["screen"] == "CODE"
 
     def test_unknown_id_is_404_not_500(self, server):
         srv, port = server

@@ -86,12 +86,22 @@ class TestSessionRestore:
         assert "r.status===404" in body
         assert "return" in body
 
-    def test_restores_only_home_thread(self):
+    def test_restores_each_turn_to_its_own_screens_thread(self):
+        """v13: a real bug fixed — restore used to hardcode threadFor("HOME")
+        for every turn, flattening RESEARCH/CODE/MEDIA/NEWS/DESIGN3D's own
+        v8.29 per-screen conversations onto HOME on every reload. The turn's
+        persisted `screen` field (chat.py's ask()/_persist(), threaded
+        through /api/session/current) now picks the thread, gated through
+        THREAD_SCREENS exactly like a live run() does, with HOME as the
+        fallback for an unrecognized/missing screen (older records predate
+        the field and always meant HOME anyway)."""
         script = _extract_inline_script()
         m = re.search(r"async function restoreSession\(\)\{(.*?)\n\}\n", script, re.S)
         assert m
         body = m.group(1)
-        assert 'threadFor("HOME")' in body
+        assert "THREAD_SCREENS.includes(turn.screen)" in body
+        assert 'targetScreen = THREAD_SCREENS.includes(turn.screen) ? turn.screen : "HOME"' in body
+        assert "threadFor(targetScreen)" in body
 
     def test_replays_transcript_through_the_same_chip_machinery(self):
         script = _extract_inline_script()
@@ -114,10 +124,25 @@ class TestSessionRestore:
         m = re.search(r"async function restoreSession\(\)\{(.*?)\n\}\n", script, re.S)
         assert m
         body = m.group(1)
-        assert "addYou(threadEl, turn.user" in body
         assert "addReply(threadEl)" in body
         assert "turn.final_text" in body
         assert "turn.transcript" in body
+
+    def test_you_bubble_shows_display_text_not_the_internal_wrapper(self):
+        """v13: a real bug fixed — a focus_agent turn's persisted `user`
+        field is what the MODEL saw (webui.py wraps it into a "[ROUTING
+        DIRECTIVE] Complete this task using ONLY the '<agent>' subagent..."
+        instruction before session.ask() ever runs), and restore used to
+        show that raw internal instruction to the user as if they'd typed
+        it. `turn.display_text` (chat.py's new, additive field) is the
+        original unwrapped text; older records without it fall back to
+        `turn.user`, unchanged from before."""
+        script = _extract_inline_script()
+        m = re.search(r"async function restoreSession\(\)\{(.*?)\n\}\n", script, re.S)
+        assert m
+        body = m.group(1)
+        assert 'turn.display_text || turn.user || ""' in body
+        assert "addYou(threadEl, shown)" in body
 
     def test_restored_reply_gets_the_same_tail_buttons_as_a_live_one(self):
         script = _extract_inline_script()
@@ -130,13 +155,13 @@ class TestSessionRestore:
         assert "SHELVE" in body
         assert "shelvePicker(" in body
 
-    def test_does_not_touch_other_thread_screens(self):
+    def test_unrecognized_screen_falls_back_to_home(self):
+        """A turn persisted before the `screen` field existed (or one
+        carrying a screen name that isn't a real THREAD_SCREENS entry) must
+        still restore somewhere visible rather than being silently dropped
+        — HOME, exactly as every turn used to restore before this fix."""
         script = _extract_inline_script()
-        # The restore path must never call threadFor with a non-HOME
-        # screen name — RESEARCH/CODE/MEDIA/NEWS/DESIGN3D threads have no
-        # server-side session of their own to restore from.
         m = re.search(r"async function restoreSession\(\)\{(.*?)\n\}\n", script, re.S)
         assert m
         body = m.group(1)
-        for other in ("RESEARCH", "CODE", "MEDIA", "NEWS", "DESIGN3D"):
-            assert f'threadFor("{other}")' not in body
+        assert ': "HOME"' in body

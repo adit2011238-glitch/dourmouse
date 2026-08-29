@@ -322,10 +322,20 @@ button,input,textarea,select{font:inherit;color:inherit}
    picking a CODE toolchain) — a thread nested inside would get wiped by
    that. Hidden until the first real message lands, matching the same
    empty-state-disappears-once-you're-talking pattern Claude's own composer
-   uses, so the suggestion cards don't fight a live conversation for room. */
+   uses, so the suggestion cards don't fight a live conversation for room.
+
+   Real bug fixed here: #pane-code's .panebody is NOT a one-time empty-state
+   suggestion card — it's the TOOLCHAIN PICKER (paintCode() in the CODE
+   screen section), a persistent control the user needs for every message,
+   not just the first. The blanket rule below was hiding it forever after
+   one CODE reply, with no way back to it short of reloading the page (which
+   also resets codeTool back to AUTO, silently losing whatever toolchain
+   — e.g. CLAUDE CODE — had been pinned). #pane-code is excluded so its
+   picker stays visible alongside the live thread, exactly like SETTINGS'
+   or VISION's controls never disappear. */
 .thread{flex:1;overflow-y:auto;padding:14px;min-height:0;display:none}
 .thread.on{display:block}
-.pane:has(.thread.on) .panebody{display:none}
+.pane:not(#pane-code):has(.thread.on) .panebody{display:none}
 
 .lede{font-family:var(--display);font-size:13px;line-height:1.85;color:var(--blue-hi);
   letter-spacing:.06em;margin:0 0 16px;max-width:76ch}
@@ -1618,7 +1628,7 @@ async function run(text){
   stopBtn.onclick = ()=>{ stopped=true; try{ctrl.abort();}catch{} };
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:text, focus_agent:focusAgent||undefined}), signal:ctrl.signal});
+      body:JSON.stringify({prompt:text, focus_agent:focusAgent||undefined, screen:targetScreen}), signal:ctrl.signal});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -1815,10 +1825,27 @@ async function restoreSession(){
     data = await r.json();
   }catch{ return; }
   if(!data || !data.ok || !Array.isArray(data.turns) || !data.turns.length) return;
-  const threadEl = threadFor("HOME");
-  unhideThread(threadEl);
+  // v13: two real bugs fixed here together (both from the same root cause —
+  // this loop used to hardcode threadFor("HOME") for every turn and show
+  // raw turn.user text):
+  //   1) every screen's conversation (RESEARCH/CODE/MEDIA/NEWS/DESIGN3D —
+  //      the whole point of v8.29's per-screen threads) got flattened onto
+  //      HOME on reload, so e.g. a pinned CODE toolchain conversation
+  //      vanished from CODE and reappeared mixed into HOME instead.
+  //   2) a focus_agent turn's PERSISTED text is what the model saw — an
+  //      internal "[ROUTING DIRECTIVE] Complete this task using ONLY the
+  //      'code_claude' subagent..." wrapper (webui.py builds it BEFORE
+  //      calling session.ask()) — which used to be shown to the user
+  //      verbatim as if they'd typed it. turn.display_text (falls back to
+  //      turn.user for older records with no such field yet) is the raw
+  //      text they actually typed.
+  const touchedThreads = new Set();
   data.turns.forEach(turn=>{
-    addYou(threadEl, turn.user||"");
+    const targetScreen = THREAD_SCREENS.includes(turn.screen) ? turn.screen : "HOME";
+    const threadEl = threadFor(targetScreen);
+    if(!touchedThreads.has(threadEl)){ unhideThread(threadEl); touchedThreads.add(threadEl); }
+    const shown = turn.display_text || turn.user || "";
+    addYou(threadEl, shown);
     const node = addReply(threadEl);
     (turn.transcript||[]).forEach(e=>{ try{ restoreTranscriptEvent(node,e); }catch{} });
     node.acts.querySelectorAll(".spin").forEach(x=>x.remove());
@@ -1827,9 +1854,12 @@ async function restoreSession(){
     wireCopies(node.body);
     node.st.textContent = "DONE";
     node.tm.textContent = turn.elapsed_ms!=null ? (turn.elapsed_ms/1000).toFixed(1)+"s" : "";
-    restoreReplyTail(node, turn.user||"", buf, "HOME");
+    // REGENERATE must re-submit what the user actually typed, not the
+    // internal wrapper — the CODE screen's own submit() re-wraps it with
+    // whatever toolchain is pinned right now anyway.
+    restoreReplyTail(node, shown, buf, targetScreen);
   });
-  threadEl.scrollTop = threadEl.scrollHeight;
+  touchedThreads.forEach(el=>{ el.scrollTop = el.scrollHeight; });
 }
 
 ta.addEventListener("input",()=>{ta.style.height="auto";ta.style.height=Math.min(ta.scrollHeight,130)+"px";
@@ -2167,7 +2197,7 @@ async function sendMail(to, subject, body){
   const directive = `Send an email to ${to} with subject "${subject}" and this exact body:\n\n${body}`;
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:directive, focus_agent:"mail"})});
+      body:JSON.stringify({prompt:directive, focus_agent:"mail", screen:"COMMS"})});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -2679,7 +2709,7 @@ async function dispatchDesignDirective(directive, statusEl, opts){
   statusEl.textContent = opts.pending || "Working…";
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:directive, focus_agent:"design_3d"})});
+      body:JSON.stringify({prompt:directive, focus_agent:"design_3d", screen:"DESIGN3D"})});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
