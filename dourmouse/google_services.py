@@ -832,7 +832,18 @@ def _imap() -> imaplib.IMAP4_SSL:
             "in .env, or fill in dourmouse/local_secrets.py (Google account "
             "-> 2-Step Verification -> App passwords). Nothing was fetched."
         )
-    conn = imaplib.IMAP4_SSL("imap.gmail.com")
+    # v13: real bug fixed here, live-caught through an actual directive
+    # ("summarize my 5 most recent emails") — imaplib.IMAP4_SSL's own
+    # default is timeout=None, meaning an unresponsive IMAP server (a
+    # stalled TLS handshake, a network blip, Gmail rate-limiting) blocks
+    # the underlying socket FOREVER. Live-observed: a read_inbox call sat
+    # past 110 real seconds with zero result, holding the server's single
+    # shared session_lock the whole time — every other request queued
+    # behind it indefinitely, with no visible error anywhere. A timeout
+    # here bounds every IMAP operation on the connection (login, select,
+    # search, fetch all share the one socket's timeout), turning an
+    # indefinite hang into an honest, real "IMAP timed out" error.
+    conn = imaplib.IMAP4_SSL("imap.gmail.com", timeout=30)  # matches the SMTP send path's own timeout=30 below
     conn.login(_user(), _app_password())
     return conn
 

@@ -224,6 +224,67 @@ class TestMail:
         assert captured["pass"] == "1234567890abcdef"
         assert out == []  # fake server returned no messages — no crash
 
+    def test_read_inbox_passes_a_real_timeout(self, monkeypatch):
+        """v13: a real bug fixed here, live-caught through an actual
+        directive ("summarize my 5 most recent emails") — imaplib's own
+        default is timeout=None, so an unresponsive IMAP server blocks the
+        socket FOREVER; live-observed holding the server's single shared
+        session_lock past 110 real seconds with zero result. Every OTHER
+        network call in this module already passes a real timeout
+        (_http_get's own timeout=_TIMEOUT) — IMAP was the one overlooked
+        spot."""
+        monkeypatch.setenv("DOURMOUSE_IMAP_HOST", "imap.example.com")
+        monkeypatch.setenv("DOURMOUSE_IMAP_USER", "u@example.com")
+        monkeypatch.setenv("DOURMOUSE_IMAP_PASS", "pw")
+        captured: dict = {}
+        import imaplib as _imaplib
+
+        class _FakeConn:
+            def __init__(self, *a, **k):
+                captured["args"] = a
+                captured["kwargs"] = k
+
+            def login(self, u, p):
+                return ("OK", [b""])
+
+            def select(self, *a, **k):
+                return ("OK", [])
+
+            def search(self, *a, **k):
+                return ("OK", [b""])
+
+            def fetch(self, *a, **k):
+                return ("OK", [])
+
+            def logout(self):
+                pass
+
+        monkeypatch.setattr(_imaplib, "IMAP4_SSL", _FakeConn)
+        live_feeds.read_inbox(3)
+        assert captured["kwargs"].get("timeout") == live_feeds._TIMEOUT
+        assert captured["kwargs"]["timeout"] is not None
+
+    def test_read_inbox_timeout_reports_honestly_not_a_raw_crash(self, monkeypatch):
+        """A real socket timeout mid-session must surface as the same
+        honest RuntimeError shape every other network failure in this
+        module already uses (see _read_inbox_tool's own RuntimeError
+        catch) — not an unexplained raw socket exception propagating up."""
+        monkeypatch.setenv("DOURMOUSE_IMAP_HOST", "imap.example.com")
+        monkeypatch.setenv("DOURMOUSE_IMAP_USER", "u@example.com")
+        monkeypatch.setenv("DOURMOUSE_IMAP_PASS", "pw")
+        import imaplib as _imaplib
+
+        class _HangingConn:
+            def __init__(self, *a, **k):
+                pass
+
+            def login(self, u, p):
+                raise TimeoutError("timed out")
+
+        monkeypatch.setattr(_imaplib, "IMAP4_SSL", _HangingConn)
+        with pytest.raises(RuntimeError, match="IMAP timed out"):
+            live_feeds.read_inbox(3)
+
 
 # --------------------------------------------------------------------------- #
 # Tasks — deterministic local CRUD

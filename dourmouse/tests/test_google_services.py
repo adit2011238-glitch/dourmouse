@@ -300,3 +300,35 @@ class TestStatusAndRoster:
         read_tool = next(t for t in docs.tools if t.name == "sheets_read")
         out = read_tool.handler({"spreadsheet_id": ""})
         assert "ERROR" in out
+
+
+class TestImapTimeout:
+    """v13: a real bug fixed here, live-caught through an actual directive
+    against the sibling read_inbox path in live_feeds.py ("summarize my 5
+    most recent emails") — imaplib.IMAP4_SSL's own default is
+    timeout=None, so an unresponsive IMAP server blocks the socket
+    FOREVER; live-observed holding the server's single shared
+    session_lock past 110 real seconds with zero result. This module's
+    own SMTP send path already passes timeout=30 (smtplib.SMTP_SSL,
+    just below); _imap() was the one overlooked spot using the same
+    "imap.gmail.com" host that send already treats as needing a real
+    bound."""
+
+    def test_imap_connection_passes_a_real_timeout(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_GMAIL_USER", "u@gmail.com")
+        monkeypatch.setenv("GOOGLE_GMAIL_APP_PASSWORD", "1234567890abcdef")
+        captured: dict = {}
+        import imaplib as _imaplib
+
+        class _FakeConn:
+            def __init__(self, *a, **k):
+                captured["args"] = a
+                captured["kwargs"] = k
+
+            def login(self, u, p):
+                return ("OK", [b""])
+
+        monkeypatch.setattr(_imaplib, "IMAP4_SSL", _FakeConn)
+        gs._imap()
+        assert captured["kwargs"].get("timeout") is not None
+        assert captured["kwargs"]["timeout"] == 30

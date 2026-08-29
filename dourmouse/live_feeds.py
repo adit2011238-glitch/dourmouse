@@ -350,7 +350,21 @@ def read_inbox(max_items: int = 10) -> list[dict[str, str]]:
             "enable read-only inbox access."
         )
     max_items = max(1, min(int(max_items), 50))
-    conn = imaplib.IMAP4_SSL(host)
+    # v13: real bug fixed here, live-caught through an actual directive
+    # ("summarize my 5 most recent emails") — imaplib.IMAP4_SSL's own
+    # default is timeout=None, meaning an unresponsive IMAP server (a
+    # stalled TLS handshake, a network blip, a rate-limiting mail host)
+    # blocks the underlying socket FOREVER. Live-observed: this call sat
+    # past 110 real seconds with zero result, holding the server's single
+    # shared session_lock the whole time — every other request queued
+    # behind it indefinitely, with no visible error anywhere. This
+    # directly contradicts this module's own docstring promise ("Every
+    # network call carries a timeout and fails loudly with an honest
+    # error") — every OTHER network call in this file already does
+    # (_http_get above passes timeout=_TIMEOUT); IMAP was the one
+    # overlooked spot. _TIMEOUT bounds every operation on the connection
+    # (login, select, search, fetch all share the one socket's timeout).
+    conn = imaplib.IMAP4_SSL(host, timeout=_TIMEOUT)
     try:
         conn.login(user, password)
         conn.select("INBOX", readonly=True)
@@ -396,6 +410,11 @@ def read_inbox(max_items: int = 10) -> list[dict[str, str]]:
                 }
             )
         return messages
+    except TimeoutError as exc:
+        # Matches this module's own established shape for a network
+        # failure (see _http_get's identical treatment above) instead of
+        # letting a raw socket exception bubble up unexplained.
+        raise RuntimeError(f"IMAP timed out after {_TIMEOUT}s ({host})") from exc
     finally:
         try:
             conn.logout()
