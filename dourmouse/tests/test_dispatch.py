@@ -1190,6 +1190,139 @@ class TestBespokeAgentPrompts:
         assert "delegate_task" in names
 
 
+class TestCompleteAnswerShortCircuit:
+    """v13 (real architecture fix, live-caught): a forced_agent call to
+    code_claude (or any CLI-backed code_* tool) already returns a full,
+    real answer from a genuine separate agent — Claude Sonnet 5 via the
+    actual Claude Code CLI, in the case that surfaced this. Handing that
+    to the LOCAL ORCHESTRATOR MODEL for a second "final answer" pass only
+    re-narrates an already-complete answer through a weaker model,
+    live-measured to flatten Claude's own correct, specific response into
+    a blander paraphrase for +12s and zero benefit. These tests pin the
+    fix: the SECOND model call must never happen for this exact shape.
+    """
+
+    def _registry_with_fake_code_claude(self, result_text: str):
+        tool = ToolSpec(
+            name="code_claude",
+            description="fake code_claude for testing",
+            parameters={"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]},
+            handler=lambda a: result_text,
+        )
+        registry = DispatchRegistry()
+        registry.register_subagent(
+            Subagent(name="code_claude", domain="Coding", description="x", tools=(tool,))
+        )
+        return registry
+
+    def _run_forced(self, prompt: str, registry, client, forced_agent: str) -> dict:
+        """run_dispatch() has no forced_agent param — go one layer down
+        to run_dispatch_messages, same pattern as the forced_agent tests
+        above this class."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": prompt},
+        ]
+        return run_dispatch_messages(messages, registry, client=client, forced_agent=forced_agent)
+
+    def test_forced_agent_single_tool_call_skips_the_second_round_trip(self):
+        registry = self._registry_with_fake_code_claude("CODE CLAUDE RESULT: real answer from Claude")
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(tool_calls=[_FakeToolCall("1", "code_claude", json.dumps({"task": "x"}))])
+                ),
+                # A second canned response that must NEVER be consumed —
+                # if the short-circuit fails, THIS is what "final_text"
+                # would wrongly become instead of the real tool result.
+                _FakeResponse(_FakeMessage(content="a weaker re-narrated answer")),
+            ]
+        )
+        report = self._run_forced("do a coding task", registry, client, forced_agent="code_claude")
+        assert report["final_text"] == "CODE CLAUDE RESULT: real answer from Claude"
+        assert len(client.chat.completions.calls) == 1  # the second call never happened
+
+    def test_non_forced_run_does_not_short_circuit(self):
+        """Same tool, same single call, but NOT forced_agent — the
+        orchestrator may still need to combine this with other context,
+        so the normal re-synthesis pass must still run."""
+        registry = self._registry_with_fake_code_claude("CODE CLAUDE RESULT: real answer")
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(tool_calls=[_FakeToolCall("1", "code_claude", json.dumps({"task": "x"}))])
+                ),
+                _FakeResponse(_FakeMessage(content="synthesized final answer")),
+            ]
+        )
+        report = run_dispatch("do a coding task", registry, client=client)
+        assert report["final_text"] == "synthesized final answer"
+        assert len(client.chat.completions.calls) == 2
+
+    def test_multiple_tool_calls_in_one_turn_do_not_short_circuit(self):
+        """Even under forced_agent, more than one tool call in the SAME
+        turn means the model may be combining results — never short-
+        circuit on a partial view of a multi-call turn."""
+        registry = self._registry_with_fake_code_claude("CODE CLAUDE RESULT: real answer")
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(tool_calls=[
+                        _FakeToolCall("1", "code_claude", json.dumps({"task": "x"})),
+                        _FakeToolCall("2", "code_claude", json.dumps({"task": "y"})),
+                    ])
+                ),
+                _FakeResponse(_FakeMessage(content="synthesized from both")),
+            ]
+        )
+        report = self._run_forced("do two coding tasks", registry, client, forced_agent="code_claude")
+        assert report["final_text"] == "synthesized from both"
+        assert len(client.chat.completions.calls) == 2
+
+    def test_an_error_result_does_not_short_circuit(self):
+        """An ERROR/REFUSED/NOT CONFIGURED result isn't a real answer —
+        the model should still get a chance to explain or react to it."""
+        registry = self._registry_with_fake_code_claude("NOT CONFIGURED: no CLI found")
+        client = FakeClient(
+            [
+                _FakeResponse(
+                    _FakeMessage(tool_calls=[_FakeToolCall("1", "code_claude", json.dumps({"task": "x"}))])
+                ),
+                _FakeResponse(_FakeMessage(content="Claude Code isn't set up on this machine.")),
+            ]
+        )
+        report = self._run_forced("do a coding task", registry, client, forced_agent="code_claude")
+        assert report["final_text"] == "Claude Code isn't set up on this machine."
+        assert len(client.chat.completions.calls) == 2
+
+    def test_a_non_complete_answer_tool_does_not_short_circuit(self):
+        """forced_agent on an ordinary tool (not one of the CLI-backed
+        code_* tools) is unaffected — this is scoped tightly to the
+        specific tools that already return a complete natural-language
+        answer, not forced_agent in general."""
+        tool = ToolSpec(
+            name="list_tasks",
+            description="fake list_tasks",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda a: "TASKS:\n- task-1",
+        )
+        registry = DispatchRegistry()
+        registry.register_subagent(
+            Subagent(name="tasks", domain="Tasks", description="x", tools=(tool,))
+        )
+        client = FakeClient(
+            [
+                _FakeResponse(_FakeMessage(tool_calls=[_FakeToolCall("1", "list_tasks", "{}")])),
+                _FakeResponse(_FakeMessage(content="You have 1 task.")),
+            ]
+        )
+        report = self._run_forced("list my tasks", registry, client, forced_agent="tasks")
+        assert report["final_text"] == "You have 1 task."
+        assert len(client.chat.completions.calls) == 2
+
+
 class TestGroundedMode:
     """v13: user-controllable Grounded Mode (config.grounded_mode_enabled()).
     Live bug this exists to catch: asked through RESEARCH with no

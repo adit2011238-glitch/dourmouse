@@ -2128,6 +2128,19 @@ def _is_pure_chat(prompt: str, registry: Any) -> bool:
     )
 
 
+# v13 (real architecture fix): tools whose own result IS ALREADY a
+# complete, real, natural-language answer from a genuine separate agent —
+# code_claude/code_codex/code_deepseek/code_nvidia/code_ollama each shell
+# out to (or API-call) a real coding backend and return its actual final
+# text, not raw data needing interpretation. Handing that to the LOCAL
+# ORCHESTRATOR MODEL for a second "final answer" pass can only re-narrate
+# an already-complete answer through a weaker model — see the short-
+# circuit below (forced_agent only) for where this is used and why.
+_COMPLETE_ANSWER_TOOLS = {
+    "code_claude", "code_codex", "code_deepseek", "code_nvidia", "code_ollama",
+}
+
+
 def _run_dispatch_loop(
     messages: list[dict[str, Any]],
     registry: DispatchRegistry,
@@ -2722,6 +2735,31 @@ def _run_dispatch_loop(
             messages.append(
                 {"role": "tool", "tool_call_id": tool_call.id, "content": result_text}
             )
+
+        # v13 (real architecture fix, see _COMPLETE_ANSWER_TOOLS's own
+        # comment): a single forced_agent call to one of the CLI-backed
+        # "complete answer" tools already returned a full, real answer
+        # from a genuine separate agent (e.g. Claude Sonnet 5 via the
+        # actual Claude Code CLI) — return it directly instead of paying
+        # for a second full prefill+generation round trip just to have
+        # the LOCAL orchestrator model re-narrate it, weaker, slower.
+        # Live-measured: Claude's own correct answer got flattened into a
+        # blander local-model paraphrase, +12s for strictly negative
+        # value. Scoped tightly: forced_agent only (a CODE-screen
+        # toolchain pick, never a general multi-tool orchestration where
+        # the model may still need to combine several results), exactly
+        # one tool call this turn, that exact tool, and a real result (an
+        # honest NOT CONFIGURED/ERROR/REFUSED still goes back to the
+        # model — those aren't answers, they're situations the model may
+        # want to explain or react to).
+        if (
+            ctx.forced_agent
+            and len(tool_calls) == 1
+            and name in _COMPLETE_ANSWER_TOOLS
+            and not result_text.startswith(("ERROR", "REFUSED", "NOT CONFIGURED"))
+        ):
+            _maybe_ingest_memory(ctx.depth, str(last_user), result_text, plan_agents)
+            return {"final_text": result_text, "transcript": transcript, "messages": messages}
 
     # v8.28: the loop ran out of tool-call turns (max_turns) while the model
     # was still mid-research — observed live on a completely reasonable
