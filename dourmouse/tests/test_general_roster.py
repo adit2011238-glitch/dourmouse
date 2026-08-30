@@ -138,6 +138,10 @@ class TestRosterShape:
             # at all, so there is no ungated destructive mail path.
             "gmail_archive",
             "gmail_trash",
+            # v13.1: "delete all emails" was a real, live-reported gap — only
+            # single-message gmail_trash existed. Search+trash-many is at
+            # least as consequential as a single trash, so it's gated too.
+            "gmail_bulk_trash",
             "gmail_untrash",
             "spotify_playback_control",  # v5.7: changing playback needs a human
             "spotify_play",

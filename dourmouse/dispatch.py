@@ -217,6 +217,7 @@ def _call_with_retry(
     config: NvidiaConfig | None,
     call_log: list[dict[str, Any]] | None = None,
     on_delta: Callable[[str], None] | None = None,
+    on_thinking: Callable[[str], None] | None = None,
     event_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> Any:
     """LLM call with bounded retry + backoff, optional fallback, and timing.
@@ -268,6 +269,7 @@ def _call_with_retry(
             config=config,
             call_log=call_log,
             on_delta=on_delta,
+            on_thinking=on_thinking,
         )
         return response
     except BaseException:
@@ -307,6 +309,7 @@ def _call_with_retry_inner(
     config: NvidiaConfig | None,
     call_log: list[dict[str, Any]] | None = None,
     on_delta: Callable[[str], None] | None = None,
+    on_thinking: Callable[[str], None] | None = None,
 ) -> Any:
     """LLM call with bounded retry + backoff, and optional model fallback.
 
@@ -333,7 +336,7 @@ def _call_with_retry_inner(
                 call_log.append({"model": model, "attempt": attempt + 1})
             if on_delta is not None:
                 return _stream_completion(
-                    client, model, messages, tools, extra_body, on_delta
+                    client, model, messages, tools, extra_body, on_delta, on_thinking
                 )
             return client.chat.completions.create(
                 model=model,
@@ -371,6 +374,7 @@ def _stream_completion(
     tools: list[dict[str, Any]],
     extra_body: dict[str, Any] | None,
     on_delta: Callable[[str], None],
+    on_thinking: Callable[[str], None] | None = None,
 ) -> _OllamaResponse:
     """Stream one completion, emitting text deltas to ``on_delta`` as they arrive.
 
@@ -401,6 +405,9 @@ def _stream_completion(
         if text:
             content_parts.append(text)
             on_delta(text)
+        thinking_text = getattr(delta, "thinking", None)
+        if thinking_text and on_thinking is not None:
+            on_thinking(thinking_text)
         for tc in getattr(delta, "tool_calls", None) or []:
             idx = tc.index if getattr(tc, "index", None) is not None else 0
             acc = tool_acc.setdefault(idx, {"id": "", "name": "", "args": ""})
@@ -767,6 +774,23 @@ def _ignores_think_flag(model: str) -> bool:
     return any(pat in name for pat in _no_think_models())
 
 
+#: v13.1: visible chain-of-thought, on by default per explicit repeated user
+#: request ("enable visible chain of thought for all models"). Set
+#: DOURMOUSE_SHOW_THINKING=0 to go back to the old silent-reasoning
+#: behavior (e.g. for a model/account where reasoning tokens are billed and
+#: unwanted).
+_SHOW_THINKING_ENV = "DOURMOUSE_SHOW_THINKING"
+
+
+def _show_thinking_enabled() -> bool:
+    import os
+
+    raw = os.environ.get(_SHOW_THINKING_ENV)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
 #: The documented qwen3 soft switch. Appended to the LAST user message because
 #: the template only honours it on the active turn — a system-message
 #: placement was measured as NOT working (367 tok, reasoning still leaked).
@@ -809,9 +833,23 @@ class _OllamaResponse:
 
 
 class _OllamaDelta:
-    def __init__(self, content: str | None = None, tool_calls: list | None = None) -> None:
+    def __init__(
+        self,
+        content: str | None = None,
+        tool_calls: list | None = None,
+        thinking: str | None = None,
+    ) -> None:
         self.content = content
         self.tool_calls = tool_calls
+        # v13.1: visible chain-of-thought — Ollama's native /api/chat, when
+        # sent think:true, streams reasoning tokens in a SEPARATE
+        # message.thinking field, never mixed into message.content. Kept as
+        # its own delta attribute (not concatenated into content) so the UI
+        # can render it in its own "THINKING" block instead of leaking into
+        # the visible answer — the exact leak Rule "9. NEVER narrate your
+        # own reasoning" above was written to prevent when thinking WAS
+        # mixed into content on models that ignored think:False.
+        self.thinking = thinking
 
 
 class _OllamaChunk:
@@ -946,12 +984,13 @@ class OllamaNativeClient:
     ) -> Any:
         chosen = model or self._model
         sent = self._translate_messages(messages)
+        show_thinking = _show_thinking_enabled()
         payload: dict[str, Any] = {
             "model": chosen,
             "messages": sent,
             "stream": bool(stream),
-            "think": False,
-            "enable_thinking": False,
+            "think": show_thinking,
+            "enable_thinking": show_thinking,
             "keep_alive": _OLLAMA_KEEP_ALIVE,
             "options": {
                 "num_predict": int(max_tokens or _DEFAULT_MAX_TOKENS),
@@ -972,10 +1011,18 @@ class OllamaNativeClient:
         # sending no flag at all (461 vs 434 tokens). So for models in the
         # ignore-list we drop the ineffective flags and use the documented
         # `/no_think` soft switch instead, which the template does respect.
+        # v13.1: the /no_think soft switch only makes sense when we WANT
+        # thinking suppressed. Now that show_thinking defaults True (visible
+        # CoT), an ignore-list model's leaked reasoning is exactly what the
+        # user asked to see — it just lands in .content instead of the
+        # clean .thinking field these models don't honour, same as before
+        # think:False existed. Only force /no_think when thinking is
+        # explicitly turned off.
         if _ignores_think_flag(chosen):
             payload.pop("think", None)
             payload.pop("enable_thinking", None)
-            payload["messages"] = _append_no_think(sent)
+            if not show_thinking:
+                payload["messages"] = _append_no_think(sent)
         if tools:
             payload["tools"] = tools
         if stream:
@@ -986,7 +1033,9 @@ class OllamaNativeClient:
         data = json.loads(self._post(payload))
         msg = data.get("message") or {}
         tool_calls = self._native_tool_calls(msg.get("tool_calls") or [])
-        return _OllamaResponse(_OllamaMessage(msg.get("content") or "", tool_calls))
+        message = _OllamaMessage(msg.get("content") or "", tool_calls)
+        message.thinking = msg.get("thinking") or None
+        return _OllamaResponse(message)
 
     def _stream(self, payload: dict[str, Any]):
         if self._post is self._default_post:
@@ -1003,6 +1052,10 @@ class OllamaNativeClient:
                 continue
             msg = chunk.get("message") or {}
             content = msg.get("content") or None
+            # v13.1: Ollama's native streaming puts reasoning tokens in their
+            # OWN field when think:true — never mixed into .content, so this
+            # is a clean separation, not a heuristic parse.
+            thinking = msg.get("thinking") or None
             delta_tcs = None
             tcs = msg.get("tool_calls") or []
             if tcs:
@@ -1020,9 +1073,9 @@ class OllamaNativeClient:
                             })(),
                         })()
                     )
-            if content is None and not delta_tcs:
+            if content is None and thinking is None and not delta_tcs:
                 continue
-            yield _OllamaChunk(_OllamaDelta(content=content, tool_calls=delta_tcs))
+            yield _OllamaChunk(_OllamaDelta(content=content, tool_calls=delta_tcs, thinking=thinking))
 
     @staticmethod
     def _native_tool_calls(tcs: list[dict[str, Any]]) -> list[_OllamaTc] | None:
@@ -2688,11 +2741,20 @@ def _run_dispatch_loop(
         # non-streaming path, and nested delegate runs render via their own
         # assistant_text events rather than hijacking the parent's stream.
         on_delta = None
+        on_thinking = None
         if ctx.depth == 0 and ctx.event_sink is not None and isinstance(
             client, (OpenAI, OllamaNativeClient)
         ):
             def on_delta(text: str) -> None:
                 _emit_event(ctx.event_sink, {"type": "assistant_delta", "text": text})
+
+            # v13.1: visible chain-of-thought — a real, separate SSE channel
+            # (never concatenated into assistant_delta/buf) so the UI can
+            # render reasoning tokens in their own block instead of them
+            # either vanishing (old think:False) or leaking into the
+            # answer text (the exact bug think:False existed to prevent).
+            def on_thinking(text: str) -> None:
+                _emit_event(ctx.event_sink, {"type": "thinking_delta", "text": text})
 
         # v4.2 speed: the LLM sees a bounded rolling window (system +
         # in-flight exchange + recent history), never the unbounded
@@ -2770,6 +2832,7 @@ def _run_dispatch_loop(
                     tools=scoped_tools,
                     config=ctx.config,
                     on_delta=on_delta,
+                    on_thinking=on_thinking,
                     event_sink=event_sink,
                 )
         else:
@@ -2780,6 +2843,7 @@ def _run_dispatch_loop(
                 tools=scoped_tools,
                 config=ctx.config,
                 on_delta=on_delta,
+                on_thinking=on_thinking,
                 event_sink=event_sink,
             )
         message = response.choices[0].message

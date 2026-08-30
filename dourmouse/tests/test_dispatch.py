@@ -26,9 +26,10 @@ from dourmouse.dispatch import (
 # --- streaming fakes (v4.1) --------------------------------------------- #
 
 class _FakeStreamDelta:
-    def __init__(self, content=None, tool_calls=None):
+    def __init__(self, content=None, tool_calls=None, thinking=None):
         self.content = content
         self.tool_calls = tool_calls
+        self.thinking = thinking
 
 
 class _FakeStreamChoice:
@@ -90,6 +91,27 @@ class TestStreaming:
         assert resp.choices[0].message.content == "Hello, world."
         assert resp.choices[0].message.tool_calls is None
 
+    def test_stream_completion_routes_thinking_to_its_own_callback(self):
+        """v13.1: on_thinking gets ONLY the reasoning tokens, on_delta gets
+        ONLY the content tokens — proves the two channels never cross, which
+        is what keeps visible CoT out of the actual answer buffer."""
+        client = _FakeStreamingClient(
+            [
+                _FakeStreamChunk(_FakeStreamDelta(thinking="Hmm, ")),
+                _FakeStreamChunk(_FakeStreamDelta(thinking="let me check.")),
+                _FakeStreamChunk(_FakeStreamDelta(content="The answer is 42.")),
+            ]
+        )
+        content_deltas: list[str] = []
+        thinking_deltas: list[str] = []
+        resp = dispatch_module._stream_completion(
+            client, "qwen3:8b", [{"role": "user", "content": "hi"}], [], None,
+            content_deltas.append, thinking_deltas.append,
+        )
+        assert "".join(thinking_deltas) == "Hmm, let me check."
+        assert "".join(content_deltas) == "The answer is 42."
+        assert resp.choices[0].message.content == "The answer is 42."
+
     def test_stream_completion_accumulates_tool_calls(self):
         client = _FakeStreamingClient(
             [
@@ -110,7 +132,10 @@ class TestStreaming:
 
 
 class TestOllamaNativeClient:
-    """The native /api/chat adapter — fast, streamed, thinking disabled."""
+    """The native /api/chat adapter — fast, streamed, thinking VISIBLE by
+    default (v13.1: DOURMOUSE_SHOW_THINKING defaults on per explicit user
+    request for a real chain-of-thought transcript, not the old silent
+    think:False)."""
 
     def _client(self, post, cfg=None):
         from dourmouse.config import OllamaConfig
@@ -144,8 +169,8 @@ class TestOllamaNativeClient:
         assert msg.tool_calls[0].function.name == "news_headlines"
         # native arguments arrive as a dict; the adapter stringifies them
         assert json.loads(msg.tool_calls[0].function.arguments) == {"max_results": 3}
-        # the body carries the speed fixes
-        assert captured["think"] is False
+        # the body carries the speed fixes; think defaults True (v13.1)
+        assert captured["think"] is True
         assert captured["keep_alive"] == dispatch_module._OLLAMA_KEEP_ALIVE
         assert captured["options"]["num_ctx"] == dispatch_module._OLLAMA_NUM_CTX
         assert captured["options"]["num_predict"] == dispatch_module._DEFAULT_MAX_TOKENS
@@ -164,24 +189,43 @@ class TestOllamaNativeClient:
         return captured
 
     def test_think_flag_kept_for_models_that_honour_it(self):
-        """qwen3:8b respects think:False (measured 4.4s median / 25 tokens), so
-        the flag stays and the prompt is left alone."""
+        """qwen3:8b respects the think flag, so it stays and the prompt is
+        left alone — default is True (visible CoT), same either way."""
+        sent = self._capture("qwen3:8b")
+        assert sent["think"] is True
+        assert sent["enable_thinking"] is True
+        assert sent["messages"][-1]["content"] == "hi"
+
+    def test_think_flag_off_when_show_thinking_disabled(self, monkeypatch):
+        """DOURMOUSE_SHOW_THINKING=0 restores the old silent behavior for a
+        model that honours the flag."""
+        monkeypatch.setenv("DOURMOUSE_SHOW_THINKING", "0")
         sent = self._capture("qwen3:8b")
         assert sent["think"] is False
         assert sent["enable_thinking"] is False
-        assert sent["messages"][-1]["content"] == "hi"
 
-    def test_no_think_switch_used_for_models_that_ignore_the_flag(self):
+    def test_no_think_switch_used_for_models_that_ignore_the_flag_when_thinking_disabled(self, monkeypatch):
         """qwen3:4b IGNORES think:False and emits its reasoning as the answer
         (measured 45.1s median / 360 tokens, vs 21.5s / 178 with /no_think).
-        For those models the dead flags are dropped and the documented soft
-        switch goes on the last user turn instead."""
+        With thinking explicitly turned OFF, the dead flags are dropped and
+        the documented soft switch goes on the last user turn instead."""
+        monkeypatch.setenv("DOURMOUSE_SHOW_THINKING", "0")
         sent = self._capture("qwen3:4b")
         assert "think" not in sent
         assert "enable_thinking" not in sent
         assert sent["messages"][-1]["content"] == "hi /no_think"
 
-    def test_no_think_targets_only_the_last_user_turn(self):
+    def test_no_think_switch_skipped_for_ignore_list_models_when_thinking_visible(self):
+        """v13.1: with the new default (visible thinking), an ignore-list
+        model's leaked reasoning IS the wanted chain-of-thought — no reason
+        to force /no_think and suppress it."""
+        sent = self._capture("qwen3:4b")
+        assert "think" not in sent
+        assert "enable_thinking" not in sent
+        assert sent["messages"][-1]["content"] == "hi"
+
+    def test_no_think_targets_only_the_last_user_turn(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_SHOW_THINKING", "0")
         captured: dict = {}
 
         def fake_post(payload):
@@ -225,6 +269,31 @@ class TestOllamaNativeClient:
         ))
         text = "".join(c.choices[0].delta.content for c in chunks)
         assert text == "Hello world"
+
+    def test_stream_yields_thinking_as_a_separate_field(self):
+        """v13.1: message.thinking arrives in its OWN chunks/field, never
+        concatenated into .content — this is what lets the UI render a
+        distinct THINKING block instead of the reasoning leaking into the
+        visible answer."""
+        lines = "\n".join(
+            json.dumps(c) for c in [
+                {"message": {"role": "assistant", "content": "", "thinking": "Let me "}},
+                {"message": {"role": "assistant", "content": "", "thinking": "think..."}},
+                {"message": {"role": "assistant", "content": "42"}},
+            ]
+        )
+
+        def fake_post(payload):
+            return lines
+
+        client = self._client(fake_post)
+        chunks = list(client.chat.completions.create(
+            model="qwen3:8b", messages=[{"role": "user", "content": "hi"}], stream=True,
+        ))
+        thinking = "".join(c.choices[0].delta.thinking or "" for c in chunks)
+        content = "".join(c.choices[0].delta.content or "" for c in chunks)
+        assert thinking == "Let me think..."
+        assert content == "42"
 
     def test_history_translated_to_native_format(self):
         """OpenAI-format tool_calls in history must become Ollama-native

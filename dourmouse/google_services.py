@@ -1134,6 +1134,75 @@ def gmail_trash(message_id: str) -> str:
     )
 
 
+#: Hard ceiling on one bulk-trash call — a live-reported real gap ("delete
+#: all emails" got an honest "I can't" because only single-message
+#: gmail_trash existed). Bounded, still real, and never a hard delete: this
+#: caps the blast radius of one confirmed action, same spirit as gmail_trash
+#: itself never being a permanent DELETE.
+_BULK_TRASH_MAX = 200
+
+
+def gmail_bulk_trash(query: str = "", max_count: int = 50) -> str:
+    """Search + trash every match — the "delete all emails" capability.
+
+    Still Trash, not Gmail's DELETE endpoint: every message moved stays
+    recoverable for 30 days via gmail_untrash, exactly like gmail_trash.
+    ``query`` uses the same Gmail search syntax as gmail_search; an empty
+    query matches the WHOLE mailbox (in:anywhere), which is what "delete
+    all emails" literally means, so this is a real, honest yes to that
+    request — the blast radius is what REQUIRES_CONFIRMATION and
+    _BULK_TRASH_MAX both exist to bound, not a reason to refuse it outright.
+
+    Must be confirmation-gated upstream, same as gmail_trash — the prompt
+    text should show the query and the real match count before a human
+    approves, since this is the one Gmail tool that can move a lot of mail
+    in a single call.
+    """
+    token = _oauth_access_token()
+    if not token:
+        reauth = _oauth_user_needs_reauth("BULK TRASH")
+        return reauth or (
+            "NOT CONFIGURED: bulk trash needs the signed-in Google user's "
+            "OAuth session with the gmail.modify scope. No user is signed "
+            "in — sign in at /login, then retry. Nothing was changed."
+        )
+    n = max(1, min(int(max_count), _BULK_TRASH_MAX))
+    q = (query or "").strip()
+    params = urllib.parse.urlencode({"q": q, "maxResults": n})
+    try:
+        listing = _http_json("GET", f"{_GMAIL_API}/messages?{params}", token)
+    except RuntimeError as exc:
+        return f"GMAIL BULK TRASH (reported honestly): {exc}"
+    items = listing.get("messages") or []
+    if not items:
+        scope = f"matching {q!r}" if q else "in the mailbox"
+        return f"GMAIL BULK TRASH: no messages {scope}. Nothing was changed."
+    trashed: list[str] = []
+    failed: list[str] = []
+    for item in items:
+        mid = str(item.get("id") or "")
+        if not mid:
+            continue
+        try:
+            _gmail_modify(token, mid, "trash")
+            trashed.append(mid)
+        except RuntimeError as exc:
+            failed.append(f"{mid} ({exc})")
+    scope = f"matching {q!r}" if q else "across the whole mailbox"
+    more = (
+        f" (capped at {n} — more may still match; re-run to continue)"
+        if len(items) >= n
+        else ""
+    )
+    lines = [
+        f"GMAIL BULK TRASH: {len(trashed)} message(s) {scope} moved to Trash{more}.",
+        "Recoverable for 30 days each — gmail_untrash to restore, or Gmail's own Trash view for all of them at once.",
+    ]
+    if failed:
+        lines.append(f"{len(failed)} failed: " + "; ".join(failed[:10]))
+    return "\n".join(lines)
+
+
 def gmail_untrash(message_id: str) -> str:
     """Restore a message from Trash. The undo for gmail_trash."""
     mid = (message_id or "").strip()

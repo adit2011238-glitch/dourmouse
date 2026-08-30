@@ -345,8 +345,11 @@ class TestLiveCaughtRegressions:
         native.chat.completions.create(
             model="qwen3:8b", messages=[{"role": "user", "content": "hi"}], stream=False
         )
-        assert captured["think"] is False
-        assert captured["enable_thinking"] is False
+        # v13.1: think defaults True — visible chain-of-thought (see
+        # test_dispatch.py's TestOllamaNativeClient for the full coverage
+        # of both states via DOURMOUSE_SHOW_THINKING).
+        assert captured["think"] is True
+        assert captured["enable_thinking"] is True
         assert captured["keep_alive"] == dispatch_module._OLLAMA_KEEP_ALIVE
         assert captured["options"]["num_ctx"] == dispatch_module._OLLAMA_NUM_CTX
         assert captured["options"]["num_predict"] == dispatch_module._DEFAULT_MAX_TOKENS

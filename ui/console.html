@@ -510,6 +510,17 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
   cursor:pointer;padding:2px 0 6px;font-family:var(--mono)}
 .stepsToggle:hover{color:var(--blue-dim)}
 .stepsToggle .car{font-size:8px;transition:transform .1s}
+/* v13.1: visible chain-of-thought block — dim, italic, monospace so it
+   reads unmistakably as "reasoning happening," never mistaken for the
+   real answer in .body right below it. */
+.thinkToggle{display:inline-flex;align-items:center;gap:5px;background:none;
+  border:none;color:var(--fg-dim,#888);font-size:10px;letter-spacing:.04em;
+  cursor:pointer;padding:2px 0 6px;font-family:var(--mono)}
+.thinkToggle:hover{color:var(--blue-dim)}
+.thinkToggle .tcar{font-size:8px;transition:transform .1s}
+.think{font-style:italic;opacity:.7;font-size:12px;line-height:1.5;
+  white-space:pre-wrap;border-left:2px solid var(--blue-deep);
+  padding:2px 0 8px 10px;margin-bottom:8px;max-height:260px;overflow-y:auto}
 .acts{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
 .actwrap{display:flex;flex-direction:column;align-items:flex-start;max-width:100%}
 .act{display:flex;align-items:center;gap:7px;font-size:9.5px;letter-spacing:.05em;
@@ -931,13 +942,17 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
       <div class="panebody" id="homeBody"></div>
       <div class="thread" id="thread-home"></div></section>
 
-    <!-- v8.29: COMMS is a real Gmail inbox now, not a general chat dump —
+    <!-- v8.29: COMMS is a real Gmail inbox, not a general chat dump —
          everything typed anywhere else used to funnel here regardless of
          topic. See paintComms() for the real gmail_search/gmail_read/
-         draft_message wiring. No <div class="thread"> on this pane: Gmail
-         has its own message list, not an LLM transcript. -->
+         draft_message wiring.
+         v13.1: COMMS ALSO gets its own thread now (real bug — typing a
+         directive here used to silently redirect to HOME, read as "comms
+         is broken"). The inbox list above and the thread below coexist,
+         same as RESEARCH's suggestion cards + thread. -->
     <section class="pane" id="pane-comms"><div class="panehead">◆ COMMS // GMAIL</div>
-      <div class="panebody" id="commsBody"></div></section>
+      <div class="panebody" id="commsBody"></div>
+      <div class="thread" id="thread-comms"></div></section>
 
     <section class="pane" id="pane-research"><div class="panehead">◆ RESEARCH // LIVE WEB</div>
       <div class="panebody" id="researchBody"></div>
@@ -1039,7 +1054,12 @@ const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","S
 // instead. VISION joins that list for the same reason as COMMS: it's a
 // real status-and-control surface (kill switch, capability reports), not
 // an LLM chat surface.
-const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS","DESIGN3D"];
+// v13.1: COMMS joined the roster (real bug, live-reported) — typing a
+// directive while on COMMS used to fall back to HOME (see run()'s comment
+// history), which reads as "comms is broken" even though the mail agent
+// itself works fine. COMMS keeps its own real Gmail inbox list (paintComms)
+// AND now its own thread, same pattern as every other entry here.
+const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS","DESIGN3D","COMMS"];
 // v8.28: "ATLAS" is the internal screen id everywhere (pane-atlas, the
 // paintAtlas() dispatch, footer text before this fix) — renaming that
 // identifier would mean touching every reference. But the screen's actual
@@ -1733,19 +1753,34 @@ function addReply(threadEl){
   // default. Nothing about act()'s own real-detail expansion changed —
   // this just gates the whole chip LIST behind one more collapse.
   d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span><span class="tm"></span></div>
+    <button type="button" class="thinkToggle" style="display:none"><span class="tcar">▾</span> THINKING</button>
+    <div class="think" style="display:none"></div>
     <button type="button" class="stepsToggle" style="display:none"><span class="car">▸</span><span class="stepsCount">0</span> steps</button>
     <div class="acts" style="display:none"></div><div class="body"></div><div class="rowacts"></div>`;
   threadEl.appendChild(d); threadEl.scrollTop=threadEl.scrollHeight;
   const stepsToggle=d.querySelector(".stepsToggle"), acts=d.querySelector(".acts");
+  const thinkToggle=d.querySelector(".thinkToggle"), think=d.querySelector(".think");
   let stepCount=0;
   stepsToggle.onclick=()=>{
     const open = acts.style.display!=="none";
     acts.style.display = open?"none":"flex";
     stepsToggle.querySelector(".car").textContent = open?"▸":"▾";
   };
+  // v13.1: visible chain-of-thought. Reasoning tokens stream into their own
+  // block (never into .body — that's the exact leak the old think:False
+  // existed to prevent). Open by default WHILE reasoning is arriving (the
+  // user explicitly asked to be able to watch it think); auto-collapses
+  // the instant real answer content starts (run()'s "first content" hook
+  // below), same UX as Claude Code folding its thinking once it answers —
+  // still reachable via the toggle afterward, never thrown away.
+  thinkToggle.onclick=()=>{
+    const open = think.style.display!=="none";
+    think.style.display = open?"none":"block";
+    thinkToggle.querySelector(".tcar").textContent = open?"▸":"▾";
+  };
   return {el:d, acts, body:d.querySelector(".body"),
           row:d.querySelector(".rowacts"), mdl:d.querySelector(".mdl"), st:d.querySelector(".st"),
-          tm:d.querySelector(".tm"), thread:threadEl,
+          tm:d.querySelector(".tm"), thread:threadEl, think, thinkToggle,
           noteStep(){ stepCount++; stepsToggle.style.display="inline-flex";
             stepsToggle.querySelector(".stepsCount").textContent=stepCount; }};
 }
@@ -1832,11 +1867,12 @@ async function submit(){
   while(queue.length){ const n=queue.shift(); paintQueue(); await run(n); }
 }
 async function run(text){
-  // v8.29: the request stays on whichever screen it was asked from —
-  // RESEARCH/CODE/MEDIA/NEWS/HOME each keep their own real conversation
-  // now. Asking from a non-thread screen (COMMS/WORLD/SETTINGS/PROJECTS)
-  // falls back to HOME rather than being silently dropped; VOICE keeps its
-  // own separate orb/live-activity display and never gets navigated away,
+  // v8.29 (v13.1: +COMMS): the request stays on whichever screen it was
+  // asked from — RESEARCH/CODE/MEDIA/NEWS/DESIGN3D/COMMS/HOME each keep
+  // their own real conversation now. Asking from a non-thread screen
+  // (WORLD/SETTINGS/PROJECTS) falls back to HOME rather than being
+  // silently dropped; VOICE keeps its own separate orb/live-activity
+  // display and never gets navigated away,
   // but the turn is still recorded into HOME's thread so it's there to
   // review afterward.
   const targetScreen = THREAD_SCREENS.includes(screen) ? screen : "HOME";
@@ -1852,12 +1888,28 @@ async function run(text){
     node.tm.textContent = Math.round((performance.now()-startedAt)/1000) + "s";
   }, 1000);
   let buf="", stopped=false, dirty=false, painting=false;
+  let thinkBuf="", thinkDirty=false, thinkPainting=false, thinkFolded=false;
   const paint=()=>{ dirty=true; if(painting)return; painting=true;
     setTimeout(()=>{ painting=false; if(!dirty)return; dirty=false;
       node.body.innerHTML=md(buf); wireCopies(node.body);
       node.thread.scrollTop=node.thread.scrollHeight;
       if(voiceMode) $("vText").textContent = buf.slice(-600);
     },40); };
+  // v13.1: visible chain-of-thought — same debounce pattern as paint()
+  // above, its own buffer so reasoning tokens never touch buf/.body.
+  // Auto-opens on the first thinking_delta; auto-folds (leaving the
+  // toggle so it's still one click away) the instant real content starts,
+  // matching Claude Code's own thinking-collapses-on-answer behavior.
+  const paintThink=()=>{ thinkDirty=true; if(thinkPainting)return; thinkPainting=true;
+    setTimeout(()=>{ thinkPainting=false; if(!thinkDirty)return; thinkDirty=false;
+      node.think.textContent=thinkBuf;
+      node.think.scrollTop=node.think.scrollHeight;
+    },40); };
+  const foldThink=()=>{
+    if(thinkFolded || !thinkBuf) return; thinkFolded=true;
+    node.think.style.display="none";
+    node.thinkToggle.querySelector(".tcar").textContent="▸";
+  };
   ctrl = new AbortController();
   stopBtn.onclick = ()=>{ stopped=true; try{ctrl.abort();}catch{} };
   try{
@@ -1896,6 +1948,18 @@ async function run(text){
             node.st.textContent = `THINKING · ${e.elapsed_s}s confirmed alive`;
             liveAdd("act", `Still working (${shownModel})`, `${e.elapsed_s}s elapsed — no answer yet, connection is alive`);
             break; }
+          case "thinking_delta":{
+            // v13.1: real reasoning tokens, on a channel of their own —
+            // see paintThink() above for why this never touches buf.
+            thinkBuf += e.text||"";
+            if(thinkBuf && node.think.style.display==="none" && !thinkFolded){
+              node.think.style.display="block";
+              node.thinkToggle.style.display="inline-flex";
+              node.thinkToggle.querySelector(".tcar").textContent="▾";
+            }
+            node.st.textContent="THINKING";
+            paintThink();
+            break; }
           case "plan": act(node.acts,"PLAN",""); node.noteStep(); liveAdd("act","Planning the steps",""); break;
           case "tool_use": case "function":{
             const nm=e.name||e.tool||"tool"; const w=describeTool(nm);
@@ -1933,8 +1997,8 @@ async function run(text){
             }
             break; }
           case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e); break;
-          case "assistant_delta": buf+=e.text||""; paint(); break;
-          case "assistant_text": if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
+          case "assistant_delta": foldThink(); buf+=e.text||""; paint(); break;
+          case "assistant_text": foldThink(); if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
           case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;
           case "done": if(e.final_text&&e.final_text.length>buf.length) buf=e.final_text; break;
         }

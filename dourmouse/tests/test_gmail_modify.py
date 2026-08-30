@@ -199,3 +199,112 @@ def test_modify_scope_is_requested_but_full_mail_access_is_not():
     assert "gmail.modify" in scopes
     # mail.google.com is the scope that permits permanent deletion.
     assert "mail.google.com" not in scopes
+
+
+# --------------------------------------------------------------------------- #
+# v13.1: gmail_bulk_trash — the real "delete all emails" capability
+# (live-reported gap: only single-message gmail_trash existed, so the
+# assistant honestly refused a request it should have been able to do).
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def bulk_calls(monkeypatch):
+    """Fake a mailbox of 3 messages; capture every API call made against it."""
+    seen: list[dict] = []
+    mailbox = ["m1", "m2", "m3"]
+
+    def fake_http_json(method, url, token, body=None):
+        seen.append({"method": method, "url": url, "body": body})
+        if "/messages?" in url:
+            return {"messages": [{"id": m} for m in mailbox]}
+        return {"id": url.rsplit("/", 2)[-2]}
+
+    monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+    monkeypatch.setattr(gs, "_http_json", fake_http_json)
+    return seen
+
+
+def test_bulk_trash_never_issues_a_delete(bulk_calls):
+    gs.gmail_bulk_trash("from:spam")
+    assert all(c["method"] == "POST" or "/messages?" in c["url"] for c in bulk_calls)
+    assert not any(c["method"] == "DELETE" for c in bulk_calls)
+
+
+def test_bulk_trash_moves_every_match_to_trash(bulk_calls):
+    out = gs.gmail_bulk_trash("from:spam")
+    trash_calls = [c for c in bulk_calls if c["url"].endswith("/trash")]
+    assert len(trash_calls) == 3
+    assert "3 message(s)" in out
+    assert "Trash" in out
+    assert "30 days" in out
+
+
+def test_bulk_trash_empty_query_means_the_whole_mailbox(bulk_calls):
+    """This is the literal 'delete all emails' case — must not be refused."""
+    out = gs.gmail_bulk_trash("")
+    assert "3 message(s)" in out
+    assert "whole mailbox" in out
+    listing_call = next(c for c in bulk_calls if "/messages?" in c["url"])
+    assert "q=" in listing_call["url"]
+
+
+def test_bulk_trash_reports_the_query_it_matched(bulk_calls):
+    out = gs.gmail_bulk_trash("from:newsletters@example.com")
+    assert "newsletters@example.com" in out
+
+
+def test_bulk_trash_respects_max_count_cap(bulk_calls):
+    gs.gmail_bulk_trash("", max_count=999)
+    listing_call = next(c for c in bulk_calls if "/messages?" in c["url"])
+    assert f"maxResults={gs._BULK_TRASH_MAX}" in listing_call["url"]
+
+
+def test_bulk_trash_no_matches_is_honest_and_makes_no_mutation(monkeypatch):
+    monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+    calls: list[dict] = []
+
+    def fake_http_json(method, url, token, body=None):
+        calls.append({"method": method, "url": url})
+        return {"messages": []}
+
+    monkeypatch.setattr(gs, "_http_json", fake_http_json)
+    out = gs.gmail_bulk_trash("from:nobody@nowhere.invalid")
+    assert "no messages" in out.lower()
+    assert "Nothing was changed" in out
+    assert len(calls) == 1  # the listing call only — no trash attempted
+
+
+def test_bulk_trash_no_session_changes_nothing(monkeypatch):
+    monkeypatch.setattr(gs, "_oauth_access_token", lambda: None)
+    monkeypatch.setattr(gs, "_oauth_user_needs_reauth", lambda a: None)
+    out = gs.gmail_bulk_trash("")
+    assert "NOT CONFIGURED" in out
+    assert "Nothing was changed" in out
+
+
+def test_bulk_trash_one_failure_does_not_hide_the_others(monkeypatch):
+    monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+    def fake_http_json(method, url, token, body=None):
+        if "/messages?" in url:
+            return {"messages": [{"id": "ok1"}, {"id": "bad"}, {"id": "ok2"}]}
+        if "/bad/trash" in url:
+            raise RuntimeError("GOOGLE API 404 not found")
+        return {"id": "x"}
+
+    monkeypatch.setattr(gs, "_http_json", fake_http_json)
+    out = gs.gmail_bulk_trash("")
+    assert "2 message(s)" in out
+    assert "1 failed" in out
+    assert "bad" in out
+
+
+def test_bulk_trash_is_confirmation_gated():
+    registry = build_general_registry()
+    tools = {t.name: t for t in registry.get_subagent("mail").tools}
+    spec = tools["gmail_bulk_trash"]
+    assert spec.permission == Permission.REQUIRES_CONFIRMATION
+    prompt = spec.confirm_prompt({"query": "", "max_count": 50})
+    assert "every email in the mailbox" in prompt
+    prompt2 = spec.confirm_prompt({"query": "from:spam", "max_count": 10})
+    assert "from:spam" in prompt2

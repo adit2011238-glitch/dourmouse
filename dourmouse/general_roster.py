@@ -2428,8 +2428,16 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="open_url",
                     description=(
-                        "Open a URL in the user's default browser. Local, "
-                        "harmless — use when the user wants to look at a page."
+                        "Opens a REAL browser tab on the user's own laptop, "
+                        "visibly. ONLY call this when the user's message "
+                        "explicitly says to open/launch/pull up a page or "
+                        "site (e.g. 'open github.com'). NEVER call this to "
+                        "answer a factual/informational question ('what is "
+                        "X', 'explain Y', 'how does Z work') — for those, "
+                        "answer directly or use web_search/fetch_url and "
+                        "reply with text. Calling this for an ordinary "
+                        "question is a bug: it hijacks the user's browser "
+                        "for no reason."
                     ),
                     parameters={
                         "type": "object",
@@ -3679,6 +3687,17 @@ def build_general_registry() -> DispatchRegistry:
         except RuntimeError as exc:
             return f"GMAIL UNTRASH (reported honestly): {exc}"
 
+    def _gmail_bulk_trash_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import gmail_bulk_trash
+
+        try:
+            return gmail_bulk_trash(
+                arguments.get("query", ""),
+                arguments.get("max_count", 50),
+            )
+        except RuntimeError as exc:
+            return f"GMAIL BULK TRASH (reported honestly): {exc}"
+
     def _gmail_send_h(arguments: dict[str, Any]) -> str:
         from dourmouse.google_services import gmail_send
 
@@ -4382,6 +4401,45 @@ def build_general_registry() -> DispatchRegistry:
                     confirm_prompt=lambda a: (
                         f"Move Gmail message {a.get('message_id', '?')} to Trash? "
                         "Recoverable for 30 days."
+                    ),
+                ),
+                ToolSpec(
+                    name="gmail_bulk_trash",
+                    description=(
+                        "Search + trash EVERY matching email in one call — "
+                        "this is the real tool for 'delete all emails' / "
+                        "'clear my inbox' / 'delete every email from X'. "
+                        "Still Trash, not permanent deletion: every message "
+                        "is recoverable for 30 days via gmail_untrash, same "
+                        "as gmail_trash. An empty query matches the WHOLE "
+                        "mailbox — that IS what 'delete all emails' means, "
+                        "so use it rather than refusing. Capped per call "
+                        "(re-run to continue past the cap on a huge mailbox)."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "default": "",
+                                "description": (
+                                    "Gmail search syntax (from:x, older_than:1y, "
+                                    "label:promotions, ...). Empty = every email."
+                                ),
+                            },
+                            "max_count": {
+                                "type": "integer",
+                                "default": 50,
+                                "description": "Cap for this call (max 200).",
+                            },
+                        },
+                    },
+                    handler=_gmail_bulk_trash_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Trash ALL emails matching {a.get('query') or '(every email in the mailbox)'!r} "
+                        f"(up to {a.get('max_count', 50)})? Recoverable for 30 days each, "
+                        "but this moves a lot of mail out of the inbox at once."
                     ),
                 ),
                 ToolSpec(

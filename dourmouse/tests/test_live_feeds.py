@@ -371,7 +371,7 @@ class TestPreloadedAgents:
         # query_shared_memory (shared_rag.py) rides every non-orchestrator
         # subagent — see build_general_registry's own comment.
         assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send",
-                "gmail_archive", "gmail_trash", "gmail_untrash",
+                "gmail_archive", "gmail_trash", "gmail_bulk_trash", "gmail_untrash",
                 "drive_read", "drive_search",
                 "email_identity_status", "email_own_send",
                 "query_shared_memory"} == tools
