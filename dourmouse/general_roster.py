@@ -2433,11 +2433,13 @@ def build_general_registry() -> DispatchRegistry:
                         "explicitly says to open/launch/pull up a page or "
                         "site (e.g. 'open github.com'). NEVER call this to "
                         "answer a factual/informational question ('what is "
-                        "X', 'explain Y', 'how does Z work') — for those, "
-                        "answer directly or use web_search/fetch_url and "
-                        "reply with text. Calling this for an ordinary "
-                        "question is a bug: it hijacks the user's browser "
-                        "for no reason."
+                        "X', 'explain Y', 'how does Z work'), and NEVER call "
+                        "it as a fallback after fetch_url fails or is "
+                        "blocked — a failed fetch means answer from "
+                        "web_search's snippets instead, not hijack the "
+                        "browser. Calling this for an ordinary question is "
+                        "a bug, confirmed live: a research question ended "
+                        "up opening 2 real tabs with no answer given first."
                     ),
                     parameters={
                         "type": "object",
@@ -2445,6 +2447,17 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["url"],
                     },
                     handler=_open_url_tool,
+                    # v13.1 (live-reproduced twice): tightening the
+                    # description alone did not stop the model reaching for
+                    # this as a fallback when fetch_url failed. Opening a
+                    # browser tab is a real, surprising side effect on the
+                    # user's own laptop — same category as gmail_send,
+                    # deserves the same human-in-the-loop gate rather than
+                    # relying on prompt discipline alone.
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Open {a.get('url', '?')} in your browser?"
+                    ),
                 ),
             ],
         )

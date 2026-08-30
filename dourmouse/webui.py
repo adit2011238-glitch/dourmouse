@@ -2857,10 +2857,21 @@ class _Handler(BaseHTTPRequestHandler):
         # agent can use a coding-tuned model while research uses another.
         model_override = None
         if focus_agent:
+            # v13.1 (live-reproduced): the old phrasing ("using ONLY the
+            # ... subagent and its tools") read as an instruction to
+            # actually CALL tools, not just a scope restriction — a plain
+            # factual question ("what is retrograde motion") looped
+            # web_search/fetch_url 8 times and burned the whole tool
+            # budget instead of just answering from what the model
+            # already knows. The scope restriction stays; added the
+            # answer-directly-when-you-can escape hatch.
             prompt = (
-                f"[ROUTING DIRECTIVE] Complete this task using ONLY the "
-                f"'{focus_agent}' subagent and its tools; do not use any "
-                f"other subagent's tools. TASK: {prompt}"
+                f"[ROUTING DIRECTIVE] You may ONLY use the '{focus_agent}' "
+                f"subagent's tools for this — never another subagent's "
+                f"tools. If you already know the answer, answer directly; "
+                f"only call a tool for live/current data, something you're "
+                f"unsure of, or when the user explicitly asks you to look "
+                f"something up or take an action. TASK: {prompt}"
             )
             if self.server.config is not None:
                 model_override = self.server.config.model_for_agent(focus_agent)

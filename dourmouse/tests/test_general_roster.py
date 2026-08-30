@@ -143,6 +143,11 @@ class TestRosterShape:
             # least as consequential as a single trash, so it's gated too.
             "gmail_bulk_trash",
             "gmail_untrash",
+            # v13.1 (live-reproduced twice): a description-only fix did not
+            # stop the model reaching for open_url as a fetch_url fallback
+            # on an ordinary research question — opening a REAL browser tab
+            # is a surprising side effect, gated like every other one here.
+            "open_url",
             "spotify_playback_control",  # v5.7: changing playback needs a human
             "spotify_play",
             "browser_submit",  # v5.25: submitting a form (login/signup) needs a human
