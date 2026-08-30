@@ -30,7 +30,46 @@
   counters are now painted as a real fill bar + label
   ("HOLD PINCH — 2/4") the instant a gesture is recognized, not just after
   it fires. The interactive first-run trainer is not built.
-- **Phases 2, 3, 5, 6: not started.** Real, substantial pieces of new
+- **Phase 2, option 2 (coarse point-to-pan): SHIPPED and live-verified.**
+  Building Phase 1 surfaced a real architectural gap — hand-tracking
+  (`ui/index.html`) and the globe (`gods-eye-view`) are separate browser
+  origins with no shared pixel space, so a literal raycast ("point at
+  this exact spot") isn't reachable without much bigger engineering
+  (porting the gesture engine into the globe page — option 1, not
+  started). Shipped instead: in GLOBE MODE, POINT reads which way the
+  finger points relative to the wrist and pans the camera that direction
+  via the real `move_camera(motion:'pan')` contract, throttled the same
+  way as zoom, stopping cleanly on shape change/hand-loss/mode-toggle-off.
+  Live-verified: a real `move_camera` pan + stop round-tripped against
+  the running globe, and a before/after screenshot confirmed the camera
+  actually moved.
+- **Hand-tracking engine (accuracy + performance): SHIPPED.** Explicit
+  follow-up request ("increase accuracy, optimize to reduce lag and CPU
+  usage... be ambitious"). Real engineering call made and documented in
+  the source: MediaPipe's HandLandmarker already outputs precise 21-point
+  landmarks; OpenCV's classical tool for this exact problem (Lucas-Kanade
+  optical flow) re-derives tracking from raw pixels, which would cost
+  MORE cpu than filtering the coordinates MediaPipe already hands us, and
+  would break this project's own no-CDN/fully-local contract to vendor a
+  multi-MB WASM build for no accuracy gain. Shipped instead: a real 1€
+  Filter (Casiez/Roussel/Vogel 2012 — the actual industry-standard
+  technique for this, used in most production hand/VR tracking) applied
+  per-landmark-per-hand for jitter-free-but-not-laggy tracking, an
+  AdaptiveRate governor that measures real `detectForVideo()` time and
+  backs off the actual inference call rate under load (predicting
+  skipped frames from the filter's own velocity so visible tracking never
+  freezes), face detection decoupled to its own much lower fixed rate
+  (presence detection never needed 60Hz), and a real measured performance
+  HUD. The filter's actual math is verified by running it in Node against
+  synthetic signals (confirms real noise damping AND fast-motion
+  responsiveness, not just "a filter exists") — 12 tests,
+  `dourmouse/tests/test_index_hand_tracking_perf.py`. Camera access is
+  unavailable in the sandboxed environment this was built in, so the live
+  camera+gesture behavior (real inference timing, real jitter reduction
+  in front of an actual hand) is NOT yet confirmed on a live desktop —
+  needs that pass before calling this fully verified, same as
+  `vision_bridge.py`'s own stated pattern for anything camera/mic-gated.
+- **Phase 3, 5, 6: not started.** Real, substantial pieces of new
   design/engineering each — see their own sections below, unchanged from
   the original plan.
 - Also fixed in passing: `dourmouse/tests/test_ui_local.py`'s
