@@ -40,11 +40,12 @@ agent/orchestrator decides how to apply.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import threading
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from dourmouse.config import (
     NVIDIA_DEFAULT_BASE_URL,
@@ -393,6 +394,207 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
     if not out:
         raise RuntimeError("claude returned no output (honest).")
     return out[-_OUTPUT_CAP:]
+
+
+# v13.2: real-time passthrough (explicit user request — "I only want to be
+# talking to claude directly", "same thought tokens", "exact same experience
+# as ... the terminal"). ``_run_claude`` above blocks on subprocess.run
+# until the ENTIRE `claude -p` call finishes, then hands the whole answer
+# to Dourmouse's OWN orchestrator LLM as one opaque tool_result string for
+# it to read and re-narrate — that is a different model paraphrasing
+# Claude's output after the fact, not "talking to Claude directly", and it
+# throws away every live signal (text tokens as they're generated, the
+# extended-thinking trace, each real tool call) until the whole run is
+# already over.
+#
+# `claude -p --output-format stream-json --include-partial-messages` emits
+# the CLI's real internal event stream as NDJSON while it runs — verified
+# live on this machine: `stream_event` wraps the same Anthropic Messages
+# API streaming shape (message_start/content_block_start/
+# content_block_delta/content_block_stop/message_delta/message_stop) used
+# everywhere else in this codebase for a live token feed, so
+# content_block_delta.delta.text_delta.text IS the real per-token answer,
+# content_block_delta.delta.thinking_delta.thinking IS the real reasoning
+# trace, and a content_block_start with content_block.type=="tool_use" IS
+# a real tool call Claude itself is making — not narrated, not summarized,
+# the actual thing. webui.py wires this directly into the SAME SSE event
+# vocabulary (assistant_delta/thinking_delta/tool_use/tool_result) the rest
+# of the UI already renders, bypassing run_dispatch_messages and the
+# Dourmouse system/roster prompt entirely for this one toolchain.
+#
+# --permission-mode acceptEdits: satisfies the explicit "for creating files
+# remove approval" request for this path specifically — file edits/writes
+# proceed without a prompt, while Bash and other tool categories keep their
+# own default safety behavior (a genuinely dangerous command still gets
+# refused rather than silently running). A full relay of Claude's own
+# interactive permission prompts through Dourmouse's existing
+# WebConfirmationGate/addApproval() UI — the most faithful "exact terminal
+# experience" for the tool categories acceptEdits does NOT auto-approve —
+# is real future work: the CLI's --input-format stream-json documents
+# bidirectional streaming for this, but the exact JSON shape it expects
+# back on stdin for a permission decision isn't in `claude --help` and
+# wasn't reverse-engineered here; never guess a wire protocol un-verified.
+def stream_claude(
+    task: str,
+    *,
+    cwd: str | None,
+    timeout: int,
+    on_delta: Callable[[str], None],
+    on_thinking: Callable[[str], None] | None = None,
+    on_tool_use: Callable[[str, str], None] | None = None,
+    on_tool_result: Callable[[str], None] | None = None,
+) -> str:
+    """Stream one real ``claude -p`` run live; returns the final result text
+    (the CLI's own ``type:"result"`` ``result`` field — the same string
+    ``_run_claude`` returns, so a caller only wanting the final text can
+    treat this as a drop-in). Same session continuity (``--session-id``/
+    ``--resume``) and MCP tool wiring as ``_run_claude``; same honest
+    NOT CONFIGURED / real-error contract (Rule 2.2) — nothing here ever
+    fabricates a result.
+
+    ``on_tool_use(name, raw_arguments_json)`` fires TWICE per tool call:
+    once with empty arguments the instant Claude starts the call (so the
+    UI can show "USING <tool>" immediately, matching how it feels watching
+    the terminal), and once more with the complete arguments once Claude
+    finishes emitting them. ``on_tool_result(text)`` fires when Claude's
+    own tool execution reports back (a ``role: user`` message carrying a
+    ``tool_result`` content block — Claude runs its OWN tools directly;
+    this is Dourmouse OBSERVING that, never re-executing anything).
+    """
+    from dourmouse.general_roster import _find_claude_cli
+
+    cli = _find_claude_cli()
+    if cli is None:
+        raise RuntimeError(
+            "NOT CONFIGURED: the Claude Code CLI ('claude') was not found on "
+            "PATH. Install it (npm i -g @anthropic-ai/claude-code) or set "
+            "CLAUDE_CODE_CLI=/absolute/path/to/claude in .env. Nothing was run."
+        )
+    timeout = max(1, min(int(timeout), 600))
+    session_key = _claude_session_key(cwd)
+    mcp_args: list[str] = []
+    try:
+        mcp_args = ["--mcp-config", _ensure_mcp_config_path(), "--allowedTools", _MCP_ALLOWED_TOOLS]
+    except Exception:  # noqa: BLE001 - best-effort, see _run_claude_once's own comment
+        mcp_args = []
+
+    def _run_once(session_args: list[str]) -> tuple[int, str, str]:
+        proc = subprocess.Popen(
+            [
+                cli, "-p", "--output-format", "stream-json",
+                "--include-partial-messages", "--verbose",
+                "--permission-mode", "acceptEdits",
+                *session_args, task, *mcp_args,
+            ],
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        stopped = threading.Event()
+
+        def _watchdog() -> None:
+            if not stopped.wait(timeout):
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001 - best-effort kill
+                    pass
+
+        watchdog = threading.Thread(target=_watchdog, daemon=True)
+        watchdog.start()
+        final_result = ""
+        # Per content_block index: the tool's name (known at block start)
+        # and its input_json_delta fragments, joined once the block closes.
+        tool_name_by_index: dict[int, str] = {}
+        tool_args_by_index: dict[int, list[str]] = {}
+        try:
+            for raw_line in proc.stdout or []:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                etype = ev.get("type")
+                if etype == "stream_event":
+                    inner = ev.get("event") or {}
+                    itype = inner.get("type")
+                    if itype == "content_block_start":
+                        block = inner.get("content_block") or {}
+                        if block.get("type") == "tool_use":
+                            idx = inner.get("index")
+                            name = block.get("name") or "tool"
+                            tool_name_by_index[idx] = name
+                            tool_args_by_index[idx] = []
+                            if on_tool_use:
+                                on_tool_use(name, "")
+                    elif itype == "content_block_delta":
+                        delta = inner.get("delta") or {}
+                        dtype = delta.get("type")
+                        if dtype == "text_delta" and delta.get("text"):
+                            on_delta(delta["text"])
+                        elif dtype == "thinking_delta" and on_thinking and delta.get("thinking"):
+                            on_thinking(delta["thinking"])
+                        elif dtype == "input_json_delta":
+                            idx = inner.get("index")
+                            tool_args_by_index.setdefault(idx, []).append(
+                                delta.get("partial_json", "")
+                            )
+                    elif itype == "content_block_stop":
+                        idx = inner.get("index")
+                        if idx in tool_name_by_index and on_tool_use:
+                            on_tool_use(
+                                tool_name_by_index[idx],
+                                "".join(tool_args_by_index.get(idx, [])),
+                            )
+                elif etype == "user" and on_tool_result:
+                    for block in (ev.get("message") or {}).get("content") or []:
+                        if block.get("type") != "tool_result":
+                            continue
+                        content = block.get("content")
+                        text = content if isinstance(content, str) else json.dumps(content)
+                        on_tool_result((text or "")[:2000])
+                elif etype == "result":
+                    final_result = ev.get("result") or ""
+        finally:
+            stopped.set()
+            try:
+                proc.wait(timeout=2)
+            except Exception:  # noqa: BLE001
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+        stderr_text = ""
+        try:
+            if proc.stderr:
+                stderr_text = proc.stderr.read() or ""
+        except Exception:  # noqa: BLE001
+            pass
+        return proc.returncode, final_result, stderr_text
+
+    session_args = _claude_session_args(session_key)
+    returncode, final_result, err = _run_once(session_args)
+    if returncode != 0 and "--resume" in session_args and _CLAUDE_NO_SESSION_ERR in err:
+        _forget_claude_session(session_key)
+        session_args = _claude_session_args(session_key)
+        returncode, final_result, err = _run_once(session_args)
+    err = err.strip()
+    if returncode != 0:
+        if not err:
+            raise RuntimeError(
+                "claude exited 1 with no error output. The most likely cause "
+                "is that the CLI is installed but NOT SIGNED IN - run "
+                "'claude' on the host machine and complete /login, then "
+                "retry."
+            )
+        raise RuntimeError(f"claude exited {returncode}: {err[-2000:]}")
+    if not final_result:
+        raise RuntimeError("claude returned no output (honest).")
+    return final_result[-_OUTPUT_CAP:]
 
 
 def _run_codex(task: str, *, cwd: str | None, timeout: int) -> str:

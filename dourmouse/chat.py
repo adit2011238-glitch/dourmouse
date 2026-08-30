@@ -389,7 +389,8 @@ class ChatSession:
         self._state_file.write_text(json.dumps(self.messages))
 
     def record_slash(self, prompt: str, final_text: str,
-                     tools: list[str] | None = None) -> None:
+                     tools: list[str] | None = None,
+                     screen: str = "HOME", elapsed_ms: float = 0.0) -> None:
         """v5.22.9: audit a slash-command run (they bypass ``ask()``).
 
         Slash commands (/claude, /codex, /all, ...) execute their own
@@ -398,6 +399,12 @@ class ChatSession:
         them (a gap the live E2E sweep found). The record keeps the same
         hash-chained shape, marked ``kind: "slash"`` so the ledger stays
         tamper-evident and verifiable.
+
+        v13.2: ``screen``/``elapsed_ms`` added for the CODE screen's direct
+        Claude-passthrough path (webui.py's stream_claude wiring), which
+        also bypasses ``ask()`` — same gap, same fix. Both default to the
+        original behavior (HOME, 0.0) so every existing caller is
+        unaffected.
         """
         transcript = [
             {"type": "tool_use", "name": t, "raw_arguments": "{}"}
@@ -410,7 +417,8 @@ class ChatSession:
         self._persist(
             prompt,
             {"final_text": final_text, "transcript": transcript},
-            elapsed_ms=0.0,
+            elapsed_ms=elapsed_ms,
+            screen=screen,
         )
 
 

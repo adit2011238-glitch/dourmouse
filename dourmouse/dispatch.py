@@ -131,10 +131,35 @@ _DEFAULT_MAX_TOKENS = 800
 # as fit the budget. The authoritative ``messages`` list is untouched (still
 # persisted, resumable, and returned to callers) — only the API boundary is
 # bounded.
-# 4600 + max_tokens(800) = 5400, leaving ~2.8k hard headroom under the
-# 8192 num_ctx even when the chars/4 estimate underestimates real tokens.
-_MAX_LLM_TOKENS = 4600
+#
+# v13.2 (live-caught, real bug — explicit user report: "the model easily
+# loses the plot and doesn't retain context"): this constant's own comment
+# justified 4600 against an 8192 num_ctx ceiling that no longer exists —
+# _OLLAMA_NUM_CTX was raised to 16384 (see its own comment, a SEPARATE
+# earlier fix) and this was simply never revisited, so every real turn was
+# still being trimmed to less than a THIRD of what the model can now
+# actually hold (system prompt ~3,700 tokens, not charged against this
+# budget — see _bounded_context — + this history budget + the 800-token
+# response cap, against a 16,384 window). 9000 leaves system(~3700) +
+# history(9000) + response(800) = ~13,500, still ~2,900 tokens of real
+# headroom under 16,384 even when the chars/4 estimate undercounts —
+# proportionally the same safety margin the original 4600/8192 sizing had,
+# just correctly re-derived against the window that is actually in use.
+# Overridable via DOURMOUSE_MAX_CONTEXT_TOKENS for a smaller-context model
+# where even this would overflow — never hardcode a second constant for
+# that case.
+_MAX_LLM_TOKENS = 9000
 _MAX_TOOL_RESULT_CHARS = 800  # OLD tool results re-read by the model get cut
+
+
+def _max_llm_tokens() -> int:
+    raw = os.environ.get("DOURMOUSE_MAX_CONTEXT_TOKENS", "").strip()
+    if raw:
+        try:
+            return max(500, int(raw))
+        except ValueError:
+            pass
+    return _MAX_LLM_TOKENS
 
 
 def _est_tokens(message: dict[str, Any]) -> int:
@@ -2880,7 +2905,7 @@ def _run_dispatch_loop(
         # v4.2 speed: the LLM sees a bounded rolling window (system +
         # in-flight exchange + recent history), never the unbounded
         # conversation. The full list stays authoritative for persistence.
-        bounded = _bounded_context(messages, _MAX_LLM_TOKENS)
+        bounded = _bounded_context(messages, _max_llm_tokens())
         # Fast lane (v5.x): pure-chat turns swap the 2.2k-token orchestrator
         # roster for the compact style-only prompt AT THE API BOUNDARY only.
         # The authoritative messages are untouched, so a later agentic turn
@@ -3311,7 +3336,7 @@ def _run_dispatch_loop(
         forced_response = _call_with_retry(
             client,
             model=model,
-            messages=_bounded_context(forced_messages, _MAX_LLM_TOKENS),
+            messages=_bounded_context(forced_messages, _max_llm_tokens()),
             tools=[],  # no tools offered: the model cannot keep stalling on search
             config=ctx.config,
             event_sink=event_sink,

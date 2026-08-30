@@ -751,15 +751,22 @@ def build_system_subagent() -> Subagent:
                 },
                 handler=_repo_map_tool,
             ),
-            # v8.15: gated — same full-laptop scope as delete_path (already
-            # gated, right below), no diff shown; a silent overwrite destroys
-            # content exactly as delete_path's unlink does.
+            # v13.2: ungated on explicit user request. This was gated
+            # because an overwrite was silent and permanent; that changed
+            # with the Aider-style git safety net (git_safety.auto_commit,
+            # wired into _write_path_tool's own result string below) —
+            # every write to a real git repo auto-commits BEFORE this tool
+            # existed to gate anything, so an unwanted overwrite is now a
+            # real `undo_last_change` (git revert) away, not gone forever.
+            # Outside a git repo (no safety net) this is still exactly as
+            # reversible as it always was without the confirmation click.
             ToolSpec(
                 name="write_path",
                 description=(
                     "Write (create/overwrite) any text file by absolute path. "
                     "Refused inside credential/system dirs (~/.ssh, /etc, ...). "
-                    "REQUIRES human confirmation before it overwrites anything."
+                    "Auto-commits if the path is inside a git repo — undo_last_change "
+                    "reverts it."
                 ),
                 parameters={
                     "type": "object",
@@ -770,12 +777,6 @@ def build_system_subagent() -> Subagent:
                     "required": ["path", "content"],
                 },
                 handler=_write_path_tool,
-                permission=Permission.REQUIRES_CONFIRMATION,
-                confirm_prompt=lambda a: (
-                    f"Write {a.get('path', '?')!r} "
-                    f"({len(a.get('content', ''))} chars)? This overwrites any "
-                    "existing file at that path with no diff shown."
-                ),
             ),
             # v13.1 (Aider port part 3/4): a targeted edit to an EXISTING
             # file, unlike write_path's silent full overwrite — both show

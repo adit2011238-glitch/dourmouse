@@ -1868,8 +1868,35 @@ class TestPlanCheckpoint:
 
 
 # --------------------------------------------------------------------------- #
-# v4.2 LLM context bounding — bounded rolling window at the API boundary
+# v13.2 (live-caught, real bug — user report: "the model easily loses the
+# plot and doesn't retain context"): _MAX_LLM_TOKENS's own comment
+# justified 4600 against an 8192 num_ctx ceiling _OLLAMA_NUM_CTX no longer
+# uses (raised to 16384 in an earlier, separate fix) — every real turn was
+# being trimmed to under a third of what the model can actually hold.
 # --------------------------------------------------------------------------- #
+
+class TestMaxLlmTokens:
+    def test_default_is_raised_to_match_the_current_16k_num_ctx(self):
+        # Was 4600 (sized for a since-raised 8192 num_ctx). Must be
+        # meaningfully larger now, not just nudged.
+        assert dispatch_module._MAX_LLM_TOKENS > 4600 * 1.5
+
+    def test_no_env_override_returns_the_default(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_MAX_CONTEXT_TOKENS", raising=False)
+        assert dispatch_module._max_llm_tokens() == dispatch_module._MAX_LLM_TOKENS
+
+    def test_env_override_wins_for_a_smaller_context_model(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_MAX_CONTEXT_TOKENS", "2000")
+        assert dispatch_module._max_llm_tokens() == 2000
+
+    def test_env_override_floors_at_500_never_a_useless_or_negative_budget(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_MAX_CONTEXT_TOKENS", "10")
+        assert dispatch_module._max_llm_tokens() == 500
+
+    def test_garbage_env_value_falls_back_to_the_default(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_MAX_CONTEXT_TOKENS", "not-a-number")
+        assert dispatch_module._max_llm_tokens() == dispatch_module._MAX_LLM_TOKENS
+
 
 class TestBoundedContext:
     """_bounded_context keeps system + in-flight exchange, drops old history

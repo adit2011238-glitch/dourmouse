@@ -148,8 +148,10 @@ class TestRosterShape:
             # on an ordinary research question — opening a REAL browser tab
             # is a surprising side effect, gated like every other one here.
             "open_url",
-            "spotify_playback_control",  # v5.7: changing playback needs a human
-            "spotify_play",
+            # v13.2: spotify_playback_control/spotify_play were ungated on
+            # explicit user request — reversible/low-stakes playback
+            # control the user asks for by name every time; see
+            # general_roster.py's own comment on both tools.
             "browser_submit",  # v5.25: submitting a form (login/signup) needs a human
             "browser_signin",  # v5.25: logging in needs a human
             "browser_creds_store",  # v5.25: storing credentials needs a human
@@ -165,12 +167,11 @@ class TestRosterShape:
             # v8.15: hands a real autonomous agent in another live app a
             # prompt to act on — closer to deploy/send_draft than a write.
             "freebuff_dispatch",
-            # v8.15: silent overwrite, no diff shown (unlike write_file,
-            # which is workspace-sandboxed and shows one on overwrite).
-            # write_path is delete_path's sibling in the same subagent and
-            # same full-laptop scope; delete_path was already gated.
             "write_note",
-            "write_path",
+            # v13.2: write_path was ungated on explicit user request — the
+            # git safety net (auto_commit + undo_last_change, right below)
+            # makes an unwanted overwrite recoverable now, unlike when this
+            # tool was first gated. See system_access.py's own comment.
             # v13.1: Aider-port git safety net's real /undo — reverts file
             # content on disk, same consequential-change bar as write_path.
             "undo_last_change",

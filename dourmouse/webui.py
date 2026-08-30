@@ -2856,7 +2856,17 @@ class _Handler(BaseHTTPRequestHandler):
         # configured NVIDIA model (DOURMOUSE_MODEL_<AGENT>), so e.g. a coding
         # agent can use a coding-tuned model while research uses another.
         model_override = None
-        if focus_agent:
+        # v13.2: CLAUDE CODE toolchain talks to the real CLI DIRECTLY —
+        # explicit user request ("I only want to be talking to claude
+        # directly when doing so"). The ROUTING DIRECTIVE wrapper below and
+        # Dourmouse's whole orchestrator/roster prompt are for the OTHER
+        # subagents, whose "tools" are Dourmouse ToolSpecs the orchestrator
+        # LLM calls; code_claude's only "tool" is a real, separate program
+        # with its own real reasoning — wrapping its prompt in routing
+        # prose a different model would have needed, and then running it
+        # through THAT model's tool loop, is not talking to Claude at all.
+        # See _handle_code_claude_passthrough for the real streamed path.
+        if focus_agent and focus_agent != "code_claude":
             # v13.1 (live-reproduced): the old phrasing ("using ONLY the
             # ... subagent and its tools") read as an instruction to
             # actually CALL tools, not just a scope restriction — a plain
@@ -2903,6 +2913,20 @@ class _Handler(BaseHTTPRequestHandler):
         artifacts_store = getattr(self.server, "artifacts", None)
         if artifacts_store is not None:
             artifacts_store.set_sink(stream.emit)
+        # v13.2: CLAUDE CODE toolchain — direct, live-streamed passthrough
+        # to the real CLI. Runs without session_lock/gate, same rationale
+        # as the slash-command path right below: this is a real SEPARATE
+        # program with its own tool permissions (--permission-mode
+        # acceptEdits in stream_claude), never Dourmouse's own
+        # confirmation_gate/orchestrator loop.
+        if focus_agent == "code_claude":
+            try:
+                self._handle_code_claude_passthrough(raw_prompt, screen, sink)
+            finally:
+                if artifacts_store is not None:
+                    artifacts_store.set_sink(None)
+            self.close_connection = True
+            return
         # v5.22.9: slash commands (/all /claude /codex /chatgpt /freebuff) and
         # the "use all resources" All-Hands goal route through the SAME SSE
         # stream as normal chat — assistant_text chunks + a terminal done — so
@@ -3058,6 +3082,62 @@ class _Handler(BaseHTTPRequestHandler):
                 if result.get("run_id"):
                     tools.append("allhands:" + str(result["run_id"]))
                 session.record_slash(prompt, final, tools=tools)
+        except Exception:  # noqa: BLE001 -- an audit failure never breaks chat
+            pass
+
+    def _handle_code_claude_passthrough(self, prompt: str, screen: str, sink) -> None:
+        """v13.2: the CODE screen's CLAUDE CODE toolchain, talking to the
+        real Claude Code CLI directly and LIVE — explicit user request
+        ("I only want to be talking to claude directly when doing so",
+        "same thought tokens", "exact same experience as ... the
+        terminal"). code_backends.stream_claude does the real work (see
+        its own module docstring for the event-translation detail); this
+        just wires its callbacks onto the SAME sink/SSE vocabulary every
+        other screen already renders (assistant_delta/thinking_delta/
+        tool_use/tool_result/done) — a real, no-adapter drop-in, not a new
+        client-side rendering path.
+
+        No session_lock/confirmation_gate here (same as _handle_slash_chat
+        right above): this is a real separate program with its OWN tool
+        permissions, never Dourmouse's orchestrator loop or roster prompt.
+        """
+        import time
+
+        from dourmouse import code_backends
+        from dourmouse.general_roster import _PROJECT_ROOT
+
+        start = time.perf_counter()
+        sink({"type": "brain", "model": "claude-code-cli", "local": False})
+        final_text = ""
+        try:
+            final_text = code_backends.stream_claude(
+                prompt,
+                cwd=str(_PROJECT_ROOT),
+                timeout=300,
+                on_delta=lambda text: sink({"type": "assistant_delta", "text": text}),
+                on_thinking=lambda text: sink({"type": "thinking_delta", "text": text}),
+                on_tool_use=lambda name, args: sink(
+                    {"type": "tool_use", "name": name, "raw_arguments": args}
+                ),
+                on_tool_result=lambda text: sink(
+                    {"type": "tool_result", "name": "claude", "text": text}
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 -- surface the real failure, never fabricate
+            sink({"type": "error", "message": str(exc)})
+            final_text = f"ERROR: {exc}"
+        else:
+            sink({"type": "assistant_text", "text": final_text})
+            sink({"type": "done", "final_text": final_text})
+        # Bypasses session.ask() same as the slash-command path above —
+        # same audit gap, same fix.
+        try:
+            session = getattr(self.server, "session", None)
+            if session is not None and hasattr(session, "record_slash"):
+                session.record_slash(
+                    prompt, final_text, tools=["code_claude"], screen=screen,
+                    elapsed_ms=(time.perf_counter() - start) * 1000.0,
+                )
         except Exception:  # noqa: BLE001 -- an audit failure never breaks chat
             pass
 

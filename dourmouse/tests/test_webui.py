@@ -1971,3 +1971,122 @@ class TestWarmCacheWarmers:
             assert webui_module.start_world_pulse_warmer() is True  # already running -> no second thread
         finally:
             webui_module.stop_world_pulse_warmer()
+
+
+def _registry_with_code_claude() -> DispatchRegistry:
+    """echo_agent (real tools, for the existing focus_agent tests) plus a
+    real "code_claude" subagent name — just enough to pass the focus_agent
+    validation check in _handle_chat_authed; the CLAUDE CODE passthrough
+    path never actually calls any of its tools (it bypasses the whole
+    orchestrator/tool loop, see _handle_code_claude_passthrough)."""
+    r = _echo_registry()
+    r.register_subagent(
+        Subagent(name="code_claude", domain="Code", description="claude cli", tools=())
+    )
+    return r
+
+
+@pytest.fixture
+def code_claude_server(monkeypatch, tmp_path):
+    monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setattr(webui_module, "_CONFIRM_TIMEOUT_SECONDS", 5.0)
+    srv = run_server(_registry_with_code_claude(), port=0, client=None, config=None)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    port = srv.server_address[1]
+    yield srv, port
+    srv.shutdown()
+    srv.server_close()
+    thread.join(timeout=2)
+
+
+class TestCodeClaudePassthrough:
+    """v13.2: focus_agent == "code_claude" talks DIRECTLY to
+    code_backends.stream_claude, live, bypassing run_dispatch_messages and
+    the ROUTING DIRECTIVE wrapper entirely — explicit user request ("I
+    only want to be talking to claude directly")."""
+
+    def _stream(self, port, prompt):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat",
+            body=json.dumps({"prompt": prompt, "focus_agent": "code_claude", "screen": "CODE"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        events = []
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                events.append(json.loads(line[6:]))
+        conn.close()
+        return resp.status, events
+
+    def test_raw_prompt_reaches_stream_claude_unwrapped(self, code_claude_server, monkeypatch):
+        seen = {}
+
+        def fake_stream_claude(task, **kwargs):
+            seen["task"] = task
+            return "ok"
+
+        monkeypatch.setattr(
+            "dourmouse.code_backends.stream_claude", fake_stream_claude
+        )
+        status, events = self._stream(code_claude_server[1], "list the files here")
+        assert status == 200
+        # No "[ROUTING DIRECTIVE]" wrapper — Claude gets the user's exact words.
+        assert seen["task"] == "list the files here"
+
+    def test_deltas_and_thinking_and_tool_use_reach_the_sse_stream(self, code_claude_server, monkeypatch):
+        def fake_stream_claude(task, *, cwd, timeout, on_delta,
+                                on_thinking=None, on_tool_use=None, on_tool_result=None):
+            on_thinking("reasoning...")
+            on_delta("Hel")
+            on_delta("lo.")
+            on_tool_use("Bash", "")
+            on_tool_use("Bash", '{"command":"ls"}')
+            on_tool_result("file1.py")
+            return "Hello."
+
+        monkeypatch.setattr(
+            "dourmouse.code_backends.stream_claude", fake_stream_claude
+        )
+        status, events = self._stream(code_claude_server[1], "say hello")
+        assert status == 200
+        types = [e["type"] for e in events]
+        assert "thinking_delta" in types
+        assert types.count("assistant_delta") == 2
+        assert any(e["type"] == "tool_use" and e["name"] == "Bash" for e in events)
+        assert any(e["type"] == "tool_result" and e["text"] == "file1.py" for e in events)
+        done = next(e for e in events if e["type"] == "done")
+        assert done["final_text"] == "Hello."
+
+    def test_real_error_surfaces_as_an_error_event_not_fabricated_success(
+        self, code_claude_server, monkeypatch
+    ):
+        def fake_stream_claude(task, **kwargs):
+            raise RuntimeError("NOT CONFIGURED: the Claude Code CLI ('claude') was not found on PATH.")
+
+        monkeypatch.setattr(
+            "dourmouse.code_backends.stream_claude", fake_stream_claude
+        )
+        status, events = self._stream(code_claude_server[1], "do something")
+        assert status == 200
+        assert any(
+            e["type"] == "error" and "NOT CONFIGURED" in e["message"] for e in events
+        )
+        assert not any(e["type"] == "done" for e in events)
+
+    def test_turn_is_recorded_on_the_code_screen_not_home(self, code_claude_server, monkeypatch):
+        monkeypatch.setattr(
+            "dourmouse.code_backends.stream_claude", lambda task, **kwargs: "result text"
+        )
+        srv, port = code_claude_server
+        self._stream(port, "write a function")
+        lines = srv.session.session_file.read_text(encoding="utf-8").strip().splitlines()
+        last = json.loads(lines[-1])
+        assert last["screen"] == "CODE"
+        assert last["final_text"] == "result text"
+        assert last["user"] == "write a function"

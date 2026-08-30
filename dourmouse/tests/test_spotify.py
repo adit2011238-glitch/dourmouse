@@ -745,11 +745,15 @@ class TestWiring:
             "spotify_playback_control", "spotify_play", "spotify_search",
             "spotify_top_tracks", "spotify_recently_played", "spotify_playlists",
         } <= names
+        # v13.2: ungated on explicit user request — playback control is
+        # reversible/low-stakes, unlike an email send; the user asks for
+        # it by name every time anyway, so the confirmation was pure
+        # friction. See general_roster.py's own comment on both tools.
         gated = {
             t.name for t in music.tools
             if t.permission is Permission.REQUIRES_CONFIRMATION
         }
-        assert {"spotify_playback_control", "spotify_play"} <= gated
+        assert not ({"spotify_playback_control", "spotify_play"} & gated)
 
     def test_connections_has_spotify_row(self, _workspace, monkeypatch):
         monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)

@@ -940,3 +940,172 @@ class TestSharedContextInjection:
         code_backends.run_code_task("claude", "write a fib function")
         argv = seen["argv"]
         assert argv[argv.index("--session-id") + 2] == "write a fib function"
+
+
+# --------------------------------------------------------------------------- #
+# stream_claude — the CODE screen's real "talking to Claude directly" path
+# (v13.2, explicit user request). A fake subprocess.Popen stands in for the
+# real CLI: .stdout is an iterator of real stream-json NDJSON lines
+# (verified live against the actual installed CLI — see stream_claude's own
+# module docstring), .stderr has a .read(), .wait()/.kill() are no-ops.
+# --------------------------------------------------------------------------- #
+
+class _FakePopenStream:
+    def __init__(self, lines, returncode=0, stderr_text=""):
+        self.stdout = iter(lines)
+        self._stderr_text = stderr_text
+        self.returncode = returncode
+        self.stderr = self
+
+    def read(self):
+        return self._stderr_text
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def kill(self):
+        pass
+
+
+def _sse_line(d):
+    import json as _json
+    return _json.dumps(d) + "\n"
+
+
+class TestStreamClaude:
+    def _patch(self, monkeypatch, lines, returncode=0, stderr_text="", seen=None):
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+
+        def _fake_popen(argv, **kwargs):
+            if seen is not None:
+                seen.append(argv)
+            return _FakePopenStream(lines, returncode=returncode, stderr_text=stderr_text)
+
+        monkeypatch.setattr(code_backends.subprocess, "Popen", _fake_popen)
+
+    def test_text_deltas_stream_live_and_final_result_returned(self, monkeypatch):
+        lines = [
+            _sse_line({"type": "stream_event", "event": {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "Hel"},
+            }}),
+            _sse_line({"type": "stream_event", "event": {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "lo."},
+            }}),
+            _sse_line({"type": "result", "result": "Hello."}),
+        ]
+        self._patch(monkeypatch, lines)
+        deltas = []
+        out = code_backends.stream_claude(
+            "say hello", cwd="/tmp/proj", timeout=30, on_delta=deltas.append
+        )
+        assert deltas == ["Hel", "lo."]
+        assert out == "Hello."
+
+    def test_thinking_deltas_go_to_their_own_callback_not_on_delta(self, monkeypatch):
+        lines = [
+            _sse_line({"type": "stream_event", "event": {
+                "type": "content_block_delta",
+                "delta": {"type": "thinking_delta", "thinking": "Let me think..."},
+            }}),
+            _sse_line({"type": "stream_event", "event": {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "Answer."},
+            }}),
+            _sse_line({"type": "result", "result": "Answer."}),
+        ]
+        self._patch(monkeypatch, lines)
+        deltas, thinks = [], []
+        out = code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=deltas.append, on_thinking=thinks.append,
+        )
+        assert thinks == ["Let me think..."]
+        assert deltas == ["Answer."]
+        assert out == "Answer."
+
+    def test_tool_use_fires_on_start_empty_then_again_with_full_args(self, monkeypatch):
+        lines = [
+            _sse_line({"type": "stream_event", "event": {
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": "t1", "name": "Bash"},
+            }}),
+            _sse_line({"type": "stream_event", "event": {
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": '{"command":'},
+            }}),
+            _sse_line({"type": "stream_event", "event": {
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": '"ls"}'},
+            }}),
+            _sse_line({"type": "stream_event", "event": {
+                "type": "content_block_stop", "index": 0,
+            }}),
+            _sse_line({"type": "result", "result": "done"}),
+        ]
+        self._patch(monkeypatch, lines)
+        calls = []
+        code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_tool_use=lambda n, a: calls.append((n, a)),
+        )
+        assert calls[0] == ("Bash", "")
+        assert calls[1] == ("Bash", '{"command":"ls"}')
+
+    def test_tool_result_relayed_from_user_role_message(self, monkeypatch):
+        lines = [
+            _sse_line({"type": "user", "message": {"content": [
+                {"type": "tool_result", "content": "file1.py\nfile2.py"},
+            ]}}),
+            _sse_line({"type": "result", "result": "Listed the files."}),
+        ]
+        self._patch(monkeypatch, lines)
+        results = []
+        code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_tool_result=results.append,
+        )
+        assert results == ["file1.py\nfile2.py"]
+
+    def test_session_continuity_same_as_run_claude(self, monkeypatch):
+        seen: list = []
+        lines = [_sse_line({"type": "result", "result": "ok"})]
+        self._patch(monkeypatch, lines, seen=seen)
+        code_backends.stream_claude("first", cwd="/tmp/proj-stream", timeout=30, on_delta=lambda t: None)
+        code_backends.stream_claude("second", cwd="/tmp/proj-stream", timeout=30, on_delta=lambda t: None)
+        assert "--session-id" in seen[0]
+        assert "--resume" in seen[1]
+
+    def test_nonzero_exit_raises_with_real_stderr(self, monkeypatch):
+        self._patch(monkeypatch, [], returncode=1, stderr_text="boom: bad flag")
+        with pytest.raises(RuntimeError, match="boom: bad flag"):
+            code_backends.stream_claude("task", cwd="/tmp/proj", timeout=30, on_delta=lambda t: None)
+
+    def test_empty_stderr_nonzero_exit_gives_the_not_signed_in_hint(self, monkeypatch):
+        self._patch(monkeypatch, [], returncode=1, stderr_text="")
+        with pytest.raises(RuntimeError, match="NOT SIGNED IN"):
+            code_backends.stream_claude("task", cwd="/tmp/proj", timeout=30, on_delta=lambda t: None)
+
+    def test_no_result_event_is_an_honest_error(self, monkeypatch):
+        self._patch(monkeypatch, [_sse_line({"type": "system", "subtype": "init"})])
+        with pytest.raises(RuntimeError, match="no output"):
+            code_backends.stream_claude("task", cwd="/tmp/proj", timeout=30, on_delta=lambda t: None)
+
+    def test_cli_not_found_is_not_configured(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.general_roster._find_claude_cli", lambda: None)
+        with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
+            code_backends.stream_claude("task", cwd="/tmp/proj", timeout=30, on_delta=lambda t: None)
+
+    def test_uses_accept_edits_permission_mode(self, monkeypatch):
+        seen: list = []
+        self._patch(monkeypatch, [_sse_line({"type": "result", "result": "ok"})], seen=seen)
+        code_backends.stream_claude("task", cwd="/tmp/proj", timeout=30, on_delta=lambda t: None)
+        argv = seen[0]
+        assert "--permission-mode" in argv
+        assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
+        assert "--output-format" in argv
+        assert argv[argv.index("--output-format") + 1] == "stream-json"
+        assert "--include-partial-messages" in argv

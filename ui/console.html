@@ -551,6 +551,8 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
   padding:11px 13px;margin:0 0 12px;background:rgba(242,183,61,.06)}
 .approve .t{font-size:9px;letter-spacing:.16em;color:var(--amber);margin-bottom:6px}
 .approve .p{font-size:11px;color:var(--blue-hi);margin-bottom:10px;word-break:break-word}
+.approve .hint{font-size:10px;color:var(--blue-dim);margin-bottom:10px}
+.approve .hint b{color:var(--amber)}
 .approve .r{display:flex;gap:7px;flex-wrap:wrap}
 .btn{min-height:34px;padding:8px 15px;border:1px solid var(--line-2);background:var(--panel2);
   color:var(--blue-hi);border-radius:2px;cursor:pointer;font-size:9px;letter-spacing:.14em}
@@ -1832,17 +1834,35 @@ function wireCopies(root){
     pre.appendChild(b);
   });
 }
+// v13.2: gmail_send/email_own_send are the two REAL email-sending
+// confirm_prompt texts (general_roster.py owns both, word-for-word) —
+// checked here instead of threading a tool-name field through the
+// confirmation_gate interface (Callable[[str], bool] everywhere,
+// including ~20 single-arg test fakes) just for a cosmetic UI split.
+// On explicit user request: sending should need exactly ONE thing —
+// typing "send it" in the directive box (the imperative-affirm phrases
+// already resolve any pending confirmation server-side, see webui.py's
+// _is_imperative_affirm) — no separate APPROVE button to click.
+function _isEmailSendPrompt(promptText){
+  const p = promptText||"";
+  return p.startsWith("Send Gmail to ") || p.startsWith("Send mail FROM the Dourmouse identity");
+}
 function addApproval(node, evt, declineMap){
   const box=document.createElement("div"); box.className="approve";
-  box.innerHTML=`<div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
-    <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div>`;
+  const isEmail = _isEmailSendPrompt(evt.prompt);
+  box.innerHTML = isEmail
+    ? `<div class="t">◆ SEND THIS EMAIL?</div><div class="p"></div>
+       <div class="hint">Type <b>send it</b> in the box below to send — or click CANCEL.</div>
+       <div class="r"><button class="btn">CANCEL</button></div>`
+    : `<div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
+       <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div>`;
   box.querySelector(".p").textContent = evt.prompt||"This action needs your approval.";
   node.body.parentNode.insertBefore(box, node.body);
   liveAdd("act","Waiting for your approval", (evt.prompt||"").slice(0,90));
-  const [yes,no]=box.querySelectorAll("button"); let done=false;
+  const buttons=box.querySelectorAll("button"); let done=false;
   const decide=async(ok)=>{ if(done)return; done=true;
     if(declineMap) declineMap.delete(evt.id);
-    box.classList.add("done"); box.querySelector(".t").textContent = ok?"◆ APPROVED":"◆ DECLINED";
+    box.classList.add("done"); box.querySelector(".t").textContent = ok?"◆ APPROVED":(isEmail?"◆ CANCELLED":"◆ DECLINED");
     box.querySelector(".r").remove();
     liveAdd(ok?"done":"err", ok?"You approved it":"You declined it","");
     try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -1851,8 +1871,14 @@ function addApproval(node, evt, declineMap){
   // v13.2: STOP needs a way to auto-decline this exact box (see pendingDeclines
   // at its declaration) — registered here, not just wired to the buttons.
   if(declineMap) declineMap.set(evt.id, ()=>decide(false));
-  yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
-  yes.focus();
+  if(isEmail){
+    buttons[0].onclick=()=>decide(false);
+    buttons[0].focus();
+  } else {
+    const [yes,no]=buttons;
+    yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
+    yes.focus();
+  }
 }
 // v13.2 (live-caught, real bug): measured the raw SSE stream directly
 // against the actual "cloud" backend (a Python script timestamping every

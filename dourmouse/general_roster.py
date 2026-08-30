@@ -3474,11 +3474,16 @@ def build_general_registry() -> DispatchRegistry:
                     handler=_spotify_wrap(_spotify_state_tool),
                 ),
                 ToolSpec(
+                    # v13.2: ungated on explicit user request — playback
+                    # control (pause/skip/volume) is reversible and low-
+                    # stakes, unlike an email send or a file delete; the
+                    # confirmation round-trip was pure friction for
+                    # something the user asks for directly by name every
+                    # time anyway.
                     name="spotify_playback_control",
                     description=(
                         "CONTROL Spotify playback: next | previous | pause | resume | "
-                        "volume <0-100>. Confirmation-gated (changes the user's "
-                        "playback). Requires Spotify Premium."
+                        "volume <0-100>. Requires Spotify Premium."
                     ),
                     parameters={
                         "type": "object",
@@ -3488,16 +3493,16 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["action"],
                     },
                     handler=_spotify_control_tool,
-                    permission=Permission.REQUIRES_CONFIRMATION,
-                    confirm_prompt=lambda a: (
-                        f"Control Spotify playback: {a.get('action', '?')}"
-                    ),
                 ),
                 ToolSpec(
+                    # v13.2: ungated on explicit user request — same
+                    # rationale as spotify_playback_control above. The
+                    # anti-fabrication rule (never invent a URI) is the
+                    # real safety here, not a confirmation click.
                     name="spotify_play",
                     description=(
                         "Start playback of a spotify: track/album/playlist URI on an "
-                        "active device. Confirmation-gated. Requires Spotify Premium. "
+                        "active device. Requires Spotify Premium. "
                         "NEVER invent a URI: call spotify_playlists (for the user's "
                         "playlists) or spotify_search (for tracks/albums/artists) "
                         "FIRST and use the exact URI they return. Fabricated playlist "
@@ -3511,8 +3516,6 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["uri"],
                     },
                     handler=_spotify_play_tool,
-                    permission=Permission.REQUIRES_CONFIRMATION,
-                    confirm_prompt=lambda a: f"Play on Spotify: {a.get('uri', '?')}",
                 ),
                 ToolSpec(
                     name="spotify_search",
