@@ -48,3 +48,17 @@ def _llm_backend_isolated(monkeypatch):
     # Disable backend fallback in tests — tests expect the config they set up,
     # not a fallback decision. Production code still gets fallback in load_llm_config_with_fallback().
     monkeypatch.setenv("DOURMOUSE_FALLBACK_DISABLED", "1")
+    # v13 (real gap this same isolation was supposed to close, live-caught):
+    # config.is_configured() checks NVIDIA_API_KEY BEFORE it ever looks at
+    # DOURMOUSE_LLM_BACKEND — this fixture neutralized the backend
+    # selection above but never touched that key, so a developer .env with
+    # a real NVIDIA_API_KEY set (this repo's own for most of this project's
+    # life) made is_configured() return True in every test regardless,
+    # exactly the "developer machine's real .env leaking into the test
+    # suite" failure mode this file's own docstring describes. Surfaced the
+    # moment that key was removed: 3 tests that render "/" started getting
+    # a real 302-to-/setup instead of 200, because they had never actually
+    # been testing the CONFIGURED path — they were testing whatever this
+    # machine's real credentials happened to leave is_configured() as.
+    for _key in ("NVIDIA_API_KEY", "DEEPSEEK_API_KEY", "FREEBUFF_DEEPSEEK_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(_key, raising=False)

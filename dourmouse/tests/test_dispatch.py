@@ -10,6 +10,7 @@ LLM side of the conversation, never the tools' output.
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -2035,3 +2036,125 @@ class TestRepeatToolCallGuard:
         )
         run_dispatch("echo twice", registry, client=client, max_turns=5)
         assert len(calls) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Heartbeat during a slow model call (v13) — live bug this fixes: a slow
+# local model gives ZERO signal for its entire prefill phase (no tokens
+# exist yet to stream), measured live at 60+ seconds of nothing visible —
+# indistinguishable from a hung request, reported as "no reply".
+# --------------------------------------------------------------------------- #
+
+class _SlowFakeCompletions:
+    """create() blocks for `delay` seconds before returning — real enough
+    to let a background heartbeat thread actually fire during the call,
+    without a real model or real sleep-heavy test."""
+
+    def __init__(self, message, delay: float):
+        self._message = message
+        self._delay = delay
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        time.sleep(self._delay)
+        return _FakeResponse(self._message)
+
+
+class _SlowFakeClient:
+    def __init__(self, message, delay: float):
+        self.chat = _FakeChat(_SlowFakeCompletions(message, delay))
+
+
+class TestCallWithRetryHeartbeat:
+    def test_no_event_sink_means_no_heartbeat_thread(self, monkeypatch):
+        """Default behavior (no event_sink) must be byte-identical to
+        before this feature existed — no thread spawned, no event ever
+        emitted, zero risk to every caller that doesn't opt in."""
+        monkeypatch.setattr(dispatch_module, "_HEARTBEAT_INTERVAL_S", 0.02)
+        client = _SlowFakeClient(_FakeMessage(content="done"), delay=0.08)
+        response = dispatch_module._call_with_retry(
+            client, model="m", messages=[], tools=[], config=None,
+        )
+        assert response.choices[0].message.content == "done"
+
+    def test_heartbeat_fires_while_the_call_is_blocked(self, monkeypatch):
+        monkeypatch.setattr(dispatch_module, "_HEARTBEAT_INTERVAL_S", 0.02)
+        client = _SlowFakeClient(_FakeMessage(content="done"), delay=0.12)
+        seen: list[dict] = []
+        response = dispatch_module._call_with_retry(
+            client, model="qwen2.5:7b", messages=[], tools=[], config=None,
+            event_sink=seen.append,
+        )
+        assert response.choices[0].message.content == "done"
+        beats = [e for e in seen if e["type"] == "brain_thinking"]
+        assert beats, "expected at least one heartbeat during a 0.12s call with a 0.02s interval"
+        assert all(b["model"] == "qwen2.5:7b" for b in beats)
+        assert all(isinstance(b["elapsed_s"], (int, float)) for b in beats)
+
+    def test_heartbeat_never_fires_after_the_call_returns(self, monkeypatch):
+        """The background thread must be stopped and joined before
+        _call_with_retry returns — a heartbeat arriving AFTER the real
+        answer would be a confusing, meaningless event."""
+        monkeypatch.setattr(dispatch_module, "_HEARTBEAT_INTERVAL_S", 0.02)
+        client = _SlowFakeClient(_FakeMessage(content="done"), delay=0.05)
+        seen: list[dict] = []
+        dispatch_module._call_with_retry(
+            client, model="m", messages=[], tools=[], config=None,
+            event_sink=seen.append,
+        )
+        count_immediately_after = len(seen)
+        time.sleep(0.08)  # well past another heartbeat interval
+        assert len(seen) == count_immediately_after
+
+    def test_a_fast_call_never_gets_a_heartbeat(self, monkeypatch):
+        """A call that finishes before the first interval elapses must
+        produce zero heartbeat noise — this is a slow-call safety net,
+        not a per-call status ping."""
+        monkeypatch.setattr(dispatch_module, "_HEARTBEAT_INTERVAL_S", 5.0)
+        client = _SlowFakeClient(_FakeMessage(content="done"), delay=0.01)
+        seen: list[dict] = []
+        dispatch_module._call_with_retry(
+            client, model="m", messages=[], tools=[], config=None,
+            event_sink=seen.append,
+        )
+        assert seen == []
+
+    def test_a_raising_sink_never_breaks_the_real_call(self, monkeypatch):
+        """Same discipline as every other event_sink in this codebase
+        (Rule: a UI-streaming observer must never break the dispatch it's
+        observing)."""
+        monkeypatch.setattr(dispatch_module, "_HEARTBEAT_INTERVAL_S", 0.02)
+        client = _SlowFakeClient(_FakeMessage(content="done"), delay=0.08)
+
+        def _boom(entry):
+            raise RuntimeError("sink exploded")
+
+        response = dispatch_module._call_with_retry(
+            client, model="m", messages=[], tools=[], config=None,
+            event_sink=_boom,
+        )
+        assert response.choices[0].message.content == "done"
+
+    def test_heartbeat_survives_a_raising_call(self, monkeypatch):
+        """The heartbeat thread must still be stopped/joined cleanly even
+        when the underlying model call raises — no leaked thread, no
+        hang on the way out."""
+        monkeypatch.setattr(dispatch_module, "_HEARTBEAT_INTERVAL_S", 0.02)
+
+        class _BoomCompletions:
+            def create(self, **kwargs):
+                time.sleep(0.08)
+                raise RuntimeError("model call failed")
+
+        class _BoomClient:
+            def __init__(self):
+                self.chat = _FakeChat(_BoomCompletions())
+
+        seen: list[dict] = []
+        with pytest.raises(RuntimeError, match="model call failed"):
+            dispatch_module._call_with_retry(
+                _BoomClient(), model="m", messages=[], tools=[], config=None,
+                event_sink=seen.append,
+            )
+        assert any(e["type"] == "brain_thinking" for e in seen)

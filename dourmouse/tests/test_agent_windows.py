@@ -57,7 +57,12 @@ class TestAgentPageRoute:
         status, body = _get(server[1], "/agent/does_not_exist")
         assert status == 404
 
-    def test_map_and_index_still_served(self, server):
+    def test_map_and_index_still_served(self, server, monkeypatch):
+        # v13: "/" opts into a configured backend explicitly — see
+        # test_webui.py's test_ui_html_served for why (root conftest.py's
+        # hermetic isolation makes "no backend configured" the default
+        # test state, so an unconfigured "/" honestly redirects to /setup).
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
         assert _get(server[1], "/")[0] == 200
         assert _get(server[1], "/map")[0] == 200
 

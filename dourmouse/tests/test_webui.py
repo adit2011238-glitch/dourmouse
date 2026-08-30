@@ -339,8 +339,20 @@ class TestHttpEndpoints:
         assert newest["turns"] == 2
         conn.close()
 
-    def test_ui_html_served(self, server):
-        """v8.7: "/" serves the CONSOLE (the new default surface)."""
+    def test_ui_html_served(self, server, monkeypatch):
+        """v8.7: "/" serves the CONSOLE (the new default surface).
+
+        v13: "/" redirects to /setup when config.is_configured() is False
+        — root conftest.py's hermetic isolation deliberately makes that the
+        DEFAULT test state (no real backend selected). This test is about
+        what an already-configured install serves, so it opts into that
+        state explicitly rather than relying on whatever real credentials
+        happen to be sitting in a developer's own .env (the exact
+        leakage the isolation fixture exists to prevent — see its own
+        docstring for the real incident this test itself turned out to be
+        quietly depending on).
+        """
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
         srv, port = server
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request("GET", "/")
@@ -1456,7 +1468,7 @@ class TestPwaEndpoints:
             assert "image/png" in ctype
             assert body[:8] == b"\x89PNG\r\n\x1a\n"
 
-    def test_index_has_pwa_head_tags(self, server):
+    def test_index_has_pwa_head_tags(self, server, monkeypatch):
         """Whatever "/" serves must be installable.
 
         v8.7: this caught a real regression — promoting the console to the
@@ -1464,7 +1476,11 @@ class TestPwaEndpoints:
         would have silently killed "Add to Home Screen" and the standalone
         window. Asserted on "/" (not a fixed file) so the NEXT change of
         default surface has to carry the install metadata too.
+
+        v13: opts into a configured backend explicitly — see
+        test_ui_html_served's own docstring for why "/" needs this now.
         """
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
         status, ctype, body = self._get(server, "/")
         assert status == 200
         html = body.decode("utf-8", errors="replace")

@@ -199,6 +199,15 @@ def _usage_of(response: Any) -> dict[str, int]:
     return out
 
 
+#: How often the "still working" heartbeat fires while a model call is
+#: blocked with zero visible output — see _call_with_retry's own
+#: heartbeat thread below. 3s: frequent enough that a user watching the
+#: UI never wonders if the tab died, infrequent enough it's not visual
+#: noise on a call that finishes fast anyway (nothing fires before the
+#: first interval elapses).
+_HEARTBEAT_INTERVAL_S = 3.0
+
+
 def _call_with_retry(
     client: Any,
     *,
@@ -208,6 +217,7 @@ def _call_with_retry(
     config: NvidiaConfig | None,
     call_log: list[dict[str, Any]] | None = None,
     on_delta: Callable[[str], None] | None = None,
+    event_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> Any:
     """LLM call with bounded retry + backoff, optional fallback, and timing.
 
@@ -216,9 +226,39 @@ def _call_with_retry(
     timing wraps the whole retry sequence deliberately: what a user waits for
     is the total, including backoff and any fallback attempt, not the duration
     of the one attempt that happened to succeed.
+
+    v13 (live-caught, real bug): a slow local-model call gives the UI
+    ZERO signal for the entire PREFILL phase — no tokens exist yet to
+    stream, so even the streaming path (_stream_completion's on_delta)
+    sits silent. Live-measured: a real turn's prefill alone ran 60+
+    seconds with nothing visible, indistinguishable from a hung/dead
+    request — exactly what got reported as "no reply". When ``event_sink``
+    is given, a background thread emits a real elapsed-time "brain_thinking"
+    event every _HEARTBEAT_INTERVAL_S while the (blocking) call runs, so
+    the UI can show real progress ("still thinking — 45s") instead of a
+    frozen screen. Purely additive: the heartbeat thread never touches
+    the actual model call or its result, and the LAST heartbeat is
+    always followed by a genuine response or a genuine error — never a
+    fabricated one.
     """
     start = time.perf_counter()
     ok = True
+    stop_heartbeat = threading.Event()
+    heartbeat_thread: threading.Thread | None = None
+    if event_sink is not None:
+        def _beat() -> None:
+            while not stop_heartbeat.wait(_HEARTBEAT_INTERVAL_S):
+                _emit_event(
+                    event_sink,
+                    {
+                        "type": "brain_thinking",
+                        "model": model,
+                        "elapsed_s": round(time.perf_counter() - start, 1),
+                    },
+                )
+
+        heartbeat_thread = threading.Thread(target=_beat, daemon=True)
+        heartbeat_thread.start()
     try:
         response = _call_with_retry_inner(
             client,
@@ -235,6 +275,9 @@ def _call_with_retry(
         response = None
         raise
     finally:
+        stop_heartbeat.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=1.0)
         try:
             from dourmouse import obs
 
@@ -685,7 +728,22 @@ _SYSTEM_PROMPT = (
 # honors think=False (measured: 2+2 in 3.2s/9 tokens vs 39.6s/188). So the
 # local path talks to the native API directly: real streaming, a warm model,
 # and a proper context window instead of the 4096-token truncation default.
-_OLLAMA_NUM_CTX = 8192
+#
+# v13 (live-caught, real bug): 8192 was only ever "double Ollama's own
+# 4096 default" — never derived from this roster's real prompt sizes.
+# Live-measured on a real multi-turn conversation: the always-sent system
+# prompt alone (33-agent roster description) is ~3,700 tokens, and a
+# single real turn (one gmail_search + a summarize pass, ordinary
+# COMMS-screen usage) reached 6,719 tokens of prompt — 82% of the OLD
+# 8192 ceiling. The observed failure mode at that size was not a clean
+# truncation error: the model silently produced a fully unrelated
+# hallucinated answer (a linear-programming script, asked to summarize
+# an inbox) after 323s. qwen2.5:7b's own real context length (`ollama
+# show qwen2.5:7b`) is 32768 — Dourmouse was capping it to a quarter of
+# what it actually supports. Raised to give real headroom against this
+# exact failure; still well under the model's own ceiling, so KV-cache
+# memory cost stays bounded rather than jumping straight to 32768.
+_OLLAMA_NUM_CTX = 16384
 _OLLAMA_KEEP_ALIVE = "30m"
 
 #: Models whose chat template ignores the `think` / `enable_thinking` request
@@ -2405,6 +2463,7 @@ def _run_dispatch_loop(
                     tools=scoped_tools,
                     config=ctx.config,
                     on_delta=on_delta,
+                    event_sink=event_sink,
                 )
         else:
             response = _call_with_retry(
@@ -2414,6 +2473,7 @@ def _run_dispatch_loop(
                 tools=scoped_tools,
                 config=ctx.config,
                 on_delta=on_delta,
+                event_sink=event_sink,
             )
         message = response.choices[0].message
 
@@ -2705,6 +2765,7 @@ def _run_dispatch_loop(
             messages=_bounded_context(forced_messages, _MAX_LLM_TOKENS),
             tools=[],  # no tools offered: the model cannot keep stalling on search
             config=ctx.config,
+            event_sink=event_sink,
         )
         forced_text = forced_response.choices[0].message.content or ""
     except Exception as exc:  # noqa: BLE001 - the forced call itself must never crash the turn

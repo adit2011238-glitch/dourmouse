@@ -1882,6 +1882,20 @@ async function run(text){
             node.st.textContent="GENERATING";
             liveAdd("act","Routing", (onNode?`compute node · ${shown}`:shown)+kind);
             break; }
+          case "brain_thinking":{
+            // v13 (live-caught bug): a slow local model gives ZERO signal
+            // during prefill — .tm's own ticking clock (see addReply's
+            // comment) proves the BROWSER is still alive, but not that the
+            // SERVER/model call actually is. This is a real heartbeat from
+            // inside the blocking model call itself (dispatch.py's
+            // _call_with_retry) — it can only arrive if the request is
+            // genuinely still being served, so a CHANGING value here (not
+            // a frozen one) is the actual "is it thinking or dead"
+            // confirmation the .tm clock alone can't give.
+            const shownModel=(e.model||"").split("/").pop()||e.model||"";
+            node.st.textContent = `THINKING · ${e.elapsed_s}s confirmed alive`;
+            liveAdd("act", `Still working (${shownModel})`, `${e.elapsed_s}s elapsed — no answer yet, connection is alive`);
+            break; }
           case "plan": act(node.acts,"PLAN",""); node.noteStep(); liveAdd("act","Planning the steps",""); break;
           case "tool_use": case "function":{
             const nm=e.name||e.tool||"tool"; const w=describeTool(nm);
