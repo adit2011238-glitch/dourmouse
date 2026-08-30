@@ -56,6 +56,7 @@ from dourmouse.config import (
     fast_lane_server_enabled,
     load_llm_config,
 )
+from dourmouse import model_router
 from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.governance import (
     BudgetTracker,
@@ -219,6 +220,7 @@ def _call_with_retry(
     on_delta: Callable[[str], None] | None = None,
     on_thinking: Callable[[str], None] | None = None,
     event_sink: Callable[[dict[str, Any]], None] | None = None,
+    client_factory: Callable[[], Any] | None = None,
 ) -> Any:
     """LLM call with bounded retry + backoff, optional fallback, and timing.
 
@@ -270,6 +272,7 @@ def _call_with_retry(
             call_log=call_log,
             on_delta=on_delta,
             on_thinking=on_thinking,
+            client_factory=client_factory,
         )
         return response
     except BaseException:
@@ -310,6 +313,7 @@ def _call_with_retry_inner(
     call_log: list[dict[str, Any]] | None = None,
     on_delta: Callable[[str], None] | None = None,
     on_thinking: Callable[[str], None] | None = None,
+    client_factory: Callable[[], Any] | None = None,
 ) -> Any:
     """LLM call with bounded retry + backoff, and optional model fallback.
 
@@ -318,6 +322,15 @@ def _call_with_retry_inner(
     if still failing and a ``fallback_model`` is configured, ONE fallback
     attempt runs against the second model before giving up. Never retries
     non-transient errors. The real response object is returned.
+
+    v13.1 (Aider port part 4/4, dourmouse/model_router.py): ``client_factory``
+    is purely additive — omitted (the default), behavior is byte-for-byte
+    unchanged from before this parameter existed. When given, a
+    rate-limit-shaped failure calls it again for the NEXT attempt instead
+    of retrying the SAME exhausted client — the caller is expected to have
+    already marked the current account's cooldown (see _build_client's
+    multi-account wiring) so the factory naturally returns a DIFFERENT
+    account's client when one is configured and available.
     """
     retries = max(0, int(config.max_retries)) if config else 0
     backoff = float(config.retry_backoff) if config else 0.5
@@ -351,6 +364,11 @@ def _call_with_retry_inner(
             if not _is_transient_error(exc):
                 raise
             if attempt < retries:
+                if client_factory is not None and model_router.is_rate_limit_error(exc):
+                    try:
+                        client = client_factory()
+                    except Exception:  # noqa: BLE001 - a bad factory must not break the retry itself
+                        pass
                 time.sleep(backoff * (2**attempt))
     if fallback and fallback != model:
         if call_log is not None:
@@ -1093,6 +1111,69 @@ class OllamaNativeClient:
                 )
             )
         return out
+
+
+#: v13.1 (Aider port part 4/4, dourmouse/model_router.py): the NVIDIA
+#: account pool lives for the process lifetime — cooldown state MUST
+#: survive across calls (that's the entire point: skip an account that
+#: just rate-limited on the NEXT call, not just within one retry loop).
+#: Built lazily so a process that never sets NVIDIA_API_KEY_2 never pays
+#: for it, and reset()-able for tests that need a fresh one per case.
+_nvidia_account_pool: model_router.AccountPool | None = None
+
+
+def _get_nvidia_account_pool() -> model_router.AccountPool:
+    global _nvidia_account_pool
+    if _nvidia_account_pool is None:
+        _nvidia_account_pool = model_router.AccountPool(
+            model_router.accounts_from_env("nvidia", "NVIDIA_API_KEY")
+        )
+    return _nvidia_account_pool
+
+
+def _reset_account_pools_for_testing() -> None:
+    """Test-only: forces the next _get_nvidia_account_pool() call to
+    rebuild from the CURRENT environment instead of a stale cached one."""
+    global _nvidia_account_pool
+    _nvidia_account_pool = None
+
+
+def _nvidia_rotation_factory(
+    initial_client: Any, config: NvidiaConfig | OllamaConfig | OmniRouteConfig | None
+) -> Callable[[], Any] | None:
+    """None (no rotation) unless 2+ NVIDIA accounts are actually
+    configured — a single-account setup (the overwhelmingly common case)
+    is completely untouched by this: _call_with_retry_inner's
+    client_factory stays unused and behavior is byte-for-byte what it was
+    before multi-account routing existed.
+
+    When 2+ accounts ARE configured: returns a closure that, each time
+    _call_with_retry_inner calls it after a rate-limit error, marks the
+    account that just failed into cooldown and builds a fresh OpenAI
+    client against the next available one.
+    """
+    if not isinstance(config, NvidiaConfig):
+        return None
+    pool = _get_nvidia_account_pool()
+    if len(pool) < 2:
+        return None
+    state: dict[str, model_router.Account | None] = {"current": None}
+
+    def factory() -> Any:
+        previous = state["current"]
+        if previous is not None:
+            pool.mark_rate_limited(previous.name)
+        account = pool.select(exclude=previous.name if previous else None)
+        if account is None:
+            # every account is cooling down — keep serving on the one we
+            # already have rather than raising here; the caller's own
+            # retry/fallback machinery still runs against it and surfaces
+            # the real error if it genuinely can't succeed.
+            return initial_client
+        state["current"] = account
+        return OpenAI(api_key=account.api_key or "local-keyless", base_url=config.base_url)
+
+    return factory
 
 
 def _build_client(
@@ -2756,6 +2837,12 @@ def _run_dispatch_loop(
             def on_thinking(text: str) -> None:
                 _emit_event(ctx.event_sink, {"type": "thinking_delta", "text": text})
 
+        # v13.1 (Aider port part 4/4): None unless 2+ NVIDIA accounts are
+        # actually configured — see _nvidia_rotation_factory's own
+        # docstring for why a single-account setup is completely
+        # unaffected by this existing at all.
+        client_factory = _nvidia_rotation_factory(client, ctx.config)
+
         # v4.2 speed: the LLM sees a bounded rolling window (system +
         # in-flight exchange + recent history), never the unbounded
         # conversation. The full list stays authoritative for persistence.
@@ -2834,6 +2921,7 @@ def _run_dispatch_loop(
                     on_delta=on_delta,
                     on_thinking=on_thinking,
                     event_sink=event_sink,
+                    client_factory=client_factory,
                 )
         else:
             response = _call_with_retry(
@@ -2845,6 +2933,7 @@ def _run_dispatch_loop(
                 on_delta=on_delta,
                 on_thinking=on_thinking,
                 event_sink=event_sink,
+                client_factory=client_factory,
             )
         message = response.choices[0].message
 

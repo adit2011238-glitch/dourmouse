@@ -2363,6 +2363,166 @@ class TestCallWithRetryHeartbeat:
 
 
 # --------------------------------------------------------------------------- #
+# v13.1: Aider port part 4/4 (dourmouse/model_router.py) — multi-account
+# rotation wired into _call_with_retry_inner's retry loop via the
+# additive client_factory parameter.
+# --------------------------------------------------------------------------- #
+
+def _fake_rate_limit_error() -> Exception:
+    import httpx
+    import openai
+
+    resp = httpx.Response(429, request=httpx.Request("POST", "https://x"))
+    return openai.RateLimitError("rate limit exceeded", response=resp, body=None)
+
+
+class TestClientFactoryRotation:
+    """client_factory is purely additive to _call_with_retry_inner — these
+    pin both halves of that contract: omitted, behavior is unchanged;
+    given, a rate-limit failure rotates to whatever the factory returns
+    for the next attempt."""
+
+    def test_omitted_client_factory_is_unchanged_behavior(self):
+        """The default (no client_factory) path must be byte-identical to
+        before this parameter existed."""
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        response = dispatch_module._call_with_retry(
+            client, model="m", messages=[], tools=[], config=None,
+        )
+        assert response.choices[0].message.content == "ok"
+
+    def test_rate_limit_error_calls_the_factory_for_the_next_attempt(self):
+        from dourmouse.config import NvidiaConfig
+
+        failing = FakeClient([_FakeResponse(_FakeMessage(content="never used"))])
+        failing.chat.completions.create = lambda **k: (_ for _ in ()).throw(_fake_rate_limit_error())
+        succeeding = FakeClient([_FakeResponse(_FakeMessage(content="rotated ok"))])
+        factory_calls = []
+
+        def factory():
+            factory_calls.append(1)
+            return succeeding
+
+        config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1)
+        response = dispatch_module._call_with_retry(
+            failing, model="m", messages=[], tools=[], config=config,
+            client_factory=factory,
+        )
+        assert response.choices[0].message.content == "rotated ok"
+        assert len(factory_calls) == 1
+
+    def test_non_rate_limit_transient_error_never_calls_the_factory(self):
+        """Only a rate-limit-shaped failure should trigger rotation — a
+        plain connection/timeout error retries the SAME client, since
+        switching accounts wouldn't fix a network problem."""
+        import httpx
+        import openai
+
+        from dourmouse.config import NvidiaConfig
+
+        call_count = {"n": 0}
+
+        def flaky(**k):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise openai.APITimeoutError(request=httpx.Request("POST", "https://x"))
+            return _FakeResponse(_FakeMessage(content="ok after retry"))
+
+        client = FakeClient([_FakeResponse(_FakeMessage(content="unused"))])
+        client.chat.completions.create = flaky
+        factory_calls = []
+        config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1)
+        response = dispatch_module._call_with_retry(
+            client, model="m", messages=[], tools=[], config=config,
+            client_factory=lambda: factory_calls.append(1),
+        )
+        assert response.choices[0].message.content == "ok after retry"
+        assert factory_calls == []
+
+    def test_a_raising_factory_never_breaks_the_retry(self):
+        """A broken client_factory must not take down the call it was
+        meant to help — the existing retry/backoff still runs against
+        the original client."""
+        from dourmouse.config import NvidiaConfig
+
+        call_count = {"n": 0}
+
+        def flaky(**k):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise _fake_rate_limit_error()
+            return _FakeResponse(_FakeMessage(content="survived"))
+
+        client = FakeClient([_FakeResponse(_FakeMessage(content="unused"))])
+        client.chat.completions.create = flaky
+        config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1, retry_backoff=0.01)
+
+        def boom():
+            raise RuntimeError("factory exploded")
+
+        response = dispatch_module._call_with_retry(
+            client, model="m", messages=[], tools=[], config=config,
+            client_factory=boom,
+        )
+        assert response.choices[0].message.content == "survived"
+
+
+class TestNvidiaAccountPoolWiring:
+    """_get_nvidia_account_pool / _nvidia_rotation_factory — the concrete
+    wiring point between model_router.py and the live dispatch loop."""
+
+    def setup_method(self):
+        dispatch_module._reset_account_pools_for_testing()
+
+    def teardown_method(self):
+        dispatch_module._reset_account_pools_for_testing()
+
+    def test_single_account_yields_no_rotation_factory(self, monkeypatch):
+        from dourmouse.config import NvidiaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "only-key")
+        monkeypatch.delenv("NVIDIA_API_KEY_2", raising=False)
+        config = NvidiaConfig(api_key="only-key", base_url="https://x", model="m")
+        factory = dispatch_module._nvidia_rotation_factory(object(), config)
+        assert factory is None
+
+    def test_two_accounts_yields_a_working_rotation_factory(self, monkeypatch):
+        from dourmouse.config import NvidiaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "key1")
+        monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
+        config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
+        initial_client = object()
+        factory = dispatch_module._nvidia_rotation_factory(initial_client, config)
+        assert factory is not None
+        rotated = factory()
+        assert rotated is not initial_client
+        assert isinstance(rotated, dispatch_module.OpenAI)
+
+    def test_non_nvidia_config_yields_no_factory(self, monkeypatch):
+        from dourmouse.config import OllamaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "key1")
+        monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
+        factory = dispatch_module._nvidia_rotation_factory(object(), OllamaConfig())
+        assert factory is None
+
+    def test_pool_state_persists_across_factory_calls(self, monkeypatch):
+        """The whole point: calling the factory again after ANOTHER
+        rate-limit must not immediately re-select the account that just
+        failed."""
+        from dourmouse.config import NvidiaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "key1")
+        monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
+        config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
+        factory = dispatch_module._nvidia_rotation_factory(object(), config)
+        first = factory()
+        second = factory()
+        assert first.api_key != second.api_key
+
+
+# --------------------------------------------------------------------------- #
 # Claude/Ollama-Cloud orchestrator backend (v13, opt-in experiment) — the
 # user's own explicit ask: route every feature through a real strong
 # backend (Claude Code CLI, or a real Ollama Cloud account) instead of the
