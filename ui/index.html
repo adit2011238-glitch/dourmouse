@@ -1255,6 +1255,12 @@
   .vis-hint { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 14px;
     font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--cyan-bright);
     background: linear-gradient(transparent, rgba(6,8,15,.9)); }
+  .vis-hold-meter { position: absolute; left: 14px; right: 14px; bottom: 34px; z-index: 2; }
+  .vis-hold-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em;
+    color: var(--gold-bright); margin-bottom: 3px; }
+  .vis-hold-track { height: 4px; border-radius: 2px; background: rgba(127,224,255,.15); overflow: hidden; }
+  .vis-hold-fill { height: 100%; width: 0%; background: var(--cyan-bright);
+    transition: width 60ms linear; border-radius: 2px; }
   .vis-status { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .vis-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: rgba(11,15,26,.5); }
   .vis-card .vc-k { font-family: var(--font-mono); font-size: 9px; letter-spacing: .18em; color: var(--gold-bright); }
@@ -4276,6 +4282,68 @@ const __runV524 = () => {
     lastWaveX: null, lastWaveT: 0, waveSamples: [],
     mode: '',           // current continuous mode: 'POINTER' | 'SCROLL' | ''
   };
+  // v13.2 (VISION_ROADMAP.md Phase 1) — see the GLOBE MODE card's own
+  // comment in the VISION view markup for the full design rationale.
+  const GODS_EYE_ACTION_URL = 'http://localhost:4173/api/dourmouse/action';
+  let GLOBE_MODE = false;
+  function setGlobeModeUI() {
+    const btn = document.getElementById('visGlobeModeBtn');
+    if (btn) {
+      btn.textContent = 'GLOBE MODE: ' + (GLOBE_MODE ? 'ON' : 'OFF');
+      btn.classList.toggle('active', GLOBE_MODE);
+    }
+  }
+  function paintGlobeResult(text) {
+    const el = document.getElementById('visGlobeResult');
+    if (el) el.textContent = text;
+  }
+  // Best-effort by design (same convention as vision_bridge.py's own
+  // fail-open kill-switch reach): if no God's Eye View tab is open and
+  // polling, this times out honestly (dourmouseActionBridgeProxy's own
+  // 15s wait) rather than hanging the gesture engine or throwing into the
+  // camera loop. Never awaited by the caller — a gesture must feel
+  // instant even while this is still in flight.
+  function sendGevAction(name, args) {
+    paintGlobeResult('sending ' + name + '…');
+    return fetch(GODS_EYE_ACTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, args: args || {} }),
+    })
+      .then((res) => res.json())
+      .then((result) => {
+        if (result && result.ok === false) {
+          paintGlobeResult(name + ': ' + (result.error || 'failed'));
+        } else {
+          paintGlobeResult(name + ': ok');
+        }
+        return result;
+      })
+      .catch((err) => {
+        paintGlobeResult(
+          name + ': no God\'s Eye View tab reachable at localhost:4173 (' +
+          (err && err.message || err) + ')'
+        );
+        return { ok: false, error: String(err && err.message || err) };
+      });
+  }
+  // select_nearest_aircraft's real contract (gevActions.js) needs a
+  // preset/place-name/lat+lon -- there is no such thing as "nearest" with
+  // no reference point. A gesture has no typed location, so this asks the
+  // globe where its OWN camera is centered right now (get_current_view_state,
+  // the same real action get_current_view_state/analyst_query already use)
+  // and uses that as "nearest to what I'm currently looking at".
+  async function sendGevSelectNearestAircraft() {
+    const view = await sendGevAction('get_current_view_state', {});
+    if (!view || view.ok === false || !view.camera) {
+      paintGlobeResult('select nearest aircraft: could not read the current camera view');
+      return null;
+    }
+    return sendGevAction('select_nearest_aircraft', {
+      latitude: view.camera.latitude,
+      longitude: view.camera.longitude,
+    });
+  }
   const gestStack = [];
   function setVisState(k, v) { const el = VISION[k]; if (el) el.textContent = v; }
   function setGesture(name, detail) {
@@ -4305,50 +4373,74 @@ const __runV524 = () => {
         if (window.__activeStreamAbort) { try { window.__activeStreamAbort.abort(); } catch (_) {} }
         if (deck) { deck.ingest({ type: 'error', message: 'emergency stop by both palms' }); deckShow(false); }
         break;
-      case 'PINCH': // send directive (idle) OR click (pointer mode) — decided in onHands
+      case 'PINCH': // Globe Mode: zoom in. Otherwise: send directive (idle)
+                    // OR click (pointer mode) — decided in onHands.
+        if (GLOBE_MODE) { setGesture('PINCH', 'globe zoom in'); sendGevAction('adjust_camera_zoom', { direction: 'in' }); break; }
         setGesture('PINCH', 'send');
         if (input && document.activeElement !== input) input.focus();
         if (input && input.value.trim()) {
           input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
         } else if (deck) { deck.ingest({ type: 'error', message: 'pinch: type a directive first' }); }
         break;
-      case 'CLICK': // pointer-mode click at the cursor position
+      case 'CLICK': // pointer-mode click at the cursor position — no globe
+                    // remap, GLOBE MODE has no on-screen cursor concept.
         setGesture('PINCH', 'click');
         doClickAt(GS.px, GS.py);
         break;
-      case 'THUMBS_UP': // approve pending confirmation
+      case 'THUMBS_UP': // Globe Mode: select AND track the nearest aircraft
+                        // to the current view (select_nearest_aircraft
+                        // already tracks internally on success — see
+                        // sendGevSelectNearestAircraft's own comment).
+                        // Otherwise: approve pending confirmation.
+        if (GLOBE_MODE) { setGesture('THUMBS UP', 'globe track'); sendGevSelectNearestAircraft(); break; }
         setGesture('THUMBS UP', 'approve');
         if (deck && deck.approveConfirm()) {
           /* approved */
         } else { deck && deck.ingest({ type: 'error', message: 'no pending confirmation to approve' }); }
         break;
-      case 'THUMBS_DOWN': // deny pending confirmation
+      case 'THUMBS_DOWN': // Globe Mode: stop tracking. Otherwise: deny
+                           // pending confirmation.
+        if (GLOBE_MODE) { setGesture('THUMBS DOWN', 'globe stop tracking'); sendGevAction('stop_tracking', {}); break; }
         setGesture('THUMBS DOWN', 'deny');
         if (deck && deck.denyConfirm && deck.denyConfirm()) {
           /* denied */
         } else { deck && deck.ingest({ type: 'error', message: 'no pending confirmation to deny' }); }
         break;
       case 'POINT': // enter pointer mode — index fingertip steers the cursor
+                    // (no globe remap — GLOBE MODE has no cursor concept).
         setGesture('POINT', 'pointer');
         setMode('POINTER');
         break;
-      case 'PEACE': // hold: scroll down (continuous)
+      case 'PEACE': // Globe Mode: zoom out (continuous). Otherwise: hold to
+                    // scroll down.
+        if (GLOBE_MODE) { setGesture('PEACE', 'globe zoom out'); setMode('GLOBE_ZOOM_OUT'); break; }
         setGesture('PEACE', 'scroll down');
         setMode('SCROLL');
         break;
-      case 'THREE': // hold: scroll up (continuous)
+      case 'THREE': // Globe Mode: zoom in (continuous). Otherwise: hold to
+                    // scroll up.
+        if (GLOBE_MODE) { setGesture('THREE', 'globe zoom in'); setMode('GLOBE_ZOOM_IN'); break; }
         setGesture('THREE', 'scroll up');
         setMode('SCROLL');
         break;
-      case 'ROCK': // next view — cycle the workspace routes
+      case 'ROCK': // Globe Mode: reset to the full-globe view. Otherwise:
+                   // next view — cycle the workspace routes.
+        if (GLOBE_MODE) { setGesture('ROCK', 'globe reset'); sendGevAction('zoom_to_globe', {}); break; }
         setGesture('ROCK', 'next view');
         cycleView();
         break;
-      case 'OK': // command palette
+      case 'OK': // Globe Mode: select the nearest aircraft (see
+                 // sendGevSelectNearestAircraft — same underlying call as
+                 // THUMBS UP; select_nearest_aircraft has no separate
+                 // "select without tracking" mode in the real API).
+                 // Otherwise: open the command palette.
+        if (GLOBE_MODE) { setGesture('OK', 'globe select nearest'); sendGevSelectNearestAircraft(); break; }
         setGesture('OK', 'command palette');
         if (window.openPalette) window.openPalette();
         break;
-      case 'FIST': // dismiss the task deck
+      case 'FIST': // Globe Mode: frame the view from overhead. Otherwise:
+                   // dismiss the task deck.
+        if (GLOBE_MODE) { setGesture('FIST', 'globe frame overhead'); sendGevAction('frame_overhead', {}); break; }
         setGesture('FIST', 'dismiss');
         deckShow(false);
         break;
@@ -4420,20 +4512,39 @@ const __runV524 = () => {
     return { g, up, ext, thumbOut, pinch, ok, scale, tip: _pt(lm, 8) };
   }
   // --- hysteresis + cooldown state machine ---
+  // v13.2 (VISION_ROADMAP.md Phase 4): the hysteresis counters above
+  // (GS.pending/GS.count/GS.NEED) already exist for gating WHEN a gesture
+  // fires — this just makes that real internal state visible, so a hand
+  // that's recognized but hasn't held long enough shows a filling bar
+  // instead of silently doing nothing.
+  function paintHoldMeter(name, count) {
+    const meter = document.getElementById('visHoldMeter');
+    const fill = document.getElementById('visHoldFill');
+    const label = document.getElementById('visHoldLabel');
+    if (!meter || !fill || !label) return;
+    if (!name || count <= 0) { meter.style.display = 'none'; return; }
+    meter.style.display = 'block';
+    const pct = Math.min(100, Math.round((count / GS.NEED) * 100));
+    fill.style.width = pct + '%';
+    label.textContent = 'HOLD ' + name + ' — ' + Math.min(count, GS.NEED) + '/' + GS.NEED;
+  }
   function commitGesture(name) {
     const now = Date.now();
     if (GS.cooldown[name] && now - GS.cooldown[name] < GS.COOLDOWN_MS) return;
     GS.cooldown[name] = now;
     GS.pending = null; GS.count = 0;
+    paintHoldMeter(null, 0);
     gestureAct(name);
   }
   function feedGesture(name) {
-    if (!name) { GS.pending = null; GS.count = 0; return; }
+    if (!name) { GS.pending = null; GS.count = 0; paintHoldMeter(null, 0); return; }
     if (GS.pending === name) {
       GS.count++;
+      paintHoldMeter(name, GS.count);
       if (GS.count >= GS.NEED) commitGesture(name);
     } else {
       GS.pending = name; GS.count = 1;
+      paintHoldMeter(name, 1);
     }
   }
   // --- continuous scroll (velocity from palm movement) ---
@@ -4489,6 +4600,8 @@ const __runV524 = () => {
       setVisState('fingerEl', '—');
       setMode('');
       GS.pending = null; GS.count = 0; GS.lastPalmY = null;
+      paintHoldMeter(null, 0);
+      if (GS._globePanning) { GS._globePanning = false; sendGevAction('move_camera', { motion: 'stop' }); }
       return;
     }
     const hands = result.landmarks;
@@ -4513,6 +4626,40 @@ const __runV524 = () => {
     }
     // continuous modes — run every frame, never gated
     if (s.g === 'POINT') {
+      if (GLOBE_MODE) {
+        // v13.2 (VISION_ROADMAP.md Phase 2, option 2 — coarse deixis: no
+        // cross-origin raycast into the globe's own 3D scene exists (see
+        // the roadmap's own note on why a literal pointed-at-pixel isn't
+        // reachable from this page), so this reads which way the finger
+        // points RELATIVE TO THE WRIST — up/down/left/right — and pans
+        // the camera that way via the real move_camera(motion:'pan')
+        // contract (gods-eye-view/src/cameraVerbs.js's moveCamera). x is
+        // negated: MediaPipe's raw frame is un-mirrored, but the video
+        // element (and the user's own sense of "which way I'm pointing")
+        // is CSS-mirrored (scaleX(-1)) — same correction the old cursor
+        // code applied for the same reason.
+        setMode('GLOBE_PAN');
+        const wrist = _pt(dom, 0);
+        const dxScreen = wrist.x - s.tip.x;
+        const dy = s.tip.y - wrist.y;
+        let direction = null;
+        if (Math.max(Math.abs(dxScreen), Math.abs(dy)) > 0.08) {
+          direction = Math.abs(dxScreen) > Math.abs(dy)
+            ? (dxScreen > 0 ? 'right' : 'left')
+            : (dy > 0 ? 'down' : 'up');
+        }
+        const now = performance.now();
+        if (direction && (!GS._lastGlobePan || now - GS._lastGlobePan > 400)) {
+          GS._lastGlobePan = now;
+          setGesture('POINT', 'globe pan ' + direction);
+          sendGevAction('move_camera', { motion: 'pan', direction, mode: 'continuous' });
+        } else if (!direction && GS._globePanning) {
+          sendGevAction('move_camera', { motion: 'stop' });
+        }
+        GS._globePanning = Boolean(direction);
+        GS.pending = null; GS.count = 0;
+        return;
+      }
       setMode('POINTER');
       // mirror the camera: MediaPipe x is already camera-mirrored by the
       // CSS transform, so map directly to window coords
@@ -4520,12 +4667,39 @@ const __runV524 = () => {
       moveCursor((1 - s.tip.x) * window.innerWidth * scale, s.tip.y * window.innerHeight * scale);
       if (s.pinch) { commitGesture('CLICK'); }
       GS.pending = null; GS.count = 0; GS.lastPalmY = null;
+      paintHoldMeter(null, 0);
       return;
     }
+    if (GLOBE_MODE && GS._globePanning && s.g !== 'POINT') {
+      // Finger left POINT shape (or hand left frame via the no-hands path
+      // above) while a pan was in flight — stop it explicitly rather than
+      // letting move_camera's own continuous mode run forever unattended.
+      GS._globePanning = false;
+      sendGevAction('move_camera', { motion: 'stop' });
+    }
     if (s.g === 'PEACE' || s.g === 'THREE') {
+      if (GLOBE_MODE) {
+        // v13.2 (VISION_ROADMAP.md Phase 1): continuous zoom while held —
+        // throttled to one real HTTP call per ~400ms, never per-frame.
+        // The 60fps camera loop would otherwise flood
+        // dourmouseActionBridgeProxy's queue (each call can block up to
+        // its own 15s result-wait server-side) for something that only
+        // needs to feel continuous, not be literally per-frame.
+        setMode(s.g === 'PEACE' ? 'GLOBE_ZOOM_OUT' : 'GLOBE_ZOOM_IN');
+        const now = performance.now();
+        if (!GS._lastGlobeZoom || now - GS._lastGlobeZoom > 400) {
+          GS._lastGlobeZoom = now;
+          setGesture(s.g, s.g === 'PEACE' ? 'globe zoom out' : 'globe zoom in');
+          sendGevAction('adjust_camera_zoom', { direction: s.g === 'PEACE' ? 'out' : 'in' });
+        }
+        GS.pending = null; GS.count = 0;
+        paintHoldMeter(null, 0);
+        return;
+      }
       setMode('SCROLL');
       scrollByHand(_pt(dom, 0), s.g === 'PEACE' ? 1 : -1);
       GS.pending = null; GS.count = 0;
+      paintHoldMeter(null, 0);
       return;
     }
     // discrete gestures — through the hysteresis gate
@@ -4652,6 +4826,20 @@ const __runV524 = () => {
 
   VISION.startBtn && VISION.startBtn.addEventListener('click', startVision);
   VISION.stopBtn && VISION.stopBtn.addEventListener('click', () => stopVision({ userInitiated: true }));
+  // v13.2 (VISION_ROADMAP.md Phase 1): plain click toggle, not a gesture —
+  // see the GLOBE MODE card's own comment for why this is an explicit
+  // mode switch rather than a "which window has focus" guess.
+  const _visGlobeModeBtn = document.getElementById('visGlobeModeBtn');
+  _visGlobeModeBtn && _visGlobeModeBtn.addEventListener('click', () => {
+    if (GLOBE_MODE && GS._globePanning) { GS._globePanning = false; sendGevAction('move_camera', { motion: 'stop' }); }
+    GLOBE_MODE = !GLOBE_MODE;
+    setGlobeModeUI();
+    paintGlobeResult(
+      GLOBE_MODE
+        ? 'Globe Mode ON — open the GLOBE screen elsewhere, then gesture.'
+        : 'Globe Mode OFF — gestures act on this cockpit again.'
+    );
+  });
   async function startVision() {
     if (!hasMediaPipeSupport()) { setVisState('faceEl', 'NO CAMERA'); return; }
     if (!VISION.cameraAllowed) {
@@ -4970,6 +5158,16 @@ __probeMark('registered');
           <canvas id="visOverlay" aria-hidden="true"></canvas>
           <div class="vis-cam-off" id="visCamOff">CAMERA OFF — START TO ENABLE</div>
           <div class="vis-hint" id="visHint">GESTURE: —</div>
+          <!-- v13.2 (VISION_ROADMAP.md Phase 4, corrected scope: the 21-point
+               hand skeleton already rendered here via drawLandmarks() — this
+               adds the piece that didn't exist, a live hold-progress meter,
+               so "why didn't that gesture fire" has a visible answer (hand
+               was recognized but not held the required 4 frames yet)
+               instead of being a mystery. -->
+          <div class="vis-hold-meter" id="visHoldMeter" style="display:none">
+            <div class="vis-hold-label" id="visHoldLabel"></div>
+            <div class="vis-hold-track"><div class="vis-hold-fill" id="visHoldFill"></div></div>
+          </div>
         </div>
         <div class="vis-cursor" id="visCursor"></div>
         <div class="vis-actions">
@@ -5003,6 +5201,43 @@ __probeMark('registered');
             <tr><td>FIST</td><td>dismiss the task deck</td></tr>
             <tr><td>WAVE (open palm, sway)</td><td>wake the system</td></tr>
             <tr><td>FACE PRESENT</td><td>system stays awake; face gone = idle</td></tr>
+          </table>
+        </div>
+        <!-- v13.2 (VISION_ROADMAP.md Phase 1): the globe takes gestures.
+             The photorealistic 3D globe (gods-eye-view/, npm run dev,
+             localhost:4173 — see console.html's GLOBE screen) already
+             exposes a real action interface for voice control
+             (gevActions.js's createGevActionRunner, reached externally via
+             POST /api/dourmouse/action — gods-eye-view/vite.config.js's
+             dourmouseActionBridgeProxy). This toggle repoints a subset of
+             the SAME gestures at that runner instead of their normal
+             index.html action while it's on — an explicit mode switch, not
+             a fragile "which window has focus" guess across two separate
+             pages/origins. OPEN PALM/BOTH PALMS/WAVE (halt, emergency
+             stop, wake) are deliberately NOT remapped — those must mean
+             the same thing everywhere, on or off. -->
+        <div class="dm-card" style="margin-top:10px">
+          <div class="dm-k">GLOBE MODE — GESTURE → GOD'S EYE VIEW</div>
+          <div class="vis-actions" style="margin-top:6px">
+            <button class="dm-btn" id="visGlobeModeBtn" type="button">GLOBE MODE: OFF</button>
+          </div>
+          <div class="dm-empty" id="visGlobeResult" style="margin-top:8px;border:none">
+            Toggle on, then open the GLOBE screen in another tab/window
+            (console.html → GLOBE, or localhost:4173 directly) before
+            gesturing — this sends real actions to whichever God's Eye
+            View tab is currently open and polling.
+          </div>
+          <table class="vis-gesture-table" style="margin-top:8px">
+            <tr><td>POINT (hold)</td><td>pan the camera the way your finger points</td></tr>
+            <tr><td>PINCH</td><td>zoom IN on the globe</td></tr>
+            <tr><td>PEACE (hold)</td><td>zoom OUT on the globe</td></tr>
+            <tr><td>THREE (hold)</td><td>zoom IN on the globe (continuous)</td></tr>
+            <tr><td>THUMBS UP</td><td>track the nearest aircraft</td></tr>
+            <tr><td>THUMBS DOWN</td><td>stop tracking</td></tr>
+            <tr><td>ROCK</td><td>reset to the full-globe view</td></tr>
+            <tr><td>OK</td><td>select the nearest aircraft</td></tr>
+            <tr><td>FIST</td><td>frame the view from overhead</td></tr>
+            <tr><td>OPEN PALM / BOTH PALMS / WAVE</td><td>unchanged — halt, emergency stop, wake</td></tr>
           </table>
         </div>
       </div>

@@ -1,5 +1,46 @@
 # DOURMOUSE VISION — Roadmap to "Incredible" (v13.2)
 
+## Status
+
+- **Phase 1 (gesture -> globe): SHIPPED and live-verified.** GLOBE MODE
+  toggle in the VISION screen; PINCH/PEACE/THREE/THUMBS UP/THUMBS
+  DOWN/ROCK/OK/FIST repoint to real `gevActions` calls
+  (`adjust_camera_zoom`, `select_nearest_aircraft`, `stop_tracking`,
+  `zoom_to_globe`, `frame_overhead`) through the real
+  `POST /api/dourmouse/action` bridge — no new server code, the existing
+  voice-command action runner and dev-server proxy do all of it. OPEN
+  PALM/BOTH PALMS/WAVE are untouched. Continuous zoom is throttled to one
+  real call per ~400ms. `select_nearest_aircraft`/`track_entity` need real
+  args the API actually requires (a place/lat-lon, a query string) — no
+  gesture has a typed location, so `sendGevSelectNearestAircraft()` reads
+  the camera's own current position via `get_current_view_state` first and
+  uses that as "nearest to what I'm looking at." Live-verified against the
+  real running globe: `get_current_view_state`, `zoom_to_globe`, and
+  `stop_tracking` all round-tripped with real data;
+  `select_nearest_aircraft`'s full compound call (enable layer -> fly ->
+  refresh -> query -> track) can exceed the vendored bridge's fixed 15s
+  wait under real feed latency — a pre-existing constraint of
+  `dourmouseActionBridgeProxy` (the same thing would happen via voice),
+  not a bug in this integration. 13 tests, `dourmouse/tests/test_index_globe_mode.py`.
+- **Phase 4, corrected scope: partially shipped.** The 21-point hand
+  skeleton this doc originally proposed adding already existed
+  (`drawLandmarks()`, pre-existing, verified before writing that part of
+  this plan) — genuinely missing was a live hold-progress meter, now
+  shipped: the hysteresis engine's own `GS.pending`/`GS.count`/`GS.NEED`
+  counters are now painted as a real fill bar + label
+  ("HOLD PINCH — 2/4") the instant a gesture is recognized, not just after
+  it fires. The interactive first-run trainer is not built.
+- **Phases 2, 3, 5, 6: not started.** Real, substantial pieces of new
+  design/engineering each — see their own sections below, unchanged from
+  the original plan.
+- Also fixed in passing: `dourmouse/tests/test_ui_local.py`'s
+  no-external-resources check only ever stripped text after the LAST
+  `<script>` tag (`html.split("<script>")[-1]`) before scanning for
+  `https?://` references — correct for a page with one script block, a
+  real gap for `index.html`'s three. Phase 1's own `fetch()` call (in an
+  earlier block) was getting scanned as if it were static markup. Fixed
+  to strip every `<script>...</script>` block.
+
 ## Where this actually starts from
 
 Before proposing anything new: Vision is not a stub. Real, shipped, tested
@@ -90,20 +131,41 @@ built entirely from parts that already work independently.
 
 ## Phase 2 — Multimodal deixis (point + speak)
 
-Gesture alone is a blunt instrument for anything with a name (a specific
-city, a specific flight). Voice alone has no sense of "this one, right
-here." Fused, they cover both:
+**Revised after building Phase 1 — the original plan below has a real
+architectural gap, documented rather than papered over.** Gesture alone
+is a blunt instrument for anything with a name (a specific city, a
+specific flight). Voice alone has no sense of "this one, right here."
+Fused, they cover both — but fusing them needs the fingertip's on-screen
+position to mean something in the GLOBE's own coordinate space for a
+raycast, and Phase 1 confirmed hand-tracking and the globe are two
+separate browser pages/origins (`ui/index.html`'s camera loop vs.
+`gods-eye-view`'s Cesium scene at `localhost:4173`) with no shared pixel
+space between them — `POST /api/dourmouse/action` can carry a NAMED
+action across that gap (Phase 1's whole trick), but a raw (x, y)
+fingertip coordinate from one page's video frame has no meaning in the
+other page's 3D viewport at all.
 
-- Point at a spot on the globe while saying "what's flying over this
-  area" → the fingertip's raycast hit resolves "this area" for
-  `analyst_query` / `get_entity_context`, instead of the user having to
-  say a place name the voice parser might mishear.
-- Point at a CCTV tile while saying "zoom in" → `control_cctv` targeted
-  at the pointed tile, not "whichever tile was last selected."
+Two real ways to actually get deixis, neither of them Phase 1's
+"send a named action" trick:
 
-This needs one real piece of new plumbing: a shared "current gesture
-target" (the last raycast hit) that the voice-command parser can read as
-implicit context — additive to both existing systems, breaks neither.
+1. **Move the camera+gesture engine INTO the globe page itself** — port
+   `onHands()`/the hysteresis engine into `gods-eye-view` (or embed the
+   globe inside `ui/index.html` via an iframe with a real message-passing
+   channel to reach `window.__godsEyeView`'s live Cesium `viewer` for an
+   actual `viewer.scene.pickPosition()` raycast). This is genuine new
+   engineering on top of a vendored third-party app, not wiring.
+2. **Skip raycasting, keep it coarse**: point gestures already resolve to
+   discrete DIRECTIONS (up/down/left/right screen quadrant) cheaply,
+   without needing pixel-perfect scene coordinates — "point + say 'what's
+   here'" could pan/query in that coarse direction relative to the
+   CURRENT camera center (`get_current_view_state`, already used by Phase
+   1's `select_nearest_aircraft` chaining) rather than a literal pick.
+   Much less precise, but buildable with the SAME bridge Phase 1 already
+   proved, no new cross-origin plumbing.
+
+Not started. Option 2 is the tractable next step within the current
+architecture; option 1 is the "actually incredible" version and a
+real, separate undertaking.
 
 ---
 
@@ -132,17 +194,19 @@ what the system has been sensing about them the whole time.
 14 real gestures is a rich vocabulary most users will never discover
 without being shown. Two additive, low-risk pieces:
 
-- **Debug/confidence overlay**: render the actual hand skeleton
-  (MediaPipe already returns all 21 landmarks per hand) and a live
-  per-gesture confidence bar over the camera feed — the exact data the
-  engine already computes, just made visible. Immediately turns "why
-  didn't that gesture fire" from a mystery into something the user can
-  see and correct (hand too far, wrong angle) in real time.
+- ~~**Debug/confidence overlay**: render the actual hand skeleton~~
+  **SHIPPED, partially pre-existing.** The 21-point skeleton
+  (`drawLandmarks()`) already existed before this plan was written — the
+  genuinely missing half, a live hold-progress meter over the camera feed
+  showing the hysteresis engine's own real per-frame count toward the
+  4-frame threshold, is now built (`paintHoldMeter()`). "Why didn't that
+  gesture fire" now has a visible answer in real time instead of being a
+  mystery.
 - **Interactive first-run trainer**: walk through the 14-row gesture
   table live, waiting for each gesture to actually fire once (reusing the
   existing hysteresis gate as the "you did it" signal) before advancing —
   turns the static table in the VISION screen into something the user
-  actually learns by doing, once, and remembers.
+  actually learns by doing, once, and remembers. Not built.
 
 ---
 

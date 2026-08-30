@@ -40,9 +40,17 @@ class TestFullyLocal:
     def test_no_external_resources_any_page(self):
         for page in self._pages():
             html = self._read_utf8(page)
-            # Strip the markdown-link renderer line, which is code, not a resource ref.
-            code = html.split("<script>")[-1] if "<script>" in html else ""
-            stripped = html.replace(code, "")
+            # Strip EVERY <script>...</script> block, not just the text after
+            # the LAST <script> tag — a page can have several inline blocks
+            # (index.html has 3, e.g.), and the old `html.split("<script>")[-1]`
+            # only ever excluded the final one, silently leaving every
+            # EARLIER block's own runtime code (a deliberate fetch() to a
+            # named localhost URL, say) scanned as if it were static markup.
+            # A URL a script constructs/calls at runtime is not a resource
+            # reference the PAGE ships (an <img src>/<link href> is); this
+            # check exists for the latter, so all real code must be excluded
+            # from it, not just whichever script block happens to be last.
+            stripped = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.S)
             external = [
                 m.group(0)
                 for m in re.finditer(r"https?://[^\s\"')\]]+", stripped)
