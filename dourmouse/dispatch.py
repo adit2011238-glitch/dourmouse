@@ -2493,6 +2493,25 @@ def _run_dispatch_loop(
                 # model_for_agent resolves within it) — backend_identity()
                 # again, not re-guessed.
                 _routed_backend, _routed_local = backend_identity(ctx.config)
+                # v13 (self-caught, same real bug as the original "brain"
+                # event fix above): this per-agent routing override ALSO
+                # only ever looks at ctx.config, so it clobbered an
+                # already-honest "claude_cli" brain event back to
+                # "ollama"/the per-agent model string — purely cosmetic
+                # (the actual `client` object, and therefore which
+                # backend genuinely answers, is untouched by this block;
+                # `model` here is just a label ClaudeCliClient/the
+                # ollama_cloud client both ignore) but confusing and
+                # dishonest about what's actually happening. Re-apply the
+                # SAME orchestrator-mode override so this second event
+                # can't un-say what the first one correctly reported.
+                _orch_mode2 = _orchestrator_backend_mode()
+                if _orch_mode2 == "split":
+                    _orch_mode2 = _agent_split_backend(ctx.forced_agent)
+                if _orch_mode2 in ("claude", "claude_cli"):
+                    model, _routed_backend, _routed_local = "claude-sonnet-5 (CLI)", "claude_cli", False
+                elif _orch_mode2 in ("ollama_cloud", "cloud"):
+                    model, _routed_backend, _routed_local = _OLLAMA_CLOUD_DEFAULT_MODEL, "ollama_cloud", False
                 _emit_event(
                     event_sink,
                     {

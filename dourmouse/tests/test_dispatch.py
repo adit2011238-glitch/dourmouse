@@ -2527,3 +2527,32 @@ class TestBrainEventReportsTheRealOrchestratorBackend:
         brain = next(e for e in events if e["type"] == "brain")
         assert brain["backend"] != "claude_cli"
         assert brain["backend"] != "ollama_cloud"
+
+    def test_per_agent_routing_second_brain_event_stays_honest(self, monkeypatch):
+        """Live-caught, real bug: a single-agent-resolved query (e.g.
+        "check my inbox" -> the 'mail' agent) fires a SECOND "brain"
+        event when config.model_for_agent() resolves a different model
+        string for that agent — and that second event ALSO only looked
+        at `config`, un-saying an already-honest first event back to
+        "ollama". Verified this doesn't change WHICH backend actually
+        answers (ClaudeCliClient ignores the model string either way) —
+        only the label was wrong. Both events must report claude_cli."""
+        from dourmouse.config import OllamaConfig
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "claude")
+        monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")
+        registry = build_general_registry()
+        cfg = OllamaConfig(agent_models={"MAIL": "some-other-model"})
+        events: list[dict] = []
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "check my inbox"},
+        ]
+
+        run_dispatch_messages(messages, registry, client=None, config=cfg, event_sink=events.append)
+        brains = [e for e in events if e["type"] == "brain"]
+        assert len(brains) == 2, "this test only means something if the per-agent-routing second event fired"
+        assert all(b["backend"] == "claude_cli" for b in brains)
+        assert all(b["local"] is False for b in brains)
