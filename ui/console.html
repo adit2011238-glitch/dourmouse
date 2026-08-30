@@ -1720,6 +1720,15 @@ function transcriptToolLabel(name){
 /* ---------------- transcript ---------------- */
 const ta = $("ta"), go = $("go"), stopBtn = $("stop");
 let ctrl = null;
+// v13.2 (live bug): STOP used to only abort the browser's own fetch read —
+// the SERVER thread stayed blocked inside WebConfirmationGate.wait() holding
+// session_lock for up to 300s, so hitting STOP during a pending approval
+// froze every OTHER screen/agent too (they all queue on the same lock).
+// pendingDeclines holds a decline-callback per still-open confirmation box
+// for the in-flight request; STOP now fires all of them (POST
+// /api/confirm approved:false) so the server thread wakes immediately and
+// releases the lock, same as clicking DECLINE by hand.
+let pendingDeclines = new Map();
 // v8.29: independent per-screen conversations. Each of THREAD_SCREENS owns
 // its own <div class="thread"> (see the HTML — sibling of that screen's
 // .panebody, not nested, so repainting the toolchain picker etc. can't
@@ -1823,7 +1832,7 @@ function wireCopies(root){
     pre.appendChild(b);
   });
 }
-function addApproval(node, evt){
+function addApproval(node, evt, declineMap){
   const box=document.createElement("div"); box.className="approve";
   box.innerHTML=`<div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
     <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div>`;
@@ -1832,12 +1841,16 @@ function addApproval(node, evt){
   liveAdd("act","Waiting for your approval", (evt.prompt||"").slice(0,90));
   const [yes,no]=box.querySelectorAll("button"); let done=false;
   const decide=async(ok)=>{ if(done)return; done=true;
+    if(declineMap) declineMap.delete(evt.id);
     box.classList.add("done"); box.querySelector(".t").textContent = ok?"◆ APPROVED":"◆ DECLINED";
     box.querySelector(".r").remove();
     liveAdd(ok?"done":"err", ok?"You approved it":"You declined it","");
     try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({id:evt.id,approved:ok})}); }catch{}
   };
+  // v13.2: STOP needs a way to auto-decline this exact box (see pendingDeclines
+  // at its declaration) — registered here, not just wired to the buttons.
+  if(declineMap) declineMap.set(evt.id, ()=>decide(false));
   yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
   yes.focus();
 }
@@ -1911,7 +1924,15 @@ async function run(text){
     node.thinkToggle.querySelector(".tcar").textContent="▸";
   };
   ctrl = new AbortController();
-  stopBtn.onclick = ()=>{ stopped=true; try{ctrl.abort();}catch{} };
+  pendingDeclines = new Map();
+  stopBtn.onclick = ()=>{
+    stopped=true;
+    try{ctrl.abort();}catch{}
+    // v13.2: also decline any open approval box for THIS request so the
+    // blocked server thread wakes and frees session_lock instead of sitting
+    // in WebConfirmationGate.wait() for up to 300s.
+    for(const decline of pendingDeclines.values()){ try{decline();}catch{} }
+  };
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({prompt:text, focus_agent:focusAgent||undefined, screen:targetScreen}), signal:ctrl.signal});
@@ -1996,7 +2017,7 @@ async function run(text){
               liveAdd(e.ok?"done":"err", "Branch finished: "+(e.agent||"any"), modelShown);
             }
             break; }
-          case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e); break;
+          case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e,pendingDeclines); break;
           case "assistant_delta": foldThink(); buf+=e.text||""; paint(); break;
           case "assistant_text": foldThink(); if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
           case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;
