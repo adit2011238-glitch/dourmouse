@@ -2556,3 +2556,65 @@ class TestBrainEventReportsTheRealOrchestratorBackend:
         assert len(brains) == 2, "this test only means something if the per-agent-routing second event fired"
         assert all(b["backend"] == "claude_cli" for b in brains)
         assert all(b["local"] is False for b in brains)
+
+
+class TestEffectiveSplitAgentForOrdinaryQueries:
+    """Live-caught, real bug: for an ORDINARY (non-forced_agent) query —
+    the vast majority of real usage: HOME, COMMS, RESEARCH, NEWS all
+    route this way — _build_client() used to be called with
+    forced_agent=None always, so split mode NEVER actually split
+    ordinary conversation, it always defaulted every single query to
+    "claude". _effective_split_agent() peeks at the same deterministic
+    planner resolution the loop uses later, so the split applies to
+    real usage, not just forced_agent screens (CODE's toolchain picker)."""
+
+    def test_a_query_that_resolves_to_mail_uses_mails_real_split_side(self, monkeypatch):
+        from dourmouse.config import OllamaConfig
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "split")
+        monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
+        registry = build_general_registry()
+        expected = dispatch_module._agent_split_backend("mail")
+        events: list[dict] = []
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "check my inbox for new emails"},
+        ]
+        if expected in ("claude", "claude_cli"):
+            monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")
+        else:
+            class _Resp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def read(self):
+                    return json.dumps({"message": {"content": "hi"}}).encode()
+
+            import urllib.request as _real_urllib_request
+
+            monkeypatch.setattr(_real_urllib_request, "urlopen", lambda req, timeout=None: _Resp())
+        run_dispatch_messages(messages, registry, client=None, config=OllamaConfig(), event_sink=events.append)
+        brain = next(e for e in events if e["type"] == "brain")
+        assert brain["backend"] == expected
+
+    def test_gibberish_with_no_agent_match_falls_back_to_claude(self, monkeypatch):
+        from dourmouse.config import OllamaConfig
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "split")
+        monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")
+        registry = build_general_registry()
+        events: list[dict] = []
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "hey"},
+        ]
+        run_dispatch_messages(messages, registry, client=None, config=OllamaConfig(), event_sink=events.append)
+        brain = next(e for e in events if e["type"] == "brain")
+        assert brain["backend"] == "claude_cli"

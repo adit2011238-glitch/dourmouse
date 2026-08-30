@@ -1312,6 +1312,36 @@ def _agent_split_map() -> dict[str, str]:
     return _agent_split_cache
 
 
+def _effective_split_agent(
+    forced_agent: str | None, last_user: str, registry: DispatchRegistry
+) -> str | None:
+    """Which agent name the orchestrator-backend split should key off of
+    for THIS turn — real bug this fixes, live-caught: for an ordinary
+    (non-forced_agent) conversational query, _build_client() is called
+    BEFORE the planner resolves plan_agents (planning happens later,
+    inside _run_dispatch_loop), so a plain "how many unread emails do I
+    have" always fell through to _agent_split_backend(None)'s "claude by
+    default" case — the split NEVER actually applied to natural,
+    planner-routed queries, only to forced_agent screens (CODE's
+    toolchain picker). Since real planning here (find_agents_for_query)
+    is pure Python/deterministic — no LLM call needed — it's safe to
+    peek at it early, purely to pick a backend, without duplicating or
+    fighting the loop's own later (identical) resolution."""
+    if forced_agent:
+        return forced_agent
+    if not last_user:
+        return None
+    try:
+        from dourmouse.planner import find_agents_for_query
+
+        matches = find_agents_for_query(registry, str(last_user), limit=1)
+    except Exception:  # noqa: BLE001 - a peek for routing must never break the real turn
+        return None
+    if matches and matches[0].get("score", 0) >= 3:
+        return matches[0]["name"]
+    return None
+
+
 def _agent_split_backend(agent_name: str | None) -> str:
     """Deterministic (Rule 2.8) even split of the roster across the two
     real backends — see _agent_split_map's own docstring. An agent name
@@ -1364,9 +1394,13 @@ def _claude_orchestrator_cwd() -> str:
 _CLAUDE_ORCHESTRATOR_FRAMING = (
     "[Dourmouse assistant — you have a live MCP server called 'dourmouse' "
     "connected with real tools: mail, tasks, world/news data, code "
-    "execution, and more. Use them whenever the request needs real data "
-    "or a real action. Never fabricate a result. Be direct — answer "
-    "first, skip preamble.]\n\n"
+    "execution, and more (tool names start with mcp__dourmouse__). Use "
+    "ONLY those dourmouse tools for this request — you may have other "
+    "MCP integrations (Gmail, etc.) configured on this account from "
+    "unrelated contexts; ignore them here, they are not what this "
+    "session is asking about. Use a real dourmouse tool whenever the "
+    "request needs real data or a real action. Never fabricate a "
+    "result. Be direct — answer first, skip preamble.]\n\n"
 )
 
 
@@ -1784,7 +1818,7 @@ def run_dispatch_messages(
     )
     if client is None:
         config = config or load_llm_config_with_fallback()
-        client = _build_client(config, forced_agent=forced_agent)
+        client = _build_client(config, forced_agent=_effective_split_agent(forced_agent, last_user, registry))
         # v5.0 fast dispatch: the orchestrator (looping dispatch brain)
         # defaults to its per-agent model (qwen3:4b on the local backend) so
         # every turn is fast; explicit ``model`` overrides still win.
@@ -1861,7 +1895,10 @@ def run_dispatch_messages(
     # honestly instead of the stale config-derived guess.
     _orch_mode = _orchestrator_backend_mode()
     if _orch_mode == "split":
-        _orch_mode = _agent_split_backend(forced_agent)
+        # Same effective-agent peek _build_client() used above to pick
+        # the REAL client — must agree, or this event would report a
+        # different backend than the one actually built.
+        _orch_mode = _agent_split_backend(_effective_split_agent(forced_agent, last_user, registry))
     if _orch_mode in ("claude", "claude_cli"):
         model, backend_name, backend_local = "claude-sonnet-5 (CLI)", "claude_cli", False
     elif _orch_mode in ("ollama_cloud", "cloud"):
@@ -2507,7 +2544,14 @@ def _run_dispatch_loop(
                 # can't un-say what the first one correctly reported.
                 _orch_mode2 = _orchestrator_backend_mode()
                 if _orch_mode2 == "split":
-                    _orch_mode2 = _agent_split_backend(ctx.forced_agent)
+                    # ctx.forced_agent stays None for an ordinary
+                    # planner-routed query (see _effective_split_agent's
+                    # own docstring) — plan_agents (exactly one entry,
+                    # this block's own guard condition) is what the
+                    # CLIENT was actually built against in that case, so
+                    # match it here rather than re-falling-back to "no
+                    # agent" and reporting the wrong side of the split.
+                    _orch_mode2 = _agent_split_backend(ctx.forced_agent or next(iter(plan_agents)))
                 if _orch_mode2 in ("claude", "claude_cli"):
                     model, _routed_backend, _routed_local = "claude-sonnet-5 (CLI)", "claude_cli", False
                 elif _orch_mode2 in ("ollama_cloud", "cloud"):
