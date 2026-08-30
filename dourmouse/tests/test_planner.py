@@ -423,3 +423,19 @@ class TestFindAgentsForQueryRegression:
         registry = build_general_registry()
         prompt = "search X then write_file to /tmp/a/b.txt"
         assert build_plan(prompt, registry) == build_plan(prompt, registry)
+
+    def test_spotify_play_request_routes_to_music(self):
+        """v13.1 (live-reported real bug): 'play a song on Spotify' from the
+        MEDIA directive box had no domain word pointing at the music agent
+        ('song'/'playlist' never appear in its description), so a plain
+        typed request silently misrouted."""
+        registry = build_general_registry()
+        m = find_agents_for_query(
+            registry, "play a song on Spotify by Daft Punk", limit=1
+        )
+        assert m and m[0]["name"] == "music", f"got {m}"
+
+    def test_playlist_request_routes_to_music(self):
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "show me my playlists", limit=1)
+        assert m and m[0]["name"] == "music", f"got {m}"

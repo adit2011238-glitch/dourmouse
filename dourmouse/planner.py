@@ -157,6 +157,19 @@ _DOMAIN_ROUTE: dict[str, str] = {
     # offers) — an unambiguous, high-confidence domain word for coding,
     # same category as "terminal"/"disk"/"cpu" above.
     "python": "dev_coding",
+    # v13.1 (live-reported real bug): "play a song on Spotify" from the
+    # MEDIA screen's directive box had NO domain word at all pointing at
+    # the music agent — "song"/"playlist" don't appear in its description
+    # ("Spotify — now playing, playback control, search, top/recent
+    # tracks, playlists"), so a plain typed request never scored it and
+    # silently misrouted or got a "can't do that" reply. "play" alone is
+    # deliberately NOT here (too ambiguous — "play devil's advocate",
+    # "play back the recording"); these words are unambiguous to music.
+    "spotify": "music",
+    "song": "music",
+    "songs": "music",
+    "playlist": "music",
+    "playlists": "music",
 }
 
 # Stop words that are ALSO strong domain words must not be stripped — the
