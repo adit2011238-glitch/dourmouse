@@ -280,6 +280,38 @@ class TestFullScopeFiles:
         assert not f.exists()
 
 
+class TestRepoMapTool:
+    """Aider port part 2/4 (dourmouse/repo_map.py), wired as a real tool
+    on the system agent."""
+
+    def test_registered_on_system_agent(self):
+        registry = build_general_registry()
+        tools = {t.name for t in registry.get_subagent("system").tools}
+        assert "repo_map" in tools
+
+    def test_maps_a_real_directory(self, tmp_path):
+        from dourmouse.system_access import _repo_map_tool
+
+        (tmp_path / "m.py").write_text("def foo(a, b):\n    return a + b\n")
+        out = _repo_map_tool({"path": str(tmp_path)})
+        assert "def foo(a, b)" in out
+
+    def test_a_broken_grammar_is_reported_honestly_not_raised(self, tmp_path, monkeypatch):
+        """The handler must never crash the dispatch turn — any failure
+        deep in repo_map.py (missing grammar, corrupt file, whatever)
+        surfaces as a real error string instead of an exception."""
+        from dourmouse import repo_map as repo_map_module
+        from dourmouse.system_access import _repo_map_tool
+
+        def boom(*a, **k):
+            raise ImportError("no module named tree_sitter")
+
+        monkeypatch.setattr(repo_map_module, "generate_repo_map", boom)
+        out = _repo_map_tool({"path": str(tmp_path)})
+        assert "FAILED" in out
+        assert "tree_sitter" in out
+
+
 class TestGitAutoCommitAndUndo:
     """Aider port part 1/4, wired into write_path/delete_path: every change
     to a path inside a real git repo gets its own atomic commit, and

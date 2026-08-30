@@ -9,3 +9,5 @@ worldmonitor-sdk>=0.1.1  # v5.18 World Monitor tab (country briefs / risk feeds)
 pywebview>=6.0  # v5.19 desktop shell native window (documented browser fallback without it)
 playwright>=1.40  # v5.25 browser agent (drives the system Google Chrome via channel='chrome' — no browser download)
 faiss-cpu>=1.8.0  # dourmouse/shared_rag.py — reads the desktop's hybrid_vault vector.index (FAISS-named artifact, never confirmed live); imported lazily so its absence never breaks anything else, this pin only matters once that code actually runs where the vault lives
+tree_sitter>=0.26.0  # dourmouse/repo_map.py — Aider-port tree-sitter structural codebase map (part 2/4); imported lazily, repo_map tool reports NOT CONFIGURED honestly if missing
+tree_sitter_language_pack>=1.15.0  # grammars for python/js/ts/tsx/go/rust/java/ruby, used by repo_map.py

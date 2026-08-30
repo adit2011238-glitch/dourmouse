@@ -241,6 +241,36 @@ def _list_path_tool(arguments: dict[str, Any]) -> str:
     return f"LISTING {target}:\n" + ("\n".join(entries) if entries else "(empty)")
 
 
+def _repo_map_tool(arguments: dict[str, Any]) -> str:
+    """Aider port part 2/4 (dourmouse/repo_map.py): a real tree-sitter
+    structural map of a codebase — classes/functions/signatures, no
+    bodies. Use BEFORE editing an unfamiliar project so a small model's
+    context holds real structure instead of nothing, and a large one
+    doesn't burn its window re-reading files it hasn't touched yet.
+    """
+    raw = arguments.get("path", ".")
+    target = _resolve_abs(raw)
+    if target is None:
+        target = Path(raw).expanduser()
+        if not target.is_absolute():
+            target = _PROJECT_ROOT / target
+    try:
+        max_total_chars = int(arguments.get("max_total_chars", 12_000))
+        max_files = int(arguments.get("max_files", 400))
+    except (TypeError, ValueError):
+        return "ERROR: max_total_chars/max_files must be integers."
+    try:
+        from dourmouse import repo_map
+    except Exception as exc:  # noqa: BLE001 - optional dep, report honestly
+        return f"NOT CONFIGURED: repo_map needs tree-sitter installed ({exc})."
+    try:
+        return repo_map.generate_repo_map(
+            target, max_files=max_files, max_total_chars=max_total_chars
+        )
+    except Exception as exc:  # noqa: BLE001 - a bad grammar/file must not crash the turn
+        return f"REPO MAP FAILED (reported honestly): {type(exc).__name__}: {exc}"
+
+
 def _auto_commit_suffix(target: Path, action: str) -> str:
     """Aider-port git safety net (dourmouse/git_safety.py): every write/
     delete this agent makes to a path inside a real git repo gets its own
@@ -648,6 +678,26 @@ def build_system_subagent() -> Subagent:
                     "properties": {"path": {"type": "string", "default": "."}},
                 },
                 handler=_list_path_tool,
+            ),
+            ToolSpec(
+                name="repo_map",
+                description=(
+                    "Real tree-sitter structural map of a codebase directory: "
+                    "every class/function/method's exact signature, never "
+                    "bodies (python/js/ts/tsx/go/rust/java/ruby). Use this "
+                    "BEFORE editing an unfamiliar project instead of reading "
+                    "every file — it is the token-efficient way to see what "
+                    "exists and where, same idea as Aider's own repo map."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "default": "."},
+                        "max_files": {"type": "integer", "default": 400},
+                        "max_total_chars": {"type": "integer", "default": 12000},
+                    },
+                },
+                handler=_repo_map_tool,
             ),
             # v8.15: gated — same full-laptop scope as delete_path (already
             # gated, right below), no diff shown; a silent overwrite destroys
