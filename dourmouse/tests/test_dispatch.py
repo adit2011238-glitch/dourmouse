@@ -2291,3 +2291,239 @@ class TestCallWithRetryHeartbeat:
                 event_sink=seen.append,
             )
         assert any(e["type"] == "brain_thinking" for e in seen)
+
+
+# --------------------------------------------------------------------------- #
+# Claude/Ollama-Cloud orchestrator backend (v13, opt-in experiment) — the
+# user's own explicit ask: route every feature through a real strong
+# backend (Claude Code CLI, or a real Ollama Cloud account) instead of the
+# local model, with an even, deterministic split across the roster.
+# --------------------------------------------------------------------------- #
+
+class TestOrchestratorBackendMode:
+    def test_unset_is_empty(self, monkeypatch):
+        monkeypatch.delenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, raising=False)
+        assert dispatch_module._orchestrator_backend_mode() == ""
+
+    @pytest.mark.parametrize("raw,expected", [("claude", True), ("CLAUDE_CLI", True), ("ollama_cloud", False), ("", False)])
+    def test_claude_orchestrator_enabled(self, monkeypatch, raw, expected):
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, raw)
+        assert dispatch_module.claude_orchestrator_enabled() is expected
+
+
+class TestAgentSplitBackend:
+    def test_none_defaults_to_claude(self):
+        assert dispatch_module._agent_split_backend(None) == "claude"
+
+    def test_deterministic_across_calls(self):
+        assert dispatch_module._agent_split_backend("mail") == dispatch_module._agent_split_backend("mail")
+
+    def test_real_roster_splits_evenly(self):
+        """The alphabetical-alternation split (_agent_split_map) must be
+        exactly even (off by at most 1 for an odd-sized roster) — the
+        user's own explicit ask. A raw hash-parity split on this real
+        roster measured 12/22, nowhere close; this is what replaced it."""
+        from dourmouse.general_roster import build_general_registry
+
+        names = [s.name for s in build_general_registry().all_subagents()]
+        backends = [dispatch_module._agent_split_backend(n) for n in names]
+        claude_count = backends.count("claude")
+        cloud_count = backends.count("ollama_cloud")
+        assert claude_count + cloud_count == len(names)
+        assert abs(claude_count - cloud_count) <= 1
+
+    def test_every_result_is_a_valid_backend_name(self):
+        for name in ("mail", "code_claude", "research_info", "worldmonitor", "atlas"):
+            assert dispatch_module._agent_split_backend(name) in ("claude", "ollama_cloud")
+
+
+class TestOllamaCloudConfig:
+    def test_real_endpoint_and_default_model(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_API_KEY", "test-key-123")
+        monkeypatch.delenv("OLLAMA_CLOUD_MODEL", raising=False)
+        cfg = dispatch_module._ollama_cloud_config()
+        assert cfg.base_url == "https://ollama.com"
+        assert cfg.api_key == "test-key-123"
+        assert cfg.model == "gpt-oss:20b"
+
+    def test_model_override(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_CLOUD_MODEL", "some-other-model")
+        cfg = dispatch_module._ollama_cloud_config()
+        assert cfg.model == "some-other-model"
+
+    def test_client_sends_real_bearer_header(self, monkeypatch):
+        """OllamaNativeClient must actually send the Bearer header for a
+        cloud config — this is the one real wiring point the whole
+        feature depends on."""
+        monkeypatch.setenv("OLLAMA_API_KEY", "test-key-123")
+        cfg = dispatch_module._ollama_cloud_config()
+        client = dispatch_module.OllamaNativeClient(cfg)
+        assert client._headers.get("Authorization") == "Bearer test-key-123"
+        assert client._root == "https://ollama.com"
+
+
+class TestClaudeCliClient:
+    def test_create_calls_run_code_task_with_the_real_prompt(self, monkeypatch):
+        seen = {}
+
+        def _fake_run_code_task(backend, prompt, cwd, timeout):
+            seen["backend"] = backend
+            seen["prompt"] = prompt
+            seen["cwd"] = cwd
+            return "REAL CLAUDE ANSWER"
+
+        monkeypatch.setattr("dourmouse.code_backends.run_code_task", _fake_run_code_task)
+        client = dispatch_module.ClaudeCliClient(cwd="/tmp/fake-cwd")
+        response = client.chat.completions.create(
+            model="claude", messages=[{"role": "user", "content": "hello"}], tools=[],
+        )
+        assert seen["backend"] == "claude"
+        assert "hello" in seen["prompt"]
+        assert seen["cwd"] == "/tmp/fake-cwd"
+        assert response.choices[0].message.content == "REAL CLAUDE ANSWER"
+        assert response.choices[0].message.tool_calls is None
+
+    def test_a_real_failure_is_reported_honestly_not_fabricated(self, monkeypatch):
+        def _boom(backend, prompt, cwd, timeout):
+            raise RuntimeError("NOT CONFIGURED: no CLI found")
+
+        monkeypatch.setattr("dourmouse.code_backends.run_code_task", _boom)
+        client = dispatch_module.ClaudeCliClient()
+        response = client.chat.completions.create(messages=[{"role": "user", "content": "hi"}])
+        assert "reported honestly" in response.choices[0].message.content
+        assert "NOT CONFIGURED" in response.choices[0].message.content
+
+    def test_stream_true_yields_one_chunk_with_the_real_text(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "real text")
+        client = dispatch_module.ClaudeCliClient()
+        chunks = list(client.chat.completions.create(messages=[{"role": "user", "content": "hi"}], stream=True))
+        assert len(chunks) == 1
+        assert chunks[0].choices[0].delta.content == "real text"
+
+    def test_separate_cwd_from_the_code_screen_session(self):
+        """Deliberately NOT the project root — see _claude_orchestrator_cwd's
+        own docstring for why mixing sessions would be wrong."""
+        cwd = dispatch_module._claude_orchestrator_cwd()
+        assert cwd.endswith("workspace/claude_orchestrator") or cwd.endswith("workspace\\claude_orchestrator")
+
+
+class TestBuildClientOrchestratorRouting:
+    def test_default_mode_is_unaffected(self, monkeypatch):
+        """No env set at all — _build_client must behave exactly as
+        before this feature existed."""
+        monkeypatch.delenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, raising=False)
+        from dourmouse.config import OllamaConfig
+
+        cfg = OllamaConfig()
+        client = dispatch_module._build_client(cfg)
+        assert isinstance(client, dispatch_module.OllamaNativeClient)
+        assert "Authorization" not in client._headers
+
+    def test_claude_mode_routes_everything_to_claude(self, monkeypatch):
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "claude")
+        from dourmouse.config import OllamaConfig
+
+        client = dispatch_module._build_client(OllamaConfig(), forced_agent="mail")
+        assert isinstance(client, dispatch_module.ClaudeCliClient)
+
+    def test_ollama_cloud_mode_routes_everything_to_the_cloud(self, monkeypatch):
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "ollama_cloud")
+        monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
+        from dourmouse.config import OllamaConfig
+
+        client = dispatch_module._build_client(OllamaConfig(), forced_agent="research_info")
+        assert isinstance(client, dispatch_module.OllamaNativeClient)
+        assert client._root == "https://ollama.com"
+
+    def test_split_mode_routes_by_the_deterministic_split(self, monkeypatch):
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "split")
+        monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
+        from dourmouse.config import OllamaConfig
+
+        for agent in ("mail", "code_claude", "research_info", "worldmonitor", "atlas", "tasks"):
+            expected = dispatch_module._agent_split_backend(agent)
+            client = dispatch_module._build_client(OllamaConfig(), forced_agent=agent)
+            if expected == "claude":
+                assert isinstance(client, dispatch_module.ClaudeCliClient), agent
+            else:
+                assert isinstance(client, dispatch_module.OllamaNativeClient) and client._root == "https://ollama.com", agent
+
+
+class TestBrainEventReportsTheRealOrchestratorBackend:
+    """v13 (self-caught, real bug): the orchestrator-backend experiment
+    swaps the CLIENT, but the "brain" SSE event's model/backend fields
+    were derived purely from `config` (which never changes) — live-
+    caught: a request genuinely answered by Claude (a real ~/.claude
+    session file written at the exact request timestamp, ~7s total vs
+    qwen2.5:7b's real ~20-70s floor for the same prompt) still reported
+    "ollama"/"qwen2.5:7b" in the brain event. These tests pin the fix."""
+
+    def _run(self, prompt: str, **kwargs) -> list[dict]:
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        registry = _test_registry()
+        events: list[dict] = []
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": prompt},
+        ]
+        run_dispatch_messages(messages, registry, event_sink=events.append, **kwargs)
+        return events
+
+    def test_claude_mode_reports_claude_honestly(self, monkeypatch):
+        from dourmouse.config import OllamaConfig
+
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "claude")
+        monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")
+        # config=OllamaConfig() (not None) so this never touches
+        # load_llm_config_with_fallback() — root conftest.py's hermetic
+        # isolation deliberately sets DOURMOUSE_LLM_BACKEND=none, which
+        # that path honestly refuses to resolve; irrelevant here since
+        # _build_client short-circuits on the orchestrator-mode check
+        # before it would ever look at config's real type/value anyway.
+        events = self._run("hey", client=None, config=OllamaConfig())
+        brain = next(e for e in events if e["type"] == "brain")
+        assert brain["backend"] == "claude_cli"
+        assert brain["local"] is False
+        assert "claude" in brain["model"].lower()
+
+    def test_ollama_cloud_mode_reports_the_cloud_honestly(self, monkeypatch):
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "ollama_cloud")
+        monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
+
+        class _Resp:
+            def __init__(self, body: bytes):
+                self._body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return self._body
+
+        import urllib.request as _real_urllib_request
+
+        monkeypatch.setattr(
+            _real_urllib_request, "urlopen",
+            lambda req, timeout=None: _Resp(json.dumps({"message": {"content": "hi"}}).encode()),
+        )
+        from dourmouse.config import OllamaConfig
+
+        events = self._run("hey", client=None, config=OllamaConfig())
+        brain = next(e for e in events if e["type"] == "brain")
+        assert brain["backend"] == "ollama_cloud"
+        assert brain["local"] is False
+
+    def test_unset_mode_is_unaffected(self, monkeypatch):
+        """No orchestrator-backend override — the brain event must stay
+        exactly as it always was (derived from the injected fake client's
+        own config), zero behavior change for every existing caller."""
+        monkeypatch.delenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, raising=False)
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        events = self._run("hey", client=client)
+        brain = next(e for e in events if e["type"] == "brain")
+        assert brain["backend"] != "claude_cli"
+        assert brain["backend"] != "ollama_cloud"

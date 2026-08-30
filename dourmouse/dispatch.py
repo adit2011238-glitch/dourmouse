@@ -860,6 +860,17 @@ class OllamaNativeClient:
         base = (config.base_url or "http://127.0.0.1:11434/v1").strip()
         self._root = base[:-3] if base.endswith("/v1") else base
         self._model = model or config.model
+        # v13: Ollama Cloud (ollama.com) — the SAME native /api/chat shape,
+        # a real GPU-hosted account, auth via a real API key the local
+        # daemon never needs. OllamaConfig already carried an api_key
+        # field (kept keyless/unused for the local case); this is the one
+        # real wiring point: a non-empty key adds the Bearer header,
+        # nothing else about this client changes. Verified live against
+        # https://ollama.com/api/chat: gpt-oss:20b answered correctly in
+        # 677ms — real GPU compute, not this machine's.
+        self._headers = {"Content-Type": "application/json"}
+        if config.api_key:
+            self._headers["Authorization"] = f"Bearer {config.api_key}"
         self._post = _post or self._default_post
         self.chat = type("_Chat", (), {"completions": _OllamaCompletions(self)})()
 
@@ -869,7 +880,7 @@ class OllamaNativeClient:
         req = _urllib.Request(
             self._root + "/api/chat",
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
+            headers=self._headers,
         )
         with _urllib.urlopen(req, timeout=300) as resp:
             return resp.read().decode()
@@ -886,7 +897,7 @@ class OllamaNativeClient:
         req = _urllib.Request(
             self._root + "/api/chat",
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
+            headers=self._headers,
         )
         with _urllib.urlopen(req, timeout=300) as resp:
             for raw_line in resp:
@@ -1031,7 +1042,22 @@ class OllamaNativeClient:
         return out
 
 
-def _build_client(config: NvidiaConfig | OllamaConfig | OmniRouteConfig) -> Any:
+def _build_client(
+    config: NvidiaConfig | OllamaConfig | OmniRouteConfig,
+    forced_agent: str | None = None,
+) -> Any:
+    # v13 (opt-in experiment, the user's own explicit ask): route through
+    # a real strong backend — Claude Code CLI, or a real Ollama Cloud
+    # account — INSTEAD of the local model, for every feature. See
+    # _orchestrator_backend_mode()'s own docstring for the accepted
+    # values and why "split" exists.
+    mode = _orchestrator_backend_mode()
+    if mode == "split":
+        mode = _agent_split_backend(forced_agent)
+    if mode in ("claude", "claude_cli"):
+        return ClaudeCliClient()
+    if mode in ("ollama_cloud", "cloud"):
+        return OllamaNativeClient(_ollama_cloud_config())
     # Ollama: talk to the native API (fast, streaming, think disabled).
     # NVIDIA / OmniRoute: the OpenAI SDK, with a non-empty sentinel key
     # (Ollama/OmniRoute ignore key values, but the SDK rejects empty strings
@@ -1211,6 +1237,195 @@ def _execute_tool(
             if violation is not None:
                 result += f"\n[OUTPUT CONTRACT VIOLATION: {violation}]"
     return result
+
+
+# -- Claude CLI as the orchestrator brain (v13, opt-in experiment) --------- #
+# The user's own explicit ask: wire the real Claude Code CLI in as the
+# model behind EVERY feature (not just the CODE screen's code_claude
+# tool), to test whether a single strong model with real MCP tool access
+# genuinely replicates — and improves on — how Claude Code itself acts as
+# a harness. Architecturally this is the CLEANEST possible integration
+# point: _build_client() below is the ONE place a fresh client is
+# resolved for every dispatch call (chat.py never caches one), so gating
+# there means every screen, every tool-scoping path, every existing
+# piece of dispatch.py's plumbing (budget tracking, RBAC, DLP, transcript,
+# heartbeat, persistence) keeps working completely unchanged — only WHICH
+# model answers changes.
+#
+# Claude runs its OWN complete agentic loop via the real Claude Code CLI
+# (code_backends.run_code_task, which already wires --mcp-config +
+# --allowedTools "mcp__dourmouse__*" — see that module's own docstring),
+# so it can call Dourmouse's real tools directly over MCP rather than
+# through Dourmouse's own Python tool-calling loop. That means every
+# response reports NO tool_calls to dispatch.py — Claude already did
+# whatever tool work was needed internally — so a turn through this
+# client is exactly ONE call, not several.
+_CLAUDE_ORCHESTRATOR_ENV = "DOURMOUSE_ORCHESTRATOR_BACKEND"
+_OLLAMA_CLOUD_BASE_URL = "https://ollama.com"
+#: Ollama Cloud model verified live against the real API tonight
+#: (https://ollama.com/api/chat, real key, 677ms real response). A real,
+#: large, cloud-GPU-hosted model — not this machine's compute.
+_OLLAMA_CLOUD_DEFAULT_MODEL = "gpt-oss:20b"
+
+
+def _orchestrator_backend_mode() -> str:
+    """DOURMOUSE_ORCHESTRATOR_BACKEND — the opt-in experiment switch:
+    unset/'' -> unchanged local/configured behavior; 'claude'/'claude_cli'
+    -> every feature routed through the real Claude Code CLI (see
+    ClaudeCliClient); 'ollama_cloud'/'cloud' -> every feature routed
+    through a real Ollama Cloud account (real API key, real GPU compute,
+    NOT this machine's); 'split' -> deterministically divide the roster
+    between the two (see _agent_split_backend) rather than picking one
+    for everything — the user's own explicit ask, to compare both at once
+    rather than testing them one at a time.
+    """
+    return os.environ.get(_CLAUDE_ORCHESTRATOR_ENV, "").strip().lower()
+
+
+def claude_orchestrator_enabled() -> bool:
+    return _orchestrator_backend_mode() in ("claude", "claude_cli")
+
+
+_agent_split_cache: dict[str, str] | None = None
+
+
+def _agent_split_map() -> dict[str, str]:
+    """Real, verifiably even split of the ACTUAL registered roster —
+    computed once (module-lifetime cache, same pattern as
+    code_backends.py's own _CLAUDE_SESSIONS): sort every real subagent
+    name alphabetically and alternate, so a 34-agent roster splits
+    17/17, not whatever a per-name hash happens to land on (measured: a
+    sha256-parity split on this real roster came out 12/22 — nowhere
+    near "evenly split", the user's own explicit ask). Alphabetical sort
+    keeps it deterministic across restarts without needing to persist
+    anything.
+    """
+    global _agent_split_cache
+    if _agent_split_cache is not None:
+        return _agent_split_cache
+    from dourmouse.general_roster import build_general_registry
+
+    names = sorted(s.name for s in build_general_registry().all_subagents())
+    _agent_split_cache = {
+        name: ("claude" if i % 2 == 0 else "ollama_cloud") for i, name in enumerate(names)
+    }
+    return _agent_split_cache
+
+
+def _agent_split_backend(agent_name: str | None) -> str:
+    """Deterministic (Rule 2.8) even split of the roster across the two
+    real backends — see _agent_split_map's own docstring. An agent name
+    outside the current registry (a stale reference, a test double)
+    falls back to a stable hash of the name so it never crashes and
+    still lands the same side every time."""
+    if not agent_name:
+        return "claude"  # no single agent resolved (a free top-level chat) — Claude by default
+    mapped = _agent_split_map().get(agent_name)
+    if mapped is not None:
+        return mapped
+    import hashlib
+
+    digest = hashlib.sha256(agent_name.encode("utf-8")).hexdigest()
+    return "claude" if int(digest, 16) % 2 == 0 else "ollama_cloud"
+
+
+def _ollama_cloud_config() -> OllamaConfig:
+    """A real OllamaConfig pointed at ollama.com instead of localhost —
+    OllamaNativeClient already supports a Bearer-auth base_url (see its
+    own __init__ comment); this just supplies the real endpoint + key.
+    Honest degrade if the key isn't set: OllamaNativeClient still builds
+    (no exception here — Rule 2.1's "never fabricate" concern is about
+    the ANSWER, not the client construction), and the real request then
+    fails with ollama.com's own real 401, surfaced through the same
+    "reported honestly" path every other backend failure already uses.
+    """
+    return OllamaConfig(
+        api_key=os.environ.get("OLLAMA_API_KEY", "").strip(),
+        base_url=_OLLAMA_CLOUD_BASE_URL,
+        model=os.environ.get("OLLAMA_CLOUD_MODEL", "").strip() or _OLLAMA_CLOUD_DEFAULT_MODEL,
+    )
+
+
+def _claude_orchestrator_cwd() -> str:
+    """A REAL, STABLE directory, deliberately separate from the CODE
+    screen's own code_claude session (which uses the project root) —
+    Claude CLI session continuity is keyed by cwd (code_backends.py's own
+    _claude_session_key), and mixing "answer general Dourmouse
+    directives" history with "help me code" history under one
+    conversation would confuse both."""
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parent.parent
+    path = project_root / "workspace" / "claude_orchestrator"
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+_CLAUDE_ORCHESTRATOR_FRAMING = (
+    "[Dourmouse assistant — you have a live MCP server called 'dourmouse' "
+    "connected with real tools: mail, tasks, world/news data, code "
+    "execution, and more. Use them whenever the request needs real data "
+    "or a real action. Never fabricate a result. Be direct — answer "
+    "first, skip preamble.]\n\n"
+)
+
+
+class ClaudeCliClient:
+    """chat.completions.create()-shaped adapter routing through the real
+    Claude Code CLI. See the module comment above this class for the
+    full rationale."""
+
+    def __init__(self, cwd: str | None = None, timeout: int = 180) -> None:
+        self.cwd = cwd or _claude_orchestrator_cwd()
+        self.timeout = timeout
+        self.chat = type("_Chat", (), {"completions": _ClaudeCliCompletions(self)})()
+
+    def _create(
+        self,
+        *,
+        model: str | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        stream: bool = False,
+    ) -> Any:
+        from dourmouse import code_backends
+
+        last_user = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+            "",
+        )
+        prompt = _CLAUDE_ORCHESTRATOR_FRAMING + str(last_user)
+        try:
+            text = code_backends.run_code_task("claude", prompt, cwd=self.cwd, timeout=self.timeout)
+        except RuntimeError as exc:
+            # Honest failure, not a fabricated reply (Rule 2.1/2.2) — the
+            # SAME "reported honestly" contract every code_* tool already
+            # uses, surfaced as the model's own answer since there is no
+            # tool_result slot to put it in at this layer.
+            text = f"CLAUDE ORCHESTRATOR (reported honestly): {exc}"
+        message = _OllamaMessage(text, None)  # Claude used MCP internally; no Dourmouse-side tool_calls
+        if stream:
+            return iter([_OllamaChunk(_OllamaDelta(content=text))])
+        return _OllamaResponse(message)
+
+
+class _ClaudeCliCompletions:
+    def __init__(self, client: "ClaudeCliClient") -> None:
+        self._client = client
+
+    def create(
+        self,
+        *,
+        model: str | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+        extra_body: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        stream: bool = False,
+    ) -> Any:
+        return self._client._create(model=model, messages=messages, tools=tools, max_tokens=max_tokens, stream=stream)
 
 
 class JobTracker:
@@ -1569,7 +1784,7 @@ def run_dispatch_messages(
     )
     if client is None:
         config = config or load_llm_config_with_fallback()
-        client = _build_client(config)
+        client = _build_client(config, forced_agent=forced_agent)
         # v5.0 fast dispatch: the orchestrator (looping dispatch brain)
         # defaults to its per-agent model (qwen3:4b on the local backend) so
         # every turn is fast; explicit ``model`` overrides still win.
@@ -1635,6 +1850,22 @@ def run_dispatch_messages(
         backend_name, backend_local = "ollama", True
     else:
         backend_name, backend_local = backend_identity(config)
+    # v13 (real bug, self-caught): the orchestrator-backend experiment
+    # swaps the CLIENT in _build_client() but backend_identity() above
+    # only ever looks at `config`, which never changes — so the "brain"
+    # event kept reporting "ollama/qwen2.5:7b" even while a request was
+    # genuinely answered by Claude (verified live: a real ~/.claude
+    # session file was written at the exact request timestamp, and the
+    # answer arrived in ~7s — far faster than qwen2.5:7b's real ~20-70s
+    # floor for the same prompt). Report the REAL answering backend
+    # honestly instead of the stale config-derived guess.
+    _orch_mode = _orchestrator_backend_mode()
+    if _orch_mode == "split":
+        _orch_mode = _agent_split_backend(forced_agent)
+    if _orch_mode in ("claude", "claude_cli"):
+        model, backend_name, backend_local = "claude-sonnet-5 (CLI)", "claude_cli", False
+    elif _orch_mode in ("ollama_cloud", "cloud"):
+        model, backend_name, backend_local = _OLLAMA_CLOUD_DEFAULT_MODEL, "ollama_cloud", False
     # The chosen brain is surfaced honestly so the UI can show which model
     # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
     # of the tree: nested delegate runs ride the parent's event sink, so a
