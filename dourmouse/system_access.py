@@ -271,6 +271,58 @@ def _repo_map_tool(arguments: dict[str, Any]) -> str:
         return f"REPO MAP FAILED (reported honestly): {type(exc).__name__}: {exc}"
 
 
+def _apply_search_replace_tool(arguments: dict[str, Any]) -> str:
+    """Aider port part 3/4 (dourmouse/patch_apply.py): apply one or more
+    SEARCH/REPLACE blocks to a real file, atomically, with a real
+    pre-write syntax check. Prefer this over write_path for an edit to an
+    EXISTING file — it shows exactly what changed and can never silently
+    corrupt working code.
+    """
+    raw = arguments.get("path", "")
+    target = _resolve_abs(raw)
+    if target is None:
+        return "ERROR: apply_search_replace requires an ABSOLUTE path."
+    if _is_sensitive(target):
+        return (
+            f"REFUSED: {target} is inside a credential/system directory "
+            "(Rule 2.6) — the agent never writes there."
+        )
+    from dourmouse import patch_apply
+
+    result = patch_apply.apply_search_replace(target, arguments.get("patch", ""))
+    if not result.ok:
+        return result.message
+    out = result.message + _auto_commit_suffix(target, "patched")
+    if result.diff:
+        out += "\n\n" + result.diff
+    return out
+
+
+def _apply_patch_tool(arguments: dict[str, Any]) -> str:
+    """Aider port part 3/4: apply a unified diff to a real file,
+    atomically, with a real pre-write syntax check. Tolerates a stale
+    hunk line number as long as the CONTEXT still matches somewhere in
+    the file (same tolerance real `patch` has)."""
+    raw = arguments.get("path", "")
+    target = _resolve_abs(raw)
+    if target is None:
+        return "ERROR: apply_patch requires an ABSOLUTE path."
+    if _is_sensitive(target):
+        return (
+            f"REFUSED: {target} is inside a credential/system directory "
+            "(Rule 2.6) — the agent never writes there."
+        )
+    from dourmouse import patch_apply
+
+    result = patch_apply.apply_unified_diff(target, arguments.get("diff", ""))
+    if not result.ok:
+        return result.message
+    out = result.message + _auto_commit_suffix(target, "patched")
+    if result.diff:
+        out += "\n\n" + result.diff
+    return out
+
+
 def _auto_commit_suffix(target: Path, action: str) -> str:
     """Aider-port git safety net (dourmouse/git_safety.py): every write/
     delete this agent makes to a path inside a real git repo gets its own
@@ -724,6 +776,58 @@ def build_system_subagent() -> Subagent:
                     f"({len(a.get('content', ''))} chars)? This overwrites any "
                     "existing file at that path with no diff shown."
                 ),
+            ),
+            # v13.1 (Aider port part 3/4): a targeted edit to an EXISTING
+            # file, unlike write_path's silent full overwrite — both show
+            # exactly what changed (same rationale as dev_coding's own
+            # edit_file being ungated: a real diff IS the safety, no
+            # separate confirmation needed), and both refuse BEFORE
+            # writing anything if the result would not parse.
+            ToolSpec(
+                name="apply_search_replace",
+                description=(
+                    "Apply one or more SEARCH/REPLACE blocks to an EXISTING "
+                    "file by absolute path, atomically — all blocks must "
+                    "match exactly once or NONE are applied. Refuses "
+                    "up-front (nothing written) if the result would leave "
+                    "the file with a syntax error. Format: "
+                    "'<<<<<<< SEARCH\\n<exact current text>\\n=======\\n"
+                    "<replacement>\\n>>>>>>> REPLACE', one or more blocks "
+                    "back to back. Prefer this over write_path for editing "
+                    "an existing file."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "patch": {"type": "string"},
+                    },
+                    "required": ["path", "patch"],
+                },
+                handler=_apply_search_replace_tool,
+            ),
+            ToolSpec(
+                name="apply_patch",
+                description=(
+                    "Apply a unified diff ('@@ -a,b +c,d @@' hunks) to an "
+                    "EXISTING file by absolute path, atomically — every "
+                    "hunk's context must match somewhere in the file (a "
+                    "stale line number is tolerated as long as the context "
+                    "still matches) or NONE are applied. Refuses up-front "
+                    "if the result would leave the file with a syntax "
+                    "error. Prefer apply_search_replace for a hand-written "
+                    "small edit; use this when you already have a real "
+                    "unified diff."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "diff": {"type": "string"},
+                    },
+                    "required": ["path", "diff"],
+                },
+                handler=_apply_patch_tool,
             ),
             ToolSpec(
                 name="delete_path",

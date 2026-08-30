@@ -312,6 +312,80 @@ class TestRepoMapTool:
         assert "tree_sitter" in out
 
 
+class TestApplyPatchTools:
+    """Aider port part 3/4 (dourmouse/patch_apply.py), wired as real tools
+    on the system agent."""
+
+    def test_apply_search_replace_registered(self):
+        registry = build_general_registry()
+        tools = {t.name for t in registry.get_subagent("system").tools}
+        assert {"apply_search_replace", "apply_patch"} <= tools
+
+    def test_apply_search_replace_edits_a_real_file(self, tmp_path):
+        from dourmouse.system_access import _apply_search_replace_tool
+
+        f = tmp_path / "m.py"
+        f.write_text("def add(a, b):\n    return a - b\n")
+        patch = (
+            "<<<<<<< SEARCH\n    return a - b\n=======\n"
+            "    return a + b\n>>>>>>> REPLACE\n"
+        )
+        out = _apply_search_replace_tool({"path": str(f), "patch": patch})
+        assert "PATCHED" in out
+        assert f.read_text() == "def add(a, b):\n    return a + b\n"
+
+    def test_apply_search_replace_refuses_sensitive_paths(self):
+        from dourmouse.system_access import _apply_search_replace_tool
+
+        out = _apply_search_replace_tool({"path": _sensitive_paths()[0], "patch": "x"})
+        assert "REFUSED" in out
+
+    def test_apply_patch_edits_a_real_file(self, tmp_path):
+        from dourmouse.system_access import _apply_patch_tool
+
+        f = tmp_path / "m.py"
+        old = "x = 1\n"
+        new = "x = 2\n"
+        f.write_text(old)
+        import difflib
+
+        diff = "\n".join(difflib.unified_diff(
+            old.splitlines(), new.splitlines(), fromfile="m.py", tofile="m.py", lineterm=""
+        ))
+        out = _apply_patch_tool({"path": str(f), "diff": diff})
+        assert "PATCHED" in out
+        assert f.read_text() == new
+
+    def test_apply_patch_never_writes_a_syntax_broken_result(self, tmp_path):
+        from dourmouse.system_access import _apply_search_replace_tool
+
+        f = tmp_path / "m.py"
+        f.write_text("def f():\n    pass\n")
+        patch = "<<<<<<< SEARCH\ndef f():\n=======\ndef f(:\n>>>>>>> REPLACE\n"
+        out = _apply_search_replace_tool({"path": str(f), "patch": patch})
+        assert "syntax error" in out
+        assert f.read_text() == "def f():\n    pass\n"
+
+    def test_apply_search_replace_auto_commits_inside_a_repo(self, tmp_path):
+        import subprocess
+
+        from dourmouse.system_access import _apply_search_replace_tool
+
+        root = tmp_path / "repo"
+        root.mkdir()
+        subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
+        f = root / "m.py"
+        f.write_text("x = 1\n")
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True)
+
+        patch = "<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE\n"
+        out = _apply_search_replace_tool({"path": str(f), "patch": patch})
+        assert "auto-committed as" in out
+
+
 class TestGitAutoCommitAndUndo:
     """Aider port part 1/4, wired into write_path/delete_path: every change
     to a path inside a real git repo gets its own atomic commit, and
