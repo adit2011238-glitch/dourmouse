@@ -126,6 +126,16 @@ class TestResolvePanel:
         assert resolve_panel("companion") == "chat"
         assert resolve_panel("research panel") == "research"
 
+    def test_globe_panel_aliases(self):
+        # ui/workspace.html's real 3D VIEW panel (God's Eye View) — added
+        # alongside it, not guessed at independently.
+        assert resolve_panel("globe") == "globe"
+        assert resolve_panel("3d") == "globe"
+        assert resolve_panel("3d view") == "globe"
+        assert resolve_panel("god's eye") == "globe"
+        assert resolve_panel("gods eye view") is None  # not an aliased form
+        assert resolve_panel("gods eye") == "globe"
+
     def test_unknown_returns_none(self):
         assert resolve_panel("kitchen") is None
         assert resolve_panel("") is None

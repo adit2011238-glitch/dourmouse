@@ -54,6 +54,8 @@ _PANEL_ALIASES: dict[str, str] = {
     "map": "map", "world": "map", "world map": "map", "worldmap": "map",
     "pulse": "map", "world pulse": "map",
     "research": "research", "research panel": "research",
+    "globe": "globe", "3d": "globe", "3d view": "globe", "3d model": "globe",
+    "god's eye": "globe", "gods eye": "globe", "god's eye view": "globe",
 }
 
 _EMAIL_RE = re.compile(
@@ -158,7 +160,7 @@ def available_commands() -> list[dict[str, str]]:
         {"pattern": "email <person> saying <message>",
          "example": "email sam saying I'm running ten minutes late"},
         {"pattern": "open <panel>",
-         "example": "open mail  (panels: mail, chat, map, research)"},
+         "example": "open mail  (panels: mail, chat, map, research, globe)"},
         {"pattern": "close <panel>",
          "example": "close research"},
         {"pattern": "search for <query>",

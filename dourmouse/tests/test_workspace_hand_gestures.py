@@ -535,6 +535,65 @@ class TestSyntheticNoisyPinchNoFlicker:
         )
 
 
+class TestAdaptiveRateThrottlesInferenceUnderLoad:
+    """v13.3 consolidation: ui/index.html's VISION screen (and its
+    duplicate MediaPipe pipeline) was removed; ui/workspace.html is now
+    the ONLY hand-tracking surface, so the real per-device latency/CPU
+    fix that used to live only in index.html (measure real
+    detectForVideo() cost, back off call-rate under load, recover once
+    the device catches up) was ported here rather than lost."""
+
+    def test_backs_off_above_threshold_and_recovers_below_it(self):
+        script = _extract_inline_script()
+        m = re.search(r"const AdaptiveRate = \{(.*?)\n\};\n", script, re.S)
+        assert m, "AdaptiveRate not found in ui/workspace.html"
+        body = m.group(1)
+        assert "avg > 8" in body and "this.divisor++" in body
+        assert "avg < 4" in body and "this.divisor--" in body
+        assert "this.MAX_DIVISOR" in body
+
+    def test_hand_inference_gated_by_adaptive_rate_in_the_real_loop(self):
+        script = _extract_inline_script()
+        fn = _extract_function(script, "handLoop")
+        assert "AdaptiveRate.shouldInferThisFrame()" in fn
+        assert "AdaptiveRate.record(" in fn
+        # a skipped frame must still redraw the last real detection (no
+        # visible freeze) without re-running onHandFrame against stale
+        # landmarks (that would corrupt live drag-offset state).
+        assert "drawHandOverlay(_lastHandResult)" in fn
+        assert fn.count("onHandFrame(res)") == 1
+
+    def test_stop_hand_control_resets_adaptive_rate_state(self):
+        script = _extract_inline_script()
+        fn = _extract_function(script, "stopHandControl")
+        assert "AdaptiveRate.reset()" in fn
+        assert "_lastHandResult = null" in fn
+
+    def test_adaptive_rate_math_runs_for_real_in_node(self, tmp_path):
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node not on PATH in this environment")
+        script = _extract_inline_script()
+        m = re.search(r"const AdaptiveRate = \{.*?\n\};\n", script, re.S)
+        assert m
+        harness = m.group(0) + """
+// simulate 10 slow frames (12ms each -> should trigger back-off)
+for (let i = 0; i < 10; i++) AdaptiveRate.record(12);
+const divisorUnderLoad = AdaptiveRate.divisor;
+// simulate 30 fast frames (2ms each -> should fully recover)
+for (let i = 0; i < 30; i++) AdaptiveRate.record(2);
+const divisorRecovered = AdaptiveRate.divisor;
+console.log(JSON.stringify({divisorUnderLoad, divisorRecovered}));
+"""
+        js_file = tmp_path / "adaptive_rate.js"
+        js_file.write_text(harness, encoding="utf-8")
+        result = subprocess.run([node, str(js_file)], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        out = json.loads(result.stdout.strip().splitlines()[-1])
+        assert out["divisorUnderLoad"] > 1, f"did not back off under real sustained load: {out}"
+        assert out["divisorRecovered"] == 1, f"did not recover once load cleared: {out}"
+
+
 class TestSyntheticNoisyHeldPositionNoSpuriousDrag:
     """Extra coverage in the same spirit as scenario 4: noisy per-frame
     POSITION (not just pinch geometry) should not translate into

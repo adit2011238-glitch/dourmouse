@@ -17,14 +17,15 @@
     - The floating panels, drag/resize, and their real data (Gmail,
       companion/research chat, world map) are genuinely interactive in any
       browser right now — nothing about them needs a live desktop session.
-    - Hand-gesture window control reuses the SAME MediaPipe HandLandmarker
-      pipeline already running in ui/index.html, gated by the SAME
-      dourmouse/tray.py camera kill-switch contract (polled the same way
-      index.html already does). Real inference runs the moment a camera
-      grants permission and "ENABLE HAND CONTROL" is clicked — but like
-      index.html's own vision code, this sandbox has no real camera to
-      grant that permission to, so gesture-driven drag/resize/rotate is
-      verified here by an EMA-smoothing + pinch-hysteresis fix
+    - Hand-gesture window control runs its OWN complete MediaPipe
+      HandLandmarker pipeline (camera capture, model load, per-frame
+      inference — nothing here is borrowed from another page's runtime),
+      gated by the dourmouse/tray.py camera kill-switch contract every
+      camera-using DourMouse surface polls the same loopback bridge for.
+      Real inference runs the moment a camera grants permission and
+      "ENABLE HAND CONTROL" is clicked — but this sandbox has no real
+      camera to grant that permission to, so gesture-driven drag/resize/
+      rotate is verified here by an EMA-smoothing + pinch-hysteresis fix
       (LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO,
       section 4 below) confirmed against a synthetic-landmark Node harness
       (dourmouse/tests/test_workspace_hand_gestures.py extracts and
@@ -209,6 +210,7 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="chat">+ COMPANION</button>
     <button class="dockbtn" type="button" data-open="research">+ RESEARCH</button>
     <button class="dockbtn" type="button" data-open="map">+ WORLD MAP</button>
+    <button class="dockbtn" type="button" data-open="globe">+ 3D VIEW</button>
     <a class="backlink" href="/">← CONSOLE</a>
   </div>
 </div>
@@ -229,8 +231,8 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="hb" id="visToggle" type="button">ENABLE HAND CONTROL</button>
     <div class="note">Pinch a titlebar with one hand to drag it. Pinch with BOTH hands and
       change the distance between them to resize the focused window; change the angle
-      between them to tilt it. Gated by the same camera kill-switch as VISION screen /
-      tray.py — verified live-desktop, not this sandbox (see page source for the full
+      between them to tilt it. Gated by the tray.py camera kill-switch — verified
+      live-desktop, not this sandbox (see page source for the full
       honesty note). Raw landmarks are EMA-smoothed and pinch has real on/off hysteresis
       (see LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO below) — SIGNAL
       above reports NOISY when smoothing is actively correcting a jittery frame. DELEGATE
@@ -397,12 +399,14 @@ function wirePanelChrome(p){
 function openPanel(type){
   const existing = findPanelByType(type);
   if(existing){ bringToFront(existing.id); return existing; }
-  const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP" };
+  const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP",
+                   globe: "3D VIEW — GOD'S EYE" };
   const p = createPanel(type, titles[type] || type.toUpperCase());
   if(type === "mail") loadMailPanel(p);
   else if(type === "chat") initChatPanel(p, "companion", "Ask the companion anything…");
   else if(type === "research") initChatPanel(p, "research_info", "Search / research a topic…");
   else if(type === "map") loadMapPanel(p);
+  else if(type === "globe") loadGlobePanel(p);
   return p;
 }
 
@@ -594,6 +598,48 @@ function renderMapPanel(p, data){
     <div class="mapnote">${unmappable.length ? "unmappable (no coordinates): " + esc(unmappable.join(", ")) : "every channel with real coordinates is plotted"}</div>`;
 }
 
+/* ---- 3D VIEW panel: God's Eye View (github.com/bilawalsidhu/gods-eye-view)
+   — a real, separate open-source Node/Vite/Cesium photorealistic 3D globe
+   with live OSINT layers, embedded exactly the way console.html's own EYE
+   tab already does (same reachability check, same iframe, same "not
+   running" instructions card) rather than reinvented here. This is real
+   3D rendering the companion/voice layer can pull open on request ("open
+   the 3d view" / "open globe") — not a placeholder viewer. It runs as its
+   own dev server (gods-eye-view/, `npm run dev`, default port 4173);
+   this panel embeds it, never launches it. ---- */
+const GODS_EYE_URL = "http://localhost:4173/";
+async function loadGlobePanel(p){
+  p.body.style.padding = "0";
+  p.body.innerHTML = `<div style="padding:14px;color:var(--blue-dim)">checking for a running God's Eye View instance…</div>`;
+  let reachable = false;
+  try{
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 1500);
+    // no-cors: can't read the response cross-origin by design, but a
+    // fetch to a genuinely unreachable host rejects — that's all the
+    // signal this needs, same convention as console.html's paintGlobe().
+    await fetch(GODS_EYE_URL, { mode: "no-cors", signal: ctrl.signal });
+    clearTimeout(t);
+    reachable = true;
+  }catch{ reachable = false; }
+  if(findPanelByType("globe") !== p) return; // panel closed while awaiting
+  if(!reachable){
+    p.body.innerHTML = `
+      <div style="padding:14px;font-size:12px;line-height:1.6">
+        <div style="color:var(--amber-hi);margin-bottom:6px">God's Eye View isn't running</div>
+        <div style="color:var(--blue-dim);margin-bottom:8px">A real photorealistic 3D globe with live
+          aircraft/ship/satellite/earthquake layers — runs as its own dev server next to DourMouse.</div>
+        <div style="background:#04080e;border:1px solid var(--line);border-radius:6px;padding:8px;
+          font-size:11px;color:var(--blue-hi);margin-bottom:8px">cd gods-eye-view<br>npm run dev -- --host localhost --port 4173</div>
+        <button class="hb" id="globeRecheck" type="button" style="width:auto;padding:6px 12px">CHECK AGAIN</button>
+      </div>`;
+    p.body.querySelector("#globeRecheck").addEventListener("click", () => loadGlobePanel(p));
+    return;
+  }
+  p.body.innerHTML = `<iframe src="${esc(GODS_EYE_URL)}" allow="microphone; fullscreen" title="God's Eye View"
+    style="width:100%;height:100%;border:0;display:block;background:#000"></iframe>`;
+}
+
 /* ============================================================
    3. voice commands — real grammar (dourmouse/voice_commands.py),
       parsed server-side via POST /api/voice/command, dispatched here.
@@ -702,9 +748,10 @@ function voxStopRecording(){
 $("voxMic").addEventListener("click", voxToggleMic);
 
 /* ============================================================
-   4. hand-gesture window control — reuses the SAME MediaPipe
-      HandLandmarker pipeline ui/index.html already runs, gated by the
-      SAME dourmouse/tray.py camera kill-switch bridge poll.
+   4. hand-gesture window control — this page's OWN complete MediaPipe
+      HandLandmarker pipeline (this is the only hand-tracking surface in
+      DourMouse as of the vision-hand-tracking-v2 consolidation), gated
+      by the dourmouse/tray.py camera kill-switch bridge poll.
    ============================================================ */
 const HAND = {
   video: $("visVideo"), overlay: $("visOverlay"), wrap: $("visCamWrap"),
@@ -808,7 +855,7 @@ async function _createHandLandmarker(vision, fileset, delegate){
   });
 }
 async function startHandControl(){
-  if(!HAND.cameraAllowed){ toast("camera kill-switch is engaged — re-enable it on the VISION screen first"); return; }
+  if(!HAND.cameraAllowed){ toast("camera kill-switch is engaged — re-enable it from the tray icon"); return; }
   if(HAND.startingUp || HAND.running) return;
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast("no camera available in this browser"); return; }
   HAND.startingUp = true;
@@ -854,18 +901,66 @@ function stopHandControl(){
   HAND.signalEl.textContent = "—";
   HAND.delegateEl.textContent = "—";
   resetHandSmoothing(); HAND.lastHandCount = 0;
+  AdaptiveRate.reset(); _lastHandResult = null;
   const ctx = HAND.overlay.getContext("2d"); if(ctx) ctx.clearRect(0, 0, HAND.overlay.width, HAND.overlay.height);
   endHandDrag(); endTwoHand();
 }
+/* ---- adaptive inference rate ----------------------------------------
+   Real bug this fixes: detectForVideo() used to run on EVERY animation
+   frame unconditionally (~60Hz on a capable display) regardless of how
+   long a single call actually takes on the device it's running on -- on
+   a slower CPU-delegate fallback (see startHandControl's honest GPU/CPU
+   note above) or a loaded machine, this piles up frames faster than they
+   can be processed, which is real, measurable lag, not a subjective
+   feeling. AdaptiveRate measures the REAL wall-clock cost of the last N
+   detectForVideo() calls and backs off how often the next ones run when
+   that average creeps up, then recovers automatically once the device
+   catches up -- the same real profiling-driven approach already proven
+   in ui/index.html's own vision engine before this consolidation pass
+   (see git history), ported here since workspace.html is now the ONLY
+   hand-tracking surface. Skipped frames still redraw the last known
+   overlay/gesture state (no visible freeze) via lastResult -- only the
+   expensive detectForVideo() call itself is throttled. */
+const AdaptiveRate = {
+  samples: [], MAX_SAMPLES: 30,
+  divisor: 1, MAX_DIVISOR: 3,
+  frameCounter: 0,
+  record(ms){
+    this.samples.push(ms);
+    if(this.samples.length > this.MAX_SAMPLES) this.samples.shift();
+    if(this.samples.length < 6) return; // not enough real data to react yet
+    const avg = this.samples.reduce((a,b)=>a+b,0) / this.samples.length;
+    if(avg > 8 && this.divisor < this.MAX_DIVISOR) this.divisor++;
+    else if(avg < 4 && this.divisor > 1) this.divisor--;
+  },
+  shouldInferThisFrame(){
+    this.frameCounter++;
+    return (this.frameCounter % this.divisor) === 0;
+  },
+  reset(){ this.samples = []; this.divisor = 1; this.frameCounter = 0; },
+};
+
+let _lastHandResult = null;
 function handLoop(){
   if(!HAND.running) return;
   const v = HAND.video;
   if(v.readyState >= 2 && HAND.handLM){
-    try{
-      const res = HAND.handLM.detectForVideo(v, performance.now());
-      onHandFrame(res);
-      drawHandOverlay(res);
-    }catch(_){}
+    if(AdaptiveRate.shouldInferThisFrame()){
+      try{
+        const t0 = performance.now();
+        const res = HAND.handLM.detectForVideo(v, t0);
+        AdaptiveRate.record(performance.now() - t0);
+        _lastHandResult = res;
+        onHandFrame(res);
+        drawHandOverlay(res);
+      }catch(_){}
+    }else if(_lastHandResult){
+      // A skipped frame still redraws the last real detection so the
+      // overlay doesn't visibly freeze -- but does NOT re-run onHandFrame
+      // (that would double-process the same landmarks against live drag
+      // state, corrupting the drag-offset math).
+      drawHandOverlay(_lastHandResult);
+    }
   }
   HAND._raf = requestAnimationFrame(handLoop);
 }

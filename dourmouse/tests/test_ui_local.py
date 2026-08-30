@@ -118,58 +118,24 @@ class TestPremiumHud:
         assert "setCoreState('complete')" in html
 
 
-class TestVisionAdvancedGestures:
-    """v5.29 — the advanced hand-gesture engine, pinned at the source level
-    so a future refactor cannot silently drop the vocabulary, the hysteresis
-    gate, the pointer mode, or the deck's deny path."""
+class TestTaskDeckDenyPath:
+    """The advanced hand-gesture engine this class used to cover (v5.29,
+    ui/index.html's VISION screen) was removed in vision-hand-tracking-v2's
+    consolidation pass — ui/workspace.html is now the only hand-tracking
+    surface (see its own tests, dourmouse/tests/test_workspace_hand_gestures.py).
+    What's kept here is the one piece of real, still-live coverage that
+    happened to live in this class: the TASK DECK's own deny path, which
+    has nothing to do with hand gestures and is not covered anywhere else."""
 
     def _read(self) -> str:
         return (Path(__file__).resolve().parents[2] / "ui/index.html").read_text(
             encoding="utf-8"
         )
 
-    def test_engine_markers(self):
-        html = self._read()
-        assert "v5.29: advanced gesture engine" in html
-        assert "const GS = {" in html
-        assert "NEED: 4" in html  # hysteresis gate
-        assert "COOLDOWN_MS: 900" in html  # per-gesture re-fire guard
-
-    def test_full_gesture_vocabulary(self):
-        html = self._read()
-        for g in ("OPEN_PALM", "BOTH_PALMS", "PINCH", "CLICK", "THUMBS_UP",
-                  "THUMBS_DOWN", "POINT", "PEACE", "THREE", "ROCK",
-                  "OK", "FIST", "WAVE"):
-            assert f"case '{g}':" in html, f"missing gesture {g}"
-
-    def test_pointer_mode_wired(self):
-        html = self._read()
-        assert "setMode('POINTER')" in html
-        assert "doClickAt(GS.px, GS.py)" in html
-        assert 'id="visCursor"' in html
-        assert "VISION.cursor" in html
-
-    def test_continuous_scroll_wired(self):
-        html = self._read()
-        assert "scrollByHand(_pt(dom, 0)" in html
-        assert "setMode('SCROLL')" in html
-
-    def test_two_hand_emergency_stop(self):
-        html = self._read()
-        assert "commitGesture('BOTH_PALMS')" in html
-        assert "emergency stop" in html.lower()
-
-    def test_deny_gesture_reaches_deck(self):
+    def test_deny_reaches_the_deck(self):
         html = self._read()
         assert "denyConfirm()" in html
         assert "approved: false" in html
-
-    def test_gesture_map_ui_updated(self):
-        html = self._read()
-        assert "v5.29 ADVANCED ENGINE" in html
-        for label in ("BOTH PALMS", "POINTER MODE", "CLICK at the cursor",
-                      "THUMBS DOWN", "command palette", "dismiss the task deck"):
-            assert label in html, f"gesture map missing {label}"
 
 
 class TestComputeNodeCard:

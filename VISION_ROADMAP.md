@@ -1,6 +1,47 @@
 # DOURMOUSE VISION — Roadmap to "Incredible" (v13.2)
 
-## Status
+## SUPERSEDED — read this before the rest of the file (2026-08-30)
+
+Everything below this notice was built against `ui/index.html`'s VISION
+screen (`#/vision`). Per explicit user directive on 2026-08-30, that screen
+has been **deleted entirely** — `ui/workspace.html` is now the ONLY
+hand-tracking / vision surface in DourMouse (`localhost:8765/workspace`).
+What survived the cut, and what didn't:
+
+- **Ported to `workspace.html`:** the `AdaptiveRate` governor (real
+  `detectForVideo()` cost measurement, call-rate back-off under load,
+  automatic recovery) — see `test_workspace_hand_gestures.py`'s
+  `TestAdaptiveRateThrottlesInferenceUnderLoad`.
+- **Deliberately NOT ported:** the `OneEuroFilter` landmark smoothing.
+  `workspace.html` already had its own EMA + Schmitt-trigger-hysteresis
+  smoothing, a deliberate, already-tested, better fit for continuous
+  two-hand drag/resize/rotate than a filter designed for discrete point
+  tracking — see `test_workspace_hand_gestures.py`'s own extensive
+  synthetic-math coverage. Swapping proven, tested code for a different
+  filter with no demonstrated benefit was judged the wrong call.
+- **Lost, not ported anywhere (flagged, not silently dropped):** Phase 1's
+  and Phase 2's gesture -> God's-Eye-globe bridge (GLOBE MODE, PINCH/
+  THUMBS-UP/ROCK/OK/FIST repointed at `gevActions`, POINT-to-pan). This
+  functionality does not exist in `workspace.html` and was out of scope
+  for the consolidation request. `console.html`'s EYE tab still iframes
+  the real globe, just with no gesture control. Rebuilding this against
+  `workspace.html` (which has its own separate camera session) would be
+  real, non-trivial new engineering, not a port — flagged here as an open
+  option, not started.
+- Phase 4's hold-progress meter and the discrete gesture-hold engine
+  (`GS`/`gestureAct`) it was built on are gone along with the rest of
+  index.html's VISION screen; `workspace.html`'s own gesture model
+  (continuous pinch, not discrete hold-to-fire) doesn't have an equivalent
+  concept.
+- Phases 3, 5, 6 below were never started against index.html either, and
+  nothing here suggests they'd be a better fit for `workspace.html`'s
+  different interaction model (floating multi-window desktop, not a
+  single full-screen camera view) without being redesigned first.
+
+The historical Status section and Phase write-ups below are kept as a
+record of what was actually built and verified, not as a live plan.
+
+## Status (historical — for the now-deleted index.html VISION screen)
 
 - **Phase 1 (gesture -> globe): SHIPPED and live-verified.** GLOBE MODE
   toggle in the VISION screen; PINCH/PEACE/THREE/THUMBS UP/THUMBS
