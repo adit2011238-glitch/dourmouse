@@ -71,7 +71,24 @@ from dourmouse.planner import build_plan, looks_multi_step
 # Transient API failures worth retrying (institutional self-correction):
 # rate limits and 5xx/connection errors. Anything else (auth, malformed
 # requests) must fail loudly — never masked by a retry loop.
+#
+# v13.2 (live-caught, real bug): this only ever recognized the `openai` SDK's
+# own exception hierarchy. _OllamaNativeClient (the "cloud"/native Ollama
+# path — see its own module docstring on why it talks to /api/chat directly
+# instead of through the openai client) uses bare urllib.request, which
+# raises urllib.error.HTTPError/URLError and socket timeouts — a completely
+# different class hierarchy that isinstance() against openai.* exceptions
+# will never match. Live-reproduced: a real transient 500 from Ollama Cloud
+# mid-turn (after the model had already streamed a full answer and called a
+# tool) hit this function, got classified as non-transient, and `raise`d
+# immediately on the FIRST attempt with zero retries — crashing the whole
+# turn (empty persisted transcript, a raw "HTTP Error 500: Internal Server
+# Error" surfaced to the user) for exactly the kind of hiccup the retry loop
+# exists to absorb.
 def _is_transient_error(exc: Exception) -> bool:
+    import socket
+    import urllib.error
+
     import openai as _openai
 
     for cls in (
@@ -82,6 +99,17 @@ def _is_transient_error(exc: Exception) -> bool:
     ):
         if isinstance(exc, cls):
             return True
+    if isinstance(exc, TimeoutError | socket.timeout | ConnectionError):
+        return True
+    if isinstance(exc, urllib.error.HTTPError):
+        # A real 5xx or rate-limit response from the far end is worth
+        # retrying; a 4xx (bad request, auth, not found) never gets better
+        # on retry and must fail loudly instead of masking a real problem.
+        return exc.code == 429 or exc.code >= 500
+    if isinstance(exc, urllib.error.URLError):
+        # No HTTP status at all (DNS failure, connection refused, a plain
+        # socket timeout wrapped by urllib) — network-level, transient.
+        return True
     return False
 
 
@@ -743,7 +771,13 @@ _SYSTEM_PROMPT = (
     "honest daily self-review via the memory agent's daily_digest tool — "
     "never fabricate a digest from memory alone.\n"
     "  - Surface anything time-sensitive the live feeds expose; do not "
-    "silently drop a poll result that matters."
+    "silently drop a poll result that matters.\n"
+    "12. NEVER proactively call write_note, remember, or any other "
+    "persistence tool to save your OWN answer just because it was long or "
+    "seemed useful. A finished answer is a deliverable in the chat, not "
+    "something to file away on its own — only persist when the user "
+    "explicitly asked you to save/remember/note it, or when the request "
+    "was itself a request to store something."
 )
 
 
@@ -3052,6 +3086,36 @@ def _run_dispatch_loop(
             # above uses, so the user can see this specific answer wasn't
             # grounded rather than trusting it at face value.
             if ctx.grounded and tools_used == 0 and bool(scoped_tools):
+                # v13.2 (live-caught, real bug): when the grounded-mode nudge
+                # above forced a SECOND completion call and that follow-up
+                # answers with nothing new (common — the model already gave
+                # its real answer the first time and has nothing to add),
+                # `text` here is that follow-up's own EMPTY content.
+                # Appending the disclaimer to it and returning would drop
+                # the actual answer entirely — live-reproduced: a real
+                # ~900-char essay's OWN assistant_text transcript entry
+                # survived correctly, but final_text (what the session
+                # ledger persists, and the ONLY thing a page reload uses to
+                # rebuild the answer bubble — see restoreSession's own
+                # comment on why it never replays assistant_text from the
+                # transcript) ended up as JUST the 161-char disclaimer.
+                # Recover the real answer from the transcript before this
+                # empty follow-up overwrites it. Scoped tightly to this
+                # exact case (a round-trip happened AND this call's own text
+                # is empty) so the unrelated fabrication-correction nudges
+                # above — which deliberately DISCARD an earlier wrong claim
+                # — are never touched by this.
+                if not text.strip() and grounded_nudges > 0:
+                    prior = next(
+                        (
+                            e.get("text", "")
+                            for e in reversed(transcript)
+                            if e.get("type") == "assistant_text" and e.get("text", "").strip()
+                        ),
+                        "",
+                    )
+                    if prior:
+                        text = prior
                 text += (
                     "\n\n[DOURMOUSE: Grounded Mode was on and this answer used "
                     "zero tool calls despite real tools being available — "

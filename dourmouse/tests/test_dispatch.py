@@ -1449,6 +1449,38 @@ class TestGroundedMode:
         assert "Grounded Mode was on" in report["final_text"]
         assert "zero tool calls" in report["final_text"]
 
+    def test_nudge_followup_with_empty_reply_does_not_drop_the_real_answer(self, monkeypatch):
+        """v13.2 live-caught real bug: a real substantive first answer,
+        followed by a grounded-mode nudge whose follow-up call answers with
+        NOTHING new (empty content — common once the model already said its
+        piece), used to overwrite final_text with just the disclaimer,
+        losing the entire real answer. Live-measured against the actual
+        running server: a ~900-char essay's final_text was persisted as
+        just the 161-char "[DOURMOUSE: Grounded Mode...]" note — a page
+        reload would have shown the disclaimer with no essay at all, since
+        restoreSession() rebuilds the answer bubble from final_text alone,
+        never by replaying assistant_text out of the transcript."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = _test_registry()
+        client = FakeClient(
+            [
+                _FakeResponse(_FakeMessage(content="This is the real, complete answer.")),
+                _FakeResponse(_FakeMessage(content="")),  # the empty follow-up
+            ]
+        )
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "x"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent",
+        )
+        assert len(client.chat.completions.calls) == 2
+        assert "This is the real, complete answer." in report["final_text"]
+        assert "Grounded Mode was on" in report["final_text"]
+
     def test_on_but_a_real_tool_was_used_no_caveat(self, monkeypatch):
         from dourmouse.dispatch import run_dispatch_messages, system_message
 

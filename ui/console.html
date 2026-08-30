@@ -1854,6 +1854,66 @@ function addApproval(node, evt, declineMap){
   yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
   yes.focus();
 }
+// v13.2 (live-caught, real bug): measured the raw SSE stream directly
+// against the actual "cloud" backend (a Python script timestamping every
+// assistant_delta/thinking_delta as it arrived) and found the answer is
+// NOT delivered incrementally over wall-clock time at all -- Ollama Cloud
+// buffers the ENTIRE response (reasoning AND content) server-side and
+// bursts hundreds of "delta" events within sub-millisecond of each other,
+// the instant generation finishes. The old buf+=e.text;paint() code was
+// faithfully live -- the BACKEND just never gave it anything to be live
+// WITH, so a long essay would sit on "THINKING" for 10-20s (only the
+// brain_thinking heartbeat moving) and then the entire answer would slam
+// onto the screen in one paint(), nothing like the token-by-token reveal
+// this was built to give (see _stream_completion's own docstring: "gives
+// the UI a Claude-like feel").
+//
+// makeRevealer() decouples "when text ARRIVED" from "when text is SHOWN":
+// arriving text is queued, and a fixed-cadence ticker drains it into the
+// visible buffer a few characters at a time -- a synthetic typewriter that
+// gives the live-token feel regardless of how bursty the transport
+// actually is. Chunk size scales with the backlog (maxTicks bounds ANY
+// burst, however large, to roughly maxTicks*tickMs of total reveal time)
+// so a giant one-shot burst still finishes "quickly" instead of typing
+// out a 2,500-character essay one character at a time for 15+ seconds.
+function makeRevealer(onUpdate, opts){
+  opts = opts || {};
+  const tickMs = opts.tickMs || 20;
+  const baseChunk = opts.baseChunk || 4;
+  const maxTicks = opts.maxTicks || 60;
+  let revealed = "", pending = "", timer = null, ended = false;
+  function tick(){
+    if(!pending.length){
+      if(ended && timer){ clearInterval(timer); timer=null; }
+      return;
+    }
+    const n = Math.max(baseChunk, Math.ceil(pending.length / maxTicks));
+    revealed += pending.slice(0, n);
+    pending = pending.slice(n);
+    onUpdate(revealed);
+  }
+  function start(){ if(!timer) timer = setInterval(tick, tickMs); }
+  return {
+    enqueue(text){ if(!text) return; pending += text; start(); },
+    // For an "assistant_text"/"done" event carrying the FULL text so far —
+    // enqueues only the new suffix beyond what's already shown or queued,
+    // so it never re-types text the user has already seen.
+    setTotal(text){
+      const known = revealed.length + pending.length;
+      if(text && text.length > known) this.enqueue(text.slice(known));
+    },
+    // STOP was clicked, or the turn errored — show everything immediately
+    // rather than keep fake-typing an answer that's no longer arriving.
+    flushAll(){
+      if(pending.length){ revealed += pending; pending=""; onUpdate(revealed); }
+      if(timer){ clearInterval(timer); timer=null; }
+      ended = true;
+    },
+    finish(){ ended = true; if(!pending.length && timer){ clearInterval(timer); timer=null; } },
+    get value(){ return revealed; },
+    get draining(){ return pending.length>0; },
+  };
+}
 function setBusy(on){
   busy=on; go.disabled=false; go.textContent = on?"QUEUE":"SEND_DIRECTIVE";
   stopBtn.classList.toggle("on",on);
@@ -1901,13 +1961,17 @@ async function run(text){
     node.tm.textContent = Math.round((performance.now()-startedAt)/1000) + "s";
   }, 1000);
   let buf="", stopped=false, dirty=false, painting=false;
-  let thinkBuf="", thinkDirty=false, thinkPainting=false, thinkFolded=false;
+  let thinkBuf="", thinkDirty=false, thinkPainting=false, thinkFolded=false, thinkStarted=false;
   const paint=()=>{ dirty=true; if(painting)return; painting=true;
     setTimeout(()=>{ painting=false; if(!dirty)return; dirty=false;
       node.body.innerHTML=md(buf); wireCopies(node.body);
       node.thread.scrollTop=node.thread.scrollHeight;
       if(voiceMode) $("vText").textContent = buf.slice(-600);
     },40); };
+  // v13.2: real content no longer lands straight in buf — it drains through
+  // this typewriter (see makeRevealer's own comment for WHY: the backend
+  // bursts the whole answer at once, this is what makes it look live).
+  const contentRevealer = makeRevealer((text)=>{ buf=text; paint(); });
   // v13.1: visible chain-of-thought — same debounce pattern as paint()
   // above, its own buffer so reasoning tokens never touch buf/.body.
   // Auto-opens on the first thinking_delta; auto-folds (leaving the
@@ -1918,8 +1982,12 @@ async function run(text){
       node.think.textContent=thinkBuf;
       node.think.scrollTop=node.think.scrollHeight;
     },40); };
+  // v13.2: same typewriter treatment for reasoning tokens — a slightly
+  // bigger base chunk (reasoning traces run long and nobody reads them as
+  // closely as the answer, so a faster reveal still feels natural).
+  const thinkRevealer = makeRevealer((text)=>{ thinkBuf=text; paintThink(); }, {baseChunk:6, maxTicks:40});
   const foldThink=()=>{
-    if(thinkFolded || !thinkBuf) return; thinkFolded=true;
+    if(thinkFolded || !thinkStarted) return; thinkFolded=true;
     node.think.style.display="none";
     node.thinkToggle.querySelector(".tcar").textContent="▸";
   };
@@ -1932,6 +2000,9 @@ async function run(text){
     // blocked server thread wakes and frees session_lock instead of sitting
     // in WebConfirmationGate.wait() for up to 300s.
     for(const decline of pendingDeclines.values()){ try{decline();}catch{} }
+    // Show everything that HAD arrived immediately rather than keep
+    // fake-typing text for a turn the user just told to stop.
+    contentRevealer.flushAll(); thinkRevealer.flushAll();
   };
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -1972,14 +2043,18 @@ async function run(text){
           case "thinking_delta":{
             // v13.1: real reasoning tokens, on a channel of their own —
             // see paintThink() above for why this never touches buf.
-            thinkBuf += e.text||"";
-            if(thinkBuf && node.think.style.display==="none" && !thinkFolded){
+            // v13.2: enqueue() drains through thinkRevealer's own ticker
+            // (see makeRevealer) instead of landing in thinkBuf straight
+            // away — open the box on the first token SEEN, not the first
+            // one actually revealed, so it doesn't lag its own trigger.
+            const first = !thinkStarted; thinkStarted = true;
+            thinkRevealer.enqueue(e.text||"");
+            if(first && node.think.style.display==="none" && !thinkFolded){
               node.think.style.display="block";
               node.thinkToggle.style.display="inline-flex";
               node.thinkToggle.querySelector(".tcar").textContent="▾";
             }
             node.st.textContent="THINKING";
-            paintThink();
             break; }
           case "plan": act(node.acts,"PLAN",""); node.noteStep(); liveAdd("act","Planning the steps",""); break;
           case "tool_use": case "function":{
@@ -2018,10 +2093,10 @@ async function run(text){
             }
             break; }
           case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e,pendingDeclines); break;
-          case "assistant_delta": foldThink(); buf+=e.text||""; paint(); break;
-          case "assistant_text": foldThink(); if(e.text&&e.text.length>buf.length){buf=e.text;paint();} break;
+          case "assistant_delta": foldThink(); contentRevealer.enqueue(e.text||""); break;
+          case "assistant_text": foldThink(); contentRevealer.setTotal(e.text||""); break;
           case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;
-          case "done": if(e.final_text&&e.final_text.length>buf.length) buf=e.final_text; break;
+          case "done": if(e.final_text) contentRevealer.setTotal(e.final_text); break;
         }
       }
     }
@@ -2038,6 +2113,19 @@ async function run(text){
       liveAdd("err","Request failed",String(err.message||err).slice(0,80));
     }
   }finally{
+    // v13.2: the network stream ending does NOT mean the typewriter is done
+    // showing it — the backend bursts everything at once (see makeRevealer),
+    // so there is very likely still a queued tail the user hasn't seen yet.
+    // finish() lets each revealer's own ticker drain naturally; the wait
+    // below is capped (maxTicks*tickMs is ~1.2s per revealer, so this never
+    // meaningfully stalls) and flushAll() is the hard backstop before the
+    // "final" render below reads buf directly.
+    contentRevealer.finish(); thinkRevealer.finish();
+    const deadline = performance.now() + 3000;
+    while((contentRevealer.draining || thinkRevealer.draining) && performance.now() < deadline){
+      await new Promise(r=>setTimeout(r, 30));
+    }
+    contentRevealer.flushAll(); thinkRevealer.flushAll();
     clearInterval(tick);
     node.tm.textContent = ((performance.now()-startedAt)/1000).toFixed(1) + "s";
     ctrl=null;
