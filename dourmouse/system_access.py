@@ -51,6 +51,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dourmouse import git_safety
 from dourmouse.dispatch import Permission, Subagent, ToolSpec
 from dourmouse.sandbox import run_sandboxed
 
@@ -240,6 +241,21 @@ def _list_path_tool(arguments: dict[str, Any]) -> str:
     return f"LISTING {target}:\n" + ("\n".join(entries) if entries else "(empty)")
 
 
+def _auto_commit_suffix(target: Path, action: str) -> str:
+    """Aider-port git safety net (dourmouse/git_safety.py): every write/
+    delete this agent makes to a path inside a real git repo gets its own
+    atomic commit. Silent no-op (empty string) outside a repo — most
+    device-wide writes are not into a versioned project, and that is fine.
+    """
+    try:
+        rev = git_safety.auto_commit(target, action)
+    except Exception:  # noqa: BLE001 - the safety net must never break the write it protects
+        return ""
+    if rev is None:
+        return ""
+    return f" [auto-committed as {rev} — undo_last_change to revert]"
+
+
 def _write_path_tool(arguments: dict[str, Any]) -> str:
     raw = arguments.get("path", "")
     target = _resolve_abs(raw)
@@ -256,7 +272,26 @@ def _write_path_tool(arguments: dict[str, Any]) -> str:
         target.write_text(content)
     except OSError as exc:
         return f"ERROR: could not write {target}: {exc}"
-    return f"WROTE {target} ({len(arguments.get('content', ''))} chars)"
+    result = f"WROTE {target} ({len(arguments.get('content', ''))} chars)"
+    return result + _auto_commit_suffix(target, "wrote")
+
+
+def _undo_last_change_tool(arguments: dict[str, Any]) -> str:
+    """The real /undo for the git-safety net above: reverts the single most
+    recent Dourmouse auto-commit in whichever repo ``path`` lives in
+    (default: Dourmouse's own repo). Refuses if HEAD is not one of ours —
+    see git_safety.undo_last for the exact safety invariant.
+    """
+    raw = arguments.get("path", "") or str(_PROJECT_ROOT)
+    target = _resolve_abs(raw) or _PROJECT_ROOT
+    root = git_safety.git_root(target)
+    if root is None:
+        return (
+            f"UNDO REFUSED (reported honestly): {target} is not inside a "
+            "git repository — there is nothing for undo_last_change to "
+            "act on. Nothing was changed."
+        )
+    return git_safety.undo_last(root)
 
 
 def _delete_path_tool(arguments: dict[str, Any]) -> str:
@@ -276,7 +311,7 @@ def _delete_path_tool(arguments: dict[str, Any]) -> str:
         target.unlink()
     except OSError as exc:
         return f"ERROR: could not delete {target}: {exc}"
-    return f"DELETED {target}"
+    return f"DELETED {target}" + _auto_commit_suffix(target, "deleted")
 
 
 # --------------------------------------------------------------------------- #
@@ -654,6 +689,34 @@ def build_system_subagent() -> Subagent:
                 handler=_delete_path_tool,
                 permission=Permission.REQUIRES_CONFIRMATION,
                 confirm_prompt=lambda a: f"Permanently delete {a.get('path')!r}?",
+            ),
+            ToolSpec(
+                name="undo_last_change",
+                description=(
+                    "Aider-style /undo: reverts the SINGLE most recent "
+                    "Dourmouse auto-commit (see write_path/delete_path's "
+                    "'[auto-committed as ...]' suffix) in the git repo "
+                    "containing 'path'. Refuses honestly if HEAD is not a "
+                    "Dourmouse commit — never touches a human's own commit. "
+                    "A real git revert (new commit undoing the change), "
+                    "never a destructive reset."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "default": str(_PROJECT_ROOT),
+                            "description": "Any path inside the repo to undo in.",
+                        }
+                    },
+                },
+                handler=_undo_last_change_tool,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: (
+                    f"Undo the last Dourmouse change in the repo containing "
+                    f"{a.get('path') or str(_PROJECT_ROOT)!r}?"
+                ),
             ),
             ToolSpec(
                 name="run_command",

@@ -171,6 +171,9 @@ class TestRosterShape:
             # same full-laptop scope; delete_path was already gated.
             "write_note",
             "write_path",
+            # v13.1: Aider-port git safety net's real /undo — reverts file
+            # content on disk, same consequential-change bar as write_path.
+            "undo_last_change",
             # design_3d: can silently overwrite an existing named manifest
             # entry with no diff shown, same rationale as write_note.
             "write_manifest_entry",

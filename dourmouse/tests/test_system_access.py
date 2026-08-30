@@ -23,6 +23,7 @@ from dourmouse.system_access import (
     _delete_path_tool,
     _list_path_tool,
     _read_path_tool,
+    _undo_last_change_tool,
     _write_path_tool,
     build_system_subagent,
     classify_command,
@@ -277,6 +278,71 @@ class TestFullScopeFiles:
         result = _delete_path_tool({"path": str(f)})
         assert "DELETED" in result
         assert not f.exists()
+
+
+class TestGitAutoCommitAndUndo:
+    """Aider port part 1/4, wired into write_path/delete_path: every change
+    to a path inside a real git repo gets its own atomic commit, and
+    undo_last_change reverts exactly the most recent one."""
+
+    @pytest.fixture
+    def repo(self, tmp_path):
+        import subprocess
+
+        root = tmp_path / "repo"
+        root.mkdir()
+        subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=root, check=True)
+        (root / "README.md").write_text("hi\n")
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=root, check=True, capture_output=True)
+        return root
+
+    def test_write_path_inside_a_repo_auto_commits(self, repo):
+        target = repo / "new.txt"
+        result = _write_path_tool({"path": str(target), "content": "hello"})
+        assert "WROTE" in result
+        assert "auto-committed as" in result
+
+    def test_write_path_outside_a_repo_stays_silent(self, tmp_path):
+        target = tmp_path / "new.txt"
+        result = _write_path_tool({"path": str(target), "content": "hello"})
+        assert "WROTE" in result
+        assert "auto-committed" not in result
+
+    def test_delete_path_inside_a_repo_auto_commits(self, repo):
+        target = repo / "README.md"
+        result = _delete_path_tool({"path": str(target)})
+        assert "DELETED" in result
+        assert "auto-committed as" in result
+
+    def test_undo_last_change_reverts_the_write(self, repo):
+        target = repo / "scratch.txt"
+        _write_path_tool({"path": str(target), "content": "v1"})
+        assert target.exists()
+        out = _undo_last_change_tool({"path": str(target)})
+        assert "UNDONE" in out
+        assert not target.exists()
+
+    def test_undo_last_change_refuses_outside_a_repo(self, tmp_path):
+        out = _undo_last_change_tool({"path": str(tmp_path)})
+        assert "REFUSED" in out
+
+    def test_undo_last_change_never_touches_a_human_commit(self, repo):
+        import subprocess
+
+        (repo / "human.txt").write_text("human work")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "human wrote this"], cwd=repo, check=True, capture_output=True)
+        out = _undo_last_change_tool({"path": str(repo)})
+        assert "REFUSED" in out
+        assert (repo / "human.txt").exists()
+
+    def test_undo_last_change_is_confirmation_gated(self):
+        registry = build_system_subagent()
+        spec = next(t for t in registry.tools if t.name == "undo_last_change")
+        assert spec.permission == Permission.REQUIRES_CONFIRMATION
 
 
 class TestPrivilegedGate:

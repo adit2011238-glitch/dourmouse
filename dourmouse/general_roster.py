@@ -58,7 +58,7 @@ from dourmouse.dispatch import (
     run_dispatch_messages,
     system_message,
 )
-from dourmouse import net_errors
+from dourmouse import git_safety, net_errors
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.system_access import build_system_subagent
 
@@ -853,6 +853,17 @@ def _diff_preview_tool(arguments: dict[str, Any], *, for_write: bool = False) ->
     return header + "\n" + diff
 
 
+def _auto_commit_note(target: Path, action: str) -> str:
+    """Same git-safety net as system_access.py's write_path/delete_path
+    (dourmouse/git_safety.py, Aider port part 1/4) — silent outside a repo,
+    since most of the workspace sandbox is not one."""
+    try:
+        rev = git_safety.auto_commit(target, action)
+    except Exception:  # noqa: BLE001 - never break the write it protects
+        return ""
+    return f" [auto-committed as {rev}]" if rev else ""
+
+
 def _write_file_tool(arguments: dict[str, Any]) -> str:
     try:
         target = _safe_resolve(_workspace_root(), arguments.get("path", ""))
@@ -870,6 +881,7 @@ def _write_file_tool(arguments: dict[str, Any]) -> str:
     target.write_text(arguments.get("content", ""))
     verb = "UPDATED" if existed else "WROTE"
     msg = f"{verb} workspace file: {target.relative_to(_workspace_root())} ({len(arguments.get('content', ''))} chars)"
+    msg += _auto_commit_note(target, "wrote" if not existed else "edited")
     if diff_note:
         msg += "\n\n" + diff_note
     return msg
@@ -909,7 +921,8 @@ def _edit_file_tool(arguments: dict[str, Any]) -> str:
             fromfile=str(target.relative_to(_workspace_root())), tofile=str(target.relative_to(_workspace_root())),
         )
     )
-    return "EDITED workspace file " + str(target.relative_to(_workspace_root())) + " (1 occurrence):\n" + diff
+    note = _auto_commit_note(target, "edited")
+    return "EDITED workspace file " + str(target.relative_to(_workspace_root())) + " (1 occurrence):" + note + "\n" + diff
 
 
 def _deploy_tool(arguments: dict[str, Any]) -> str:
