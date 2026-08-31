@@ -11,20 +11,39 @@
 #  start.command in a proper .app bundle you can double-click, drag to
 #  /Applications, or pin to the Dock. The applet simply opens a Terminal
 #  running start.command (which boots the native DOURMOUSE desktop window).
+#
+#  v13.5 real bug fixed here (live-reproduced): the applet used to find
+#  the project root DYNAMICALLY via AppleScript's `path to me` — the
+#  bundle's OWN current location. That only works if the .app is left
+#  sitting right next to start.command forever. The moment a copy is
+#  moved/dragged to ~/Applications (the whole point of "add the app to
+#  my Applications folder" — a normal, expected thing to do with a .app),
+#  `path to me` resolves to ~/Applications instead, `cd` lands there, and
+#  `bash ./start.command` fails outright (no such file) — a real, exactly
+#  this failure, confirmed live: `ls ~/Applications/start.command` ->
+#  No such file or directory. Fixed by baking the REAL project root path
+#  in at BUILD time (known-good, this script's own directory) instead of
+#  resolving it at RUN time from wherever the bundle happens to be — the
+#  built .app can now be freely copied/moved anywhere and still finds the
+#  real project.
 # =============================================================================
 set -euo pipefail
 
-ROOT="${1:-$(cd "$(dirname "$0")" && pwd)}"  # default: THIS script's dir (the project root), not its parent
-APP="$ROOT/dourmouse.app"
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"  # the REAL project root — always this script's own directory, regardless of where the .app itself ends up
+OUTPUT_DIR="${1:-$PROJECT_ROOT}"  # default: build straight into the project root, as before
+APP="$OUTPUT_DIR/dourmouse.app"
+# AppleScript string-literal escaping for the one character that would
+# otherwise break out of the quoted string below (real paths essentially
+# never contain a literal double-quote, but this is cheap insurance).
+APPLESCRIPT_ROOT="${PROJECT_ROOT//\"/\\\"}"
 # Deterministic temp path (mktemp chokes on a leftover file in some /tmp
 # states); always cleared first, removed after compile.
 TMP_SCRIPT="/tmp/dourmouse_applet.applescript"
 rm -f "$TMP_SCRIPT"
 
-cat > "$TMP_SCRIPT" <<'APPLESCRIPT'
+cat > "$TMP_SCRIPT" <<APPLESCRIPT
 on run
-	set bundlePath to POSIX path of (path to me)
-	set appRoot to do shell script "dirname " & quoted form of bundlePath
+	set appRoot to "$APPLESCRIPT_ROOT"
 	tell application "Terminal"
 		activate
 		do script "cd " & quoted form of appRoot & " && bash ./start.command"
@@ -37,7 +56,7 @@ end run
 -- to start.command — the allow-list parser in dourmouse/deeplink.py decides
 -- what it means; nothing here ever executes it.
 on open location theURL
-	set appRoot to do shell script "dirname " & quoted form of (POSIX path of (path to me))
+	set appRoot to "$APPLESCRIPT_ROOT"
 	do shell script "cd " & quoted form of appRoot & " && DOURMOUSE_DEEP_LINK=" & quoted form of theURL & " nohup bash ./start.command >/dev/null 2>&1 &"
 end open location
 APPLESCRIPT

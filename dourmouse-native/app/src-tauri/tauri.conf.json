@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "app",
+  "productName": "Dourmouse Native",
   "version": "0.1.0",
   "identifier": "com.dourmouse.native",
   "build": {
@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "app",
-        "width": 800,
-        "height": 600
+        "title": "Dourmouse Native — Agent Swarm Canvas",
+        "width": 1280,
+        "height": 860
       }
     ],
     "security": {

@@ -775,6 +775,64 @@ class TestPackaging:
         builder = (_PROJECT_ROOT / "build_app.command").read_text(encoding="utf-8")
         assert "osacompile" in builder
 
+    def test_build_app_command_no_longer_self_locates_at_runtime(self):
+        """v13.5, real live-reproduced bug: the applet used to find the
+        project root via AppleScript's `path to me` (the bundle's OWN
+        current location) — broke the instant a built .app was copied to
+        ~/Applications (the whole point of "add it to my Applications
+        folder"): `path to me` resolved to ~/Applications, `cd` landed
+        there, and `bash ./start.command` failed outright (confirmed
+        live: `ls ~/Applications/start.command` -> No such file or
+        directory). Fixed by baking the real project root in at BUILD
+        time instead. This pins the regression at the source level;
+        TestBuildAppCommandBakesRealRoot below proves it end to end with
+        a real osacompile + osadecompile round trip."""
+        builder = (_PROJECT_ROOT / "build_app.command").read_text(encoding="utf-8")
+        # The FUNCTIONAL AppleScript call, not the prose explaining the old
+        # bug in this file's own comments (which legitimately still says
+        # "path to me" describing what used to happen).
+        assert "POSIX path of (path to me)" not in builder
+        assert "PROJECT_ROOT" in builder
+
+
+class TestBuildAppCommandBakesRealRoot:
+    """Real end-to-end proof of the fix above: actually run build_app.command
+    (real osacompile) against a throwaway output dir and decompile the
+    resulting applet (real osadecompile) to confirm the literal, real
+    project root path is baked into the compiled script — not a dynamic
+    `path to me` call that breaks once the .app is moved."""
+
+    def test_compiled_applet_contains_the_real_project_root(self, tmp_path):
+        osacompile = shutil.which("osacompile")
+        osadecompile = shutil.which("osadecompile")
+        if not osacompile or not osadecompile:
+            pytest.skip("osacompile/osadecompile not available on this runner (macOS-only)")
+        bash = _usable_bash()
+        if bash is None:
+            pytest.skip("no usable bash on this runner")
+        # tmp_path is a real pytest-managed directory, always on the same
+        # filesystem class as the rest of the test run's tmp storage — a
+        # deliberately different location than _PROJECT_ROOT, to actually
+        # exercise the "app built/placed somewhere else" case this fix is
+        # for, not just the same-directory default.
+        result = subprocess.run(
+            [bash, str(_PROJECT_ROOT / "build_app.command"), str(tmp_path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, f"build_app.command failed: {result.stderr}"
+        app_dir = tmp_path / "dourmouse.app"
+        assert app_dir.is_dir()
+        scpt = app_dir / "Contents" / "Resources" / "Scripts" / "main.scpt"
+        assert scpt.is_file()
+        decompiled = subprocess.run(
+            [osadecompile, str(scpt)], capture_output=True, text=True, timeout=30,
+        )
+        assert decompiled.returncode == 0, decompiled.stderr
+        source = decompiled.stdout
+        assert "path to me" not in source
+        assert str(_PROJECT_ROOT) in source  # the REAL root, baked in literally
+        assert "bash ./start.command" in source
+
 
 # --------------------------------------------------------------------------- #
 # Vision helper auto-start (v13) — real bug fixed: nothing ever launched
