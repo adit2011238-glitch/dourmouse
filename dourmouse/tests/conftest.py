@@ -40,6 +40,29 @@ def _neuro_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _memory_remote_isolated(monkeypatch):
+    """v13.4 (hermetic-test-caught, real bug — same failure mode
+    _user_config_isolated below already documents once): this developer's
+    REAL project .env now sets DOURMOUSE_MEMORY_REMOTE_URL (the shared RAG
+    database genuinely moved to another machine, 2026-08-31) —
+    dourmouse.config's own module-level load_dotenv() picks that up into
+    os.environ the moment ANY test imports it, completely independent of
+    any individual test's own monkeypatch.setenv/delenv calls (those only
+    revert what THAT test changed, not a value already set before the
+    test ran). Caught immediately: test_open_default_store_returns_none_
+    when_fts5_missing started returning a live RemoteMemoryStore instead
+    of the local-mode None it asserts, purely because it ran on this
+    specific machine's real .env instead of a clean one. Tests that want
+    remote mode set the two env vars themselves (see test_learn.py's own
+    test_open_default_store_uses_remote_when_configured), same override-
+    the-fixture convention every other isolation fixture here already
+    uses.
+    """
+    monkeypatch.delenv("DOURMOUSE_MEMORY_REMOTE_URL", raising=False)
+    monkeypatch.delenv("DOURMOUSE_MEMORY_REMOTE_TOKEN", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _user_config_isolated(tmp_path_factory, monkeypatch):
     """v13 (hermetic-test-caught, real bug): every test touching
     orchestrator-model settings, Grounded Mode, or (new) the MCP bridge's

@@ -38,6 +38,8 @@ from dourmouse.memory_store import MemoryStore, MemoryStoreUnavailable
 _LEARN_ENV = "DOURMOUSE_LEARN"
 _MEMORY_DB_ENV = "DOURMOUSE_MEMORY_DB"
 _WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
+_MEMORY_REMOTE_URL_ENV = "DOURMOUSE_MEMORY_REMOTE_URL"
+_MEMORY_REMOTE_TOKEN_ENV = "DOURMOUSE_MEMORY_REMOTE_TOKEN"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 _OFF_VALUES = {"", "0", "false", "no", "off"}
@@ -64,7 +66,7 @@ def default_store_path() -> Path:
     return root / "memory" / "atlas_memory.db"
 
 
-def open_default_store() -> MemoryStore | None:
+def open_default_store() -> "MemoryStore | RemoteMemoryStore | None":
     """Open the long-term store for the learning loop, or None (honestly).
 
     Returns None when DOURMOUSE_LEARN is off (the loop is disabled by design) or
@@ -72,9 +74,27 @@ def open_default_store() -> MemoryStore | None:
     Never raises for the caller — a learning loop that cannot run must not
     take down the app. The memory SUBAGENT's tools still report NOT
     CONFIGURED loudly when the user explicitly asks for memory.
+
+    v13.4: real bug found live deploying "move the actual rag to [the
+    desktop]" — this function used to ALWAYS open a local MemoryStore,
+    completely independent of general_roster._open_memory_store()'s own
+    (correct) DOURMOUSE_MEMORY_REMOTE_URL check. The individual memory
+    tools (remember/recall/query_shared_memory) went through the general_
+    roster path and correctly reached the remote desktop; this server-
+    level store (server.memory — the Store & Learn background loop AND
+    the /api/memory stats the dashboard shows) silently opened a brand
+    new, empty LOCAL file instead — caught immediately after a real
+    restart reported "1 fact(s)" instead of the real remote count.
+    Same remote-first check as general_roster now, so both paths agree.
     """
     if not learn_enabled():
         return None
+    remote_url = os.environ.get(_MEMORY_REMOTE_URL_ENV, "").strip()
+    if remote_url:
+        from dourmouse.memory_store import RemoteMemoryStore
+
+        token = os.environ.get(_MEMORY_REMOTE_TOKEN_ENV, "").strip() or None
+        return RemoteMemoryStore(remote_url, token=token)
     try:
         return MemoryStore(default_store_path())
     except MemoryStoreUnavailable:

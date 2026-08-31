@@ -103,6 +103,31 @@ class TestDefaultStore:
         assert s is not None
         s.close()
 
+    def test_open_default_store_uses_remote_when_configured(self, monkeypatch):
+        """Real bug found live deploying "move the actual rag to [the
+        desktop]" (2026-08-31): this function used to ALWAYS open a local
+        file, completely independent of general_roster._open_memory_
+        store()'s own remote check -- the individual memory tools
+        correctly reached a configured remote desktop while server.memory
+        (the Store & Learn loop + /api/memory's dashboard count) silently
+        opened a brand new, empty local file instead. Caught immediately
+        after a real restart reported "1 fact(s)" instead of the real
+        remote count. Both paths must agree."""
+        from dourmouse.memory_store import RemoteMemoryStore
+
+        monkeypatch.setenv("DOURMOUSE_LEARN", "1")
+        monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_URL", "http://100.98.97.23:8765")
+        monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_TOKEN", "real-token")
+        s = learn.open_default_store()
+        assert isinstance(s, RemoteMemoryStore)
+        assert s.base_url == "http://100.98.97.23:8765"
+        assert s.token == "real-token"
+
+    def test_open_default_store_remote_still_respects_learn_gate(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_URL", "http://100.98.97.23:8765")
+        assert learn.open_default_store() is None
+
 
 # --------------------------------------------------------------------------- #
 # recall_block — deterministic FTS5 recall
