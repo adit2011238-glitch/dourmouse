@@ -63,6 +63,19 @@ def _memory_remote_isolated(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _hands_free_off(monkeypatch):
+    """Same real leak class as _memory_remote_isolated above, applied
+    proactively: no test server should ever try to open a real
+    microphone (dourmouse/hands_free.py, dourmouse/wakeword.py) just
+    because DOURMOUSE_HANDS_FREE happens to be set in this developer's
+    real .env. run_server()'s own hands-free wiring is wrapped so a
+    disabled/failed start never crashes server startup either way, but
+    tests should never even attempt it."""
+    monkeypatch.delenv("DOURMOUSE_HANDS_FREE", raising=False)
+    monkeypatch.delenv("DOURMOUSE_WAKEWORD", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _user_config_isolated(tmp_path_factory, monkeypatch):
     """v13 (hermetic-test-caught, real bug): every test touching
     orchestrator-model settings, Grounded Mode, or (new) the MCP bridge's

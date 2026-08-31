@@ -1711,6 +1711,18 @@ class _Handler(BaseHTTPRequestHandler):
                 })
         elif path == "/api/memory":
             self._handle_memory_api()
+        elif path == "/api/hands_free/status":
+            # v13.4: real, LIVE status of the hands-free loop this server
+            # actually started (or honestly didn't) at boot — see
+            # run_server()'s own hands-free wiring. Not the same thing as
+            # wakeword_status()'s dependency-capability check above (that
+            # reports what COULD run; this reports what actually IS
+            # running right now), a real "listening" indicator the UI can
+            # poll.
+            status = dict(getattr(self.server, "hands_free_status", {"enabled": False, "reason": "not started"}))
+            controller = getattr(self.server, "hands_free", None)
+            status["running"] = bool(controller and controller.running)
+            self._send_json(status)
         elif path == "/api/memory/search":
             # v13.4: real remote read for the shared RAG database, explicit
             # user request ("move the actual rag to [the desktop], that
@@ -5445,6 +5457,53 @@ def run_server(
         # movers and the ATLAS strategy report land on the feed immediately.
         # Env-gated by DOURMOUSE_BRIEF_ON_OPEN (default on).
         server.brief_on_open_thread = schedule_brief_on_open(server.daily_reporter)
+    # v13.4: hands-free conversational loop — real user request ("a
+    # conversational llm you can talk to without pressing buttons").
+    # Self-gated by DOURMOUSE_HANDS_FREE (HandsFreeController.start()
+    # itself checks it and refuses honestly, same pattern wakeword.py's
+    # own env gate already uses) rather than a run_server() parameter, so
+    # a plain env-var flip is enough to turn this on/off — no code
+    # change, matching every other opt-in capability flag in this file.
+    # Attempted unconditionally; a real failure (missing dependency, no
+    # mic permission, DOURMOUSE_HANDS_FREE off) is reported honestly on
+    # server.hands_free_status and never crashes the server itself.
+    server.hands_free: Any = None
+    server.hands_free_status = {"enabled": False, "reason": "not attempted"}
+    try:
+        from dourmouse.hands_free import HandsFreeController, hands_free_enabled
+
+        if hands_free_enabled():
+            def _hands_free_dispatch(heard_text: str) -> str:
+                # The SAME real dispatch path a typed/voice-button message
+                # already goes through (_handle_chat_authed's own
+                # session.ask() call, same session_lock) — never a second,
+                # competing implementation. voice=True shapes the reply
+                # for being SPOKEN (dispatch.py's own voice/text response
+                # split — short, no markdown structure), screen="HANDS_FREE"
+                # so a session-restore can tell this thread apart from the
+                # typed HOME conversation.
+                with server.session_lock:
+                    server.gate.set_emit(lambda _e: None)
+                    server.session.confirmation_gate = server.gate
+                    server.confirm_resolver = server.gate.resolve
+                    try:
+                        report = server.session.ask(
+                            heard_text, max_turns=8, voice=True, screen="HANDS_FREE",
+                        )
+                    finally:
+                        server.confirm_resolver = None
+                return report.get("final_text") or "I didn't get a reply for that."
+
+            server.hands_free = HandsFreeController(dispatch_fn=_hands_free_dispatch)
+            ok, reason = server.hands_free.start()
+            server.hands_free_status = {"enabled": ok, "reason": reason}
+        else:
+            server.hands_free_status = {
+                "enabled": False,
+                "reason": "DOURMOUSE_HANDS_FREE is off — set DOURMOUSE_HANDS_FREE=1 to enable.",
+            }
+    except Exception as exc:  # noqa: BLE001 - a hands-free startup failure must never take down the server
+        server.hands_free_status = {"enabled": False, "reason": f"startup failed: {exc}"}
     return server
 
 

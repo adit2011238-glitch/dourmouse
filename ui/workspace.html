@@ -100,6 +100,12 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--blue-hi);
   cursor:pointer;white-space:nowrap}
 .dockbtn:hover{border-color:var(--line-2);color:#fff}
 .dockbtn.on{border-color:var(--amber-line);color:var(--amber-hi);background:var(--amber-soft)}
+.hfpill{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--blue-dim);
+  background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 11px;
+  white-space:nowrap;cursor:default}
+.hfpill.live{color:var(--ok);border-color:var(--ok)}
+.hfpill.off{color:var(--blue-dim)}
+.hfpill.error{color:var(--bad);border-color:var(--bad)}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:#3a4a58;margin-right:6px;vertical-align:middle}
 .dot.ok{background:var(--ok);box-shadow:0 0 6px var(--ok)}
 .dot.bad{background:var(--bad)}
@@ -255,6 +261,7 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="design3d">+ 3D MODEL</button>
     <button class="dockbtn" type="button" data-open="upload">+ UPLOAD TO RAG</button>
     <button class="dockbtn" type="button" id="organizeBtn">⊞ ORGANIZE</button>
+    <span class="hfpill" id="handsFreePill" title="Hands-free voice loop (dourmouse/hands_free.py)">● HANDS-FREE: —</span>
     <a class="backlink" href="/">← CONSOLE</a>
   </div>
 </div>
@@ -519,6 +526,34 @@ $("organizeBtn").addEventListener("click", () => {
   const n = autoArrangePanels();
   toast(n > 0 ? "organized " + n + " panel" + (n === 1 ? "" : "s") : "nothing open to organize");
 });
+
+async function pollHandsFreeStatus() {
+  const pill = $("handsFreePill");
+  if (!pill) return;
+  try {
+    const res = await fetch("/api/hands_free/status");
+    const status = await res.json();
+    if (status.enabled && status.running) {
+      pill.textContent = "● HANDS-FREE: LISTENING";
+      pill.className = "hfpill live";
+      pill.title = "Hands-free voice loop active — say the wake word (dourmouse/hands_free.py)";
+    } else if (status.enabled && !status.running) {
+      pill.textContent = "● HANDS-FREE: ERROR";
+      pill.className = "hfpill error";
+      pill.title = status.reason || "enabled but not running";
+    } else {
+      pill.textContent = "● HANDS-FREE: OFF";
+      pill.className = "hfpill off";
+      pill.title = status.reason || "hands-free disabled";
+    }
+  } catch (err) {
+    pill.textContent = "● HANDS-FREE: ?";
+    pill.className = "hfpill error";
+    pill.title = "status check failed: " + err;
+  }
+}
+pollHandsFreeStatus();
+setInterval(pollHandsFreeStatus, 7000);
 
 /* ---- MAIL panel: reuses /api/gmail/search + /api/gmail/read, unmodified real endpoints ---- */
 async function loadMailPanel(p){
