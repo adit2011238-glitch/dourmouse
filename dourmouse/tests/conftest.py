@@ -76,6 +76,23 @@ def _hands_free_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _denoise_off(monkeypatch):
+    """v13.5: dourmouse/audio_denoise.py's RnnoiseDenoiser is real and
+    live-verified (see test_audio_denoise.py, which explicitly opts back
+    in) but constructing one loads a real ctypes C library — genuine,
+    measurable startup latency that broke an existing timing-sensitive
+    test_hands_free.py test (a 0.05s window for the fake stream to open
+    was no longer enough once record_utterance() started constructing a
+    real RnnoiseDenoiser by default before opening the stream at all).
+    Same "hermetic by default, opt in explicitly" convention as every
+    other fixture in this file: DOURMOUSE_DENOISE=0 here means
+    create_default() returns None on a cheap env check, no library load,
+    unless a test sets the env var itself (test_audio_denoise.py does).
+    """
+    monkeypatch.setenv("DOURMOUSE_DENOISE", "0")
+
+
+@pytest.fixture(autouse=True)
 def _ollama_cloud_isolated(monkeypatch):
     """v13.5: the SAME real leak class as _memory_remote_isolated and
     _hands_free_off above, caught proactively this time (before it broke

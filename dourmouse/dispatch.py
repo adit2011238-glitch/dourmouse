@@ -1694,10 +1694,22 @@ class JobTracker:
 
     _MAX_JOBS = 500
 
-    def __init__(self) -> None:
+    def __init__(self, chime_fn: Callable[[dict[str, Any]], None] | None = None) -> None:
         self._jobs: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._next = 0
+        # v13.5 (Vision OS checklist item 6, "proactive audio interruption
+        # & contextual chimes"): an optional real hook, called with the
+        # finished job's own snapshot dict whenever a TOP-LEVEL
+        # (depth == 0) delegated job finishes/errors/is refused — the
+        # real "a background automation pipeline finished or failed"
+        # event this codebase actually has. depth == 0 only (not every
+        # nested sub-branch a delegate_parallel fan-out spawns) so this
+        # never turns into a chime storm for one real background task.
+        # Same pure-observer discipline as event_sink/_emit_event
+        # elsewhere: wrapped so a raising chime_fn can never break the
+        # real job bookkeeping — see the call sites below.
+        self._chime_fn = chime_fn
 
     def spawn(self, *, task: str, subagent: str | None, depth: int,
               parent_id: str | None = None) -> str:
@@ -1723,6 +1735,7 @@ class JobTracker:
             return job_id
 
     def finish(self, job_id: str, result: str = "", error: str = "") -> None:
+        finished: dict[str, Any] | None = None
         with self._lock:
             for job in self._jobs:
                 if job["id"] == job_id:
@@ -1730,16 +1743,29 @@ class JobTracker:
                     job["finished_at"] = _now_iso()
                     job["result"] = (result or "")[:800]
                     job["error"] = (error or "")[:800]
-                    return
+                    finished = dict(job)
+                    break
+        self._maybe_chime(finished)
 
     def refuse(self, job_id: str, reason: str) -> None:
+        finished: dict[str, Any] | None = None
         with self._lock:
             for job in self._jobs:
                 if job["id"] == job_id:
                     job["status"] = "refused"
                     job["finished_at"] = _now_iso()
                     job["error"] = reason[:800]
-                    return
+                    finished = dict(job)
+                    break
+        self._maybe_chime(finished)
+
+    def _maybe_chime(self, job: dict[str, Any] | None) -> None:
+        if job is None or self._chime_fn is None or job.get("depth") != 0:
+            return
+        try:
+            self._chime_fn(job)
+        except Exception:  # noqa: BLE001 - a chime must never break job bookkeeping
+            pass
 
     def snapshot(self, limit: int = 100) -> list[dict[str, Any]]:
         """Newest-first view (stable; caller may not mutate the dicts)."""

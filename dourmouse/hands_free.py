@@ -215,19 +215,42 @@ def record_utterance(
     segmenter: UtteranceSegmenter | None = None,
     stream_factory: Callable[[Callable[..., None]], Any] | None = None,
     mic_allowed: Callable[[], bool] | None = None,
+    denoiser: Any | None = None,
 ) -> bytes | None:
     """Record one real utterance after a wake word fired, real audio in,
     real WAV bytes out. Returns None (never raises) when the mic is
     killed, no dependency is available, or nothing was actually captured
     — the caller decides what "no utterance" means for it, this function
     never fabricates audio. Same mic_allowed() gate as WakeWordListener.start()
-    — checked BEFORE opening a stream, never bypassed."""
+    — checked BEFORE opening a stream, never bypassed.
+
+    ``denoiser`` (v13.5, Vision OS checklist item 5): an optional real-time
+    audio object with a ``.process(chunk: np.ndarray) -> np.ndarray`` method
+    — dourmouse.audio_denoise.RnnoiseDenoiser's own real shape — applied to
+    EVERY captured chunk before it reaches both the segmenter's VAD and the
+    final WAV, so a cleaner signal helps utterance-boundary detection AND
+    the transcription that follows, not just one or the other. Defaults to
+    dourmouse.audio_denoise.create_default() (None when DOURMOUSE_DENOISE=0
+    or pyrnnoise isn't installed — an honest, fail-open degrade to raw
+    audio, never a crash). A denoise failure on any single chunk falls back
+    to that chunk's raw audio rather than dropping it — see the try/except
+    around the call below.
+    """
     if mic_allowed is None:
         from dourmouse.tray import mic_allowed as _default_mic_allowed
 
         mic_allowed = _default_mic_allowed
     if not mic_allowed():
         return None
+    # Track whether WE created the denoiser (own its lifecycle, must
+    # close() it) vs. the caller injected one (theirs to manage — e.g. a
+    # test reusing the same instance across assertions).
+    owns_denoiser = denoiser is None
+    if owns_denoiser:
+        from dourmouse.audio_denoise import create_default as _create_default_denoiser
+
+        denoiser = _create_default_denoiser()
+        owns_denoiser = denoiser is not None
     seg = segmenter or UtteranceSegmenter()
     seg.reset()
     frames: list[Any] = []
@@ -237,30 +260,46 @@ def record_utterance(
         if done_evt.is_set():
             return
         chunk = indata[:, 0].copy() if hasattr(indata, "shape") and len(indata.shape) > 1 else indata
+        if denoiser is not None:
+            try:
+                chunk = denoiser.process(chunk)
+            except Exception:  # noqa: BLE001 - a denoise failure must fall back to raw audio, never drop the chunk
+                pass
         frames.append(chunk)
         if seg.feed(chunk):
             done_evt.set()
 
-    factory = stream_factory or _default_stream_factory
     try:
-        stream = factory(_on_audio)
-        stream.start()
-    except Exception:  # noqa: BLE001 - honest None, never crash the caller
-        return None
-    try:
-        # Real hard timeout, not just the segmenter's own max_ms bound —
-        # belt and suspenders against a stream that never calls back at
-        # all (a real, observed failure mode class for audio hardware).
-        done_evt.wait(timeout=(seg.max_ms / 1000.0) + 5.0)
-    finally:
+        factory = stream_factory or _default_stream_factory
         try:
-            stream.stop()
-            stream.close()
-        except Exception:  # noqa: BLE001 - closing must never raise
-            pass
-    if not frames:
-        return None
-    return _pcm_to_wav_bytes(frames)
+            stream = factory(_on_audio)
+            stream.start()
+        except Exception:  # noqa: BLE001 - honest None, never crash the caller
+            return None
+        try:
+            # Real hard timeout, not just the segmenter's own max_ms bound —
+            # belt and suspenders against a stream that never calls back at
+            # all (a real, observed failure mode class for audio hardware).
+            done_evt.wait(timeout=(seg.max_ms / 1000.0) + 5.0)
+        finally:
+            try:
+                stream.stop()
+                stream.close()
+            except Exception:  # noqa: BLE001 - closing must never raise
+                pass
+        if not frames:
+            return None
+        return _pcm_to_wav_bytes(frames)
+    finally:
+        # A denoiser WE created (create_default(), not caller-injected) is
+        # ours to release — real RNNoise C-level state, same discipline as
+        # HandLandmarker.close() in ui/workspace.html (repeated enable/
+        # disable cycles must not accumulate live instances).
+        if owns_denoiser and denoiser is not None:
+            try:
+                denoiser.close()
+            except Exception:  # noqa: BLE001 - closing must never raise
+                pass
 
 
 def _default_stream_factory(callback: Callable[..., None]) -> Any:

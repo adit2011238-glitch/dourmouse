@@ -121,6 +121,18 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
   box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.3);
   backdrop-filter:blur(6px);overflow:hidden;transition:box-shadow .15s}
 .panel.focused{border-color:var(--amber-line);box-shadow:0 22px 60px rgba(0,0,0,.65),0 0 0 1px var(--amber-line)}
+/* v13.5, Vision OS checklist item 3 ("gaze-assisted multitasking &
+   attention focus"): applied to every panel EXCEPT the focused one while
+   real on-device gaze tracking (see GAZE below) has steadily detected the
+   user looking at the screen for a sustained beat. transition makes the
+   blur/dim a real fade, not a snap, so peripheral vision doesn't get a
+   jarring flicker on gaze-state hysteresis edges. */
+.panel.peripheral-blur{filter:blur(3px) saturate(.7) brightness(.75);
+  transition:filter .5s ease}
+/* Real bug avoided here, not fixed after the fact: pointer-events:none
+   would block clicking a blurred panel to refocus it -- the blur is a
+   visual signal only, never an interaction blocker. */
+.panel{transition:box-shadow .15s,filter .5s ease}
 .panel .tb{cursor:grab;user-select:none;display:flex;align-items:center;gap:8px;
   padding:8px 10px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--line);
   touch-action:none}
@@ -1202,6 +1214,11 @@ const HAND = {
   // positional convention the pre-existing two-hand pinch code already
   // relies on for pinching[0]/pinching[1]) EMA + hysteresis memory.
   smoothLM: [null, null], pinchState: [false, false], lastHandCount: 0,
+  // v13.5, Vision OS checklist item 3 (gaze-assisted attention focus):
+  // faceLM mirrors handLM's own null-until-loaded / null-on-load-failure
+  // contract. wasGazing is computeGazeState's own hysteresis memory
+  // (same pattern as pinchState above).
+  faceLM: null, wasGazing: false,
 };
 
 /* ---- landmark smoothing --------------------------------------------
@@ -1291,6 +1308,19 @@ async function _createHandLandmarker(vision, fileset, delegate){
     runningMode: "VIDEO", numHands: 2,
   });
 }
+// v13.5, Vision OS checklist item 3 (gaze-assisted attention focus): same
+// GPU-then-CPU-fallback discipline as _createHandLandmarker above, same
+// reason (an embedded desktop webview's GPU support is real but frequently
+// degraded). Shares the SAME already-open camera stream/video element hand
+// control uses — no second getUserMedia prompt, no second permission
+// dialog. numFaces:1 (this is "is the one user at the keyboard looking at
+// the screen," not a multi-person tracker).
+async function _createFaceLandmarker(vision, fileset, delegate){
+  return vision.FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: "/assets/vision/face_landmarker.task", delegate },
+    runningMode: "VIDEO", numFaces: 1,
+  });
+}
 async function startHandControl(){
   if(!HAND.cameraAllowed){ toast("camera kill-switch is engaged — re-enable it from the tray icon"); return; }
   if(HAND.startingUp || HAND.running) return;
@@ -1310,6 +1340,16 @@ async function startHandControl(){
       HAND.handLM = await _createHandLandmarker(vision, fileset, "CPU");
     }
     HAND.delegateEl.textContent = delegateUsed;
+    // Gaze tracking is genuinely optional -- a real failure loading the
+    // face model must never prevent hand control (the feature this whole
+    // function exists for) from starting. Swallowed, not surfaced as a
+    // toast, so it doesn't read as an error for a feature the user didn't
+    // explicitly ask about; HAND.faceLM stays null and the gaze-blur loop
+    // below simply never engages.
+    try{
+      try{ HAND.faceLM = await _createFaceLandmarker(vision, fileset, delegateUsed); }
+      catch(_faceGpuErr){ HAND.faceLM = await _createFaceLandmarker(vision, fileset, "CPU"); }
+    }catch(_faceErr){ HAND.faceLM = null; }
     HAND.running = true;
     HAND.toggleBtn.textContent = "DISABLE HAND CONTROL";
     HAND.toggleBtn.classList.add("on");
@@ -1328,6 +1368,8 @@ function stopHandControl(){
   // Repeated enable/disable cycles (exactly what a user testing hand
   // tracking does) would accumulate live instances instead of freeing them.
   if(HAND.handLM){ try{ HAND.handLM.close(); }catch(_){} HAND.handLM = null; }
+  if(HAND.faceLM){ try{ HAND.faceLM.close(); }catch(_){} HAND.faceLM = null; }
+  clearGazeBlur(); HAND.wasGazing = false;
   if(HAND._raf) cancelAnimationFrame(HAND._raf);
   if(HAND.stream){ HAND.stream.getTracks().forEach(t => t.stop()); HAND.stream = null; }
   HAND.video.srcObject = null;
@@ -1399,7 +1441,45 @@ function handLoop(){
       drawHandOverlay(_lastHandResult);
     }
   }
+  runGazeFrame(v);
   HAND._raf = requestAnimationFrame(handLoop);
+}
+
+/* ---- gaze-assisted attention focus, live wiring (Vision OS checklist
+   item 3) -- deliberately its OWN, much coarser throttle than
+   AdaptiveRate above: AdaptiveRate is tuned to hand-tracking's cost
+   profile for drag/resize responsiveness; head pose changes slowly, so
+   gaze only needs a real detectForVideo() call a few times a second, not
+   every frame -- running it that rarely also means it never meaningfully
+   competes with hand tracking for the same GPU/CPU delegate. */
+const GAZE_MIN_INTERVAL_MS = 300;
+let _lastGazeCheckAt = 0;
+function runGazeFrame(video){
+  if(!HAND.faceLM || video.readyState < 2) return;
+  const now = performance.now();
+  if(now - _lastGazeCheckAt < GAZE_MIN_INTERVAL_MS) return;
+  _lastGazeCheckAt = now;
+  try{
+    const res = HAND.faceLM.detectForVideo(video, now);
+    applyGazeResult(res);
+  }catch(_){}
+}
+function applyGazeResult(res){
+  const lm = res && res.faceLandmarks && res.faceLandmarks[0];
+  if(!lm){ clearGazeBlur(); return; } // no face in frame -- never guess a state
+  const { gazing } = computeGazeState(lm, HAND.wasGazing);
+  HAND.wasGazing = gazing;
+  const fp = getFocusedPanel();
+  if(!gazing || !fp){ clearGazeBlur(); return; }
+  for(const p of panels.values()){
+    if(!p.el) continue;
+    p.el.classList.toggle("peripheral-blur", p.id !== fp.id);
+  }
+}
+function clearGazeBlur(){
+  for(const p of panels.values()){
+    if(p.el) p.el.classList.remove("peripheral-blur");
+  }
 }
 // v13.5: draws in the SAME real page-pixel space handPinchState()
 // hit-tests against — (1-x)*window.innerWidth, y*window.innerHeight —
@@ -1476,6 +1556,52 @@ function handPinchState(lm, wasPinching, viewW, viewH){
   const px = (lm[4].x + lm[8].x) / 2, py = (lm[4].y + lm[8].y) / 2;
   // mirror the camera, same convention as ui/index.html's onHands.
   return { pinch, x: (1 - px) * viewW, y: py * viewH, scale };
+}
+
+/* ---- gaze-assisted attention focus (Vision OS checklist item 3) -----
+   Deliberately NOT using MediaPipe's facialTransformationMatrixes output:
+   extracting a reliable yaw/pitch from a general 4x4 transform means
+   trusting an exact row/column-major + axis-sign convention this sandbox
+   has no live camera to verify against a real face -- guessing that would
+   be exactly the "never guess a wire protocol un-verified" mistake this
+   codebase's own house rule (see code_backends.py's stream_claude
+   docstring) exists to prevent.
+
+   Instead, this uses plain landmark-ratio geometry -- the SAME kind of
+   already-proven, already-tested approach handPinchState() above uses
+   (a distance RATIO between well-known point indices, not a coordinate-
+   frame-sensitive matrix). Face Mesh's 478-point topology has fixed,
+   well-documented canonical indices used throughout MediaPipe's own
+   examples: 1 = nose tip, 234 = left face boundary (~left ear/cheek),
+   454 = right face boundary (~right ear/cheek). yawRatio is how far the
+   nose sits from the horizontal midpoint between the two face-boundary
+   points, normalized by face width -- 0 when facing the camera dead-on,
+   approaching +-0.5 turned hard to one side. Robust to camera distance
+   (normalized by the same face-width scale) the same way handPinchState's
+   pinch ratio is robust to hand distance from the camera. */
+const GAZE_LM = { NOSE: 1, LEFT_EDGE: 234, RIGHT_EDGE: 454 };
+// Engage (blur peripheral panels) only once yaw settles under this ratio;
+// release again once it drifts back out past the wider threshold -- same
+// Schmitt-trigger reasoning as PINCH_ENGAGE_RATIO/PINCH_RELEASE_RATIO
+// above, so gaze near the boundary can't flicker blur on/off every frame.
+const GAZE_ENGAGE_RATIO = 0.12;
+const GAZE_RELEASE_RATIO = 0.22;
+
+function computeYawRatio(lm){
+  const nose = lm[GAZE_LM.NOSE], left = lm[GAZE_LM.LEFT_EDGE], right = lm[GAZE_LM.RIGHT_EDGE];
+  const faceWidth = Math.max(1e-4, Math.abs(right.x - left.x));
+  const midX = (left.x + right.x) / 2;
+  return (nose.x - midX) / faceWidth;
+}
+
+// wasGazing is the previous frame's state (hysteresis memory, same pattern
+// as handPinchState's wasPinching). Pure -- no DOM/window dependency, so a
+// bare Node harness can drive it with fabricated landmark arrays.
+function computeGazeState(lm, wasGazing){
+  const yawRatio = computeYawRatio(lm);
+  const abs = Math.abs(yawRatio);
+  const gazing = wasGazing ? (abs < GAZE_RELEASE_RATIO) : (abs < GAZE_ENGAGE_RATIO);
+  return { gazing, yawRatio };
 }
 
 // Real bug found and fixed (flagged, not fixed, by the smoothing/hysteresis

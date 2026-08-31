@@ -177,6 +177,72 @@ class TestJobTracker:
         assert jobs.snapshot(limit=1)[0]["id"] == f"job-{JobTracker._MAX_JOBS + 10}"
 
 
+class TestJobTrackerChimeHook:
+    """v13.5 (Vision OS checklist item 6, contextual chimes): JobTracker's
+    optional chime_fn — called on a TOP-LEVEL (depth == 0) job's real
+    finish()/refuse(), never for a nested sub-branch (no chime storm from
+    one delegate_parallel fan-out), and never allowed to break job
+    bookkeeping even if it raises."""
+
+    def test_depth_zero_finish_fires_the_chime(self):
+        seen = []
+        jt = JobTracker(chime_fn=lambda job: seen.append(job))
+        job_id = jt.spawn(task="run the tests", subagent="dev_coding", depth=0)
+        jt.finish(job_id, result="all green")
+        assert len(seen) == 1
+        assert seen[0]["id"] == job_id
+        assert seen[0]["status"] == "done"
+        assert seen[0]["result"] == "all green"
+
+    def test_depth_zero_error_fires_the_chime(self):
+        seen = []
+        jt = JobTracker(chime_fn=lambda job: seen.append(job))
+        job_id = jt.spawn(task="x", subagent="dev_coding", depth=0)
+        jt.finish(job_id, error="boom")
+        assert len(seen) == 1
+        assert seen[0]["status"] == "error"
+
+    def test_depth_zero_refuse_fires_the_chime(self):
+        seen = []
+        jt = JobTracker(chime_fn=lambda job: seen.append(job))
+        job_id = jt.spawn(task="x", subagent="dev_coding", depth=0)
+        jt.refuse(job_id, reason="policy")
+        assert len(seen) == 1
+        assert seen[0]["status"] == "refused"
+
+    def test_nested_job_never_fires_the_chime(self):
+        seen = []
+        jt = JobTracker(chime_fn=lambda job: seen.append(job))
+        job_id = jt.spawn(task="x", subagent="dev_coding", depth=1)
+        jt.finish(job_id, result="done")
+        assert seen == []
+
+    def test_no_chime_fn_is_a_true_noop(self):
+        jt = JobTracker()  # default, matches every existing JobTracker() call
+        job_id = jt.spawn(task="x", subagent="dev_coding", depth=0)
+        jt.finish(job_id, result="done")  # must not raise with no chime_fn
+        assert jt.snapshot()[0]["status"] == "done"
+
+    def test_a_raising_chime_fn_never_breaks_finish(self):
+        def boom(_job):
+            raise RuntimeError("tts backend exploded")
+
+        jt = JobTracker(chime_fn=boom)
+        job_id = jt.spawn(task="x", subagent="dev_coding", depth=0)
+        jt.finish(job_id, result="done")  # must not propagate boom
+        assert jt.snapshot()[0]["status"] == "done"
+        assert jt.snapshot()[0]["result"] == "done"
+
+    def test_a_raising_chime_fn_never_breaks_refuse(self):
+        def boom(_job):
+            raise RuntimeError("tts backend exploded")
+
+        jt = JobTracker(chime_fn=boom)
+        job_id = jt.spawn(task="x", subagent="dev_coding", depth=0)
+        jt.refuse(job_id, reason="policy")  # must not propagate boom
+        assert jt.snapshot()[0]["status"] == "refused"
+
+
 # --------------------------------------------------------------------------- #
 # delegate_task — the tool itself (unit level)
 # --------------------------------------------------------------------------- #

@@ -5275,7 +5275,19 @@ def run_server(
     server.backend_label = _backend_label(config)
     server.tracker = ActivityTracker(registry)
     server.attention = AttentionQueue()
-    server.jobs = JobTracker()
+    # v13.5 (Vision OS checklist item 6, contextual chimes): wired here
+    # rather than at JobTracker's own default so it stays testable/
+    # injectable (test_dispatch.py's JobTracker tests construct their own
+    # instances with no chime_fn at all) and so a broken chimes.py import
+    # can never take down server startup (try/except, same discipline as
+    # every other optional-feature wiring in this function — see the
+    # hands_free block above).
+    try:
+        from dourmouse.chimes import announce_job_result
+
+        server.jobs = JobTracker(chime_fn=announce_job_result)
+    except Exception:
+        server.jobs = JobTracker()
     server.memory = memory  # v2.9: long-term store for the learning loop
     # v3.0: the inter-agent message bus. Defaults to the process singleton so
     # the messenger tools, the live runtime, and the UI share ONE channel;

@@ -182,6 +182,152 @@ class TestRecordUtterance:
         )
         assert result is None
 
+    def test_injected_denoiser_processes_every_chunk(self):
+        # v13.5, Vision OS checklist item 5: a real chunk-processing seam,
+        # same discipline as every other test seam in this file -- proves
+        # record_utterance() actually calls .process() per chunk and uses
+        # ITS return value (not the raw chunk) in the final WAV.
+        #
+        # Real design constraint this test respects: the DENOISED chunk is
+        # what reaches the segmenter's own VAD (correct production
+        # behavior -- see record_utterance's own docstring), so a fake
+        # denoiser that returns a CONSTANT value regardless of input would
+        # make every chunk look like loud speech to the segmenter and the
+        # recording would never end. Scaling by 2x instead keeps silence
+        # near-zero (still reads as silence) and speech loud (still reads
+        # as speech), while still being a real, verifiably DIFFERENT value
+        # from the raw input.
+        seen = []
+
+        class _FakeDenoiser:
+            def process(self, chunk):
+                seen.append(chunk.copy())
+                return (chunk.astype(np.int32) * 2).astype(np.int16)
+
+        stream_holder = {}
+
+        def factory(cb):
+            s = _FakeStream(cb)
+            stream_holder["stream"] = s
+            return s
+
+        seg = hands_free.UtteranceSegmenter(energy_threshold=150.0, silence_ms=160.0, max_ms=10_000.0)
+        denoiser = _FakeDenoiser()
+        result_box = {}
+
+        def run():
+            result_box["wav"] = hands_free.record_utterance(
+                segmenter=seg, stream_factory=factory, mic_allowed=lambda: True, denoiser=denoiser,
+            )
+
+        import threading
+        t = threading.Thread(target=run)
+        t.start()
+        import time
+        time.sleep(0.05)
+        stream = stream_holder["stream"]
+        stream.callback(_speech_chunk(), 160, None, None)
+        stream.callback(_silence_chunk(), 160, None, None)
+        stream.callback(_silence_chunk(), 160, None, None)
+        t.join(timeout=5)
+        assert len(seen) == 3  # every real callback went through .process()
+        wav = result_box["wav"]
+        assert wav is not None
+        with _wave.open(BytesIO(wav), "rb") as wf:
+            import struct
+
+            raw = wf.readframes(wf.getnframes())
+            samples = struct.unpack(f"<{len(raw)//2}h", raw)
+        # The WAV must contain the DENOISED (2x) values, not the raw
+        # speech/silence amplitudes -- proves the return value is used.
+        # speech chunk (2000) -> 4000, silence chunks (0) -> 0.
+        assert samples[:160] == (4000,) * 160
+        assert samples[160:] == (0,) * (len(samples) - 160)
+
+    def test_denoiser_failure_falls_back_to_the_raw_chunk(self):
+        # A broken/raising denoiser must never drop real captured audio.
+        class _BoomDenoiser:
+            def process(self, chunk):
+                raise RuntimeError("rnnoise state corrupted")
+
+        seg = hands_free.UtteranceSegmenter(energy_threshold=150.0, silence_ms=160.0, max_ms=10_000.0)
+        stream_holder = {}
+
+        def factory(cb):
+            s = _FakeStream(cb)
+            stream_holder["stream"] = s
+            return s
+
+        result_box = {}
+
+        def run():
+            result_box["wav"] = hands_free.record_utterance(
+                segmenter=seg, stream_factory=factory, mic_allowed=lambda: True,
+                denoiser=_BoomDenoiser(),
+            )
+
+        import threading
+        t = threading.Thread(target=run)
+        t.start()
+        import time
+        time.sleep(0.05)
+        stream = stream_holder["stream"]
+        stream.callback(_speech_chunk(), 160, None, None)
+        stream.callback(_silence_chunk(), 160, None, None)
+        stream.callback(_silence_chunk(), 160, None, None)
+        t.join(timeout=5)
+        wav = result_box["wav"]
+        assert wav is not None
+        with _wave.open(BytesIO(wav), "rb") as wf:
+            assert wf.getnframes() == 160 * 3  # nothing dropped despite the raising denoiser
+
+    def test_injected_denoiser_is_never_closed_by_record_utterance(self):
+        # The caller owns an INJECTED denoiser's lifecycle -- only one
+        # record_utterance() creates itself (via create_default()) gets
+        # closed here.
+        class _FakeDenoiser:
+            def __init__(self):
+                self.closed = False
+
+            def process(self, chunk):
+                return chunk
+
+            def close(self):
+                self.closed = True
+
+        seg = hands_free.UtteranceSegmenter(max_ms=50.0)
+        d = _FakeDenoiser()
+        hands_free.record_utterance(
+            segmenter=seg, stream_factory=lambda cb: _FakeStream(cb),
+            mic_allowed=lambda: True, denoiser=d,
+        )
+        assert d.closed is False
+
+    def test_owned_denoiser_is_closed_after_recording(self, monkeypatch):
+        # DOURMOUSE_DENOISE is off by default in this whole test suite
+        # (see conftest.py's _denoise_off) -- explicitly re-enabled here,
+        # with create_default() itself monkeypatched to a fake so this
+        # stays hermetic (no real ctypes library load in this test).
+        monkeypatch.setenv("DOURMOUSE_DENOISE", "1")
+
+        class _FakeDenoiser:
+            def __init__(self):
+                self.closed = False
+
+            def process(self, chunk):
+                return chunk
+
+            def close(self):
+                self.closed = True
+
+        created = _FakeDenoiser()
+        monkeypatch.setattr("dourmouse.audio_denoise.create_default", lambda: created)
+        seg = hands_free.UtteranceSegmenter(max_ms=50.0)
+        hands_free.record_utterance(
+            segmenter=seg, stream_factory=lambda cb: _FakeStream(cb), mic_allowed=lambda: True,
+        )
+        assert created.closed is True
+
 
 class TestPlayAudio:
     def test_empty_bytes_refused_honestly(self):
