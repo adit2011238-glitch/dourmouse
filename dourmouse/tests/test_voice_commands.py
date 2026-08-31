@@ -136,6 +136,15 @@ class TestResolvePanel:
         assert resolve_panel("gods eye view") is None  # not an aliased form
         assert resolve_panel("gods eye") == "globe"
 
+    def test_design3d_panel_aliases_do_not_collide_with_globe(self):
+        # ui/workspace.html's Three.js scene editor is a SEPARATE panel
+        # from the God's Eye globe -- "3d model" must resolve to it, not
+        # to "globe", even though both panels are "3d" in casual speech.
+        assert resolve_panel("3d model") == "design3d"
+        assert resolve_panel("design3d") == "design3d"
+        assert resolve_panel("3d editor") == "design3d"
+        assert resolve_panel("3d view") == "globe"  # still the globe, unambiguous
+
     def test_unknown_returns_none(self):
         assert resolve_panel("kitchen") is None
         assert resolve_panel("") is None

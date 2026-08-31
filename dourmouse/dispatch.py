@@ -830,13 +830,23 @@ _SYSTEM_PROMPT = (
 _OLLAMA_NUM_CTX = 16384
 _OLLAMA_KEEP_ALIVE = "30m"
 
-#: Models whose chat template ignores the `think` / `enable_thinking` request
-#: flags and reason anyway. For these the reasoning is not tagged, so it lands
-#: in the user-visible answer AND consumes the num_predict budget. Substring
-#: match on the model name, so tags (":4b", ":4b-instruct-q4_0") all hit.
-#: Override with DOURMOUSE_NO_THINK_MODELS (comma-separated) when a future
-#: build fixes or breaks a model — no code change needed to re-tune this.
-_THINK_FLAG_IGNORED_DEFAULT = "qwen3:4b"
+#: Models whose chat template either (a) IGNORES the `think` /
+#: `enable_thinking` request flags and reasons anyway — the reasoning then
+#: lands untagged in the user-visible answer AND consumes the num_predict
+#: budget (qwen3:4b, the original case this list was built for) — or
+#: (b) actively REJECTS the request outright when the flags are present at
+#: all, a stricter failure live-caught 2026-08-30 against the companion
+#: agent's real workspace_ui/delegate_task tool-calling turns: every
+#: request 400'd with body {"error":"\"qwen2.5:7b\" does not support
+#: thinking"} the instant `think`/`enable_thinking` were sent, regardless
+#: of true/false — Ollama here treats an unsupported model even ASKING is
+#: an error, not something to silently ignore. Both failure modes get the
+#: exact same fix (drop the flags before sending), so one list serves
+#: both. Substring match on the model name, so tags (":4b",
+#: ":7b-instruct-q4_0") all hit. Override with DOURMOUSE_NO_THINK_MODELS
+#: (comma-separated) when a future build fixes or breaks a model — no
+#: code change needed to re-tune this.
+_THINK_FLAG_IGNORED_DEFAULT = "qwen3:4b,qwen2.5"
 
 
 def _no_think_models() -> tuple[str, ...]:
@@ -986,6 +996,22 @@ class OllamaNativeClient:
         self._headers = {"Content-Type": "application/json"}
         if config.api_key:
             self._headers["Authorization"] = f"Bearer {config.api_key}"
+        # Real bug found and fixed here (2026-08-30, live-caught while
+        # debugging an unrelated 400): `self._post is self._default_post`
+        # in _stream() below ALWAYS evaluates False, even when this exact
+        # branch (_post is None) ran and _post really is self._default_post
+        # — Python creates a NEW bound-method wrapper object on every
+        # attribute access, so two separate `self._default_post` reads are
+        # never `is`-identical to each other, only equal. The real effect:
+        # every real (non-test) streaming call silently fell through to the
+        # buffered `self._post(payload)` + splitlines() branch instead of
+        # the genuinely-incremental `_default_post_lines()` — true
+        # token-by-token delivery to the browser was never actually
+        # happening for the default client, only for injected test
+        # doubles that happened to differ by identity. A plain bool
+        # recorded once here, instead of an unreliable method-identity
+        # check later, is the fix.
+        self._is_default_post = _post is None
         self._post = _post or self._default_post
         self.chat = type("_Chat", (), {"completions": _OllamaCompletions(self)})()
 
@@ -1115,7 +1141,7 @@ class OllamaNativeClient:
         return _OllamaResponse(message)
 
     def _stream(self, payload: dict[str, Any]):
-        if self._post is self._default_post:
+        if self._is_default_post:
             lines = self._default_post_lines(payload)
         else:
             lines = iter((self._post(payload) or "").splitlines())

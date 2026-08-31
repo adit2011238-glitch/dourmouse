@@ -254,6 +254,22 @@ class TestOllamaNativeClient:
         assert dispatch_module._ignores_think_flag("qwen3:8b")
         assert not dispatch_module._ignores_think_flag("qwen3:4b")
 
+    def test_qwen2_5_drops_the_think_flags_entirely(self):
+        """Live-caught, real bug (2026-08-30): this Ollama build doesn't
+        just ignore think/enable_thinking for qwen2.5 like qwen3:4b does —
+        it actively REJECTS the request with a 400 the instant either flag
+        is present, body {"error":"\\"qwen2.5:7b\\" does not support
+        thinking"} — reproduced against the real companion agent's own
+        real tool-calling turns. qwen2.5:7b is this project's own default
+        companion/general model (see _OLLAMA_NUM_CTX's neighboring
+        comment), so this silently broke EVERY companion turn, not an edge
+        case. Same fix as the ignore-list case: drop the flags first."""
+        assert dispatch_module._ignores_think_flag("qwen2.5:7b")
+        assert dispatch_module._ignores_think_flag("qwen2.5:14b")
+        sent = self._capture("qwen2.5:7b")
+        assert "think" not in sent
+        assert "enable_thinking" not in sent
+
     def test_stream_yields_delta_chunks(self):
         lines = "\n".join(
             json.dumps({"message": {"role": "assistant", "content": c}}) for c in ("Hel", "lo", " world")
@@ -327,6 +343,72 @@ class TestOllamaNativeClient:
         assert "type" not in ass["tool_calls"][0]
         assert ass["tool_calls"][0]["function"]["arguments"] == {"max_results": 3}
         assert sent[2] == {"role": "tool", "content": "LIVE NEWS"}
+
+
+class TestOllamaNativeClientRealDefaultPostRoutesToLineStreaming:
+    """Real bug found live-debugging an unrelated 400 (2026-08-30):
+    OllamaNativeClient._stream() decided whether to use genuinely
+    incremental line-by-line reading (_default_post_lines) or a buffered
+    read-then-splitlines fallback via `self._post is self._default_post`
+    — a bound-method identity check that is ALWAYS False, even for the
+    real default client this exact branch exists for, because Python
+    creates a new wrapper object on every attribute access; two separate
+    reads of `self._default_post` are never `is`-identical to each other.
+    Effect: the real (non-test-double) client never actually streamed
+    incrementally — every real user's SSE deltas were secretly assembled
+    from one buffered read, not delivered as Ollama produced them. Fixed
+    to a plain bool recorded once in __init__ (`self._is_default_post`).
+    TestOllamaNativeClient's own tests all inject a `_post` double, so
+    none of them exercised this branch either way — these tests mock the
+    real urlopen() call instead, the way the real default client actually
+    reaches the network, to prove the fix routes correctly."""
+
+    def test_default_client_with_no_injected_post_is_flagged_default(self):
+        from dourmouse.config import OllamaConfig
+
+        client = dispatch_module.OllamaNativeClient(OllamaConfig())
+        assert client._is_default_post is True
+
+    def test_client_with_an_injected_post_double_is_not_flagged_default(self):
+        from dourmouse.config import OllamaConfig
+
+        client = dispatch_module.OllamaNativeClient(OllamaConfig(), _post=lambda payload: "{}")
+        assert client._is_default_post is False
+
+    def test_real_default_client_streaming_uses_the_incremental_line_reader(self, monkeypatch):
+        """The actual end-to-end proof: with NO injected _post (the real
+        production shape), streaming must call urlopen and iterate its
+        response line by line — not buffer the whole body first."""
+        from dourmouse.config import OllamaConfig
+
+        iterated = {"count": 0}
+        lines = [
+            (json.dumps({"message": {"content": "Hel"}}) + "\n").encode(),
+            (json.dumps({"message": {"content": "lo"}}) + "\n").encode(),
+        ]
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):  # pragma: no cover — must NOT be called by the streaming path
+                raise AssertionError("buffered read() called — the fix regressed to the non-streaming path")
+
+            def __iter__(self):
+                iterated["count"] += 1
+                return iter(lines)
+
+        monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: _Resp())
+        client = dispatch_module.OllamaNativeClient(OllamaConfig())
+        chunks = list(client.chat.completions.create(
+            model="qwen3:8b", messages=[{"role": "user", "content": "hi"}], stream=True,
+        ))
+        text = "".join(c.choices[0].delta.content for c in chunks if c.choices[0].delta.content)
+        assert text == "Hello"
+        assert iterated["count"] == 1, "the incremental line-reader must be the one used, exactly once"
 
 
 # --- shared fake client (same shape as test_orchestrator.py) ---
@@ -1607,6 +1689,7 @@ class TestEndToEndThroughGeneralRoster:
             "companion",  # world-monitor-expansion: friendly-persona counterpart
                           # to orchestrator, for the Vision workspace chat panel
             "globe",  # v13: God's Eye View 3D globe control
+            "panel_control",  # v13.4: floating-panel control (open/close/move/resize)
         }
 
     def test_trading_subagent_added_later_dispatchable(self):
@@ -2792,6 +2875,21 @@ class TestBrainEventReportsTheRealOrchestratorBackend:
             def read(self):
                 return self._body
 
+            def __iter__(self):
+                # Real bug found live-debugging an unrelated 400 (2026-08-30):
+                # OllamaNativeClient._stream() used to ALWAYS take the
+                # buffered .read()-then-splitlines() branch, even for the
+                # real default client, because a bound-method identity check
+                # (self._post is self._default_post) is never True — two
+                # separate attribute reads never produce the same wrapper
+                # object. Fixed to a plain bool set once in __init__, which
+                # means the real client now genuinely exercises
+                # _default_post_lines()'s line-by-line iteration — this mock
+                # must support that real http.client.HTTPResponse behavior
+                # (iterable, one line per iteration) or it silently only
+                # ever covered the buffered path this fix moved away from.
+                return iter(self._body.splitlines(keepends=True))
+
         import urllib.request as _real_urllib_request
 
         monkeypatch.setattr(
@@ -2874,6 +2972,8 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
             monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")
         else:
             class _Resp:
+                _BODY = json.dumps({"message": {"content": "hi"}}).encode()
+
                 def __enter__(self):
                     return self
 
@@ -2881,7 +2981,14 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
                     return False
 
                 def read(self):
-                    return json.dumps({"message": {"content": "hi"}}).encode()
+                    return self._BODY
+
+                def __iter__(self):
+                    # See the sibling _Resp mock's own comment above (same
+                    # class, same real fix this covers) — a real
+                    # http.client.HTTPResponse is iterable, one line per
+                    # iteration; this mock must be too.
+                    return iter(self._BODY.splitlines(keepends=True))
 
             import urllib.request as _real_urllib_request
 

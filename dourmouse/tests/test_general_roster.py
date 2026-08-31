@@ -102,6 +102,7 @@ class TestRosterShape:
             "companion",  # world-monitor-expansion: friendly-persona counterpart
                           # to orchestrator, for the Vision workspace chat panel
             "globe",  # v13: God's Eye View 3D globe control
+            "panel_control",  # v13.4: floating-panel control (open/close/move/resize)
         }
 
     def test_orchestrator_exposes_delegate_task(self):

@@ -54,8 +54,10 @@ _PANEL_ALIASES: dict[str, str] = {
     "map": "map", "world": "map", "world map": "map", "worldmap": "map",
     "pulse": "map", "world pulse": "map",
     "research": "research", "research panel": "research",
-    "globe": "globe", "3d": "globe", "3d view": "globe", "3d model": "globe",
+    "globe": "globe", "3d": "globe", "3d view": "globe",
     "god's eye": "globe", "gods eye": "globe", "god's eye view": "globe",
+    "3d model": "design3d", "design3d": "design3d", "3d design": "design3d",
+    "3d editor": "design3d", "model editor": "design3d",
 }
 
 _EMAIL_RE = re.compile(

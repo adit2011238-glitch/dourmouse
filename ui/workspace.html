@@ -45,6 +45,15 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#04080e">
 <link rel="icon" type="image/png" href="/assets/icon-192.png">
+<!-- 3D MODEL panel: real Three.js, vendored locally (assets/vendor/three/,
+     zero CDN — same discipline as ui/console.html's DESIGN screen, whose
+     window.Design3D module this panel loads verbatim below). -->
+<script type="importmap">
+{"imports": {
+  "three": "/assets/vendor/three/three.module.min.js",
+  "three/addons/": "/assets/vendor/three/addons/"
+}}
+</script>
 <style>
 @font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;
   src:url('assets/fonts/sekuya-regular.ttf') format('truetype')}
@@ -150,6 +159,24 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
   padding:4px 9px;cursor:pointer;background:var(--panel2);color:var(--blue-hi)}
 .confirmbox button.go{background:var(--ok);color:#08111c;border-color:var(--ok)}
 
+/* 3D model panel */
+.d3wrap{display:flex;flex-direction:column;height:100%}
+.d3canvas{position:relative;flex:1;min-height:0;overflow:hidden;background:#05080c}
+.d3canvas canvas{display:block}
+.d3hint{position:absolute;left:8px;bottom:8px;color:var(--blue-dim);font-size:9.5px;
+  background:rgba(4,8,14,.6);padding:3px 6px;border-radius:4px;pointer-events:none}
+.d3toolbar{display:flex;gap:5px;padding:6px 8px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.d3chip{font-family:var(--mono);font-size:10px;background:var(--panel2);color:var(--blue-hi);
+  border:1px solid var(--line);border-radius:5px;padding:4px 8px;cursor:pointer}
+.d3chip:hover{border-color:var(--line-2)}
+.d3ask{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
+.d3ask input{flex:1;background:#04080e;border:1px solid var(--line);border-radius:6px;
+  color:var(--blue-hi);font-family:var(--mono);font-size:12px;padding:7px 8px}
+.d3ask button{background:var(--amber);color:var(--amber-ink);border:none;border-radius:6px;
+  font-family:var(--mono);font-weight:700;font-size:11px;padding:0 12px;cursor:pointer}
+.d3status{padding:6px 8px;color:var(--blue-dim);font-size:10.5px;border-top:1px solid var(--line);
+  min-height:14px}
+
 /* map panel */
 .maplegend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;font-size:10.5px}
 .maplegend span{display:inline-flex;align-items:center;gap:4px;color:var(--blue-dim)}
@@ -211,6 +238,7 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="research">+ RESEARCH</button>
     <button class="dockbtn" type="button" data-open="map">+ WORLD MAP</button>
     <button class="dockbtn" type="button" data-open="globe">+ 3D VIEW</button>
+    <button class="dockbtn" type="button" data-open="design3d">+ 3D MODEL</button>
     <a class="backlink" href="/">← CONSOLE</a>
   </div>
 </div>
@@ -400,13 +428,14 @@ function openPanel(type){
   const existing = findPanelByType(type);
   if(existing){ bringToFront(existing.id); return existing; }
   const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP",
-                   globe: "3D VIEW — GOD'S EYE" };
+                   globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL" };
   const p = createPanel(type, titles[type] || type.toUpperCase());
   if(type === "mail") loadMailPanel(p);
   else if(type === "chat") initChatPanel(p, "companion", "Ask the companion anything…");
   else if(type === "research") initChatPanel(p, "research_info", "Search / research a topic…");
   else if(type === "map") loadMapPanel(p);
   else if(type === "globe") loadGlobePanel(p);
+  else if(type === "design3d") loadDesign3DPanel(p);
   return p;
 }
 
@@ -516,6 +545,7 @@ async function sendChatMessage(p, text){
         else if(ev.type === "assistant_text"){ if((ev.text||"").length > buf.length){ buf = ev.text; aEl.textContent = buf; } }
         else if(ev.type === "brain"){ metaEl.textContent = (ev.model || "").split("/").pop() || ""; }
         else if(ev.type === "confirmation_requested"){ addConfirmBox(p, log, ev); }
+        else if(ev.type === "tool_result"){ applyPanelControlToolResult(ev, log); }
         else if(ev.type === "error"){ aEl.textContent = "ERROR: " + (ev.message || "unknown error"); aEl.style.color = "var(--bad)"; }
         else if(ev.type === "done"){ if(ev.final_text && ev.final_text.length > buf.length){ buf = ev.final_text; aEl.textContent = buf; } }
       }
@@ -547,6 +577,62 @@ function addConfirmBox(p, log, ev){
   };
   box.querySelector(".go").addEventListener("click", () => decide(true));
   box.querySelector(".no").addEventListener("click", () => decide(false));
+}
+
+/* ---- panel_control tool_result -> real panel action -------------------
+   The actual "LLM controls window sizes in real time, no clicking"
+   mechanism: dourmouse/workspace_panel_ops.py's four tools are pure
+   spec-generators (see that module's own docstring) -- this is where the
+   spec they return actually DOES something, by calling the exact same
+   openPanel/closePanel/setPanelRect/bringToFront functions a mouse-drag
+   or hand-gesture pinch already calls (section 1/4 above). Any tool_result
+   from an unrelated tool (gmail search, web_search, ...) is silently
+   ignored here -- extractPanelControlAction returns null for those, same
+   refusal discipline as extractDesign3DPrimitives(). Tool names here are
+   plain (open_panel, not open_workspace_panel) -- see
+   workspace_panel_ops.py's own NAMING NOTE for why "workspace" was
+   deliberately dropped from every name in this family. ---- */
+const PANEL_CONTROL_TOOL_NAMES = new Set([
+  "open_panel", "close_panel", "move_panel", "resize_panel",
+]);
+function extractPanelControlAction(toolName, rawText){
+  if(!PANEL_CONTROL_TOOL_NAMES.has(toolName)) return null;
+  if(!rawText || rawText.startsWith("ERROR")) return null;
+  const i = rawText.indexOf("{");
+  if(i < 0) return null;
+  let parsed;
+  try{ parsed = JSON.parse(rawText.slice(i)); }catch{ return null; }
+  if(!parsed || typeof parsed.action !== "string" || typeof parsed.panel !== "string") return null;
+  return parsed;
+}
+function applyPanelControlToolResult(ev, log){
+  const action = extractPanelControlAction(ev.name, ev.text);
+  if(!action) return;
+  let note = "";
+  if(action.action === "open"){
+    openPanel(action.panel);
+    note = "→ opened " + action.panel;
+  }else if(action.action === "close"){
+    const found = findPanelByType(action.panel);
+    if(found){ closePanel(found.id); note = "→ closed " + action.panel; }
+    else note = "→ " + action.panel + " wasn't open";
+  }else if(action.action === "move"){
+    const found = findPanelByType(action.panel);
+    if(found){ setPanelRect(found, { x: action.x, y: action.y }); bringToFront(found.id);
+      note = "→ moved " + action.panel + " to (" + Math.round(action.x) + ", " + Math.round(action.y) + ")"; }
+    else note = "→ " + action.panel + " isn't open — open it first";
+  }else if(action.action === "resize"){
+    const found = findPanelByType(action.panel);
+    if(found){ setPanelRect(found, { w: action.width, h: action.height }); bringToFront(found.id);
+      note = "→ resized " + action.panel + " to " + Math.round(action.width) + "x" + Math.round(action.height); }
+    else note = "→ " + action.panel + " isn't open — open it first";
+  }
+  if(note && log){
+    const row = document.createElement("div");
+    row.style.cssText = "color:var(--blue-dim);font-size:10.5px;margin:2px 0 6px";
+    row.textContent = note;
+    log.appendChild(row); log.scrollTop = log.scrollHeight;
+  }
 }
 
 /* ---- WORLD MAP panel: real /api/worldmap data, a real (simple) plotted
@@ -638,6 +724,142 @@ async function loadGlobePanel(p){
   }
   p.body.innerHTML = `<iframe src="${esc(GODS_EYE_URL)}" allow="microphone; fullscreen" title="God's Eye View"
     style="width:100%;height:100%;border:0;display:block;background:#000"></iframe>`;
+}
+
+/* ---- 3D MODEL panel: real Three.js scene (window.Design3D, loaded by the
+   type="module" script at the end of <body>, ported verbatim from
+   ui/console.html's DESIGN screen — same module, same real orbit camera,
+   real primitive meshes, real TransformControls gizmo, nothing
+   reimplemented here). What's NEW here, and what makes this the actual
+   "AI can pull a 3D model with no clicking" feature rather than a manual
+   editor bolted into a floating window: a natural-language ASK box wired
+   to the real design_3d agent (focus_agent:"design_3d", the exact same
+   real tool-calling pipeline console.html's dispatchDesignDirective
+   already proved) — asking "show me a red box next to a blue sphere" (no
+   button clicks) makes the LLM call the real generate_3d_model_spec tool,
+   and the moment that tool_result event streams back, the scene updates
+   live. generate_3d_model_spec is a pure preview (no manifest write, no
+   confirmation gate) so a live preview never needs approval; asking to
+   SAVE it routes to write_manifest_entry, which keeps its real
+   Permission.REQUIRES_CONFIRMATION gate (design_3d_ops.py) exactly like
+   every other confirmed-write path in DourMouse — no shortcut around it
+   just because the request arrived as a floating panel instead of a
+   thread. ---- */
+function extractDesign3DPrimitives(toolName, rawText){
+  if(!rawText || rawText.startsWith("ERROR")) return null;
+  const i = rawText.indexOf("{");
+  if(i < 0) return null;
+  let parsed;
+  try{ parsed = JSON.parse(rawText.slice(i)); }catch{ return null; }
+  if(toolName === "generate_3d_model_spec"){
+    return Array.isArray(parsed.primitives) ? { name: parsed.name, primitives: parsed.primitives } : null;
+  }
+  // read_manifest_entry / write_manifest_entry both return {name: entry}
+  const key = Object.keys(parsed)[0];
+  const entry = key ? parsed[key] : null;
+  return (entry && Array.isArray(entry.primitives)) ? { name: key, primitives: entry.primitives } : null;
+}
+
+async function dispatchDesign3D(directive, statusEl, opts){
+  opts = opts || {};
+  statusEl.textContent = opts.pending || "Working…";
+  try{
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: directive, focus_agent: "design_3d", screen: "WORKSPACE_3D" }) });
+    if(!res.ok || !res.body) throw new Error("HTTP " + res.status);
+    const rd = res.body.getReader(), dec = new TextDecoder(); let carry = "";
+    for(;;){
+      const { value, done } = await rd.read(); if(done) break;
+      carry += dec.decode(value, { stream: true });
+      const parts = carry.split("\n"); carry = parts.pop() || "";
+      for(const line of parts){
+        if(!line.startsWith("data:")) continue;
+        let ev; try{ ev = JSON.parse(line.slice(5)); }catch(_){ continue; }
+        if(ev.type === "confirmation_requested"){
+          // write_manifest_entry's real confirmation gate -- same as every
+          // other confirmed-write path, never bypassed for this panel.
+          statusEl.innerHTML = `<span>◆ SAVE TO MANIFEST — approve?</span> `+
+            `<button class="d3chip" id="d3ConfirmYes" type="button">APPROVE</button> `+
+            `<button class="d3chip" id="d3ConfirmNo" type="button">DECLINE</button>`;
+          statusEl.querySelector("#d3ConfirmYes").onclick = async () => {
+            statusEl.textContent = "Approved — saving…";
+            try{ await fetch("/api/confirm", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: ev.id, approved: true }) }); }catch(_){}
+          };
+          statusEl.querySelector("#d3ConfirmNo").onclick = async () => {
+            statusEl.textContent = "Declined.";
+            try{ await fetch("/api/confirm", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: ev.id, approved: false }) }); }catch(_){}
+          };
+        }else if(ev.type === "tool_result" && opts.onToolResult){
+          opts.onToolResult(ev);
+        }else if(ev.type === "error"){
+          statusEl.textContent = "Error: " + (ev.message || "request failed");
+        }else if(ev.type === "done" && opts.onDone){
+          opts.onDone(ev.final_text || "");
+        }
+      }
+    }
+  }catch(err){ statusEl.textContent = "Failed: " + String(err.message || err); }
+}
+
+function loadDesign3DPanel(p){
+  p.body.style.padding = "0";
+  p.body.innerHTML = `
+    <div class="d3wrap">
+      <div class="d3toolbar" id="d3AddRow"></div>
+      <div class="d3canvas" id="d3CanvasWrap"><div class="d3hint">DRAG = orbit · SCROLL = zoom · CLICK = select</div></div>
+      <div class="d3ask">
+        <input id="d3AskInput" type="text" placeholder='Tell it what to show, e.g. "a red box next to a blue sphere"' autocomplete="off">
+        <button id="d3AskGo" type="button">GO</button>
+      </div>
+      <div class="d3status" id="d3Status">Ask above, or add a primitive manually — the AI can also SAVE what you build to the manifest by name.</div>
+    </div>`;
+  const addRow = p.body.querySelector("#d3AddRow");
+  ["box","sphere","cylinder","cone","plane","torus"].forEach(t => {
+    const b = document.createElement("button"); b.className = "d3chip"; b.type = "button";
+    b.textContent = "+ " + t.toUpperCase();
+    b.onclick = () => { window.Design3D && window.Design3D.addPrimitive(t); };
+    addRow.appendChild(b);
+  });
+  const status = p.body.querySelector("#d3Status");
+  const input = p.body.querySelector("#d3AskInput");
+  const runAsk = () => {
+    const text = input.value.trim(); if(!text) return;
+    input.value = "";
+    // A save-shaped request needs the real primitives to save, so hand the
+    // agent the CURRENT live scene (getState()) alongside the request --
+    // otherwise "save this as toy_lamp" would have nothing real to write.
+    const live = window.Design3D ? window.Design3D.getState() : { primitives: [] };
+    const directive = `${text}\n\n(Current live scene, if relevant to a save/compare request: `+
+      `${JSON.stringify(live)})`;
+    dispatchDesign3D(directive, status, {
+      pending: "Asking the design_3d agent…",
+      onToolResult: (ev) => {
+        const got = extractDesign3DPrimitives(ev.name, ev.text);
+        if(got && window.Design3D){
+          window.Design3D.loadState(got.primitives);
+          status.textContent = `Loaded ${got.primitives.length} primitive(s)`+(got.name ? ` — "${got.name}"` : "")+".";
+        }
+      },
+      onDone: (finalText) => {
+        // Only overwrite status with plain chat text if no tool result already
+        // set a real "loaded N primitives" message above (checked via a
+        // module-scope flag would be cleaner, but reading status.textContent
+        // back is enough here -- it's local to this one exchange).
+        if(status.textContent === "Asking the design_3d agent…") status.textContent = finalText || "(no reply)";
+      },
+    });
+  };
+  p.body.querySelector("#d3AskGo").addEventListener("click", runAsk);
+  input.addEventListener("keydown", (e) => { if(e.key === "Enter"){ e.preventDefault(); runAsk(); } });
+
+  (function mountWhenReady(){
+    const wrap = p.body.querySelector("#d3CanvasWrap");
+    if(!wrap || findPanelByType("design3d") !== p) return; // panel closed/replaced
+    if(window.Design3D) window.Design3D.mount(wrap);
+    else setTimeout(mountWhenReady, 60);
+  })();
 }
 
 /* ============================================================
@@ -1161,6 +1383,270 @@ function onHandFrame(res){
    ============================================================ */
 openPanel("chat");
 openPanel("map");
+</script>
+
+<!-- 3D MODEL panel: real Three.js scene editor, ported VERBATIM from
+     ui/console.html's DESIGN screen (window.Design3D — mount/addPrimitive/
+     getState/loadState/…), called from loadDesign3DPanel() above. Its own
+     `type="module"` script, same reason console.html keeps it separate:
+     the vendored Three.js addons (OrbitControls/TransformControls) are
+     real ES modules with their own `import ... from 'three'` — the
+     importmap in <head> resolves that against the locally-vendored build,
+     no CDN. Ported rather than shared via an external file so this page
+     stays a single self-contained document like every other DourMouse
+     screen; if this module ever needs a real bugfix, ui/console.html's
+     copy needs the same fix applied by hand (documented here so that
+     isn't a silent trap). -->
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+const state = {
+  renderer: null, scene: null, camera: null, orbit: null, gizmo: null,
+  container: null, raf: null, _resizeHandler: null,
+  objects: [],        // [{id, type, mesh}] — mesh instances survive remounts
+  selectedId: null,
+  mode: "translate",  // translate | rotate | scale
+  nextId: 1,
+};
+
+function notifyChange(){
+  if(typeof window.__d3dOnChange === "function"){
+    try{ window.__d3dOnChange(); }catch(e){ /* panel not painted right now */ }
+  }
+}
+
+function makeGeometry(type){
+  switch(type){
+    case "box": return new THREE.BoxGeometry(1,1,1);
+    case "sphere": return new THREE.SphereGeometry(0.6,24,16);
+    case "cylinder": return new THREE.CylinderGeometry(0.5,0.5,1,24);
+    case "cone": return new THREE.ConeGeometry(0.6,1,24);
+    case "plane": return new THREE.PlaneGeometry(1,1);
+    case "torus": return new THREE.TorusGeometry(0.5,0.18,16,32);
+    default: return new THREE.BoxGeometry(1,1,1);
+  }
+}
+
+function addPrimitiveInternal(type, position, scale, colorHex, forcedId){
+  const geo = makeGeometry(type);
+  const mat = new THREE.MeshStandardMaterial({ color: colorHex || "#8899aa", roughness: 0.6, metalness: 0.05 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(position[0]||0, position[1]||0, position[2]||0);
+  mesh.scale.set(Math.max(0.01,scale[0]||1), Math.max(0.01,scale[1]||1), Math.max(0.01,scale[2]||1));
+  if(state.scene) state.scene.add(mesh);
+  const id = forcedId!=null ? forcedId : state.nextId++;
+  if(id >= state.nextId) state.nextId = id+1;
+  const obj = { id, type, mesh };
+  state.objects.push(obj);
+  return obj;
+}
+
+function selectById(id){
+  state.selectedId = id;
+  const found = id==null ? null : state.objects.find(o=>o.id===id);
+  if(state.gizmo){
+    if(found){ state.gizmo.attach(found.mesh); state.gizmo.visible = true; }
+    else { state.gizmo.detach(); state.gizmo.visible = false; }
+  }
+  notifyChange();
+}
+
+function onPointerDown(ev){
+  if(ev.button !== 0) return; // left click only — right/middle stay orbit/pan
+  if(!state.renderer || !state.camera) return;
+  const rect = state.renderer.domElement.getBoundingClientRect();
+  const mouse = new THREE.Vector2(
+    ((ev.clientX-rect.left)/rect.width)*2-1,
+    -((ev.clientY-rect.top)/rect.height)*2+1
+  );
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(mouse, state.camera);
+  if(state.gizmo && state.gizmo.visible){
+    // Let TransformControls own its own handles — don't let our selection
+    // raycast (which only tests primitive meshes, never gizmo meshes)
+    // misread "no hit" on a gizmo click as "clicked empty space, deselect".
+    if(ray.intersectObject(state.gizmo, true).length) return;
+  }
+  const hits = ray.intersectObjects(state.objects.map(o=>o.mesh), false);
+  if(hits.length){
+    const found = state.objects.find(o=>o.mesh===hits[0].object);
+    if(found) selectById(found.id);
+  } else {
+    selectById(null);
+  }
+}
+
+function disposeCurrent(){
+  if(state.raf) cancelAnimationFrame(state.raf);
+  state.raf = null;
+  if(state._resizeHandler){ window.removeEventListener("resize", state._resizeHandler); state._resizeHandler = null; }
+  if(state.orbit){ try{ state.orbit.dispose(); }catch(e){} state.orbit = null; }
+  if(state.gizmo){ try{ state.gizmo.dispose(); }catch(e){} state.gizmo = null; }
+  if(state.renderer){
+    try{ state.renderer.dispose(); }catch(e){}
+    const el = state.renderer.domElement;
+    if(el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  state.renderer = null; state.scene = null; state.camera = null;
+}
+
+function mount(container){
+  disposeCurrent();
+  state.container = container;
+  const hint = container.querySelector(".d3hint");
+  container.querySelectorAll("canvas").forEach(c=>c.remove());
+  const w = container.clientWidth || 400, h = container.clientHeight || 380;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(w, h);
+  renderer.setClearColor(0x05080c, 1);
+  container.insertBefore(renderer.domElement, hint || null);
+  state.renderer = renderer;
+
+  const scene = new THREE.Scene();
+  scene.add(new THREE.GridHelper(10, 10, 0x2a3f52, 0x18232e));
+  scene.add(new THREE.AxesHelper(1.6));
+  scene.add(new THREE.HemisphereLight(0xbfd9ea, 0x0a0f14, 1.1));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(3, 5, 4);
+  scene.add(dir);
+  state.scene = scene;
+
+  // Re-attach EXISTING mesh instances (not recreated) — the scene survives
+  // remounts (e.g. the panel being closed and reopened).
+  state.objects.forEach(o => scene.add(o.mesh));
+
+  const camera = new THREE.PerspectiveCamera(50, w/h, 0.1, 200);
+  camera.position.set(4, 3.4, 5);
+  state.camera = camera;
+
+  const orbit = new OrbitControls(camera, renderer.domElement);
+  orbit.enableDamping = true;
+  orbit.dampingFactor = 0.08;
+  orbit.target.set(0, 0.4, 0);
+  state.orbit = orbit;
+
+  const gizmo = new TransformControls(camera, renderer.domElement);
+  gizmo.setMode(state.mode);
+  gizmo.addEventListener("dragging-changed", e => { orbit.enabled = !e.value; });
+  gizmo.addEventListener("objectChange", notifyChange);
+  scene.add(gizmo);
+  state.gizmo = gizmo;
+  const selectedObj = state.selectedId != null ? state.objects.find(o => o.id === state.selectedId) : null;
+  if(selectedObj){ gizmo.attach(selectedObj.mesh); gizmo.visible = true; }
+
+  renderer.domElement.addEventListener("pointerdown", onPointerDown);
+
+  function resize(){
+    if(!state.container || !state.renderer || !state.camera) return;
+    const w2 = state.container.clientWidth || w, h2 = state.container.clientHeight || h;
+    state.camera.aspect = w2/h2;
+    state.camera.updateProjectionMatrix();
+    state.renderer.setSize(w2, h2);
+  }
+  window.addEventListener("resize", resize);
+  state._resizeHandler = resize;
+
+  function loop(){
+    if(!document.body.contains(container)){ disposeCurrent(); return; }
+    if(state.orbit) state.orbit.update();
+    if(state.renderer && state.scene && state.camera) state.renderer.render(state.scene, state.camera);
+    state.raf = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function addPrimitive(type){
+  if(!state.scene) return;
+  const n = state.objects.length;
+  const pos = [ (n % 4) * 1.4 - 2.1, 0.5, Math.floor(n / 4) * 1.4 - 1.4 ];
+  const obj = addPrimitiveInternal(type, pos, [1,1,1], "#8899aa", null);
+  selectById(obj.id);
+}
+
+function deleteSelected(){
+  if(state.selectedId == null) return;
+  const idx = state.objects.findIndex(o => o.id === state.selectedId);
+  if(idx < 0) return;
+  const obj = state.objects[idx];
+  if(state.gizmo){ state.gizmo.detach(); state.gizmo.visible = false; }
+  if(state.scene) state.scene.remove(obj.mesh);
+  obj.mesh.geometry.dispose(); obj.mesh.material.dispose();
+  state.objects.splice(idx, 1);
+  state.selectedId = null;
+  notifyChange();
+}
+
+function clear(){
+  if(state.gizmo){ state.gizmo.detach(); state.gizmo.visible = false; }
+  state.objects.forEach(o => {
+    if(state.scene) state.scene.remove(o.mesh);
+    o.mesh.geometry.dispose(); o.mesh.material.dispose();
+  });
+  state.objects = []; state.selectedId = null; state.nextId = 1;
+  notifyChange();
+}
+
+function setMode(mode){
+  state.mode = mode;
+  if(state.gizmo) state.gizmo.setMode(mode);
+}
+
+function getSelected(){
+  if(state.selectedId == null) return null;
+  const obj = state.objects.find(o => o.id === state.selectedId);
+  if(!obj) return null;
+  return {
+    id: obj.id, type: obj.type,
+    position: obj.mesh.position.toArray(),
+    scale: obj.mesh.scale.toArray(),
+    color: "#" + obj.mesh.material.color.getHexString(),
+  };
+}
+
+function setSelectedPosition(p){
+  const obj = state.objects.find(o => o.id === state.selectedId); if(!obj) return;
+  obj.mesh.position.set(p[0], p[1], p[2]);
+}
+function setSelectedScale(s){
+  const obj = state.objects.find(o => o.id === state.selectedId); if(!obj) return;
+  obj.mesh.scale.set(Math.max(0.01,s[0]), Math.max(0.01,s[1]), Math.max(0.01,s[2]));
+}
+function setSelectedColor(hex){
+  const obj = state.objects.find(o => o.id === state.selectedId); if(!obj) return;
+  try{ obj.mesh.material.color.set(hex); }catch(e){ /* invalid color text — ignore keystroke */ }
+}
+
+function getState(){
+  return {
+    primitives: state.objects.map(o => ({
+      type: o.type,
+      position: o.mesh.position.toArray(),
+      scale: o.mesh.scale.toArray(),
+      material: { color: "#" + o.mesh.material.color.getHexString(), roughness: o.mesh.material.roughness },
+    })),
+  };
+}
+
+function loadState(primitives){
+  clear();
+  (primitives || []).forEach(p => {
+    const pos = Array.isArray(p.position) ? p.position : [0,0,0];
+    const scl = Array.isArray(p.scale) ? p.scale : [1,1,1];
+    const color = (p.material && p.material.color) || "#8899aa";
+    addPrimitiveInternal(p.type, pos, scl, color, null);
+  });
+  notifyChange();
+}
+
+window.Design3D = {
+  mount, addPrimitive, deleteSelected, clear, setMode,
+  getSelected, setSelectedPosition, setSelectedScale, setSelectedColor,
+  getState, loadState,
+};
 </script>
 </body>
 </html>

@@ -4642,6 +4642,31 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    # -- Floating-panel control (v13.4) --------------------------------- #
+    # Real, deterministic tools (Rule 2.8 — no model in the loop for the
+    # actual mutation; Rule 2.2 — no silent stubs) that let the companion
+    # agent (delegate_task) open/close/move/resize ui/workspace.html's
+    # floating panels by natural language, with no manual clicking — see
+    # workspace_panel_ops.py's own module docstring for the full honest
+    # boundary (these tools validate + spec the action; the client applies
+    # it, the same real setPanelRect/openPanel/closePanel every mouse-drag
+    # and hand-gesture pinch already calls). Named "panel_control", NOT
+    # "workspace_ui" — see workspace_panel_ops.py's own NAMING NOTE for the
+    # real live-caught routing collision that name caused.
+    from dourmouse.workspace_panel_ops import build_workspace_panel_tool_specs
+
+    registry.register_subagent(
+        _subagent(
+            "panel_control",
+            "General",
+            "Floating-panel control for DourMouse's Vision screen — "
+            "open/close/move/resize its floating panels (mail, chat, "
+            "research, map, globe, design3d) by natural language, "
+            "real-time, no manual clicking required.",
+            build_workspace_panel_tool_specs(),
+        )
+    )
+
     # -- v5.8 artifact renderer ---------------------------------------- #
     # Every research/coding/report agent can publish a structured artifact
     # (markdown / table / series) rendered beside the chat — the biggest
