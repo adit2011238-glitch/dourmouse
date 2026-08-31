@@ -733,6 +733,9 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
 .shelfname{font-family:var(--display);font-size:13px;letter-spacing:.08em;color:var(--amber)}
 .shelfcount{font-size:9px;color:var(--blue-deep)}
 .shelfdel{margin-left:auto}
+.shelfnewproject{display:flex;flex-direction:column;gap:7px;max-width:420px;
+  padding:10px;margin-bottom:12px;background:var(--panel);border:1px solid var(--line-2);
+  border-radius:8px}
 .shelfrow{display:flex;gap:11px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity}
 .book{flex:none;width:200px;scroll-snap-align:start;border:1px solid var(--line);
   border-left:3px solid var(--amber-line);border-radius:8px;padding:11px 13px;
@@ -2846,11 +2849,55 @@ function paintImportedShelf(box){
   sec.innerHTML=`<div class="shelfhead"><span class="shelfname">PROJECTS — CLAUDE CODE &amp; CODEX CLI</span>
     <span class="shelfcount" id="importedCount"></span>
     <span class="shelfmeta" id="importedRefreshedAt"></span>
+    <button class="mini" type="button" id="importedNewBtn">+ NEW PROJECT</button>
     <button class="mini" type="button" id="importedRefreshBtn">REFRESH</button></div>
+    <div id="importedNewForm" class="shelfnewproject" hidden>
+      <input type="text" class="mailfield" id="importedNewName" placeholder="Project name">
+      <input type="text" class="mailfield" id="importedNewPath" placeholder="Real path, e.g. /Users/you/code/thing">
+      <input type="text" class="mailfield" id="importedNewDesc" placeholder="Description (optional)">
+      <button class="chip" type="button" id="importedNewSave">CREATE</button>
+      <button class="mini" type="button" id="importedNewCancel">CANCEL</button>
+      <div class="note" id="importedNewStatus"></div>
+    </div>
     <div id="importedBody"><div class="note">Loading project history…</div></div>`;
   box.appendChild(sec);
   $("importedRefreshBtn").onclick=refreshBookkeeperProjects;
+  $("importedNewBtn").onclick=()=>{ $("importedNewForm").hidden=false; $("importedNewName").focus(); };
+  $("importedNewCancel").onclick=()=>{ $("importedNewForm").hidden=true; $("importedNewStatus").textContent=""; };
+  $("importedNewSave").onclick=createBookkeeperProject;
   loadImportedProjects();
+}
+async function createBookkeeperProject(){
+  // Real server-side create (dourmouse/project_bookkeeper.py's own
+  // create_project, v13.4 — explicit user request: "add the features to
+  // create and delete projects"). This is the auto-discovered Claude/
+  // Codex bookshelf, deliberately separate from the manual client-only
+  // "shelf" of saved chat answers above (dm_projects_v1) — that shelf
+  // already had real create/delete; this one didn't, until now.
+  const name=$("importedNewName").value.trim(), path=$("importedNewPath").value.trim(),
+        description=$("importedNewDesc").value.trim(), status=$("importedNewStatus");
+  if(!name || !path){ status.textContent="Name and path are both required."; return; }
+  $("importedNewSave").disabled=true;
+  try{
+    const res=await fetch("/api/projects/create",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name,path,description})});
+    const r=await res.json();
+    if(!res.ok || r.ok===false){ status.textContent="Failed — "+esc(r.error||("HTTP "+res.status)); return; }
+    $("importedNewForm").hidden=true; status.textContent="";
+    $("importedNewName").value=""; $("importedNewPath").value=""; $("importedNewDesc").value="";
+    loadImportedProjects();
+  }catch(e){ status.textContent="Failed — "+esc(String(e.message||e)); }
+  finally{ $("importedNewSave").disabled=false; }
+}
+async function deleteBookkeeperProject(path, name){
+  if(!confirm(`Remove "${name}" from the PROJECTS bookshelf? This only stops tracking it here — the real folder and its session history are never touched.`)) return;
+  try{
+    const res=await fetch("/api/projects/delete",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({path})});
+    const r=await res.json();
+    if(!res.ok || r.ok===false){ alert("Delete failed — "+(r.error||("HTTP "+res.status))); return; }
+    loadImportedProjects();
+  }catch(e){ alert("Delete failed — "+String(e.message||e)); }
 }
 async function loadImportedProjects(){
   // The cheap path: GET /api/projects/bookkeeper is a persisted-file read,
@@ -2929,9 +2976,11 @@ function bookkeeperCard(p){
   card.title = p.path;
   card.innerHTML = `<div class="bookscreen"></div><div class="bookq"></div>
     <div class="bookctx"></div><div class="ipath"></div><div class="istat"></div>
-    <div class="bookfoot"><span class="bookwhen"></span><span class="goneflag" hidden>PATH GONE</span></div>`;
+    <div class="bookfoot"><span class="bookwhen"></span><span class="goneflag" hidden>PATH GONE</span>
+      <button class="bookx" type="button" title="Remove from bookshelf">✕</button></div>`;
   card.querySelector(".bookscreen").textContent = importedSourceLabel(p.sources);
   card.querySelector(".bookq").textContent = p.name || p.path;
+  card.querySelector(".bookx").onclick=(e)=>{ e.stopPropagation(); deleteBookkeeperProject(p.path, p.name||p.path); };
   // real per-project context (project_bookkeeper.py's own extractive
   // summary) — the whole reason this shelf moved off the raw scan. Honest
   // empty state when nothing has been captured yet, never a blank card.

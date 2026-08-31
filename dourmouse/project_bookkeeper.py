@@ -118,6 +118,16 @@ def _empty_store() -> dict[str, Any]:
         "claude_code": {"configured": False},
         "codex_cli": {"configured": False},
         "projects": {},
+        # v13.4: real create/delete on the bookshelf, explicit user request.
+        # Kept SEPARATE from "projects" (the auto-discovered set) because
+        # refresh() unconditionally REBUILDS "projects" from a fresh
+        # project_import scan every call -- anything living only in that
+        # dict would be silently wiped on the next refresh. manual_projects
+        # is never touched by refresh(); hidden_paths is a real user
+        # "delete" of an auto-discovered project (see delete_project's own
+        # docstring for why this hides rather than deletes real files).
+        "manual_projects": {},
+        "hidden_paths": [],
     }
 
 
@@ -379,27 +389,46 @@ def refresh(
             "_checkpoint_last_active_epoch": last_active_epoch,
         }
 
-    store = {
+    new_store = {
         "version": 1,
         "last_refreshed": _now_iso(),
         "context_method": _CONTEXT_METHOD,
         "claude_code": imported["claude_code"],
         "codex_cli": imported["codex_cli"],
         "projects": updated,
+        # Real bug caught by test_manual_project_survives_a_refresh_call /
+        # test_delete_of_an_auto_discovered_project_hides_it_...: this dict
+        # used to be built from scratch with no reference to `store` (the
+        # PRIOR persisted record, loaded above) at all, silently dropping
+        # any manually created project and un-hiding any deleted
+        # auto-discovered one on every single refresh. Both are carried
+        # forward explicitly here — refresh() only ever rebuilds "projects"
+        # (the auto-discovered set); manual_projects/hidden_paths are this
+        # module's own state, never re-derived from project_import.
+        "manual_projects": store.get("manual_projects", {}),
+        "hidden_paths": store.get("hidden_paths", []),
     }
-    _save_store(store, sp)
-    return _public_view(store)
+    _save_store(new_store, sp)
+    return _public_view(new_store)
 
 
 def _public_view(store: dict[str, Any]) -> dict[str, Any]:
     """The bookshelf-card-ready response shape: strips this module's own
     internal checkpoint field (``_checkpoint_last_active_epoch``) — real
     and inspectable in the persisted JSON file, but not part of the public
-    contract another agent's UI code should depend on."""
+    contract another agent's UI code should depend on. Merges in manually
+    created projects and filters out user-deleted (hidden) ones -- see
+    create_project/delete_project."""
+    hidden = set(store.get("hidden_paths", []))
     projects = [
         {k: v for k, v in rec.items() if not k.startswith("_")}
         for rec in store.get("projects", {}).values()
+        if rec.get("path") not in hidden
     ]
+    for rec in store.get("manual_projects", {}).values():
+        if rec.get("path") in hidden:
+            continue
+        projects.append(dict(rec))
     projects.sort(key=lambda p: (p["last_active"] is None, p["last_active"] or ""), reverse=True)
     return {
         "last_refreshed": store.get("last_refreshed"),
@@ -408,6 +437,90 @@ def _public_view(store: dict[str, Any]) -> dict[str, Any]:
         "codex_cli": store.get("codex_cli", {"configured": False}),
         "projects": projects,
     }
+
+
+def create_project(
+    name: str,
+    path: str,
+    description: str = "",
+    store_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Manually register a project on the bookshelf — real user request
+    (v13.4), for a project that has no Claude/Codex session history yet
+    (a brand-new folder) or that the user simply wants tracked/pinned.
+    Does NOT create the directory itself (Rule 2.2: no silent side
+    effects a caller didn't ask for) -- ``path`` is recorded whether or
+    not it exists yet; ``exists`` reflects the real, current filesystem
+    state at creation time and is honestly re-checked, not assumed.
+
+    Returns the same per-project card shape refresh()'s auto-discovered
+    entries use, so the client's rendering code needs no special case for
+    "manual" vs "auto-discovered" -- only ``sources: ["manual"]`` differs.
+    """
+    name = (name or "").strip()
+    path = (path or "").strip()
+    if not name:
+        raise ValueError("create_project requires a non-empty 'name'.")
+    if not path:
+        raise ValueError("create_project requires a non-empty 'path'.")
+    resolved = str(Path(path).expanduser())
+    sp = Path(store_path) if store_path is not None else _store_path()
+    store = _load_store(sp)
+    if resolved in store.get("projects", {}) or resolved in store.get("manual_projects", {}):
+        raise ValueError(f"a project at {resolved!r} is already on the bookshelf.")
+    now = _now_iso()
+    record = {
+        "path": resolved,
+        "name": name,
+        "sources": ["manual"],
+        "session_count": 0,
+        "session_counts": {},
+        "last_active": now,
+        "git_branch": None,
+        "stat": None,
+        "exists": Path(resolved).exists(),
+        "context": description.strip(),
+        "context_source": "manual" if description.strip() else "none",
+        "context_items": [],
+        "context_updated_at": now,
+        "created_at": now,
+    }
+    store.setdefault("manual_projects", {})[resolved] = record
+    # A hidden auto-discovered project at the same path, re-created
+    # manually, should reappear -- an explicit re-add un-hides it.
+    store["hidden_paths"] = [p for p in store.get("hidden_paths", []) if p != resolved]
+    _save_store(store, sp)
+    return record
+
+
+def delete_project(path: str, store_path: Path | str | None = None) -> bool:
+    """Remove a project from the bookshelf. NEVER touches the real
+    directory or its session files -- "delete" here means "stop tracking
+    on the bookshelf", the same meaning "delete" carries in any project
+    list/dashboard UI, not "destroy the project's real files". A manually
+    created project is removed outright (nothing else derives it); an
+    auto-discovered project is HIDDEN (added to hidden_paths) rather than
+    removed from the "projects" dict directly, because refresh() rebuilds
+    that dict from a fresh real scan on every call and would silently
+    resurrect a direct deletion on the very next refresh -- hidden_paths
+    is the one thing refresh() never touches, so a hide actually sticks.
+    Returns True if something was actually removed/hidden, False if
+    ``path`` wasn't tracked at all (nothing to do, not an error)."""
+    resolved = str(Path(path).expanduser())
+    sp = Path(store_path) if store_path is not None else _store_path()
+    store = _load_store(sp)
+    changed = False
+    if resolved in store.get("manual_projects", {}):
+        del store["manual_projects"][resolved]
+        changed = True
+    if resolved in store.get("projects", {}):
+        hidden = set(store.get("hidden_paths", []))
+        hidden.add(resolved)
+        store["hidden_paths"] = sorted(hidden)
+        changed = True
+    if changed:
+        _save_store(store, sp)
+    return changed
 
 
 def get_bookkeeper(

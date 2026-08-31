@@ -159,6 +159,20 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
   padding:4px 9px;cursor:pointer;background:var(--panel2);color:var(--blue-hi)}
 .confirmbox button.go{background:var(--ok);color:#08111c;border-color:var(--ok)}
 
+/* upload-to-RAG panel */
+.upwrap{display:flex;flex-direction:column;height:100%;padding:10px;gap:8px}
+.updrop{border:2px dashed var(--line-2);border-radius:8px;padding:22px 10px;
+  text-align:center;color:var(--blue-dim);font-size:11.5px;cursor:pointer;transition:border-color .15s}
+.updrop.over{border-color:var(--amber);color:var(--amber-hi);background:var(--amber-soft)}
+.uplist{flex:1;overflow:auto;display:flex;flex-direction:column;gap:5px}
+.uprow{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:6px;font-size:11px}
+.uprow .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--blue-hi)}
+.uprow .s{font-size:10px;flex-shrink:0}
+.uprow .s.ok{color:var(--ok)}
+.uprow .s.warn{color:var(--warn)}
+.uprow .s.bad{color:var(--bad)}
+
 /* 3D model panel */
 .d3wrap{display:flex;flex-direction:column;height:100%}
 .d3canvas{position:relative;flex:1;min-height:0;overflow:hidden;background:#05080c}
@@ -239,6 +253,7 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="map">+ WORLD MAP</button>
     <button class="dockbtn" type="button" data-open="globe">+ 3D VIEW</button>
     <button class="dockbtn" type="button" data-open="design3d">+ 3D MODEL</button>
+    <button class="dockbtn" type="button" data-open="upload">+ UPLOAD TO RAG</button>
     <a class="backlink" href="/">← CONSOLE</a>
   </div>
 </div>
@@ -428,7 +443,7 @@ function openPanel(type){
   const existing = findPanelByType(type);
   if(existing){ bringToFront(existing.id); return existing; }
   const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP",
-                   globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL" };
+                   globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL", upload: "UPLOAD TO RAG" };
   const p = createPanel(type, titles[type] || type.toUpperCase());
   if(type === "mail") loadMailPanel(p);
   else if(type === "chat") initChatPanel(p, "companion", "Ask the companion anything…");
@@ -436,6 +451,7 @@ function openPanel(type){
   else if(type === "map") loadMapPanel(p);
   else if(type === "globe") loadGlobePanel(p);
   else if(type === "design3d") loadDesign3DPanel(p);
+  else if(type === "upload") loadUploadPanel(p);
   return p;
 }
 
@@ -860,6 +876,79 @@ function loadDesign3DPanel(p){
     if(window.Design3D) window.Design3D.mount(wrap);
     else setTimeout(mountWhenReady, 60);
   })();
+}
+
+/* ---- UPLOAD TO RAG panel: real user request ("add a page where files
+   can be uploaded to the shared rag database"). Drag-drop or click to
+   pick files, POST each raw to /api/rag/upload -- the server saves it
+   (same sandboxed uploads/ root every other DourMouse upload uses) AND
+   extracts real text via bulk_ingest.py's own extractor, remembering it
+   into the SAME shared MemoryStore the bulk laptop/Drive scans write to
+   and query_shared_memory searches -- one real store, three ways in
+   (manual upload here, the bulk scans, and remember()'d facts), not a
+   separate island. ---- */
+function loadUploadPanel(p){
+  p.body.innerHTML = `
+    <div class="upwrap">
+      <div class="updrop" id="upDrop">Drop files here, or click to choose<br>
+        <span style="font-size:9.5px">Indexed into the shared RAG database the moment they finish uploading — search them from any chat via query_shared_memory.</span></div>
+      <input type="file" id="upInput" multiple style="display:none">
+      <div class="uplist" id="upList"></div>
+    </div>`;
+  const drop = p.body.querySelector("#upDrop");
+  const input = p.body.querySelector("#upInput");
+  const list = p.body.querySelector("#upList");
+
+  function addRow(name){
+    const row = document.createElement("div"); row.className = "uprow";
+    row.innerHTML = `<span class="n"></span><span class="s">uploading…</span>`;
+    row.querySelector(".n").textContent = name;
+    list.prepend(row);
+    return row;
+  }
+
+  async function uploadOne(file){
+    const row = addRow(file.name);
+    const statusEl = row.querySelector(".s");
+    // Same filename-sanitizing contract /api/rag/upload's server side
+    // enforces (letters/digits/dot/underscore/dash, 1-120 chars) -- a
+    // name outside that gets a real, honest 400 back, not a silent drop.
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "upload.bin";
+    try{
+      const res = await fetch("/api/rag/upload?name=" + encodeURIComponent(safeName), {
+        method: "POST", body: file,
+      });
+      const r = await res.json();
+      if(!res.ok || r.ok === false){
+        statusEl.textContent = "failed — " + (r.error || ("HTTP " + res.status));
+        statusEl.className = "s bad";
+        return;
+      }
+      if(r.indexed){
+        statusEl.textContent = `indexed (${r.indexed_chars.toLocaleString()} chars)`;
+        statusEl.className = "s ok";
+      }else{
+        statusEl.textContent = "saved, not indexed — " + (r.reason || r.index_error || "unknown");
+        statusEl.className = "s warn";
+      }
+    }catch(e){
+      statusEl.textContent = "failed — " + String(e.message || e);
+      statusEl.className = "s bad";
+    }
+  }
+
+  function uploadFiles(files){
+    Array.from(files).forEach(uploadOne);
+  }
+
+  drop.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => { uploadFiles(input.files); input.value = ""; });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault(); drop.classList.remove("over");
+    if(e.dataTransfer && e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+  });
 }
 
 /* ============================================================

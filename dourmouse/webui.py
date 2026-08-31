@@ -2255,6 +2255,15 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/upload":
             # v5.0: raw-body file upload into the sandboxed uploads root.
             self._handle_upload()
+        elif parsed.path == "/api/rag/upload":
+            # v13.4: real user request — "a page where files can be
+            # uploaded to the shared rag database". Same raw-body upload
+            # contract as /api/upload (name query param, size cap, sandbox
+            # write), then ADDITIONALLY extracts real text and remembers
+            # it into the shared MemoryStore — reusing bulk_ingest.py's
+            # own extraction (one extractor, not a second one for the
+            # manual-upload path vs the bulk laptop/Drive scan).
+            self._handle_rag_upload()
         elif parsed.path == "/api/tasks":
             # v5.x: HUD task intake — deterministic CRUD into the same
             # workspace/tasks.json the tasks agent owns.
@@ -2283,6 +2292,40 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, **refresh_bookkeeper()})
             except Exception as exc:  # noqa: BLE001 - honest, never a 500
                 self._send_json({"ok": False, "error": str(exc)[:200]}, status=500)
+        elif parsed.path == "/api/projects/create":
+            # v13.4: real create on the PROJECTS bookshelf, explicit user
+            # request. Same deterministic-CRUD shape as /api/world/regions
+            # above — no LLM in this path, real validation errors come
+            # back as 400 with the honest reason.
+            body = self._read_json_body()
+            from dourmouse.project_bookkeeper import create_project
+
+            try:
+                record = create_project(
+                    name=body.get("name") or "",
+                    path=body.get("path") or "",
+                    description=body.get("description") or "",
+                )
+            except ValueError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self._send_json({"ok": True, "project": record})
+        elif parsed.path == "/api/projects/delete":
+            # POST, not DELETE — this server implements do_GET/do_POST
+            # only, matching every other mutating action in this file
+            # (see /api/world/regions/delete's own comment).  "Delete"
+            # here means stop tracking on the bookshelf — see
+            # project_bookkeeper.delete_project's own docstring for why
+            # this never touches the real directory or its session files.
+            body = self._read_json_body()
+            path = (body.get("path") or "").strip()
+            if not path:
+                self._send_json({"ok": False, "error": "path is required"}, status=400)
+                return
+            from dourmouse.project_bookkeeper import delete_project
+
+            removed = delete_project(path)
+            self._send_json({"ok": True, "removed": removed})
         elif parsed.path == "/api/world/regions":
             # v8.20 watch regions: create. Same deterministic-CRUD shape as
             # /api/tasks above — no LLM in this path, real validation errors
@@ -2651,6 +2694,93 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send_json(
             {"ok": True, "name": name, "size": len(data), "path": str(target)}
+        )
+
+    def _handle_rag_upload(self) -> None:
+        """v13.4: POST /api/rag/upload?name=<file> — raw file bytes,
+        written into the sandboxed uploads root (same contract as
+        /api/upload above: name whitelist, size cap, Windows-safe drain-
+        before-400), then indexed for real into the shared RAG database
+        (dourmouse/memory_store.py) via bulk_ingest.py's own text
+        extraction — the same extractor the bulk laptop/Drive scans use,
+        not a second, competing implementation. Honest when a file has no
+        extractable text (an image, a binary) — the file is still saved,
+        but the response says plainly that nothing was indexed, never a
+        fabricated success.
+        """
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        name = (qs.get("name") or [""])[0].strip()
+        raw_len = self.headers.get("Content-Length", "0") or "0"
+        try:
+            length = int(raw_len)
+        except (TypeError, ValueError):
+            self._send_json({"ok": False, "error": "invalid Content-Length"}, status=400)
+            return
+        if length < 0 or length > _MAX_UPLOAD_BYTES:
+            self._send_json(
+                {"ok": False, "error": f"upload too large (max {_MAX_UPLOAD_BYTES} bytes)"},
+                status=400,
+            )
+            return
+        if not _UPLOAD_NAME_RE.match(name):
+            try:
+                self.rfile.read(length)
+            except OSError:
+                pass
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": (
+                        "filename must be 1-120 chars of letters/digits/"
+                        "dot/underscore/dash (no paths)"
+                    ),
+                },
+                status=400,
+            )
+            return
+        data = self.rfile.read(length) if length else b""
+        if not data:
+            self._send_json({"ok": False, "error": "empty upload body"}, status=400)
+            return
+        try:
+            root = _uploads_root()
+            target = (root / name).resolve()
+            target.relative_to(root.resolve())  # sandbox re-check
+            with open(target, "wb") as fh:
+                fh.write(data)
+        except OSError as exc:
+            self._send_json({"ok": False, "error": f"upload failed: {exc}"}, status=500)
+            return
+
+        from dourmouse.bulk_ingest import _extract_local_text
+        from dourmouse.general_roster import _open_memory_store
+
+        try:
+            text = _extract_local_text(target)
+        except Exception as exc:  # noqa: BLE001 — a bad file must still report the real save
+            self._send_json(
+                {"ok": True, "name": name, "size": len(data), "path": str(target),
+                 "indexed": False, "index_error": f"{type(exc).__name__}: {exc}"}
+            )
+            return
+        if text is None or not text.strip():
+            self._send_json(
+                {"ok": True, "name": name, "size": len(data), "path": str(target),
+                 "indexed": False, "reason": "no extractable text (image/binary/empty file)"}
+            )
+            return
+        store = _open_memory_store()
+        if isinstance(store, Exception):
+            self._send_json(
+                {"ok": True, "name": name, "size": len(data), "path": str(target),
+                 "indexed": False, "index_error": str(store)}
+            )
+            return
+        store.remember("manual_upload", str(target), text[:200_000])
+        self._send_json(
+            {"ok": True, "name": name, "size": len(data), "path": str(target),
+             "indexed": True, "indexed_chars": min(len(text), 200_000)}
         )
 
     def _handle_push_notify(self) -> None:

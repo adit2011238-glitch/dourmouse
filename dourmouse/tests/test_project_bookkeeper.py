@@ -20,6 +20,8 @@ import time
 import pytest
 
 from dourmouse.project_bookkeeper import (
+    create_project,
+    delete_project,
     get_bookkeeper,
     refresh,
 )
@@ -393,3 +395,115 @@ class TestBookkeeperEndpoints:
             srv.shutdown()
             srv.server_close()
             thread.join(timeout=2)
+
+
+class TestCreateAndDeleteProject:
+    """v13.4 — explicit user request: "add the features to create and
+    delete projects" on the PROJECTS bookshelf. Manual create/delete on
+    top of the auto-discovered (refresh()-derived) project set, without
+    either being silently wiped by, or silently wiping, the other."""
+
+    def test_create_adds_a_real_manual_project(self, tmp_path):
+        sp = tmp_path / "store.json"
+        record = create_project("My Thing", str(tmp_path / "proj"), "a real note", store_path=sp)
+        assert record["name"] == "My Thing"
+        assert record["sources"] == ["manual"]
+        view = get_bookkeeper(store_path=sp)
+        assert any(p["name"] == "My Thing" for p in view["projects"])
+
+    def test_create_requires_name_and_path(self, tmp_path):
+        sp = tmp_path / "store.json"
+        with pytest.raises(ValueError):
+            create_project("", str(tmp_path), store_path=sp)
+        with pytest.raises(ValueError):
+            create_project("Name", "", store_path=sp)
+
+    def test_create_refuses_duplicate_path(self, tmp_path):
+        sp = tmp_path / "store.json"
+        path = str(tmp_path / "dup")
+        create_project("First", path, store_path=sp)
+        with pytest.raises(ValueError):
+            create_project("Second", path, store_path=sp)
+
+    def test_manual_project_exists_flag_reflects_real_filesystem(self, tmp_path):
+        sp = tmp_path / "store.json"
+        real_dir = tmp_path / "is_real"
+        real_dir.mkdir()
+        rec_real = create_project("Real", str(real_dir), store_path=sp)
+        rec_fake = create_project("Not Yet", str(tmp_path / "not_real_yet"), store_path=sp)
+        assert rec_real["exists"] is True
+        assert rec_fake["exists"] is False
+
+    def test_delete_removes_a_manual_project(self, tmp_path):
+        sp = tmp_path / "store.json"
+        path = str(tmp_path / "gone")
+        create_project("Gone Soon", path, store_path=sp)
+        assert delete_project(path, store_path=sp) is True
+        view = get_bookkeeper(store_path=sp)
+        assert not any(p["path"] == path for p in view["projects"])
+
+    def test_delete_unknown_path_returns_false_not_an_error(self, tmp_path):
+        sp = tmp_path / "store.json"
+        assert delete_project(str(tmp_path / "never-existed"), store_path=sp) is False
+
+    def test_manual_project_survives_a_refresh_call(self, tmp_path, monkeypatch):
+        """The real bug this whole feature would have hit without a
+        SEPARATE manual_projects dict: refresh() rebuilds "projects" from
+        a fresh scan every call -- a manually created project stored
+        there would vanish on the very next refresh."""
+        import dourmouse.project_import as project_import
+
+        monkeypatch.setattr(
+            project_import, "get_imported_projects",
+            lambda claude_root=None, codex_db=None: {
+                "claude_code": {"configured": False}, "codex_cli": {"configured": False}, "projects": [],
+            },
+        )
+        sp = tmp_path / "store.json"
+        create_project("Survivor", str(tmp_path / "survivor"), store_path=sp)
+        refresh(store_path=sp)
+        view = get_bookkeeper(store_path=sp)
+        assert any(p["name"] == "Survivor" for p in view["projects"])
+
+    def test_delete_of_an_auto_discovered_project_hides_it_and_a_refresh_does_not_resurrect_it(self, tmp_path, monkeypatch):
+        """The real bug delete_project's hidden_paths mechanism exists to
+        prevent: directly deleting from the "projects" dict would come
+        right back on the next refresh(), since that dict is rebuilt from
+        a fresh real scan every call."""
+        import dourmouse.project_import as project_import
+
+        auto_path = str(tmp_path / "auto_proj")
+        fake_imported = {
+            "claude_code": {"configured": True}, "codex_cli": {"configured": False},
+            "projects": [{
+                "path": auto_path, "title": "Auto Found", "sources": ["claude_code"],
+                "session_count": 1, "session_counts": {"claude_code": 1},
+                "last_active": "2026-08-30T00:00:00+00:00", "git_branch": None,
+                "stat": "1 session", "exists": True,
+            }],
+        }
+        monkeypatch.setattr(
+            project_import, "get_imported_projects",
+            lambda claude_root=None, codex_db=None: fake_imported,
+        )
+        sp = tmp_path / "store.json"
+        refresh(store_path=sp)
+        assert any(p["path"] == auto_path for p in get_bookkeeper(store_path=sp)["projects"])
+
+        assert delete_project(auto_path, store_path=sp) is True
+        assert not any(p["path"] == auto_path for p in get_bookkeeper(store_path=sp)["projects"])
+
+        # The real regression check: refresh() re-scans and would put
+        # auto_path right back into "projects" if hidden_paths weren't honored.
+        refresh(store_path=sp)
+        assert not any(p["path"] == auto_path for p in get_bookkeeper(store_path=sp)["projects"])
+
+    def test_recreating_at_a_hidden_path_unhides_it(self, tmp_path):
+        sp = tmp_path / "store.json"
+        path = str(tmp_path / "reborn")
+        create_project("First Life", path, store_path=sp)
+        delete_project(path, store_path=sp)
+        assert not any(p["path"] == path for p in get_bookkeeper(store_path=sp)["projects"])
+        create_project("Second Life", path, store_path=sp)
+        assert any(p["path"] == path and p["name"] == "Second Life"
+                   for p in get_bookkeeper(store_path=sp)["projects"])

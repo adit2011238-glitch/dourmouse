@@ -102,6 +102,85 @@ class TestUpload:
 
 
 # --------------------------------------------------------------------------- #
+# v13.4 — upload into the shared RAG database
+# --------------------------------------------------------------------------- #
+
+class TestRagUpload:
+    """POST /api/rag/upload — real user request: "a page where files can
+    be uploaded to the shared rag database". Same sandboxed save contract
+    as /api/upload above, plus real indexing into the same MemoryStore
+    query_shared_memory searches (dourmouse/memory_store.py)."""
+
+    def test_text_file_saved_and_indexed(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        _, port = server
+        status, body = _post(
+            port, "/api/rag/upload?name=notes.txt",
+            b"the quick brown fox jumps over the lazy dog",
+        )
+        assert status == 200
+        data = json.loads(body)
+        assert data["ok"] is True
+        assert data["indexed"] is True
+        assert data["indexed_chars"] == len(b"the quick brown fox jumps over the lazy dog")
+
+        from dourmouse.memory_store import MemoryStore
+
+        store = MemoryStore(tmp_path / "ws" / "memory" / "atlas_memory.db")
+        hits = store.search("fox", limit=5)
+        assert any("notes.txt" in h["title"] for h in hits)
+        store.close()
+
+    def test_file_saved_even_when_nothing_extractable(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        _, port = server
+        status, body = _post(port, "/api/rag/upload?name=photo.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 40)
+        assert status == 200
+        data = json.loads(body)
+        assert data["ok"] is True
+        assert data["indexed"] is False
+        assert "reason" in data
+        # the raw bytes were still genuinely saved, same as /api/upload
+        # (binary content -- read raw, not through _get's UTF-8 decode).
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/uploads/photo.png")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        conn.close()
+
+    def test_rejects_bad_name_same_as_plain_upload(self, server):
+        _, port = server
+        status, _body = _post(port, "/api/rag/upload?name=a%2Fb.txt", b"x")
+        assert status == 400
+
+    def test_rejects_empty_body(self, server):
+        _, port = server
+        status, body = _post(port, "/api/rag/upload?name=empty.txt", b"")
+        assert status == 400
+        assert b"empty" in body
+
+    def test_pdf_extraction_reuses_bulk_ingest_extractor(self, server, monkeypatch, tmp_path):
+        """Not a real PDF byte stream here (that's covered by
+        dourmouse/tests/test_extract.py's own real pypdf tests) — this
+        confirms the endpoint calls bulk_ingest._extract_local_text at
+        all, i.e. one extractor shared with the bulk scans, not a second
+        implementation living only in webui.py."""
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        calls = []
+
+        def fake_extract(path):
+            calls.append(str(path))
+            return "extracted pdf text"
+
+        monkeypatch.setattr("dourmouse.bulk_ingest._extract_local_text", fake_extract)
+        _, port = server
+        status, body = _post(port, "/api/rag/upload?name=doc.pdf", b"%PDF-fake-bytes")
+        assert status == 200
+        assert json.loads(body)["indexed"] is True
+        assert len(calls) == 1 and calls[0].endswith("doc.pdf")
+
+
+# --------------------------------------------------------------------------- #
 # A7 — setup status panel
 # --------------------------------------------------------------------------- #
 
