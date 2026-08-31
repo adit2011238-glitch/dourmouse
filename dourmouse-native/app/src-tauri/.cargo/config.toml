@@ -1,0 +1,18 @@
+# Real, root-caused fix (2026-08-31): this repo lives on the "ATLAS "
+# external volume, which is ExFAT-formatted. ExFAT has no native macOS
+# extended-attribute/resource-fork support, so macOS synthesizes AppleDouble
+# sidecar files (._<name>) alongside real files touched on this volume —
+# the SAME root cause already documented for build_app.command's earlier
+# osacompile failure on this drive (see the repo's own git history/
+# dourmouse_universe.md, 2026-08-31 entry). Tauri's own build.rs globs its
+# generated permissions directory and picked up a `._default.toml` sidecar
+# instead of (or alongside) the real one, then choked trying to parse it as
+# UTF-8 TOML: "stream did not contain valid UTF-8".
+#
+# Fix: keep cargo's build/target output on an APFS-internal path instead
+# of this ExFAT volume. SOURCE stays here (tracked by git, synced as
+# normal) — only the generated build artifacts move. This is the standard,
+# supported way to relocate Cargo's target dir; nothing else about the
+# project changes.
+[build]
+target-dir = "/Users/aditagrawal/.cache/dourmouse-native-target"
