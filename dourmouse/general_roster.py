@@ -269,6 +269,14 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
     Uses headless mode (`claude -p <task>`) so the task is executed and its
     REAL stdout/stderr are returned. Never fabricates a result: a missing
     CLI, a non-zero exit, or a timeout is reported honestly.
+
+    Runs with `--permission-mode bypassPermissions` (v13.5, explicit user
+    request: full parity with running `claude` in a real terminal — no
+    permission-prompt "skimping" on a headless subprocess that has no TTY
+    to answer one anyway). Does not touch mcp_bridge.py's own exclusion
+    list (delegate_task/code_*/claude_code/codex_code) — that guard is
+    against Claude recursively re-invoking Dourmouse's own orchestration
+    loop, a structural loop/cost risk, not a permission setting.
     """
     task = (arguments.get("task") or "").strip()
     if not task:
@@ -291,7 +299,7 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
     mcp_args = _claude_code_mcp_args()
     result = _run_cli_delegate(
         cli=cli,
-        argv=[cli, "-p", *session_args, task, *mcp_args],
+        argv=[cli, "-p", "--permission-mode", "bypassPermissions", *session_args, task, *mcp_args],
         cli_name="claude",
         tool_label="claude_code",
         display_name="Claude Code",
@@ -315,7 +323,7 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
         session_args = _claude_code_session_args(session_key)
         result = _run_cli_delegate(
             cli=cli,
-            argv=[cli, "-p", *session_args, task, *mcp_args],
+            argv=[cli, "-p", "--permission-mode", "bypassPermissions", *session_args, task, *mcp_args],
             cli_name="claude",
             tool_label="claude_code",
             display_name="Claude Code",

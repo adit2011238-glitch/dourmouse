@@ -125,6 +125,7 @@ class ChatSession:
         display_text: str | None = None,
         screen: str = "HOME",
         forced_agent: str | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         """Send one user turn; returns the dispatch report.
 
@@ -149,6 +150,10 @@ class ChatSession:
         it never touches ``self.messages`` or the model. Falls back to
         ``prompt`` when the caller doesn't have a separate display form
         (e.g. no focus_agent was pinned, so the two are identical anyway).
+        ``should_stop`` (v13.5, the "stop/directive bug" fix): an optional
+        real cancellation check, threaded straight through to
+        dispatch.run_dispatch_messages — see that function's own docstring
+        paragraph for the full diagnosis and why this exists.
         ``screen`` (v13) is which console screen the turn was asked from
         (HOME/RESEARCH/CODE/...) — persisted so restore can put a turn back
         on the thread it actually belongs to instead of flattening every
@@ -218,6 +223,7 @@ class ChatSession:
                 model=model,
                 voice=voice,
                 forced_agent=forced_agent,
+                should_stop=should_stop,
                 # v5.6 neural orchestration: every top-level turn feeds the
                 # neural orchestrator (delayed import — a disabled gate is a
                 # no-op, and the sink can never break the turn).

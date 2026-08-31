@@ -64,6 +64,107 @@ def test_client_without_a_base_url_keeps_historical_behaviour():
     assert _fast_lane_model_is_servable(object()) is True
 
 
+class _FakeMessage:
+    def __init__(self, content=None, tool_calls=None):
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _FakeChoice:
+    def __init__(self, message):
+        self.message = message
+
+
+class _FakeResponse:
+    def __init__(self, message):
+        self.choices = [_FakeChoice(message)]
+
+
+class _FakeCompletions:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return _FakeResponse(_FakeMessage(content="a real answer"))
+
+
+class _FakeChat:
+    def __init__(self, completions):
+        self.completions = completions
+
+
+class _FakeLocalClient(_Client):
+    """A LOCAL-shaped client (fast-lane-servable, per _fast_lane_model_is_
+    servable above) that actually answers a call, so the model it was
+    ACTUALLY asked for is inspectable."""
+
+    def __init__(self):
+        super().__init__("http://127.0.0.1:11434/v1")
+        self.completions = _FakeCompletions()
+        self.chat = _FakeChat(self.completions)
+
+
+class TestFastLaneModelSwapGate:
+    """v13.5 (live-diagnosed, explicit user request — "why is routing
+    requests to qwen local instead of the Ollama api key or claude code"):
+    a SEPARATE opt-out from fast_lane_enabled — the fast lane's other real
+    benefit (no tool loop, compact prompt) stays on, but the MODEL swap to
+    DOURMOUSE_FAST_MODEL ("qwen2.5:7b") can be turned off so a pure-chat
+    turn still answers on the turn's own real resolved brain model instead
+    of a hardcoded swap-in. See config.fast_lane_model_swap_enabled's own
+    docstring for the full diagnosis."""
+
+    def _pure_chat_registry_and_client(self):
+        from dourmouse.dispatch import DispatchRegistry, Subagent
+
+        registry = DispatchRegistry()
+        registry.register_subagent(Subagent(name="x", domain="x", description="x", tools=()))
+        return registry, _FakeLocalClient()
+
+    def test_default_on_still_swaps_to_the_fast_model(self, monkeypatch):
+        from dourmouse.dispatch import run_dispatch
+
+        monkeypatch.delenv("DOURMOUSE_FAST_LANE_MODEL_SWAP", raising=False)
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        registry, client = self._pure_chat_registry_and_client()
+        run_dispatch("just say hi", registry, client=client)
+        assert client.completions.calls[0]["model"] == "qwen2.5:7b"
+
+    def test_disabled_keeps_the_turns_own_resolved_model(self, monkeypatch):
+        # No explicit `model=` here on purpose: an explicit override already
+        # bypasses the fast lane entirely on its own (fast_lane requires
+        # _explicit_model is None) -- that would prove nothing about THIS
+        # gate. With no override and a pre-supplied client, the turn's own
+        # resolved model is the deterministic "test-model" fallback
+        # (run_dispatch_messages: `model = model or (config.model if
+        # config is not None else "test-model")`) -- the real point is just
+        # that it must NOT be silently swapped to "qwen2.5:7b".
+        from dourmouse.dispatch import run_dispatch
+
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE_MODEL_SWAP", "0")
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
+        registry, client = self._pure_chat_registry_and_client()
+        run_dispatch("just say hi", registry, client=client)
+        assert client.completions.calls[0]["model"] != "qwen2.5:7b"
+        assert client.completions.calls[0]["model"] == "test-model"
+
+
+class TestFastLaneModelSwapEnabledConfig:
+    def test_default_on(self, monkeypatch):
+        from dourmouse.config import fast_lane_model_swap_enabled
+
+        monkeypatch.delenv("DOURMOUSE_FAST_LANE_MODEL_SWAP", raising=False)
+        assert fast_lane_model_swap_enabled() is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "no", "off"])
+    def test_off_values(self, monkeypatch, value):
+        from dourmouse.config import fast_lane_model_swap_enabled
+
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE_MODEL_SWAP", value)
+        assert fast_lane_model_swap_enabled() is False
+
+
 def test_a_remote_ollama_on_the_lan_counts_as_local():
     """An Ollama daemon is an Ollama daemon, wherever it runs.
 

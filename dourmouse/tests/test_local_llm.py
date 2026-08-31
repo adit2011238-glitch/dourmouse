@@ -79,6 +79,96 @@ class TestOllamaConfig:
         assert cfg.model_for_agent("markets") == "qwen2.5-coder:14b"
 
 
+class TestOllamaCloudWiring:
+    """v13.5 (live-diagnosed, explicit user request — "why is routing
+    requests to qwen local instead of the Ollama api key"): OLLAMA_API_KEY
+    used to be read into nothing — load_ollama_config() hardcoded
+    api_key="" unconditionally, so a real, already-provisioned Ollama Cloud
+    key just sat unused. Fixed by reusing the SAME real endpoint/model
+    dispatch.py's own already-live-verified _ollama_cloud_config() uses
+    (see that function's docstring — "Verified live against
+    https://ollama.com/api/chat: gpt-oss:20b answered correctly in
+    677ms")."""
+
+    def test_no_key_stays_local_exactly_as_before(self, monkeypatch):
+        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        cfg = load_ollama_config()
+        assert cfg.api_key == ""
+        assert cfg.base_url == "http://127.0.0.1:11434/v1"
+        assert cfg.is_cloud is False
+
+    def test_key_present_routes_to_ollama_cloud(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_API_KEY", "real-cloud-key-123")
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        monkeypatch.delenv("OLLAMA_CLOUD_MODEL", raising=False)
+        cfg = load_ollama_config()
+        assert cfg.api_key == "real-cloud-key-123"
+        assert cfg.base_url == "https://ollama.com"
+        assert cfg.is_cloud is True
+        # NOT a silent fallback to the (local-oriented) OLLAMA_MODEL default
+        # — the known-real cloud default, unless OLLAMA_CLOUD_MODEL is set.
+        assert cfg.model == "gpt-oss:20b"
+
+    def test_explicit_cloud_model_wins_over_the_default(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_API_KEY", "real-cloud-key-123")
+        monkeypatch.setenv("OLLAMA_CLOUD_MODEL", "deepseek-v3.1:671b-cloud")
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        cfg = load_ollama_config()
+        assert cfg.model == "deepseek-v3.1:671b-cloud"
+
+    def test_a_local_ollama_model_setting_is_not_silently_reused_for_cloud(self, monkeypatch):
+        # The user's own OLLAMA_MODEL is very often a small local-only name
+        # (this codebase's own local default is "qwen2.5:7b") — sending
+        # that straight to the cloud endpoint would likely 404. Confirms
+        # it is deliberately NOT reused once cloud kicks in.
+        monkeypatch.setenv("OLLAMA_API_KEY", "real-cloud-key-123")
+        monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:7b")
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        monkeypatch.delenv("OLLAMA_CLOUD_MODEL", raising=False)
+        cfg = load_ollama_config()
+        assert cfg.model != "qwen2.5:7b"
+        assert cfg.model == "gpt-oss:20b"
+
+    def test_explicit_base_url_override_always_wins_even_with_a_key_set(self, monkeypatch):
+        # An operator who set BOTH a key and an explicit OLLAMA_BASE_URL
+        # clearly wants that exact endpoint — never silently redirected to
+        # the cloud default instead.
+        monkeypatch.setenv("OLLAMA_API_KEY", "real-cloud-key-123")
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:9999/v1")
+        cfg = load_ollama_config()
+        assert cfg.base_url == "http://127.0.0.1:9999/v1"
+        assert cfg.is_cloud is False
+        assert cfg.api_key == ""  # local endpoint -> genuinely keyless again
+
+    def test_cloud_orchestrator_is_not_pinned_to_the_local_fast_dispatch_model(self, monkeypatch):
+        # _OLLAMA_FAST_DISPATCH pins ORCHESTRATOR to "qwen2.5:7b" for the
+        # LOCAL case (a real, deliberate speed trade on this machine's own
+        # compute) -- that rationale doesn't hold once the request already
+        # leaves the machine over the network, and the pinned name likely
+        # isn't even a real Ollama Cloud model.
+        monkeypatch.setenv("OLLAMA_API_KEY", "real-cloud-key-123")
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        monkeypatch.delenv("OLLAMA_CLOUD_MODEL", raising=False)
+        # An explicit per-agent override still wins over everything, by
+        # design (same precedence as NvidiaConfig.model_for_agent) — this
+        # developer's own real .env happens to set exactly this one
+        # (DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR=qwen2.5:7b, predating Ollama
+        # Cloud support), which would otherwise mask the very thing this
+        # test checks. Cleared here so the test proves the DEFAULT
+        # (no override) behavior.
+        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
+        cfg = load_ollama_config()
+        assert cfg.model_for_agent("orchestrator") == cfg.model == "gpt-oss:20b"
+
+    def test_local_orchestrator_still_gets_the_fast_dispatch_pin(self, monkeypatch):
+        # Unaffected regression guard: the local-only speed trade is
+        # untouched by this fix.
+        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+        cfg = load_ollama_config()
+        assert cfg.model_for_agent("orchestrator") == "qwen2.5:7b"
+
+
 # --------------------------------------------------------------------------- #
 # ollama_available probe (monkeypatched — no network)
 # --------------------------------------------------------------------------- #

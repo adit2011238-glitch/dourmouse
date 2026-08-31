@@ -352,6 +352,18 @@ def load_nvidia_config() -> NvidiaConfig:
 # v4.0 — Local LLM backend (Ollama). Keyless, OpenAI-compatible, default.
 # --------------------------------------------------------------------------- #
 
+# Ollama Cloud's real OpenAI-compatible endpoint. NOT a new guess — this is
+# the exact same URL + default model dispatch.py's own _ollama_cloud_config()
+# already uses live for the agent-split feature (_agent_split_backend), so
+# this is reusing an already-established, presumably-verified real endpoint
+# rather than inventing one. Kept as its own copy here (not imported from
+# dispatch.py) because config.py sits BELOW dispatch.py in this codebase's
+# import graph (dispatch.py imports FROM config.py) — importing the other
+# direction would be circular. A future cleanup could have dispatch.py's
+# copy import these instead of duplicating the literals; not attempted here
+# to keep this fix's blast radius to the actual reported bug.
+_OLLAMA_CLOUD_BASE_URL = "https://ollama.com"
+_OLLAMA_CLOUD_DEFAULT_MODEL = "gpt-oss:20b"
 _OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 # world-monitor-expansion (systematic backend verification, 2026-08-29): was
 # "qwen3:8b" — same never-pulled-model bug class as DOURMOUSE_FAST_MODEL's
@@ -386,13 +398,16 @@ _OLLAMA_FAST_DISPATCH = {"ORCHESTRATOR": "qwen2.5:7b"}
 
 @dataclass(frozen=True)
 class OllamaConfig:
-    """Local Ollama (OpenAI-compatible) backend config.
+    """Ollama (OpenAI-compatible) backend config — local by default, real
+    Ollama Cloud when ``OLLAMA_API_KEY`` is set (v13.5, see
+    ``load_ollama_config``'s own docstring for the live bug this fixes:
+    that key used to be read from env and then silently discarded,
+    ``api_key`` was unconditionally hardcoded to ``""`` here regardless).
 
-    Keyless by design — the model runs on this machine, nothing leaves it
-    (Rule 2.6 / local-first). ``api_key`` is an empty string and the OpenAI
-    client accepts it; Ollama ignores it. Per-agent overrides come from
-    ``DOURMOUSE_OLLAMA_MODEL_<AGENT>`` (mirroring the NVIDIA ``DOURMOUSE_MODEL_``
-    convention), resolved deterministically (Rule 2.8).
+    ``api_key`` is empty for a genuinely local daemon (nothing leaves the
+    machine, Rule 2.6) and real for Ollama Cloud. Per-agent overrides come
+    from ``DOURMOUSE_OLLAMA_MODEL_<AGENT>`` (mirroring the NVIDIA
+    ``DOURMOUSE_MODEL_`` convention), resolved deterministically (Rule 2.8).
     """
 
     api_key: str = ""
@@ -402,13 +417,23 @@ class OllamaConfig:
     retry_backoff: float = 0.5
     fallback_model: str = ""
     agent_models: dict[str, str] = field(default_factory=dict)
+    # v13.5: True when this config is actually pointed at Ollama Cloud
+    # (api_key set, no explicit local OLLAMA_BASE_URL override). Gates the
+    # built-in _OLLAMA_FAST_DISPATCH orchestrator pin below — that pin
+    # exists to trade a smaller LOCAL model for a faster first token on
+    # THIS machine's own compute, a rationale that doesn't hold once the
+    # request is already leaving the machine over the network, and the
+    # pinned name ("qwen2.5:7b") is a local-only model unlikely to even
+    # exist in Ollama Cloud's real hosted catalog.
+    is_cloud: bool = False
 
     def model_for_agent(self, agent: str | None) -> str:
         """The Ollama model a specific subagent runs on (deterministic).
 
         Same precedence as NvidiaConfig.model_for_agent: env override, then
         (orchestrator only) the persisted orchestrator-model setting, then
-        the built-in fast-dispatch default, then the run's default model.
+        the built-in fast-dispatch default (local only — see ``is_cloud``
+        above), then the run's default model.
         """
         key = (agent or "").strip().upper()
         if key and key in self.agent_models:
@@ -417,15 +442,54 @@ class OllamaConfig:
             persisted = _persisted_model_for_backend("ollama")
             if persisted:
                 return persisted
-        if key and key in _OLLAMA_FAST_DISPATCH:
+        if not self.is_cloud and key and key in _OLLAMA_FAST_DISPATCH:
             return _OLLAMA_FAST_DISPATCH[key]
         return self.model
 
 
 def load_ollama_config() -> OllamaConfig:
-    """Build the Ollama backend config from env (defaults when unset)."""
-    base_url = os.environ.get("OLLAMA_BASE_URL", _OLLAMA_DEFAULT_BASE_URL).strip() or _OLLAMA_DEFAULT_BASE_URL
-    model = os.environ.get("OLLAMA_MODEL", _OLLAMA_DEFAULT_MODEL).strip() or _OLLAMA_DEFAULT_MODEL
+    """Build the Ollama backend config from env (defaults when unset).
+
+    v13.5 (live-diagnosed, explicit user request — "why is routing requests
+    to qwen local instead of the Ollama api key"): OLLAMA_API_KEY was being
+    read into this function's local scope by NOTHING — the returned
+    OllamaConfig hardcoded ``api_key=""`` unconditionally, so a real,
+    already-provisioned Ollama Cloud key sat in the user's own .env and was
+    never once used. Confirmed this wasn't a case of Ollama Cloud being
+    entirely unsupported by this codebase: dispatch.py's own
+    ``_ollama_cloud_config()`` (built for a separate feature, the roster's
+    agent-split backend) already does real Bearer-auth Ollama Cloud calls
+    against ``https://ollama.com`` — this reuses that same real, already-
+    established endpoint and default cloud model
+    (``_OLLAMA_CLOUD_DEFAULT_MODEL``), not a newly-guessed one.
+
+    Precedence: an explicit ``OLLAMA_BASE_URL`` always wins (forces local
+    behavior even with a key present — an operator who set both clearly
+    wants that exact endpoint). Otherwise, a set ``OLLAMA_API_KEY`` routes
+    to Ollama Cloud. The MODEL used once cloud is active is
+    ``OLLAMA_CLOUD_MODEL`` if set, else the known-real cloud default —
+    deliberately NOT a silent fallback to ``OLLAMA_MODEL``: that env var is
+    very often a small local-only model name (this codebase's own default
+    is "qwen2.5:7b", not a real Ollama Cloud catalog entry), and sending it
+    to the cloud endpoint would just trade one confusing wrong-model bug
+    for another. Set OLLAMA_CLOUD_MODEL explicitly to pick a specific real
+    cloud model.
+    """
+    api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
+    explicit_base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
+    if explicit_base_url:
+        base_url = explicit_base_url
+        is_cloud = False
+    elif api_key:
+        base_url = _OLLAMA_CLOUD_BASE_URL
+        is_cloud = True
+    else:
+        base_url = _OLLAMA_DEFAULT_BASE_URL
+        is_cloud = False
+    if is_cloud:
+        model = os.environ.get("OLLAMA_CLOUD_MODEL", "").strip() or _OLLAMA_CLOUD_DEFAULT_MODEL
+    else:
+        model = os.environ.get("OLLAMA_MODEL", _OLLAMA_DEFAULT_MODEL).strip() or _OLLAMA_DEFAULT_MODEL
     max_retries = int(os.environ.get("OLLAMA_MAX_RETRIES", "2"))
     retry_backoff = float(os.environ.get("OLLAMA_RETRY_BACKOFF", "0.5"))
     fallback_model = os.environ.get("OLLAMA_FALLBACK_MODEL", "").strip()
@@ -437,13 +501,14 @@ def load_ollama_config() -> OllamaConfig:
             if agent_name:
                 agent_models[agent_name] = value.strip()
     return OllamaConfig(
-        api_key="",
+        api_key=api_key if is_cloud else "",
         base_url=base_url,
         model=model,
         max_retries=max_retries,
         retry_backoff=retry_backoff,
         fallback_model=fallback_model,
         agent_models=agent_models,
+        is_cloud=is_cloud,
     )
 
 
@@ -867,9 +932,40 @@ def bind_host() -> str:
 
 def fast_lane_enabled(value: str | None = None) -> bool:
     """DOURMOUSE_FAST_LANE: route pure-chat turns (no plan, no tool match)
-    to the small local fast model. Default on. Set to 0/off to disable.
+    to a ONE-completion, no-tool-loop path with a compact system prompt
+    (no 21-agent roster) instead of the full agentic loop. Default on. Set
+    to 0/off to disable — every turn (even "2+2") gets the full loop.
     """
     raw = value if value is not None else os.environ.get("DOURMOUSE_FAST_LANE", "1")
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def fast_lane_model_swap_enabled(value: str | None = None) -> bool:
+    """DOURMOUSE_FAST_LANE_MODEL_SWAP: whether the fast lane is ALSO allowed
+    to swap the model itself to ``fast_lane_model()`` (a smaller model name,
+    default "qwen2.5:7b" on Ollama) instead of answering on the turn's own
+    real resolved brain model. Default on, matching the historical behavior
+    (dispatch._fast_lane_model_is_servable's docstring: "get the first token
+    out sooner" on a local Ollama backend, where a smaller model really is
+    faster).
+
+    v13.5 (live-diagnosed, explicit user request): this is a SEPARATE knob
+    from ``fast_lane_enabled`` above on purpose. The user's actual complaint
+    ("why is routing requests to qwen local instead of the Ollama api key or
+    claude code") traced to this exact swap: DOURMOUSE_FAST_MODEL defaults
+    to "qwen2.5:7b" and _fast_lane_model_is_servable() treats ANY Ollama-
+    backed client as eligible for it, so every simple chat turn got
+    hardcoded to that one small model regardless of what OLLAMA_MODEL (or a
+    real Ollama Cloud model, once OLLAMA_API_KEY is actually wired — see
+    load_ollama_config's own OLLAMA_API_KEY comment) was actually configured
+    to answer on. Turning this off keeps the OTHER fast-lane benefit (no
+    tool loop, compact prompt, still fast) while every turn answers on the
+    real configured model, not a silent swap-in. Deliberately a new opt-out
+    rather than changing fast_lane_model_is_servable's own default for
+    everyone: other deployments (a genuinely local-only setup with no cloud
+    key) still benefit from the documented speed win unless they ask not to.
+    """
+    raw = value if value is not None else os.environ.get("DOURMOUSE_FAST_LANE_MODEL_SWAP", "1")
     return raw.strip().lower() not in ("0", "false", "no", "off", "")
 
 

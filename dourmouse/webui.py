@@ -487,6 +487,15 @@ class _SSEStream:
     def __init__(self, wfile) -> None:
         self._wfile = wfile
         self._lock = threading.Lock()
+        # v13.5 "stop/directive bug" fix: this used to be a bare `pass` —
+        # a real fact (the client's socket is gone, which is exactly what
+        # STOP's ctrl.abort() produces) was detected and then silently
+        # thrown away, so the dispatch loop upstream had no way to learn
+        # the user had cancelled and kept running to completion regardless
+        # (see dispatch.run_dispatch_messages' should_stop docstring for
+        # the full diagnosis). Now recorded so should_stop() below can
+        # answer honestly.
+        self.client_gone = False
 
     def emit(self, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, default=str)
@@ -495,7 +504,14 @@ class _SSEStream:
                 self._wfile.write(f"data: {data}\n\n".encode("utf-8"))
                 self._wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
-                pass  # client went away; loop continues harmlessly
+                self.client_gone = True  # client went away; loop continues harmlessly,
+                # but should_stop() can now see it and end the dispatch run early
+
+    def should_stop(self) -> bool:
+        """The real cancellation predicate threaded into
+        dispatch.run_dispatch_messages — see this class's own client_gone
+        comment and that function's should_stop docstring paragraph."""
+        return self.client_gone
 
 
 class _SSEBroadcast:
@@ -3074,7 +3090,8 @@ class _Handler(BaseHTTPRequestHandler):
         # to the real CLI. Runs without session_lock/gate, same rationale
         # as the slash-command path right below: this is a real SEPARATE
         # program with its own tool permissions (--permission-mode
-        # acceptEdits in stream_claude), never Dourmouse's own
+        # bypassPermissions in stream_claude, v13.5 — full terminal parity,
+        # see code_backends.py's own comment), never Dourmouse's own
         # confirmation_gate/orchestrator loop.
         if focus_agent == "code_claude":
             try:
@@ -3173,6 +3190,7 @@ class _Handler(BaseHTTPRequestHandler):
                     # against the real subagent_names, so passing it
                     # straight through is safe.
                     forced_agent=focus_agent or None,
+                    should_stop=stream.should_stop,
                 )
             except Exception as exc:  # surface real failures to the UI
                 error_msg = str(exc)

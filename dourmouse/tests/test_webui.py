@@ -26,6 +26,7 @@ from dourmouse.dispatch import (
 from dourmouse.webui import (
     WebConfirmationGate,
     _is_imperative_affirm,
+    _SSEStream,
     build_roster_payload,
     run_server,
 )
@@ -2090,3 +2091,58 @@ class TestCodeClaudePassthrough:
         assert last["screen"] == "CODE"
         assert last["final_text"] == "result text"
         assert last["user"] == "write a function"
+
+
+class TestSSEStreamShouldStop:
+    """v13.5 "stop/directive bug" fix: _SSEStream used to silently
+    discard a dead-client write failure ("client went away; loop
+    continues harmlessly") instead of recording it anywhere — see
+    dispatch.run_dispatch_messages' should_stop docstring paragraph for
+    why that mattered (nothing upstream could ever learn the user had
+    clicked STOP outside the one already-fixed confirmation-deadlock
+    case). Covered directly against the real class, no server needed."""
+
+    class _DeadWfile:
+        def write(self, _data: bytes) -> None:
+            raise BrokenPipeError("client gone")
+
+        def flush(self) -> None:
+            pass
+
+    class _LiveWfile:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+
+        def write(self, data: bytes) -> None:
+            self.written.append(data)
+
+        def flush(self) -> None:
+            pass
+
+    def test_should_stop_false_while_the_client_is_still_connected(self):
+        stream = _SSEStream(self._LiveWfile())
+        assert stream.should_stop() is False
+        stream.emit({"type": "assistant_delta", "text": "hi"})
+        assert stream.should_stop() is False
+
+    def test_should_stop_true_once_a_write_hits_a_dead_socket(self):
+        stream = _SSEStream(self._DeadWfile())
+        assert stream.should_stop() is False  # nothing written yet
+        stream.emit({"type": "assistant_delta", "text": "hi"})  # BrokenPipeError, swallowed
+        assert stream.should_stop() is True
+        # A dead client must never resurrect itself on a later emit — the
+        # flag is sticky for the rest of this request's lifetime.
+        stream.emit({"type": "assistant_delta", "text": "more"})
+        assert stream.should_stop() is True
+
+    def test_connection_reset_error_also_flips_it(self):
+        class _ResetWfile:
+            def write(self, _data: bytes) -> None:
+                raise ConnectionResetError("reset")
+
+            def flush(self) -> None:
+                pass
+
+        stream = _SSEStream(_ResetWfile())
+        stream.emit({"type": "done", "final_text": "x"})
+        assert stream.should_stop() is True

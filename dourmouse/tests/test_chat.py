@@ -443,6 +443,27 @@ class TestGatedToolThroughChat:
         assert result2["text"] == "ECHOED: y"
 
 
+class TestShouldStopThroughChat:
+    """v13.5 "stop/directive bug" fix: ChatSession.ask(should_stop=...) is
+    real plumbing all the way down to dispatch.run_dispatch_messages, not
+    a parameter that's silently dropped somewhere in between — see
+    test_dispatch.py::TestShouldStop for the loop-level behavior itself."""
+
+    def test_should_stop_reaches_the_dispatch_loop(self, tmp_path):
+        client = FakeClient([_FakeResponse(_FakeMessage(content="should never be seen"))])
+        session = ChatSession(_registry(), client=client, session_file=tmp_path / "stop.jsonl")
+        report = session.ask("hello", should_stop=lambda: True)
+        assert client.chat.completions.calls == []
+        assert report["final_text"] == ""
+        assert report["transcript"][-1]["type"] == "stopped_by_user"
+
+    def test_no_should_stop_is_unaffected(self, tmp_path):
+        client = FakeClient([_FakeResponse(_FakeMessage(content="all good"))])
+        session = ChatSession(_registry(), client=client, session_file=tmp_path / "nostop.jsonl")
+        report = session.ask("hello")
+        assert report["final_text"] == "all good"
+
+
 class TestChatImportLaziness:
     def test_chat_module_importable_without_general_roster(self):
         # chat.py must import without pulling tool backends (no cycle).

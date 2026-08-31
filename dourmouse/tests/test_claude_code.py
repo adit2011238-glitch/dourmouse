@@ -163,11 +163,15 @@ class TestToolBehavior:
         # --mcp-config/--allowedTools args now ride along too (see
         # _claude_code_mcp_args) — tolerate whatever lands between the
         # session args and the task text rather than asserting their exact
-        # absence.
+        # absence. v13.5: --permission-mode bypassPermissions now also
+        # rides between "-p" and "--session-id" (full terminal-parity
+        # permission mode, explicit user request — see general_roster.py's
+        # _claude_code_tool docstring) — tolerated the same way.
         match = re.search(
-            r"ARGV: -p --session-id ([0-9a-f-]{36}) .*explain this bug", result
+            r"ARGV: -p .*--session-id ([0-9a-f-]{36}) .*explain this bug", result
         )
         assert match, result
+        assert "--permission-mode bypassPermissions" in result
         assert uuid.UUID(match.group(1)).version == 4
         assert f"CWD: {tmp_path}" in result
 

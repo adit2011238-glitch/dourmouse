@@ -335,7 +335,10 @@ def _run_claude_once(
         mcp_args = []
     try:
         return subprocess.run(
-            [cli, "-p", *session_args, task, *mcp_args],
+            [
+                cli, "-p", "--permission-mode", "bypassPermissions",
+                *session_args, task, *mcp_args,
+            ],
             cwd=cwd,
             stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
             capture_output=True,
@@ -422,18 +425,22 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
 # of the UI already renders, bypassing run_dispatch_messages and the
 # Dourmouse system/roster prompt entirely for this one toolchain.
 #
-# --permission-mode acceptEdits: satisfies the explicit "for creating files
-# remove approval" request for this path specifically — file edits/writes
-# proceed without a prompt, while Bash and other tool categories keep their
-# own default safety behavior (a genuinely dangerous command still gets
-# refused rather than silently running). A full relay of Claude's own
-# interactive permission prompts through Dourmouse's existing
-# WebConfirmationGate/addApproval() UI — the most faithful "exact terminal
-# experience" for the tool categories acceptEdits does NOT auto-approve —
-# is real future work: the CLI's --input-format stream-json documents
-# bidirectional streaming for this, but the exact JSON shape it expects
-# back on stdin for a permission decision isn't in `claude --help` and
-# wasn't reverse-engineered here; never guess a wire protocol un-verified.
+# --permission-mode bypassPermissions (v13.5, explicit user request: "give
+# claude default approval for all mcps, i want the exact same way claude is
+# used in terminal or on claude desktop within dourmouse, no skimping no
+# difference at all"): this used to be acceptEdits, which only auto-approved
+# file edits/writes and left Bash and every other tool category asking a
+# permission question this headless subprocess has no TTY to answer, so
+# those calls just silently failed or hung — the actual "skimping" the user
+# was reporting. bypassPermissions is the real flag `claude --help` documents
+# for "Bypass all permission checks" — the same trust level the user already
+# operates at when running `claude` directly in their own terminal, so a
+# CODE-screen task now gets the identical real tool access a terminal
+# session would. This does NOT touch the separate, structural mcp_bridge.py
+# exclusion list (delegate_task/code_*/claude_code/codex_code) — that guard
+# exists to stop Claude recursively re-invoking itself/Dourmouse's own
+# orchestration loop through the MCP bridge, a real infinite-loop/cost risk
+# unrelated to file-edit approval, and stays in place.
 def stream_claude(
     task: str,
     *,
@@ -483,7 +490,7 @@ def stream_claude(
             [
                 cli, "-p", "--output-format", "stream-json",
                 "--include-partial-messages", "--verbose",
-                "--permission-mode", "acceptEdits",
+                "--permission-mode", "bypassPermissions",
                 *session_args, task, *mcp_args,
             ],
             cwd=cwd,

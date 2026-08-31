@@ -203,6 +203,34 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
 .maplegend i{width:8px;height:8px;border-radius:50%;display:inline-block}
 .mapnote{color:var(--blue-dim);font-size:10px;margin-top:6px}
 
+/* ---------------- vision full-viewport camera backdrop ----------------
+   v13.5, explicit user request ("make the background the users camera,
+   so then the exact movements and proportions are synced"): the real
+   root cause of "hand is not on the titlebar" — the pinch hit-test math
+   in handPinchState() ALWAYS mapped a landmark's normalized position
+   across the FULL window (document.elementFromPoint(s.x, s.y) where
+   s.x/s.y are in real page pixels), but the only visual feedback was a
+   tiny ~230px camera preview tucked in the HAND CONTROL dock (see the
+   removed #visdock video/canvas/.camwrap rules above this block) — a
+   user aiming their hand at a titlebar inside that small mirrored box
+   had ZERO relationship to where the code was actually hit-testing.
+   This backdrop makes the live camera fill the whole viewport (so a
+   real titlebar and the camera image of your hand share the same
+   screen space) and drawHandOverlay() below now plots every landmark
+   in the SAME real page-pixel coordinates handPinchState() hit-tests
+   against — what you see the dot doing IS what the code is doing, not
+   an approximation of it. pointer-events:none throughout so the camera
+   never intercepts mouse/touch meant for panels sitting on top of it
+   (DOM-order stacking: this div is placed before #canvas in the body,
+   so panels always paint over it with no explicit z-index needed). */
+#visBackdrop{position:fixed;inset:0;overflow:hidden;pointer-events:none}
+#visBackdrop video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  transform:scaleX(-1);display:block;background:#000;
+  /* dimmed + desaturated so panel text/UI on top stays readable — this is
+     a positioning aid, not meant to be the visually dominant layer */
+  opacity:.4;filter:saturate(.5) brightness(.55)}
+#visBackdrop canvas.ov{position:absolute;inset:0;width:100%;height:100%}
+
 /* ---------------- vision control dock (fixed, not a panel) ---------------- */
 #visdock{position:fixed;right:14px;bottom:14px;width:250px;z-index:9999;
   background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line-2);
@@ -210,11 +238,6 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
 #visdock .hd{padding:8px 10px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--line);
   display:flex;align-items:center;gap:6px;color:var(--blue-hi);letter-spacing:.06em;font-size:10.5px}
 #visdock .bd{padding:9px 10px;display:flex;flex-direction:column;gap:7px}
-#visdock video{width:100%;border-radius:6px;transform:scaleX(-1);display:block;background:#000;
-  aspect-ratio:16/9}
-#visdock canvas.ov{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);
-  pointer-events:none}
-#visdock .camwrap{position:relative;border-radius:6px;overflow:hidden}
 #visdock .row{display:flex;justify-content:space-between;color:var(--blue-dim)}
 #visdock .row b{color:var(--blue-hi);font-weight:500}
 #visdock button.hb{width:100%;background:var(--panel2);color:var(--blue-hi);border:1px solid var(--line);
@@ -266,15 +289,16 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
   </div>
 </div>
 
+<div id="visBackdrop">
+  <video id="visVideo" playsinline muted></video>
+  <canvas id="visOverlay" class="ov"></canvas>
+</div>
+
 <div id="canvas"></div>
 
 <div id="visdock">
   <div class="hd"><span id="visKillDot" class="dot"></span>HAND CONTROL <span id="visHandsCount" style="margin-left:auto;color:var(--blue-dim)">0 hands</span></div>
   <div class="bd">
-    <div class="camwrap" id="visCamWrap">
-      <video id="visVideo" playsinline muted></video>
-      <canvas id="visOverlay" class="ov"></canvas>
-    </div>
     <div class="row"><span>Gesture</span><b id="visGesture">—</b></div>
     <div class="row"><span>Focused window</span><b id="visFocused">none</b></div>
     <div class="row"><span>Signal</span><b id="visSignal">—</b></div>
@@ -1167,7 +1191,7 @@ $("voxMic").addEventListener("click", voxToggleMic);
       by the dourmouse/tray.py camera kill-switch bridge poll.
    ============================================================ */
 const HAND = {
-  video: $("visVideo"), overlay: $("visOverlay"), wrap: $("visCamWrap"),
+  video: $("visVideo"), overlay: $("visOverlay"), wrap: $("visBackdrop"),
   toggleBtn: $("visToggle"), gestureEl: $("visGesture"), handsCountEl: $("visHandsCount"),
   killDot: $("visKillDot"), signalEl: $("visSignal"), delegateEl: $("visDelegate"),
   stream: null, handLM: null, running: false, startingUp: false,
@@ -1377,15 +1401,32 @@ function handLoop(){
   }
   HAND._raf = requestAnimationFrame(handLoop);
 }
+// v13.5: draws in the SAME real page-pixel space handPinchState()
+// hit-tests against — (1-x)*window.innerWidth, y*window.innerHeight —
+// not the video's own small native resolution. This canvas is NOT
+// CSS-mirrored (unlike the background video, which uses scaleX(-1) for
+// a natural selfie view): the mirroring is already baked into these
+// coordinates, so a dot drawn here lands exactly on top of where that
+// same point appears on the mirrored video underneath (see the
+// #visBackdrop CSS comment for the full worked-out reasoning) AND at the
+// exact page coordinate the pinch/drag/titlebar hit-test actually uses
+// — the fix for "hand is not on the titlebar": what you SEE the dot do
+// now IS what the code is doing, not a disconnected small preview.
 function drawHandOverlay(res){
   const cv = HAND.overlay; if(!cv) return;
-  cv.width = HAND.video.videoWidth || 480; cv.height = HAND.video.videoHeight || 270;
+  const w = window.innerWidth, h = window.innerHeight;
+  if(cv.width !== w) cv.width = w;
+  if(cv.height !== h) cv.height = h;
   const ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, cv.width, cv.height);
   if(!res || !res.landmarks) return;
+  ctx.fillStyle = "rgba(242,183,61,.9)";
   for(const lm of res.landmarks){
-    ctx.fillStyle = "rgba(242,183,61,.9)";
-    for(const pt of lm){ ctx.beginPath(); ctx.arc(pt.x * cv.width, pt.y * cv.height, 2, 0, Math.PI * 2); ctx.fill(); }
+    for(const pt of lm){
+      ctx.beginPath();
+      ctx.arc((1 - pt.x) * cv.width, pt.y * cv.height, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 

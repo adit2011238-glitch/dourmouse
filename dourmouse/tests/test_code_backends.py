@@ -1099,13 +1099,17 @@ class TestStreamClaude:
         with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
             code_backends.stream_claude("task", cwd="/tmp/proj", timeout=30, on_delta=lambda t: None)
 
-    def test_uses_accept_edits_permission_mode(self, monkeypatch):
+    def test_uses_bypass_permissions_mode(self, monkeypatch):
+        """v13.5: full terminal-parity permission mode, not the old
+        acceptEdits (which left Bash and every non-file-edit tool category
+        asking a permission question this headless subprocess has no TTY
+        to answer)."""
         seen: list = []
         self._patch(monkeypatch, [_sse_line({"type": "result", "result": "ok"})], seen=seen)
         code_backends.stream_claude("task", cwd="/tmp/proj", timeout=30, on_delta=lambda t: None)
         argv = seen[0]
         assert "--permission-mode" in argv
-        assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
+        assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
         assert "--output-format" in argv
         assert argv[argv.index("--output-format") + 1] == "stream-json"
         assert "--include-partial-messages" in argv

@@ -53,6 +53,7 @@ from dourmouse.config import (
     brief_mode_enabled,
     fast_lane_enabled,
     fast_lane_model,
+    fast_lane_model_swap_enabled,
     fast_lane_server_enabled,
     load_llm_config,
 )
@@ -1772,6 +1773,11 @@ class DispatchContext:
     config: NvidiaConfig | None
     confirmation_gate: Callable[[str], bool] | None
     event_sink: Callable[[dict[str, Any]], None] | None
+    # v13.5 "stop/directive bug" fix: threaded alongside event_sink so the
+    # inner turn loop (which reads everything off ctx, not the outer
+    # function's own parameters) can actually see it — see
+    # run_dispatch_messages' should_stop docstring paragraph.
+    should_stop: Callable[[], bool] | None = None
     jobs: JobTracker | None = None
     depth: int = 0
     max_depth: int = 3
@@ -1964,6 +1970,7 @@ def run_dispatch_messages(
     session_stem: str | None = None,
     forced_agent: str | None = None,
     voice: bool = False,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -1990,6 +1997,32 @@ def run_dispatch_messages(
     results and model output before it reaches the API boundary or the
     transcript; ``rbac`` refuses tools outside the role's allow-set before
     they execute. All three are threaded through delegated nested runs.
+
+    v13.5 (live-caught, real bug — "the stop/directive bug"): ``should_stop``
+    is a real cancellation check, same house pattern as ``cost_budget`` —
+    called at the top of every turn AND before every individual tool call
+    within a turn, so a user hitting STOP mid-multi-tool-call turn (not just
+    between turns) still lands honestly on a ``stopped_by_user`` event
+    instead of the loop running to completion regardless. Before this
+    existed, there was NO channel from the SSE stream ending back into this
+    loop at all: webui.py's ``_SSEStream.emit()`` already detected a dead
+    client socket (BrokenPipeError/ConnectionResetError on write, which is
+    exactly what a clicked STOP produces via the aborted fetch) but
+    silently discarded that fact ("client went away; loop continues
+    harmlessly") — the CLIENT stopped rendering, but the SERVER thread kept
+    holding session_lock and running the full remaining ``max_turns``,
+    burning real tool calls/tokens/cost and blocking every other queued
+    request on the same session lock the whole time. STOP only ever
+    actually interrupted a run that happened to be blocked inside
+    WebConfirmationGate.wait() (the v13.2 fix) — an ordinary tool-calling
+    run with no pending approval had no way to be told to stop at all. This
+    is that channel: ``event_sink`` stays a pure, never-raising observer
+    (unchanged, ``_emit_event`` still swallows everything a sink raises) —
+    cancellation is its own explicit, polled predicate, not repurposed
+    exception plumbing through the observer. Not threaded into delegate_task
+    / delegate_parallel's own nested recursive runs (real, stated scope
+    limit, not silently assumed away): those already don't stream events at
+    depth>0 and are separately bounded by ``max_delegates``/``max_depth``.
 
     v5.6 neural orchestration: ``experience_sink`` (optional, called ONCE per
     TOP-LEVEL run with a self-supervised experience record — the prompt, the
@@ -2081,7 +2114,7 @@ def run_dispatch_messages(
     # actually engaged. Only pure chat reaches the lane; agentic turns keep
     # the resolved brain + full loop.
     server_lane = False
-    if fast_lane and _fast_lane_model_is_servable(client):
+    if fast_lane and _fast_lane_model_is_servable(client) and fast_lane_model_swap_enabled():
         model = fast_lane_model()
         from dourmouse.remote_server import server_model, server_online_cached, server_url_configured
 
@@ -2155,6 +2188,7 @@ def run_dispatch_messages(
         config=config,
         confirmation_gate=confirmation_gate,
         event_sink=event_sink,
+        should_stop=should_stop,
         jobs=job_tracker,
         depth=depth,
         max_depth=max_depth,
@@ -2639,6 +2673,7 @@ def _run_dispatch_loop(
     client = ctx.client
     model = ctx.model
     event_sink = ctx.event_sink
+    should_stop = ctx.should_stop
     confirmation_gate = ctx.confirmation_gate
     cost_budget = ctx.cost_budget
     dlp = ctx.dlp
@@ -2673,6 +2708,9 @@ def _run_dispatch_loop(
 
     def _budget_entry(reason: str) -> dict[str, Any]:
         return {"type": "budget_exhausted", "reason": reason}
+
+    def _stop_entry() -> dict[str, Any]:
+        return {"type": "stopped_by_user", "reason": "cancelled by the user"}
 
     # v2.0 Phase 2.1: for a multi-step prompt, emit a visible PLAN event
     # before executing (deterministic heuristic + subagent mapping, no extra
@@ -2859,6 +2897,17 @@ def _run_dispatch_loop(
                 _emit_event(event_sink, entry)
                 messages.append({"role": "assistant", "content": ""})
                 return {"final_text": "", "transcript": transcript, "messages": messages}
+
+        # v13.5 "stop/directive bug" fix — see run_dispatch_messages'
+        # should_stop docstring paragraph above for the full diagnosis.
+        # Checked here (between turns) AND again before each individual
+        # tool call below (a turn can request several).
+        if should_stop is not None and should_stop():
+            entry = _stop_entry()
+            transcript.append(entry)
+            _emit_event(event_sink, entry)
+            messages.append({"role": "assistant", "content": ""})
+            return {"final_text": "", "transcript": transcript, "messages": messages}
 
         # v4.2 plan checkpoint: if the model has used a plan's worth of tool
         # calls but some plan step's agent has never run, it is fixating (e.g.
@@ -3197,6 +3246,15 @@ def _run_dispatch_loop(
         messages.append(assistant_msg)
 
         for tool_call in tool_calls:
+            # v13.5 "stop/directive bug" fix: re-checked before EACH tool
+            # call, not just between turns — a single turn can request
+            # several tool calls back to back, and STOP should not have to
+            # wait for all of them to finish first.
+            if should_stop is not None and should_stop():
+                entry = _stop_entry()
+                transcript.append(entry)
+                _emit_event(event_sink, entry)
+                return {"final_text": "", "transcript": transcript, "messages": messages}
             name = tool_call.function.name
             use_entry = {
                 "type": "tool_use",
@@ -3412,6 +3470,7 @@ def run_dispatch(
     confirmation_gate: Callable[[str], bool] | None = None,
     model: str | None = None,
     voice: bool = False,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Send one request through the NVIDIA-backed general dispatcher.
 
@@ -3420,7 +3479,9 @@ def run_dispatch(
     {"final_text", "transcript"}. ``client``/``config`` injectable for
     isolated testing; ``confirmation_gate`` is the human-in-the-loop hook.
     ``voice`` (v8.18) marks the turn as arriving on the voice channel — see
-    run_dispatch_messages for what that changes.
+    run_dispatch_messages for what that changes. ``should_stop`` (v13.5)
+    is the real cancellation predicate — see run_dispatch_messages' own
+    docstring paragraph for the full "stop/directive bug" diagnosis.
     """
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_message(registry)},
@@ -3435,6 +3496,7 @@ def run_dispatch(
         confirmation_gate=confirmation_gate,
         model=model,
         voice=voice,
+        should_stop=should_stop,
         # The CLI is a learning surface too: log the single-shot run so the
         # neural orchestrator learns from it.
         experience_sink=(

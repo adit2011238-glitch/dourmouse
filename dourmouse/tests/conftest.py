@@ -76,6 +76,34 @@ def _hands_free_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _ollama_cloud_isolated(monkeypatch):
+    """v13.5: the SAME real leak class as _memory_remote_isolated and
+    _hands_free_off above, caught proactively this time (before it broke
+    anything) rather than live — this developer's real .env sets a real
+    OLLAMA_API_KEY (Ollama Cloud key, wired for the first time in this
+    pass; see config.load_ollama_config's own docstring for the "silently
+    discarded API key" bug it fixes). Once that env var actually DOES
+    something (before this fix it was read into nothing, so leaking it
+    into a test process was harmless), any test asserting the default
+    LOCAL Ollama config (api_key=="", base_url==127.0.0.1) would start
+    failing on this specific machine the same way test_open_default_
+    store_returns_none_when_fts5_missing already did once for
+    DOURMOUSE_MEMORY_REMOTE_URL. Tests that want cloud mode set
+    OLLAMA_API_KEY themselves, same override-the-fixture convention every
+    other isolation fixture here already uses.
+    """
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_CLOUD_MODEL", raising=False)
+    # v13.5: same real leak, same session — this developer's .env now also
+    # sets DOURMOUSE_FAST_LANE_MODEL_SWAP=0 (see config.
+    # fast_lane_model_swap_enabled's own docstring), which broke every
+    # existing fast-lane test asserting the swap TO qwen2.5:7b/qwen3:4b
+    # actually happens (they never touched this brand-new env var
+    # themselves, same as every prior incident in this file).
+    monkeypatch.delenv("DOURMOUSE_FAST_LANE_MODEL_SWAP", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _user_config_isolated(tmp_path_factory, monkeypatch):
     """v13 (hermetic-test-caught, real bug): every test touching
     orchestrator-model settings, Grounded Mode, or (new) the MCP bridge's

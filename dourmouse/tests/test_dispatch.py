@@ -760,6 +760,64 @@ class TestLoop:
         assert client.chat.completions.calls[-1]["tools"] == []
 
 
+class TestShouldStop:
+    """v13.5 "stop/directive bug" fix: run_dispatch_messages(should_stop=...)
+    is the real cancellation channel that used to not exist at all — see
+    that function's own should_stop docstring paragraph for the full
+    diagnosis (webui.py's _SSEStream silently discarded the exact fact —
+    a dead client socket — that would have let it know the user hit STOP,
+    so an ordinary tool-calling run with no pending approval box just kept
+    running to completion regardless of the client having disconnected)."""
+
+    def test_stop_before_any_llm_call_ends_the_run_immediately(self):
+        # should_stop() already true from the very first check (top of the
+        # first turn, before the first LLM call is even made) — same
+        # contract as the cost_budget check right above it in the loop.
+        client = FakeClient([_FakeResponse(_FakeMessage(content="should never be seen"))])
+        report = run_dispatch(
+            "hello", _test_registry(), client=client, should_stop=lambda: True,
+        )
+        assert client.chat.completions.calls == []
+        assert report["final_text"] == ""
+        assert report["transcript"][-1]["type"] == "stopped_by_user"
+
+    def test_stop_mid_turn_skips_remaining_tool_calls_but_keeps_the_first(self):
+        # One LLM turn requests TWO tool calls back to back. should_stop()
+        # is checked before EACH one individually (not just once per turn),
+        # so the first tool call still runs and its real result is kept —
+        # only the second one is skipped, and no second LLM call happens.
+        tool_calls = [
+            _FakeToolCall("call_a", "echo", json.dumps({"text": "a"})),
+            _FakeToolCall("call_b", "echo", json.dumps({"text": "b"})),
+        ]
+        client = FakeClient([_FakeResponse(_FakeMessage(content=None, tool_calls=tool_calls))])
+        seen = {"n": 0}
+
+        def should_stop():
+            seen["n"] += 1
+            # call 1: top-of-turn check (before the LLM call) -> False
+            # call 2: before tool call "a" -> False, "a" executes
+            # call 3: before tool call "b" -> True, "b" is skipped
+            return seen["n"] >= 3
+
+        report = run_dispatch(
+            "do two things", _test_registry(), client=client, should_stop=should_stop,
+        )
+        assert client.chat.completions.calls.__len__() == 1  # never asked the model again
+        tool_results = [t for t in report["transcript"] if t["type"] == "tool_result"]
+        assert len(tool_results) == 1
+        assert tool_results[0]["text"] == "ECHOED: a"
+        assert report["transcript"][-1]["type"] == "stopped_by_user"
+
+    def test_should_stop_none_behaves_exactly_as_before(self):
+        # The default — no cancellation predicate at all — must be a true
+        # no-op, same as every other optional governance hook in this loop.
+        client = FakeClient([_FakeResponse(_FakeMessage(content="all good"))])
+        report = run_dispatch("hi", _test_registry(), client=client, should_stop=None)
+        assert report["final_text"] == "all good"
+        assert not any(t["type"] == "stopped_by_user" for t in report["transcript"])
+
+
 class TestPermissions:
     """Deterministic permission enforcement (Rule 2.8 / Section 2.9)."""
 
