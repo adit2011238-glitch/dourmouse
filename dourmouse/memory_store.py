@@ -394,3 +394,133 @@ def _fts_query(query: str) -> str:
         return ""
     quoted = ["\"" + t.replace('"', '""') + "\"" for t in terms]
     return " OR ".join(quoted)
+
+
+class RemoteMemoryStoreUnavailable(RuntimeError):
+    """Raised when the remote machine's memory API can't be reached at
+    all (network down, wrong URL, remote store not configured there
+    either) — the same honest NOT CONFIGURED contract
+    MemoryStoreUnavailable gives for the local case."""
+
+
+class RemoteMemoryStore:
+    """Same real public interface as MemoryStore (remember/search/count/
+    close) — a drop-in for _open_memory_store()'s callers — but every call
+    is a real HTTP request to another machine's own webui.py
+    (GET /api/memory/search, POST /api/memory/remember), which runs the
+    exact same MemoryStore against its OWN local disk.
+
+    Explicit user request (2026-08-31): "move the actual rag to
+    [the desktop], that machine has more storage". The real, honest
+    architecture this implements: the SQLite file itself NEVER moves onto
+    a network-mounted path — SQLite's file-locking is documented as
+    unreliable over SMB/network filesystems, a real corruption risk, not
+    a hypothetical one. Instead the desktop keeps owning its real file on
+    its own local disk, and every machine that wants to read/write the
+    shared RAG talks to it over a real HTTP API instead of opening the
+    file directly. Selected by general_roster._open_memory_store() when
+    DOURMOUSE_MEMORY_REMOTE_URL is set — a machine with that env var
+    unset keeps using the local MemoryStore exactly as before, zero
+    behavior change for a single-machine setup.
+
+    Honest scope: semantic/embedding recall (memory_embed.semantic_search)
+    reads a MemoryStore's SQLite connection directly and is NOT proxied
+    here — remote mode covers the default FTS5 remember/search/recall
+    path (Rule 2.2: no attempt to fake vector search over HTTP that isn't
+    real); semantic_recall on a remote-configured machine reports its own
+    honest NOT CONFIGURED rather than silently degrading.
+    """
+
+    def __init__(self, base_url: str, timeout: float = 15.0, token: str | None = None) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        # Real gap found before this ever ran cross-machine (2026-08-31):
+        # webui.py's own _authorized() requires a Bearer token for any
+        # NON-loopback client the moment DOURMOUSE_ACCESS_TOKEN is set on
+        # the remote server — which the desktop deployment already has
+        # set (binds 0.0.0.0). An unauthenticated remote call would 401,
+        # not silently succeed against the wrong data — but it should
+        # authenticate correctly in the first place, not rely on hitting
+        # and parsing that 401.
+        self.token = token
+
+    def _send(self, req: Any) -> dict[str, Any]:
+        import urllib.error
+        import urllib.request
+
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            # The remote server DID respond -- a real 400/409/500 with its
+            # own honest {"ok": false, "error": "..."} JSON body (see
+            # webui.py's _handle_memory_remote_search/_remember). Caught
+            # SEPARATELY from URLError (its own superclass) and BEFORE it:
+            # a genuine validation/config error from the remote server is
+            # not the same thing as the remote being unreachable, and
+            # must not be reported as one.
+            try:
+                return json.loads(exc.read().decode())
+            except (ValueError, OSError):
+                raise RemoteMemoryStoreUnavailable(
+                    f"remote memory store at {self.base_url} returned "
+                    f"HTTP {exc.code} with no parseable body"
+                ) from exc
+        except urllib.error.URLError as exc:
+            # No response at all — genuinely unreachable (network down,
+            # wrong host/port, remote process not running).
+            raise RemoteMemoryStoreUnavailable(
+                f"remote memory store unreachable at {self.base_url}: {exc}"
+            ) from exc
+
+    def _get(self, path: str) -> dict[str, Any]:
+        import urllib.request
+
+        return self._send(urllib.request.Request(self.base_url + path))
+
+    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        import urllib.request
+
+        req = urllib.request.Request(
+            self.base_url + path,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        return self._send(req)
+
+    def remember(self, source: str, title: str, body: str) -> str:
+        result = self._post(
+            "/api/memory/remember", {"source": source, "title": title, "body": body}
+        )
+        if not result.get("ok"):
+            raise ValueError(result.get("error") or "remote remember failed")
+        return str(result.get("result") or "")
+
+    def search(
+        self, query: str, limit: int = 10, source: str | None = None
+    ) -> list[dict[str, Any]]:
+        import urllib.parse as _up
+
+        params = {"q": query, "limit": str(limit)}
+        if source:
+            params["source"] = source
+        result = self._get("/api/memory/search?" + _up.urlencode(params))
+        if not result.get("ok"):
+            raise RemoteMemoryStoreUnavailable(result.get("error") or "remote search failed")
+        return result.get("hits") or []
+
+    def count(self, source: str | None = None) -> int:
+        # The remote server's own /api/memory already reports a total
+        # count; a per-source count isn't exposed remotely (not needed by
+        # any current remote caller) — honestly unsupported rather than
+        # silently wrong.
+        if source is not None:
+            raise NotImplementedError("RemoteMemoryStore.count(source=...) is not supported remotely")
+        result = self._get("/api/memory")
+        return int(result.get("count") or 0)
+
+    def close(self) -> None:
+        pass  # stateless HTTP client — nothing to close

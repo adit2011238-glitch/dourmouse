@@ -967,6 +967,21 @@ def _delete_file_tool(arguments: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 _MEMORY_DB_ENV = "DOURMOUSE_MEMORY_DB"
+#: v13.4: real user request — "move the actual rag to [the desktop], that
+#: machine has more storage". When set, THIS machine's own memory tools
+#: (remember/recall/query_shared_memory) talk to another machine's real
+#: MemoryStore over HTTP (dourmouse.memory_store.RemoteMemoryStore)
+#: instead of opening a local SQLite file — the file itself never moves
+#: onto a network-mounted path (see RemoteMemoryStore's own docstring for
+#: why that's a real corruption risk, not just a style choice). Unset on
+#: a machine (the normal case — e.g. the desktop that actually owns the
+#: file) means zero behavior change from before this existed.
+_MEMORY_REMOTE_URL_ENV = "DOURMOUSE_MEMORY_REMOTE_URL"
+#: The remote machine's own DOURMOUSE_ACCESS_TOKEN — required the moment
+#: that machine has one configured (webui.py's _authorized() only
+#: exempts LOOPBACK clients from it; a cross-machine call is never
+#: loopback). See RemoteMemoryStore.__init__'s own comment.
+_MEMORY_REMOTE_TOKEN_ENV = "DOURMOUSE_MEMORY_REMOTE_TOKEN"
 
 
 def _memory_db_path() -> Path:
@@ -978,8 +993,19 @@ def _memory_db_path() -> Path:
 
 
 def _open_memory_store():
-    """Open the shared long-term store (Phase A1), honestly NOT CONFIGURED
-    when SQLite FTS5 is unavailable (Rule 2.2 — never a silent grep fake)."""
+    """Open the shared long-term store (Phase A1) — a real remote store
+    (over HTTP, see RemoteMemoryStore) when DOURMOUSE_MEMORY_REMOTE_URL is
+    set, else the local SQLite file as always. Honestly NOT CONFIGURED
+    when neither is reachable (Rule 2.2 — never a silent grep fake, and
+    never a silent fall-back from remote to a stale local file the user
+    didn't ask to keep using)."""
+    remote_url = os.environ.get(_MEMORY_REMOTE_URL_ENV, "").strip()
+    if remote_url:
+        from dourmouse.memory_store import RemoteMemoryStore
+
+        token = os.environ.get(_MEMORY_REMOTE_TOKEN_ENV, "").strip() or None
+        return RemoteMemoryStore(remote_url, token=token)
+
     from dourmouse.memory_store import MemoryStore, MemoryStoreUnavailable
 
     try:

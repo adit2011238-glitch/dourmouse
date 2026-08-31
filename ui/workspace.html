@@ -254,6 +254,7 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="globe">+ 3D VIEW</button>
     <button class="dockbtn" type="button" data-open="design3d">+ 3D MODEL</button>
     <button class="dockbtn" type="button" data-open="upload">+ UPLOAD TO RAG</button>
+    <button class="dockbtn" type="button" id="organizeBtn">⊞ ORGANIZE</button>
     <a class="backlink" href="/">← CONSOLE</a>
   </div>
 </div>
@@ -373,6 +374,62 @@ function setPanelRotate(p, deg){
   p.el.style.transform = "rotate(" + p.rotate.toFixed(1) + "deg)";
 }
 
+/* ---- "windows organize themselves" (real user request, 2026-08-31) ----
+   A real, deterministic grid layout over every currently-open panel,
+   computed from the ACTUAL live viewport size -- not a fixed cascade
+   offset, not a model guessing coordinates. Deliberately plain
+   arithmetic (Rule 2.8: no model in the loop for the actual mutation),
+   reachable two ways that both end up calling this exact function:
+   the "+ ORGANIZE" dock button (instant, no round trip) and the
+   organize_panels tool's tool_result (see applyPanelControlToolResult
+   above) -- one real mechanism, two ways to trigger it, same pattern
+   move/resize/open/close already use. Rotation is reset to 0 on every
+   arranged panel -- a tidy grid and an arbitrary tilt from an earlier
+   two-hand gesture are not compatible, and "organize" means tidy. */
+const ORGANIZE_MARGIN = 14;
+const ORGANIZE_TOP = 60; // clears the fixed topbar (52px) + a hairline gap
+
+function computeGridLayout(count, viewportW, viewportH){
+  // Real math extracted so a Node harness can execute it directly against
+  // fabricated viewport sizes/counts -- see
+  // dourmouse/tests/test_workspace_panel_control.py's own coverage.
+  if(count <= 0) return [];
+  const availW = Math.max(260, viewportW - ORGANIZE_MARGIN);
+  const availH = Math.max(180, viewportH - ORGANIZE_TOP - ORGANIZE_MARGIN);
+  // cols chosen to keep cells reasonably close to a 4:3-ish shape rather
+  // than always maximizing columns -- ceil(sqrt(count)) is the standard
+  // "as square a grid as possible" choice for N items.
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
+  const rows = Math.max(1, Math.ceil(count / cols));
+  const cellW = Math.max(260, Math.floor((availW - ORGANIZE_MARGIN * (cols - 1)) / cols));
+  const cellH = Math.max(180, Math.floor((availH - ORGANIZE_MARGIN * (rows - 1)) / rows));
+  const rects = [];
+  for(let i = 0; i < count; i++){
+    const col = i % cols, row = Math.floor(i / cols);
+    rects.push({
+      x: ORGANIZE_MARGIN + col * (cellW + ORGANIZE_MARGIN),
+      y: ORGANIZE_TOP + row * (cellH + ORGANIZE_MARGIN),
+      w: cellW, h: cellH,
+    });
+  }
+  return rects;
+}
+
+function autoArrangePanels(){
+  const open = Array.from(panels.values());
+  if(!open.length) return 0;
+  // Stable order: by titlebar text, so re-running "organize" twice in a
+  // row with nothing else changed produces the identical layout instead
+  // of shuffling panels around based on Map insertion order.
+  open.sort((a, b) => (a.title || a.type).localeCompare(b.title || b.type));
+  const rects = computeGridLayout(open.length, window.innerWidth, window.innerHeight);
+  open.forEach((p, i) => {
+    setPanelRect(p, rects[i]);
+    setPanelRotate(p, 0);
+  });
+  return open.length;
+}
+
 function createPanel(type, title){
   const id = "p" + (++panelSeq);
   const pos = nextCascadePos();
@@ -457,6 +514,10 @@ function openPanel(type){
 
 document.querySelectorAll(".dockbtn[data-open]").forEach(b => {
   b.addEventListener("click", () => openPanel(b.dataset.open));
+});
+$("organizeBtn").addEventListener("click", () => {
+  const n = autoArrangePanels();
+  toast(n > 0 ? "organized " + n + " panel" + (n === 1 ? "" : "s") : "nothing open to organize");
 });
 
 /* ---- MAIL panel: reuses /api/gmail/search + /api/gmail/read, unmodified real endpoints ---- */
@@ -609,7 +670,7 @@ function addConfirmBox(p, log, ev){
    workspace_panel_ops.py's own NAMING NOTE for why "workspace" was
    deliberately dropped from every name in this family. ---- */
 const PANEL_CONTROL_TOOL_NAMES = new Set([
-  "open_panel", "close_panel", "move_panel", "resize_panel",
+  "open_panel", "close_panel", "move_panel", "resize_panel", "organize_panels",
 ]);
 function extractPanelControlAction(toolName, rawText){
   if(!PANEL_CONTROL_TOOL_NAMES.has(toolName)) return null;
@@ -618,7 +679,10 @@ function extractPanelControlAction(toolName, rawText){
   if(i < 0) return null;
   let parsed;
   try{ parsed = JSON.parse(rawText.slice(i)); }catch{ return null; }
-  if(!parsed || typeof parsed.action !== "string" || typeof parsed.panel !== "string") return null;
+  if(!parsed || typeof parsed.action !== "string") return null;
+  // organize_panels applies to every open panel, not one -- no "panel"
+  // field on that action; every other real action needs one.
+  if(parsed.action !== "organize" && typeof parsed.panel !== "string") return null;
   return parsed;
 }
 function applyPanelControlToolResult(ev, log){
@@ -642,6 +706,9 @@ function applyPanelControlToolResult(ev, log){
     if(found){ setPanelRect(found, { w: action.width, h: action.height }); bringToFront(found.id);
       note = "→ resized " + action.panel + " to " + Math.round(action.width) + "x" + Math.round(action.height); }
     else note = "→ " + action.panel + " isn't open — open it first";
+  }else if(action.action === "organize"){
+    const n = autoArrangePanels();
+    note = n > 0 ? "→ organized " + n + " panel(s)" : "→ nothing open to organize";
   }
   if(note && log){
     const row = document.createElement("div");

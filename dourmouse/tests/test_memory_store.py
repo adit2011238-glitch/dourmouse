@@ -20,6 +20,8 @@ from dourmouse.general_roster import (
 from dourmouse.memory_store import (
     MemoryStore,
     MemoryStoreUnavailable,
+    RemoteMemoryStore,
+    RemoteMemoryStoreUnavailable,
     _fts_query,
 )
 
@@ -238,3 +240,140 @@ class TestConcurrentProcessSafety:
         finally:
             store_a.close()
             store_b.close()
+
+
+class TestRemoteMemoryStore:
+    """Real HTTP round trip against a real dourmouse.webui server — the
+    remote-RAG contract behind "move the actual rag to [another machine]"
+    (2026-08-31). RemoteMemoryStore never opens the SQLite file itself;
+    every call is a real request to the OTHER machine's own
+    /api/memory/search and /api/memory/remember, which run the exact same
+    MemoryStore that machine already uses locally."""
+
+    @pytest.fixture
+    def server(self, tmp_path):
+        import threading
+
+        from dourmouse.tests.test_webui import _echo_registry
+        from dourmouse.webui import run_server
+
+        srv = run_server(_echo_registry(), port=0, client=None, config=None,
+                          memory=MemoryStore(tmp_path / "remote_side.db"))
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        port = srv.server_address[1]
+        yield port
+        srv.shutdown()
+        srv.server_close()
+        thread.join(timeout=2)
+
+    def test_remember_and_search_round_trip_over_real_http(self, server):
+        port = server
+        remote = RemoteMemoryStore(f"http://127.0.0.1:{port}")
+        result = remote.remember("laptop_file", "notes.txt", "the quick brown fox")
+        assert "MEMORY STORED" in result
+        hits = remote.search("fox", limit=5)
+        assert any(h["title"] == "notes.txt" for h in hits)
+        remote.close()
+
+    def test_bearer_token_is_actually_sent_when_configured(self, server, monkeypatch):
+        """Real gap found before this ever ran cross-machine: a remote
+        machine with DOURMOUSE_ACCESS_TOKEN set (the desktop deployment
+        already has one) rejects any non-loopback caller with no Bearer
+        header (webui.py's _authorized()). A same-host test server can't
+        exercise the REJECTION path (127.0.0.1 is always loopback-
+        exempt, by design), so this checks the request the client
+        actually SENDS instead — the real fix, not an end-to-end replay
+        of something the test harness can't reproduce honestly."""
+        import urllib.request
+
+        seen_auth = {}
+        real_urlopen = urllib.request.urlopen
+
+        def spy(req, *a, **k):
+            seen_auth["value"] = req.get_header("Authorization")
+            return real_urlopen(req, *a, **k)
+
+        monkeypatch.setattr(urllib.request, "urlopen", spy)
+        port = server
+        remote = RemoteMemoryStore(f"http://127.0.0.1:{port}", token="secret-token-123")
+        remote.count()
+        assert seen_auth["value"] == "Bearer secret-token-123"
+
+    def test_no_auth_header_sent_when_no_token_configured(self, server, monkeypatch):
+        import urllib.request
+
+        seen_auth = {}
+        real_urlopen = urllib.request.urlopen
+
+        def spy(req, *a, **k):
+            seen_auth["value"] = req.get_header("Authorization")
+            return real_urlopen(req, *a, **k)
+
+        monkeypatch.setattr(urllib.request, "urlopen", spy)
+        port = server
+        remote = RemoteMemoryStore(f"http://127.0.0.1:{port}")
+        remote.count()
+        assert seen_auth["value"] is None
+
+    def test_count_reflects_real_remote_state(self, server):
+        port = server
+        remote = RemoteMemoryStore(f"http://127.0.0.1:{port}")
+        assert remote.count() == 0
+        remote.remember("src", "t1", "body one")
+        remote.remember("src", "t2", "body two")
+        assert remote.count() == 2
+
+    def test_remember_requires_title_and_body_same_as_local_store(self, server):
+        port = server
+        remote = RemoteMemoryStore(f"http://127.0.0.1:{port}")
+        with pytest.raises(ValueError):
+            remote.remember("src", "", "")
+
+    def test_unreachable_server_raises_the_real_honest_error(self):
+        # An address nothing is listening on -- a genuinely unreachable
+        # remote, not a mocked failure.
+        remote = RemoteMemoryStore("http://127.0.0.1:1")
+        with pytest.raises(RemoteMemoryStoreUnavailable):
+            remote.search("anything")
+
+    def test_count_with_source_is_honestly_unsupported_not_silently_wrong(self, server):
+        port = server
+        remote = RemoteMemoryStore(f"http://127.0.0.1:{port}")
+        with pytest.raises(NotImplementedError):
+            remote.count(source="laptop_file")
+
+
+class TestOpenMemoryStoreUsesRemoteWhenConfigured:
+    def test_remote_url_env_selects_remote_store(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_URL", "http://100.98.97.23:8765")
+        from dourmouse.general_roster import _open_memory_store
+
+        store = _open_memory_store()
+        assert isinstance(store, RemoteMemoryStore)
+        assert store.base_url == "http://100.98.97.23:8765"
+
+    def test_remote_token_env_is_passed_through(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_URL", "http://100.98.97.23:8765")
+        monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_TOKEN", "real-desktop-token")
+        from dourmouse.general_roster import _open_memory_store
+
+        store = _open_memory_store()
+        assert store.token == "real-desktop-token"
+
+    def test_remote_without_token_env_has_none(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_URL", "http://100.98.97.23:8765")
+        monkeypatch.delenv("DOURMOUSE_MEMORY_REMOTE_TOKEN", raising=False)
+        from dourmouse.general_roster import _open_memory_store
+
+        store = _open_memory_store()
+        assert store.token is None
+
+    def test_unset_env_keeps_local_store(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DOURMOUSE_MEMORY_REMOTE_URL", raising=False)
+        monkeypatch.setenv("DOURMOUSE_MEMORY_DB", str(tmp_path / "local.db"))
+        from dourmouse.general_roster import _open_memory_store
+
+        store = _open_memory_store()
+        assert isinstance(store, MemoryStore)
+        store.close()

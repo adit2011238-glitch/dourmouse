@@ -1711,6 +1711,17 @@ class _Handler(BaseHTTPRequestHandler):
                 })
         elif path == "/api/memory":
             self._handle_memory_api()
+        elif path == "/api/memory/search":
+            # v13.4: real remote read for the shared RAG database, explicit
+            # user request ("move the actual rag to [the desktop], that
+            # machine has more storage") -- the desktop keeps owning the
+            # real SQLite file locally on its own disk (zero network-
+            # SQLite risk, a real, documented corruption hazard over SMB/
+            # network shares); the Mac's dourmouse.memory_store.
+            # RemoteMemoryStore calls this over the network instead of
+            # opening the file directly. Same real FTS5 search this
+            # server already runs locally -- not a second implementation.
+            self._handle_memory_remote_search()
         elif path == "/api/profile":
             # v8.14: the one-time working-style profile — status for SETTINGS.
             self._handle_profile_status()
@@ -2471,6 +2482,10 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/history/import":
             # v8.13: pull Claude Code + Codex CLI session history into memory.
             self._handle_history_import()
+        elif parsed.path == "/api/memory/remember":
+            # v13.4: the write half of the remote RAG contract — see
+            # GET /api/memory/search's route comment above.
+            self._handle_memory_remote_remember()
         elif parsed.path == "/api/profile/generate":
             # v8.14: the one-time working-style profile.
             self._handle_profile_generate()
@@ -4069,6 +4084,60 @@ class _Handler(BaseHTTPRequestHandler):
                 ),
             }
         )
+
+    def _handle_memory_remote_search(self) -> None:
+        """GET /api/memory/search?q=<query>&limit=<n>&source=<optional> —
+        the read half of the remote RAG contract (see the route comment
+        above). Runs the exact same MemoryStore.search() this server
+        already uses locally; a remote Mac's RemoteMemoryStore just calls
+        this instead of opening the SQLite file itself."""
+        if self.server.memory is None:
+            self._send_json(
+                {"ok": False, "error": "long-term memory is not configured on this machine"},
+                status=409,
+            )
+            return
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        query = (qs.get("q") or [""])[0]
+        source = (qs.get("source") or [None])[0]
+        try:
+            limit = int((qs.get("limit") or ["10"])[0])
+        except ValueError:
+            limit = 10
+        try:
+            hits = self.server.memory.search(query, limit=limit, source=source)
+        except Exception as exc:  # noqa: BLE001 - honest, never a 500 the caller can't parse
+            self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+        self._send_json({"ok": True, "hits": hits})
+
+    def _handle_memory_remote_remember(self) -> None:
+        """POST /api/memory/remember — the write half of the remote RAG
+        contract. Body: {"source", "title", "body"}. Same real
+        MemoryStore.remember() this server already uses for its own
+        remember/recall tools -- one real store, local calls and remote
+        calls both land in it the same way."""
+        if self.server.memory is None:
+            self._send_json(
+                {"ok": False, "error": "long-term memory is not configured on this machine"},
+                status=409,
+            )
+            return
+        body = self._read_json_body()
+        try:
+            result = self.server.memory.remember(
+                source=str(body.get("source") or ""),
+                title=str(body.get("title") or ""),
+                body=str(body.get("body") or ""),
+            )
+        except ValueError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+        self._send_json({"ok": True, "result": result})
 
     def _handle_history_import(self) -> None:
         """v8.13: POST /api/history/import — pull Claude Code + Codex CLI

@@ -21,6 +21,7 @@ from dourmouse.workspace_panel_ops import (
     _list_panel_types_tool,
     _move_panel_tool,
     _open_panel_tool,
+    _organize_panels_tool,
     _resize_panel_tool,
     build_workspace_panel_tool_specs,
 )
@@ -115,17 +116,24 @@ class TestListPanelTypes:
 
 
 class TestToolSpecsRegistration:
-    def test_five_tools_all_regular_permission(self):
+    def test_six_tools_all_regular_permission(self):
         specs = build_workspace_panel_tool_specs()
         names = {s.name for s in specs}
         assert names == {
-            "list_panel_types", "open_panel",
-            "close_panel", "move_panel", "resize_panel",
+            "list_panel_types", "open_panel", "close_panel",
+            "move_panel", "resize_panel", "organize_panels",
         }
         # Panel layout is not data, money, or a persistent write -- none of
         # these should carry a confirmation gate.
         for s in specs:
             assert s.permission == Permission.REGULAR, f"{s.name} should not require confirmation"
+
+
+class TestOrganizePanels:
+    def test_returns_the_real_organize_spec(self):
+        out = _organize_panels_tool({})
+        spec = _json_tail(out)
+        assert spec == {"action": "organize"}
 
     def test_panel_control_subagent_registered_in_general_roster(self):
         registry = general_roster.build_general_registry()

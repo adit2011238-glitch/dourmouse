@@ -144,6 +144,20 @@ def _resize_panel_tool(arguments: dict[str, Any]) -> str:
     )
 
 
+def _organize_panels_tool(_arguments: dict[str, Any]) -> str:
+    """Real user request (2026-08-31): "windows organize themselves."
+    Deliberately NOT the model computing a grid layout (Rule 2.8 — no
+    model in the loop for the actual mutation; a small local model doing
+    real-time viewport/grid arithmetic through free-form tool arguments
+    is exactly the kind of thing that goes wrong in an LLM). This tool
+    only signals the request; ui/workspace.html's own deterministic
+    autoArrangePanels() does the real math (rows/cols, panel count,
+    actual live viewport size) client-side, the moment this tool_result
+    streams back — same "validate/spec here, apply for real on the
+    client" boundary open/close/move/resize_panel already draw."""
+    return "Organize all open panels into a real grid layout.\n" + json.dumps({"action": "organize"})
+
+
 def build_workspace_panel_tool_specs() -> list[ToolSpec]:
     return [
         ToolSpec(
@@ -218,6 +232,19 @@ def build_workspace_panel_tool_specs() -> list[ToolSpec]:
                 "required": ["panel", "width", "height"],
             },
             handler=_resize_panel_tool,
+            permission=Permission.REGULAR,
+        ),
+        ToolSpec(
+            name="organize_panels",
+            description=(
+                "Automatically arrange ALL currently open floating panels "
+                "into a tidy, non-overlapping grid that fits the real "
+                "viewport. Use this for a general 'organize/tidy/arrange "
+                "my windows' request rather than moving/resizing panels "
+                "one at a time."
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=_organize_panels_tool,
             permission=Permission.REGULAR,
         ),
     ]

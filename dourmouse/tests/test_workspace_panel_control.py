@@ -122,3 +122,111 @@ class TestApplyPanelControlToolResultCallsRealPanelFunctions:
         m = re.search(r"async function sendChatMessage\(p, text\)\{(.*?)\n\}\n", script, re.S)
         assert m
         assert 'applyPanelControlToolResult(ev, log)' in m.group(1)
+
+    def test_organize_action_calls_the_real_autoArrangePanels(self):
+        body = self._body()
+        assert 'autoArrangePanels()' in body
+
+
+class TestComputeGridLayoutRealMath:
+    """"Windows organize themselves" (2026-08-31): computeGridLayout() is
+    real, deterministic grid arithmetic -- covered here by actually
+    RUNNING it in Node against real viewport sizes and panel counts, not
+    source-grep. No model in the loop for the actual layout math
+    (Rule 2.8) -- only whether to trigger it comes from the LLM/voice/
+    button; the numbers themselves are plain, checkable arithmetic."""
+
+    def _fn_source(self) -> str:
+        script = _classic_script()
+        m = re.search(
+            r"const ORGANIZE_MARGIN = 14;\nconst ORGANIZE_TOP = 60.*?\n"
+            r"function computeGridLayout\(count, viewportW, viewportH\)\{(.*?)\n\}\n",
+            script, re.S,
+        )
+        assert m, "computeGridLayout not found"
+        return (
+            "const ORGANIZE_MARGIN = 14;\nconst ORGANIZE_TOP = 60;\n"
+            "function computeGridLayout(count, viewportW, viewportH){" + m.group(1) + "\n}"
+        )
+
+    def _run(self, tmp_path, tail):
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node not on PATH in this environment")
+        js_file = tmp_path / "grid.js"
+        js_file.write_text(self._fn_source() + "\n" + tail, encoding="utf-8")
+        result = subprocess.run([node, str(js_file)], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    def test_zero_panels_yields_empty_layout(self, tmp_path):
+        out = self._run(tmp_path, "console.log(JSON.stringify(computeGridLayout(0, 1200, 800)));")
+        assert out == []
+
+    def test_one_panel_fills_most_of_the_viewport(self, tmp_path):
+        out = self._run(tmp_path, "console.log(JSON.stringify(computeGridLayout(1, 1200, 800)));")
+        assert len(out) == 1
+        r = out[0]
+        assert r["w"] > 1000 and r["h"] > 600
+        assert r["x"] == 14 and r["y"] == 60
+
+    def test_four_panels_form_a_two_by_two_grid(self, tmp_path):
+        out = self._run(tmp_path, "console.log(JSON.stringify(computeGridLayout(4, 1200, 800)));")
+        assert len(out) == 4
+        xs = sorted({r["x"] for r in out})
+        ys = sorted({r["y"] for r in out})
+        assert len(xs) == 2 and len(ys) == 2  # a real 2x2 grid, not a single row/column
+
+    def test_no_two_rects_in_the_same_row_overlap(self, tmp_path):
+        out = self._run(tmp_path, "console.log(JSON.stringify(computeGridLayout(5, 1400, 900)));")
+        by_row = {}
+        for r in out:
+            by_row.setdefault(r["y"], []).append(r)
+        for row in by_row.values():
+            row_sorted = sorted(row, key=lambda r: r["x"])
+            for a, b in zip(row_sorted, row_sorted[1:]):
+                assert a["x"] + a["w"] <= b["x"], f"real horizontal overlap: {a} vs {b}"
+
+    def test_every_rect_respects_the_real_client_minimum_size(self, tmp_path):
+        # setPanelRect() clamps to 260x180 -- computeGridLayout must never
+        # hand back something smaller and rely on that clamp to save it.
+        out = self._run(tmp_path, "console.log(JSON.stringify(computeGridLayout(12, 1200, 800)));")
+        for r in out:
+            assert r["w"] >= 260 and r["h"] >= 180
+
+    def test_layout_is_deterministic_for_the_same_inputs(self, tmp_path):
+        out1 = self._run(tmp_path, "console.log(JSON.stringify(computeGridLayout(6, 1300, 850)));")
+        js_file2 = tmp_path / "grid2.js"
+        js_file2.write_text(self._fn_source() + "\nconsole.log(JSON.stringify(computeGridLayout(6, 1300, 850)));", encoding="utf-8")
+        node = shutil.which("node")
+        result2 = subprocess.run([node, str(js_file2)], capture_output=True, text=True, timeout=10)
+        out2 = json.loads(result2.stdout.strip().splitlines()[-1])
+        assert out1 == out2
+
+
+class TestAutoArrangePanelsWired:
+    def _body(self) -> str:
+        script = _classic_script()
+        m = re.search(r"function autoArrangePanels\(\)\{(.*?)\n\}\n", script, re.S)
+        assert m, "autoArrangePanels not found"
+        return m.group(1)
+
+    def test_uses_the_real_viewport_size(self):
+        body = self._body()
+        assert "window.innerWidth" in body
+        assert "window.innerHeight" in body
+
+    def test_calls_the_real_setPanelRect_and_resets_rotation(self):
+        body = self._body()
+        assert "setPanelRect(p, rects[i])" in body
+        assert "setPanelRotate(p, 0)" in body
+
+    def test_returns_zero_when_nothing_is_open_not_an_error(self):
+        body = self._body()
+        assert "if(!open.length) return 0;" in body
+
+    def test_organize_dock_button_wired(self):
+        html = _WORKSPACE_HTML.read_text(encoding="utf-8")
+        assert 'id="organizeBtn"' in html
+        script = _classic_script()
+        assert '$("organizeBtn").addEventListener("click"' in script
