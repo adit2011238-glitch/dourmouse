@@ -2352,6 +2352,59 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(png_bytes)
+        elif path == "/api/gdelt/graph":
+            # v13.6, Vision OS "real-time global event ingestion + kinetic
+            # knowledge graph" (dourmouse/gdelt_graph.py — real GDELT GKG
+            # 2.1, see that module's own docstring for scope). Read-only
+            # snapshot of the shared, continuously-updated graph — never
+            # blocks on a live fetch, always returns whatever the
+            # background poller has already ingested (honestly empty
+            # right after boot until its first cycle completes).
+            from dourmouse.gdelt_graph import get_graph
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                limit = int((qs.get("limit") or ["150"])[0])
+            except ValueError:
+                limit = 150
+            self._send_json(get_graph().snapshot(limit_nodes=limit))
+        elif path == "/api/gdelt/status":
+            from dourmouse.gdelt_graph import graph_status
+
+            self._send_json(graph_status())
+        elif path == "/api/git/log":
+            # v13.6, Vision OS item 9's safe subset — real, read-only
+            # history of DOURMOUSE'S OWN repo (never arbitrary user
+            # files, never a mutating git call — see git_timetravel.py's
+            # own docstring for the deliberate scope boundary).
+            from dourmouse.git_timetravel import log as git_log
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                limit = int((qs.get("limit") or ["50"])[0])
+            except ValueError:
+                limit = 50
+            file_filter = (qs.get("path") or [""])[0].strip() or None
+            self._send_json(git_log(_PROJECT_ROOT, limit=limit, path=file_filter))
+        elif path == "/api/git/diff":
+            from dourmouse.git_timetravel import diff as git_diff
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            commit_hash = (qs.get("hash") or [""])[0].strip()
+            self._send_json(git_diff(_PROJECT_ROOT, commit_hash))
+        elif path == "/api/git/changed_files":
+            from dourmouse.git_timetravel import changed_files as git_changed_files
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            commit_hash = (qs.get("hash") or [""])[0].strip()
+            self._send_json(git_changed_files(_PROJECT_ROOT, commit_hash))
+        elif path == "/api/git/file_at":
+            from dourmouse.git_timetravel import file_at as git_file_at
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            commit_hash = (qs.get("hash") or [""])[0].strip()
+            file_path = (qs.get("path") or [""])[0].strip()
+            self._send_json(git_file_at(_PROJECT_ROOT, commit_hash, file_path))
         elif path == "/api/speech":
             # v4.1 (P7): GET = local TTS, returns audio/wav bytes.
             qs = urllib.parse.parse_qs(parsed.query)
@@ -5562,6 +5615,13 @@ def run_server(
     if reporting and live_polling and live_enabled():
         start_world_pulse_warmer()
         start_gmail_inbox_warmer()
+        # v13.6: same real-network-in-a-background-thread gate as the two
+        # warmers above, for the same reason — GDELT ingestion opens real
+        # sockets to data.gdeltproject.org and must never do so from a
+        # test's default run_server() call.
+        from dourmouse.gdelt_graph import start_gdelt_graph_poller
+
+        start_gdelt_graph_poller()
     # v4.0: proactive daily briefing (automation engine). Env-gated by
     # DOURMOUSE_REPORT (default on); tests opt out via reporting=False.
     from dourmouse.report import DailyReporter

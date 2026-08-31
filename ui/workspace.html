@@ -224,6 +224,47 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
   border:1px solid var(--line);border-radius:6px}
 .pdferr{color:var(--bad)}
 
+/* EVENT GRAPH panel (v13.6) — real-time GDELT kinetic knowledge graph */
+.egwrap{display:flex;flex-direction:column;height:100%;padding:10px;gap:8px}
+.egstatus{font-size:10.5px;color:var(--blue-dim);flex-shrink:0}
+.egstatus.ok{color:var(--ok)}
+.egstatus.bad{color:var(--bad)}
+.egcanvaswrap{flex:1;min-height:0;background:#04080e;border:1px solid var(--line);
+  border-radius:6px;overflow:hidden;position:relative}
+.egcanvaswrap canvas{display:block;width:100%;height:100%}
+.eglegend{position:absolute;left:8px;bottom:8px;display:flex;gap:10px;font-size:9.5px;
+  color:var(--blue-dim);background:rgba(4,8,14,.6);padding:4px 7px;border-radius:4px;
+  pointer-events:none}
+.eglegend span{display:inline-flex;align-items:center;gap:4px}
+.eglegend i{width:7px;height:7px;border-radius:50%;display:inline-block}
+.eghover{position:absolute;top:8px;left:8px;font-size:10px;color:var(--amber-hi);
+  background:rgba(4,8,14,.75);padding:4px 7px;border-radius:4px;pointer-events:none;
+  display:none;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* TIME TRAVEL panel (v13.6) — real git log/diff/file-at-commit, DOURMOUSE'S OWN repo, read-only */
+.ttwrap{display:flex;height:100%}
+.ttlog{width:38%;min-width:150px;flex-shrink:0;border-right:1px solid var(--line);
+  overflow:auto;padding:8px}
+.ttcommit{padding:6px 7px;border-radius:5px;cursor:pointer;margin-bottom:3px;font-size:10.5px}
+.ttcommit:hover{background:var(--panel2)}
+.ttcommit.sel{background:var(--panel2);border:1px solid var(--line-2)}
+.ttcommit .subj{color:var(--blue-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ttcommit .meta{color:var(--blue-dim);font-size:9px;margin-top:2px}
+.ttmain{flex:1;min-width:0;display:flex;flex-direction:column;padding:8px;gap:6px}
+.ttfiles{display:flex;flex-wrap:wrap;gap:5px;flex-shrink:0}
+.ttfile{font-family:var(--mono);font-size:9.5px;background:var(--panel2);color:var(--blue-hi);
+  border:1px solid var(--line);border-radius:4px;padding:3px 7px;cursor:pointer}
+.ttfile:hover{border-color:var(--line-2)}
+.ttfile.sel{border-color:var(--amber-hi);color:var(--amber-hi)}
+.ttfile .st{opacity:.6;margin-right:3px}
+.ttbody{flex:1;min-height:0;overflow:auto;font-size:10px;line-height:1.5;
+  white-space:pre-wrap;padding:7px 8px;background:#04080e;border:1px solid var(--line);
+  border-radius:6px;color:var(--blue-dim)}
+.ttbody .add{color:var(--ok)}
+.ttbody .del{color:var(--bad)}
+.ttempty{color:var(--blue-dim);font-size:10.5px;padding:12px}
+.tterr{color:var(--bad)}
+
 /* 3D model panel */
 .d3wrap{display:flex;flex-direction:column;height:100%}
 .d3canvas{position:relative;flex:1;min-height:0;overflow:hidden;background:#05080c}
@@ -330,6 +371,8 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="upload">+ UPLOAD TO RAG</button>
     <button class="dockbtn" type="button" data-open="browser">+ LIVE BROWSER</button>
     <button class="dockbtn" type="button" data-open="pdf">+ PDF READER</button>
+    <button class="dockbtn" type="button" data-open="eventgraph">+ EVENT GRAPH</button>
+    <button class="dockbtn" type="button" data-open="timetravel">+ TIME TRAVEL</button>
     <button class="dockbtn" type="button" id="organizeBtn">⊞ ORGANIZE</button>
     <span class="hfpill" id="handsFreePill" title="Hands-free voice loop (dourmouse/hands_free.py)">● HANDS-FREE: —</span>
     <a class="backlink" href="/">← CONSOLE</a>
@@ -585,7 +628,8 @@ function openPanel(type){
   if(existing){ bringToFront(existing.id); return existing; }
   const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP",
                    globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL", upload: "UPLOAD TO RAG",
-                   browser: "LIVE BROWSER", pdf: "PDF READER" };
+                   browser: "LIVE BROWSER", pdf: "PDF READER", eventgraph: "EVENT GRAPH",
+                   timetravel: "TIME TRAVEL" };
   const p = createPanel(type, titles[type] || type.toUpperCase());
   if(type === "mail") loadMailPanel(p);
   else if(type === "chat") initChatPanel(p, "companion", "Ask the companion anything…");
@@ -596,6 +640,8 @@ function openPanel(type){
   else if(type === "upload") loadUploadPanel(p);
   else if(type === "browser") loadBrowserPanel(p);
   else if(type === "pdf") loadPdfPanel(p);
+  else if(type === "eventgraph") loadEventGraphPanel(p);
+  else if(type === "timetravel") loadTimeTravelPanel(p);
   return p;
 }
 
@@ -1280,6 +1326,303 @@ function loadPdfPanel(p){
   nextBtn.addEventListener("click", () => { if(state.page < state.pageCount - 1){ state.page++; loadPage(); } });
 
   refreshList();
+}
+
+/* ---- EVENT GRAPH panel (v13.6, Vision OS "Real-Time Global Event
+   Ingestion & Kinetic Knowledge Graph"): real GDELT GKG 2.1 data
+   (dourmouse/gdelt_graph.py — a background server thread polls GDELT's
+   actual 15-minute export stream, no key required; see that module's
+   own docstring for what's real vs. deliberately not built/Streamparse)
+   rendered as an actual live force-directed graph — real named persons/
+   organizations/locations as nodes, real article co-occurrence as
+   edges, both genuinely decaying over time server-side so this always
+   reflects recent world activity, not an ever-growing static dump. The
+   "kinetic" part is real, client-side physics (simple spring/repulsion
+   simulation, no library), not a static layout redrawn on each poll —
+   nodes settle into position and drift smoothly as new data arrives. ---- */
+function loadEventGraphPanel(p){
+  p.body.innerHTML = `
+    <div class="egwrap">
+      <div class="egstatus">checking…</div>
+      <div class="egcanvaswrap">
+        <canvas class="egcanvas"></canvas>
+        <div class="eghover"></div>
+        <div class="eglegend">
+          <span><i style="background:#ffb020"></i>person</span>
+          <span><i style="background:#4fc3f7"></i>org</span>
+          <span><i style="background:#8bd17c"></i>location</span>
+        </div>
+      </div>
+    </div>`;
+  const statusEl = p.body.querySelector(".egstatus");
+  const wrapEl = p.body.querySelector(".egcanvaswrap");
+  const canvas = p.body.querySelector(".egcanvas");
+  const hoverEl = p.body.querySelector(".eghover");
+  const ctx = canvas.getContext("2d");
+
+  const KIND_COLOR = { person: "#ffb020", org: "#4fc3f7", location: "#8bd17c" };
+  // Sim state persists across polls -- a node already on screen keeps its
+  // position and velocity; only genuinely new/gone nodes are added/removed,
+  // which is what makes updates feel kinetic instead of a jump-cut redraw.
+  const sim = { nodes: new Map(), edges: [] };
+  let raf = null, dragging = null, hoverNode = null;
+
+  function resize(){
+    const r = wrapEl.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.floor(r.width));
+    canvas.height = Math.max(1, Math.floor(r.height));
+  }
+  const resizeObs = new ResizeObserver(resize);
+  resizeObs.observe(wrapEl);
+  resize();
+
+  function mergeSnapshot(data){
+    const seen = new Set();
+    for(const n of (data.nodes || [])){
+      seen.add(n.id);
+      let s = sim.nodes.get(n.id);
+      if(!s){
+        s = {
+          id: n.id, x: canvas.width * (0.3 + Math.random() * 0.4),
+          y: canvas.height * (0.3 + Math.random() * 0.4), vx: 0, vy: 0,
+        };
+        sim.nodes.set(n.id, s);
+      }
+      s.kind = n.kind; s.label = n.label; s.weight = n.weight;
+    }
+    // Real decay client-side too: a node the server pruned (no longer in
+    // the snapshot) fades out of the simulation, not just off the list.
+    for(const id of Array.from(sim.nodes.keys())){
+      if(!seen.has(id)) sim.nodes.delete(id);
+    }
+    sim.edges = (data.edges || []).filter(e => sim.nodes.has(e.a) && sim.nodes.has(e.b));
+  }
+
+  function step(){
+    const nodes = Array.from(sim.nodes.values());
+    const W = canvas.width, H = canvas.height;
+    // Repulsion between every pair -- fine at this panel's node cap (<=150).
+    for(let i = 0; i < nodes.length; i++){
+      for(let j = i + 1; j < nodes.length; j++){
+        const a = nodes[i], b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx * dx + dy * dy;
+        if(d2 < 1) d2 = 1;
+        const force = 1800 / d2;
+        const d = Math.sqrt(d2);
+        const fx = (dx / d) * force, fy = (dy / d) * force;
+        if(a !== dragging){ a.vx += fx; a.vy += fy; }
+        if(b !== dragging){ b.vx -= fx; b.vy -= fy; }
+      }
+    }
+    // Spring attraction along real co-occurrence edges.
+    for(const e of sim.edges){
+      const a = sim.nodes.get(e.a), b = sim.nodes.get(e.b);
+      if(!a || !b) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      const target = 70;
+      const k = 0.02 * Math.min(4, Math.log2(1 + e.weight));
+      const f = (d - target) * k;
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      if(a !== dragging){ a.vx += fx; a.vy += fy; }
+      if(b !== dragging){ b.vx -= fx; b.vy -= fy; }
+    }
+    // Gentle pull to center + damping + integrate + clamp to canvas.
+    for(const n of nodes){
+      if(n !== dragging){
+        n.vx += (W / 2 - n.x) * 0.0006;
+        n.vy += (H / 2 - n.y) * 0.0006;
+        n.vx *= 0.85; n.vy *= 0.85;
+        n.x += n.vx; n.y += n.vy;
+      }
+      n.x = Math.max(10, Math.min(W - 10, n.x));
+      n.y = Math.max(10, Math.min(H - 10, n.y));
+    }
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(120,160,200,0.18)";
+    for(const e of sim.edges){
+      const a = sim.nodes.get(e.a), b = sim.nodes.get(e.b);
+      if(!a || !b) continue;
+      ctx.lineWidth = Math.min(3, 0.4 + Math.log2(1 + e.weight) * 0.4);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    for(const n of nodes){
+      const r = Math.min(16, 3 + Math.log2(1 + (n.weight || 1)) * 2.2);
+      ctx.fillStyle = KIND_COLOR[n.kind] || "#888";
+      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
+      if(n === hoverNode){
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(n.x, n.y, r + 2, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    raf = requestAnimationFrame(step);
+  }
+
+  function nodeAt(px, py){
+    let best = null, bestD = 20;
+    for(const n of sim.nodes.values()){
+      const r = Math.min(16, 3 + Math.log2(1 + (n.weight || 1)) * 2.2);
+      const d = Math.hypot(n.x - px, n.y - py) - r;
+      if(d < bestD){ bestD = d; best = n; }
+    }
+    return best;
+  }
+  function evPos(ev){
+    const r = canvas.getBoundingClientRect();
+    return [ev.clientX - r.left, ev.clientY - r.top];
+  }
+  canvas.addEventListener("pointerdown", ev => {
+    const [x, y] = evPos(ev);
+    const n = nodeAt(x, y);
+    if(n){ dragging = n; n.vx = 0; n.vy = 0; }
+  });
+  canvas.addEventListener("pointermove", ev => {
+    const [x, y] = evPos(ev);
+    if(dragging){ dragging.x = x; dragging.y = y; }
+    const n = nodeAt(x, y);
+    hoverNode = n;
+    if(n){
+      hoverEl.textContent = `${n.kind}: ${n.label} (${n.weight} mention${n.weight === 1 ? "" : "s"})`;
+      hoverEl.style.display = "block";
+    }else{
+      hoverEl.style.display = "none";
+    }
+  });
+  window.addEventListener("pointerup", () => { dragging = null; });
+
+  async function poll(){
+    try{
+      const [snap, status] = await Promise.all([
+        api("/api/gdelt/graph?limit=150"), api("/api/gdelt/status"),
+      ]);
+      mergeSnapshot(snap);
+      if(!status.enabled){
+        statusEl.textContent = "GDELT poller disabled (DOURMOUSE_GDELT_POLLER=0)";
+        statusEl.className = "egstatus bad";
+      }else if(status.last_error && !status.last_fetch_at){
+        statusEl.textContent = "waiting for first fetch — " + status.last_error;
+        statusEl.className = "egstatus bad";
+      }else{
+        const when = status.last_fetch_at
+          ? Math.max(0, Math.round(Date.now() / 1000 - status.last_fetch_at)) + "s ago"
+          : "never yet";
+        statusEl.textContent = `${snap.total_nodes} entities · ${snap.total_edges} links (real GDELT GKG) · last fetch ${when}`;
+        statusEl.className = "egstatus ok";
+      }
+    }catch(e){
+      statusEl.textContent = "unavailable — " + String(e.message || e);
+      statusEl.className = "egstatus bad";
+    }
+  }
+  poll();
+  const pollId = setInterval(poll, 15000);
+  raf = requestAnimationFrame(step);
+  p.onClose = () => { clearInterval(pollId); if(raf) cancelAnimationFrame(raf); resizeObs.disconnect(); };
+}
+
+/* ---- TIME TRAVEL panel (v13.6, Vision OS item 9's safe subset): real,
+   read-only history of DOURMOUSE'S OWN repo (dourmouse/git_timetravel.py
+   — real `git log`/`git show`, see that module's own docstring for the
+   deliberate scope boundary: this never checks anything out, resets, or
+   reverts — an actual rollback stays a manual action in a real
+   terminal). Scrub the real commit list, pick a commit to see its real
+   changed-file list and real diff, or open one changed file to see its
+   real content as of that exact commit. ---- */
+function loadTimeTravelPanel(p){
+  p.body.innerHTML = `
+    <div class="ttwrap">
+      <div class="ttlog"><div class="ttempty">loading history…</div></div>
+      <div class="ttmain">
+        <div class="ttfiles"></div>
+        <div class="ttbody"><div class="ttempty">select a commit to view its diff</div></div>
+      </div>
+    </div>`;
+  const logEl = p.body.querySelector(".ttlog");
+  const filesEl = p.body.querySelector(".ttfiles");
+  const bodyEl = p.body.querySelector(".ttbody");
+  const state = { commits: [], selectedHash: null, selectedFile: null };
+
+  function fmtDate(iso){
+    try{ return new Date(iso).toLocaleString(); }catch(_){ return iso; }
+  }
+
+  async function loadLog(){
+    try{
+      const data = await api("/api/git/log?limit=80");
+      if(!data.ok){
+        logEl.innerHTML = `<div class="tterr">${esc(data.error || "not a git repository")}</div>`;
+        return;
+      }
+      state.commits = data.commits;
+      logEl.innerHTML = "";
+      for(const c of data.commits){
+        const row = document.createElement("div");
+        row.className = "ttcommit"; row.dataset.hash = c.hash;
+        row.innerHTML = `<div class="subj">${esc(c.subject)}</div>` +
+          `<div class="meta">${esc(c.short_hash)} · ${esc(c.author)} · ${esc(fmtDate(c.date))}</div>`;
+        row.addEventListener("click", () => selectCommit(c.hash));
+        logEl.appendChild(row);
+      }
+      if(data.commits.length) selectCommit(data.commits[0].hash);
+    }catch(e){
+      logEl.innerHTML = `<div class="tterr">unavailable — ${esc(String(e.message || e))}</div>`;
+    }
+  }
+
+  async function selectCommit(hash){
+    state.selectedHash = hash; state.selectedFile = null;
+    logEl.querySelectorAll(".ttcommit").forEach(el => el.classList.toggle("sel", el.dataset.hash === hash));
+    filesEl.innerHTML = `<span class="ttempty">loading files…</span>`;
+    bodyEl.innerHTML = "";
+    try{
+      const [files, diffData] = await Promise.all([
+        api("/api/git/changed_files?hash=" + encodeURIComponent(hash)),
+        api("/api/git/diff?hash=" + encodeURIComponent(hash)),
+      ]);
+      filesEl.innerHTML = "";
+      for(const f of (files.files || [])){
+        const chip = document.createElement("span");
+        chip.className = "ttfile"; chip.dataset.path = f.path;
+        chip.innerHTML = `<span class="st">${esc(f.status)}</span>${esc(f.path)}`;
+        chip.addEventListener("click", () => selectFile(hash, f.path, chip));
+        filesEl.appendChild(chip);
+      }
+      renderDiff(diffData.ok ? diffData.diff : (diffData.error || "could not load diff"));
+    }catch(e){
+      bodyEl.innerHTML = `<div class="tterr">${esc(String(e.message || e))}</div>`;
+    }
+  }
+
+  function renderDiff(text){
+    bodyEl.innerHTML = "";
+    for(const line of String(text).split("\n")){
+      const div = document.createElement("div");
+      if(line.startsWith("+") && !line.startsWith("+++")) div.className = "add";
+      else if(line.startsWith("-") && !line.startsWith("---")) div.className = "del";
+      div.textContent = line;
+      bodyEl.appendChild(div);
+    }
+  }
+
+  async function selectFile(hash, path, chipEl){
+    state.selectedFile = path;
+    filesEl.querySelectorAll(".ttfile").forEach(el => el.classList.toggle("sel", el === chipEl));
+    bodyEl.innerHTML = `<div class="ttempty">loading ${esc(path)}…</div>`;
+    try{
+      const data = await api("/api/git/file_at?hash=" + encodeURIComponent(hash) + "&path=" + encodeURIComponent(path));
+      if(!data.ok){
+        bodyEl.innerHTML = `<div class="tterr">${esc(data.error || "could not read file at this commit")}</div>`;
+        return;
+      }
+      bodyEl.textContent = data.content;
+    }catch(e){
+      bodyEl.innerHTML = `<div class="tterr">${esc(String(e.message || e))}</div>`;
+    }
+  }
+
+  loadLog();
 }
 
 /* ============================================================

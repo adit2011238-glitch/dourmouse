@@ -121,6 +121,18 @@ def _ollama_cloud_isolated(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _gdelt_poller_off(monkeypatch):
+    """v13.6: same real leak class as _hands_free_off/_denoise_off above,
+    caught proactively before it ever bit — no test server should ever
+    open a real network connection to data.gdeltproject.org just because
+    a test happens to call run_server(reporting=True, live_polling=True).
+    test_gdelt_graph.py opts back in explicitly (monkeypatching the fetch
+    functions rather than really re-enabling the poller) the same way
+    test_audio_denoise.py opts back into denoising."""
+    monkeypatch.setenv("DOURMOUSE_GDELT_POLLER", "0")
+
+
+@pytest.fixture(autouse=True)
 def _user_config_isolated(tmp_path_factory, monkeypatch):
     """v13 (hermetic-test-caught, real bug): every test touching
     orchestrator-model settings, Grounded Mode, or (new) the MCP bridge's

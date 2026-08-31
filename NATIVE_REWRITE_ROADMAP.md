@@ -232,13 +232,53 @@ missing piece, not the engine itself.
   live, uploading one real PDF produced two entries in the file list.
   Fixed at the source (`GET /api/files` now skips dotfiles), benefiting
   every panel that lists uploads, not just the new PDF reader.
-- **GDELT global event ingestion + kinetic knowledge graph — NOT
-  started.** Real, substantial, separately-scoped work (a background
-  ingestion pipeline for a real public dataset, plus graph storage and
-  canvas-overlay wiring) — not begun this pass given the scope already
-  covered; a genuine future increment, not silently dropped.
+- **GDELT global event ingestion + kinetic knowledge graph — BUILT,
+  v13.6** (`dourmouse/gdelt_graph.py`). Real ingestion, not a stub: a
+  background poller (`start_gdelt_graph_poller`, same idempotent
+  start/stop/env-opt-out shape as the pre-existing world-pulse/gmail
+  warmers) reads GDELT's actual keyless GKG 2.1 15-minute export stream
+  directly from `data.gdeltproject.org` — field layout (27 tab columns)
+  confirmed live against a real downloaded file before the parser was
+  written. This is deliberately a DIFFERENT GDELT read than the
+  pre-existing `conflict_events` world-monitor channel: that one reads
+  the EVENT file for map pins; this reads the GKG file and turns real
+  per-article co-occurrence of named persons/organizations/locations
+  into an actual graph — bounded and decaying (default 6h max age) so
+  it stays "kinetic," not an ever-growing dump. New `+ EVENT GRAPH`
+  workspace panel renders it as a real client-side force-directed
+  simulation (spring edges, node repulsion, draggable, hover for
+  real mention counts) — no charting library, plain canvas physics.
+  "Streamparse" (Storm) explicitly NOT used — GDELT's own 15-minute
+  cadence makes a plain polling loop the honest right-sized tool; see
+  the module's own docstring for the reasoning. Live-verified end to
+  end against the real feed: one real poll ingested 4717 real entities
+  and 22045 real co-occurrence edges from a single GKG file (Donald
+  Trump / United States / India among the top real nodes by mention
+  count), rendered correctly in the browser with working hover
+  tooltips and clean teardown on panel close. 36 new tests (parser,
+  graph decay/prune/snapshot, poller dedupe, lifecycle), all green.
 
-Full suite after both: 3446 passed, 3 skipped, 0 failed.
+Full suite after both segments: 3446 passed, 3 skipped, 0 failed (pre-GDELT); GDELT segment adds 36 more, all green — see change log for the exact final count.
+
+- **Item 9 — safe subset BUILT, v13.6** (`dourmouse/git_timetravel.py`).
+  Deliberately scoped down from the checklist's own framing (see below)
+  to what's actually safe to automate: real, read-only history of
+  DOURMOUSE'S OWN repo via real `git log`/`git show` subprocess calls —
+  never a mutating git call anywhere in the module (no checkout/reset/
+  revert), verified by a real test that hashes the working tree before
+  and after every read operation and asserts it's byte-identical. New
+  `+ TIME TRAVEL` workspace panel: real commit list, click a commit for
+  its real changed-file list and real diff, click a file for its real
+  content as of that exact commit. Live-verified against this actual
+  repo's real history in the browser (real commit subjects, real diff
+  text, real historical file content for `dourmouse/pdf_reader.py`
+  correctly retrieved from a past commit). 20 new module tests (against
+  real disposable git repos, not mocked subprocess output) + 6 new
+  server-endpoint tests, all green. Actual rollback/revert stays a
+  manual action in a real terminal, matching this codebase's existing
+  "irreversible actions need a human" discipline (gmail_send is
+  REQUIRES_CONFIRMATION, etc.) — a deliberate boundary, not a gap; see
+  below for what's still genuinely unbuilt.
 
 ## Explicitly NOT built yet (flagged, not silently skipped)
 
@@ -259,11 +299,13 @@ Full suite after both: 3446 passed, 3 skipped, 0 failed.
   on the user's behalf" beyond the browser sandbox, and deserves the
   same deliberate confirmation-gate design as everything else, not a
   rushed build.
-- **Item 9** — Visual git time-travel / state-rollback timeline scrubber
-  across code + DB + UI-layout snapshots.
-- **GDELT real-time global event ingestion + kinetic knowledge graph** —
-  a real background ingestion pipeline for GDELT's public dataset, plus
-  graph storage and canvas-overlay wiring. Not started.
+- **Item 9 — the general auto-versioning + instant-revert system the
+  checklist actually describes.** What's built (above) is real,
+  read-only history browsing of THIS repo only. Auto-versioning
+  ARBITRARY user files with a one-click "safely revert" is a separate,
+  data-safety-critical system (what gets versioned, how often, storage
+  location, what happens to uncommitted changes on revert) — deserves
+  its own deliberate design pass, not an extension of this module.
 - **True real-time particle effects along edges** (item 7's own
   full description) — the current implementation polls a snapshot every
   2s, not a genuine SSE event stream into the native shell. A real

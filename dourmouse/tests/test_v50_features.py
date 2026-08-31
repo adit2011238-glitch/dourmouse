@@ -293,6 +293,85 @@ class TestPdfEndpoints:
         assert status == 404
 
 
+class TestGitTimeTravelEndpoints:
+    """GET /api/git/log, /diff, /changed_files, /file_at — v13.6, Vision
+    OS item 9's safe subset (dourmouse/git_timetravel.py — real,
+    read-only git history of DOURMOUSE'S OWN repo; see that module's own
+    docstring for the deliberate "never mutates the working tree, never
+    an arbitrary user file" scope boundary). These endpoints always read
+    ``webui._PROJECT_ROOT`` — monkeypatched here to a real, disposable
+    git repo so this test suite never depends on or touches this actual
+    checkout's own git state."""
+
+    def _real_repo(self, tmp_path, monkeypatch):
+        import os
+        import subprocess
+
+        from dourmouse import webui as webui_module
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
+        }
+        subprocess.run(["git", "init", "-q"], cwd=str(repo), check=True, env=env)
+        (repo / "a.txt").write_text("hello\n")
+        subprocess.run(["git", "add", "a.txt"], cwd=str(repo), check=True, env=env)
+        subprocess.run(["git", "commit", "-q", "-m", "first commit"], cwd=str(repo), check=True, env=env)
+        monkeypatch.setattr(webui_module, "_PROJECT_ROOT", repo)
+        return repo
+
+    def test_log_returns_the_real_commit(self, server, monkeypatch, tmp_path):
+        self._real_repo(tmp_path, monkeypatch)
+        _, port = server
+        status, body = _get(port, "/api/git/log")
+        assert status == 200
+        data = json.loads(body)
+        assert data["ok"] is True
+        assert len(data["commits"]) == 1
+        assert data["commits"][0]["subject"] == "first commit"
+
+    def test_diff_returns_the_real_diff_text(self, server, monkeypatch, tmp_path):
+        self._real_repo(tmp_path, monkeypatch)
+        _, port = server
+        status, body = _get(port, "/api/git/diff?hash=HEAD")
+        assert status == 200
+        data = json.loads(body)
+        assert data["ok"] is True
+        assert "hello" in data["diff"]
+
+    def test_changed_files_reports_real_status(self, server, monkeypatch, tmp_path):
+        self._real_repo(tmp_path, monkeypatch)
+        _, port = server
+        status, body = _get(port, "/api/git/changed_files?hash=HEAD")
+        assert status == 200
+        data = json.loads(body)
+        assert data["files"] == [{"status": "A", "path": "a.txt"}]
+
+    def test_file_at_returns_real_content(self, server, monkeypatch, tmp_path):
+        self._real_repo(tmp_path, monkeypatch)
+        _, port = server
+        status, body = _get(port, "/api/git/file_at?hash=HEAD&path=a.txt")
+        assert status == 200
+        assert json.loads(body) == {"ok": True, "content": "hello\n", "error": None}
+
+    def test_bad_hash_is_honest_not_a_crash(self, server, monkeypatch, tmp_path):
+        self._real_repo(tmp_path, monkeypatch)
+        _, port = server
+        status, body = _get(port, "/api/git/diff?hash=" + urllib.parse.quote("; rm -rf /"))
+        assert status == 200
+        assert json.loads(body)["ok"] is False
+
+    def test_path_traversal_in_file_at_is_refused(self, server, monkeypatch, tmp_path):
+        self._real_repo(tmp_path, monkeypatch)
+        _, port = server
+        status, body = _get(port, "/api/git/file_at?hash=HEAD&path=" + urllib.parse.quote("../../etc/passwd"))
+        assert status == 200
+        assert json.loads(body)["ok"] is False
+
+
 # --------------------------------------------------------------------------- #
 # A7 — setup status panel
 # --------------------------------------------------------------------------- #
