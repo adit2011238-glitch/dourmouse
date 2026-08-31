@@ -41,6 +41,38 @@ What survived the cut, and what didn't:
 The historical Status section and Phase write-ups below are kept as a
 record of what was actually built and verified, not as a live plan.
 
+## Since the cut (2026-08-30/31) — real, live-verified additions to `workspace.html`
+
+Three things shipped directly on `workspace.html` after the cut above,
+none of them in the original phase plan below — the "Iron Man" ambition
+(real-time window control by natural language, real 3D, no clicking)
+described by the user directly rather than through this roadmap:
+
+- **3D MODEL panel** — real Three.js (`window.Design3D`, ported verbatim
+  from `console.html`'s DESIGN screen) plus a natural-language ask box:
+  "show me a red sphere on a blue box" makes the real `design_3d` agent
+  call `generate_3d_model_spec` and the scene updates live, no manual
+  "add primitive" clicking required.
+- **3D VIEW panel** — the real God's Eye View globe (`console.html`'s own
+  EYE-tab embed pattern, ported), openable by click or by voice/typed
+  command (`open globe`).
+- **panel_control** — real LLM-driven panel geometry: a new subagent
+  (`dourmouse/workspace_panel_ops.py`) the companion reaches via
+  `delegate_task`, giving `open/close/move/resize_panel` tools real
+  natural-language reach — "move the map panel to x=400 y=150" genuinely
+  moves it, live-verified against the running server. Originally named
+  `workspace_ui`; renamed after a real routing collision was found and
+  fixed (see `dourmouse_universe.md`'s 2026-08-31 entries for the full
+  story — the word "workspace" in the name collided with the planner's
+  own word-match scorer for any unrelated query containing the ordinary
+  phrase "in your workspace").
+
+Full detail, every commit, and the two real infrastructure bugs found and
+fixed along the way (an Ollama think-flag 400 affecting the companion's
+default model, and a bound-method identity bug that silently disabled
+real incremental streaming) are in `dourmouse_universe.md`, not repeated
+here.
+
 ## Status (historical — for the now-deleted index.html VISION screen)
 
 - **Phase 1 (gesture -> globe): SHIPPED and live-verified.** GLOBE MODE
