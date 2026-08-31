@@ -134,6 +134,52 @@ them.
 
 Full suite after all three: 3412 passed, 3 skipped, 0 failed.
 
+## Item 7 (agent-swarm live graph visualization) — DONE, real, live-verified
+
+`dourmouse-native/app/src/agentGraph.ts` (new, pure/testable-shaped
+functions) + `src-tauri/src/lib.rs` (two new commands,
+`fetch_agent_topology`/`fetch_agent_activity`) + `App.tsx` (real polling
+wiring). Renders the REAL, already-existing agent roster topology
+(`dourmouse/webui.py`'s `build_link_topology()`, served at `/api/links` —
+real nodes/edges the browser-based Agent Map already used) as a live
+React Flow graph, overlaid with REAL live per-agent status
+(`ActivityTracker.snapshot()`, `/api/activity` — idle/computing/auth,
+polled every 2s) — computing nodes get a real amber glow, auth nodes
+red, matching `ui/workspace.html`'s own color vocabulary. NOT a
+LangGraph orchestrator swap (see the architecture decision above —
+dispatch.py's real orchestration is completely untouched; this only
+visualizes it).
+
+**Live-verified end to end, not just "compiles"**: added temporary
+`eprintln!` debug output to the Rust command, ran the real packaged
+`.app` binary directly (not through `open`, so stdout was directly
+visible), and confirmed real requests + real responses:
+```
+[DEBUG] _fetch_json calling http://127.0.0.1:8765/api/hands_free/status
+[DEBUG] _fetch_json calling http://127.0.0.1:8765/api/links
+[DEBUG] _fetch_json http://127.0.0.1:8765/api/hands_free/status -> 122 bytes
+[DEBUG] _fetch_json http://127.0.0.1:8765/api/links -> 17394 bytes
+[DEBUG] _fetch_json calling http://127.0.0.1:8765/api/activity
+[DEBUG] _fetch_json http://127.0.0.1:8765/api/activity -> 72132 bytes
+```
+Real note for future debugging of this shell: `lsof` checks around the
+running process caught ZERO TCP connections despite this real traffic —
+a real methodological miss (reqwest's connect-request-close cycle is too
+fast for a point-in-time `lsof` snapshot to reliably catch), not evidence
+of a bug. `eprintln!` + running the binary directly is the reliable way
+to verify network activity in this shell, not `lsof` polling. Debug
+prints removed before committing; `npm run build` + `cargo check` both
+clean afterward, and a final rebuild + launch reconfirmed the app still
+runs.
+
+Also confirmed (Browser pane, plain `vite dev` outside any Tauri
+runtime): the React component itself renders correctly, the background
+grid/controls paint, and `invoke()` fails with a clear, expected
+`"Cannot read properties of undefined (reading 'invoke')"` — CORRECT,
+expected behavior outside a real Tauri webview (no `window.__TAURI_INTERNALS__`
+injected by a plain browser), not a bug; the packaged app's real
+internals make it work there.
+
 ## Explicitly NOT built yet (flagged, not silently skipped)
 
 - **Skia GPU rendering.** React Flow's default renderer is DOM/SVG, not
@@ -143,11 +189,6 @@ Full suite after all three: 3412 passed, 3 skipped, 0 failed.
 - **Item 2** — Qdrant + Ollama embeddings, semantic-proximity gravity
   clustering physics.
 - **Item 4** — Excalidraw multimodal scratchpad panel.
-- **Item 7** — Agent-swarm live graph visualization on the React Flow
-  canvas, driven by the real SSE tool_use/tool_result event stream
-  `ui/workspace.html`/`ui/console.html` already consume (NOT a LangGraph
-  orchestrator swap — see the architecture decision above: dispatch.py's
-  own orchestration loop stays; only the VISUALIZATION is new).
 - **Item 8** — Playwright DOM injection (web) + native accessibility-tree
   automation (desktop). Real, substantial, and safety-sensitive — this
   overlaps directly with "an agent driving other apps on the user's
@@ -157,17 +198,20 @@ Full suite after all three: 3412 passed, 3 skipped, 0 failed.
   extending that SAME discipline, not inventing a separate one.
 - **Item 9** — Visual git time-travel / state-rollback timeline scrubber
   across code + DB + UI-layout snapshots.
+- **True real-time particle effects along edges** (item 7's own
+  full description) — the current implementation polls a snapshot every
+  2s, not a genuine SSE event stream into the native shell. A real
+  future upgrade once this shell has its own SSE client.
 
 ## Next concrete steps (in priority order, update as work lands)
 
-1. Wire the native canvas's panel nodes to real backend data each panel
-   already shows in `ui/workspace.html` (Gmail, companion chat, world
-   map) — same real endpoints, new renderer.
-2. Item 7 (agent-swarm graph viz) is the next natural pick: the native
-   canvas (React Flow, already built) + the real SSE event stream
-   (already built) just need wiring together — no new subsystem.
-3. Items 2, 4, 8, 9 are each genuinely substantial, separately-scoped
+1. Items 2, 4, 8, 9 are each genuinely substantial, separately-scoped
    efforts (a new infra service, a vendored third-party editor, a
    safety-sensitive automation surface, a full snapshot/rollback system)
    — pick off one at a time, not in parallel, same discipline as
    everything else in this doc.
+2. A real SSE client in the native shell (Rust side, forwarding events
+   to React via Tauri's event system) would upgrade item 7's polling to
+   genuine real-time, and is also the natural foundation for wiring the
+   native canvas's panel nodes to live chat/tool activity the same way
+   `ui/workspace.html` already does.
