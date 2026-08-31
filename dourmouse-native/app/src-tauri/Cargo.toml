@@ -25,5 +25,13 @@ serde_json = "1"
 # Real HTTP client to the existing Python backend (dourmouse/webui.py,
 # unchanged) -- the native shell is a NEW client of the SAME real
 # server, not a second backend. See lib.rs's own comment.
-reqwest = { version = "0.12", features = ["json"] }
+# v13.6: "stream" feature added for a real SSE client against
+# GET /api/events (item 7's own flagged gap: real push, not a 2s poll) --
+# see start_activity_stream in lib.rs.
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
+# Tauri already runs on tokio internally (tauri::async_runtime); this
+# direct dependency is only for tokio::time::sleep's backoff delay in
+# start_activity_stream's reconnect loop.
+tokio = { version = "1", features = ["time"] }
 

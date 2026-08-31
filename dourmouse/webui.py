@@ -284,24 +284,62 @@ class ActivityTracker:
         self._feed: dict[str, list[dict[str, Any]]] = {
             sub.name: [] for sub in registry.all_subagents()
         }
+        self._broadcast: Any = None
+
+    def set_broadcast(self, fn: Any) -> None:
+        """Wire a real push channel (v13.6, item 7's own flagged SSE gap:
+        "the current implementation polls a snapshot every 2s, not a
+        genuine SSE event stream"). ``fn`` is ``server.events_broadcast
+        .broadcast`` — the SAME real fan-out hub `/api/events` already
+        uses for Freebuff/all_hands/state_change events (nothing new
+        server-side, just a new real event TYPE on the existing bus).
+        Optional: with no broadcaster wired, ActivityTracker behaves
+        exactly as before (poll-only via /api/activity), never breaks."""
+        self._broadcast = fn
 
     def on_event(self, entry: dict[str, Any]) -> None:
         """Observer hook — swallow everything so dispatch never breaks."""
         try:
-            self._record(entry)
+            changed = self._record(entry)
+            if changed and self._broadcast is not None:
+                self._broadcast_changed(changed)
+        except Exception:
+            pass
+
+    def _broadcast_changed(self, changed: set[str]) -> None:
+        """Push a real, compact delta (only the agents that actually
+        changed, not a full snapshot) over the existing SSE hub. Wrapped
+        so a broken/disconnected broadcaster can never take dispatch
+        down — same discipline as on_event's own outer try/except."""
+        with self._lock:
+            payload = {
+                "type": "agent_activity",
+                "agents": {
+                    name: {"status": self._status[name], "last": self._last[name]}
+                    for name in changed
+                },
+            }
+        try:
+            self._broadcast(payload)
         except Exception:
             pass
 
     def _agent_for(self, entry: dict[str, Any]) -> str | None:
         return self._tool_to_agent.get(entry.get("name", ""))
 
-    def _record(self, entry: dict[str, Any]) -> None:
+    def _record(self, entry: dict[str, Any]) -> set[str]:
+        """Applies one event to internal state; returns the set of agent
+        names whose status/last actually changed (v13.6, used to drive a
+        real SSE push — see set_broadcast). Empty set means nothing
+        broadcast-worthy happened (e.g. an event for an unmapped tool)."""
         etype = entry.get("type")
+        changed: set[str] = set()
         with self._lock:
             if etype == "tool_use":
                 agent = self._agent_for(entry)
                 if agent is None:
-                    return
+                    return changed
+                changed.add(agent)
                 self._status[agent] = "computing"
                 self._last[agent] = {
                     "tool": entry.get("name"),
@@ -321,7 +359,8 @@ class ActivityTracker:
             elif etype == "tool_result":
                 agent = self._agent_for(entry)
                 if agent is None:
-                    return
+                    return changed
+                changed.add(agent)
                 if self._last[agent] is not None:
                     self._last[agent]["result"] = (entry.get("text") or "")[:400]
                 self._feed[agent].append(
@@ -338,6 +377,7 @@ class ActivityTracker:
                 for agent, status in self._status.items():
                     if status == "computing":
                         self._status[agent] = "auth"
+                        changed.add(agent)
                         self._feed[agent].append(
                             {
                                 "type": "auth",
@@ -353,11 +393,12 @@ class ActivityTracker:
                 # window shows genuine current activity, never a stub.
                 agent = self._agent_for(entry)
                 if agent is None:
-                    return
+                    return changed
                 # A poll must never clobber a mid-chat computing/auth state:
                 # only idle/live agents return to their always-on LIVE status.
                 if self._status[agent] not in ("idle", "live"):
-                    return
+                    return changed
+                changed.add(agent)
                 self._status[agent] = "live"
                 self._last[agent] = {
                     "tool": entry.get("name"),
@@ -381,6 +422,8 @@ class ActivityTracker:
                 for agent in self._status:
                     if self._status[agent] in ("computing", "auth"):
                         self._status[agent] = "idle"
+                        changed.add(agent)
+        return changed
 
     def _trim(self, agent: str) -> None:
         feed = self._feed[agent]
@@ -5663,6 +5706,16 @@ def run_server(
     # Freebuff app. The watcher emits into the hub, the hub pushes to every
     # connected HUD stream.
     server.events_broadcast = _SSEBroadcast()
+    # v13.6: real push for the agent-swarm graph (Vision OS item 7's own
+    # flagged gap — "the current implementation polls a snapshot every
+    # 2s, not a genuine SSE event stream"). ActivityTracker now emits a
+    # real "agent_activity" event on this SAME existing hub every time an
+    # agent's status actually changes — no new endpoint, no new
+    # infrastructure, just a new event type on the fan-out that already
+    # serves /api/events. A poll-based consumer (the workspace.html Agent
+    # Map, or a native shell that hasn't wired an SSE client yet) is
+    # completely unaffected; this is additive.
+    server.tracker.set_broadcast(server.events_broadcast.broadcast)
     # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
     # HUD and the dedicated window listen to (live per-brain cards).
     from dourmouse import all_hands

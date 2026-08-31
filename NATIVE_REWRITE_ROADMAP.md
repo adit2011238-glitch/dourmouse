@@ -329,10 +329,53 @@ Full suite after both segments: 3446 passed, 3 skipped, 0 failed (pre-GDELT); GD
   data-safety-critical system (what gets versioned, how often, storage
   location, what happens to uncommitted changes on revert) — deserves
   its own deliberate design pass, not an extension of this module.
-- **True real-time particle effects along edges** (item 7's own
-  full description) — the current implementation polls a snapshot every
-  2s, not a genuine SSE event stream into the native shell. A real
-  future upgrade once this shell has its own SSE client.
+- **True real-time particle effects along edges** (item 7's own full
+  visual description — animated dots traveling along an edge as a tool
+  call happens) — genuinely NOT built; a real client-side animation
+  layer on top of the now-real event stream below, not attempted here.
+
+## v13.6 — item 7's SSE gap closed (real push, not just a faster poll)
+
+The gap this same section used to flag ("the current implementation
+polls a snapshot every 2s, not a genuine SSE event stream into the
+native shell") is closed, real, both sides:
+
+- **Server side** (`dourmouse/webui.py`): `ActivityTracker` gained a
+  `set_broadcast()` hook wired to the ALREADY-EXISTING
+  `server.events_broadcast` fan-out hub `/api/events` serves for
+  Freebuff/all_hands/state_change events — no new endpoint, no new
+  infrastructure, just a new real event type (`agent_activity`) on the
+  bus that already existed. Broadcasts a compact DELTA (only the agents
+  that actually changed on a given real dispatch event), never a full
+  snapshot spam. A broken/disconnected broadcaster can never break
+  dispatch (wrapped, same discipline as every other optional-feature
+  hook in this file). 10 new tests, including a real end-to-end one: an
+  actual `GET /api/events` HTTP client receiving an actual
+  `agent_activity` event pushed by a real `tracker.on_event()` call.
+- **Native client side** (`dourmouse-native/app/src-tauri/src/lib.rs`):
+  a new `start_activity_stream` Tauri command opens a real streaming
+  GET against that same `/api/events` hub, parses real SSE frames (a
+  small, pure, directly-unit-tested `extract_agent_activity_frames`
+  function — 6 real tests against the EXACT wire format
+  `_SSEStream.emit()` produces, including partial-frame-across-chunks
+  handling), and re-emits each real `agent_activity` payload as a Tauri
+  event. Idempotent (won't double-start), self-healing (3s backoff
+  retry forever on a dropped/refused connection, never gives up
+  silently). `App.tsx`'s activity poll is kept as a slow (10s) resync
+  safety net rather than removed outright — an honest fallback, not a
+  hard dependency on the stream always being connected.
+- **Honest limitation on native-side verification**: the Rust/TS
+  toolchains both compile clean (`cargo check`, `cargo test`, `tsc
+  --noEmit`, all real, all pass) and the Rust SSE parser is unit-tested
+  against the exact real wire format the Python side produces, but this
+  development environment has no way to open and visually verify an
+  actual native macOS Tauri window — unlike every browser-based panel
+  this session, which was live-verified with real screenshots. The
+  Python-side push (the harder, more failure-prone half) IS verified
+  fully end-to-end with a real HTTP SSE client. Genuine end-to-end
+  verification of the compiled `.app` — actually watching a node glow
+  the instant a real tool call fires, with no poll delay — is the one
+  piece of this still worth doing on a machine that can run it.
 
 ## Next concrete steps (in priority order, update as work lands)
 
