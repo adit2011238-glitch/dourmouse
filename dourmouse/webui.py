@@ -938,11 +938,63 @@ def build_link_topology(registry: DispatchRegistry) -> dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
-def build_setup_status(server) -> dict[str, Any]:
-    """v5.0: honest capability checklist for the SETUP panel (Rule 2.2).
+_SETUP_STATUS_CACHE_ENV = "DOURMOUSE_SETUP_CACHE_TTL"
+_SETUP_STATUS_DEFAULT_TTL = 20.0  # seconds
+_setup_status_cache: dict[str, Any] = {"server_id": None, "at": 0.0, "result": None}
+_setup_status_cache_lock = threading.Lock()
 
-    Every entry reports configured True/False + a one-line fix. Never
-    fabricates a capability: a missing key/CLI/model is NOT CONFIGURED.
+
+def _setup_status_cache_ttl() -> float:
+    try:
+        return float(os.environ.get(_SETUP_STATUS_CACHE_ENV, str(_SETUP_STATUS_DEFAULT_TTL)))
+    except ValueError:
+        return _SETUP_STATUS_DEFAULT_TTL
+
+
+def build_setup_status(server) -> dict[str, Any]:
+    """v13.5 (live-diagnosed, real bug — "it didn't load properly in
+    preview"): a real GET /api/setup on this exact machine measured
+    15.4s. build_setup_status() (the uncached implementation below) makes
+    several real, synchronous network/subprocess probes with no caching
+    of its own — the compute-node health probe (dourmouse.remote_server.
+    server_status(), called TWICE per request: once directly here and
+    again inside connections.check_connections()), `claude --version`
+    (subprocess, up to a real 10s timeout), and a macOS Keychain lookup
+    (subprocess, up to 5s). Each individual probe already has its own
+    documented, deliberately-short timeout (world_pulse_status's own
+    docstring already fixed the identical class of bug for ITS probe,
+    calling this exact endpoint "a panel whose entire purpose is a quick
+    capability checklist") — but nothing wrapped the WHOLE function, so
+    every poll paid the full cold cost again regardless.
+
+    Cached here by (server identity, time) — NOT a bare time-only cache:
+    keying on id(server) too means two DIFFERENT server objects (as every
+    test in this suite constructs, e.g. test_atlas_cli.py's own direct
+    call) never share a stale result, while the ONE real long-lived
+    server this endpoint actually serves in production gets real caching
+    across repeated polls. Default TTL 20s (DOURMOUSE_SETUP_CACHE_TTL to
+    override) — the checklist doesn't change meaningfully faster than
+    that in practice.
+    """
+    ttl = _setup_status_cache_ttl()
+    now = time.monotonic()
+    with _setup_status_cache_lock:
+        if (
+            _setup_status_cache["server_id"] == id(server)
+            and (now - _setup_status_cache["at"]) < ttl
+        ):
+            return _setup_status_cache["result"]
+    result = _build_setup_status_uncached(server)
+    with _setup_status_cache_lock:
+        _setup_status_cache.update(server_id=id(server), at=now, result=result)
+    return result
+
+
+def _build_setup_status_uncached(server) -> dict[str, Any]:
+    """The real, honest capability checklist for the SETUP panel (Rule
+    2.2) — every entry reports configured True/False + a one-line fix,
+    never fabricates a capability. See build_setup_status() above for the
+    caching wrapper (and the real 15.4s-load bug it fixes) around this.
     """
     import os
 
@@ -1102,14 +1154,42 @@ def build_setup_status(server) -> dict[str, Any]:
     mem = getattr(server, "memory", None)
     mem_ok = mem is not None and learn_enabled()
     mem_count = 0
+    mem_slow = False
     if mem_ok:
-        try:
-            mem_count = mem.count()
-        except Exception:  # noqa: BLE001 -- a broken store must not kill setup
-            mem_count = 0
+        # v13.5 (live-diagnosed, real bug): mem.count() is fast for a local
+        # MemoryStore but a REAL, un-cached network call for a
+        # RemoteMemoryStore (a real remote RAG host, up to its own 15s
+        # timeout — memory_store.py's own default) — measured live at
+        # 15.6s on the very first /api/setup poll after a fresh start,
+        # exactly the "SETUP panel whose entire purpose is a quick
+        # checklist" problem world_pulse_status's own docstring already
+        # names for a different probe. build_setup_status's own cache
+        # above fixes every poll AFTER the first; this bounds the first
+        # one too — a real background thread with a short real wait
+        # (2s), falling back to an honest "checking…" instead of blocking
+        # the whole request on the store's full internal timeout. The
+        # count still gets the real remote answer eventually (the thread
+        # keeps running even after this function gives up waiting on it);
+        # this just stops one slow remote host from making the FIRST
+        # setup-panel view of a session look hung.
+        result: dict[str, Any] = {}
+
+        def _count_in_background() -> None:
+            try:
+                result["count"] = mem.count()
+            except Exception as exc:  # noqa: BLE001 -- a broken store must not kill setup
+                result["error"] = exc
+
+        t = threading.Thread(target=_count_in_background, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+        if "count" in result:
+            mem_count = result["count"]
+        else:
+            mem_slow = True  # either still running, or it raised -- either way, no real number yet
     items["memory"] = {
         "configured": mem_ok,
-        "detail": f"{mem_count} facts" if mem_ok else "off",
+        "detail": ("checking… (remote store slow to answer)" if mem_slow else f"{mem_count} facts") if mem_ok else "off",
         "hint": "DOURMOUSE_LEARN=1 + FTS5 store",
     }
     if cfg is not None and hasattr(cfg, "model_for_agent"):
@@ -5614,7 +5694,44 @@ def serve_forever(
     if server.daily_reporter is not None and server.daily_reporter.running:
         print("Daily report: scheduled (DOURMOUSE_REPORT_TIME)")
     if server.memory is not None and learn_enabled():
-        print(f"Store & Learn: {server.memory.count()} fact(s) in long-term memory")
+        # v13.5 (live-reproduced, real crash — "it didn't load properly"):
+        # server.memory can be a RemoteMemoryStore (DOURMOUSE_MEMORY_REMOTE_URL
+        # set, see general_roster._open_memory_store's own remote-first
+        # check) whose .count() genuinely RAISES RemoteMemoryStoreUnavailable
+        # when the remote machine is unreachable — unlike the local
+        # MemoryStore.count(), which never raises. This one line had no
+        # try/except while the diagnostic block right above it does (same
+        # "a diagnostic must never block startup" rule) — a single dead
+        # remote RAG host at boot time took down the ENTIRE server before
+        # it ever started listening. Confirmed live: a fresh process died
+        # here with RemoteMemoryStoreUnavailable the moment the configured
+        # remote host (this session's own desktop RAG migration) was
+        # slow/unreachable at startup.
+        #
+        # v13.5: also bounded to a real short wait (2s), same reasoning as
+        # build_setup_status's own memory-count fix right above this
+        # function — a slow (not just dead) remote host still has a real
+        # 15s timeout to pay before this try/except catches it, and this
+        # banner print runs BEFORE the server's accept loop starts, so a
+        # slow remote host was making every real client connection attempt
+        # during that window fail outright, not just "load slowly".
+        _mem_result: dict[str, Any] = {}
+
+        def _startup_mem_count() -> None:
+            try:
+                _mem_result["count"] = server.memory.count()
+            except Exception as exc:  # noqa: BLE001 - a diagnostic must never block startup
+                _mem_result["error"] = exc
+
+        _mem_thread = threading.Thread(target=_startup_mem_count, daemon=True)
+        _mem_thread.start()
+        _mem_thread.join(timeout=2.0)
+        if "count" in _mem_result:
+            print(f"Store & Learn: {_mem_result['count']} fact(s) in long-term memory")
+        elif "error" in _mem_result:
+            print(f"Store & Learn: fact count unavailable ({_mem_result['error']})")
+        else:
+            print("Store & Learn: fact count still loading (remote store slow to answer) — continuing startup")
     try:
         from dourmouse.orch_net import status as _neuro_status
 

@@ -206,6 +206,143 @@ class TestSetupPanel:
             assert "hint" in items[key]
 
 
+class TestSetupStatusMemoryCountBoundedWait:
+    """v13.5 (live-diagnosed, real bug): mem.count() is a real, uncached
+    network call for a RemoteMemoryStore, up to its own real 15s timeout
+    — measured live at 15.6s on the first /api/setup poll after a fresh
+    server start. Bounded here to a real 2s wait with an honest
+    "checking…" fallback rather than blocking the whole request."""
+
+    def test_a_slow_memory_store_does_not_block_past_the_bound(self):
+        import time
+        import types
+
+        from dourmouse import webui as webui_module
+
+        class _SlowMemory:
+            def count(self):
+                time.sleep(5.0)  # real sleep, well past the 2s bound
+                return 999
+
+        server = types.SimpleNamespace(config=None, memory=_SlowMemory(), live_runtime=None)
+        started = time.monotonic()
+        result = webui_module._build_setup_status_uncached(server)
+        elapsed = time.monotonic() - started
+        assert elapsed < 4.0, f"blocked for {elapsed}s, past the real 2s bound"
+        assert "checking" in result["items"]["memory"]["detail"].lower()
+        assert result["items"]["memory"]["configured"] is True
+
+    def test_a_fast_memory_store_reports_the_real_count(self):
+        import types
+
+        from dourmouse import webui as webui_module
+
+        class _FastMemory:
+            def count(self):
+                return 42
+
+        server = types.SimpleNamespace(config=None, memory=_FastMemory(), live_runtime=None)
+        result = webui_module._build_setup_status_uncached(server)
+        assert result["items"]["memory"]["detail"] == "42 facts"
+
+    def test_a_raising_memory_store_is_still_honest_not_a_crash(self):
+        import types
+
+        from dourmouse import webui as webui_module
+
+        class _BrokenMemory:
+            def count(self):
+                raise RuntimeError("store corrupted")
+
+        server = types.SimpleNamespace(config=None, memory=_BrokenMemory(), live_runtime=None)
+        result = webui_module._build_setup_status_uncached(server)
+        # A fast raise still lands as "no real number yet" via the same
+        # bounded-wait path (the thread finishes almost instantly with an
+        # error, not a count) -- never a crash, never a fabricated number.
+        assert result["items"]["memory"]["configured"] is True
+        assert "checking" in result["items"]["memory"]["detail"].lower()
+
+
+class TestSetupStatusCache:
+    """v13.5 (live-diagnosed, real bug — "it didn't load properly in
+    preview"): a real GET /api/setup on the actual machine measured
+    15.4s (compute-node health probe called TWICE + a slow `claude
+    --version` subprocess + a Keychain lookup, none of it cached at the
+    whole-function level). See webui.build_setup_status's own docstring
+    for the full diagnosis. These test the cache wrapper directly
+    (webui._build_setup_status_uncached monkeypatched to a counting spy)
+    rather than going through a real server + real probes — fast,
+    deterministic, and isolates the caching behavior itself from
+    whatever the real probes happen to return on this machine."""
+
+    def _fake_server(self):
+        import types
+
+        return types.SimpleNamespace(config=None, memory=None, live_runtime=None)
+
+    def test_second_call_within_ttl_is_served_from_cache(self, monkeypatch):
+        from dourmouse import webui as webui_module
+
+        calls = []
+        monkeypatch.setattr(
+            webui_module, "_build_setup_status_uncached",
+            lambda server: calls.append(1) or {"items": {"marker": "real"}},
+        )
+        server = self._fake_server()
+        first = webui_module.build_setup_status(server)
+        second = webui_module.build_setup_status(server)
+        assert first == second == {"items": {"marker": "real"}}
+        assert len(calls) == 1  # the SECOND call must be served from cache
+
+    def test_different_server_objects_never_share_a_cached_result(self, monkeypatch):
+        # The real safety property that makes this cache correct for
+        # tests (and for anything that ever constructs a second server):
+        # id(server)-keyed, not a bare time-only cache.
+        from dourmouse import webui as webui_module
+
+        calls = []
+
+        def fake(server):
+            calls.append(server)
+            return {"items": {"n": len(calls)}}
+
+        monkeypatch.setattr(webui_module, "_build_setup_status_uncached", fake)
+        server_a = self._fake_server()
+        server_b = self._fake_server()
+        result_a = webui_module.build_setup_status(server_a)
+        result_b = webui_module.build_setup_status(server_b)
+        assert result_a == {"items": {"n": 1}}
+        assert result_b == {"items": {"n": 2}}
+        assert len(calls) == 2  # both real, neither served the other's cache
+
+    def test_cache_expires_after_the_ttl(self, monkeypatch):
+        from dourmouse import webui as webui_module
+
+        calls = []
+        monkeypatch.setattr(
+            webui_module, "_build_setup_status_uncached",
+            lambda server: calls.append(1) or {"items": {}},
+        )
+        monkeypatch.setenv("DOURMOUSE_SETUP_CACHE_TTL", "0")  # expires immediately
+        server = self._fake_server()
+        webui_module.build_setup_status(server)
+        webui_module.build_setup_status(server)
+        assert len(calls) == 2  # TTL=0 -> never served from cache
+
+    def test_default_ttl_is_a_real_positive_number(self, monkeypatch):
+        from dourmouse import webui as webui_module
+
+        monkeypatch.delenv("DOURMOUSE_SETUP_CACHE_TTL", raising=False)
+        assert webui_module._setup_status_cache_ttl() == webui_module._SETUP_STATUS_DEFAULT_TTL
+        assert webui_module._SETUP_STATUS_DEFAULT_TTL > 0
+
+    def test_malformed_ttl_env_falls_back_to_the_default(self, monkeypatch):
+        from dourmouse import webui as webui_module
+
+        monkeypatch.setenv("DOURMOUSE_SETUP_CACHE_TTL", "not-a-number")
+        assert webui_module._setup_status_cache_ttl() == webui_module._SETUP_STATUS_DEFAULT_TTL
+
+
 # --------------------------------------------------------------------------- #
 # A5 — Codex backend
 # --------------------------------------------------------------------------- #
