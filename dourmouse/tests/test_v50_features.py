@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.client
 import json
 import threading
+import urllib.parse
 
 import pytest
 
@@ -75,6 +76,25 @@ class TestUpload:
         # served back
         status, body = _get(port, "/uploads/notes.txt")
         assert status == 200 and body == "hello world upload"
+
+    def test_api_files_skips_dotfiles(self, server, monkeypatch, tmp_path):
+        # v13.5 (live-caught, real bug): this project's own workspace/
+        # uploads/ lives on an ExFAT external volume, which makes macOS
+        # synthesize a real "._<name>" AppleDouble sidecar next to every
+        # real file written there -- confirmed live, uploading a real PDF
+        # produced both edge_report.pdf AND ._edge_report.pdf, and this
+        # listing showed both as if the user had uploaded two files.
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        uploads = tmp_path / "ws" / "uploads"
+        uploads.mkdir(parents=True)
+        (uploads / "real.txt").write_text("real content")
+        (uploads / "._real.txt").write_bytes(b"\x00\x05Mac OS X junk")  # a real AppleDouble-shaped sidecar
+        (uploads / ".DS_Store").write_bytes(b"junk")
+        _, port = server
+        status, body = _get(port, "/api/files")
+        assert status == 200
+        names = [f["name"] for f in json.loads(body)["files"]]
+        assert names == ["real.txt"]
 
     def test_upload_rejects_path_escape(self, server):
         _, port = server
@@ -178,6 +198,99 @@ class TestRagUpload:
         assert status == 200
         assert json.loads(body)["indexed"] is True
         assert len(calls) == 1 and calls[0].endswith("doc.pdf")
+
+
+def _write_minimal_pdf(path, text="Hello PDF"):
+    """Same real, hand-built minimal-valid-PDF fixture as
+    test_pdf_reader.py's own — duplicated here (not imported cross-file)
+    so this HTTP-endpoint test file stays independently runnable, same
+    convention as the rest of this codebase's test suite."""
+    content = f"BT /F1 18 Tf 10 50 Td ({text}) Tj ET".encode()
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 5 0 R >> >> "
+        b"/MediaBox [0 0 200 100] /Contents 4 0 R >>",
+        b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    pdf = b"%PDF-1.4\n"
+    offsets = [0]
+    for i, body in enumerate(objs, start=1):
+        offsets.append(len(pdf))
+        pdf += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref_offset = len(pdf)
+    pdf += f"xref\n0 {len(objs) + 1}\n".encode()
+    pdf += b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        pdf += f"{off:010d} 00000 n \n".encode()
+    pdf += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF".encode()
+    path.write_bytes(pdf)
+
+
+class TestPdfEndpoints:
+    """GET /api/pdf/info, /api/pdf/text, /api/pdf/page.png — v13.5, Vision
+    OS "GPU-accelerated technical document reader" (dourmouse/pdf_reader.py
+    — real pypdfium2, see that module's own docstring for what's real vs.
+    Marker, explicitly not built). Sandboxed to the uploads root, same
+    whitelist+resolve+relative_to pattern the pre-existing /uploads/
+    handler already uses (dourmouse/webui.py's _sandboxed_upload_path)."""
+
+    def _write_pdf(self, tmp_path, name="doc.pdf", text="Hello PDF"):
+        uploads = tmp_path / "ws" / "uploads"
+        uploads.mkdir(parents=True, exist_ok=True)
+        p = uploads / name
+        _write_minimal_pdf(p, text)
+        return p
+
+    def test_info_reports_the_real_page_count(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        self._write_pdf(tmp_path)
+        _, port = server
+        status, body = _get(port, "/api/pdf/info?name=doc.pdf")
+        assert status == 200
+        assert json.loads(body) == {"ok": True, "page_count": 1}
+
+    def test_text_returns_the_real_extracted_text(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        self._write_pdf(tmp_path)
+        _, port = server
+        status, body = _get(port, "/api/pdf/text?name=doc.pdf&page=0")
+        assert status == 200
+        assert json.loads(body)["text"] == "Hello PDF"
+
+    def test_page_png_returns_a_real_image(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        self._write_pdf(tmp_path)
+        _, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/pdf/page.png?name=doc.pdf&page=0")
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        assert resp.status == 200
+        assert resp.getheader("Content-Type") == "image/png"
+        assert body.startswith(b"\x89PNG\r\n\x1a\n")
+
+    def test_missing_file_is_honest_not_a_crash(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        _, port = server
+        status, body = _get(port, "/api/pdf/info?name=nope.pdf")
+        assert status == 400  # fails the sandbox's is_file() check -> bad name path
+        assert json.loads(body)["ok"] is False
+
+    def test_path_traversal_is_refused(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        _, port = server
+        status, _body = _get(port, "/api/pdf/info?name=" + urllib.parse.quote("../../etc/passwd"))
+        assert status == 400
+
+    def test_out_of_range_page_png_is_a_404_not_a_crash(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        self._write_pdf(tmp_path)
+        _, port = server
+        status, _body = _get(port, "/api/pdf/page.png?name=doc.pdf&page=99")
+        assert status == 404
 
 
 # --------------------------------------------------------------------------- #

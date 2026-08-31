@@ -180,6 +180,66 @@ expected behavior outside a real Tauri webview (no `window.__TAURI_INTERNALS__`
 injected by a plain browser), not a bug; the packaged app's real
 internals make it work there.
 
+## Two more checklist items — DONE, real, live-verified (2026-08-31, later same session)
+
+The user asked for three NEW checklist items beyond the original 9:
+real-time global event ingestion (GDELT + a knowledge graph), an
+autonomous headless browser + live DOM navigation engine (Puppeteer/
+Browserbase), and a GPU-accelerated PDF/textbook reader (PDFium +
+Marker). Investigating the existing codebase first turned up that the
+headless-browser item was ALREADY ~90% real and live
+(`dourmouse/browser_agent.py`, v5.25 — real Playwright + system Chrome,
+`browser_open`/`click`/`fill`/`screenshot`, confirmation-gated on
+submit/login/credentials) — the checklist's own framing ("streams the
+live rendered viewport into your workspace") was the one genuinely
+missing piece, not the engine itself.
+
+- **Headless browser — the missing viewport panel.** New "+ LIVE
+  BROWSER" panel in `ui/workspace.html`, polling the browser agent's
+  own pre-existing, real `/api/browser/status` / `/api/browser/activity`
+  / `/api/browser/screenshot` endpoints (zero new server-side code
+  needed — they already existed). Live-verified in a real browser: real
+  status text, a real prior screenshot (an actual "Example Domain" page
+  capture) rendered correctly, real activity feed, all polls 200 OK
+  every 3s, and confirmed the polling interval actually STOPS when the
+  panel closes (a new generic `closePanel()` onClose teardown hook,
+  reusable by any future panel with a live interval). 4 tests.
+- **PDF/textbook reader.** `dourmouse/pdf_reader.py` (new) — real
+  Google PDFium via `pypdfium2`: real text extraction and real page-to-
+  PNG rendering, live-verified against an actual 5-page PDF (correct
+  text per page, a real ~197KB PNG). Marker's own ML pipeline (layout/
+  table/formula recognition) is explicitly NOT built — flagged plainly
+  in the module's own docstring, not silently substituted; this is
+  PDFium only. New sandboxed endpoints (`/api/pdf/info`, `/api/pdf/text`,
+  `/api/pdf/page.png`, reusing the exact same whitelist+resolve+
+  relative_to sandbox the pre-existing `/uploads/` handler already
+  proved safe) and a new "+ PDF READER" panel with real page navigation.
+  **A real, severe bug found and fixed before this shipped**: PDFium is
+  not thread-safe — two concurrent PDFium calls (exactly what the new
+  panel's own JS does, firing a text request and an image request back
+  to back) crashed the ENTIRE Python server process with SIGABRT, not a
+  catchable exception, confirmed live and reproduced in isolation. Fixed
+  with one real module-level lock serializing all PDFium calls; the fix
+  itself is regression-tested via a real subprocess (so if it ever
+  breaks again, the test fails cleanly instead of crashing the whole
+  test run) — verified the test actually catches the bug by temporarily
+  disabling the lock and confirming a real SIGABRT (returncode -5).
+  19 tests total.
+- **A separate real bug caught along the way**: this repo's own
+  `workspace/uploads/` (like the rest of the project) lives on an
+  ExFAT-formatted external volume, which makes macOS synthesize a real
+  `._<name>` AppleDouble sidecar file next to every upload — confirmed
+  live, uploading one real PDF produced two entries in the file list.
+  Fixed at the source (`GET /api/files` now skips dotfiles), benefiting
+  every panel that lists uploads, not just the new PDF reader.
+- **GDELT global event ingestion + kinetic knowledge graph — NOT
+  started.** Real, substantial, separately-scoped work (a background
+  ingestion pipeline for a real public dataset, plus graph storage and
+  canvas-overlay wiring) — not begun this pass given the scope already
+  covered; a genuine future increment, not silently dropped.
+
+Full suite after both: 3446 passed, 3 skipped, 0 failed.
+
 ## Explicitly NOT built yet (flagged, not silently skipped)
 
 - **Skia GPU rendering.** React Flow's default renderer is DOM/SVG, not
@@ -189,15 +249,21 @@ internals make it work there.
 - **Item 2** — Qdrant + Ollama embeddings, semantic-proximity gravity
   clustering physics.
 - **Item 4** — Excalidraw multimodal scratchpad panel.
-- **Item 8** — Playwright DOM injection (web) + native accessibility-tree
-  automation (desktop). Real, substantial, and safety-sensitive — this
-  overlaps directly with "an agent driving other apps on the user's
-  behalf," the exact territory this whole assistant's own safety
-  categories (confirmation-gate, no-credential-entry) already govern for
-  every other action surface in this codebase; building it means
-  extending that SAME discipline, not inventing a separate one.
+- **Item 8 — mostly done, native desktop accessibility automation
+  NOT built.** `dourmouse/browser_agent.py`'s Playwright engine already
+  covers the WEB-automation half (DOM injection, form fill, login,
+  confirmation-gated), and the LIVE BROWSER panel above now shows it
+  live. Native accessibility-tree automation for OTHER desktop apps
+  (macOS Accessibility APIs / Windows UI Automation) is a real, separate,
+  safety-sensitive undertaking — genuinely "an agent driving other apps
+  on the user's behalf" beyond the browser sandbox, and deserves the
+  same deliberate confirmation-gate design as everything else, not a
+  rushed build.
 - **Item 9** — Visual git time-travel / state-rollback timeline scrubber
   across code + DB + UI-layout snapshots.
+- **GDELT real-time global event ingestion + kinetic knowledge graph** —
+  a real background ingestion pipeline for GDELT's public dataset, plus
+  graph storage and canvas-overlay wiring. Not started.
 - **True real-time particle effects along edges** (item 7's own
   full description) — the current implementation polls a snapshot every
   2s, not a genuine SSE event stream into the native shell. A real

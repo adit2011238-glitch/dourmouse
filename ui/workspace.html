@@ -191,6 +191,39 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
 .uprow .s.warn{color:var(--warn)}
 .uprow .s.bad{color:var(--bad)}
 
+/* LIVE BROWSER panel (v13.5) */
+.brwrap{display:flex;flex-direction:column;height:100%;padding:10px;gap:8px}
+.brstatus{font-size:10.5px;color:var(--blue-dim);flex-shrink:0}
+.brstatus.ok{color:var(--ok)}
+.brstatus.bad{color:var(--bad)}
+.brshotwrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+  background:#04080e;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.brshot{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.bract{max-height:96px;overflow:auto;display:flex;flex-direction:column;gap:3px;flex-shrink:0}
+.bractrow{display:flex;gap:6px;font-size:10px;color:var(--blue-dim);padding:2px 4px}
+.bractrow .k{color:var(--amber-hi);flex-shrink:0;text-transform:uppercase}
+.bractrow .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* PDF READER panel (v13.5) */
+.pdfwrap{display:flex;flex-direction:column;height:100%;padding:10px;gap:8px}
+.pdfpicker{display:flex;gap:6px;flex-shrink:0}
+.pdfsel{flex:1;background:#04080e;border:1px solid var(--line);border-radius:6px;
+  color:var(--blue-hi);font-family:var(--mono);font-size:11px;padding:6px 7px}
+.pdfrefresh{background:var(--panel2);color:var(--blue-hi);border:1px solid var(--line);
+  border-radius:6px;font-family:var(--mono);font-size:12px;width:30px;cursor:pointer}
+.pdfnav{display:flex;align-items:center;justify-content:center;gap:10px;flex-shrink:0;
+  font-size:10.5px;color:var(--blue-dim)}
+.pdfnav button{background:var(--panel2);color:var(--blue-hi);border:1px solid var(--line);
+  border-radius:6px;font-family:var(--mono);font-size:11px;padding:4px 10px;cursor:pointer}
+.pdfnav button:disabled{opacity:.35;cursor:default}
+.pdfimgwrap{flex:1.4;min-height:0;display:flex;align-items:center;justify-content:center;
+  background:#04080e;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.pdfimg{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.pdftext{flex:1;min-height:0;overflow:auto;font-size:10.5px;line-height:1.5;
+  color:var(--blue-dim);white-space:pre-wrap;padding:6px 8px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:6px}
+.pdferr{color:var(--bad)}
+
 /* 3D model panel */
 .d3wrap{display:flex;flex-direction:column;height:100%}
 .d3canvas{position:relative;flex:1;min-height:0;overflow:hidden;background:#05080c}
@@ -295,6 +328,8 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="globe">+ 3D VIEW</button>
     <button class="dockbtn" type="button" data-open="design3d">+ 3D MODEL</button>
     <button class="dockbtn" type="button" data-open="upload">+ UPLOAD TO RAG</button>
+    <button class="dockbtn" type="button" data-open="browser">+ LIVE BROWSER</button>
+    <button class="dockbtn" type="button" data-open="pdf">+ PDF READER</button>
     <button class="dockbtn" type="button" id="organizeBtn">⊞ ORGANIZE</button>
     <span class="hfpill" id="handsFreePill" title="Hands-free voice loop (dourmouse/hands_free.py)">● HANDS-FREE: —</span>
     <a class="backlink" href="/">← CONSOLE</a>
@@ -396,6 +431,12 @@ function bringToFront(id){
 
 function closePanel(id){
   const p = panels.get(id); if(!p) return;
+  // v13.5: generic teardown hook — a panel that started a real polling
+  // interval (or anything else that outlives the panel's own DOM
+  // element) sets p.onClose to stop it here. Optional, so every
+  // pre-existing panel type (none of which needed this before) is
+  // completely unaffected.
+  if(p.onClose){ try{ p.onClose(); }catch(_){} }
   p.el.remove(); panels.delete(id);
   if(focusedId === id) focusedId = null;
 }
@@ -543,7 +584,8 @@ function openPanel(type){
   const existing = findPanelByType(type);
   if(existing){ bringToFront(existing.id); return existing; }
   const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP",
-                   globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL", upload: "UPLOAD TO RAG" };
+                   globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL", upload: "UPLOAD TO RAG",
+                   browser: "LIVE BROWSER", pdf: "PDF READER" };
   const p = createPanel(type, titles[type] || type.toUpperCase());
   if(type === "mail") loadMailPanel(p);
   else if(type === "chat") initChatPanel(p, "companion", "Ask the companion anything…");
@@ -552,6 +594,8 @@ function openPanel(type){
   else if(type === "globe") loadGlobePanel(p);
   else if(type === "design3d") loadDesign3DPanel(p);
   else if(type === "upload") loadUploadPanel(p);
+  else if(type === "browser") loadBrowserPanel(p);
+  else if(type === "pdf") loadPdfPanel(p);
   return p;
 }
 
@@ -1087,6 +1131,155 @@ function loadUploadPanel(p){
     e.preventDefault(); drop.classList.remove("over");
     if(e.dataTransfer && e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
   });
+}
+
+/* ---- LIVE BROWSER panel (v13.5, Vision OS "Autonomous Headless Browser
+   & Live DOM Navigation Engine"): the real headless-Chrome/Playwright
+   agent (dourmouse/browser_agent.py, v5.25 — browser_open/click/fill/
+   screenshot etc, already live, already gated by real confirmation on
+   submit/login/credential actions) already does everything this
+   checklist item describes EXCEPT show it. This panel is that missing
+   piece: polls the agent's own real status/activity/screenshot endpoints
+   (/api/browser/status, /api/browser/activity, /api/browser/screenshot —
+   all pre-existing, real, nothing new added server-side) and renders the
+   live viewport as an actual panel on the canvas, same continuity idea
+   as "render live web pages as interactive vector cards directly onto
+   your 2D canvas" — a real screenshot, refreshed on an interval, not a
+   mock. Driving the browser itself still only ever happens through the
+   companion/research chat calling the real browser_* tools (this panel
+   is observe-only, matching the read-only nature of a status display —
+   it does not add a second way to drive navigation). ---- */
+function loadBrowserPanel(p){
+  p.body.innerHTML = `
+    <div class="brwrap">
+      <div class="brstatus">checking…</div>
+      <div class="brshotwrap"><img class="brshot" alt="live browser viewport" style="display:none"></div>
+      <div class="bract"></div>
+    </div>`;
+  const statusEl = p.body.querySelector(".brstatus");
+  const shotEl = p.body.querySelector(".brshot");
+  const actEl = p.body.querySelector(".bract");
+
+  async function poll(){
+    try{
+      const st = await api("/api/browser/status");
+      if(!st.ready){
+        statusEl.textContent = "playwright not installed" + (st.launch_error ? " — " + st.launch_error : "");
+        statusEl.className = "brstatus bad";
+      }else if(st.launch_error){
+        statusEl.textContent = "launch error — " + st.launch_error;
+        statusEl.className = "brstatus bad";
+      }else{
+        const shots = st.shots || [];
+        statusEl.textContent = (st.headless ? "headless" : "visible") + " · "
+          + (shots.length ? shots.length + " screenshot(s) captured" : "no screenshot yet — ask the companion to open a page");
+        statusEl.className = "brstatus ok";
+        if(shots.length){
+          // Cache-busting query param -- the server already sends
+          // Cache-Control: no-store, but this also forces a real re-fetch
+          // even on a browser that ignores that header for an identical
+          // <img> src assigned again.
+          shotEl.src = "/api/browser/screenshot?t=" + Date.now();
+          shotEl.style.display = "block";
+        }else{
+          shotEl.style.display = "none";
+        }
+      }
+      const act = await api("/api/browser/activity?limit=12");
+      actEl.innerHTML = "";
+      for(const a of (act.activity || []).slice().reverse()){
+        const row = document.createElement("div"); row.className = "bractrow";
+        row.innerHTML = `<span class="k">${esc(a.kind)}</span><span class="t">${esc(a.text)}</span>`;
+        actEl.appendChild(row);
+      }
+    }catch(e){
+      statusEl.textContent = "unavailable — " + String(e.message || e);
+      statusEl.className = "brstatus bad";
+    }
+  }
+  poll();
+  const pollId = setInterval(poll, 3000);
+  p.onClose = () => clearInterval(pollId);
+}
+
+/* ---- PDF READER panel (v13.5, Vision OS "GPU-accelerated technical
+   document & textbook reader"): real PDFium page rendering + text
+   extraction (dourmouse/pdf_reader.py, /api/pdf/info|text|page.png —
+   see that module's own docstring for what's real vs. Marker's ML
+   pipeline, explicitly not built here). Lists real PDFs already sitting
+   in the sandboxed uploads folder (the SAME /api/files list the UPLOAD
+   TO RAG panel's uploads populate — drop a PDF there first), lets you
+   page through a real rendered image of each page with the real
+   extracted text alongside it. ---- */
+function loadPdfPanel(p){
+  p.body.innerHTML = `
+    <div class="pdfwrap">
+      <div class="pdfpicker">
+        <select class="pdfsel"><option value="">choose a PDF…</option></select>
+        <button type="button" class="pdfrefresh" title="rescan uploads">⟳</button>
+      </div>
+      <div class="pdfnav" style="display:none">
+        <button type="button" class="pdfprev">◀</button>
+        <span class="pdfpage">page — / —</span>
+        <button type="button" class="pdfnext">▶</button>
+      </div>
+      <div class="pdfimgwrap"><img class="pdfimg" alt="rendered PDF page" style="display:none"></div>
+      <div class="pdftext"></div>
+    </div>`;
+  const sel = p.body.querySelector(".pdfsel");
+  const nav = p.body.querySelector(".pdfnav");
+  const prevBtn = p.body.querySelector(".pdfprev");
+  const nextBtn = p.body.querySelector(".pdfnext");
+  const pageLabel = p.body.querySelector(".pdfpage");
+  const imgEl = p.body.querySelector(".pdfimg");
+  const textEl = p.body.querySelector(".pdftext");
+  const refreshBtn = p.body.querySelector(".pdfrefresh");
+
+  const state = { name: "", page: 0, pageCount: 0 };
+
+  async function refreshList(){
+    try{
+      const data = await api("/api/files");
+      const pdfs = (data.files || []).filter(f => /\.pdf$/i.test(f.name));
+      const prevSelection = sel.value;
+      sel.innerHTML = '<option value="">choose a PDF…</option>' +
+        pdfs.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
+      if(pdfs.some(f => f.name === prevSelection)) sel.value = prevSelection;
+    }catch(e){
+      textEl.innerHTML = `<div class="pdferr">could not list uploads: ${esc(String(e.message || e))}</div>`;
+    }
+  }
+
+  async function loadPage(){
+    if(!state.name) return;
+    try{
+      const info = await api("/api/pdf/info?name=" + encodeURIComponent(state.name));
+      if(!info.ok){
+        textEl.innerHTML = `<div class="pdferr">${esc(info.error || "could not open PDF")}</div>`;
+        nav.style.display = "none"; imgEl.style.display = "none";
+        return;
+      }
+      state.pageCount = info.page_count;
+      state.page = Math.max(0, Math.min(state.page, state.pageCount - 1));
+      nav.style.display = "flex";
+      pageLabel.textContent = `page ${state.page + 1} / ${state.pageCount}`;
+      prevBtn.disabled = state.page <= 0;
+      nextBtn.disabled = state.page >= state.pageCount - 1;
+      imgEl.src = "/api/pdf/page.png?name=" + encodeURIComponent(state.name) + "&page=" + state.page + "&t=" + Date.now();
+      imgEl.style.display = "block";
+      const textData = await api("/api/pdf/text?name=" + encodeURIComponent(state.name) + "&page=" + state.page);
+      textEl.textContent = textData.text || "(no extractable text on this page)";
+    }catch(e){
+      textEl.innerHTML = `<div class="pdferr">${esc(String(e.message || e))}</div>`;
+    }
+  }
+
+  sel.addEventListener("change", () => { state.name = sel.value; state.page = 0; loadPage(); });
+  refreshBtn.addEventListener("click", refreshList);
+  prevBtn.addEventListener("click", () => { if(state.page > 0){ state.page--; loadPage(); } });
+  nextBtn.addEventListener("click", () => { if(state.page < state.pageCount - 1){ state.page++; loadPage(); } });
+
+  refreshList();
 }
 
 /* ============================================================

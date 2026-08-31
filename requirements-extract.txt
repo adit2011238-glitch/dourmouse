@@ -3,3 +3,10 @@
 # honestly (same pattern as the voice/desktop extras).
 # Install with: pip install -r requirements.txt -r requirements-extract.txt
 pypdf>=4.0
+# v13.5, Vision OS "GPU-accelerated technical document & textbook reader"
+# (dourmouse/pdf_reader.py) — real Google PDFium bindings (pypdfium2),
+# used for real page-image rendering (the PDF READER panel's "pull a
+# diagram onto the canvas" capability) and PDFium's own text extraction.
+# A genuinely separate capability from pypdf above, not a replacement —
+# extract_pdf_text (bulk_ingest.py's RAG indexing) is unaffected.
+pypdfium2>=5.0

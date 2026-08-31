@@ -111,6 +111,24 @@ def _uploads_root() -> Path:
     up.mkdir(parents=True, exist_ok=True)
     return up
 
+
+def _sandboxed_upload_path(rel: str) -> Path | None:
+    """The SAME whitelist+resolve+relative_to sandbox check the
+    /uploads/<name> handler already does, factored out so every new
+    reader (v13.5: /api/pdf/*) reuses one real, already-proven-safe
+    implementation instead of re-deriving it. Returns None (never
+    raises) for anything outside the uploads root or failing the name
+    whitelist — the caller decides how to report that honestly."""
+    if not _UPLOAD_NAME_RE.match(rel):
+        return None
+    root = _uploads_root()
+    target = (root / rel).resolve()
+    try:
+        target.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return target if target.is_file() else None
+
 # Time a human has to approve/decline a gated action before it auto-declines.
 _CONFIRM_TIMEOUT_SECONDS = 300.0
 
@@ -2228,6 +2246,19 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 files = []
                 for f in sorted(_uploads_root().glob("*")):
+                    # v13.5 (live-caught, real bug): this project (and the
+                    # workspace/uploads dir it lives under) sits on an
+                    # ExFAT-formatted external volume — macOS synthesizes a
+                    # real "._<name>" AppleDouble sidecar file the moment
+                    # ANY file is written there (no native xattr support on
+                    # ExFAT). Confirmed live: uploading edge_report.pdf via
+                    # a real curl POST produced BOTH edge_report.pdf AND a
+                    # real "._edge_report.pdf" sitting right next to it,
+                    # and this listing showed both as if they were two real
+                    # uploads — the sidecar is unopenable junk, not a
+                    # second file the user ever chose. Skip dotfiles.
+                    if f.name.startswith("."):
+                        continue
                     if f.is_file():
                         files.append(
                             {
@@ -2266,6 +2297,61 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+        elif path == "/api/pdf/info":
+            # v13.5, Vision OS "GPU-accelerated technical document reader"
+            # (dourmouse/pdf_reader.py — real PDFium, see that module's own
+            # docstring for what's real vs explicitly not built/Marker).
+            # Sandboxed to the uploads root, SAME whitelist+resolve+
+            # relative_to pattern as the /uploads/ handler right above.
+            from dourmouse.pdf_reader import pdf_info
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            name = (qs.get("name") or [""])[0].strip()
+            target = _sandboxed_upload_path(name)
+            if target is None:
+                self._send_json({"ok": False, "error": "bad file name"}, status=400)
+                return
+            self._send_json(pdf_info(target))
+        elif path == "/api/pdf/text":
+            from dourmouse.pdf_reader import page_text
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            name = (qs.get("name") or [""])[0].strip()
+            target = _sandboxed_upload_path(name)
+            if target is None:
+                self._send_json({"text": "", "error": "bad file name"}, status=400)
+                return
+            try:
+                page = int((qs.get("page") or ["0"])[0])
+            except ValueError:
+                self._send_json({"text": "", "error": "bad page number"}, status=400)
+                return
+            self._send_json({"text": page_text(target, page)})
+        elif path == "/api/pdf/page.png":
+            from dourmouse.pdf_reader import render_page_png
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            name = (qs.get("name") or [""])[0].strip()
+            target = _sandboxed_upload_path(name)
+            if target is None:
+                self.send_error(400, "bad file name")
+                return
+            try:
+                page = int((qs.get("page") or ["0"])[0])
+            except ValueError:
+                self.send_error(400, "bad page number")
+                return
+            try:
+                png_bytes = render_page_png(target, page)
+            except RuntimeError as exc:
+                self.send_error(404, str(exc))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png_bytes)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(png_bytes)
         elif path == "/api/speech":
             # v4.1 (P7): GET = local TTS, returns audio/wav bytes.
             qs = urllib.parse.parse_qs(parsed.query)
