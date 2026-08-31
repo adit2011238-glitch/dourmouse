@@ -200,3 +200,41 @@ class TestMemoryStoreUnavailable:
             MemoryStore(tmp_path / "nofs.db")
         result = _remember_tool({"title": "t", "body": "b"})
         assert "NOT CONFIGURED" in result
+
+
+class TestConcurrentProcessSafety:
+    """Real bug found live (2026-08-31): the shared RAG database is now
+    genuinely opened by multiple separate PROCESSES at once (the live
+    webui server plus a long-running dourmouse/bulk_ingest.py scan) — a
+    manual upload arriving mid-scan raised MemoryStoreUnavailable at the
+    FTS5 schema probe itself. WAL mode + a real busy_timeout fix real
+    multi-process contention; these tests verify the mechanism is
+    actually enabled, and that two real, separate connections to the same
+    file can both write without either raising "database is locked"."""
+
+    def test_wal_mode_and_busy_timeout_are_actually_set(self, tmp_path):
+        store = MemoryStore(tmp_path / "wal_test.db")
+        mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+        timeout_ms = store._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert mode.lower() == "wal"
+        assert timeout_ms >= 30000
+        store.close()
+
+    def test_two_real_separate_connections_can_both_write(self, tmp_path):
+        # Two genuinely independent MemoryStore instances (own sqlite3
+        # connection each) against the SAME file -- the real shape of the
+        # live server + bulk_ingest.py collision, without needing an
+        # actual second OS process to reproduce it.
+        db_path = tmp_path / "shared.db"
+        store_a = MemoryStore(db_path)
+        store_b = MemoryStore(db_path)
+        try:
+            store_a.remember("proc_a", "note one", "content from process a")
+            store_b.remember("proc_b", "note two", "content from process b")
+            hits_a = store_a.search("content", limit=10)
+            hits_b = store_b.search("content", limit=10)
+            assert len(hits_a) == 2
+            assert len(hits_b) == 2
+        finally:
+            store_a.close()
+            store_b.close()

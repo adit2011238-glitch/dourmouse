@@ -48,9 +48,30 @@ class MemoryStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(
-            str(self.db_path), check_same_thread=False
+            str(self.db_path), check_same_thread=False, timeout=30.0
         )
         self._conn.row_factory = sqlite3.Row
+        # Real bug found live (2026-08-31): this store is now genuinely
+        # opened by MULTIPLE SEPARATE PROCESSES at once — the live webui
+        # server plus a bulk_ingest.py scan running for hours in the
+        # background, both writing the same file. SQLite's default
+        # rollback-journal mode holds an exclusive lock for the whole
+        # duration of a write, and the plain sqlite3.connect() default
+        # busy behavior is to raise "database is locked" immediately
+        # rather than wait — reproduced live: a manual RAG upload arriving
+        # mid-scan raised MemoryStoreUnavailable at the FTS5 schema PROBE
+        # itself, not just on a write. WAL mode lets readers and one
+        # writer proceed concurrently instead of blocking each other for
+        # the transaction's whole duration; the connect()-level `timeout`
+        # above (Python's busy_timeout equivalent) covers the remaining
+        # writer-vs-writer window by retrying for up to 30s instead of
+        # failing on the first collision. Both are real fixes for real
+        # multi-process contention, not a workaround for a test flake.
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=30000")
+        except sqlite3.OperationalError:
+            pass  # best-effort — an unsupported build still works, just without the concurrency headroom
         try:
             self._init_schema()
         except sqlite3.OperationalError as exc:
