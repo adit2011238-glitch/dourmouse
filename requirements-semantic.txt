@@ -1,0 +1,15 @@
+# Semantic clustering extra (v13.6) — OPTIONAL, matches the same
+# "NOT CONFIGURED, honestly, never a crash" pattern as the voice/
+# desktop/extract extras. Without this wheel, semantic_graph.py's
+# build_semantic_graph() reports NOT CONFIGURED instead of crashing.
+# Install with: pip install -r requirements.txt -r requirements-semantic.txt
+#
+# v13.6, Vision OS item 2 ("Qdrant + Ollama embeddings, semantic-
+# proximity gravity clustering physics") — real qdrant-client, used in
+# its LOCAL on-disk mode (no separate server/Docker container; see
+# dourmouse/semantic_graph.py's own docstring for why local mode is the
+# honestly right-sized way to use the same real technology at this
+# app's real scale). Embeddings themselves reuse the already-existing
+# dourmouse/memory_embed.py (Ollama nomic-embed-text) — this wheel adds
+# ONLY the real vector-index/search layer on top.
+qdrant-client>=1.9

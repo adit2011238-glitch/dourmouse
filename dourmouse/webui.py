@@ -2405,6 +2405,33 @@ class _Handler(BaseHTTPRequestHandler):
             commit_hash = (qs.get("hash") or [""])[0].strip()
             file_path = (qs.get("path") or [""])[0].strip()
             self._send_json(git_file_at(_PROJECT_ROOT, commit_hash, file_path))
+        elif path == "/api/semantic/graph":
+            # v13.6, Vision OS item 2 ("Qdrant + Ollama embeddings,
+            # semantic-proximity gravity clustering physics") —
+            # dourmouse/semantic_graph.py, real local Qdrant + the
+            # existing Ollama embedding cache, applied to the real
+            # memory store. server.memory can be a RemoteMemoryStore
+            # (no local fact_embeddings cache to build against) —
+            # reported honestly rather than attempted.
+            from dourmouse.semantic_graph import build_semantic_graph
+
+            if not isinstance(self.server.memory, MemoryStore):
+                self._send_json({
+                    "ok": False, "nodes": [], "edges": [],
+                    "error": "NOT CONFIGURED: semantic clustering needs a local memory store (this server is using a remote one)",
+                })
+                return
+            self._send_json(build_semantic_graph(self.server.memory, _uploads_root().parent))
+        elif path == "/api/semantic/status":
+            from dourmouse.semantic_graph import semantic_graph_available
+
+            from dourmouse.memory_embed import embed_enabled
+
+            self._send_json({
+                "qdrant_available": semantic_graph_available(),
+                "embed_enabled": embed_enabled(),
+                "local_memory_store": isinstance(self.server.memory, MemoryStore),
+            })
         elif path == "/api/speech":
             # v4.1 (P7): GET = local TTS, returns audio/wav bytes.
             qs = urllib.parse.parse_qs(parsed.query)

@@ -110,6 +110,34 @@ def _fts_hits(store: MemoryStore, query: str, limit: int) -> list[dict[str, Any]
     return store.search(distilled, limit=limit)
 
 
+def ensure_embeddings(
+    store: MemoryStore, facts: list[dict[str, Any]]
+) -> dict[int, list[float]] | None:
+    """Real embeddings for every given fact, using the SAME cache
+    (``fact_embeddings``, via ``store.get_embeddings``/``save_embedding``)
+    ``semantic_search`` already reads/writes. Factored out (v13.6) so a
+    second real caller — ``semantic_graph.py``'s clustering, which needs
+    embeddings for potentially every stored fact, not just the top
+    recall hits — shares ONE implementation instead of a second,
+    potentially-diverging copy of the same missing-batch logic.
+
+    Returns the full ``{fact_id: vector}`` map (already-cached vectors
+    plus any freshly embedded ones), or ``None`` — never a partial or
+    fabricated result — if the embed endpoint fails for any batch of
+    missing facts.
+    """
+    vectors = store.get_embeddings()
+    missing = [f for f in facts if f["id"] not in vectors]
+    if missing:
+        batch = embed_texts([f["body"] for f in missing])
+        if batch is None or len(batch) != len(missing):
+            return None
+        for fact, vec in zip(missing, batch):
+            store.save_embedding(fact["id"], embed_model(), vec)
+            vectors[fact["id"]] = vec
+    return vectors
+
+
 def semantic_search(
     store: MemoryStore, query: str, limit: int = 5
 ) -> dict[str, Any]:
@@ -136,15 +164,9 @@ def semantic_search(
     if not facts:
         return {"method": "fts5", "hits": []}
 
-    vectors = store.get_embeddings()
-    missing = [f for f in facts if f["id"] not in vectors]
-    if missing:
-        batch = embed_texts([f["body"] for f in missing])
-        if batch is None or len(batch) != len(missing):
-            return {"method": "fts5", "hits": _fts_hits(store, query, limit)}
-        for fact, vec in zip(missing, batch):
-            store.save_embedding(fact["id"], embed_model(), vec)
-            vectors[fact["id"]] = vec
+    vectors = ensure_embeddings(store, facts)
+    if vectors is None:
+        return {"method": "fts5", "hits": _fts_hits(store, query, limit)}
 
     qvecs = embed_texts([query])
     if qvecs is None:

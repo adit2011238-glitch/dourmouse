@@ -15,6 +15,7 @@ import urllib.parse
 
 import pytest
 
+from dourmouse.memory_store import MemoryStore
 from dourmouse.tests.test_webui import _echo_registry
 
 
@@ -370,6 +371,69 @@ class TestGitTimeTravelEndpoints:
         status, body = _get(port, "/api/git/file_at?hash=HEAD&path=" + urllib.parse.quote("../../etc/passwd"))
         assert status == 200
         assert json.loads(body)["ok"] is False
+
+
+class TestSemanticGraphEndpoints:
+    """GET /api/semantic/graph, /api/semantic/status — v13.6, Vision OS
+    item 2 (dourmouse/semantic_graph.py — real local Qdrant + the
+    existing Ollama embedding cache, applied to the real memory store;
+    see that module's own docstring for the honest local-mode scope
+    note). Requires the real qdrant-client package (importorskip, same
+    convention as test_semantic_graph.py) — these tests exercise a real
+    local on-disk Qdrant index, not a mock, but monkeypatch
+    memory_embed.embed_texts so no real Ollama call happens."""
+
+    qdrant_client = pytest.importorskip("qdrant_client")
+
+    def _with_local_memory(self, server, tmp_path):
+        srv, port = server
+        srv.memory = MemoryStore(tmp_path / "sem_mem.db")
+        return srv, port
+
+    def test_status_reports_real_capability_flags(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_EMBED", "1")
+        _, port = self._with_local_memory(server, tmp_path)
+        status, body = _get(port, "/api/semantic/status")
+        assert status == 200
+        data = json.loads(body)
+        assert data["qdrant_available"] is True
+        assert data["embed_enabled"] is True
+        assert data["local_memory_store"] is True
+
+    def test_status_honest_when_no_local_store_configured(self, server):
+        _, port = server  # server.memory is None by default in this fixture
+        status, body = _get(port, "/api/semantic/status")
+        assert status == 200
+        assert json.loads(body)["local_memory_store"] is False
+
+    def test_graph_reports_not_configured_when_embed_disabled(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_EMBED", "0")
+        _, port = self._with_local_memory(server, tmp_path)
+        status, body = _get(port, "/api/semantic/graph")
+        assert status == 200
+        data = json.loads(body)
+        assert data["ok"] is False
+        assert "DOURMOUSE_EMBED" in data["error"]
+
+    def test_graph_clusters_real_memory_facts(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_EMBED", "1")
+        srv, port = self._with_local_memory(server, tmp_path)
+        srv.memory.remember("test", "a1", "alpha one")
+        srv.memory.remember("test", "a2", "alpha two")
+        vectors = {"alpha one": [1.0, 0.0], "alpha two": [0.98, 0.02]}
+
+        import dourmouse.memory_embed as memory_embed_module
+
+        monkeypatch.setattr(
+            memory_embed_module, "embed_texts",
+            lambda texts, timeout=10.0: [vectors[t] for t in texts],
+        )
+        status, body = _get(port, "/api/semantic/graph")
+        assert status == 200
+        data = json.loads(body)
+        assert data["ok"] is True
+        assert len(data["nodes"]) == 2
+        assert data["nodes"][0]["cluster"] == data["nodes"][1]["cluster"]
 
 
 # --------------------------------------------------------------------------- #

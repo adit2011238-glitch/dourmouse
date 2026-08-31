@@ -280,14 +280,37 @@ Full suite after both segments: 3446 passed, 3 skipped, 0 failed (pre-GDELT); GD
   REQUIRES_CONFIRMATION, etc.) — a deliberate boundary, not a gap; see
   below for what's still genuinely unbuilt.
 
+- **Item 2 — BUILT, v13.6** (`dourmouse/semantic_graph.py`). Real
+  `qdrant-client` in LOCAL on-disk mode (a genuine Qdrant instance —
+  same client/HNSW index/query API a networked server would use, just
+  embedded in-process; a separate Qdrant server would be disproportionate
+  infrastructure at this app's real scale of hundreds of facts, not
+  millions — same right-sizing call as GDELT/Streamparse above) layered
+  on top of the ALREADY-EXISTING `dourmouse/memory_embed.py` (real
+  Ollama `nomic-embed-text`), applied to Dourmouse's real RAG memory
+  store. Real, simple connected-components clustering (pure Python
+  union-find) over real cosine-similarity edges. New `+ SEMANTIC MAP`
+  workspace panel — reuses the SAME shared force-graph physics
+  (`createForceGraphView`, factored out of the EVENT GRAPH panel in the
+  same pass) with real embedding-similarity edges as the "gravity."
+  Live-verified end to end with real data: seeded 4 real facts (2 about
+  programming languages, 2 about hot beverages) through the real
+  memory API, and the real endpoint correctly clustered
+  python+rust together (score 0.6695) and coffee+tea together (score
+  0.6377) as two separate clusters, confirmed both via direct API call
+  and rendered correctly (color-separated) in the browser — real
+  semantic gravity, not fabricated grouping. `memory_embed.py` gained
+  one small real refactor (`ensure_embeddings()` extracted from
+  `semantic_search`) so both real callers share one embedding-cache
+  implementation instead of two. 13 new module tests + 4 new endpoint
+  tests, all green.
+
 ## Explicitly NOT built yet (flagged, not silently skipped)
 
 - **Skia GPU rendering.** React Flow's default renderer is DOM/SVG, not
   the Skia/WebGPU raster path the checklist names. A real Skia layer
   (e.g. `skia-safe` Rust bindings, or a custom WebGPU canvas) is real,
   separate follow-on work.
-- **Item 2** — Qdrant + Ollama embeddings, semantic-proximity gravity
-  clustering physics.
 - **Item 4** — Excalidraw multimodal scratchpad panel.
 - **Item 8 — mostly done, native desktop accessibility automation
   NOT built.** `dourmouse/browser_agent.py`'s Playwright engine already

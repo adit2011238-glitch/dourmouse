@@ -373,6 +373,7 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="pdf">+ PDF READER</button>
     <button class="dockbtn" type="button" data-open="eventgraph">+ EVENT GRAPH</button>
     <button class="dockbtn" type="button" data-open="timetravel">+ TIME TRAVEL</button>
+    <button class="dockbtn" type="button" data-open="semanticmap">+ SEMANTIC MAP</button>
     <button class="dockbtn" type="button" id="organizeBtn">⊞ ORGANIZE</button>
     <span class="hfpill" id="handsFreePill" title="Hands-free voice loop (dourmouse/hands_free.py)">● HANDS-FREE: —</span>
     <a class="backlink" href="/">← CONSOLE</a>
@@ -629,7 +630,7 @@ function openPanel(type){
   const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP",
                    globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL", upload: "UPLOAD TO RAG",
                    browser: "LIVE BROWSER", pdf: "PDF READER", eventgraph: "EVENT GRAPH",
-                   timetravel: "TIME TRAVEL" };
+                   timetravel: "TIME TRAVEL", semanticmap: "SEMANTIC MAP" };
   const p = createPanel(type, titles[type] || type.toUpperCase());
   if(type === "mail") loadMailPanel(p);
   else if(type === "chat") initChatPanel(p, "companion", "Ask the companion anything…");
@@ -642,6 +643,7 @@ function openPanel(type){
   else if(type === "pdf") loadPdfPanel(p);
   else if(type === "eventgraph") loadEventGraphPanel(p);
   else if(type === "timetravel") loadTimeTravelPanel(p);
+  else if(type === "semanticmap") loadSemanticMapPanel(p);
   return p;
 }
 
@@ -1328,42 +1330,22 @@ function loadPdfPanel(p){
   refreshList();
 }
 
-/* ---- EVENT GRAPH panel (v13.6, Vision OS "Real-Time Global Event
-   Ingestion & Kinetic Knowledge Graph"): real GDELT GKG 2.1 data
-   (dourmouse/gdelt_graph.py — a background server thread polls GDELT's
-   actual 15-minute export stream, no key required; see that module's
-   own docstring for what's real vs. deliberately not built/Streamparse)
-   rendered as an actual live force-directed graph — real named persons/
-   organizations/locations as nodes, real article co-occurrence as
-   edges, both genuinely decaying over time server-side so this always
-   reflects recent world activity, not an ever-growing static dump. The
-   "kinetic" part is real, client-side physics (simple spring/repulsion
-   simulation, no library), not a static layout redrawn on each poll —
-   nodes settle into position and drift smoothly as new data arrives. ---- */
-function loadEventGraphPanel(p){
-  p.body.innerHTML = `
-    <div class="egwrap">
-      <div class="egstatus">checking…</div>
-      <div class="egcanvaswrap">
-        <canvas class="egcanvas"></canvas>
-        <div class="eghover"></div>
-        <div class="eglegend">
-          <span><i style="background:#ffb020"></i>person</span>
-          <span><i style="background:#4fc3f7"></i>org</span>
-          <span><i style="background:#8bd17c"></i>location</span>
-        </div>
-      </div>
-    </div>`;
-  const statusEl = p.body.querySelector(".egstatus");
-  const wrapEl = p.body.querySelector(".egcanvaswrap");
-  const canvas = p.body.querySelector(".egcanvas");
-  const hoverEl = p.body.querySelector(".eghover");
+/* ---- shared kinetic force-directed graph physics (v13.6): the real,
+   client-side spring/repulsion simulation behind BOTH the EVENT GRAPH
+   panel (real GDELT co-occurrence) and the SEMANTIC MAP panel (real
+   embedding-similarity clusters) below — factored into one function so
+   both panels share one tested implementation instead of two
+   independently-drifting copies of the same physics. A caller supplies
+   ``colorForNode(n)`` and ``hoverText(n)``; everything else (repulsion,
+   spring edges, drag, hover hit-testing, resize) is generic. Sim state
+   persists across merge() calls -- a node already on screen keeps its
+   position/velocity, only genuinely new/gone nodes are added/removed,
+   which is what makes updates feel kinetic instead of a jump-cut
+   redraw. ---- */
+function createForceGraphView(canvas, hoverEl, wrapEl, opts){
   const ctx = canvas.getContext("2d");
-
-  const KIND_COLOR = { person: "#ffb020", org: "#4fc3f7", location: "#8bd17c" };
-  // Sim state persists across polls -- a node already on screen keeps its
-  // position and velocity; only genuinely new/gone nodes are added/removed,
-  // which is what makes updates feel kinetic instead of a jump-cut redraw.
+  const colorForNode = opts.colorForNode || (() => "#888");
+  const hoverText = opts.hoverText || (n => n.label || n.id);
   const sim = { nodes: new Map(), edges: [] };
   let raf = null, dragging = null, hoverNode = null;
 
@@ -1376,7 +1358,7 @@ function loadEventGraphPanel(p){
   resizeObs.observe(wrapEl);
   resize();
 
-  function mergeSnapshot(data){
+  function merge(data){
     const seen = new Set();
     for(const n of (data.nodes || [])){
       seen.add(n.id);
@@ -1388,15 +1370,18 @@ function loadEventGraphPanel(p){
         };
         sim.nodes.set(n.id, s);
       }
-      s.kind = n.kind; s.label = n.label; s.weight = n.weight;
+      Object.assign(s, n);
     }
-    // Real decay client-side too: a node the server pruned (no longer in
-    // the snapshot) fades out of the simulation, not just off the list.
+    // Real decay/removal client-side too: a node the server no longer
+    // reports fades out of the simulation, not just off a list.
     for(const id of Array.from(sim.nodes.keys())){
       if(!seen.has(id)) sim.nodes.delete(id);
     }
     sim.edges = (data.edges || []).filter(e => sim.nodes.has(e.a) && sim.nodes.has(e.b));
   }
+
+  function radiusFor(n){ return Math.min(16, 3 + Math.log2(1 + (n.weight || 1)) * 2.2); }
+  function edgeWeight(e){ return e.weight != null ? e.weight : (e.score != null ? e.score * 4 : 1); }
 
   function step(){
     const nodes = Array.from(sim.nodes.values());
@@ -1415,14 +1400,16 @@ function loadEventGraphPanel(p){
         if(b !== dragging){ b.vx -= fx; b.vy -= fy; }
       }
     }
-    // Spring attraction along real co-occurrence edges.
+    // Spring attraction along real edges -- this IS the "gravity" pulling
+    // related nodes together, whether "related" means real co-occurrence
+    // (EVENT GRAPH) or real embedding similarity (SEMANTIC MAP).
     for(const e of sim.edges){
       const a = sim.nodes.get(e.a), b = sim.nodes.get(e.b);
       if(!a || !b) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.max(1, Math.sqrt(dx * dx + dy * dy));
       const target = 70;
-      const k = 0.02 * Math.min(4, Math.log2(1 + e.weight));
+      const k = 0.02 * Math.min(4, Math.log2(1 + edgeWeight(e)));
       const f = (d - target) * k;
       const fx = (dx / d) * f, fy = (dy / d) * f;
       if(a !== dragging){ a.vx += fx; a.vy += fy; }
@@ -1445,12 +1432,12 @@ function loadEventGraphPanel(p){
     for(const e of sim.edges){
       const a = sim.nodes.get(e.a), b = sim.nodes.get(e.b);
       if(!a || !b) continue;
-      ctx.lineWidth = Math.min(3, 0.4 + Math.log2(1 + e.weight) * 0.4);
+      ctx.lineWidth = Math.min(3, 0.4 + Math.log2(1 + edgeWeight(e)) * 0.4);
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
     for(const n of nodes){
-      const r = Math.min(16, 3 + Math.log2(1 + (n.weight || 1)) * 2.2);
-      ctx.fillStyle = KIND_COLOR[n.kind] || "#888";
+      const r = radiusFor(n);
+      ctx.fillStyle = colorForNode(n);
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
       if(n === hoverNode){
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
@@ -1463,8 +1450,7 @@ function loadEventGraphPanel(p){
   function nodeAt(px, py){
     let best = null, bestD = 20;
     for(const n of sim.nodes.values()){
-      const r = Math.min(16, 3 + Math.log2(1 + (n.weight || 1)) * 2.2);
-      const d = Math.hypot(n.x - px, n.y - py) - r;
+      const d = Math.hypot(n.x - px, n.y - py) - radiusFor(n);
       if(d < bestD){ bestD = d; best = n; }
     }
     return best;
@@ -1484,7 +1470,7 @@ function loadEventGraphPanel(p){
     const n = nodeAt(x, y);
     hoverNode = n;
     if(n){
-      hoverEl.textContent = `${n.kind}: ${n.label} (${n.weight} mention${n.weight === 1 ? "" : "s"})`;
+      hoverEl.textContent = hoverText(n);
       hoverEl.style.display = "block";
     }else{
       hoverEl.style.display = "none";
@@ -1492,12 +1478,52 @@ function loadEventGraphPanel(p){
   });
   window.addEventListener("pointerup", () => { dragging = null; });
 
+  raf = requestAnimationFrame(step);
+  return {
+    merge,
+    destroy(){ if(raf) cancelAnimationFrame(raf); resizeObs.disconnect(); },
+  };
+}
+
+/* ---- EVENT GRAPH panel (v13.6, Vision OS "Real-Time Global Event
+   Ingestion & Kinetic Knowledge Graph"): real GDELT GKG 2.1 data
+   (dourmouse/gdelt_graph.py — a background server thread polls GDELT's
+   actual 15-minute export stream, no key required; see that module's
+   own docstring for what's real vs. deliberately not built/Streamparse)
+   rendered via the shared force-graph physics above — real named
+   persons/organizations/locations as nodes, real article co-occurrence
+   as edges, both genuinely decaying server-side so this always
+   reflects recent world activity, not an ever-growing static dump. ---- */
+function loadEventGraphPanel(p){
+  p.body.innerHTML = `
+    <div class="egwrap">
+      <div class="egstatus">checking…</div>
+      <div class="egcanvaswrap">
+        <canvas class="egcanvas"></canvas>
+        <div class="eghover"></div>
+        <div class="eglegend">
+          <span><i style="background:#ffb020"></i>person</span>
+          <span><i style="background:#4fc3f7"></i>org</span>
+          <span><i style="background:#8bd17c"></i>location</span>
+        </div>
+      </div>
+    </div>`;
+  const statusEl = p.body.querySelector(".egstatus");
+  const KIND_COLOR = { person: "#ffb020", org: "#4fc3f7", location: "#8bd17c" };
+  const view = createForceGraphView(
+    p.body.querySelector(".egcanvas"), p.body.querySelector(".eghover"), p.body.querySelector(".egcanvaswrap"),
+    {
+      colorForNode: n => KIND_COLOR[n.kind] || "#888",
+      hoverText: n => `${n.kind}: ${n.label} (${n.weight} mention${n.weight === 1 ? "" : "s"})`,
+    }
+  );
+
   async function poll(){
     try{
       const [snap, status] = await Promise.all([
         api("/api/gdelt/graph?limit=150"), api("/api/gdelt/status"),
       ]);
-      mergeSnapshot(snap);
+      view.merge(snap);
       if(!status.enabled){
         statusEl.textContent = "GDELT poller disabled (DOURMOUSE_GDELT_POLLER=0)";
         statusEl.className = "egstatus bad";
@@ -1518,8 +1544,58 @@ function loadEventGraphPanel(p){
   }
   poll();
   const pollId = setInterval(poll, 15000);
-  raf = requestAnimationFrame(step);
-  p.onClose = () => { clearInterval(pollId); if(raf) cancelAnimationFrame(raf); resizeObs.disconnect(); };
+  p.onClose = () => { clearInterval(pollId); view.destroy(); };
+}
+
+/* ---- SEMANTIC MAP panel (v13.6, Vision OS item 2: "Qdrant + Ollama
+   embeddings, semantic-proximity gravity clustering physics"): real
+   memory facts (dourmouse/memory_store.py) clustered by real embedding
+   similarity (dourmouse/semantic_graph.py — real Ollama nomic-embed-
+   text vectors, a real local Qdrant index; see that module's own
+   docstring for the honest "local mode is right-sized here" note),
+   rendered with the SAME shared force-graph physics as EVENT GRAPH —
+   the spring edges here really are "gravity" pulling semantically
+   related facts together, colored by real connected-component cluster
+   id rather than a fixed category. ---- */
+const _SEMANTIC_CLUSTER_PALETTE = ["#ffb020", "#4fc3f7", "#8bd17c", "#e05d5d", "#c792ea", "#f8c555", "#5ddad0", "#ff8ba7"];
+function loadSemanticMapPanel(p){
+  p.body.innerHTML = `
+    <div class="egwrap">
+      <div class="egstatus">checking…</div>
+      <div class="egcanvaswrap">
+        <canvas class="egcanvas"></canvas>
+        <div class="eghover"></div>
+      </div>
+    </div>`;
+  const statusEl = p.body.querySelector(".egstatus");
+  const view = createForceGraphView(
+    p.body.querySelector(".egcanvas"), p.body.querySelector(".eghover"), p.body.querySelector(".egcanvaswrap"),
+    {
+      colorForNode: n => _SEMANTIC_CLUSTER_PALETTE[(n.cluster || 0) % _SEMANTIC_CLUSTER_PALETTE.length],
+      hoverText: n => `${n.label} — ${n.source} (cluster ${n.cluster})`,
+    }
+  );
+
+  async function poll(){
+    try{
+      const snap = await api("/api/semantic/graph");
+      if(!snap.ok){
+        statusEl.textContent = snap.error || "unavailable";
+        statusEl.className = "egstatus bad";
+        return;
+      }
+      view.merge(snap);
+      const clusterCount = new Set(snap.nodes.map(n => n.cluster)).size;
+      statusEl.textContent = `${snap.nodes.length} facts · ${snap.edges.length} links · ${clusterCount} cluster${clusterCount === 1 ? "" : "s"} (real embeddings)`;
+      statusEl.className = "egstatus ok";
+    }catch(e){
+      statusEl.textContent = "unavailable — " + String(e.message || e);
+      statusEl.className = "egstatus bad";
+    }
+  }
+  poll();
+  const pollId = setInterval(poll, 20000);
+  p.onClose = () => { clearInterval(pollId); view.destroy(); };
 }
 
 /* ---- TIME TRAVEL panel (v13.6, Vision OS item 9's safe subset): real,
