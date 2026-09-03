@@ -18,7 +18,7 @@ import pytest
 from dourmouse import learn
 from dourmouse.chat import ChatSession
 from dourmouse.dispatch import system_message
-from dourmouse.memory_store import MemoryStore
+from dourmouse.memory_store import MemoryStore, RemoteMemoryStore
 from dourmouse.tests.test_chat import FakeClient, _FakeMessage, _FakeResponse, _registry
 from dourmouse.tests.test_webui import _echo_registry
 from dourmouse.webui import run_server
@@ -175,6 +175,32 @@ class TestRecallBlock:
         body_hits = store.search("rated good")
         assert body_hits
         assert "RATED: good by operator" in body_hits[0]["snippet"].replace("[", "").replace("]", "")
+
+    def test_unreachable_remote_store_degrades_honestly_not_a_crash(self):
+        """v13.6, real severe bug found live this session: with a
+        RemoteMemoryStore (DOURMOUSE_MEMORY_REMOTE_URL) whose host is
+        unreachable, recall_block used to let RemoteMemoryStoreUnavailable
+        propagate uncaught -- confirmed live, this broke EVERY chat turn
+        outright (the raw exception text replaced the entire assistant
+        reply) the instant the configured remote host went offline. This
+        module's own docstring promises "a missing/unavailable store...
+        simply disables the loop" -- this test holds that promise for the
+        remote-store case, not just the local one every other test here
+        already covers. Real unreachable host: 127.0.0.1 on a closed port,
+        with a short timeout so the test itself stays fast."""
+        remote = RemoteMemoryStore("http://127.0.0.1:1", timeout=0.5)
+        assert learn.recall_block(remote, "tell me about project nebula") == ""
+
+    def test_unreachable_remote_store_search_really_does_raise(self):
+        """Sanity check for the test above: confirms RemoteMemoryStore.search
+        genuinely raises against an unreachable host (proving the previous
+        test exercises a real exception path through recall_block's own
+        try/except, not a vacuously-passing no-op)."""
+        from dourmouse.memory_store import RemoteMemoryStoreUnavailable
+
+        remote = RemoteMemoryStore("http://127.0.0.1:1", timeout=0.5)
+        with pytest.raises(RemoteMemoryStoreUnavailable):
+            remote.search("project nebula")
 
 
 # --------------------------------------------------------------------------- #

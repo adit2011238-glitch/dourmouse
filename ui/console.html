@@ -32,6 +32,19 @@
   src:url('assets/fonts/jetbrains-mono-500-latin.woff2') format('woff2')}
 @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:700;font-display:swap;
   src:url('assets/fonts/jetbrains-mono-700-latin.woff2') format('woff2')}
+/* v13.6: real Fira Sans, bundled locally (OFL-licensed). Every theme
+   below deliberately owns its own --mono/--display identity (that IS
+   the theme, per the block comment above) — this instead adds ONE
+   theme-independent --font-prose token, defined the same in all five
+   themes, for genuinely long-form prose (AI chat reply text) so it
+   reads well regardless of which theme's terminal/serif/gothic --mono
+   is active underneath it. */
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+  src:url('assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;
+  src:url('assets/fonts/fira-sans-500-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+  src:url('assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
 
 :root{
   --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
@@ -42,6 +55,7 @@
   --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+  --font-prose:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
   --map-land:#12283a;
 }
 
@@ -485,7 +499,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .turn.you .gut .who{color:var(--blue-hi)}
 .turn .gut .tm{color:var(--blue-deep);opacity:.7;font-variant-numeric:tabular-nums}
 .turn .gut .mdl.local{color:var(--ok)}
-.turn .body{font-size:13px;line-height:1.75;color:var(--blue-hi);word-break:break-word}
+.turn .body{font-size:13.5px;line-height:1.7;color:var(--blue-hi);word-break:break-word;font-family:var(--font-prose)}
 .turn.you .body{color:var(--blue);white-space:pre-wrap}
 .turn .body p{margin:0 0 9px}.turn .body p:last-child{margin:0}
 .turn .body ul,.turn .body ol{margin:8px 0;padding-left:19px}
@@ -493,9 +507,10 @@ button,input,textarea,select{font:inherit;color:inherit}
 .turn .body strong{color:var(--amber-hi);font-weight:500}
 .turn .body a{color:var(--amber)}
 .turn .body code{background:rgba(120,175,210,.10);border:1px solid var(--line);
-  padding:1px 5px;border-radius:4px;font-size:11px}
+  padding:1px 5px;border-radius:4px;font-size:11px;font-family:var(--mono)}
 .turn .body pre{background:#050c15;border:1px solid var(--line);border-radius:8px;
-  padding:12px 14px;overflow-x:auto;margin:10px 0;position:relative;font-size:11.5px;line-height:1.65}
+  padding:12px 14px;overflow-x:auto;margin:10px 0;position:relative;font-size:11.5px;line-height:1.65;
+  font-family:var(--mono)}
 .turn .body pre code{background:none;border:none;padding:0}
 .copybtn{position:absolute;top:7px;right:7px;border:1px solid var(--line-2);background:var(--panel);
   color:var(--blue-dim);border-radius:5px;padding:4px 9px;font-size:8.5px;letter-spacing:.08em;

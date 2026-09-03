@@ -6,6 +6,19 @@
 <meta name="color-scheme" content="light dark">
 <title>Dourmouse</title>
 <style>
+/* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
+   — this is the most conversation/prose-heavy screen in the app ("the
+   conversation is the interface"), previously pure system-font. */
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:italic;font-weight:400;font-display:swap;
+  src:url('/assets/fonts/fira-sans-400-italic-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/assets/fonts/fira-sans-500-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:700;font-display:swap;
+  src:url('/assets/fonts/fira-sans-700-latin.woff2') format('woff2')}
 /* ===================================================================== *
    Dourmouse — consumer interface
 
@@ -42,7 +55,7 @@
   --radius-sm:   8px;
   --shadow:      0 1px 2px rgba(26,25,23,.05), 0 8px 24px -18px rgba(26,25,23,.35);
 
-  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sans: "Fira Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   --rail: 248px;

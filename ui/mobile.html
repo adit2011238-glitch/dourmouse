@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DOURMOUSE // PHONE LINK</title>
 <style>
+  /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
+     — this compact mobile view's body text deliberately stays on
+     --font-mono (aligned terminal-style layout), so this adds a real,
+     available --font-prose below rather than rewriting body{}. */
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+    src:url('/assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+    src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
   :root {
     /* ---- JARVIS Scene Archive & Design System · palette ---- */
     --ground: #0B0E14;
@@ -19,6 +27,7 @@
     --font-display:  "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
     --font-mono:     "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
     --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
+    --font-prose: "Fira Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
     --text: rgba(var(--cyan-rgb), var(--a85));
     --text-dim: rgba(var(--cyan-rgb), var(--a45));
     --line: rgba(var(--cyan-rgb), var(--a10));

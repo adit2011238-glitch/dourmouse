@@ -6,7 +6,27 @@
 <title>DOURMOUSE // SETUP</title>
 <style>
 /* First-run setup. Shares the console's tokens so the app does not change
-   identity between setup and use. */
+   identity between setup and use.
+   v13.6 fix: this page named 'Sekuya'/'JetBrains Mono' in --display/--mono
+   below but never actually bundled either font locally (unlike console.html,
+   which this page's own comment says it shares tokens with) — on a fresh
+   install with neither font already cached from a prior page visit, THIS
+   first-run screen would silently render in generic ui-monospace instead.
+   Real fix, not just Fira Sans: bundle all three here now. */
+@font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;
+  src:url('assets/fonts/sekuya-regular.ttf') format('truetype')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:300;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-300-latin.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-500-latin.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:700;font-display:swap;
+  src:url('assets/fonts/jetbrains-mono-700-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+  src:url('assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;
+  src:url('assets/fonts/fira-sans-500-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+  src:url('assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
 :root{
   --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
   --amber:#f2b73d; --amber-ink:#08111c;
@@ -16,6 +36,7 @@
   --ok:#5fbf8a; --bad:#e0685c;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+  --font-prose:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--blue);font-family:var(--mono);

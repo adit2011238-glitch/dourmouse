@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>STARK MK. ZERO INTERFACE</title>
 <style>
+  /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
+     — this "Stark MK. Zero" tactical HUD is deliberately all-monospace
+     (readouts, not prose), so this makes --font-prose available below
+     without touching the terminal-styled body. */
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+    src:url('/assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+    src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
   :root {
     --bg: #07070a;
     --panel: #0d0d12;
@@ -14,6 +22,7 @@
     --dim: #8a8a92;
     --txt: #e8e8ec;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-prose: "Fira Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }

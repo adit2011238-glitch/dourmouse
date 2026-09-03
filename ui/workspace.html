@@ -63,6 +63,17 @@
   src:url('assets/fonts/jetbrains-mono-500-latin.woff2') format('woff2')}
 @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:700;font-display:swap;
   src:url('assets/fonts/jetbrains-mono-700-latin.woff2') format('woff2')}
+/* v13.6: real Fira Sans, bundled locally (OFL-licensed) — this workspace
+   is deliberately all-monospace (terminal-style HUD panels), so this adds
+   a real --font-prose below for genuinely prose-heavy panel content (PDF
+   text, TIME TRAVEL diffs' commit subjects, help banners) rather than
+   rewriting the whole panel system's font. */
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+  src:url('assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;
+  src:url('assets/fonts/fira-sans-500-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+  src:url('assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
 
 :root{
   --bg:#04080e; --panel:#0b1826ee; --panel2:#0e2032ee;
@@ -73,6 +84,7 @@
   --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
+  --font-prose:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--blue-hi);
@@ -162,8 +174,26 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
 .chatlog{flex:1;overflow:auto;padding:2px 0}
 .turn{margin-bottom:10px}
 .turn .q{color:var(--amber-hi);font-size:11.5px;margin-bottom:3px}
-.turn .a{color:var(--blue-hi);font-size:12px;white-space:pre-wrap}
+.turn .a{color:var(--blue-hi);font-size:12.5px;line-height:1.5;white-space:pre-wrap;font-family:var(--font-prose)}
 .turn .meta{color:var(--blue-dim);font-size:10px;margin-top:3px}
+/* v13.6: real thinking-stream UX (Claude Code's extended-thinking tokens,
+   thinking_delta events) — same open-while-reasoning/fold-on-answer
+   pattern already live in ui/console.html, ported here since workspace.html
+   never rendered thinking_delta at all before (silently dropped it). */
+.thinkToggle{display:none;align-items:center;gap:5px;background:none;border:none;
+  color:var(--blue-dim);font-size:10px;letter-spacing:.04em;cursor:pointer;
+  padding:2px 0 4px;font-family:var(--mono)}
+.thinkToggle:hover{color:var(--blue-hi)}
+.thinkToggle .tcar{font-size:8px}
+.think{display:none;font-style:italic;opacity:.75;font-size:11px;line-height:1.5;
+  white-space:pre-wrap;border-left:2px solid var(--line-2);
+  padding:2px 0 6px 9px;margin-bottom:6px;max-height:220px;overflow-y:auto;
+  font-family:var(--font-prose)}
+/* v13.6: per-panel Claude/Ollama directive backend picker. */
+.backendsel{display:flex;align-items:center;gap:6px;padding:4px 8px;
+  border-top:1px solid var(--line);font-size:9.5px;color:var(--blue-dim)}
+.backendsel select{background:#04080e;border:1px solid var(--line);border-radius:5px;
+  color:var(--blue-hi);font-family:var(--mono);font-size:10px;padding:3px 5px}
 .chatform{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
 .chatform input{flex:1;background:#04080e;border:1px solid var(--line);border-radius:6px;
   color:var(--blue-hi);font-family:var(--mono);font-size:12px;padding:7px 8px}
@@ -219,9 +249,9 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
 .pdfimgwrap{flex:1.4;min-height:0;display:flex;align-items:center;justify-content:center;
   background:#04080e;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .pdfimg{max-width:100%;max-height:100%;object-fit:contain;display:block}
-.pdftext{flex:1;min-height:0;overflow:auto;font-size:10.5px;line-height:1.5;
+.pdftext{flex:1;min-height:0;overflow:auto;font-size:11.5px;line-height:1.55;
   color:var(--blue-dim);white-space:pre-wrap;padding:6px 8px;background:var(--panel2);
-  border:1px solid var(--line);border-radius:6px}
+  border:1px solid var(--line);border-radius:6px;font-family:var(--font-prose)}
 .pdferr{color:var(--bad)}
 
 /* EVENT GRAPH panel (v13.6) — real-time GDELT kinetic knowledge graph */
@@ -736,9 +766,28 @@ async function openMailMessage(p, row){
    assistant_text / confirmation_requested / done / error). ---- */
 function initChatPanel(p, focusAgent, placeholder){
   p.focusAgent = focusAgent;
+  // v13.6: per-tab directive backend picker — real, explicit user request
+  // ("for each tab where a directive can be given, give the option as to
+  // whether claude or ollama api key does it"). "auto" keeps this panel's
+  // existing agent (Ollama/NVIDIA/whichever DOURMOUSE_LLM_BACKEND already
+  // resolves to server-side, unchanged); "claude" sends focus_agent=
+  // "code_claude" instead, which routes to the REAL, already-built direct
+  // Claude Code CLI passthrough (webui.py's _handle_code_claude_passthrough,
+  // v13.2) — genuine terminal parity: full context (no max-tokens cap,
+  // nothing here shrinks it), full MCP tool access, bypassPermissions,
+  // and (below) the real extended-thinking stream that passthrough already
+  // emits but this panel never rendered until now.
+  p.backendMode = "auto";
   p.body.innerHTML = `
     <div class="chatwrap">
       <div class="chatlog"></div>
+      <div class="backendsel">
+        <span>directive via</span>
+        <select class="backendpick">
+          <option value="auto">Ollama / local agent</option>
+          <option value="claude">Claude (direct CLI)</option>
+        </select>
+      </div>
       <form class="chatform">
         <input type="text" placeholder="${esc(placeholder)}" autocomplete="off">
         <button type="submit">SEND</button>
@@ -746,6 +795,8 @@ function initChatPanel(p, focusAgent, placeholder){
     </div>`;
   const form = p.body.querySelector("form");
   const input = p.body.querySelector("input");
+  const backendPick = p.body.querySelector(".backendpick");
+  backendPick.addEventListener("change", () => { p.backendMode = backendPick.value; });
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const text = input.value.trim();
@@ -760,17 +811,34 @@ async function sendChatMessage(p, text){
   if(!log) return; // panel might not be a chat panel (defensive)
   const turn = document.createElement("div");
   turn.className = "turn";
-  turn.innerHTML = `<div class="q"></div><div class="a"></div><div class="meta"></div>`;
+  turn.innerHTML = `<div class="q"></div>
+    <button type="button" class="thinkToggle"><span class="tcar">▾</span> THINKING</button>
+    <div class="think"></div>
+    <div class="a"></div><div class="meta"></div>`;
   turn.querySelector(".q").textContent = "YOU: " + text;
   log.appendChild(turn);
   log.scrollTop = log.scrollHeight;
   const aEl = turn.querySelector(".a"), metaEl = turn.querySelector(".meta");
+  const thinkEl = turn.querySelector(".think"), thinkToggleEl = turn.querySelector(".thinkToggle");
   aEl.textContent = "…thinking";
-  let buf = "";
+  let buf = "", thinkBuf = "", thinkStarted = false, thinkFolded = false;
+  // Manual toggle always works, independent of the auto-fold below.
+  thinkToggleEl.addEventListener("click", () => {
+    const open = thinkEl.style.display !== "none";
+    thinkEl.style.display = open ? "none" : "block";
+    thinkToggleEl.querySelector(".tcar").textContent = open ? "▸" : "▾";
+  });
+  const foldThink = () => {
+    if(thinkFolded || !thinkStarted) return;
+    thinkFolded = true;
+    thinkEl.style.display = "none";
+    thinkToggleEl.querySelector(".tcar").textContent = "▸";
+  };
+  const focusAgent = p.backendMode === "claude" ? "code_claude" : p.focusAgent;
   try{
     const res = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: text, focus_agent: p.focusAgent }),
+      body: JSON.stringify({ prompt: text, focus_agent: focusAgent }),
     });
     if(!res.ok || !res.body) throw new Error("HTTP " + res.status);
     const rd = res.body.getReader(), dec = new TextDecoder(); let carry = "";
@@ -781,13 +849,27 @@ async function sendChatMessage(p, text){
       for(const line of parts){
         if(!line.startsWith("data:")) continue;
         let ev; try{ ev = JSON.parse(line.slice(5)); }catch(_){ continue; }
-        if(ev.type === "assistant_delta"){ buf += ev.text || ""; aEl.textContent = buf; log.scrollTop = log.scrollHeight; }
-        else if(ev.type === "assistant_text"){ if((ev.text||"").length > buf.length){ buf = ev.text; aEl.textContent = buf; } }
+        if(ev.type === "thinking_delta"){
+          // Real extended-thinking tokens (Claude's own reasoning stream,
+          // via code_claude) — a channel of their own, never mixed into
+          // the answer text. Opens on first token, folds the instant real
+          // answer content starts (same UX console.html already has).
+          if(!thinkStarted){
+            thinkStarted = true;
+            thinkEl.style.display = "block";
+            thinkToggleEl.style.display = "inline-flex";
+          }
+          thinkBuf += ev.text || "";
+          thinkEl.textContent = thinkBuf;
+          thinkEl.scrollTop = thinkEl.scrollHeight;
+        }
+        else if(ev.type === "assistant_delta"){ foldThink(); buf += ev.text || ""; aEl.textContent = buf; log.scrollTop = log.scrollHeight; }
+        else if(ev.type === "assistant_text"){ foldThink(); if((ev.text||"").length > buf.length){ buf = ev.text; aEl.textContent = buf; } }
         else if(ev.type === "brain"){ metaEl.textContent = (ev.model || "").split("/").pop() || ""; }
         else if(ev.type === "confirmation_requested"){ addConfirmBox(p, log, ev); }
         else if(ev.type === "tool_result"){ applyPanelControlToolResult(ev, log); }
         else if(ev.type === "error"){ aEl.textContent = "ERROR: " + (ev.message || "unknown error"); aEl.style.color = "var(--bad)"; }
-        else if(ev.type === "done"){ if(ev.final_text && ev.final_text.length > buf.length){ buf = ev.final_text; aEl.textContent = buf; } }
+        else if(ev.type === "done"){ foldThink(); if(ev.final_text && ev.final_text.length > buf.length){ buf = ev.final_text; aEl.textContent = buf; } }
       }
     }
   }catch(e){

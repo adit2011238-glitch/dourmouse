@@ -153,11 +153,30 @@ def recall_block(store: MemoryStore, prompt: str, limit: int = 5) -> str:
     leaves the system message untouched. Everything here is real stored
     data; the snippet field comes from SQLite's snippet() with the match
     highlighted.
+
+    v13.6, real severe bug found live (this session's own "final app"
+    polish pass): this module's own docstring promises "a missing/
+    unavailable store... simply disables the loop — the system still
+    works," but ``store.search()`` was called here with NO error
+    handling at all — fine for a local ``MemoryStore`` (which never
+    raises), but ``store`` can also be a ``RemoteMemoryStore``
+    (``DOURMOUSE_MEMORY_REMOTE_URL``), whose ``.search()`` genuinely
+    RAISES ``RemoteMemoryStoreUnavailable`` the moment the remote host
+    is unreachable — confirmed live: with the default ``DOURMOUSE_LEARN=1``
+    and a remote store configured, EVERY chat turn failed outright the
+    instant the remote host went offline, the raw exception text
+    replacing the entire assistant reply. Recall must never break a
+    turn (the exact same principle ``dispatch._maybe_ingest_memory``
+    and ``memory_embed.semantic_search`` already apply to their own
+    memory calls) — restored here, not a new rule.
     """
     query = distill_query(prompt)
     if not query:
         return ""
-    hits = store.search(query, limit=max(1, min(int(limit), 10)))
+    try:
+        hits = store.search(query, limit=max(1, min(int(limit), 10)))
+    except Exception:  # noqa: BLE001 - a remote/unavailable store must never break a turn
+        return ""
     if not hits:
         return ""
     lines = [

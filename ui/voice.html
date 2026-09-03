@@ -15,6 +15,11 @@
   @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/space-grotesk-400-latin.woff2') format('woff2');}
   @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:500;font-display:swap;src:url('assets/fonts/space-grotesk-500-latin.woff2') format('woff2');}
   @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:600;font-display:swap;src:url('assets/fonts/space-grotesk-600-latin.woff2') format('woff2');}
+  /* v13.6: real Fira Sans, bundled locally (OFL-licensed) — takes over
+     --font-prose below from Space Grotesk. */
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/fira-sans-400-latin.woff2') format('woff2');}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;src:url('assets/fonts/fira-sans-500-latin.woff2') format('woff2');}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;src:url('assets/fonts/fira-sans-600-latin.woff2') format('woff2');}
   :root {
     --bg: #070b12;
     --panel: #0c1220;
@@ -29,7 +34,7 @@
     --green: #5ee7a0;
     --font-hud: 'Rajdhani', system-ui, sans-serif;
     --font-mono: 'Share Tech Mono', ui-monospace, Menlo, monospace;
-    --font-prose: 'Space Grotesk', system-ui, sans-serif;
+    --font-prose: 'Fira Sans', system-ui, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }

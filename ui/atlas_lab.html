@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ATLAS // STRATEGY LAB</title>
 <style>
+  /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
+     — replaces --font-prose's previous "Inter" entry below, which was
+     never actually bundled anywhere in this codebase and silently fell
+     through to -apple-system on every real machine. Genuine fix. */
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:300;font-display:swap;
+    src:url('/assets/fonts/fira-sans-300-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+    src:url('/assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:italic;font-weight:400;font-display:swap;
+    src:url('/assets/fonts/fira-sans-400-italic-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;
+    src:url('/assets/fonts/fira-sans-500-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+    src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:700;font-display:swap;
+    src:url('/assets/fonts/fira-sans-700-latin.woff2') format('woff2')}
   :root {
     --ground: #070B12;
     --surface: #0E1420;
@@ -18,7 +34,7 @@
     --a06: 0.06; --a10: 0.10; --a16: 0.16; --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
     --font-display: "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
     --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
-    --font-prose: "Inter",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    --font-prose: "Fira Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
     --text: rgba(var(--cyan-rgb), var(--a85));
     --text-dim: rgba(var(--cyan-rgb), var(--a45));
     --line: rgba(var(--cyan-rgb), var(--a10));

@@ -5,6 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Dourmouse</title>
 <style>
+/* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
+   — this is exactly the "humanist face" --sans below names in this
+   screen's own design philosophy comment, previously unbundled (pure
+   system-font stack). Genuine fix, not a rename. */
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:italic;font-weight:400;font-display:swap;
+  src:url('/assets/fonts/fira-sans-400-italic-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/assets/fonts/fira-sans-500-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
+@font-face{font-family:'Fira Sans';font-style:normal;font-weight:700;font-display:swap;
+  src:url('/assets/fonts/fira-sans-700-latin.woff2') format('woff2')}
 /* =====================================================================
    DOURMOUSE — personal AI operating system
 
@@ -54,7 +68,7 @@
      the only thing set in a humanist face. The split is the identity —
      an instrument that talks, not a chat app with a monospace font. */
   --mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --sans: "Fira Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 
   --rail: 220px;
   --gutter: 116px;   /* per-turn metadata column */

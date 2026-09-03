@@ -5,6 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DOURMOUSE // AGENT WINDOW</title>
 <style>
+  /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
+     — see dourmouse_universe.md for the "polish for final app" pass this
+     belongs to. Replaces --font-prose's previous "Inter" entry below,
+     which was never actually bundled anywhere in this codebase (Inter
+     isn't a macOS system font either, so it silently fell through to
+     -apple-system on every real machine) — this is a genuine fix, not
+     just a rename. Absolute /assets/ path (not relative) because this
+     page is served at the nested route /agent/<name>. */
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:300;font-display:swap;
+    src:url('/assets/fonts/fira-sans-300-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
+    src:url('/assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:italic;font-weight:400;font-display:swap;
+    src:url('/assets/fonts/fira-sans-400-italic-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;
+    src:url('/assets/fonts/fira-sans-500-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
+    src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
+  @font-face{font-family:'Fira Sans';font-style:normal;font-weight:700;font-display:swap;
+    src:url('/assets/fonts/fira-sans-700-latin.woff2') format('woff2')}
   :root {
     /* ---- JARVIS Scene Archive & Design System · palette ---- */
     --ground: #0B0E14;
@@ -19,7 +39,7 @@
     /* ---- type ---- */
     --font-display:  "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
     --font-mono:     "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
-    --font-prose:    "Inter",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    --font-prose:    "Fira Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
     --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
     /* ---- semantic aliases ---- */
     --text: rgba(var(--cyan-rgb), var(--a85));
