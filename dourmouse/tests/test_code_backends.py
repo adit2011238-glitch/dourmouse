@@ -1070,6 +1070,57 @@ class TestStreamClaude:
         )
         assert results == ["file1.py\nfile2.py"]
 
+    def test_on_usage_receives_real_result_event_fields(self, monkeypatch):
+        """v13.6, real usage bar: field names/shape here are transcribed
+        EXACTLY from a real `claude -p --output-format stream-json
+        --include-partial-messages --verbose` invocation run live this
+        session, not guessed."""
+        lines = [
+            _sse_line({
+                "type": "result", "result": "OK", "total_cost_usd": 0.0446764,
+                "usage": {
+                    "input_tokens": 2, "output_tokens": 4,
+                    "cache_creation_input_tokens": 10010, "cache_read_input_tokens": 22962,
+                    "output_tokens_details": {"thinking_tokens": 0},  # a real, irrelevant field -- must be ignored, not crash
+                },
+            }),
+        ]
+        self._patch(monkeypatch, lines)
+        usages = []
+        code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_usage=usages.append,
+        )
+        assert usages == [{
+            "cost_usd": 0.0446764, "input_tokens": 2, "output_tokens": 4,
+            "cache_creation_input_tokens": 10010, "cache_read_input_tokens": 22962,
+        }]
+
+    def test_on_usage_not_called_when_result_carries_no_usage_fields(self, monkeypatch):
+        lines = [_sse_line({"type": "result", "result": "ok"})]
+        self._patch(monkeypatch, lines)
+        usages = []
+        code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_usage=usages.append,
+        )
+        assert usages == []
+
+    def test_on_usage_is_optional_and_a_raising_callback_never_breaks_the_reply(self, monkeypatch):
+        lines = [
+            _sse_line({"type": "result", "result": "done", "total_cost_usd": 0.01, "usage": {"input_tokens": 1}}),
+        ]
+        self._patch(monkeypatch, lines)
+
+        def _raise(usage):
+            raise RuntimeError("usage tracker down")
+
+        out = code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_usage=_raise,
+        )
+        assert out == "done"  # the real reply is unaffected
+
     def test_session_continuity_same_as_run_claude(self, monkeypatch):
         seen: list = []
         lines = [_sse_line({"type": "result", "result": "ok"})]

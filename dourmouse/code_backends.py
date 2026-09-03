@@ -450,6 +450,7 @@ def stream_claude(
     on_thinking: Callable[[str], None] | None = None,
     on_tool_use: Callable[[str, str], None] | None = None,
     on_tool_result: Callable[[str], None] | None = None,
+    on_usage: Callable[[dict[str, Any]], None] | None = None,
 ) -> str:
     """Stream one real ``claude -p`` run live; returns the final result text
     (the CLI's own ``type:"result"`` ``result`` field — the same string
@@ -566,6 +567,32 @@ def stream_claude(
                         on_tool_result((text or "")[:2000])
                 elif etype == "result":
                     final_result = ev.get("result") or ""
+                    if on_usage:
+                        # v13.6: real usage bar ("how much usage you have
+                        # used on claude") -- the CLI's own real result
+                        # event, live-verified this session (a real `claude
+                        # -p` call), carries genuine cost/token accounting
+                        # (total_cost_usd, usage.input_tokens/output_tokens/
+                        # cache_*) that used to be discarded here (only
+                        # .result text was kept). Never fabricated: any
+                        # field missing from a real response is simply
+                        # absent from this dict, not zero-filled.
+                        raw_usage = ev.get("usage") or {}
+                        usage_out: dict[str, Any] = {}
+                        if isinstance(ev.get("total_cost_usd"), (int, float)):
+                            usage_out["cost_usd"] = float(ev["total_cost_usd"])
+                        for field in (
+                            "input_tokens", "output_tokens",
+                            "cache_creation_input_tokens", "cache_read_input_tokens",
+                        ):
+                            value = raw_usage.get(field)
+                            if isinstance(value, int):
+                                usage_out[field] = value
+                        if usage_out:
+                            try:
+                                on_usage(usage_out)
+                            except Exception:  # noqa: BLE001 - a usage-tracking failure must never break the real reply
+                                pass
         finally:
             stopped.set()
             try:

@@ -436,6 +436,37 @@ class TestSemanticGraphEndpoints:
         assert data["nodes"][0]["cluster"] == data["nodes"][1]["cluster"]
 
 
+class TestUsageEndpoint:
+    """GET /api/usage — v13.6, real persisted Claude+Ollama usage totals
+    (dourmouse/usage_tracker.py). See that module's own docstring for
+    what's real (Claude: real cost+tokens from the CLI's own result
+    event) vs. honestly not attempted (a fabricated Ollama $ figure)."""
+
+    def test_reports_honest_zero_state_by_default(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path / "cfg"))
+        _, port = server
+        status, body = _get(port, "/api/usage")
+        assert status == 200
+        data = json.loads(body)
+        assert data["claude"]["requests"] == 0
+        assert data["ollama"]["requests"] == 0
+
+    def test_reflects_real_recorded_usage(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path / "cfg"))
+        from dourmouse.usage_tracker import record_claude_usage, record_ollama_usage
+
+        record_claude_usage({"cost_usd": 0.05, "input_tokens": 100, "output_tokens": 50})
+        record_ollama_usage({"prompt_tokens": 30, "completion_tokens": 10})
+        _, port = server
+        status, body = _get(port, "/api/usage")
+        assert status == 200
+        data = json.loads(body)
+        assert data["claude"]["requests"] == 1
+        assert data["claude"]["cost_usd"] == 0.05
+        assert data["ollama"]["requests"] == 1
+        assert data["ollama"]["prompt_tokens"] == 30
+
+
 # --------------------------------------------------------------------------- #
 # A7 — setup status panel
 # --------------------------------------------------------------------------- #

@@ -106,6 +106,21 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--blue-hi);
   border-bottom:1px solid var(--line)}
 #topbar .brand{font-family:var(--display);color:var(--amber);letter-spacing:.06em;font-size:15px}
 #topbar .brand small{color:var(--blue-dim);font-family:var(--mono);font-weight:400;margin-left:8px;font-size:11px}
+/* v13.6: real usage bar ("how much usage you have used on claude and
+   ollama api key") — a fixed corner badge, independent of the topbar's
+   own already-crowded dock row (11 buttons, real horizontal scroll on
+   a normal-width window), so it stays visible regardless of dock
+   scroll position. Real, persisted totals (dourmouse/usage_tracker.py,
+   /api/usage), polled — never a per-session-only counter that quietly
+   resets on reload. */
+#usagebar{position:fixed;right:10px;bottom:10px;z-index:9999;display:flex;gap:10px;
+  align-items:center;background:rgba(4,8,14,.88);border:1px solid var(--line);
+  border-radius:7px;padding:6px 11px;font-family:var(--mono);font-size:10px;
+  color:var(--blue-dim);backdrop-filter:blur(6px)}
+#usagebar .ub-item{display:flex;align-items:center;gap:5px}
+#usagebar .ub-k{color:var(--amber-hi);font-weight:600}
+#usagebar .ub-v{color:var(--blue-hi)}
+#usagebar .ub-sep{color:var(--line-2)}
 .dock{display:flex;gap:6px;margin-left:auto;align-items:center}
 .dockbtn{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--blue-hi);
   background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 11px;
@@ -253,6 +268,9 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
   color:var(--blue-dim);white-space:pre-wrap;padding:6px 8px;background:var(--panel2);
   border:1px solid var(--line);border-radius:6px;font-family:var(--font-prose)}
 .pdferr{color:var(--bad)}
+
+/* Generic iframe panel (v13.6) — embeds another real DOURMOUSE screen */
+.iframepanel{width:100%;height:100%;border:none;display:block;background:#04080e}
 
 /* EVENT GRAPH panel (v13.6) — real-time GDELT kinetic knowledge graph */
 .egwrap{display:flex;flex-direction:column;height:100%;padding:10px;gap:8px}
@@ -404,10 +422,19 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="eventgraph">+ EVENT GRAPH</button>
     <button class="dockbtn" type="button" data-open="timetravel">+ TIME TRAVEL</button>
     <button class="dockbtn" type="button" data-open="semanticmap">+ SEMANTIC MAP</button>
+    <button class="dockbtn" type="button" data-open="agentmap">+ AGENT MAP</button>
+    <button class="dockbtn" type="button" data-open="atlaslab">+ ATLAS LAB</button>
+    <button class="dockbtn" type="button" data-open="allhands">+ ALL HANDS</button>
     <button class="dockbtn" type="button" id="organizeBtn">⊞ ORGANIZE</button>
     <span class="hfpill" id="handsFreePill" title="Hands-free voice loop (dourmouse/hands_free.py)">● HANDS-FREE: —</span>
     <a class="backlink" href="/">← CONSOLE</a>
   </div>
+</div>
+
+<div id="usagebar">
+  <div class="ub-item"><span class="ub-k">CLAUDE</span><span class="ub-v" id="ubClaude">—</span></div>
+  <span class="ub-sep">|</span>
+  <div class="ub-item"><span class="ub-k">OLLAMA</span><span class="ub-v" id="ubOllama">—</span></div>
 </div>
 
 <div id="visBackdrop">
@@ -660,7 +687,8 @@ function openPanel(type){
   const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP",
                    globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL", upload: "UPLOAD TO RAG",
                    browser: "LIVE BROWSER", pdf: "PDF READER", eventgraph: "EVENT GRAPH",
-                   timetravel: "TIME TRAVEL", semanticmap: "SEMANTIC MAP" };
+                   timetravel: "TIME TRAVEL", semanticmap: "SEMANTIC MAP",
+                   agentmap: "AGENT MAP", atlaslab: "ATLAS LAB", allhands: "ALL HANDS" };
   const p = createPanel(type, titles[type] || type.toUpperCase());
   if(type === "mail") loadMailPanel(p);
   else if(type === "chat") initChatPanel(p, "companion", "Ask the companion anything…");
@@ -674,6 +702,9 @@ function openPanel(type){
   else if(type === "eventgraph") loadEventGraphPanel(p);
   else if(type === "timetravel") loadTimeTravelPanel(p);
   else if(type === "semanticmap") loadSemanticMapPanel(p);
+  else if(type === "agentmap") loadIframePanel(p, "/map");
+  else if(type === "atlaslab") loadIframePanel(p, "/atlas-lab");
+  else if(type === "allhands") loadIframePanel(p, "/all-hands");
   return p;
 }
 
@@ -712,6 +743,39 @@ async function pollHandsFreeStatus() {
 }
 pollHandsFreeStatus();
 setInterval(pollHandsFreeStatus, 7000);
+
+/* v13.6: real usage bar — polls the real, persisted /api/usage totals
+   (dourmouse/usage_tracker.py). sendChatMessage also calls this
+   immediately on a real "usage" SSE event so a just-finished Claude
+   turn's cost shows up right away, not after waiting out the poll. */
+async function refreshUsageBar(){
+  const claudeEl = $("ubClaude"), ollamaEl = $("ubOllama");
+  if(!claudeEl || !ollamaEl) return;
+  try{
+    const u = await api("/api/usage");
+    const c = u.claude || {};
+    claudeEl.textContent = `$${(c.cost_usd || 0).toFixed(4)} · ${(c.input_tokens||0)+(c.output_tokens||0)} tok · ${c.requests||0} req`;
+    const o = u.ollama || {};
+    ollamaEl.textContent = `${(o.prompt_tokens||0)+(o.completion_tokens||0)} tok · ${o.requests||0} req`;
+  }catch(e){
+    claudeEl.textContent = "?"; ollamaEl.textContent = "?";
+  }
+}
+refreshUsageBar();
+setInterval(refreshUsageBar, 15000);
+
+/* ---- Generic iframe panel (v13.6): embeds one of DOURMOUSE's other
+   real, full HTML screens (the agent orchestration map, ATLAS strategy
+   lab, ALL HANDS) INSIDE a workspace panel instead of the window.open()
+   popup those screens' own launchers use elsewhere (index.html, map.html)
+   — explicit user request ("for each tab in dourmouse, ensure it opens
+   in one window, doesn't open new separate windows"). Reuses 100% of
+   the real target page's own logic/markup unmodified (same server,
+   same session — this is genuinely the same app, just framed), rather
+   than reimplementing any of it a second time in workspace.html. ---- */
+function loadIframePanel(p, href){
+  p.body.innerHTML = `<iframe src="${esc(href)}" class="iframepanel" title="${esc(href)}"></iframe>`;
+}
 
 /* ---- MAIL panel: reuses /api/gmail/search + /api/gmail/read, unmodified real endpoints ---- */
 async function loadMailPanel(p){
@@ -866,6 +930,7 @@ async function sendChatMessage(p, text){
         else if(ev.type === "assistant_delta"){ foldThink(); buf += ev.text || ""; aEl.textContent = buf; log.scrollTop = log.scrollHeight; }
         else if(ev.type === "assistant_text"){ foldThink(); if((ev.text||"").length > buf.length){ buf = ev.text; aEl.textContent = buf; } }
         else if(ev.type === "brain"){ metaEl.textContent = (ev.model || "").split("/").pop() || ""; }
+        else if(ev.type === "usage"){ refreshUsageBar(); }
         else if(ev.type === "confirmation_requested"){ addConfirmBox(p, log, ev); }
         else if(ev.type === "tool_result"){ applyPanelControlToolResult(ev, log); }
         else if(ev.type === "error"){ aEl.textContent = "ERROR: " + (ev.message || "unknown error"); aEl.style.color = "var(--bad)"; }

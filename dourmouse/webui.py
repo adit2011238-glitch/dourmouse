@@ -2475,6 +2475,15 @@ class _Handler(BaseHTTPRequestHandler):
                 "embed_enabled": embed_enabled(),
                 "local_memory_store": isinstance(self.server.memory, MemoryStore),
             })
+        elif path == "/api/usage":
+            # v13.6: real, persisted Claude + Ollama usage totals — see
+            # dourmouse/usage_tracker.py's own docstring for exactly
+            # what's real (Claude: real cost+tokens from the CLI's own
+            # result event) vs. honestly not attempted (a fabricated
+            # Ollama dollar figure).
+            from dourmouse.usage_tracker import get_totals
+
+            self._send_json(get_totals())
         elif path == "/api/speech":
             # v4.1 (P7): GET = local TTS, returns audio/wav bytes.
             qs = urllib.parse.parse_qs(parsed.query)
@@ -3573,6 +3582,17 @@ class _Handler(BaseHTTPRequestHandler):
         start = time.perf_counter()
         sink({"type": "brain", "model": "claude-code-cli", "local": False})
         final_text = ""
+
+        def _on_claude_usage(usage: dict[str, Any]) -> None:
+            # v13.6: real usage bar -- persist AND emit live so a
+            # connected client can show this turn's real cost the
+            # instant it's known, not just via a separately-polled
+            # /api/usage total.
+            from dourmouse.usage_tracker import record_claude_usage
+
+            record_claude_usage(usage)
+            sink({"type": "usage", "backend": "claude", **usage})
+
         try:
             final_text = code_backends.stream_claude(
                 prompt,
@@ -3586,6 +3606,7 @@ class _Handler(BaseHTTPRequestHandler):
                 on_tool_result=lambda text: sink(
                     {"type": "tool_result", "name": "claude", "text": text}
                 ),
+                on_usage=_on_claude_usage,
             )
         except Exception as exc:  # noqa: BLE001 -- surface the real failure, never fabricate
             sink({"type": "error", "message": str(exc)})

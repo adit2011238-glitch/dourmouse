@@ -310,6 +310,7 @@ class TestNativeWindowLaunch:
     def test_server_serves_roster_during_launch(self, monkeypatch):
         """The window must point at a REAL live server (not a stub)."""
         import http.client
+        import urllib.parse
 
         fake = _FakeWebview()
         monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
@@ -317,7 +318,17 @@ class TestNativeWindowLaunch:
 
         def _probe_and_start():
             main = next(w for w in fake.windows if w.title.startswith("DOURMOUSE"))
-            host, port = main.url.split("://")[1].rsplit(":", 1)
+            # v13.6: real urllib.parse instead of naive string-splitting —
+            # main.url now carries a real path (initial_href defaults to
+            # "/workspace", see desktop.py's own comment), which the old
+            # `.split("://")[1].rsplit(":", 1)` didn't account for (it
+            # folded the path onto the port, e.g. "8765/workspace",
+            # int()-crashed, and that crash's own except-branch fell
+            # through to the REAL _wait_forever() — a genuine, by-design
+            # infinite wait — hanging this exact test. urlsplit() parses
+            # the URL correctly regardless of what path is present.
+            parsed = urllib.parse.urlsplit(main.url)
+            host, port = parsed.hostname, parsed.port
             conn = http.client.HTTPConnection(host, int(port), timeout=5)
             conn.request("GET", "/api/roster")
             resp = conn.getresponse()

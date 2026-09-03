@@ -337,6 +337,7 @@ def _call_with_retry(
         stop_heartbeat.set()
         if heartbeat_thread is not None:
             heartbeat_thread.join(timeout=1.0)
+        real_usage = _usage_of(response) if response is not None else {}
         try:
             from dourmouse import obs
 
@@ -350,11 +351,23 @@ def _call_with_retry(
                     "n_messages": len(messages),
                     "n_tools": len(tools),
                     "attempts": len(call_log) if call_log is not None else None,
-                    **(_usage_of(response) if response is not None else {}),
+                    **real_usage,
                 },
             )
         except Exception:  # noqa: BLE001 - measurement must never break a call
             pass
+        # v13.6: real usage bar ("how much usage you have used on...
+        # ollama api key") -- this is the one real choke point every
+        # non-Claude-CLI backend call (Ollama/NVIDIA/OmniRoute) already
+        # passes through, so it's also the one place to record real
+        # token counts without duplicating _usage_of's own extraction.
+        if real_usage:
+            try:
+                from dourmouse import usage_tracker
+
+                usage_tracker.record_ollama_usage(real_usage)
+            except Exception:  # noqa: BLE001 - usage tracking must never break a call
+                pass
 
 
 def _call_with_retry_inner(

@@ -2042,7 +2042,7 @@ class TestCodeClaudePassthrough:
 
     def test_deltas_and_thinking_and_tool_use_reach_the_sse_stream(self, code_claude_server, monkeypatch):
         def fake_stream_claude(task, *, cwd, timeout, on_delta,
-                                on_thinking=None, on_tool_use=None, on_tool_result=None):
+                                on_thinking=None, on_tool_use=None, on_tool_result=None, on_usage=None):
             on_thinking("reasoning...")
             on_delta("Hel")
             on_delta("lo.")
@@ -2063,6 +2063,33 @@ class TestCodeClaudePassthrough:
         assert any(e["type"] == "tool_result" and e["text"] == "file1.py" for e in events)
         done = next(e for e in events if e["type"] == "done")
         assert done["final_text"] == "Hello."
+
+    def test_real_usage_is_recorded_and_emitted_live(self, code_claude_server, monkeypatch, tmp_path):
+        """v13.6, real usage bar: the CLI's own real usage fields (see
+        code_backends.py's own docstring for the exact real field names,
+        transcribed from a live `claude -p` call) reach BOTH the
+        persisted usage_tracker AND a live "usage" SSE event, not just
+        one or the other."""
+        monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path / "cfg"))
+
+        def fake_stream_claude(task, *, cwd, timeout, on_delta, on_thinking=None,
+                                on_tool_use=None, on_tool_result=None, on_usage=None):
+            on_delta("Hello.")
+            if on_usage:
+                on_usage({"cost_usd": 0.05, "input_tokens": 10, "output_tokens": 5})
+            return "Hello."
+
+        monkeypatch.setattr("dourmouse.code_backends.stream_claude", fake_stream_claude)
+        status, events = self._stream(code_claude_server[1], "say hello")
+        assert status == 200
+        usage_events = [e for e in events if e["type"] == "usage"]
+        assert usage_events == [{"type": "usage", "backend": "claude", "cost_usd": 0.05, "input_tokens": 10, "output_tokens": 5}]
+
+        from dourmouse.usage_tracker import get_totals
+
+        totals = get_totals()
+        assert totals["claude"]["requests"] == 1
+        assert totals["claude"]["cost_usd"] == 0.05
 
     def test_real_error_surfaces_as_an_error_event_not_fabricated_success(
         self, code_claude_server, monkeypatch

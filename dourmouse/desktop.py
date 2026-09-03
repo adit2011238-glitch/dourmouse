@@ -746,8 +746,14 @@ def _brand_native_app() -> None:
         # Dock icon: use the bundled DourMouse.icns if found next to the app.
         icon_path = str(Path(__file__).resolve().parent.parent / "dourmouse.app" / "Contents" / "Resources" / "DourMouse.icns")
         if not Path(icon_path).is_file():
-            # Try the installed /Applications path.
-            icon_path = "/Applications/dourmouse-dist/dourmouse.app/Contents/Resources/DourMouse.icns"
+            # v13.6: the old fallback here pointed at /Applications/
+            # dourmouse-dist/dourmouse.app -- a specific, now-retired
+            # personal dist folder, not a real install-location
+            # convention. Real installs from build_app.command land in
+            # the user's own ~/Applications (see that script's own
+            # baked-in-project-root fix, and NATIVE_REWRITE_ROADMAP.md's
+            # "dourmouse2" packaging pass) -- try that instead.
+            icon_path = str(Path.home() / "Applications" / "dourmouse2.app" / "Contents" / "Resources" / "DourMouse.icns")
         if Path(icon_path).is_file():
             img = NSImage.alloc().initWithContentsOfFile_(icon_path)
             if img:
@@ -827,7 +833,15 @@ def launch(
     # v5.19: an OS deep link at launch (dourmouse://...) loads the main
     # window at its validated SPA route — the allow-list parser decides,
     # never raw argv.
-    initial_href = ""
+    # v13.6: default entry point is now /workspace (the confirmed-current
+    # primary UI — real single-window floating-panel desktop, hand/voice
+    # control, the newest features built this session), not console.html's
+    # bare "/" — explicit "for each tab in dourmouse, ensure it opens in
+    # one window" pass. console.html remains one click away (workspace's
+    # own "← CONSOLE" link) — nothing about it is removed or broken, this
+    # only changes which screen a freshly-launched app's one window shows
+    # first. A real deep link still wins, exactly as before.
+    initial_href = "/workspace"
     if deep_link:
         from dourmouse.deeplink import parse_deeplink
 
@@ -859,7 +873,7 @@ def launch(
         try:
             webview = loader()
         except RuntimeError as exc:
-            return _fallback_to_browser(url, str(exc))
+            return _fallback_to_browser(url + initial_href, str(exc))
 
         map_window = webview.create_window(
             "AGENT ORCHESTRATION MAP",
@@ -989,7 +1003,7 @@ def launch(
         except KeyboardInterrupt:
             pass
         except Exception as exc:
-            return _fallback_to_browser(url, f"Native window could not start: {exc}")
+            return _fallback_to_browser(url + initial_href, f"Native window could not start: {exc}")
         return 0
     finally:
         _stop_vision_helpers(vision_procs)
