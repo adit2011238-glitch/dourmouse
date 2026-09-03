@@ -48,12 +48,26 @@ class _FakeFaissIndex:
     """Stands in for a real faiss.Index: reports a dimension and hands
     back a fixed, pre-decided ranked hit list on .search() — exactly the
     surface query_spatial_vault actually touches (.d, .metric_type,
-    .search())."""
+    .ntotal, .search()).
 
-    def __init__(self, d, metric_type, ordered_hits):
+    v13.6: ``ordered_hits`` entries are real 0-based FAISS POSITIONS in
+    the second slot, NOT SQL ids — matching what a real plain
+    IndexFlatL2/IndexFlatIP genuinely returns (live-confirmed against
+    the real desktop vault: it carries no id map at all). Every test
+    below used to pass literal SQL ids there, which happened to equal
+    the position for those specific fixtures and so never actually
+    exercised (or could have caught) the real position!=id bug this
+    session found live — see TestPositionToIdMapping below for a
+    fixture where they genuinely differ. ``ntotal`` defaults to a
+    generous sentinel for tests that don't care about the position/id
+    boundary at all.
+    """
+
+    def __init__(self, d, metric_type, ordered_hits, ntotal=10_000):
         self.d = d
         self.metric_type = metric_type
-        self._ordered_hits = ordered_hits  # list[(score, faiss_id)]
+        self.ntotal = ntotal
+        self._ordered_hits = ordered_hits  # list[(score, faiss_position)]
 
     def search(self, q, k):
         scores = [s for s, _ in self._ordered_hits[:k]]
@@ -246,9 +260,13 @@ class TestQuerySpatialVault:
         d = 4
         fake_index = _FakeFaissIndex(
             d=d, metric_type=_FakeFaissModule.METRIC_INNER_PRODUCT,
-            # id 99 has no matching row — a stale index entry, must be
-            # skipped honestly, not crash and not silently vanish unnoted.
-            ordered_hits=[(0.9, 1), (0.5, 2), (0.1, 99)],
+            # Real 0-based FAISS positions: 0->id 1 (alpha), 1->id 2
+            # (beta), both real rows in this 3-row table (id ASC order
+            # is [1,2,3]). Position 99 is genuinely out of range for a
+            # 3-row table -- a stale index entry, must be skipped
+            # honestly, not crash and not silently vanish unnoted.
+            ordered_hits=[(0.9, 0), (0.5, 1), (0.1, 99)],
+            ntotal=100,
         )
         monkeypatch.setitem(sys.modules, "faiss", _FakeFaissModule(fake_index))
         monkeypatch.setattr(shared_rag, "EMBED_DIM", d)
@@ -271,10 +289,12 @@ class TestQuerySpatialVault:
         (tmp_path / "vector.index").write_bytes(b"placeholder")
         monkeypatch.setenv("DOURMOUSE_SPATIAL_VAULT_PATH", str(db))
         d = 2
-        # id 1 has the SMALLER L2 distance (0.1) -> should rank FIRST.
+        # Real positions in a 2-row table (id ASC -> [1, 2]): position 0
+        # is id 1, position 1 is id 2. id 1 has the SMALLER L2 distance
+        # (0.1) -> should rank FIRST.
         fake_index = _FakeFaissIndex(
             d=d, metric_type=_FakeFaissModule.METRIC_L2,
-            ordered_hits=[(2.0, 2), (0.1, 1)],
+            ordered_hits=[(2.0, 1), (0.1, 0)],
         )
         monkeypatch.setitem(sys.modules, "faiss", _FakeFaissModule(fake_index))
         monkeypatch.setattr(shared_rag, "EMBED_DIM", d)
@@ -294,6 +314,126 @@ class TestQuerySpatialVault:
         monkeypatch.setattr(shared_rag, "EMBED_DIM", 2)
         monkeypatch.setattr(shared_rag, "embed_text", lambda q: [0.1, 0.2])
         assert query_spatial_vault("anything") == []
+
+
+class TestPositionToIdMapping:
+    """v13.6, the real bug this session found live against the actual
+    desktop vault: a plain FAISS IndexFlatL2/IndexFlatIP carries NO id
+    map — .search() returns 0-based POSITIONS, not SQL ids. Every test
+    above this class uses fixtures where position happens to equal id
+    (rows inserted 1,2,3 with none skipped), which could never have
+    caught this.
+    """
+
+    def test_default_id_asc_resolves_a_true_prefix_correctly(self, tmp_path, monkeypatch):
+        """The default (plain 'id ASC') is correct for the common case:
+        an index built in one straight pass over the whole table, so
+        the index covers a true PREFIX of it — position N really is
+        the (N+1)-th row by id."""
+        db = tmp_path / "vault.db"
+        _make_db(db, rows=[(1, "row one"), (2, "row two"), (3, "row three")])
+        (tmp_path / "vector.index").write_bytes(b"placeholder")
+        monkeypatch.setenv("DOURMOUSE_SPATIAL_VAULT_PATH", str(db))
+        d = 2
+        # Only 2 of the 3 real rows are indexed (a real, common shape:
+        # ingestion is still in progress) -- but crucially still a
+        # PREFIX (ids 1, 2), not a gap in the middle.
+        fake_index = _FakeFaissIndex(
+            d=d, metric_type=_FakeFaissModule.METRIC_INNER_PRODUCT,
+            ordered_hits=[(0.9, 1)],  # position 1 -> should be id 2
+            ntotal=2,
+        )
+        monkeypatch.setitem(sys.modules, "faiss", _FakeFaissModule(fake_index))
+        monkeypatch.setattr(shared_rag, "EMBED_DIM", d)
+        monkeypatch.setattr(shared_rag, "embed_text", lambda q: [0.1, 0.2])
+
+        hits = query_spatial_vault("q", top_k=5)
+        assert len(hits) == 1
+        assert hits[0]["id"] == "2"
+        assert hits[0]["text"] == "row two"
+
+    def test_id_order_override_resolves_the_real_verified_gap_shape(self, tmp_path, monkeypatch):
+        """The real desktop vault is NOT a simple prefix -- it indexes
+        two DISJOINT id ranges with a large skipped range in between
+        (real, live-verified this session: HuggingFace_Parquet_Stream
+        1..81166 + English_Wikipedia 878856..1023765 indexed,
+        Pristine_Filtered_Stream 81167..878855 in between is not). A
+        naive "id = position" OR even a plain "id ASC over everything"
+        default gets this wrong. DOURMOUSE_SPATIAL_VAULT_ID_ORDER_SQL
+        is the real, documented escape hatch -- this test uses the
+        EXACT real clause verified against the actual vault, on a
+        small synthetic fixture with the same shape."""
+        db = tmp_path / "vault.db"
+        _make_db(
+            db,
+            rows=[
+                (1, "hf row"),
+                (2, "hf row two"),
+                (500, "pristine row - never indexed, sits in the gap"),
+                (900, "wikipedia row"),
+                (901, "wikipedia row two"),
+            ],
+        )
+        # Real column name in the actual vault -- exercised for real
+        # here too (not just id/text) since the ORDER BY clause
+        # references it by name.
+        conn = sqlite3.connect(str(db))
+        conn.execute("ALTER TABLE chunks ADD COLUMN source_pipeline TEXT")
+        conn.execute("UPDATE chunks SET source_pipeline='HuggingFace_Parquet_Stream' WHERE id IN (1,2)")
+        conn.execute("UPDATE chunks SET source_pipeline='Pristine_Filtered_Stream' WHERE id=500")
+        conn.execute("UPDATE chunks SET source_pipeline='English_Wikipedia' WHERE id IN (900,901)")
+        conn.commit()
+        conn.close()
+        (tmp_path / "vector.index").write_bytes(b"placeholder")
+        monkeypatch.setenv("DOURMOUSE_SPATIAL_VAULT_PATH", str(db))
+        monkeypatch.setenv(
+            "DOURMOUSE_SPATIAL_VAULT_ID_FILTER_SQL",
+            "source_pipeline IN ('HuggingFace_Parquet_Stream','English_Wikipedia')",
+        )
+        monkeypatch.setenv(
+            "DOURMOUSE_SPATIAL_VAULT_ID_ORDER_SQL",
+            "(source_pipeline='English_Wikipedia'), id ASC",
+        )
+        d = 2
+        # Index covers 4 of the 5 real rows (everything except the
+        # Pristine one in the middle): positions 0,1 = the two HF rows
+        # (id ASC), positions 2,3 = the two Wikipedia rows (id ASC).
+        fake_index = _FakeFaissIndex(
+            d=d, metric_type=_FakeFaissModule.METRIC_INNER_PRODUCT,
+            ordered_hits=[(0.9, 3)],  # position 3 -> should be id 901, NOT id 500
+            ntotal=4,
+        )
+        monkeypatch.setitem(sys.modules, "faiss", _FakeFaissModule(fake_index))
+        monkeypatch.setattr(shared_rag, "EMBED_DIM", d)
+        monkeypatch.setattr(shared_rag, "embed_text", lambda q: [0.1, 0.2])
+
+        hits = query_spatial_vault("q", top_k=5)
+        assert len(hits) == 1
+        assert hits[0]["id"] == "901"
+        assert hits[0]["text"] == "wikipedia row two"
+
+    def test_position_beyond_the_real_id_map_is_honestly_stale(self, tmp_path, monkeypatch):
+        """An index reporting more vectors (ntotal) than the table
+        actually has real ids for a corrupt/mismatched pairing -- must
+        degrade to a stale skip, never an IndexError or a wrong id."""
+        db = tmp_path / "vault.db"
+        _make_db(db, rows=[(1, "only row")])
+        (tmp_path / "vector.index").write_bytes(b"placeholder")
+        monkeypatch.setenv("DOURMOUSE_SPATIAL_VAULT_PATH", str(db))
+        d = 2
+        fake_index = _FakeFaissIndex(
+            d=d, metric_type=_FakeFaissModule.METRIC_INNER_PRODUCT,
+            ordered_hits=[(0.9, 0), (0.5, 5)],  # position 5 has no real id at all
+            ntotal=10,
+        )
+        monkeypatch.setitem(sys.modules, "faiss", _FakeFaissModule(fake_index))
+        monkeypatch.setattr(shared_rag, "EMBED_DIM", d)
+        monkeypatch.setattr(shared_rag, "embed_text", lambda q: [0.1, 0.2])
+
+        hits = query_spatial_vault("q", top_k=5)
+        assert len(hits) == 1
+        assert hits[0]["id"] == "1"
+        assert hits[0]["metadata"]["vault_stale_entries_skipped"] == 1
 
 
 class TestMergedSearch:

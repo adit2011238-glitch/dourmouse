@@ -92,6 +92,9 @@ _VAULT_ID_COL_ENV = "DOURMOUSE_SPATIAL_VAULT_ID_COL"        # optional override
 _VAULT_TEXT_COL_ENV = "DOURMOUSE_SPATIAL_VAULT_TEXT_COL"    # optional override
 _VAULT_META_COL_ENV = "DOURMOUSE_SPATIAL_VAULT_METADATA_COL"  # optional override
 _VAULT_EMBED_MODEL_ENV = "DOURMOUSE_SPATIAL_VAULT_EMBED_MODEL"  # optional, informational+strict
+_VAULT_ID_ORDER_ENV = "DOURMOUSE_SPATIAL_VAULT_ID_ORDER_SQL"  # optional override, see _load_position_id_map
+_VAULT_ID_FILTER_ENV = "DOURMOUSE_SPATIAL_VAULT_ID_FILTER_SQL"  # optional WHERE fragment, see _load_position_id_map
+_VAULT_ID_ORDER_DEFAULT = "id ASC"
 
 # Best-effort default column-name guesses, tried in order against whatever
 # PRAGMA table_info actually reports — never assumed to be right, always
@@ -317,6 +320,74 @@ def _metric_is_lower_better(index) -> bool:
         return False
 
 
+def _load_position_id_map(db_path: Path, schema: VaultSchema, index_total: int) -> list[int]:
+    """Real, live-confirmed fix (v13.6, this session's own "understand
+    and quiz the desktop's spatial vault" pass): a plain FAISS
+    ``IndexFlatL2``/``IndexFlatIP`` (confirmed live to be exactly what
+    ``hybrid_omnidisciplinary_vault/vector.index`` actually is) carries
+    NO id map at all — ``index.search()`` returns raw 0-based POSITIONAL
+    indices into the index, not the SQL id column. The code below this
+    function used to feed those positions STRAIGHT into
+    ``WHERE id = ?``, which is simply wrong whenever the index's
+    insertion order isn't a straight ``id ASC`` scan of the WHOLE table
+    — confirmed live, and the honest, harder finding underneath that:
+    the real vault is NOT a simple prefix either. It has three
+    ``source_pipeline`` values with disjoint id RANGES
+    (``HuggingFace_Parquet_Stream`` 1..81166, ``Pristine_Filtered_Stream``
+    81167..878855, ``English_Wikipedia`` 878856..1023765), and the real
+    index covers the FIRST and THIRD ranges but skips the (largest,
+    middle) second one — real, live-verified via
+    ``index.reconstruct()`` compared against an independently
+    recomputed embedding at the exact position boundaries (cosine
+    similarity 1.0, not a guess): position 0 is the real global-
+    minimum id (1, HuggingFace_Parquet_Stream), and position 81166 is
+    real English_Wikipedia's own minimum id (878856) — i.e. the real
+    build order was "every HuggingFace_Parquet_Stream row by id, THEN
+    every English_Wikipedia row by id", a real, specific, NOT
+    generically-inferrable ordering from the SQL schema alone.
+
+    Default here (plain ``id ASC`` over every row, no filter) is a
+    correct, honest best-effort for the COMMON case — a vault embedded
+    in one straight pass over the WHOLE table covers a true prefix of
+    it, and this matches that exactly.
+
+    It is NOT guaranteed correct for a vault (like the real one) built
+    across multiple passes that SKIP some rows entirely — a plain
+    ORDER BY alone still can't fix that (live-caught in this module's
+    own test suite: an ORDER BY that only reorders which INDEXED
+    pipeline sorts last still interleaves a genuinely-skipped
+    pipeline's rows into the early positions unless they're filtered
+    out first). That real ordering isn't recoverable from schema alone
+    — rather than hardcode today's exact real shape here (which would
+    silently go stale the moment more of the vault gets embedded),
+    these are real, documented, operator-set overrides:
+    ``DOURMOUSE_SPATIAL_VAULT_ID_FILTER_SQL`` (a real SQL boolean
+    expression usable after ``WHERE``, selecting only rows the index
+    actually covers) and ``DOURMOUSE_SPATIAL_VAULT_ID_ORDER_SQL`` (a
+    real SQL expression usable after ``ORDER BY``, for how the index
+    was built beyond plain id order). For the actual desktop vault as
+    verified this session, the real, correct values are
+    filter ``"source_pipeline IN ('HuggingFace_Parquet_Stream',
+    'English_Wikipedia')"`` (excludes the large, real, genuinely-
+    unindexed ``Pristine_Filtered_Stream`` pipeline) and order
+    ``"(source_pipeline='English_Wikipedia'), id ASC"`` (false/0 sorts
+    before true/1, so every non-Wikipedia real row comes first in id
+    order, then every Wikipedia real row in id order — the real,
+    verified build sequence, confirmed via ``index.reconstruct()``
+    matched against an independently recomputed embedding at both
+    range boundaries, cosine similarity 1.0).
+    """
+    order_sql = os.environ.get(_VAULT_ID_ORDER_ENV, "").strip() or _VAULT_ID_ORDER_DEFAULT
+    filter_sql = os.environ.get(_VAULT_ID_FILTER_ENV, "").strip()
+    where_clause = f"WHERE {filter_sql} " if filter_sql else ""
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        rows = conn.execute(
+            f'SELECT "{schema.id_col}" FROM "{schema.table}" {where_clause}ORDER BY {order_sql} LIMIT ?',
+            (index_total,),
+        ).fetchall()
+    return [int(r[0]) for r in rows]
+
+
 def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
     """Query the external spatial vault. Raises ``ExternalCorpusError``
     (never returns a fabricated or silently-empty result when something is
@@ -333,6 +404,7 @@ def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
     schema = probe_vault_schema(db_path)
     index = _load_faiss_index(index_path)
     _check_index_dimension(int(index.d))
+    position_to_id = _load_position_id_map(db_path, schema, int(index.ntotal))
 
     qvec = embed_text(query)
     if qvec is None:
@@ -364,9 +436,13 @@ def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
     try:
         cols = [schema.id_col, schema.text_col] + ([schema.metadata_col] if schema.metadata_col else [])
         select_cols = ", ".join(f'"{c}"' for c in cols)
-        for raw_score, vault_id in zip(distances[0].tolist(), indices[0].tolist()):
-            if vault_id < 0:
+        for raw_score, position in zip(distances[0].tolist(), indices[0].tolist()):
+            if position < 0:
                 continue  # FAISS's own "no result" sentinel
+            if position >= len(position_to_id):
+                stale += 1  # a plain FlatIndex position with no known id mapping (see _load_position_id_map)
+                continue
+            vault_id = position_to_id[position]
             row = conn.execute(
                 f'SELECT {select_cols} FROM "{schema.table}" WHERE "{schema.id_col}" = ?',
                 (vault_id,),
