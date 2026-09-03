@@ -296,6 +296,55 @@
     #search { font-size: 14px; min-height: 40px; }
   }
 
+  /* ---------------- in-window frame panel (#dmframe) ----------------
+     Explicit user requirement: "for each tab in dourmouse, ensure it opens
+     in one window, doesn't open new separate windows." An agent's live
+     screen (/agent/<name>) used to be a window.open() popup from both the
+     [LIVE WINDOW] button and from dispatch; it now loads in here. Follows
+     this file's own overlay convention (#results above): hidden by default,
+     revealed by an .open class. .dmf-frame mirrors ui/workspace.html's
+     .iframepanel. */
+  #dmframe {
+    position: fixed; inset: 0; z-index: 92; display: none;
+    align-items: center; justify-content: center; padding: 3vh 2vw;
+    background: rgba(6,8,14,0.74); backdrop-filter: blur(4px);
+  }
+  #dmframe.open { display: flex; }
+  .dmf-box {
+    width: min(96vw, 1180px); height: min(94vh, 900px);
+    display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--line-strong); background: var(--surface);
+    box-shadow: 0 0 70px rgba(var(--cyan-rgb), var(--a22));
+  }
+  .dmf-head {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 9px;
+    padding: 9px 12px; border-bottom: 1px solid var(--line);
+  }
+  .dmf-title {
+    flex: 1; min-width: 0; font-size: 10px; letter-spacing: 0.14em;
+    color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dmf-head button {
+    flex: 0 0 auto; font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: 0.12em; color: var(--text); background: transparent;
+    border: 1px solid var(--line-strong); padding: 6px 11px; cursor: pointer;
+  }
+  .dmf-head button:hover { background: rgba(var(--cyan-rgb), var(--a10)); }
+  .dmf-body { flex: 1; min-height: 0; position: relative; background: #04080e; }
+  .dmf-frame { width: 100%; height: 100%; border: none; display: block; background: #04080e; }
+  /* honest failure surface — shown only when the embed really did not load */
+  .dmf-note {
+    position: absolute; left: 0; right: 0; bottom: 0; display: none;
+    font-size: 9px; letter-spacing: 0.08em; line-height: 1.6; color: var(--amber);
+    background: rgba(16,13,8,0.96); padding: 8px 12px;
+    border-top: 1px solid rgba(var(--amber-rgb), var(--a45));
+  }
+  .dmf-note.show { display: block; }
+  @media (max-width: 760px) {
+    #dmframe { padding: 0; }
+    .dmf-box { width: 100vw; height: 100vh; border: none; }
+  }
+
   /* reduced motion — freeze rotation and pulse, keep alpha states and glyphs */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -343,6 +392,25 @@
   </div>
 </div>
 
+<!-- in-window frame panel — an agent's live screen (/agent/<name>) loads in
+     HERE instead of spawning a separate OS window. Static shell only: the
+     frame's src and the title are assigned as DOM properties by
+     openFramePanel(), so an agent name never reaches markup. -->
+<div id="dmframe" role="dialog" aria-modal="true" aria-label="Agent live panel" aria-hidden="true">
+  <div class="dmf-box">
+    <div class="dmf-head">
+      <div class="dmf-title" id="dmfTitle">PANEL</div>
+      <button type="button" id="dmfPop" title="Fallback: open this screen in a separate window instead">⧉ NEW WINDOW</button>
+      <button type="button" id="dmfClose" title="Close this panel (Esc)">✕ CLOSE</button>
+    </div>
+    <div class="dmf-body">
+      <iframe id="dmfFrame" class="dmf-frame" title="Agent live panel"
+              referrerpolicy="no-referrer" allow="clipboard-read; clipboard-write"></iframe>
+      <div class="dmf-note" id="dmfNote"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 (() => {
   const nodesEl = document.getElementById('nodes');
@@ -362,6 +430,137 @@
   // ---------- helpers ----------
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   function now() { return new Date().toTimeString().slice(0, 8); }
+
+  // ---------- one window: the in-window frame panel ----------
+  // Explicit user requirement: "for each tab in dourmouse, ensure it opens
+  // in one window, doesn't open new separate windows." An agent's live
+  // screen (/agent/<name>) is served by this same server on this same
+  // origin, so framing it is genuinely the same app in the same session —
+  // the approach ui/workspace.html already uses (loadIframePanel /
+  // .iframepanel). The old separate-window openers stay wired as the
+  // fallback, never as the default path.
+  //
+  // The panel shell in <body> is static markup; href and title are set as
+  // DOM properties, so an agent name is never interpolated into HTML.
+  let framePrevFocus = null;   // what to hand focus back to on close
+  let frameExternal = null;    // separate-window fallback for what's loaded
+  let frameWatchdog = null;
+  let frameWired = false;
+
+  function frameEls() {
+    return {
+      root:  document.getElementById('dmframe'),
+      frame: document.getElementById('dmfFrame'),
+      title: document.getElementById('dmfTitle'),
+      note:  document.getElementById('dmfNote'),
+      pop:   document.getElementById('dmfPop'),
+      close: document.getElementById('dmfClose'),
+    };
+  }
+
+  function closeFramePanel() {
+    const el = frameEls();
+    if (!el.root) return;
+    if (frameWatchdog) { clearTimeout(frameWatchdog); frameWatchdog = null; }
+    el.root.classList.remove('open');
+    el.root.setAttribute('aria-hidden', 'true');
+    if (el.note) { el.note.classList.remove('show'); el.note.textContent = ''; }
+    if (el.frame) {
+      // Drop handlers BEFORE blanking, or the about:blank load re-enters
+      // the previous panel's load check.
+      el.frame.onload = null; el.frame.onerror = null;
+      // Tear the embedded document down so its own polling/SSE stops.
+      el.frame.src = 'about:blank';
+    }
+    frameExternal = null;
+    // Never trap the user: hand focus back to whatever opened the panel.
+    const back = framePrevFocus; framePrevFocus = null;
+    if (back && typeof back.focus === 'function') { try { back.focus(); } catch (e) { /* detached */ } }
+  }
+
+  function wireFramePanel() {
+    if (frameWired) return true;
+    const el = frameEls();
+    if (!el.root || !el.frame) return false;
+    if (el.close) el.close.addEventListener('click', closeFramePanel);
+    if (el.pop) el.pop.addEventListener('click', () => {
+      const ext = frameExternal;      // capture: closeFramePanel() clears it
+      closeFramePanel();
+      if (typeof ext === 'function') ext();
+    });
+    el.root.addEventListener('click', (ev) => { if (ev.target === el.root) closeFramePanel(); });
+    window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && el.root.classList.contains('open')) closeFramePanel();
+    });
+    frameWired = true;
+    return true;
+  }
+
+  // external: the pre-existing separate-window opener, kept as a GENUINE
+  // fallback — used when the panel shell is absent, and offered behind the
+  // panel's ⧉ NEW WINDOW button when the embed fails to render.
+  function openFramePanel(href, title, external) {
+    frameExternal = (typeof external === 'function') ? external : null;
+    if (!wireFramePanel()) {
+      const ext = frameExternal; frameExternal = null;
+      if (ext) ext();
+      return;
+    }
+    const el = frameEls();
+    framePrevFocus = (document.activeElement && document.activeElement !== document.body)
+      ? document.activeElement : null;
+    if (frameWatchdog) { clearTimeout(frameWatchdog); frameWatchdog = null; }
+    if (el.note) { el.note.classList.remove('show'); el.note.textContent = ''; }
+    const label = String(title == null ? href : title);
+    if (el.title) el.title.textContent = label;
+    el.frame.title = label;
+
+    let settled = false;
+    const done = () => {
+      settled = true;
+      if (frameWatchdog) { clearTimeout(frameWatchdog); frameWatchdog = null; }
+    };
+    const fail = (why) => {
+      if (settled) return;
+      done();
+      if (el.note) {
+        el.note.textContent = why + ' Use ⧉ NEW WINDOW above to open it separately.';
+        el.note.classList.add('show');
+      }
+    };
+    el.frame.onload = () => {
+      if (settled) return;
+      // Same origin (always, here): the result is genuinely inspectable, so
+      // a blank or refused embed is detected rather than assumed to work.
+      let body = null;
+      try { body = el.frame.contentDocument && el.frame.contentDocument.body; }
+      catch (e) { body = null; }
+      if (!body || (!body.childElementCount && !(body.textContent || '').trim())) {
+        fail('This screen did not render inside the panel.');
+        return;
+      }
+      done();
+    };
+    el.frame.onerror = () => fail('This screen failed to load inside the panel.');
+    frameWatchdog = setTimeout(() => fail('This screen did not load in time.'), 8000);
+
+    el.frame.src = href;
+    el.root.classList.add('open');
+    el.root.setAttribute('aria-hidden', 'false');
+    if (el.close) { try { el.close.focus(); } catch (e) { /* ignore */ } }
+  }
+
+  function openAgentWindowExternal(name) {
+    // The pre-conversion behaviour, kept verbatim as the genuine fallback.
+    const api = (window.pywebview && window.pywebview.api) || null;
+    if (api && typeof api.open_agent === 'function') { api.open_agent(name); return; }
+    window.open('/agent/' + encodeURIComponent(name), 'dourmouseAgent_' + name, 'width=980,height=760');
+  }
+  function openAgentPanel(name) {
+    openFramePanel('/agent/' + encodeURIComponent(name),
+                   'AGENT // ' + String(name).toUpperCase(),
+                   () => openAgentWindowExternal(name));
+  }
 
   function renderNodes() {
     nodesEl.innerHTML = '';
@@ -493,7 +692,7 @@
         <textarea id="dinput" rows="2" placeholder="Send a task to ${esc(ag.name)}…"></textarea>
         <div class="drow">
           <button id="dsend">[SEND_DIRECTIVE]</button>
-          <button id="dopenwin" title="Open ${esc(ag.name)}'s own live window">[LIVE WINDOW]</button>
+          <button id="dopenwin" title="Open ${esc(ag.name)}'s own live screen as a panel in this window">[LIVE PANEL]</button>
           <div id="dstatusline"></div>
         </div>
       </div>
@@ -511,10 +710,17 @@
       });
     });
     document.getElementById('dsend').addEventListener('click', () => dispatchToAgent(ag.name));
+    // One window: the agent's live screen opens as a panel in this window.
+    // The separate-window opener stays wired verbatim as the panel's
+    // ⧉ NEW WINDOW fallback — native window via the desktop bridge when
+    // present, otherwise the old popup.
     document.getElementById('dopenwin').addEventListener('click', () => {
-      const api = (window.pywebview && window.pywebview.api) || null;
-      if (api && typeof api.open_agent === 'function') { api.open_agent(ag.name); }
-      else { window.open('/agent/' + encodeURIComponent(ag.name), 'dourmouseAgent_' + ag.name, 'width=980,height=760'); }
+      openFramePanel('/agent/' + encodeURIComponent(ag.name),
+                     'AGENT // ' + String(ag.name).toUpperCase(), () => {
+        const api = (window.pywebview && window.pywebview.api) || null;
+        if (api && typeof api.open_agent === 'function') { api.open_agent(ag.name); }
+        else { window.open('/agent/' + encodeURIComponent(ag.name), 'dourmouseAgent_' + ag.name, 'width=980,height=760'); }
+      });
     });
     const di = document.getElementById('dinput');
     di.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dispatchToAgent(ag.name); } });
@@ -524,11 +730,10 @@
   async function dispatchToAgent(name) {
     const prompt = document.getElementById('dinput').value.trim();
     if (!prompt) return;
-    // v2.7: dispatching to an agent also opens its own live window, so you
-    // can watch it work from every entry point (dashboard + map + window).
-    const api = (window.pywebview && window.pywebview.api) || null;
-    if (api && typeof api.open_agent === 'function') { api.open_agent(name); }
-    else { window.open('/agent/' + encodeURIComponent(name), 'dourmouseAgent_' + name, 'width=980,height=760'); }
+    // v2.7: dispatching to an agent also opens its own live screen, so you
+    // can watch it work from every entry point (dashboard + map + panel).
+    // One window: this is now a panel over the map, not a second window.
+    openAgentPanel(name);
     const btn = document.getElementById('dsend');
     const line = document.getElementById('dstatusline');
     btn.disabled = true;

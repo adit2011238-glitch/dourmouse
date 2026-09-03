@@ -1638,6 +1638,48 @@
     background: none;
   }
   .inline-confirm.resolved .ic-head { color: var(--dead); }
+
+  /* ---------------- in-window frame panel (#dmframe) ----------------
+     Explicit user requirement: "for each tab in dourmouse, ensure it
+     opens in one window, doesn't open new separate windows." The agent
+     map, the per-agent live windows, ALL HANDS, the COMMERCIAL HUB and
+     the ATLAS TERMINAL all used to be window.open() popups; they now
+     load INSIDE this window. Same overlay convention as #dmpalette
+     above (fixed inset:0, hidden until .open, dismissed by ✕ / Escape /
+     backdrop click). .dmf-frame mirrors ui/workspace.html's
+     .iframepanel, which already solved this for the workspace dock. */
+  #dmframe { position: fixed; inset: 0; z-index: 92; display: none;
+    align-items: center; justify-content: center; padding: 3vh 2vw;
+    background: rgba(4,6,10,.72); backdrop-filter: blur(4px); }
+  #dmframe.open { display: flex; }
+  .dmf-box { width: min(96vw, 1480px); height: min(94vh, 1000px);
+    display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--line-strong); background: var(--surface);
+    box-shadow: 0 0 80px rgba(var(--cyan-rgb), var(--a22)); }
+  .dmf-head { flex: 0 0 auto; display: flex; align-items: center; gap: 9px;
+    padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  .dmf-title { flex: 1; min-width: 0; font-family: var(--font-mono);
+    font-size: 9.5px; letter-spacing: .14em; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dmf-head button { flex: 0 0 auto; font-family: var(--font-mono);
+    font-size: 8.5px; letter-spacing: .12em; color: var(--text);
+    background: transparent; border: 1px solid var(--line-strong);
+    padding: 6px 11px; cursor: pointer; }
+  .dmf-head button:hover { background: rgba(var(--cyan-rgb), var(--a10)); }
+  .dmf-body { flex: 1; min-height: 0; position: relative; background: #04080e; }
+  .dmf-frame { width: 100%; height: 100%; border: none; display: block;
+    background: #04080e; }
+  /* honest failure surface — shown only when the embed really did not
+     load, never as decoration. */
+  .dmf-note { position: absolute; left: 0; right: 0; bottom: 0; display: none;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em;
+    line-height: 1.6; color: var(--amber); background: rgba(16,13,8,.96);
+    border-top: 1px solid rgba(var(--amber-rgb), var(--a45)); padding: 8px 12px; }
+  .dmf-note.show { display: block; }
+  @media (max-width: 760px) {
+    #dmframe { padding: 0; }
+    .dmf-box { width: 100vw; height: 100vh; border: none; }
+  }
 </style>
 </head>
 <body>
@@ -1714,8 +1756,8 @@
     </div>
     <div class="clock-block">
       <select id="sessionpick" title="Resume a recent session (real data from workspace/sessions)"><option value="">⌁ RESUME SESSION…</option></select>
-      <button id="mapbtn" title="Open the agent orchestration map in a new window">⧉ AGENT MAP</button>
-      <button id="atlasTermBtn" title="Open the ATLAS Terminal (backtesting & strategy lab) in a new window">◈ ATLAS TERMINAL</button>
+      <button id="mapbtn" title="Open the agent orchestration map in a panel in this window">⧉ AGENT MAP</button>
+      <button id="atlasTermBtn" title="Open the ATLAS Terminal (backtesting &amp; strategy lab) in a panel in this window">◈ ATLAS TERMINAL</button>
       <button id="hubbtn" title="Open the COMMERCIAL HUB — ATLAS / DOURMOUSE / TAILSCALE FEED in one shell" style="color:var(--gold)">◉ COMMERCIAL HUB</button>
       <button id="setupbtn" title="Capability checklist — what's configured and how to fix the rest">[SETUP]</button>
       <div class="clock" id="clock">--:--:--</div>
@@ -2196,7 +2238,7 @@
           <div class="nchips">${chips}</div>
         </div>
         <div class="npill">[READY]</div>
-        <button class="nwin" title="Open ${esc(ag.name)}'s live window">⧉</button>`;
+        <button class="nwin" title="Open ${esc(ag.name)}'s live panel in this window">⧉</button>`;
       el.querySelector('.nwin').addEventListener('click', () => openAgentWindow(ag.name));
       nodesEl.appendChild(el);
       nodes.set(ag.name, {
@@ -2213,31 +2255,187 @@
     nodesEl.innerHTML = '<div class="iv-empty">ROSTER OFFLINE</div>';
   });
 
+  // ---------- one window: the in-window frame panel ----------
+  // Explicit user requirement: "for each tab in dourmouse, ensure it opens
+  // in one window, doesn't open new separate windows." Every DOURMOUSE
+  // screen that used to be a window.open() popup (the agent map, an agent's
+  // own live window, ALL HANDS, the commercial hub, the ATLAS terminal) now
+  // loads into #dmframe instead. This mirrors ui/workspace.html's
+  // loadIframePanel()/.iframepanel, which already solved exactly this for
+  // the workspace dock — same server, same session, so framing our own
+  // pages is genuinely the same app, not a reimplementation of it.
+  //
+  // Nothing user-controlled is ever interpolated into markup: the shell in
+  // <body> is static and the frame's src/title are assigned as DOM
+  // properties, which cannot be escaped out of.
+  let framePrevFocus = null;   // what to hand focus back to on close
+  let frameExternal = null;    // the separate-window fallback for what's loaded
+  let frameWatchdog = null;
+  let frameWired = false;
+
+  function frameEls() {
+    return {
+      root:  document.getElementById('dmframe'),
+      frame: document.getElementById('dmfFrame'),
+      title: document.getElementById('dmfTitle'),
+      note:  document.getElementById('dmfNote'),
+      pop:   document.getElementById('dmfPop'),
+      close: document.getElementById('dmfClose'),
+    };
+  }
+
+  function isSameOriginHref(href) {
+    try { return new URL(href, location.href).origin === location.origin; }
+    catch (e) { return false; }
+  }
+
+  function closeFramePanel() {
+    const el = frameEls();
+    if (!el.root) return;
+    if (frameWatchdog) { clearTimeout(frameWatchdog); frameWatchdog = null; }
+    el.root.classList.remove('open');
+    el.root.setAttribute('aria-hidden', 'true');
+    if (el.note) { el.note.classList.remove('show'); el.note.textContent = ''; }
+    if (el.frame) {
+      // Drop the handlers BEFORE blanking, or the about:blank load would
+      // re-enter the previous panel's load check.
+      el.frame.onload = null; el.frame.onerror = null;
+      // Tear the embedded document down so its own polling/SSE stops; a
+      // panel that keeps streaming after you close it is a leak.
+      el.frame.src = 'about:blank';
+    }
+    frameExternal = null;
+    // Never trap the user: hand focus back to whatever opened the panel.
+    const back = framePrevFocus; framePrevFocus = null;
+    if (back && typeof back.focus === 'function') { try { back.focus(); } catch (e) { /* detached */ } }
+  }
+
+  function wireFramePanel() {
+    // Lazy: this script block runs before #dmframe is parsed further down
+    // the body, so wiring happens on first open rather than at load.
+    if (frameWired) return true;
+    const el = frameEls();
+    if (!el.root || !el.frame) return false;
+    el.close?.addEventListener('click', closeFramePanel);
+    el.pop?.addEventListener('click', () => {
+      const ext = frameExternal;      // capture: closeFramePanel() clears it
+      closeFramePanel();
+      if (typeof ext === 'function') ext();
+    });
+    // Backdrop click dismisses, same as #dmpalette.
+    el.root.addEventListener('click', (ev) => { if (ev.target === el.root) closeFramePanel(); });
+    window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && el.root.classList.contains('open')) closeFramePanel();
+    });
+    frameWired = true;
+    return true;
+  }
+
+  // href: same-origin DOURMOUSE path, or an absolute URL for the ATLAS
+  //       terminal. title: plain text for the panel header.
+  // external: the pre-existing separate-window opener, kept as a GENUINE
+  //       fallback — used when the panel cannot exist at all, and offered
+  //       behind the panel's ⧉ NEW WINDOW button when the embed fails.
+  function openFramePanel(href, title, external, timeoutMs) {
+    frameExternal = (typeof external === 'function') ? external : null;
+    if (!wireFramePanel()) {
+      // The panel shell is genuinely absent (e.g. a stale cached shell from
+      // the service worker). Fall back to the old behaviour rather than
+      // silently doing nothing.
+      const ext = frameExternal; frameExternal = null;
+      if (ext) ext();
+      return;
+    }
+    const el = frameEls();
+    framePrevFocus = (document.activeElement && document.activeElement !== document.body)
+      ? document.activeElement : null;
+    if (frameWatchdog) { clearTimeout(frameWatchdog); frameWatchdog = null; }
+    if (el.note) { el.note.classList.remove('show'); el.note.textContent = ''; }
+    if (el.title) el.title.textContent = String(title == null ? href : title);
+    el.frame.title = String(title == null ? href : title);
+
+    const sameOrigin = isSameOriginHref(href);
+    let settled = false;
+    const done = () => {
+      settled = true;
+      if (frameWatchdog) { clearTimeout(frameWatchdog); frameWatchdog = null; }
+    };
+    const fail = (why) => {
+      if (settled) return;
+      done();
+      if (el.note) {
+        el.note.textContent = why + ' Use ⧉ NEW WINDOW above to open it separately.';
+        el.note.classList.add('show');
+      }
+    };
+    el.frame.onload = () => {
+      if (settled) return;
+      if (sameOrigin) {
+        // Our own pages: we can genuinely read the result, so a blank or
+        // refused embed is detectable rather than assumed.
+        let body = null;
+        try { body = el.frame.contentDocument && el.frame.contentDocument.body; }
+        catch (e) { body = null; }
+        if (!body || (!body.childElementCount && !(body.textContent || '').trim())) {
+          fail('This screen did not render inside the panel.');
+          return;
+        }
+      }
+      // Cross-origin (ATLAS terminal): the load event is all we get — the
+      // parent cannot read a cross-origin document, so a page that refuses
+      // framing can still look "loaded" here. Hence the always-available
+      // ⧉ NEW WINDOW button rather than a claim that it worked.
+      done();
+    };
+    el.frame.onerror = () => fail('This screen failed to load inside the panel.');
+    frameWatchdog = setTimeout(() => {
+      fail(sameOrigin
+        ? 'This screen did not load in time.'
+        : 'Nothing loaded from that address — the service may not be running, or it may refuse to be embedded.');
+    }, timeoutMs || 8000);
+
+    el.frame.src = href;
+    el.root.classList.add('open');
+    el.root.setAttribute('aria-hidden', 'false');
+    // Focus the close control so Escape/Tab work immediately and the panel
+    // is announced; focus moves into the frame as soon as the user clicks.
+    if (el.close) { try { el.close.focus(); } catch (e) { /* ignore */ } }
+  }
+
   // ---------- v2.7: per-agent live windows ----------
-  // Each agent gets its own DOURMOUSE window showing live activity. In the
-  // native desktop app this opens a real second window via the js_api
-  // bridge; in a plain browser it falls back to a new tab.
+  // Each agent has its own live-activity screen. It now opens in the
+  // in-window panel above; the native desktop window (js_api bridge) and
+  // the browser popup remain only as the fallback path.
   const openedAgentWindows = new Set();
   function hasDesktopBridge() {
     const api = (window.pywebview && window.pywebview.api) || null;
     return !!(api && typeof api.open_agent === 'function');
   }
-  function openAgentWindow(name) {
-    // User-initiated path (roster ⧉, map LIVE WINDOW): native window via the
-    // desktop bridge when present, otherwise a plain-browser tab. This runs
-    // from a real user gesture, so the popup is never silently blocked.
+  function openAgentWindowExternal(name) {
+    // The pre-conversion behaviour, kept verbatim as the genuine fallback:
+    // native window via the desktop bridge when present, else a popup.
     if (hasDesktopBridge()) {
       window.pywebview.api.open_agent(name);
       return;
     }
     window.open('/agent/' + encodeURIComponent(name), 'dourmouseAgent_' + name, 'width=980,height=760');
   }
+  function openAgentWindow(name) {
+    // User-initiated path (roster ⧉, map LIVE WINDOW): one window — the
+    // agent's live screen loads in #dmframe instead of a second window.
+    openFramePanel('/agent/' + encodeURIComponent(name),
+                   'AGENT // ' + String(name).toUpperCase(),
+                   () => openAgentWindowExternal(name));
+  }
   function tryAutoOpenAgentWindow(name) {
     // SSE-callback path is NOT a user gesture: only open when a real desktop
     // bridge exists. A plain-browser popup from here would be silently
     // blocked (and in strict automation it can hijack the tab and kill the
     // HUD stream). Agent windows stay reachable from the roster and map.
-    if (hasDesktopBridge()) openAgentWindow(name);
+    // Deliberately still the EXTERNAL opener: this fires unprompted on an
+    // agent's first tool call, and throwing a full-viewport panel over the
+    // live feed mid-run would hide the very stream the user is watching.
+    if (hasDesktopBridge()) openAgentWindowExternal(name);
   }
 
   function setNodeState(name, state) {
@@ -2756,14 +2954,21 @@
         }
         switch (evt.type) {
           case 'allhands_started': {
-            // v5.22.9: an ALL HANDS run started — open its dedicated window.
+            // v5.22.9: an ALL HANDS run started — open its dedicated screen.
+            // One window: it loads in the in-window panel. That also fixes
+            // the old bug where this popup, fired from an SSE callback and
+            // not a user gesture, was silently blocked in a plain browser.
             if (evt.run_id) {
-              fline('ALL HANDS', 'Run <b>' + esc(evt.run_id) + '</b> started — every resource is on the goal. Opening the ALL HANDS window…', null);
-              if (window.pywebview && window.pywebview.api && window.pywebview.api.open_all_hands) {
-                window.pywebview.api.open_all_hands(evt.run_id, '');
-              } else {
-                window.open('/all-hands?run=' + encodeURIComponent(evt.run_id), '_blank');
-              }
+              fline('ALL HANDS', 'Run <b>' + esc(evt.run_id) + '</b> started — every resource is on the goal. Opening the ALL HANDS panel…', null);
+              const ahHref = '/all-hands?run=' + encodeURIComponent(evt.run_id);
+              const ahRun = evt.run_id;
+              openFramePanel(ahHref, 'ALL HANDS // RUN ' + String(ahRun), () => {
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.open_all_hands) {
+                  window.pywebview.api.open_all_hands(ahRun, '');
+                } else {
+                  window.open(ahHref, '_blank');
+                }
+              });
             }
             break;
           }
@@ -2951,32 +3156,41 @@
   }
 
   // ---------- events ----------
-  // v2.5: inside the native desktop window (pywebview) the map opens as a
-  // SECOND native window via the js_api bridge; in a plain browser it falls
-  // back to window.open exactly as before.
-  document.getElementById('hubbtn')?.addEventListener('click', () => { window.open('hub.html', '_blank'); });
-document.getElementById('mapbtn').addEventListener('click', () => {
-    const api = (window.pywebview && window.pywebview.api) || null;
-    if (api && typeof api.open_map === 'function') {
-      api.open_map();
-    } else {
-      window.open('/map', 'dourmouseMap', 'width=1280,height=860');
-    }
+  // One window: the commercial hub, the agent map and the ATLAS terminal
+  // all load in #dmframe. The old openers (the pywebview js_api bridge in
+  // the native desktop shell, window.open in a plain browser) are kept as
+  // the genuine fallback behind the panel's ⧉ NEW WINDOW button.
+  document.getElementById('hubbtn')?.addEventListener('click', () => {
+    openFramePanel('hub.html', 'COMMERCIAL HUB', () => window.open('hub.html', '_blank'));
   });
-  // v8.2 — ATLAS TERMINAL: open the streamlit backtesting terminal in a
-  // new window. Port is configurable via DOURMOUSE_ATLAS_TERMINAL_PORT;
-  // defaults to the launcher's 8511. Never fabricated — it either opens
-  // the real terminal or the window shows the connection failure.
+  document.getElementById('mapbtn').addEventListener('click', () => {
+    openFramePanel('/map', 'AGENT ORCHESTRATION MAP', () => {
+      const api = (window.pywebview && window.pywebview.api) || null;
+      if (api && typeof api.open_map === 'function') api.open_map();
+      else window.open('/map', 'dourmouseMap', 'width=1280,height=860');
+    });
+  });
+  // v8.2 — ATLAS TERMINAL: the streamlit backtesting terminal. Port is
+  // configurable via DOURMOUSE_ATLAS_TERMINAL_PORT; defaults to the
+  // launcher's 8511. Never fabricated — it either shows the real terminal
+  // or the panel says plainly that nothing loaded.
+  //
+  // NOTE: unlike every other panel here this is CROSS-ORIGIN (a separate
+  // streamlit process on its own port), so the parent cannot inspect the
+  // embedded document and cannot tell "rendered" from "refused to be
+  // framed". The load watchdog below catches a dead/unreachable port; a
+  // frame-refusal would still look loaded, which is why ⧉ NEW WINDOW stays
+  // on the header. Streamlit also needs longer than our own pages to boot.
   const atlasTermBtn = document.getElementById('atlasTermBtn');
   if (atlasTermBtn) {
     atlasTermBtn.addEventListener('click', () => {
       const port = (window.__ATLAS_TERMINAL_PORT__ || '8511');
-      const api = (window.pywebview && window.pywebview.api) || null;
-      if (api && typeof api.open_url === 'function') {
-        api.open_url('http://127.0.0.1:' + port);
-      } else {
-        window.open('http://127.0.0.1:' + port, 'atlasTerminal', 'width=1400,height=900');
-      }
+      const url = 'http://127.0.0.1:' + port;
+      openFramePanel(url, 'ATLAS TERMINAL // 127.0.0.1:' + port, () => {
+        const api = (window.pywebview && window.pywebview.api) || null;
+        if (api && typeof api.open_url === 'function') api.open_url(url);
+        else window.open(url, 'atlasTerminal', 'width=1400,height=900');
+      }, 15000);
     });
   }
   sendBtn.addEventListener('click', send);
@@ -4486,6 +4700,27 @@ __probeMark('registered');
   <div class="dmp-box">
     <div class="dmp-head"><span class="dmp-k">⌘K</span><input id="dmpInput" placeholder="Type a command — e.g. open atlas" autocomplete="off" spellcheck="false"><span class="dmp-k">ESC</span></div>
     <div class="dmp-list" id="dmpList"></div>
+  </div>
+</div>
+
+<!-- in-window frame panel — AGENT MAP / agent live windows / ALL HANDS /
+     COMMERCIAL HUB / ATLAS TERMINAL load in HERE instead of spawning a
+     separate OS window. Static shell only: the frame's src and the title
+     are assigned as DOM properties by openFramePanel() in the HUD script,
+     so nothing user-controlled (an agent name, a run id) is ever
+     interpolated into markup. -->
+<div id="dmframe" role="dialog" aria-modal="true" aria-label="DOURMOUSE panel" aria-hidden="true">
+  <div class="dmf-box">
+    <div class="dmf-head">
+      <div class="dmf-title" id="dmfTitle">PANEL</div>
+      <button type="button" id="dmfPop" title="Fallback: open this screen in a separate window instead">⧉ NEW WINDOW</button>
+      <button type="button" id="dmfClose" title="Close this panel (Esc)">✕ CLOSE</button>
+    </div>
+    <div class="dmf-body">
+      <iframe id="dmfFrame" class="dmf-frame" title="DOURMOUSE panel"
+              referrerpolicy="no-referrer" allow="clipboard-read; clipboard-write"></iframe>
+      <div class="dmf-note" id="dmfNote"></div>
+    </div>
   </div>
 </div>
 <div id="dmtoast"></div>

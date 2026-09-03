@@ -211,9 +211,13 @@ class TestUiWiring:
         assert "class=\"nwin\"" in html
         assert "openAgentWindow(ag.name)" in html
 
-    def test_map_detail_panel_has_live_window_button(self):
+    def test_map_detail_panel_has_live_panel_button(self):
         html = self._read("ui/map.html")
-        assert "[LIVE WINDOW]" in html
+        # Renamed from "[LIVE WINDOW]" when the control stopped opening a
+        # separate OS window and started loading the agent screen as an
+        # in-window panel. The label has to match what the button now does.
+        assert "[LIVE PANEL]" in html
+        # The native-bridge path is still a real fallback and must survive.
         assert "api.open_agent(ag.name)" in html
 
     def test_agent_page_self_contained(self):

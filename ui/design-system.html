@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dourmouse UI</title>
+<link rel="stylesheet" href="assets/dourmouse-ui.css">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--dm-canvas); }
+  #app { height: 100vh; }
+</style>
+</head>
+<body class="dm">
+<div id="app" class="dm-split">
+
+  <!-- LEFT: context / explorer -->
+  <div class="dm-pane dm-rail-left">
+    <div class="dm-pane-head">
+      <span class="dm-label">Explorer</span>
+      <span style="flex:1"></span>
+      <span class="dm-kbd">⌘B</span>
+    </div>
+    <div class="dm-pane-body">
+      <div class="dm-stagger">
+        <div class="dm-row is-selected"><span class="dm-dot dm-dot-active"></span><span class="dm-truncate">webui.py</span><span class="dm-meta dm-fixed">1.2k</span></div>
+        <div class="dm-row"><span class="dm-dot dm-dot-ok"></span><span class="dm-truncate">dispatch.py</span><span class="dm-meta dm-fixed">3.4k</span></div>
+        <div class="dm-row"><span class="dm-dot"></span><span class="dm-truncate">usage_tracker.py</span><span class="dm-meta dm-fixed">125</span></div>
+        <div class="dm-row"><span class="dm-dot dm-dot-error"></span><span class="dm-truncate">memory_store.py</span><span class="dm-meta dm-fixed">418</span></div>
+        <div class="dm-row"><span class="dm-dot"></span><span class="dm-row-path">dourmouse/tests/test_shared_rag.py</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: tabs + stream -->
+  <div class="dm-pane dm-center">
+    <div class="dm-tabs" role="tablist">
+      <button class="dm-tab is-active" role="tab" aria-selected="true">COMPANION</button>
+      <button class="dm-tab" role="tab" aria-selected="false">RESEARCH</button>
+      <button class="dm-tab" role="tab" aria-selected="false">AGENT MAP</button>
+      <button class="dm-tab" role="tab" aria-selected="false">ATLAS LAB</button>
+      <button class="dm-tab" role="tab" aria-selected="false">ALL HANDS</button>
+      <button class="dm-tab" role="tab" aria-selected="false">A tab with a very long label that must clip</button>
+    </div>
+
+    <div class="dm-pane-body" style="padding:14px 16px">
+      <h2 style="margin-bottom:10px">Retrieval pass complete</h2>
+      <p class="dm-prose" style="margin:0 0 12px">
+        Queried the spatial vault at <span class="dm-mono">D:\spatial_ai_library</span> and resolved
+        4 of 4 questions against real rows. The FAISS index is <span class="dm-mono">IndexFlatL2</span>
+        with 226,076 vectors at dim 384, so positions are not row ids — they are resolved
+        through the position map before any SQL lookup.
+      </p>
+
+      <div style="display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap">
+        <span class="dm-pill">faiss</span>
+        <span class="dm-pill">all-MiniLM-L6-v2</span>
+        <span class="dm-pill">1,023,765 rows</span>
+        <span class="dm-pill">verified</span>
+      </div>
+
+      <div class="dm-label" style="margin-bottom:6px">Execution</div>
+      <div style="border:1px solid var(--dm-line)">
+        <div class="dm-pane-head"><span class="dm-mono">probe_vault.py</span><span style="flex:1"></span><span class="dm-meta">exit 0 · 1.8s</span></div>
+        <div class="dm-mono dm-dim" style="padding:8px 10px; background:var(--dm-canvas)">
+          <div>hybrid_chunks       1,023,765</div>
+          <div>Pristine_Filtered_Stream   797,689</div>
+          <div>English_Wikipedia          144,910</div>
+          <div>HuggingFace_Parquet_Stream  81,166</div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:14px; align-items:center">
+        <button class="dm-btn dm-btn-primary">Run again</button>
+        <button class="dm-btn">Export</button>
+        <button class="dm-btn" disabled>Deploy</button>
+        <span style="flex:1"></span>
+        <span class="dm-meta">19:47:02</span>
+      </div>
+
+      <div style="margin-top:14px; display:flex; gap:8px; align-items:center">
+        <span class="dm-label dm-fixed">directive via</span>
+        <select class="dm-select" style="max-width:220px">
+          <option>Ollama / local agent</option>
+          <option>Claude (direct CLI)</option>
+        </select>
+      </div>
+      <textarea class="dm-textarea" rows="3" style="margin-top:8px" placeholder="Give a directive…"></textarea>
+    </div>
+  </div>
+
+  <!-- RIGHT: inspector -->
+  <div class="dm-pane dm-rail-right">
+    <div class="dm-pane-head"><span class="dm-label">Inspector</span></div>
+    <div class="dm-pane-body">
+      <div class="dm-row"><span class="dm-truncate">Backend</span><span class="dm-meta dm-fixed">claude-cli</span></div>
+      <div class="dm-row"><span class="dm-truncate">Context</span><span class="dm-meta dm-fixed">1,000,000</span></div>
+      <div class="dm-row"><span class="dm-truncate">Session</span><span class="dm-meta dm-fixed">8d07ad7c</span></div>
+      <div class="dm-row"><span class="dm-dot dm-dot-ok dm-fixed"></span><span class="dm-truncate">Ollama</span><span class="dm-meta dm-fixed">qwen2.5:7b</span></div>
+      <div class="dm-row"><span class="dm-dot dm-dot-error dm-fixed"></span><span class="dm-truncate">ENTSO-E</span><span class="dm-meta dm-fixed">no key</span></div>
+      <div style="padding:10px">
+        <div class="dm-label" style="margin-bottom:6px">Usage</div>
+        <div class="dm-mono dm-dim">claude &nbsp;$0.4182 · 118k tok · 26 req</div>
+        <div class="dm-mono dm-dim">ollama &nbsp;— · 44k tok · 91 req</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

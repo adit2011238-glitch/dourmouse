@@ -1,0 +1,425 @@
+/* ===========================================================================
+   DOURMOUSE UI — powered terminal-IDE design system
+   ===========================================================================
+
+   One shared layer. Every screen imports this and then adds only what is
+   genuinely specific to it. The point is that a control looks and behaves
+   identically whether it is on the console, the workspace, or the map.
+
+   The four things this file exists to prevent, stated plainly so a future
+   edit does not quietly undo them:
+
+     1. Floating cards. Features do not live in individually rounded,
+        bordered, shadowed boxes stacked on a background. Space is divided
+        by 1px structural lines and solid contrasting panes. The result
+        should read as a workbench, not as widgets scattered on a desk.
+
+     2. Translucent wash. No `rgba(...)` or `/50` backdrops layered over
+        other backdrops to fake depth. A surface is exactly one of the four
+        solid layer colours below. Depth comes from the layer it is on and
+        the line around it, never from opacity.
+
+     3. Decorative glow. No gradient borders, no radial glows, no sparkle
+        iconography to signal "AI". Status is a 6px solid dot. The engine
+        is invisible; the tool is what you see.
+
+     4. Icon and badge vomit. Typography carries the hierarchy. Icons
+        appear where space is genuinely scarce (a collapsed rail, an
+        icon-only button) and nowhere else. Tags are one uniform
+        monochrome pill, never a palette of coloured ones.
+
+   Motion rules, enforced by the utilities near the bottom: transform and
+   opacity only, 180-260ms, ease-out. Never animate width, height, top,
+   left, margin or padding -- those force layout on every frame.
+   =========================================================================== */
+
+/* ------------------------------------------------------------------ fonts */
+/* Self-hosted. This ships as an offline desktop app; nothing is fetched
+   from a CDN at runtime. Berkeley Mono is the design's first choice for
+   --font-mono but is commercially licensed and not redistributable, so it
+   is named first (it will be used if the machine has it) and Monaspace
+   Neon, which is OFL and vendored here, is the real shipped face. */
+
+@font-face {
+  font-family: 'Departure Mono';
+  src: url('fonts/departure-mono-400.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Intel One Mono';
+  src: url('fonts/intel-one-mono-400.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Monaspace Neon';
+  src: url('fonts/monaspace-neon-300.woff2') format('woff2');
+  font-weight: 300; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Monaspace Neon';
+  src: url('fonts/monaspace-neon-400.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Monaspace Neon';
+  src: url('fonts/monaspace-neon-500.woff2') format('woff2');
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Monaspace Neon';
+  src: url('fonts/monaspace-neon-600.woff2') format('woff2');
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+
+/* ----------------------------------------------------------------- tokens */
+:root {
+  /* Layers. Four solid values, no intermediates, no alpha. If a surface
+     needs to read as "deeper", it moves to the next layer -- it does not
+     get a translucent overlay. */
+  --dm-canvas:      #09090B;  /* ~60% of the screen: root, streams, output */
+  --dm-layer:       #18181B;  /* ~30%: rails, inactive tab ribbon, headers */
+  --dm-layer-hi:    #27272A;  /* active tab, code-block header, hover fill */
+
+  /* Lines. Exactly two. */
+  --dm-line:        #27272A;  /* every pane, tab and window division       */
+  --dm-line-focus:  #3F3F46;  /* focus rings and input borders, only       */
+
+  /* Text. */
+  --dm-fg:          #FAFAFA;  /* headers, active titles, the user's own text */
+  --dm-fg-body:     #A1A1AA;  /* body copy, logs, commentary, inactive     */
+  --dm-fg-label:    #71717A;  /* small uppercase metadata labels           */
+  --dm-fg-dim:      #52525B;  /* timestamps, line numbers, paths, hints    */
+  --dm-fg-prose:    #D4D4D8;  /* assistant prose in the terminal feed      */
+
+  /* Functional accents. Solid, never blurred, never given a drop shadow.
+     Budget: all accent colour combined stays under ~10% of the screen. */
+  --dm-active:      #F59E0B;  /* selection, active state                   */
+  --dm-ok:          #10B981;  /* online, passing, settled                  */
+  --dm-error:       #EF4444;  /* breaking log, failed run                  */
+
+  /* Type. Track 1 is structure, Track 2 is everything the machine says. */
+  --dm-font-sans: 'Departure Mono', 'Commit Mono', 'Intel One Mono', ui-monospace, monospace;
+  --dm-font-mono: 'Berkeley Mono', 'Monaspace Neon', 'JetBrains Mono NL', 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Density. Rows are tight on purpose; this is a dense tool, not a page. */
+  --dm-row-y:       6px;
+  --dm-row-y-lg:    8px;
+  --dm-gap:         8px;
+  --dm-gap-lg:      12px;
+
+  --dm-dur:         220ms;
+  --dm-ease:        cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ------------------------------------------------------------------- base */
+.dm {
+  background: var(--dm-canvas);
+  color: var(--dm-fg-body);
+  font-family: var(--dm-font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Headings are tight and semibold from text-lg up. Below that they are
+   labels, not headings, and follow .dm-label instead. */
+.dm h1, .dm h2, .dm h3, .dm .dm-title {
+  font-family: var(--dm-font-sans);
+  color: var(--dm-fg);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+.dm h1 { font-size: 20px; }
+.dm h2 { font-size: 17px; }
+.dm h3, .dm .dm-title { font-size: 15px; }
+
+/* The label rule: ultra-crisp, uppercase, wide-tracked, dim. */
+.dm-label {
+  font-family: var(--dm-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dm-fg-label);
+}
+
+/* Assistant prose renders as a terminal feed, not as an article. */
+.dm-prose {
+  font-family: var(--dm-font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--dm-fg-prose);
+  font-weight: 400;
+}
+/* Monospace never goes heavier than medium -- heavy mono bleeds badly on a
+   dark ground and turns dense output into mush. */
+.dm-prose b, .dm-prose strong,
+.dm-mono b, .dm-mono strong { font-weight: 500; color: var(--dm-fg); }
+
+.dm-mono {
+  font-family: var(--dm-font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+.dm-dim  { color: var(--dm-fg-dim); }
+.dm-meta {
+  font-family: var(--dm-font-mono);
+  font-size: 11px;
+  color: var(--dm-fg-dim);
+}
+
+/* ------------------------------------------------------- panes and splits */
+/* A workbench is panes separated by lines. Not cards floating on a page. */
+.dm-split      { display: flex; min-height: 0; min-width: 0; }
+.dm-split-col  { flex-direction: column; }
+.dm-pane       { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.dm-pane-fill  { flex: 1 1 auto; }
+
+/* Divisions are a single line, on the side that faces the neighbour. */
+.dm-split > .dm-pane + .dm-pane            { border-left: 1px solid var(--dm-line); }
+.dm-split-col > .dm-pane + .dm-pane        { border-left: 0; border-top: 1px solid var(--dm-line); }
+
+/* The three functional zones. Widths are fluid: a clamp, not a hard px. */
+.dm-rail-left  { flex: 0 0 clamp(180px, 18vw, 280px); background: var(--dm-layer); }
+.dm-rail-right { flex: 0 0 clamp(220px, 22vw, 360px); background: var(--dm-layer); }
+.dm-center     { flex: 1 1 auto; background: var(--dm-canvas); }
+
+.dm-pane-head {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--dm-gap);
+  padding: var(--dm-row-y) 10px;
+  background: var(--dm-layer);
+  border-bottom: 1px solid var(--dm-line);
+}
+.dm-pane-body { flex: 1 1 auto; overflow: auto; min-height: 0; }
+
+/* ------------------------------------------------------------------- tabs */
+/* Flat, flush, anchored to the pane they open. Never pills, never buttons.
+   An inactive tab has no border at all until it is hovered. */
+.dm-tabs {
+  display: flex; align-items: stretch;
+  flex: 0 0 auto;
+  background: var(--dm-layer);
+  border-bottom: 1px solid var(--dm-line);
+  overflow: hidden;              /* clip, do not scroll -- see the mask below */
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 48px), transparent 100%);
+          mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 48px), transparent 100%);
+}
+.dm-tab {
+  /* Deliberately does NOT shrink. A shrinking tab strip degrades into
+     "COMF / RESE / AGEN" long before it runs out of room -- every label
+     unreadable, which is worse than showing four tabs properly and
+     letting the fifth slide under the fade. Overflow is handled by the
+     mask on .dm-tabs above, not by squeezing the labels. */
+  flex: 0 0 auto;
+  max-width: 200px;
+  display: flex; align-items: center; gap: 6px;
+  padding: var(--dm-row-y) 12px;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--dm-line);
+  font-family: var(--dm-font-sans);
+  font-size: 12px;
+  color: var(--dm-fg-label);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--dm-dur) var(--dm-ease),
+              background-color var(--dm-dur) var(--dm-ease);
+}
+.dm-tab:hover        { background: var(--dm-layer-hi); color: var(--dm-fg-body); }
+.dm-tab[aria-selected="true"],
+.dm-tab.is-active    { background: var(--dm-layer-hi); color: var(--dm-fg); }
+/* The active marker is a solid 2px rule, not a glow. */
+.dm-tab[aria-selected="true"]::after,
+.dm-tab.is-active::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--dm-active);
+}
+.dm-tab { position: relative; }
+
+/* ---------------------------------------------------------------- controls */
+.dm-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: var(--dm-row-y) 10px;
+  background: var(--dm-layer);
+  color: var(--dm-fg-body);
+  border: 1px solid var(--dm-line);
+  border-radius: 2px;                 /* structural, not a pill */
+  font-family: var(--dm-font-sans);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;   /* a two-line "Run again" is not a button */
+  cursor: pointer;
+  transition: background-color var(--dm-dur) var(--dm-ease),
+              color var(--dm-dur) var(--dm-ease),
+              border-color var(--dm-dur) var(--dm-ease);
+}
+.dm-btn:hover           { background: var(--dm-layer-hi); color: var(--dm-fg); }
+.dm-btn:focus-visible   { outline: none; border-color: var(--dm-line-focus); }
+.dm-btn[disabled]       { opacity: 0.45; cursor: not-allowed; }
+.dm-btn-primary         { background: var(--dm-layer-hi); color: var(--dm-fg); border-color: var(--dm-line-focus); }
+
+.dm-input, .dm-select, .dm-textarea {
+  width: 100%;
+  padding: var(--dm-row-y) 8px;
+  background: var(--dm-canvas);
+  color: var(--dm-fg);
+  border: 1px solid var(--dm-line);
+  border-radius: 2px;
+  font-family: var(--dm-font-mono);
+  font-size: 12px;
+  transition: border-color var(--dm-dur) var(--dm-ease);
+}
+.dm-input:focus, .dm-select:focus, .dm-textarea:focus {
+  outline: none;
+  border-color: var(--dm-line-focus);
+}
+.dm-textarea { resize: vertical; line-height: 1.5; }
+
+/* One pill style. Monochrome. There is no coloured-badge variant on
+   purpose -- if a tag needs to shout, it is not a tag, it is a status. */
+.dm-pill {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px;
+  background: var(--dm-layer-hi);
+  color: var(--dm-fg-label);
+  border-radius: 2px;
+  font-family: var(--dm-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* Status is a solid dot. No halo, no blur, no pulse-glow. */
+.dm-dot {
+  flex: 0 0 auto;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--dm-fg-dim);
+}
+.dm-dot-ok     { background: var(--dm-ok); }
+.dm-dot-active { background: var(--dm-active); }
+.dm-dot-error  { background: var(--dm-error); }
+
+/* ------------------------------------------------------------------- rows */
+.dm-row {
+  display: flex; align-items: center; gap: var(--dm-gap);
+  padding: var(--dm-row-y) 10px;
+  font-family: var(--dm-font-mono);
+  font-size: 12px;
+  color: var(--dm-fg-body);
+  border-bottom: 1px solid var(--dm-line);
+  cursor: default;
+  transition: background-color var(--dm-dur) var(--dm-ease);
+}
+.dm-row:hover        { background: var(--dm-layer); }
+.dm-row.is-selected  { background: var(--dm-layer-hi); color: var(--dm-fg); }
+.dm-row-path {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dm-fg-dim);
+}
+
+/* --------------------------------------------------------------- keyboard */
+.dm-kbd {
+  font-family: var(--dm-font-mono);
+  font-size: 10px;
+  color: var(--dm-fg-dim);
+  border: 1px solid var(--dm-line);
+  border-radius: 2px;
+  padding: 0 4px;
+}
+
+/* ----------------------------------------------------------- layout sanity */
+/* Fixed assets never squash. Dynamic text always truncates. Both of these
+   are the failure this codebase actually hits: a long agent name or a long
+   file path shoving a status dot off the end of its row. */
+.dm-fixed    { flex-shrink: 0; }
+.dm-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-clamp-2  { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.dm-scroll-x { overflow-x: auto; overflow-y: hidden; }
+.dm-scroll-y { overflow-y: auto; overflow-x: hidden; }
+
+.dm ::-webkit-scrollbar             { width: 10px; height: 10px; }
+.dm ::-webkit-scrollbar-track       { background: var(--dm-canvas); }
+.dm ::-webkit-scrollbar-thumb       { background: var(--dm-layer-hi); border: 2px solid var(--dm-canvas); border-radius: 0; }
+.dm ::-webkit-scrollbar-thumb:hover { background: var(--dm-line-focus); }
+
+/* --------------------------------------------------------------- motion */
+/* Only transform and opacity appear in any transition or keyframe below.
+   Anything that would animate a layout property is deliberately absent. */
+.dm-enter {
+  animation: dm-enter var(--dm-dur) var(--dm-ease) both;
+}
+@keyframes dm-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.dm-fade { animation: dm-fade var(--dm-dur) var(--dm-ease) both; }
+@keyframes dm-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* A staggered list uses a delay, not a longer duration, so the last item
+   is still crisp rather than slow. */
+.dm-stagger > *          { animation: dm-enter var(--dm-dur) var(--dm-ease) both; }
+.dm-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.dm-stagger > *:nth-child(2) { animation-delay: 20ms; }
+.dm-stagger > *:nth-child(3) { animation-delay: 40ms; }
+.dm-stagger > *:nth-child(4) { animation-delay: 60ms; }
+.dm-stagger > *:nth-child(5) { animation-delay: 80ms; }
+.dm-stagger > *:nth-child(n+6) { animation-delay: 100ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dm *, .dm *::before, .dm *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* ------------------------------------------------------- command palette */
+.dm-palette {
+  position: fixed; inset: 0;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 12vh;
+  background: var(--dm-canvas);
+  z-index: 900;
+}
+.dm-palette-box {
+  width: min(640px, 92vw);
+  background: var(--dm-layer);
+  border: 1px solid var(--dm-line-focus);
+  border-radius: 2px;
+  display: flex; flex-direction: column;
+  max-height: 60vh;
+  overflow: hidden;
+}
+.dm-palette-input {
+  padding: 10px 12px;
+  background: var(--dm-layer);
+  border: 0; border-bottom: 1px solid var(--dm-line);
+  color: var(--dm-fg);
+  font-family: var(--dm-font-mono);
+  font-size: 13px;
+}
+.dm-palette-input:focus { outline: none; }
+.dm-palette-list { overflow-y: auto; }
+
+/* -------------------------------------------------------------- iframes */
+.dm-iframe {
+  width: 100%; height: 100%;
+  border: 0; display: block;
+  background: var(--dm-canvas);
+}
+
+/* --------------------------------------------------------------- icons */
+/* Lucide renders inline SVG. Size and colour are inherited so an icon
+   never carries its own palette. */
+.dm svg.lucide {
+  width: 14px; height: 14px;
+  stroke-width: 1.75;
+  flex-shrink: 0;
+  color: currentColor;
+}

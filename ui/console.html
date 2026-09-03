@@ -617,11 +617,51 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
   min-height:36px;flex:none;align-items:center;gap:7px}
 #stop.on{display:inline-flex}
 #stop .sq{width:7px;height:7px;background:currentColor;border-radius:1px}
+/* v13.6: directive backend picker, in the dock. Answers the same explicit
+   user request workspace.html's own .backendsel answers ("for each tab
+   where a directive can be given, give the option as to whether claude or
+   ollama api key does it in the form of a dropdown box in each tab") —
+   written in THIS file's own chrome language (the .chip row it sits in),
+   not workspace.html's CSS pasted across.
+   WHY ONE picker rather than one per pane: .dock is outside .panes, so it
+   renders on every screen, and it is the ONE composer every screen's
+   free-text directive goes through (HOME/RESEARCH/CODE/MEDIA/NEWS/
+   DESIGN3D/COMMS threads, the TRY cards, the DESIGN forms and VOICE
+   dictation all end at ta.value=…; submit()). A per-pane copy would be
+   several controls sharing one piece of state — the same picker drawn
+   more than once, not more choice. */
+.backendsel{display:inline-flex;align-items:center;gap:7px;flex:none}
+/* Reuses the file's existing .lbl (see the code-tool-picker section) rather
+   than a second class that would say the same thing. */
+.backendsel .lbl{white-space:nowrap}
+#backendPick{font-family:var(--mono);font-size:9px;letter-spacing:.08em;
+  color:var(--blue-dim);background:var(--panel2);border:1px solid var(--line-2);
+  border-radius:6px;padding:0 7px;min-height:30px;max-width:200px;cursor:pointer}
+#backendPick:hover{border-color:var(--amber-line);color:var(--amber)}
+#backendPick.on{color:var(--amber);border-color:var(--amber-line);background:var(--amber-soft)}
+#backendPick option{background:var(--panel2);color:var(--blue-hi)}
 
 /* ---------- footer ---------- */
+/* v8.7-style wrap, for the same reason: the footer now carries a third
+   item (the usage readout below), and without wrapping a narrow viewport
+   would push it off the right edge. */
 .foot{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;
   font-size:8.5px;letter-spacing:.16em;color:var(--blue-deep);flex:none;padding:0 4px}
 .foot b{color:var(--blue-dim);font-weight:400}
+/* v13.6: live usage readout. Sits IN the footer status strip — the row
+   that already reports BACKEND/NODE — rather than as a fixed corner badge:
+   this console already has two fixed overlays in the corners (#newsToastBox
+   top-right, and the .selmenu/.tabsMoreMenu dropdowns), and the bottom
+   corners belong to the composer dock. Real, persisted totals polled from
+   /api/usage (dourmouse/usage_tracker.py), never a per-session counter.
+   Ollama deliberately has NO dollar figure — there is no real cost to
+   report and the tracker does not fabricate one. */
+#usagebar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-width:0}
+#usagebar .ub-item{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+#usagebar .ub-k{color:var(--amber);letter-spacing:.16em}
+#usagebar .ub-v{color:var(--blue-dim);letter-spacing:.06em}
+#usagebar .ub-sep{color:var(--line-2)}
 
 /* ---------- code tool picker ---------- */
 .toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:13px;
@@ -1044,6 +1084,19 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
     <div class="queue" id="queue"></div>
     <div class="dockrow">
       <span class="hint">ENTER TO SEND · SHIFT+ENTER FOR NEWLINE</span>
+      <!-- v13.6: which backend actually runs the next directive. AUTO keeps
+           whatever this screen already routes to (the server-side default
+           backend, or CODE's pinned TOOLCHAIN agent); CLAUDE sends
+           focus_agent="code_claude", the real direct Claude Code CLI
+           passthrough in dourmouse/webui.py. -->
+      <div class="backendsel">
+        <span class="lbl">DIRECTIVE VIA</span>
+        <select id="backendPick" title="Which backend runs the next directive"
+          aria-label="Which backend runs the next directive">
+          <option value="auto">AUTO — OLLAMA / LOCAL AGENT</option>
+          <option value="claude">CLAUDE (DIRECT CLI)</option>
+        </select>
+      </div>
       <button class="chip" id="micChip" title="Switch to voice-only mode">(MIC)</button>
       <textarea id="ta" rows="1" placeholder="Ask anything — or /all &lt;goal&gt; to put every resource on it"></textarea>
       <button class="chip" id="spkChip" title="Speak replies aloud">(SPK)</button>
@@ -1054,6 +1107,15 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
 
   <div class="foot">
     <span id="footL">SCREEN 01 / 10 — HOME</span>
+    <!-- v13.6: real, persisted usage totals (GET /api/usage). Claude shows a
+         real dollar cost because the CLI's own result event reports one;
+         Ollama shows tokens and requests only — it has no real dollar cost
+         and none is invented here. -->
+    <span id="usagebar" aria-live="off">
+      <span class="ub-item"><span class="ub-k">CLAUDE</span><span class="ub-v" id="ubClaude">—</span></span>
+      <span class="ub-sep">·</span>
+      <span class="ub-item"><span class="ub-k">OLLAMA</span><span class="ub-v" id="ubOllama">—</span></span>
+    </span>
     <span>BACKEND: <b id="footBackend">—</b> · NODE: <b id="footNode">—</b></span>
   </div>
 </div>
@@ -1099,6 +1161,34 @@ const queue = [];
    "connected" dot — if the backend watcher isn't running, this says so). */
 let newsFeed = [], newsWatcherStatus = null;
 const _NEWS_FEED_CAP = 200;
+
+/* ---------------- directive backend (v13.6) ----------------
+   The dock's DIRECTIVE VIA picker. Two real values only:
+     "auto"   — send whatever focusAgent already holds (empty = let the
+                router pick; on CODE, whatever TOOLCHAIN pinned). The
+                server-side default backend is Ollama/local, which is what
+                the option is labelled after — nothing here changes it.
+     "claude" — send focus_agent="code_claude", which webui.py routes
+                straight to the real Claude Code CLI
+                (_handle_code_claude_passthrough -> code_backends.stream_claude),
+                bypassing the orchestrator entirely.
+   Persisted with the same try/catch localStorage pattern themeGet/
+   codeToolGet already use, so the choice survives a reload instead of
+   silently snapping back (the exact gap v13 fixed for the toolchain pin).
+   Defaults to "auto": this must not silently move every existing user's
+   directives onto a different, metered backend on first load. */
+const BACKEND_MODE_KEY = "dm_backend_mode_v1";
+function backendModeGet(){
+  try{ const v = localStorage.getItem(BACKEND_MODE_KEY); return v === "claude" ? "claude" : "auto"; }
+  catch{ return "auto"; }
+}
+function backendModeSet(v){ try{ localStorage.setItem(BACKEND_MODE_KEY, v); }catch{ /* private mode: session-only */ } }
+let backendMode = backendModeGet();
+/* The single place the wire value is decided, so every /api/chat caller
+   that honours the picker agrees on what it means. */
+function directiveFocusAgent(){
+  return backendMode === "claude" ? "code_claude" : (focusAgent || undefined);
+}
 
 /* ---------------- tabs ---------------- */
 // world-monitor-expansion (UX pass item 2): real user feedback after a
@@ -2050,7 +2140,7 @@ async function run(text){
   };
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:text, focus_agent:focusAgent||undefined, screen:targetScreen}), signal:ctrl.signal});
+      body:JSON.stringify({prompt:text, focus_agent:directiveFocusAgent(), screen:targetScreen}), signal:ctrl.signal});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -2140,6 +2230,11 @@ async function run(text){
           case "assistant_delta": foldThink(); contentRevealer.enqueue(e.text||""); break;
           case "assistant_text": foldThink(); contentRevealer.setTotal(e.text||""); break;
           case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;
+          // v13.6: the passthrough persists this turn's real usage and emits
+          // it live (webui.py::_on_claude_usage). Re-read the totals now so
+          // the footer shows the just-spent cost immediately instead of
+          // waiting out the 15s poll.
+          case "usage": refreshUsageBar(); break;
           case "done": if(e.final_text) contentRevealer.setTotal(e.final_text); break;
         }
       }
@@ -2331,6 +2426,53 @@ ta.addEventListener("input",()=>{ta.style.height="auto";ta.style.height=Math.min
   go.textContent = busy?"QUEUE":"SEND_DIRECTIVE";});
 ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();} });
 go.onclick=()=>submit();
+
+/* ---------------- DIRECTIVE VIA picker (v13.6) ----------------
+   Wires the dock dropdown to backendMode (declared with the rest of the
+   session state near the top). Restores the persisted choice on load, so
+   the control always shows what will ACTUALLY be sent — a picker reading
+   AUTO while the stored value says CLAUDE would be the same silent lie the
+   toolchain-pin fix removed. The .on class is the same "this is pinned to
+   something non-default" affordance .chip.on already uses. */
+const backendPick = $("backendPick");
+function paintBackendPick(){
+  backendPick.value = backendMode;
+  backendPick.classList.toggle("on", backendMode === "claude");
+}
+backendPick.addEventListener("change", ()=>{
+  backendMode = backendPick.value === "claude" ? "claude" : "auto";
+  backendModeSet(backendMode);
+  paintBackendPick();
+});
+paintBackendPick();
+
+/* ---------------- usage bar (v13.6) ----------------
+   GET /api/usage returns the real, persisted totals dourmouse/usage_tracker.py
+   keeps: claude {requests, cost_usd, input_tokens, output_tokens,
+   cache_creation_input_tokens, cache_read_input_tokens} and ollama
+   {requests, prompt_tokens, completion_tokens}. Ollama has no real dollar
+   cost, so none is rendered — tokens and requests only.
+   Cache tokens are counted into Claude's token figure because they are
+   real tokens the request actually carried; the cost figure is the CLI's
+   own reported cost, never recomputed here from a guessed price table.
+   A failed poll shows "—", not a stale or invented number. */
+async function refreshUsageBar(){
+  const claudeEl = $("ubClaude"), ollamaEl = $("ubOllama");
+  if(!claudeEl || !ollamaEl) return;
+  try{
+    const u = await api("/api/usage");
+    const c = u.claude || {};
+    const cTok = (c.input_tokens||0) + (c.output_tokens||0)
+      + (c.cache_creation_input_tokens||0) + (c.cache_read_input_tokens||0);
+    claudeEl.textContent = `$${Number(c.cost_usd||0).toFixed(4)} · ${cTok} TOK · ${c.requests||0} REQ`;
+    const o = u.ollama || {};
+    ollamaEl.textContent = `${(o.prompt_tokens||0)+(o.completion_tokens||0)} TOK · ${o.requests||0} REQ`;
+  }catch{
+    claudeEl.textContent = "—"; ollamaEl.textContent = "—";
+  }
+}
+refreshUsageBar();
+setInterval(refreshUsageBar, 15000);
 
 /* ---------------- CODE: toolchain picker ----------------
    Each option is a REAL agent in the roster and maps to focus_agent, so
@@ -2675,6 +2817,14 @@ function paintCompose(prefill){
   $("mCancel").onclick=()=>{ box.style.display="none"; box.innerHTML=""; };
   $("mSend").onclick=()=>sendMail($("mTo").value.trim(), $("mSubj").value.trim(), $("mBody").value);
 }
+/* v13.6: deliberately NOT wired to the dock's DIRECTIVE VIA picker. This is
+   not a free-text directive — it is a tool-bound one whose whole job is to
+   reach Dourmouse's own gmail_send tool and its REQUIRES_CONFIRMATION gate
+   (general_roster.py). focus_agent="code_claude" bypasses the orchestrator
+   and the gate entirely (webui.py::_handle_code_claude_passthrough), so the
+   Claude Code CLI would have no gmail_send to call and no approval box would
+   ever appear. Offering the choice here would be an option that cannot do
+   the thing it claims. Free-text directives get the picker; this doesn't. */
 async function sendMail(to, subject, body){
   const status=$("mStatus");
   if(!to||!subject){ status.textContent="To and subject are required."; return; }
@@ -3234,7 +3384,16 @@ function paintDesign3dChat(){
    emits {"type":"tool_result","name","text"} for every tool call — see
    design_3d_ops.py's handlers), so a caller can read back exactly what a
    gated write actually persisted, or what a read actually found, instead
-   of trusting the model's own prose summary of it. */
+   of trusting the model's own prose summary of it.
+
+   v13.6: like sendMail above, this is deliberately NOT wired to the dock's
+   DIRECTIVE VIA picker — same reason. The SAVE/LOAD buttons that call it
+   depend on design_3d's real tools (generate_3d_model_spec,
+   read_manifest_entry, write_manifest_entry and its confirmation gate),
+   none of which exist on the direct Claude Code CLI path. DESIGN3D's own
+   free-text asks (the TRY cards and the two form buttons in
+   paintDesign3dChat) DO honour the picker — they route through the dock
+   composer's submit()/run(). */
 async function dispatchDesignDirective(directive, statusEl, opts){
   opts = opts || {};
   statusEl.textContent = opts.pending || "Working…";
