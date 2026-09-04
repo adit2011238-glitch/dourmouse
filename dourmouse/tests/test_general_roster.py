@@ -112,7 +112,18 @@ class TestRosterShape:
         # v8.31: delegate_parallel joins delegate_task as the orchestrator's
         # own native self-dispatch tools — genuinely concurrent fan-out
         # alongside the existing one-at-a-time nested run.
-        assert {t.name for t in sub.tools} == {"delegate_task", "delegate_parallel"}
+        # v5.21: delegate_to_models joins them. It is a different thing from
+        # the other two and the distinction matters: delegate_task and
+        # delegate_parallel spawn nested runs against the SAME model, and are
+        # both excluded from the MCP bridge for recursion risk, so Claude
+        # never sees them. delegate_to_models routes ACROSS models (local
+        # Ollama vs cloud Gemini, privacy-first) and never re-enters a coding
+        # CLI, so it is safe to expose and is the one Claude actually calls.
+        assert {t.name for t in sub.tools} == {
+            "delegate_task",
+            "delegate_parallel",
+            "delegate_to_models",
+        }
 
     def test_companion_mirrors_orchestrators_dispatch_tools(self):
         # world-monitor-expansion: companion is not a second orchestrator
