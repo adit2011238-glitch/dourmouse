@@ -137,8 +137,13 @@ class TestRunWiresRevealersInsteadOfDirectBufMutation:
         assert "thinkRevealer.enqueue(e.text||\"\");" in script
 
     def test_stop_flushes_both_revealers_immediately(self):
+        """v13.7: the abort/decline/flush body moved from a single
+        stopBtn.onclick rebound per run() call into stopHandlerByScreen[
+        targetScreen] (per-screen, so STOP always targets the right
+        screen — see test_console_per_screen_busy_state.py). The flush
+        behaviour itself is unchanged."""
         script = _extract_inline_script()
-        m = re.search(r"stopBtn\.onclick = \(\)=>\{(.*?)\};", script, re.S)
+        m = re.search(r"stopHandlerByScreen\[targetScreen\] = \(\) => \{(.*?)\};", script, re.S)
         assert m
         body = m.group(1)
         assert "contentRevealer.flushAll(); thinkRevealer.flushAll();" in body

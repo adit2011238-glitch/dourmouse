@@ -1182,8 +1182,35 @@ const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS","DESIGN3D","COMM
 // every internal id/comparison still uses "ATLAS" untouched.
 const SCREEN_LABELS = { ATLAS: "WORLD", DESIGN3D: "DESIGN", GLOBE: "EYE" };
 const sys = {roster:null,conns:null,server:null,backend:null,memory:null,telemetry:null,version:null,me:null,voice:null};
-let screen = "HOME", busy = false, focusAgent = "", speak = false, voiceMode = false;
-const queue = [];
+let screen = "HOME", focusAgent = "", speak = false, voiceMode = false;
+// v13.7 (real live bug fix): busy/queue/ctrl/pendingDeclines used to be ONE
+// set of module-level variables shared across every screen, even though
+// each THREAD_SCREENS entry already keeps its own separate conversation
+// (threadFor(targetScreen) below). That meant: (a) pressing Enter on
+// screen B while screen A's directive was still running QUEUED the new
+// message instead of sending it, because the single global `busy` flag
+// was still true from A's still-running turn; (b) clicking STOP while
+// VIEWING screen B aborted whatever was actually running on screen A,
+// since stopBtn's handler was rebound to the MOST RECENTLY STARTED run()
+// call regardless of which screen the user had since switched to.
+// Both reported live, verbatim: "when the enter key is pressed it queues
+// the message" and "stopping the directive in one tab stops it across
+// other tabs as well".
+//
+// Fixed by keying all four by threadKey() (the same THREAD_SCREENS-or-
+// HOME mapping run() already used inline) instead of using bare globals.
+// This does NOT change how many directives the SERVER can run at once —
+// session_lock (webui.py) still serializes the Ollama backend path
+// server-side, exactly as the pendingDeclines comment below already
+// documents. What this fixes is the FRONTEND correctly representing and
+// controlling each screen's own state instead of conflating them.
+const busyByScreen = {};
+const queueByScreen = {};
+const ctrlByScreen = {};
+const pendingDeclinesByScreen = {};
+const stopHandlerByScreen = {};
+function threadKey(name){ return THREAD_SCREENS.includes(name) ? name : "HOME"; }
+function queueFor(key){ return queueByScreen[key] || (queueByScreen[key] = []); }
 /* v13: the NEWS screen's live feed state — see startNewsStream() and
    paintNews() below. newsFeed accumulates newest-first, capped so an
    all-day session never grows this unbounded; newsWatcherStatus is the
@@ -1321,6 +1348,14 @@ function show(name){
   if(name==="DESIGN3D") paintDesign3d();
   if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
   else if(voiceMode && name!=="VOICE"){ voiceMode = false; $("micChip").classList.remove("on"); }
+  // v13.7: the composer (SEND/QUEUE label, stop-button glow, queue list)
+  // must reflect the THREAD now being viewed, not whatever screen last
+  // called setBusy(). Without this, switching to an idle screen while
+  // another screen's directive is still running left the button reading
+  // "QUEUE" and the stop button lit, even though pressing Enter here would
+  // correctly send immediately (busyByScreen keys were already right —
+  // only the visible label was stale).
+  syncComposerUI();
 }
 
 /* ---------------- system state ---------------- */
@@ -1865,16 +1900,24 @@ function transcriptToolLabel(name){
 
 /* ---------------- transcript ---------------- */
 const ta = $("ta"), go = $("go"), stopBtn = $("stop");
-let ctrl = null;
 // v13.2 (live bug): STOP used to only abort the browser's own fetch read —
 // the SERVER thread stayed blocked inside WebConfirmationGate.wait() holding
 // session_lock for up to 300s, so hitting STOP during a pending approval
 // froze every OTHER screen/agent too (they all queue on the same lock).
-// pendingDeclines holds a decline-callback per still-open confirmation box
-// for the in-flight request; STOP now fires all of them (POST
-// /api/confirm approved:false) so the server thread wakes immediately and
-// releases the lock, same as clicking DECLINE by hand.
-let pendingDeclines = new Map();
+// pendingDeclinesByScreen[key] holds a decline-callback per still-open
+// confirmation box for that screen's in-flight request; STOP now fires all
+// of them (POST /api/confirm approved:false) so the server thread wakes
+// immediately and releases the lock, same as clicking DECLINE by hand.
+// v13.7: stopBtn itself is bound ONCE, here, rather than rebound inside
+// every run() call — it always targets whichever screen is CURRENTLY
+// VIEWED (threadKey(screen)) rather than whichever run() happened to start
+// most recently. The actual per-call abort/decline logic still lives in
+// run()'s own closure (it needs that call's local `stopped`/`node`), so
+// this just looks up and invokes that call's handler.
+stopBtn.onclick = () => {
+  const h = stopHandlerByScreen[threadKey(screen)];
+  if(h) h();
+};
 // v8.29: independent per-screen conversations. Each of THREAD_SCREENS owns
 // its own <div class="thread"> (see the HTML — sibling of that screen's
 // .panebody, not nested, so repainting the toolchain picker etc. can't
@@ -2084,19 +2127,33 @@ function makeRevealer(onUpdate, opts){
     get draining(){ return pending.length>0; },
   };
 }
-function setBusy(on){
-  busy=on; go.disabled=false; go.textContent = on?"QUEUE":"SEND_DIRECTIVE";
+function setBusy(on, key){
+  // key defaults to the screen the request actually belongs to; if omitted
+  // (a couple of older call sites), fall back to the currently viewed one.
+  key = key || threadKey(screen);
+  busyByScreen[key] = on;
+  // Only touch the composer's VISIBLE state if the user is looking at THIS
+  // screen right now — a background screen finishing must not silently
+  // relabel a different screen's SEND button.
+  if(key === threadKey(screen)) syncComposerUI();
+}
+function syncComposerUI(){
+  const key = threadKey(screen);
+  const on = !!busyByScreen[key];
+  go.disabled=false; go.textContent = on?"QUEUE":"SEND_DIRECTIVE";
   stopBtn.classList.toggle("on",on);
   paintQueue();
 }
 function paintQueue(){
+  const key = threadKey(screen);
+  const q = queueFor(key);
   const box=$("queue"); box.innerHTML="";
-  queue.forEach((t,i)=>{
+  q.forEach((t,i)=>{
     const r=document.createElement("div"); r.className="qi";
     const n=document.createElement("b"); n.textContent=String(i+1);
     const s=document.createElement("span"); s.textContent=t;
     const x=document.createElement("button"); x.type="button"; x.setAttribute("aria-label","Remove"); x.textContent="✕";
-    x.onclick=()=>{queue.splice(i,1);paintQueue();};
+    x.onclick=()=>{q.splice(i,1);paintQueue();};
     r.append(n,s,x); box.appendChild(r);
   });
 }
@@ -2104,10 +2161,12 @@ function paintQueue(){
 /* ---------------- send ---------------- */
 async function submit(){
   const text = ta.value.trim(); if(!text) return;
-  if(busy){ queue.push(text); ta.value=""; ta.style.height="auto"; paintQueue(); return; }
+  const key = threadKey(screen);
+  if(busyByScreen[key]){ queueFor(key).push(text); ta.value=""; ta.style.height="auto"; paintQueue(); return; }
   ta.value=""; ta.style.height="auto";
   await run(text);
-  while(queue.length){ const n=queue.shift(); paintQueue(); await run(n); }
+  const q = queueFor(key);
+  while(q.length){ const n=q.shift(); paintQueue(); await run(n); }
 }
 async function run(text){
   // v8.29 (v13.1: +COMMS): the request stays on whichever screen it was
@@ -2118,11 +2177,11 @@ async function run(text){
   // display and never gets navigated away,
   // but the turn is still recorded into HOME's thread so it's there to
   // review afterward.
-  const targetScreen = THREAD_SCREENS.includes(screen) ? screen : "HOME";
+  const targetScreen = threadKey(screen);
   if(screen!=="VOICE" && screen!==targetScreen) show(targetScreen);
   const threadEl = threadFor(targetScreen);
   unhideThread(threadEl);
-  addYou(threadEl, text); setBusy(true);
+  addYou(threadEl, text); setBusy(true, targetScreen);
   liveClear(); liveAdd("act","Thinking", text.slice(0,80));
   const node = addReply(threadEl); node.st.textContent="THINKING";
   const startedAt = performance.now();
@@ -2161,22 +2220,29 @@ async function run(text){
     node.think.style.display="none";
     node.thinkToggle.querySelector(".tcar").textContent="▸";
   };
-  ctrl = new AbortController();
-  pendingDeclines = new Map();
-  stopBtn.onclick = ()=>{
+  // v13.7: local to THIS run() call, and ALSO stashed in the per-screen
+  // maps so the permanently-bound stopBtn.onclick (declared once, near ta/
+  // go/stopBtn above) can reach this exact call's controller/declines/stop
+  // logic by screen key, without a second run() on another screen
+  // clobbering it.
+  const myCtrl = new AbortController();
+  const myDeclines = new Map();
+  ctrlByScreen[targetScreen] = myCtrl;
+  pendingDeclinesByScreen[targetScreen] = myDeclines;
+  stopHandlerByScreen[targetScreen] = () => {
     stopped=true;
-    try{ctrl.abort();}catch{}
+    try{myCtrl.abort();}catch{}
     // v13.2: also decline any open approval box for THIS request so the
     // blocked server thread wakes and frees session_lock instead of sitting
     // in WebConfirmationGate.wait() for up to 300s.
-    for(const decline of pendingDeclines.values()){ try{decline();}catch{} }
+    for(const decline of myDeclines.values()){ try{decline();}catch{} }
     // Show everything that HAD arrived immediately rather than keep
     // fake-typing text for a turn the user just told to stop.
     contentRevealer.flushAll(); thinkRevealer.flushAll();
   };
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:text, focus_agent:directiveFocusAgent(), screen:targetScreen}), signal:ctrl.signal});
+      body:JSON.stringify({prompt:text, focus_agent:directiveFocusAgent(), screen:targetScreen}), signal:myCtrl.signal});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -2262,7 +2328,7 @@ async function run(text){
               liveAdd(e.ok?"done":"err", "Branch finished: "+(e.agent||"any"), modelShown);
             }
             break; }
-          case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e,pendingDeclines); break;
+          case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e,myDeclines); break;
           case "assistant_delta": foldThink(); contentRevealer.enqueue(e.text||""); break;
           case "assistant_text": foldThink(); contentRevealer.setTotal(e.text||""); break;
           case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;
@@ -2303,7 +2369,8 @@ async function run(text){
     contentRevealer.flushAll(); thinkRevealer.flushAll();
     clearInterval(tick);
     node.tm.textContent = ((performance.now()-startedAt)/1000).toFixed(1) + "s";
-    ctrl=null;
+    ctrlByScreen[targetScreen]=null;
+    stopHandlerByScreen[targetScreen]=null;
     node.body.innerHTML = md(buf) || "<p><em>No reply.</em></p>";
     wireCopies(node.body);
     node.st.textContent = stopped?"STOPPED":"DONE";
@@ -2312,7 +2379,7 @@ async function run(text){
     c.onclick=async()=>{try{await navigator.clipboard.writeText(buf);c.textContent="COPIED";setTimeout(()=>c.textContent="COPY",1200);}catch{}};
     const rg=document.createElement("button"); rg.className="mini"; rg.type="button";
     rg.textContent = stopped?"CONTINUE":"REGENERATE";
-    rg.onclick=()=>{ if(!busy) run(stopped?text+"\n\n(continue)":text); };
+    rg.onclick=()=>{ if(!busyByScreen[targetScreen]) run(stopped?text+"\n\n(continue)":text); };
     node.row.append(c,rg);
     // v8.29: shelving a real, completed answer onto a named project —
     // never offered on a stopped/empty reply, since a shelf is meant to
@@ -2323,7 +2390,7 @@ async function run(text){
       node.row.append(sh);
     }
     liveAdd(stopped?"err":"done", stopped?"Halted":"Done","");
-    setBusy(false);
+    setBusy(false, targetScreen);
     if(voiceMode){ $("vText").textContent = buf.slice(-600) || "No reply."; setVoice("idle"); if(speak) say(buf); }
     node.thread.scrollTop=node.thread.scrollHeight;
     refresh();
@@ -2404,7 +2471,7 @@ function restoreReplyTail(node, text, buf, targetScreen){
   const c=document.createElement("button"); c.className="mini"; c.type="button"; c.textContent="COPY";
   c.onclick=async()=>{try{await navigator.clipboard.writeText(buf);c.textContent="COPIED";setTimeout(()=>c.textContent="COPY",1200);}catch{}};
   const rg=document.createElement("button"); rg.className="mini"; rg.type="button"; rg.textContent="REGENERATE";
-  rg.onclick=()=>{ if(!busy) run(text); };
+  rg.onclick=()=>{ if(!busyByScreen[targetScreen]) run(text); };
   node.row.append(c,rg);
   if(buf){
     const sh=document.createElement("button"); sh.className="mini"; sh.type="button"; sh.textContent="SHELVE";
@@ -2459,7 +2526,7 @@ async function restoreSession(){
 }
 
 ta.addEventListener("input",()=>{ta.style.height="auto";ta.style.height=Math.min(ta.scrollHeight,130)+"px";
-  go.textContent = busy?"QUEUE":"SEND_DIRECTIVE";});
+  go.textContent = busyByScreen[threadKey(screen)]?"QUEUE":"SEND_DIRECTIVE";});
 ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();} });
 go.onclick=()=>submit();
 

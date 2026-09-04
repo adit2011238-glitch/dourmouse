@@ -64,30 +64,54 @@ class TestConsoleScriptSyntax:
 
 
 class TestStopDeclinesPendingConfirmation:
+    """v13.7 note: pendingDeclines/ctrl/stopBtn.onclick were refactored to be
+    PER-SCREEN (pendingDeclinesByScreen / ctrlByScreen / stopHandlerByScreen)
+    as part of a separate real bug fix -- see TestPerScreenBusyState below.
+    STOP declining a pending confirmation (this file's own subject) still
+    happens, just through the per-screen handler now instead of one shared
+    global. These assertions were updated to match; the underlying guarantee
+    (STOP fires every open decline callback for the in-flight request) is
+    unchanged and still covered.
+    """
+
     def test_pending_declines_map_declared(self):
         script = _extract_inline_script()
-        assert "let pendingDeclines = new Map();" in script
+        assert "const pendingDeclinesByScreen = {};" in script
 
-    def test_run_resets_the_map_alongside_the_abort_controller(self):
+    def test_run_creates_a_fresh_map_per_screen_alongside_its_controller(self):
         script = _extract_inline_script()
-        m = re.search(r"ctrl = new AbortController\(\);(.*?)stopBtn\.onclick", script, re.S)
-        assert m, "ctrl/pendingDeclines reset block not found before stopBtn.onclick"
-        assert "pendingDeclines = new Map();" in m.group(1)
-
-    def test_stop_click_aborts_and_declines(self):
-        script = _extract_inline_script()
-        m = re.search(r"stopBtn\.onclick = \(\)=>\{(.*?)\};", script, re.S)
-        assert m, "stopBtn.onclick handler not found"
+        m = re.search(r"const myCtrl = new AbortController\(\);(.*?)stopHandlerByScreen\[targetScreen\] = \(\) => \{", script, re.S)
+        assert m, "myCtrl/myDeclines setup block not found before the stop handler is registered"
         body = m.group(1)
-        assert "ctrl.abort()" in body
-        # Must actually invoke every registered decline callback, not just
-        # abort the client-side read.
-        assert "pendingDeclines.values()" in body
+        assert "const myDeclines = new Map();" in body
+        assert "pendingDeclinesByScreen[targetScreen] = myDeclines;" in body
+
+    def test_stop_handler_aborts_and_declines_for_its_own_screen(self):
+        script = _extract_inline_script()
+        m = re.search(r"stopHandlerByScreen\[targetScreen\] = \(\) => \{(.*?)\};", script, re.S)
+        assert m, "per-screen stop handler body not found"
+        body = m.group(1)
+        assert "myCtrl.abort()" in body
+        # Must actually invoke every registered decline callback for THIS
+        # screen's request, not just abort the client-side read.
+        assert "myDeclines.values()" in body
         assert "decline()" in body
 
-    def test_confirmation_requested_registers_into_the_map(self):
+    def test_stop_button_dispatches_to_the_currently_viewed_screens_handler(self):
+        """The permanently-bound stopBtn.onclick (declared once, not per
+        run() call) must look up the CURRENTLY VIEWED screen's handler --
+        this is what stops STOP from a background screen's run() call
+        silently overriding it and hijacking a later click made while
+        looking at a different screen."""
         script = _extract_inline_script()
-        assert 'addApproval(node,e,pendingDeclines)' in script
+        m = re.search(r"stopBtn\.onclick = \(\) => \{(.*?)\};", script, re.S)
+        assert m, "the single, permanently-bound stopBtn.onclick not found"
+        body = m.group(1)
+        assert "stopHandlerByScreen[threadKey(screen)]" in body
+
+    def test_confirmation_requested_registers_into_this_calls_own_map(self):
+        script = _extract_inline_script()
+        assert 'addApproval(node,e,myDeclines)' in script
 
     def test_add_approval_accepts_and_uses_the_decline_map(self):
         script = _extract_inline_script()
