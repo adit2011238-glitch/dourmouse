@@ -377,3 +377,118 @@ class TestOpenMemoryStoreUsesRemoteWhenConfigured:
         store = _open_memory_store()
         assert isinstance(store, MemoryStore)
         store.close()
+
+
+class TestRemoteStoreHonoursTheFullInterface:
+    """Regression tests for a real live bug, found by probing the running
+    server rather than by reading the code.
+
+    GET /api/profile did not return 500 -- it dropped the connection
+    outright (curl reported HTTP 000), because personality_profile called
+    ``store.get(...)`` and RemoteMemoryStore had no ``get``. The class
+    advertised itself in its own docstring as "a drop-in for
+    _open_memory_store()'s callers" while implementing 4 of MemoryStore's
+    12 public methods; the other seven were reached by personality_profile,
+    semantic_graph, repo_index, memory_embed and chat -- each of them
+    crashing or silently doing nothing whenever DOURMOUSE_MEMORY_REMOTE_URL
+    was set, which is this machine's real configuration.
+    """
+
+    def test_remote_store_exposes_every_public_method_the_local_one_does(self):
+        from dourmouse.memory_store import MemoryStore, RemoteMemoryStore
+
+        def public(cls):
+            return {
+                n for n in dir(cls)
+                if not n.startswith("_") and callable(getattr(cls, n, None))
+            }
+
+        missing = public(MemoryStore) - public(RemoteMemoryStore)
+        assert missing == set(), (
+            "RemoteMemoryStore is selected by _open_memory_store() wherever "
+            "DOURMOUSE_MEMORY_REMOTE_URL is set, so any public method it lacks is "
+            f"an AttributeError in production, not a type error at import. Missing: {sorted(missing)}"
+        )
+
+    @pytest.mark.parametrize(
+        "op,call",
+        [
+            ("all_facts", lambda s: s.all_facts()),
+            ("delete", lambda s: s.delete("s", "t")),
+            ("get_embeddings", lambda s: s.get_embeddings()),
+            ("save_embedding", lambda s: s.save_embedding(1, "m", [0.0])),
+            ("ingest_session_file", lambda s: s.ingest_session_file("/tmp/x")),
+            ("ingest_vault", lambda s: s.ingest_vault("/tmp/x")),
+        ],
+    )
+    def test_unsupported_operations_fail_typed_and_readable(self, op, call):
+        from dourmouse.memory_store import RemoteMemoryStore, RemoteMemoryStoreUnavailable
+
+        store = RemoteMemoryStore("http://127.0.0.1:1", timeout=0.25)
+        with pytest.raises(RemoteMemoryStoreUnavailable) as exc:
+            call(store)
+        # The message must name the operation and say what to do about it --
+        # the entire point is that a human reading a log can act on it.
+        assert op in str(exc.value)
+        assert "DOURMOUSE_MEMORY_REMOTE_URL" in str(exc.value)
+
+    def test_get_is_real_and_filters_to_an_exact_source_title_match(self):
+        """``get`` is implemented over the remote FTS search endpoint, so it
+        must reject a near-match rather than confidently return a wrong row."""
+        from dourmouse.memory_store import RemoteMemoryStore
+
+        store = RemoteMemoryStore("http://example.invalid", timeout=0.25)
+        store.search = lambda q, limit=10, source=None: [
+            {"source": "other", "title": "profile", "body": "wrong source"},
+            {"source": "prof", "title": "profile-ish", "body": "wrong title"},
+            {"source": "prof", "title": "profile", "body": "correct"},
+        ]
+        assert store.get("prof", "profile")["body"] == "correct"
+        assert store.get("prof", "absent") is None
+
+
+class TestStreamedTurnsAreCounted:
+    """Regression test for the second live bug from the same sweep:
+    /api/usage reported ollama at 0 requests no matter how much was run,
+    because Ollama's native stream yields its token counters on a final
+    done:true chunk that carries no message content -- and the stream loop
+    skipped exactly that chunk. Only the non-streaming path was ever
+    counted, and the chat UI never uses it.
+    """
+
+    def test_the_done_chunk_carrying_token_counts_is_not_dropped(self):
+        from dourmouse.dispatch import OllamaNativeClient, _usage_of
+
+        stream_lines = [
+            json.dumps({"message": {"content": "hi"}, "done": False}),
+            # The real shape Ollama sends last: no message content at all,
+            # done true, and the only token counts in the whole exchange.
+            json.dumps({
+                "message": {},
+                "done": True,
+                "prompt_eval_count": 3285,
+                "eval_count": 28,
+            }),
+        ]
+        fake = type(
+            "_FakeNative",
+            (),
+            {
+                "_is_default_post": False,
+                "_post": staticmethod(lambda payload: "\n".join(stream_lines)),
+                "_stream": OllamaNativeClient._stream,
+            },
+        )()
+        chunks = list(fake._stream({}))
+        usages = [c.usage for c in chunks if getattr(c, "usage", None) is not None]
+        assert usages, "the done chunk's token counters were dropped again"
+        assert usages[-1].prompt_tokens == 3285
+        assert usages[-1].completion_tokens == 28
+        assert usages[-1].total_tokens == 3313
+        # And the shape must be what _usage_of already knows how to read,
+        # so one extraction path serves native and OpenAI-compatible alike.
+        assert _usage_of(type("_R", (), {"usage": usages[-1]})()) == {
+            "prompt_tokens": 3285,
+            "completion_tokens": 28,
+            "total_tokens": 3313,
+        }

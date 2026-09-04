@@ -317,6 +317,39 @@ def check_connections() -> dict[str, dict[str, Any]]:
         atlas_detail = "paths set but repo dir not found"
     else:
         atlas_detail = "ATLAS_REPO_PATH / ATLAS_VENV_PATH not set"
+    # Long-term memory. Added after a real live failure: with
+    # DOURMOUSE_MEMORY_REMOTE_URL set to a machine that was switched off,
+    # every memory and RAG feature failed, /api/profile dropped its
+    # connection outright, and NOTHING in the connections panel mentioned
+    # memory at all -- so there was no way for a human to see why. The
+    # probe is a cheap TCP reachability check rather than a real query,
+    # to honor this module's "no remote network calls on HUD polls" rule.
+    _mem_remote = (os.environ.get("DOURMOUSE_MEMORY_REMOTE_URL") or "").strip()
+    if _mem_remote:
+        from urllib.parse import urlsplit
+
+        _mp = urlsplit(_mem_remote if "://" in _mem_remote else "http://" + _mem_remote)
+        _mhost, _mport = _mp.hostname or "", _mp.port or 8765
+        _mup = bool(_mhost) and _tcp_reachable(_mhost, _mport)
+        out["memory"] = {
+            "ok": _mup,
+            "detail": (
+                f"remote store on {_mhost}:{_mport}" if _mup
+                else f"remote store at {_mhost}:{_mport} is unreachable"
+            ),
+            "hint": (
+                "Start Dourmouse on that machine, or unset "
+                "DOURMOUSE_MEMORY_REMOTE_URL in .env to use this machine's own "
+                "local memory store instead."
+            ),
+        }
+    else:
+        out["memory"] = {
+            "ok": True,
+            "detail": "local store on this machine",
+            "hint": "set DOURMOUSE_MEMORY_REMOTE_URL to share one store across machines",
+        }
+
     out["atlas"] = {
         "ok": atlas_repo_resolves and atlas_venv_resolves,
         "detail": atlas_detail,

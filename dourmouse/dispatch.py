@@ -619,7 +619,18 @@ def _stream_completion(
     unchanged. This is what gives the UI a Claude-like feel: the first tokens
     appear in ~1s instead of the whole answer landing at once.
     """
-    stream = client.chat.completions.create(
+    # stream_options={"include_usage": True} is what makes an
+    # OpenAI-compatible stream emit a final usage-bearing chunk. Without it
+    # the whole streaming path reports no tokens at all, which is exactly
+    # the bug this fixes: /api/usage showed ollama at 0 requests forever
+    # because every real chat turn goes through here, while only the
+    # non-streaming _call_with_retry path was ever counted.
+    #
+    # Not every OpenAI-compatible server accepts the parameter, and one
+    # that rejects it fails the request outright rather than ignoring it --
+    # so a failure falls back to the original call. Losing token counts is
+    # an acceptable degradation; losing the user's chat turn is not.
+    _create_kwargs = dict(
         model=model,
         messages=messages,
         tools=tools,
@@ -628,9 +639,22 @@ def _stream_completion(
         max_tokens=_default_max_tokens(),
         stream=True,
     )
+    try:
+        stream = client.chat.completions.create(
+            **_create_kwargs, stream_options={"include_usage": True}
+        )
+    except Exception:
+        stream = client.chat.completions.create(**_create_kwargs)
+
     content_parts: list[str] = []
     tool_acc: dict[int, dict[str, str]] = {}
+    stream_usage: Any = None
     for chunk in stream:
+        # The usage-bearing final chunk carries an EMPTY choices list, so
+        # this must be read before the choices guard below skips it.
+        chunk_usage = getattr(chunk, "usage", None)
+        if chunk_usage is not None:
+            stream_usage = chunk_usage
         if not getattr(chunk, "choices", None):
             continue
         delta = chunk.choices[0].delta
@@ -659,8 +683,10 @@ def _stream_completion(
             _OllamaTc(a["id"], a["name"], a["args"])
             for _, a in sorted(tool_acc.items())
         ]
-        return _OllamaResponse(_OllamaMessage("".join(content_parts), tool_calls))
-    return _OllamaResponse(_OllamaMessage("".join(content_parts), None))
+        return _OllamaResponse(
+            _OllamaMessage("".join(content_parts), tool_calls), usage=stream_usage
+        )
+    return _OllamaResponse(_OllamaMessage("".join(content_parts), None), usage=stream_usage)
 
 
 class Permission(str, Enum):
@@ -1123,8 +1149,14 @@ class _OllamaMessage:
 
 
 class _OllamaResponse:
-    def __init__(self, message: _OllamaMessage) -> None:
+    def __init__(self, message: _OllamaMessage, usage: Any = None) -> None:
         self.choices = [type("_Choice", (), {"message": message})()]
+        # Carries the provider's own usage object when the stream supplied
+        # one. _usage_of() reads `.usage` off whatever it is handed, so a
+        # streamed turn is now counted the same as a non-streamed one --
+        # previously this attribute did not exist at all and every real
+        # streaming turn silently reported zero tokens.
+        self.usage = usage
 
 
 class _OllamaDelta:
@@ -1147,9 +1179,26 @@ class _OllamaDelta:
         self.thinking = thinking
 
 
+class _OllamaUsage:
+    """OpenAI-shaped view of Ollama's own native token counters.
+
+    Ollama's native /api/chat reports `prompt_eval_count` (input) and
+    `eval_count` (output) on its final done:true chunk. _usage_of() reads
+    OpenAI's names off whatever object it is given, so translating here
+    means one extraction path serves both the native and the
+    OpenAI-compatible backends.
+    """
+
+    def __init__(self, prompt_tokens: int, completion_tokens: int) -> None:
+        self.prompt_tokens = int(prompt_tokens)
+        self.completion_tokens = int(completion_tokens)
+        self.total_tokens = self.prompt_tokens + self.completion_tokens
+
+
 class _OllamaChunk:
-    def __init__(self, delta: _OllamaDelta) -> None:
+    def __init__(self, delta: _OllamaDelta, usage: Any = None) -> None:
         self.choices = [type("_Choice", (), {"delta": delta})()]
+        self.usage = usage
 
 
 class _OllamaCompletions:
@@ -1385,6 +1434,25 @@ class OllamaNativeClient:
                         })()
                     )
             if content is None and thinking is None and not delta_tcs:
+                # Ollama's final chunk carries done:true plus the real token
+                # counters and NO message content, so the guard above used to
+                # drop it on the floor -- which is why every streamed local
+                # turn reported zero usage and /api/usage sat at 0 requests
+                # for Ollama no matter how much the user actually ran.
+                # Emit it as a usage-only chunk; _stream_completion reads
+                # .usage before it checks .choices, so a chunk with no delta
+                # content is still counted.
+                if chunk.get("done") and (
+                    chunk.get("prompt_eval_count") is not None
+                    or chunk.get("eval_count") is not None
+                ):
+                    yield _OllamaChunk(
+                        _OllamaDelta(),
+                        usage=_OllamaUsage(
+                            chunk.get("prompt_eval_count") or 0,
+                            chunk.get("eval_count") or 0,
+                        ),
+                    )
                 continue
             yield _OllamaChunk(_OllamaDelta(content=content, tool_calls=delta_tcs, thinking=thinking))
 

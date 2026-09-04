@@ -522,5 +522,80 @@ class RemoteMemoryStore:
         result = self._get("/api/memory")
         return int(result.get("count") or 0)
 
+    def get(self, source: str, title: str) -> dict[str, Any] | None:
+        """Fetch one fact by its exact (source, title) key.
+
+        Implemented against the remote FTS search endpoint, because the
+        remote API exposes no by-key read: search for the title, then
+        keep only a genuinely exact (source, title) match. The exactness
+        filter is what makes this a real `get` rather than a fuzzy lookup
+        that happens to usually work.
+
+        HONEST CAVEAT, and it is a real one: FTS5 tokenises. A title made
+        entirely of characters the remote tokeniser drops could fail to
+        come back from search even though the row exists, and this would
+        then return None -- a false negative, never a false positive. The
+        local MemoryStore.get() does a direct keyed SELECT and has no such
+        gap. Callers that must not tolerate a false negative should not
+        use a remote store for that job.
+        """
+        try:
+            hits = self.search(title, limit=25, source=source)
+        except RemoteMemoryStoreUnavailable:
+            raise
+        for hit in hits:
+            if hit.get("source") == source and hit.get("title") == title:
+                return hit
+        return None
+
+    # ---- operations that are genuinely NOT proxyable over this API ---- #
+    #
+    # These exist so that calling one produces an honest, typed, readable
+    # failure naming the operation, instead of an AttributeError.
+    #
+    # This was a real live bug, not a hypothetical: GET /api/profile died
+    # with "'RemoteMemoryStore' object has no attribute 'get'" and dropped
+    # the connection outright, because this class advertised itself in its
+    # own docstring as "a drop-in for _open_memory_store()'s callers"
+    # while implementing 4 of MemoryStore's 12 public methods. The other
+    # seven were reached by personality_profile, semantic_graph,
+    # repo_index, memory_embed and chat -- every one of them crashing or
+    # silently doing nothing the moment DOURMOUSE_MEMORY_REMOTE_URL was
+    # set, which is this machine's real configuration.
+    #
+    # Why these specific ones stay unsupported rather than being faked:
+    # each needs either a bulk dump or direct SQLite access that the
+    # remote HTTP API deliberately does not expose (see this class's
+    # docstring on why the SQLite file itself must never be shared over a
+    # network filesystem). Returning an empty list instead would be worse
+    # than failing -- a caller would treat "no facts" as truth and, in
+    # repo_index's case, delete real rows on the strength of it.
+
+    def _unsupported(self, op: str, needs: str) -> "RemoteMemoryStoreUnavailable":
+        return RemoteMemoryStoreUnavailable(
+            f"RemoteMemoryStore.{op}() is not available against a remote "
+            f"memory store at {self.base_url}: it needs {needs}, which the "
+            f"remote HTTP API does not expose. Unset DOURMOUSE_MEMORY_REMOTE_URL "
+            f"to use the local store for this operation."
+        )
+
+    def all_facts(self, source: str | None = None) -> list[dict[str, Any]]:
+        raise self._unsupported("all_facts", "a full table dump")
+
+    def delete(self, source: str, title: str) -> bool:
+        raise self._unsupported("delete", "a remote delete endpoint")
+
+    def get_embeddings(self) -> list[dict[str, Any]]:
+        raise self._unsupported("get_embeddings", "direct SQLite access")
+
+    def save_embedding(self, fact_id: int, model: str, vector: Any) -> None:
+        raise self._unsupported("save_embedding", "direct SQLite access")
+
+    def ingest_session_file(self, path: Any) -> int:
+        raise self._unsupported("ingest_session_file", "a bulk ingest endpoint")
+
+    def ingest_vault(self, *args: Any, **kwargs: Any) -> int:
+        raise self._unsupported("ingest_vault", "a bulk ingest endpoint")
+
     def close(self) -> None:
         pass  # stateless HTTP client — nothing to close

@@ -70,7 +70,7 @@ from dourmouse.dispatch import DispatchRegistry, JobTracker
 from dourmouse.governance import RbacPolicy
 from dourmouse.learn import learn_enabled, open_default_store, record_feedback
 from dourmouse.live_runtime import LiveRuntime, live_enabled
-from dourmouse.memory_store import MemoryStore
+from dourmouse.memory_store import MemoryStore, RemoteMemoryStoreUnavailable
 from dourmouse.message_bus import MessageBus, get_message_bus
 from dourmouse.planner import find_agents_for_query  # re-exported for callers
 
@@ -4447,6 +4447,29 @@ class _Handler(BaseHTTPRequestHandler):
             limit = 10
         try:
             hits = self.server.memory.search(query, limit=limit, source=source)
+        except RemoteMemoryStoreUnavailable as exc:
+            # A machine configured with DOURMOUSE_MEMORY_REMOTE_URL asks
+            # ANOTHER machine for its memory. When that machine is off or
+            # off-network, this is a dependency being down, not this
+            # server erroring -- 503 says so, and says it in a way a
+            # human reading the UI can act on. Previously this fell into
+            # the generic handler below and surfaced as a bare 500 with a
+            # urllib traceback string, which told the user nothing about
+            # what to actually do.
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "hint": (
+                        "This machine is configured to keep its memory on another "
+                        "machine (DOURMOUSE_MEMORY_REMOTE_URL in .env). Start "
+                        "Dourmouse there, or unset that variable to use this "
+                        "machine's own local memory store instead."
+                    ),
+                },
+                status=503,
+            )
+            return
         except Exception as exc:  # noqa: BLE001 - honest, never a 500 the caller can't parse
             self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
@@ -4520,11 +4543,27 @@ class _Handler(BaseHTTPRequestHandler):
         if self.server.memory is None:
             self._send_json({"exists": False, "profile": None})
             return
-        exists = has_profile(self.server.memory)
-        profile = None
-        if exists:
-            fact = self.server.memory.get(PROFILE_SOURCE, PROFILE_TITLE)
-            profile = fact["body"] if fact else None
+        # Live bug this guard exists for: against a RemoteMemoryStore this
+        # raised AttributeError ('object has no attribute get') and the
+        # connection was dropped outright -- curl reported HTTP 000, not a
+        # 500, so the failure did not even look like a failure. The store
+        # interface itself is fixed in memory_store.py; this reports the
+        # remaining honest cases (remote unreachable, or an operation the
+        # remote API genuinely cannot serve) as real JSON instead of
+        # taking the endpoint down.
+        try:
+            exists = has_profile(self.server.memory)
+            profile = None
+            if exists:
+                fact = self.server.memory.get(PROFILE_SOURCE, PROFILE_TITLE)
+                profile = fact["body"] if fact else None
+        except Exception as exc:
+            self._send_json({
+                "exists": False,
+                "profile": None,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+            return
         self._send_json({"exists": exists, "profile": profile})
 
     def _handle_profile_generate(self) -> None:
