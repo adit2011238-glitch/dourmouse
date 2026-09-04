@@ -35,6 +35,10 @@ class TestGoogleWorkspaceAgentExists:
             "sheets_read", "slides_create",
             "list_calendar_events", "propose_time_slots",
             "query_shared_memory",
+            # v13.7: extended onto every real agent, google_workspace
+            # included -- see general_roster.py's own comment on the
+            # "RAG knowledge base" routing bug this fixes.
+            "query_desktop_vault",
         }
         assert names == expected
 

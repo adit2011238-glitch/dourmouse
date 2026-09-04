@@ -610,7 +610,12 @@ class TestGlobeControlTool:
         registry = build_general_registry()
         sub = registry.get_subagent("globe")
         assert sub is not None
-        assert {t.name for t in sub.tools} == {"globe_control", "query_shared_memory"}
+        # v13.7: query_desktop_vault joined query_shared_memory as a tool
+        # extended onto every real agent (except orchestrator/companion) --
+        # see general_roster.py's own comment on the routing bug this fixes.
+        assert {t.name for t in sub.tools} == {
+            "globe_control", "query_shared_memory", "query_desktop_vault",
+        }
 
     def test_requires_a_name(self):
         tool = self._tool()

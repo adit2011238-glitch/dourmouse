@@ -4935,6 +4935,23 @@ def build_general_registry() -> DispatchRegistry:
         permission=Permission.REGULAR,
     )
     registry.extend_subagent("research_info", _desktop_vault_spec)
+    # Live-reproduced real bug: a query naming "the RAG knowledge base" was
+    # planner-routed to `atlas` (not `research_info` -- "rag"/"vault"/
+    # "knowledge" all turned out to be USELESS as domain words here, because
+    # query_shared_memory's own description already contains them and it is
+    # extended onto every agent, so they can never discriminate research_info
+    # from anyone else). Once routed to atlas, the model had only
+    # query_shared_memory available -- correctly reported NOT CONFIGURED
+    # (shared memory genuinely isn't set up on this machine) and never even
+    # saw query_desktop_vault, which WOULD have answered. Fixing the router
+    # is fighting a losing, ever-growing keyword list; the tool itself
+    # should just be reachable no matter which agent a "check the knowledge
+    # base" style request lands on -- exactly the same reasoning
+    # query_shared_memory's own "every subagent" extension already applies.
+    for _sub in registry.all_subagents():
+        if _sub.name in ("orchestrator", "companion", "research_info"):
+            continue  # already has it, or deliberately scoped to native tools only
+        registry.extend_subagent(_sub.name, _desktop_vault_spec)
 
     # Drive reads belong on the docs agent as well as on mail.
     #
@@ -5035,5 +5052,10 @@ def build_general_registry() -> DispatchRegistry:
     # own rule exactly (it is neither orchestrator nor companion).
     if _shared_memory_spec is not None:
         registry.extend_subagent("google_workspace", _shared_memory_spec)
+    # Same reason: google_workspace is registered after the "every agent
+    # except orchestrator/companion" query_desktop_vault loop already ran.
+    _vault_spec = registry.lookup("query_desktop_vault")
+    if _vault_spec is not None:
+        registry.extend_subagent("google_workspace", _vault_spec)
 
     return registry
