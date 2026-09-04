@@ -277,3 +277,84 @@ class TestAuthStore:
         store.upsert_user("u@example.com", old)
         assert store.access_token_for("u@example.com") is None  # honest None
         store.close()
+
+
+class TestIdentityResolvesOutsideARequestThread:
+    """Regression tests for "it said it couldn't access my Google Drive".
+
+    Three separate real bugs, none of them auth: the stored token already
+    carried drive.readonly, drive.file, gmail and calendar scopes plus a
+    working refresh token the whole time.
+    """
+
+    def test_single_stored_user_resolves_without_a_thread_local(self, tmp_path, monkeypatch):
+        """Agent turns, scheduled jobs and the MCP bridge all run outside an
+        HTTP request thread, so the thread-local is never set and every
+        Google tool reported NOT CONFIGURED."""
+        from dourmouse import google_auth
+
+        store = google_auth.AuthStore(tmp_path / "auth.db")
+        store.upsert_user("solo@example.com", {"access_token": "t"})
+        monkeypatch.setattr(google_auth, "default_auth_store", lambda: store)
+        monkeypatch.setattr(google_auth, "_auth_store", None, raising=False)
+        google_auth.set_current_user(None)
+
+        assert google_auth.current_user() == "solo@example.com"
+
+    def test_two_stored_users_stay_ambiguous_rather_than_guessing(self, tmp_path, monkeypatch):
+        """Guessing which account an agent meant would be a real cross-account
+        privacy failure, so more than one linked identity must fall back to
+        None and let the caller report NOT CONFIGURED honestly."""
+        from dourmouse import google_auth
+
+        store = google_auth.AuthStore(tmp_path / "auth.db")
+        store.upsert_user("a@example.com", {"access_token": "t"})
+        store.upsert_user("b@example.com", {"access_token": "t"})
+        monkeypatch.setattr(google_auth, "default_auth_store", lambda: store)
+        monkeypatch.setattr(google_auth, "_auth_store", None, raising=False)
+        google_auth.set_current_user(None)
+
+        assert google_auth.current_user() is None
+
+    def test_thread_local_still_wins_over_the_stored_fallback(self, tmp_path, monkeypatch):
+        """A request thread serving a known session must never be overridden."""
+        from dourmouse import google_auth
+
+        store = google_auth.AuthStore(tmp_path / "auth.db")
+        store.upsert_user("stored@example.com", {"access_token": "t"})
+        monkeypatch.setattr(google_auth, "default_auth_store", lambda: store)
+        monkeypatch.setattr(google_auth, "_auth_store", None, raising=False)
+        google_auth.set_current_user("request@example.com")
+        try:
+            assert google_auth.current_user() == "request@example.com"
+        finally:
+            google_auth.set_current_user(None)
+
+    def test_auth_store_falls_back_when_nothing_is_mounted(self, tmp_path, monkeypatch):
+        """Only the serving process mounts a store. Everything else saw None
+        and reported "your Google session is missing or expired"."""
+        from dourmouse import google_auth
+
+        store = google_auth.AuthStore(tmp_path / "auth.db")
+        monkeypatch.setattr(google_auth, "default_auth_store", lambda: store)
+        monkeypatch.setattr(google_auth, "_auth_store", None, raising=False)
+
+        assert google_auth.auth_store() is store
+
+
+class TestDriveToolsReachTheAgentThatGetsDriveQuestions:
+    def test_docs_agent_can_actually_search_drive(self):
+        """The planner routes a Drive question to `docs` -- that is the agent
+        whose description is Sheets, Drive and Slides -- but drive_search and
+        drive_read lived only on `mail`, beside the Gmail tools they share
+        OAuth plumbing with. So `docs` genuinely had no way to search Drive
+        and honestly said so, one agent away from the capability.
+        """
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        docs = registry.get_subagent("docs")
+        assert docs is not None
+        names = {t.name for t in docs.tools}
+        assert "drive_search" in names
+        assert "drive_read" in names

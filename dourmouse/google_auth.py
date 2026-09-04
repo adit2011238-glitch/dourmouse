@@ -315,7 +315,31 @@ def bind_auth_store(store: Any | None) -> None:
 
 
 def auth_store() -> Any | None:
-    return _auth_store
+    """The store the agent tools read tokens from.
+
+    A mounted store wins: the web server installs the exact instance it is
+    serving from, and nothing may override that.
+
+    The fallback is the second half of the same bug fixed in current_user()
+    below. Nothing mounts a store outside the serving process, so an agent
+    turn, a scheduled job, or the MCP bridge (a separate process entirely)
+    saw None here and every Google tool reported "your Google session is
+    missing or expired" -- while the user was signed in and the stored token
+    carried drive.readonly, drive.file, gmail and calendar scopes plus a
+    working refresh token. Google Drive was fully authorised the whole time
+    and simply unreachable.
+
+    Opening the real on-disk store is the honest thing to do: it is the same
+    file the server itself mounts, and access is still gated per-identity by
+    current_user(), which returns None whenever the caller cannot be
+    resolved unambiguously.
+    """
+    if _auth_store is not None:
+        return _auth_store
+    try:
+        return default_auth_store()
+    except Exception:  # noqa: BLE001 - a missing store must not break a turn
+        return None
 
 
 def set_current_user(email: str | None) -> None:
@@ -325,7 +349,37 @@ def set_current_user(email: str | None) -> None:
 
 
 def current_user() -> str | None:
-    return getattr(_thread, "email", None)
+    """The Google identity to act as, for tools that need a real OAuth token.
+
+    The thread-local is authoritative when it is set: an HTTP request thread
+    that carried a session cookie knows exactly which signed-in user it is
+    serving, and on a multi-user deployment nothing else may override that.
+
+    The fallback exists because of a real, reported failure. Anything that
+    reaches these tools from OUTSIDE a request thread -- an agent turn, a
+    scheduled job, or the MCP bridge, which is a whole separate process --
+    has no thread-local at all. So current_user() returned None and
+    drive_search answered "NOT CONFIGURED: no OAuth session user found",
+    even though the user was signed in, the row was in the store, and the
+    stored token already carried drive.readonly, drive.file, gmail and
+    calendar scopes plus a refresh token. Google Drive was fully authorised
+    and simply unreachable.
+
+    So when there is no thread-local, fall back to the stored user -- but
+    only when there is EXACTLY ONE. This is a single-user desktop app, where
+    that is unambiguous and correct. With zero users there is nobody to be;
+    with two or more, guessing which one an agent meant would be a real
+    privacy failure, so it stays None and the caller reports NOT CONFIGURED
+    honestly, exactly as before.
+    """
+    email = getattr(_thread, "email", None)
+    if email:
+        return email
+    try:
+        users = default_auth_store().all_user_emails()
+    except Exception:  # noqa: BLE001 - a broken store must not break a turn
+        return None
+    return users[0] if len(users) == 1 else None
 
 
 # -- AuthStore ----------------------------------------------------------- #
@@ -426,6 +480,20 @@ class AuthStore:
                 " tokens=excluded.tokens, updated=excluded.updated",
                 (email, name[:120], picture[:400], sub[:120], json.dumps(tokens), now, now),
             )
+
+    def all_user_emails(self) -> list[str]:
+        """Every linked Google identity, oldest first. Used by current_user()
+        to resolve the single-user desktop case outside a request thread."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT email FROM users ORDER BY created ASC"
+                ).fetchall()
+            finally:
+                if self._conn is None:
+                    conn.close()
+        return [str(r["email"]) for r in rows]
 
     def user_tokens(self, email: str) -> dict[str, Any]:
         email = (email or "").strip().lower()

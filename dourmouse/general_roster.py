@@ -4788,4 +4788,25 @@ def build_general_registry() -> DispatchRegistry:
                 continue
             registry.extend_subagent(_sub.name, _shared_memory_spec)
 
+    # Drive reads belong on the docs agent as well as on mail.
+    #
+    # Real routing failure, reported by the user: "it said it couldn't access
+    # my Google Drive". The planner correctly routes a Drive question to
+    # `docs` -- that is the agent whose whole description is Sheets, Drive
+    # and Slides -- but drive_search and drive_read lived ONLY on `mail`,
+    # because they were originally written next to the Gmail tools that
+    # share their OAuth plumbing. So the docs agent genuinely had no way to
+    # search Drive and honestly said so, while the capability existed one
+    # agent over and was never reachable from the request that needed it.
+    #
+    # Shared by reference rather than redefined, so the two agents can never
+    # drift into having different Drive semantics.
+    _mail_sub = registry.get_subagent("mail")
+    _docs_sub = registry.get_subagent("docs")
+    if _mail_sub is not None and _docs_sub is not None:
+        _docs_tool_names = {t.name for t in _docs_sub.tools}
+        for _spec in _mail_sub.tools:
+            if _spec.name in ("drive_search", "drive_read") and _spec.name not in _docs_tool_names:
+                registry.extend_subagent("docs", _spec)
+
     return registry
