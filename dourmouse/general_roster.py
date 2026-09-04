@@ -4788,6 +4788,110 @@ def build_general_registry() -> DispatchRegistry:
                 continue
             registry.extend_subagent(_sub.name, _shared_memory_spec)
 
+    # ---- Claude-as-orchestrator: fan work out to the other models ------ #
+    #
+    # The architecture the user asked for: Claude is the brain in every tab
+    # and does not do everything itself. It splits work up, hands each piece
+    # to whichever model suits it, and runs them CONCURRENTLY -- five
+    # delegated questions take about as long as the slowest one rather than
+    # the sum of all five (measured: 3 real local turns of 5.5s/8.0s/11.0s
+    # finished in 12.0s wall clock).
+    #
+    # Routing is privacy-first and lives in model_delegation.py: anything
+    # touching mail, memory, files, money or the user's repos stays on the
+    # local model; public-input work (research, news, world monitor) may go
+    # to Gemini. Unknown agents default to local. See that module for why.
+    def _delegate_to_models_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.model_delegation import (
+            DelegationTask,
+            delegate,
+            format_results,
+        )
+
+        raw = arguments.get("tasks")
+        if not isinstance(raw, list) or not raw:
+            return (
+                "delegate_to_models: 'tasks' must be a non-empty list of "
+                "{prompt, agent?, model?, label?} objects. Nothing was run."
+            )
+        if len(raw) > 12:
+            return (
+                f"delegate_to_models: {len(raw)} tasks is too many for one "
+                "fan-out (limit 12). Split it into batches. Nothing was run."
+            )
+
+        tasks: list[DelegationTask] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                return "delegate_to_models: every task must be an object. Nothing was run."
+            prompt = str(item.get("prompt") or "").strip()
+            if not prompt:
+                return "delegate_to_models: every task needs a non-empty 'prompt'. Nothing was run."
+            agent = str(item.get("agent") or "").strip() or None
+            # Refuse to bounce work back into a coding CLI from inside a
+            # delegated turn -- that is the recursion the roster's other
+            # delegate tools are excluded from the MCP bridge to prevent.
+            if agent and agent.startswith("code_"):
+                return (
+                    f"delegate_to_models: '{agent}' is a coding-CLI agent and "
+                    "cannot be a delegation target (recursion risk). Nothing was run."
+                )
+            tasks.append(
+                DelegationTask(
+                    prompt=prompt,
+                    agent=agent,
+                    model=str(item.get("model") or "").strip() or None,
+                    label=str(item.get("label") or "").strip(),
+                )
+            )
+
+        results = delegate(tasks)
+        return format_results(results)
+
+    _delegate_models_spec = ToolSpec(
+        name="delegate_to_models",
+        description=(
+            "Hand one or more prompts to the OTHER models and get every "
+            "answer back. All tasks run CONCURRENTLY, so a batch costs about "
+            "as long as its slowest item, not the sum. Use this for rapid-fire "
+            "multi-part work: split a request into independent pieces and send "
+            "them together in a single call rather than asking one at a time.\n"
+            "Each task is {prompt, agent?, model?, label?}. 'agent' names a "
+            "roster specialist (mail, research_info, news, markets, ...) and "
+            "gives that task the real tools; omit it for a plain question. "
+            "'model' forces a backend ('ollama' local, 'gemini' cloud); omit "
+            "it and routing is automatic and privacy-first -- anything "
+            "touching mail, memory, files, money or your repos stays on the "
+            "local model, public research may go to the cloud one. 'label' is "
+            "yours, for matching answers back to intent.\n"
+            "Returns each result separately, marked succeeded or failed. A "
+            "failed task never invalidates the others."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": "1-12 independent pieces of work to run at once.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "prompt": {"type": "string"},
+                            "agent": {"type": "string", "default": ""},
+                            "model": {"type": "string", "enum": ["", "ollama", "gemini"], "default": ""},
+                            "label": {"type": "string", "default": ""},
+                        },
+                        "required": ["prompt"],
+                    },
+                },
+            },
+            "required": ["tasks"],
+        },
+        handler=_delegate_to_models_h,
+        permission=Permission.REGULAR,
+    )
+    registry.extend_subagent("orchestrator", _delegate_models_spec)
+
     # Drive reads belong on the docs agent as well as on mail.
     #
     # Real routing failure, reported by the user: "it said it couldn't access
