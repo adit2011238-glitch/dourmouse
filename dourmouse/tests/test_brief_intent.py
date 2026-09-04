@@ -178,14 +178,34 @@ def test_brevity_never_shrinks_the_generation_cap():
     before it emits content, so a tight max_tokens does not shorten an
     answer -- it truncates one, measured as a reply cut mid-clause at
     "using standard HTTP verbs (GET,". Every call must keep the standard
-    cap."""
+    cap.
+
+    v13.7: the call sites now go through ``_default_max_tokens()`` rather
+    than reading ``_DEFAULT_MAX_TOKENS`` directly, so that
+    DOURMOUSE_MAX_RESPONSE_TOKENS is actually honoured (a module constant
+    read at the call site is fine, but the accessor is what makes the
+    override real). The guard is unchanged in intent: ONE shared cap, no
+    brief-specific knob anywhere.
+    """
     import inspect
 
     from dourmouse import dispatch as d
 
     src = inspect.getsource(d)
     assert "brief_cap" not in src
-    for call in ("max_tokens=", ):
-        assert "max_tokens=_DEFAULT_MAX_TOKENS" in src
+    # Every generation call must use the ONE shared cap accessor...
+    assert "max_tokens=_default_max_tokens()" in src
+    # ...and no call site may pass a smaller literal instead. Forwarding
+    # the caller's own ``max_tokens`` parameter through an adapter layer
+    # (_ClaudeCliCompletions.create -> _create) is not a cap, so it is
+    # allowed; a bare number here would be exactly the recurring bug.
+    for line in src.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("max_tokens="):
+            continue
+        value = stripped[len("max_tokens="):].split(",")[0].strip()
+        assert value in ("_default_max_tokens()", "max_tokens"), (
+            f"a generation call bypasses the shared cap: {stripped!r}"
+        )
     # no brief-specific cap knob survives
     assert "brief_max_tokens" not in src

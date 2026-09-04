@@ -51,6 +51,25 @@ NVIDIA_BASE_URL = os.environ.get(
 NVIDIA_MODEL = os.environ.get("NVIDIA_MODEL", "nvidia/llama-3.1-nemotron-ultra-253b-v1")
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
+#: Response cap for BOTH ATLAS LLM paths (this module's ``_llm_chat`` and
+#: atlas_proposals' ``_llm_json``) — see _llm_chat's own call site for the
+#: full v13.7 rationale. Read through the accessor at call time, never
+#: bound as a def-time default, so ATLAS_LLM_MAX_TOKENS is actually
+#: honoured.
+ATLAS_LLM_MAX_TOKENS = 8000
+ATLAS_LLM_MAX_TOKENS_ENV = "ATLAS_LLM_MAX_TOKENS"
+
+
+def _atlas_llm_max_tokens() -> int:
+    """ATLAS response cap, honouring the env override. Floors at 512."""
+    raw = os.environ.get(ATLAS_LLM_MAX_TOKENS_ENV, "").strip()
+    if raw:
+        try:
+            return max(512, int(raw))
+        except ValueError:
+            pass
+    return ATLAS_LLM_MAX_TOKENS
+
 # --------------------------------------------------------------------------- #
 # Data types
 # --------------------------------------------------------------------------- #
@@ -604,7 +623,22 @@ def _llm_chat(prompt: str, system: str = "") -> str:
             model=NVIDIA_MODEL,
             messages=messages,
             temperature=0.3,
-            max_tokens=2000,
+            # v13.7 (2026-09-03, user directive "maximize context windows
+            # of everything"): was 2000, the smallest response cap left in
+            # the codebase and the one most exposed to this repo's
+            # recurring truncation landmine. NVIDIA_MODEL defaults to
+            # nvidia/llama-3.1-nemotron-ultra-253b-v1, a REASONING model:
+            # like every other backend that has bitten this project (see
+            # dispatch.py's _DEFAULT_MAX_TOKENS comment for the three prior
+            # occurrences), it spends the cap thinking inside ``content``
+            # before the answer starts, so 2000 does not shorten a reply,
+            # it deletes one. This function's real job is emitting whole
+            # strategy JSON documents and report prose — both routinely
+            # longer than 2000 tokens on their own, before any reasoning
+            # preamble. 8000 matches the value atlas_proposals._llm_json
+            # now uses against the SAME model, so the two ATLAS LLM paths
+            # stop disagreeing. Overridable via ATLAS_LLM_MAX_TOKENS.
+            max_tokens=_atlas_llm_max_tokens(),
         )
         text = response.choices[0].message.content or ""
         return text.strip()

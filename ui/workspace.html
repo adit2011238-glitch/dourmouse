@@ -54,7 +54,13 @@
   "three/addons/": "/assets/vendor/three/addons/"
 }}
 </script>
+<link rel="stylesheet" href="assets/dourmouse-ui.css">
 <style>
+/* Departure Mono (structure) and Monaspace Neon (machine output) are
+   declared in assets/dourmouse-ui.css, linked above, so the faces are
+   defined in exactly one place across every screen. The faces below are
+   this file's own older stack, kept because --mono/--display still list
+   JetBrains Mono as a fallback and Sekuya is used by the boot sequence. */
 @font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;
   src:url('assets/fonts/sekuya-regular.ttf') format('truetype')}
 @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:300;font-display:swap;
@@ -75,37 +81,83 @@
 @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
   src:url('assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
 
+/* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css).
+   The variable NAMES are unchanged on purpose -- 225 call sites across this
+   file keep working untouched, and the whole look is one block to revert.
+
+   What actually changed, and why, rather than just "new colours":
+
+     - --panel and --panel2 were #0b1826ee / #0e2032ee: eight-digit hex, so
+       every panel was compositing its parent through itself. Stacking two
+       of them produced the muddy low-contrast wash the design brief calls
+       out by name. They are now flat, opaque layer colours.
+     - --line and --line-2 were rgba() over the background for the same
+       reason and are now the two solid line values.
+     - --amber-soft was a 14%-alpha amber fill used as a "selected" tint;
+       it is now the solid interactive layer. Selection reads as a filled
+       row, not as a coloured haze.
+     - Amber survives as the single active/selection accent and red/green
+       as error/ok, but nothing gets a glow, blur or drop-shadow.
+     - Type moves mono-first: Departure Mono carries structure, Monaspace
+       Neon carries everything the machine says, including prose.
+
+   Fira Sans stays loaded and one line away (see --font-prose-alt) if the
+   mono-prose reading turns out to be too dense in daily use.
+
+   Previous values, for a one-step revert:
+     --bg:#04080e; --panel:#0b1826ee; --panel2:#0e2032ee;
+     --amber:#f2b73d; --amber-hi:#ffd27a; --amber-ink:#08111c;
+     --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6;
+     --line:rgba(120,175,210,.22); --line-2:rgba(120,175,210,.36);
+     --amber-line:rgba(242,183,61,.4); --amber-soft:rgba(242,183,61,.14);
+     --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c;                          */
 :root{
-  --bg:#04080e; --panel:#0b1826ee; --panel2:#0e2032ee;
-  --amber:#f2b73d; --amber-hi:#ffd27a; --amber-ink:#08111c;
-  --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6;
-  --line:rgba(120,175,210,.22); --line-2:rgba(120,175,210,.36);
-  --amber-line:rgba(242,183,61,.4); --amber-soft:rgba(242,183,61,.14);
-  --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c;
-  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
-  --font-prose:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --bg:#09090B; --panel:#18181B; --panel2:#27272A;
+  --amber:#F59E0B; --amber-hi:#FAFAFA; --amber-ink:#09090B;
+  --blue:#A1A1AA; --blue-dim:#71717A; --blue-hi:#FAFAFA;
+  --line:#27272A; --line-2:#3F3F46;
+  --amber-line:#3F3F46; --amber-soft:#27272A;
+  --ok:#10B981; --warn:#F59E0B; --bad:#EF4444;
+  --mono:'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --display:'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+  --font-prose:'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
+  --font-prose-alt:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--blue-hi);
   font-family:var(--mono);overflow:hidden;-webkit-font-smoothing:antialiased}
 
+/* The two radial-gradient washes that used to sit here are gone: they were
+   pure decoration, and a coloured glow bleeding out of two corners is the
+   single most recognisable "an AI generated this" tell in the brief.
+   The 48px grid stays -- a workbench grid is a real terminal idiom, not
+   ornament -- but it is now a crisp solid rule at the structural layer
+   colour instead of a 5%-alpha smear over the background. */
 #canvas{position:fixed;inset:0;overflow:hidden;
   background:
-    radial-gradient(ellipse at 20% 0%, rgba(126,169,201,.10), transparent 55%),
-    radial-gradient(ellipse at 85% 90%, rgba(242,183,61,.07), transparent 50%),
-    repeating-linear-gradient(0deg, rgba(126,169,201,.05) 0, rgba(126,169,201,.05) 1px, transparent 1px, transparent 48px),
-    repeating-linear-gradient(90deg, rgba(126,169,201,.05) 0, rgba(126,169,201,.05) 1px, transparent 1px, transparent 48px),
+    repeating-linear-gradient(0deg,  var(--panel) 0, var(--panel) 1px, transparent 1px, transparent 48px),
+    repeating-linear-gradient(90deg, var(--panel) 0, var(--panel) 1px, transparent 1px, transparent 48px),
     var(--bg);
 }
 
 /* ---------------- top bar ---------------- */
-#topbar{position:fixed;top:0;left:0;right:0;height:52px;z-index:10000;
+#topbar{position:fixed;top:0;left:0;right:0;height:52px;z-index:10000;overflow:hidden;
   display:flex;align-items:center;gap:10px;padding:0 14px;
   background:linear-gradient(180deg,rgba(4,8,14,.96),rgba(4,8,14,.75));
   border-bottom:1px solid var(--line)}
-#topbar .brand{font-family:var(--display);color:var(--amber);letter-spacing:.06em;font-size:15px}
-#topbar .brand small{color:var(--blue-dim);font-family:var(--mono);font-weight:400;margin-left:8px;font-size:11px}
+/* Real pre-existing bug, found by measuring rather than looking: .brand
+   had no width constraint and no nowrap, so its <small> subtitle wrapped
+   to three lines and the block rendered 98px tall inside a 52px bar,
+   spilling over the buttons beside it. (Measured at 98px on the commit
+   before this retheme, so it is not a regression from the font change --
+   the wider display face only made it 133px instead of 98px.)
+   It now refuses to wrap, refuses to shrink, and hides the subtitle
+   entirely once there is genuinely no room for it. */
+#topbar .brand{font-family:var(--display);color:var(--amber);letter-spacing:.06em;font-size:15px;
+  flex:0 0 auto;white-space:nowrap;display:flex;align-items:baseline;gap:8px;line-height:1}
+#topbar .brand small{color:var(--blue-dim);font-family:var(--mono);font-weight:400;font-size:11px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw}
+@media (max-width:1100px){#topbar .brand small{display:none}}
 /* v13.6: real usage bar ("how much usage you have used on claude and
    ollama api key") — a fixed corner badge, independent of the topbar's
    own already-crowded dock row (11 buttons, real horizontal scroll on
@@ -114,40 +166,65 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--blue-hi);
    /api/usage), polled — never a per-session-only counter that quietly
    resets on reload. */
 #usagebar{position:fixed;right:10px;bottom:10px;z-index:9999;display:flex;gap:10px;
-  align-items:center;background:rgba(4,8,14,.88);border:1px solid var(--line);
-  border-radius:7px;padding:6px 11px;font-family:var(--mono);font-size:10px;
-  color:var(--blue-dim);backdrop-filter:blur(6px)}
+  align-items:center;background:var(--panel);border:1px solid var(--line);
+  border-radius:2px;padding:6px 11px;font-family:var(--mono);font-size:10px;
+  color:var(--blue-dim)}
 #usagebar .ub-item{display:flex;align-items:center;gap:5px}
 #usagebar .ub-k{color:var(--amber-hi);font-weight:600}
 #usagebar .ub-v{color:var(--blue-hi)}
 #usagebar .ub-sep{color:var(--line-2)}
-.dock{display:flex;gap:6px;margin-left:auto;align-items:center}
+/* Second real pre-existing bug from the same measurement: twelve dock
+   buttons totalled 1,952px inside a 1,280px bar, so every button past
+   "+ EVENT GRAPH" was simply unreachable -- no scroll, no overflow menu,
+   just clipped off the end of a fixed-position element.
+   The design brief's answer is a clipping mask with a hard fade rather
+   than a heavy scrollbar, so: the row scrolls horizontally, the scrollbar
+   itself is hidden, and the right edge fades to signal there is more.
+   Everything stays reachable by wheel/trackpad, and the command palette
+   still reaches every panel by keyboard. */
+.dock{display:flex;gap:6px;align-items:center;
+  /* flex:1 1 auto, not margin-left:auto -- with margin:auto the row was a
+     zero-width box whose children simply painted outside it, so the mask
+     had nothing to clip and #topbar still overflowed by 174px. Claiming
+     the remaining space is what makes the scroll and the fade real. */
+  flex:1 1 auto;justify-content:flex-end;
+  min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 40px),transparent 100%);
+          mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 40px),transparent 100%)}
+.dock::-webkit-scrollbar{display:none}
+.dock > *{flex:0 0 auto}
 .dockbtn{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--blue-hi);
-  background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 11px;
+  background:var(--panel2);border:1px solid var(--line);border-radius:2px;padding:7px 11px;
   cursor:pointer;white-space:nowrap}
 .dockbtn:hover{border-color:var(--line-2);color:#fff}
 .dockbtn.on{border-color:var(--amber-line);color:var(--amber-hi);background:var(--amber-soft)}
 .hfpill{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--blue-dim);
-  background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 11px;
+  background:var(--panel2);border:1px solid var(--line);border-radius:2px;padding:7px 11px;
   white-space:nowrap;cursor:default}
 .hfpill.live{color:var(--ok);border-color:var(--ok)}
 .hfpill.off{color:var(--blue-dim)}
 .hfpill.error{color:var(--bad);border-color:var(--bad)}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:#3a4a58;margin-right:6px;vertical-align:middle}
-.dot.ok{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+/* No box-shadow halo: a status dot is a solid 6px mark, not a light source. */
+.dot.ok{background:var(--ok)}
 .dot.bad{background:var(--bad)}
 .dot.warn{background:var(--warn)}
 a.backlink{color:var(--blue-dim);text-decoration:none;font-size:11px;border:1px solid var(--line);
-  border-radius:6px;padding:7px 10px}
+  border-radius:2px;padding:7px 10px}
 a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
 
 /* ---------------- floating panels ---------------- */
 .panel{position:absolute;min-width:260px;min-height:180px;display:flex;flex-direction:column;
-  background:linear-gradient(180deg,var(--panel),var(--panel2));
-  border:1px solid var(--line-2);border-radius:10px;
-  box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.3);
-  backdrop-filter:blur(6px);overflow:hidden;transition:box-shadow .15s}
-.panel.focused{border-color:var(--amber-line);box-shadow:0 22px 60px rgba(0,0,0,.65),0 0 0 1px var(--amber-line)}
+  /* Was a vertical gradient fill under a 50px drop shadow and a 6px
+     backdrop blur -- three separate ways of saying "this floats above the
+     page". A window in a workbench is a solid pane held by a line, so the
+     fill is flat, the blur is gone, and the shadow is a single tight rule
+     that reads as depth without haze. Focus is the amber line, not a glow. */
+  background:var(--panel);
+  border:1px solid var(--line);border-radius:2px;
+  box-shadow:0 2px 8px rgba(0,0,0,.45);
+  overflow:hidden}
+.panel.focused{border-color:var(--amber);box-shadow:0 2px 10px rgba(0,0,0,.55)}
 /* v13.5, Vision OS checklist item 3 ("gaze-assisted multitasking &
    attention focus"): applied to every panel EXCEPT the focused one while
    real on-device gaze tracking (see GAZE below) has steadily detected the
@@ -161,7 +238,7 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
    visual signal only, never an interaction blocker. */
 .panel{transition:box-shadow .15s,filter .5s ease}
 .panel .tb{cursor:grab;user-select:none;display:flex;align-items:center;gap:8px;
-  padding:8px 10px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--line);
+  padding:8px 10px;background:var(--panel2);border-bottom:1px solid var(--line);
   touch-action:none}
 .panel .tb:active{cursor:grabbing}
 .panel .tb .ttl{font-size:11px;letter-spacing:.08em;color:var(--blue-hi);flex:1;

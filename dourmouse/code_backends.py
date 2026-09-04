@@ -60,7 +60,24 @@ _DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
 # but no DeepSeek key. Overridable via DEEPSEEK_NVIDIA_MODEL. Verified live
 # on the user's key (integrate.api.nvidia.com/v1/models).
 _DEEPSEEK_NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash-0731"
-_OUTPUT_CAP = 6_000
+# Chars of a CLI backend's output handed back to the caller (tail-kept —
+# see _run_claude / _run_codex / stream_claude).
+#
+# v13.7 (2026-09-03, user directive "maximize context windows of
+# everything"): was 6_000, which made this the outlier in its own repo —
+# general_roster.py caps the SAME two CLIs at 20_000 (_CLAUDE_OUTPUT_CAP /
+# _CODEX_OUTPUT_CAP), and sandbox.py and system_access.py both use 20_000
+# for command output. So identical Claude output arrived truncated to a
+# third of its length depending only on which module called it. Aligned on
+# the house 20_000.
+#
+# This is affordable now specifically because of the window change made in
+# the same pass: dispatch._MAX_LLM_TOKENS's arithmetic budgets 5,000 est
+# tokens for one full-size in-flight tool result against the 32,768 window,
+# and 20_000 chars is exactly that 5,000 by the repo's chars/4 convention.
+# Older copies of the same result are cut again by
+# dispatch._MAX_TOOL_RESULT_CHARS, so this does not compound across turns.
+_OUTPUT_CAP = 20_000
 
 # -- CODE-screen Claude CLI session continuity ------------------------------ #
 # Every ``code_claude`` call used to shell out to a brand-new `claude -p`
@@ -156,6 +173,51 @@ _CODING_SYSTEM = (
     "Write correct, tested code for the task. Return only the code and a "
     "brief explanation. Never claim work was done that wasn't."
 )
+
+# Response cap for the API (non-CLI) coding backends — see
+# ``_run_openai_compat``, which serves ollama / nvidia / deepseek / codex /
+# qwen / glm / kimi.
+#
+# v13.7 (2026-09-03, user directive "maximize context windows of
+# everything"): was a bare 4000 inline. Two reasons that was too small:
+#   * A real coding task ("write module X plus its tests") routinely
+#     exceeds 4000 tokens of OUTPUT, and this function has no continuation
+#     path — whatever the cap cuts is simply lost.
+#   * Every model this routes to is reasoning-capable, and this repo's
+#     recurring landmine is that such a model spends the cap on reasoning
+#     inside ``content`` BEFORE the answer starts (see dispatch.py's
+#     _DEFAULT_MAX_TOKENS comment for the three separate times that bug has
+#     been fixed here). The ``enable_thinking: False`` extra_body below only
+#     covers the keyless/Ollama case, and dispatch.py has measured that even
+#     that flag is ignored on Ollama's OpenAI-compat endpoint.
+#
+# 8000 and not higher, deliberately: this one constant is sent to several
+# providers, and a max_tokens ABOVE a provider's own per-response ceiling is
+# a hard 400, not a soft clamp — so the constant has to sit at or under the
+# lowest ceiling in the set, which is DeepSeek's documented 8192 for
+# deepseek-chat. NOT VERIFIED LIVE in this change: no API call was made
+# against any of these providers here; that 8192 figure is from DeepSeek's
+# published limit, not a measurement taken on this machine. A deployment
+# that only ever uses higher-ceiling backends (NVIDIA NIM, Codex) can raise
+# it with DOURMOUSE_CODE_MAX_TOKENS rather than editing this.
+_CODE_MAX_TOKENS = 8000
+_CODE_MAX_TOKENS_ENV = "DOURMOUSE_CODE_MAX_TOKENS"
+
+
+def _code_max_tokens() -> int:
+    """Coding-backend response cap, honouring the env override.
+
+    Floors at 512 — below that the cap cannot fit even a short function
+    plus the reasoning preamble these models emit first, which is the exact
+    failure the constant above exists to avoid.
+    """
+    raw = os.environ.get(_CODE_MAX_TOKENS_ENV, "").strip()
+    if raw:
+        try:
+            return max(512, int(raw))
+        except ValueError:
+            pass
+    return _CODE_MAX_TOKENS
 
 
 def load_backend(backend: str) -> tuple[str, str, str]:
@@ -275,7 +337,9 @@ def _run_openai_compat(
                 {"role": "user", "content": task},
             ],
             timeout=timeout,
-            max_tokens=4000,
+            # Module global read at CALL time, same reason as the
+            # _openai_client_factory note above.
+            max_tokens=_code_max_tokens(),
             extra_body=extra_body,
         )
     except Exception as exc:  # openai raises many exception types

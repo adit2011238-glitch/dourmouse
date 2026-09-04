@@ -2014,13 +2014,46 @@ class TestPlanCheckpoint:
 # justified 4600 against an 8192 num_ctx ceiling _OLLAMA_NUM_CTX no longer
 # uses (raised to 16384 in an earlier, separate fix) — every real turn was
 # being trimmed to under a third of what the model can actually hold.
+#
+# v13.7 (2026-09-03, explicit user directive "maximize context windows of
+# everything"): _OLLAMA_NUM_CTX went to the model's own 32768 ceiling and
+# the three budgets underneath it were re-derived against that window. The
+# checks below are pinned to the WINDOW rather than to a literal, so the
+# next time one of these constants moves the test fails for the real
+# reason (the split stopped adding up) instead of because a number in a
+# test went stale — which is exactly the drift v13.2 was cleaning up.
 # --------------------------------------------------------------------------- #
 
 class TestMaxLlmTokens:
-    def test_default_is_raised_to_match_the_current_16k_num_ctx(self):
-        # Was 4600 (sized for a since-raised 8192 num_ctx). Must be
-        # meaningfully larger now, not just nudged.
+    def test_history_budget_is_sized_against_the_current_window(self):
+        # Must be a real slice of the window, not a leftover from a
+        # smaller one: >1/3 of num_ctx (4600/8192 and 9000/16384 were both
+        # ~55%, so this is a floor, not the target) and always larger than
+        # the 4600 the original 8192-era sizing used.
+        window = dispatch_module._OLLAMA_NUM_CTX
         assert dispatch_module._MAX_LLM_TOKENS > 4600 * 1.5
+        assert dispatch_module._MAX_LLM_TOKENS > window / 3
+
+    def test_the_three_budgets_still_fit_inside_the_window(self):
+        """system prompt + history + response must leave real headroom.
+
+        The headroom is not slack: the tool schemas (a separate ``tools=``
+        payload _est_tokens never counts) and the in-flight exchange (which
+        _bounded_context never charges against the history budget) both
+        land on top of this sum. Measured 2026-09-03: the 35-agent system
+        prompt is ~3,924 est tokens and the heaviest realistic scoped
+        schema payload (atlas + system + dev_coding) is ~6,992.
+        """
+        window = dispatch_module._OLLAMA_NUM_CTX
+        system_reserve = 4000  # measured 3,924, rounded up for roster growth
+        subtotal = (
+            system_reserve
+            + dispatch_module._MAX_LLM_TOKENS
+            + dispatch_module._DEFAULT_MAX_TOKENS
+        )
+        assert subtotal < window
+        # Even the worst measured scoped-schema payload has to fit on top.
+        assert subtotal + 6992 <= window
 
     def test_no_env_override_returns_the_default(self, monkeypatch):
         monkeypatch.delenv("DOURMOUSE_MAX_CONTEXT_TOKENS", raising=False)
@@ -2043,7 +2076,20 @@ class TestBoundedContext:
     """_bounded_context keeps system + in-flight exchange, drops old history
     at clean user boundaries, and truncates OLD tool results only."""
 
-    def _long_history(self, n_turns: int) -> list[dict]:
+    def _long_history(self, n_turns: int | None = None) -> list[dict]:
+        """History guaranteed to OVERFLOW the current budget.
+
+        v13.7: this used to hardcode 100 turns, which was ~10,900 est
+        tokens — comfortably over the 4600 budget it was written for, and
+        still (barely) over 9000, but UNDER the current 16000. At that
+        point every ``len(out) < len(msgs)`` assertion below silently stops
+        testing bounding at all, because nothing gets bounded. Derive the
+        turn count from the budget instead, so raising the budget again can
+        never quietly turn these into no-ops: ~109 est tokens per turn
+        (user 4 + 258//4, assistant 4 + 150//4), targeted at 2x the budget.
+        """
+        if n_turns is None:
+            n_turns = max(100, int(dispatch_module._MAX_LLM_TOKENS * 2 / 109) + 1)
         msgs = [{"role": "system", "content": "SYSTEM" * 20}]
         for i in range(n_turns):
             msgs.append({"role": "user", "content": f"turn {i}: " + "x" * 250})
@@ -2051,7 +2097,7 @@ class TestBoundedContext:
         return msgs
 
     def test_keeps_system_and_inflight_exchange(self):
-        msgs = self._long_history(100)
+        msgs = self._long_history()
         msgs.append({"role": "user", "content": "LATEST DIRECTIVE"})
         msgs.append(
             {
@@ -2075,7 +2121,7 @@ class TestBoundedContext:
         assert len(out) < len(msgs)  # old turns dropped, not the exchange
 
     def test_drops_history_at_clean_user_boundary(self):
-        msgs = self._long_history(100)
+        msgs = self._long_history()
         msgs.append({"role": "user", "content": "final question"})
         out = dispatch_module._bounded_context(msgs)
         assert out[0]["role"] == "system"
@@ -2128,11 +2174,22 @@ class TestLoopBounding:
     conversation (v4.2 speed: unbounded re-prefill made long sessions crawl
     on the local GPU)."""
 
-    def test_loop_sends_bounded_history_to_client(self):
+    @staticmethod
+    def _overflowing_history() -> list[dict]:
+        """History guaranteed to overflow the CURRENT budget — same reason
+        as TestBoundedContext._long_history's own note (v13.7): a fixed
+        100-turn fixture stopped overflowing once the budget reached 16000,
+        which would have turned the ``len(sent) < full_len`` assertion below
+        into a silent no-op rather than a failure."""
+        turns = max(100, int(dispatch_module._MAX_LLM_TOKENS * 2 / 109) + 1)
         full = [{"role": "system", "content": "SYSTEM" * 20}]
-        for i in range(100):
+        for i in range(turns):
             full.append({"role": "user", "content": f"old turn {i}: " + "x" * 250})
             full.append({"role": "assistant", "content": "y" * 150})
+        return full
+
+    def test_loop_sends_bounded_history_to_client(self):
+        full = self._overflowing_history()
         full.append({"role": "user", "content": "hello"})
         full_len = len(full)
         client = FakeClient([_FakeResponse(_FakeMessage(content="Done."))])
@@ -2146,10 +2203,7 @@ class TestLoopBounding:
 
     def test_loop_bounds_every_llm_call_in_a_tool_chain(self):
         """Mid-chain, after a tool result, the NEXT call is bounded too."""
-        full = [{"role": "system", "content": "SYSTEM" * 20}]
-        for i in range(100):
-            full.append({"role": "user", "content": f"old turn {i}: " + "x" * 250})
-            full.append({"role": "assistant", "content": "y" * 150})
+        full = self._overflowing_history()
         full.append({"role": "user", "content": "first"})
         client = FakeClient(
             [

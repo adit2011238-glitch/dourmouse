@@ -277,6 +277,13 @@ Output ONLY the JSON object. The "code" value is a JSON string (escape newlines 
 def _llm_chat(prompt: str, system: str) -> str:
     from openai import OpenAI
 
+    # Lazy import (same reason code_backends imports general_roster lazily):
+    # this module has never imported atlas_lab at module load, and the
+    # response cap is not worth becoming the first thing that does. One
+    # constant, one env var (ATLAS_LLM_MAX_TOKENS), shared by both ATLAS
+    # LLM paths — see the max_tokens call site below.
+    from dourmouse.atlas_lab import _atlas_llm_max_tokens
+
     api_key = os.environ.get("NVIDIA_API_KEY", "")
     if not api_key:
         raise _LLMUnavailable(
@@ -297,7 +304,21 @@ def _llm_chat(prompt: str, system: str) -> str:
             model=NVIDIA_MODEL,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=4000,
+            # v13.7 (2026-09-03, user directive "maximize context windows
+            # of everything"): was 4000. Unlike most cap raises in this
+            # pass, this one has in-repo evidence sitting directly beneath
+            # it: _CODEGEN_ATTEMPTS' own comment records a live 2026-08-18
+            # observation that a code-heavy structured response comes back
+            # unparseable from "an unescaped quote inside the 'code'
+            # string, OR TRUNCATION ON A LONGER STRATEGY". Truncation is
+            # not LLM variance and a retry is not its fix — a bigger cap
+            # is. NVIDIA_MODEL here is the same reasoning model
+            # (nemotron-ultra-253b) atlas_lab uses, which spends the cap on
+            # thinking inside ``content`` before the JSON starts, so a
+            # long strategy loses its closing braces first. Shares
+            # atlas_lab's constant so the two ATLAS LLM paths cannot drift
+            # apart again; overridable via ATLAS_LLM_MAX_TOKENS.
+            max_tokens=_atlas_llm_max_tokens(),
         )
     except Exception as exc:  # noqa: BLE001 -- any SDK/network failure, converted honestly
         raise _LLMUnavailable(f"NVIDIA API call failed: {exc}") from exc
@@ -312,6 +333,16 @@ def _llm_chat(prompt: str, system: str) -> str:
 #: that failed in the UI parsed clean on the next call). A retry is the
 #: correct fix, not a cleverer parser — there is no parser that reliably
 #: repairs an LLM's own occasional malformed output.
+#:
+#: v13.7 (2026-09-03) narrows that: retry is the right fix for the FIRST
+#: cause (the unescaped quote) and was never the right fix for the second.
+#: Truncation on a longer strategy is deterministic in the length of the
+#: answer — retrying the same prompt under the same cap reproduces it — so
+#: that half was really a too-small max_tokens, now raised (see _llm_chat's
+#: call site). This retry loop is kept for the variance case it genuinely
+#: covers. NOT VERIFIED: no live run was made after the cap change, so
+#: whether truncation-shaped failures actually disappear from this loop is
+#: still an expectation, not a measurement.
 _CODEGEN_ATTEMPTS = 3
 
 

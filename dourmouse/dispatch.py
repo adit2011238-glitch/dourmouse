@@ -114,14 +114,68 @@ def _is_transient_error(exc: Exception) -> bool:
     return False
 
 
-# Hard cap on a single LLM response. qwen3 without a cap can ramble for
-# hundreds of tokens at local speeds. Measured dispatch outputs (tool-call
-# JSON and chat answers) run 120-300 tokens, so 800 covers any answer and
-# any tool-call JSON with 2.7x headroom while halving worst-case generation
-# latency on this hardware (the old 1400 cap meant up to ~80-140s at the
-# 10-17 tok/s thermal ceiling; 800 bounds it to ~45-80s). Code completions
-# pass their own 4000 cap via code_backends.
-_DEFAULT_MAX_TOKENS = 800
+# Hard cap on a single LLM response (Ollama ``num_predict`` / OpenAI
+# ``max_tokens``).
+#
+# v13.7 (2026-09-03, explicit repeated user directive: "max out the context
+# window don't reduce it" / "maximize context windows of everything"): 800
+# was the exact shape of this repo's most expensive RECURRING bug. The
+# justification it used to carry here was correct arithmetic about ANSWER
+# length and wrong about what actually spends the budget:
+#
+#   "Measured dispatch outputs (tool-call JSON and chat answers) run
+#    120-300 tokens, so 800 covers any answer ... with 2.7x headroom"
+#
+# True of the answer, irrelevant to the cap: this brain spends the budget
+# on REASONING BEFORE it emits content, so a tight cap does not shorten a
+# reply, it truncates one — or ships raw deliberation AS the reply. The
+# identical mistake has been made and fixed three separate times in three
+# separate modules:
+#   * the v8.10 brevity fix — see the ``brief`` wiring in run_dispatch,
+#     which is prompt-only and deliberately carries NO cap of its own;
+#     measured as a reply cut mid-clause at "using standard HTTP verbs
+#     (GET,";
+#   * personality_profile.py — same failure surfacing in a new module,
+#     fixed by raising that call to 4000;
+#   * call_nvidia's own max_tokens.
+# And the leak is the NORMAL case here, not an edge case: visible
+# chain-of-thought is on by default (_show_thinking_enabled, v13.1), and
+# _create's own measured table below shows qwen3:4b emitting 360-461
+# tokens of reasoning on a TRIVIAL prompt. 800 truncates that before the
+# answer has started.
+#
+# 4000 is the number the two modules that already hit this bug independently
+# settled on (code_backends._run_openai_compat, personality_profile), so
+# matching them leaves one number to reason about instead of three. Against
+# the 32768 window (_OLLAMA_NUM_CTX) it is a 12.2% reserve, which the
+# _MAX_LLM_TOKENS arithmetic below budgets for explicitly. This is a
+# CEILING, not a target — generation still stops at EOS, so a 200-token
+# answer still costs 200 tokens and the common case is no slower. The old
+# comment's latency argument ("halving worst-case generation latency") was
+# only ever buying that speed by cutting answers off mid-sentence.
+#
+# Overridable via DOURMOUSE_MAX_RESPONSE_TOKENS for a metered/billed
+# backend where a hard low ceiling is genuinely wanted — never hardcode a
+# second constant for that case.
+_DEFAULT_MAX_TOKENS = 4000
+_MAX_RESPONSE_TOKENS_ENV = "DOURMOUSE_MAX_RESPONSE_TOKENS"
+
+
+def _default_max_tokens() -> int:
+    """Response cap actually sent, honouring the env override.
+
+    Same constant + accessor shape as ``_max_llm_tokens`` below, so either
+    can be retuned per deployment without a code change. Floors at 256: a
+    smaller cap cannot fit even a leaked-reasoning preamble, which is the
+    exact failure this constant exists to prevent.
+    """
+    raw = os.environ.get(_MAX_RESPONSE_TOKENS_ENV, "").strip()
+    if raw:
+        try:
+            return max(256, int(raw))
+        except ValueError:
+            pass
+    return _DEFAULT_MAX_TOKENS
 
 # ---- LLM context bounding (v4.2 speed) ------------------------------- #
 # Measured on the user's M3 Air: prefill runs ~46 tok/s under sustained
@@ -135,22 +189,106 @@ _DEFAULT_MAX_TOKENS = 800
 #
 # v13.2 (live-caught, real bug — explicit user report: "the model easily
 # loses the plot and doesn't retain context"): this constant's own comment
-# justified 4600 against an 8192 num_ctx ceiling that no longer exists —
-# _OLLAMA_NUM_CTX was raised to 16384 (see its own comment, a SEPARATE
-# earlier fix) and this was simply never revisited, so every real turn was
-# still being trimmed to less than a THIRD of what the model can now
-# actually hold (system prompt ~3,700 tokens, not charged against this
-# budget — see _bounded_context — + this history budget + the 800-token
-# response cap, against a 16,384 window). 9000 leaves system(~3700) +
-# history(9000) + response(800) = ~13,500, still ~2,900 tokens of real
-# headroom under 16,384 even when the chars/4 estimate undercounts —
-# proportionally the same safety margin the original 4600/8192 sizing had,
-# just correctly re-derived against the window that is actually in use.
+# justified 4600 against an 8192 num_ctx ceiling that no longer existed,
+# so every real turn was trimmed to under a third of what the model could
+# hold. Raised to 9000 against the then-current 16384 window.
+#
+# v13.7 (2026-09-03): _OLLAMA_NUM_CTX has now been opened to the model's
+# OWN real ceiling, 32768 (see its comment), so this is re-derived again —
+# and this time the arithmetic is corrected, because the v13.2 sizing above
+# left out two real costs.
+#
+# What is actually on the wire, and what this budget does and does not
+# cover (verified by reading _bounded_context, not by trusting the old
+# comment):
+#   * The SYSTEM PROMPT is not charged against this budget in any way that
+#     matters. The backward walk can only reach messages[0] on its final
+#     step, i.e. only once every other message already fit, and messages[0]
+#     is unconditionally re-emitted afterwards regardless (see the
+#     ``i == 0 and role == "system"`` branch). So it is sent IN ADDITION to
+#     this budget. Measured on this checkout 2026-09-03: the full 35-agent
+#     roster prompt is 15,695 chars = 3,924 est tokens by the repo's
+#     chars/4 convention. (The v13.2 comment's "~3,700" was a 33-agent
+#     roster; it grows as agents are added, so reserve 4,000.) A fast-lane
+#     or focused-roster turn swaps in a much smaller prompt (_FAST_LANE_
+#     SYSTEM measures 114 tokens), so 4,000 is the ceiling, not the norm.
+#   * The IN-FLIGHT EXCHANGE — everything from the last user message
+#     onward — is also uncharged: the walk only ever spends budget on
+#     messages strictly BEFORE ``tail_start``. A single in-flight tool
+#     result can be large (system_access/sandbox cap their output at
+#     20,000 chars = 5,000 est tokens; worldmonitor at 8,000; the Claude
+#     CLI backend at 6,000).
+#   * The TOOL SCHEMAS are a separate ``tools=`` payload that _est_tokens
+#     never sees at all. Measured 2026-09-03 via _scoped_tool_specs:
+#     orchestrator-only 430 est tokens; one agent 430-3,999 (median
+#     1,064); two agents median 1,583 / p90 2,818 / max 5,753; the three
+#     heaviest agents together (atlas + system + dev_coding) 6,992. The
+#     UNSCOPED set is 190 tools / 21,265 tokens, but the loop always calls
+#     _scoped_tool_specs, so the scoped figures are the real ones.
+#
+# The v13.2 sizing counted only system + history + response, so its claimed
+# "~2,900 tokens of headroom under 16,384" was optimistic: at 16,384 the
+# realistic worst stack was 3,924 + 6,992 + 9,000 + 800 = 20,716, already
+# 4,332 tokens OVER the window before the in-flight exchange was counted.
+# That overcommit is a large part of why context still felt lost.
+#
+# Re-derived honestly against 32,768:
+#     system prompt   4,000  (measured 3,924, rounded up for roster growth)
+#     history         16,000 (this constant)
+#     response         4,000 (_DEFAULT_MAX_TOKENS)
+#     ------------------------------
+#     subtotal        24,000, leaving 8,768 = 26.8% of the window free —
+#                     a LARGER proportional margin than the 17.6% the
+#                     v13.2 sizing believed it had, which is what absorbs
+#                     the two costs that sizing forgot.
+# Worst measured tool-schema stack still fits:
+#     4,000 + 6,992 (3 heaviest agents) + 16,000 + 4,000 = 30,992 < 32,768.
+# Worst realistic in-flight stack still fits:
+#     4,000 + 2,368 (the ``system`` agent, whose tools are the ones that
+#     return 20k-char output) + 16,000 + 5,000 in-flight + 4,000 = 31,368
+#     < 32,768.
+# A flat doubling to 18,000 was rejected for a real reason, not caution:
+# it overflows the first of those two stacks by 224 tokens. 16,000 is the
+# largest round history budget that provably fits BOTH worst cases, and is
+# still a 1.78x increase on 9000 and a 3.5x increase on the original 4600.
+#
 # Overridable via DOURMOUSE_MAX_CONTEXT_TOKENS for a smaller-context model
 # where even this would overflow — never hardcode a second constant for
 # that case.
-_MAX_LLM_TOKENS = 9000
-_MAX_TOOL_RESULT_CHARS = 800  # OLD tool results re-read by the model get cut
+_MAX_LLM_TOKENS = 16000
+
+# OLD tool results re-read by the model get cut to this many chars (the
+# in-flight one is always kept in full — see _bounded_context).
+#
+# v13.7 (2026-09-03): was 800 chars (~200 est tokens), a number sized when
+# the whole history budget was 4600 and every token of it was contested.
+# With the budget now 16,000 that cut is gratuitously lossy — it was
+# throwing away the substance of every prior tool call to save ~200 tokens
+# out of 16,000. 4,000 chars is ~1,000 est tokens, so even eight surviving
+# old tool results cost 8,000 tokens, half the budget, and _bounded_context
+# still enforces the budget above regardless: anything that does not fit is
+# dropped at a clean user boundary exactly as before. The failure mode this
+# constant guards against (a 20,000-char sandbox dump re-sent on every
+# later turn) is still guarded; it is just no longer amputated to a
+# sentence. Overridable via DOURMOUSE_MAX_TOOL_RESULT_CHARS.
+_MAX_TOOL_RESULT_CHARS = 4000
+_MAX_TOOL_RESULT_CHARS_ENV = "DOURMOUSE_MAX_TOOL_RESULT_CHARS"
+
+
+def _max_tool_result_chars() -> int:
+    """Old-tool-result truncation width, honouring the env override.
+
+    Floors at 200 chars: below that the retained text is not a gist of
+    anything, it is a fragment, and the model is better served by the
+    explicit ``...[truncated]`` marker than by a misleading sliver.
+    """
+    raw = os.environ.get(_MAX_TOOL_RESULT_CHARS_ENV, "").strip()
+    if raw:
+        try:
+            return max(200, int(raw))
+        except ValueError:
+            pass
+    return _MAX_TOOL_RESULT_CHARS
 
 
 def _max_llm_tokens() -> int:
@@ -178,8 +316,8 @@ def _est_tokens(message: dict[str, Any]) -> int:
 
 def _bounded_context(
     messages: list[dict[str, Any]],
-    max_tokens: int = _MAX_LLM_TOKENS,
-    max_tool_chars: int = _MAX_TOOL_RESULT_CHARS,
+    max_tokens: int | None = None,
+    max_tool_chars: int | None = None,
 ) -> list[dict[str, Any]]:
     """Bounded copy of ``messages`` for the LLM API boundary.
 
@@ -192,9 +330,21 @@ def _bounded_context(
     messages OLDER than the in-flight exchange are truncated to
     ``max_tool_chars`` in the copy: they were already seen in full when
     produced, so later turns only need the gist.
+
+    v13.7: both limits default to ``None`` and resolve through their
+    accessors at CALL time rather than binding the module constant as a
+    def-time default. Same reason ``_run_openai_compat`` spells out in
+    code_backends.py — a def-time default freezes the value at import, so
+    DOURMOUSE_MAX_CONTEXT_TOKENS / DOURMOUSE_MAX_TOOL_RESULT_CHARS would
+    have been silently ignored by every caller that omitted the argument
+    (which, for ``max_tool_chars``, was every caller in the repo).
     """
     if not messages:
         return []
+    if max_tokens is None:
+        max_tokens = _max_llm_tokens()
+    if max_tool_chars is None:
+        max_tool_chars = _max_tool_result_chars()
     system = messages[0] if messages[0].get("role") == "system" else None
     user_idx = [i for i, m in enumerate(messages) if m.get("role") == "user"]
     tail_start = user_idx[-1] if user_idx else (0 if system is None else 1)
@@ -424,7 +574,7 @@ def _call_with_retry_inner(
                 tools=tools,
                 tool_choice="auto",
                 extra_body=extra_body,
-                max_tokens=_DEFAULT_MAX_TOKENS,
+                max_tokens=_default_max_tokens(),
             )
         except Exception as exc:  # noqa: BLE001 - inspect then decide
             last_exc = exc
@@ -446,7 +596,7 @@ def _call_with_retry_inner(
             tools=tools,
             tool_choice="auto",
             extra_body=extra_body,
-            max_tokens=_DEFAULT_MAX_TOKENS,
+            max_tokens=_default_max_tokens(),
         )
     assert last_exc is not None
     raise last_exc
@@ -475,7 +625,7 @@ def _stream_completion(
         tools=tools,
         tool_choice="auto",
         extra_body=extra_body,
-        max_tokens=_DEFAULT_MAX_TOKENS,
+        max_tokens=_default_max_tokens(),
         stream=True,
     )
     content_parts: list[str] = []
@@ -841,7 +991,51 @@ _SYSTEM_PROMPT = (
 # what it actually supports. Raised to give real headroom against this
 # exact failure; still well under the model's own ceiling, so KV-cache
 # memory cost stays bounded rather than jumping straight to 32768.
-_OLLAMA_NUM_CTX = 16384
+#
+# v13.7 (2026-09-03): now taken all the way to that 32768 ceiling, on the
+# user's explicit repeated directive ("max out the context window don't
+# reduce it", "maximize context windows of everything"). The v13 note
+# above is honest about why it stopped at half: KV-cache memory, not any
+# model limit — 16384 was never a measured safe maximum, it was a
+# deliberate hedge. Taking the hedge off costs roughly a doubling of the
+# KV cache for this model (order ~0.5 GB more resident while the model is
+# warm under _OLLAMA_KEEP_ALIVE, on a 7B at the quantisation this box
+# runs); that is the price the user has explicitly asked to pay, and
+# Ollama allocates the cache lazily, so a short conversation does not pay
+# the full 32k cost up front. NOT VERIFIED HERE: no live `ollama show` or
+# resident-memory measurement was taken for this change — the 32768 figure
+# is the previously-recorded live reading quoted above, and the KV-cache
+# estimate is arithmetic, not a measurement.
+#
+# Overridable via DOURMOUSE_OLLAMA_NUM_CTX — the escape hatch for a box
+# that genuinely cannot spare the KV cache, or for a model whose own
+# context length is smaller than this. Note this is the WINDOW; the
+# history slice inside it is _MAX_LLM_TOKENS (its comment carries the full
+# system + schemas + history + response arithmetic against this number),
+# so lowering this without also lowering that one just moves the overflow
+# from this constant to Ollama's own front-truncation.
+_OLLAMA_NUM_CTX = 32768
+_OLLAMA_NUM_CTX_ENV = "DOURMOUSE_OLLAMA_NUM_CTX"
+
+
+def _ollama_num_ctx() -> int:
+    """Context window sent to Ollama, honouring the env override.
+
+    Same constant + accessor shape as ``_max_llm_tokens`` /
+    ``_default_max_tokens``. Floors at 2048: Ollama's own default is 4096
+    and anything below 2048 cannot hold even the fast-lane system prompt
+    plus a real answer, so a typo in the env var degrades to "small" rather
+    than to "broken".
+    """
+    raw = os.environ.get(_OLLAMA_NUM_CTX_ENV, "").strip()
+    if raw:
+        try:
+            return max(2048, int(raw))
+        except ValueError:
+            pass
+    return _OLLAMA_NUM_CTX
+
+
 _OLLAMA_KEEP_ALIVE = "30m"
 
 #: Models whose chat template either (a) IGNORES the `think` /
@@ -1110,8 +1304,8 @@ class OllamaNativeClient:
             "enable_thinking": show_thinking,
             "keep_alive": _OLLAMA_KEEP_ALIVE,
             "options": {
-                "num_predict": int(max_tokens or _DEFAULT_MAX_TOKENS),
-                "num_ctx": _OLLAMA_NUM_CTX,
+                "num_predict": int(max_tokens or _default_max_tokens()),
+                "num_ctx": _ollama_num_ctx(),
             },
         }
         # v5.32: `think: False` is NOT honoured by every qwen3 build. Measured
