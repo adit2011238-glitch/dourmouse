@@ -1,4 +1,5 @@
 """Multi-backend coding tests (v2.4) — NVIDIA / Freebuff DeepSeek / Claude.
+from pathlib import Path
 
 Exercises the REAL code_backends module: backend resolution with honest
 NOT CONFIGURED when unset, the OpenAI-compatible completion path via an
@@ -1164,3 +1165,80 @@ class TestStreamClaude:
         assert "--output-format" in argv
         assert argv[argv.index("--output-format") + 1] == "stream-json"
         assert "--include-partial-messages" in argv
+
+
+class TestCliResolutionSurvivesAGuiLaunch:
+    """Regression tests for the "Dourmouse can't access my Google Workspace"
+    report, which turned out to be two separate real bugs on the Claude
+    route. Neither was an auth problem: dourmouse's own gmail_search was
+    working and returning real inbox rows the whole time.
+    """
+
+    def test_cli_is_found_without_the_users_shell_path(self, monkeypatch, tmp_path):
+        """A macOS app launched from the Dock does not inherit the shell
+        PATH. The dourmouse2.app server was measured running with
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin, so shutil.which("claude")
+        returned None and every Claude request reported NOT CONFIGURED --
+        while the binary sat at ~/.local/bin/claude, installed and logged in.
+        """
+        from dourmouse import general_roster
+
+        fake_home = tmp_path / "home"
+        (fake_home / ".local" / "bin").mkdir(parents=True)
+        cli = fake_home / ".local" / "bin" / "claude"
+        cli.write_text("#!/bin/sh\nexit 0\n")
+        cli.chmod(0o755)
+
+        monkeypatch.delenv("CLAUDE_CODE_CLI", raising=False)
+        # The exact PATH the GUI-launched server process was measured with.
+        monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        # Path.expanduser() resolves "~" from HOME on POSIX, so pointing HOME
+        # at the fixture is enough -- no need to patch pathlib itself.
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        assert general_roster._find_claude_cli() == str(cli)
+
+    def test_child_env_keeps_the_parent_environment_and_widens_path(self):
+        """The CLI resolves the user's subscription session itself, from the
+        macOS Keychain ("Claude Code-credentials") or
+        ~/.claude/.credentials.json. Handing it a stripped or hand-built
+        environment is what would break that, so the parent environment must
+        be inherited whole -- PATH is added to, never replaced.
+        """
+        import os
+
+        from dourmouse.code_backends import _cli_env
+
+        os.environ["DOURMOUSE_ENV_INHERITANCE_PROBE"] = "kept"
+        try:
+            env = _cli_env("/usr/bin/true")
+        finally:
+            os.environ.pop("DOURMOUSE_ENV_INHERITANCE_PROBE", None)
+
+        assert env["DOURMOUSE_ENV_INHERITANCE_PROBE"] == "kept"
+        # Everything the parent had on PATH is still reachable.
+        for part in (os.environ.get("PATH") or "").split(os.pathsep):
+            if part:
+                assert part in env["PATH"].split(os.pathsep)
+        # And the resolved CLI's own directory leads, so its helpers win.
+        assert env["PATH"].split(os.pathsep)[0] == "/usr/bin"
+
+    def test_strict_mcp_config_is_passed_so_only_dourmouse_tools_load(self):
+        """Without --strict-mcp-config the CLI also loads the user's own
+        claude.ai connectors, and Claude preferred those: asked for the
+        latest email it called mcp__claude_ai_Gmail__search_threads and
+        returned "Gmail auth insufficient scope. Need reauthorize
+        connector". --allowedTools did not prevent it, because that gates
+        which tools may RUN, not which MCP servers are loaded and offered.
+        """
+        import inspect
+
+        from dourmouse import code_backends
+
+        source = inspect.getsource(code_backends)
+        # Both spawn sites (blocking _run_claude and streaming stream_claude).
+        assert source.count('"--strict-mcp-config"') == 2, (
+            "every claude invocation that loads Dourmouse's MCP config must "
+            "also pass --strict-mcp-config, or the broken claude.ai Gmail "
+            "connector comes back and wins again"
+        )

@@ -196,6 +196,57 @@ def _forget_claude_code_session(key: str) -> None:
         _CLAUDE_CODE_SESSIONS.pop(key, None)
 
 
+#: Directories a CLI like `claude` or `codex` really installs into, checked
+#: in order when PATH does not contain it.
+#:
+#: This exists because of a real, reproduced failure, not as defensive
+#: padding. A macOS app launched from the Dock or via `open` does NOT
+#: inherit the user's shell PATH -- the dourmouse2.app server process was
+#: measured running with PATH=/usr/bin:/bin:/usr/sbin:/sbin, while the real
+#: binary sits at ~/.local/bin/claude. So shutil.which("claude") returned
+#: None and every Claude-backed request reported NOT CONFIGURED, even
+#: though the CLI was installed, logged in, and working from a terminal.
+#:
+#: Nothing here reads or handles a credential. The CLI resolves its own
+#: session token natively -- from the macOS Keychain under the service name
+#: "Claude Code-credentials", or ~/.claude/.credentials.json on Linux and
+#: Windows. Locating the binary is all that was ever broken.
+_CLI_SEARCH_DIRS: tuple[str, ...] = (
+    "~/.local/bin",
+    "~/.claude/local",
+    "~/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "~/.npm-global/bin",
+    "~/.yarn/bin",
+    "/opt/local/bin",
+)
+
+
+def _search_known_cli_dirs(name: str) -> str | None:
+    """Find an executable named ``name`` outside PATH, in the real install
+    locations listed above, plus whichever Node version nvm currently has
+    active (npm -g installs land in that version's own bin directory)."""
+    candidates: list[Path] = [Path(d).expanduser() / name for d in _CLI_SEARCH_DIRS]
+
+    nvm = Path("~/.nvm/versions/node").expanduser()
+    if nvm.is_dir():
+        try:
+            # Newest version first, so a current install wins over a stale one.
+            for version_dir in sorted(nvm.iterdir(), reverse=True):
+                candidates.append(version_dir / "bin" / name)
+        except OSError:
+            pass
+
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
 def _find_claude_cli() -> str | None:
     """Locate the Claude Code CLI: CLAUDE_CODE_CLI env override, else PATH.
 
@@ -211,7 +262,7 @@ def _find_claude_cli() -> str | None:
         if resolved:
             return resolved
         return None
-    return shutil.which("claude")
+    return shutil.which("claude") or _search_known_cli_dirs("claude")
 
 
 def _run_cli_delegate(
@@ -395,7 +446,7 @@ def _find_codex_cli() -> str | None:
         if resolved:
             return resolved
         return None
-    return shutil.which("codex")
+    return shutil.which("codex") or _search_known_cli_dirs("codex")
 
 
 def _codex_code_tool(arguments: dict[str, Any]) -> str:

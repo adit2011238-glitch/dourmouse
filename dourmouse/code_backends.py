@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import subprocess
 import threading
 import uuid
@@ -118,6 +119,21 @@ _CLAUDE_NO_SESSION_ERR = "No conversation found with session ID"
 # call genuinely invoked the real list_tasks/world_pulse tools and returned
 # real data, and the wildcard allowedTools pattern (rather than one flag per
 # tool name) was confirmed live to actually match.
+# v5.21 (live-reproduced): --strict-mcp-config is REQUIRED here, not
+# optional hardening. Without it the CLI also loads the user's own
+# claude.ai connectors on top of ours, and Claude preferred those: asked
+# for the latest email it called mcp__claude_ai_Gmail__search_threads and
+# came back with "Gmail auth insufficient scope. Need reauthorize
+# connector" -- which is exactly the "Dourmouse can't access my Google
+# Workspace" symptom the user reported. Dourmouse's OWN gmail_search was
+# working the entire time and returning real inbox rows; it was simply
+# never reached. --allowedTools alone did not prevent this, because it
+# gates which tools may run, not which MCP servers get loaded and offered.
+#
+# With the flag, exactly one Gmail path exists on this route: Dourmouse's
+# own, which authenticates through the credentials in local_secrets.py
+# rather than through a claude.ai connector the user would have to
+# re-authorise separately.
 _MCP_ALLOWED_TOOLS = "mcp__dourmouse__*"
 _mcp_config_path_cache: str | None = None
 _mcp_config_lock = threading.Lock()
@@ -391,7 +407,11 @@ def _run_claude_once(
 ) -> subprocess.CompletedProcess[str]:
     mcp_args: list[str] = []
     try:
-        mcp_args = ["--mcp-config", _ensure_mcp_config_path(), "--allowedTools", _MCP_ALLOWED_TOOLS]
+        mcp_args = [
+            "--mcp-config", _ensure_mcp_config_path(),
+            "--strict-mcp-config",
+            "--allowedTools", _MCP_ALLOWED_TOOLS,
+        ]
     except Exception:  # noqa: BLE001 - best-effort: a broken MCP config must
         # never stop coding from working at all; Claude just runs without
         # Dourmouse tool access for this one call (its own bash/file tools
@@ -404,6 +424,7 @@ def _run_claude_once(
                 *session_args, task, *mcp_args,
             ],
             cwd=cwd,
+            env=_cli_env(cli),
             stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
             capture_output=True,
             text=True,
@@ -413,6 +434,60 @@ def _run_claude_once(
         raise RuntimeError(f"claude timed out after {timeout}s (task still running).") from None
     except OSError as exc:
         raise RuntimeError(f"could not run the claude CLI: {exc}") from exc
+
+
+def _cli_env(cli: str | None = None) -> dict[str, str]:
+    """The environment to hand a coding CLI child process.
+
+    Starts from a full copy of this process's own environment -- that
+    inheritance is the whole point, and must not be narrowed. The Claude
+    Code CLI resolves the user's subscription session itself, natively:
+    from the macOS Keychain under the service name "Claude Code-credentials",
+    or from ~/.claude/.credentials.json on Linux and Windows. Nothing here
+    reads, injects, copies or logs a token; stripping the environment (or
+    passing a hand-built one) is what would break that lookup, so we don't.
+
+    What IS added is PATH. A macOS app launched from the Dock or via `open`
+    does not inherit the user's shell PATH: the dourmouse2.app server
+    process was measured running with exactly
+
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+    which contains neither ~/.local/bin (where `claude` actually lives on
+    this machine) nor any Node install. So the binary could not be found,
+    and even once found by absolute path it would have failed to run,
+    because `claude` is a Node program that needs `node` on PATH. The
+    directory the CLI itself was resolved from goes first, since a CLI's
+    siblings are the most likely place its own helpers live.
+    """
+    env = dict(os.environ)
+
+    extra: list[str] = []
+    if cli:
+        extra.append(str(Path(cli).resolve().parent))
+    for d in ("~/.local/bin", "~/.claude/local", "~/bin",
+              "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"):
+        extra.append(str(Path(d).expanduser()))
+
+    nvm = Path("~/.nvm/versions/node").expanduser()
+    if nvm.is_dir():
+        try:
+            for version_dir in sorted(nvm.iterdir(), reverse=True):
+                bin_dir = version_dir / "bin"
+                if bin_dir.is_dir():
+                    extra.append(str(bin_dir))
+                    break  # the newest install is enough; don't stack them all
+        except OSError:
+            pass
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for part in extra + (env.get("PATH", "") or "").split(os.pathsep):
+        if part and part not in seen:
+            seen.add(part)
+            ordered.append(part)
+    env["PATH"] = os.pathsep.join(ordered)
+    return env
 
 
 def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
@@ -546,7 +621,11 @@ def stream_claude(
     session_key = _claude_session_key(cwd)
     mcp_args: list[str] = []
     try:
-        mcp_args = ["--mcp-config", _ensure_mcp_config_path(), "--allowedTools", _MCP_ALLOWED_TOOLS]
+        mcp_args = [
+            "--mcp-config", _ensure_mcp_config_path(),
+            "--strict-mcp-config",
+            "--allowedTools", _MCP_ALLOWED_TOOLS,
+        ]
     except Exception:  # noqa: BLE001 - best-effort, see _run_claude_once's own comment
         mcp_args = []
 
@@ -559,6 +638,7 @@ def stream_claude(
                 *session_args, task, *mcp_args,
             ],
             cwd=cwd,
+            env=_cli_env(cli),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
