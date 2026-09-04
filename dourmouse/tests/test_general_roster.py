@@ -103,6 +103,14 @@ class TestRosterShape:
                           # to orchestrator, for the Vision workspace chat panel
             "globe",  # v13: God's Eye View 3D globe control
             "panel_control",  # v13.4: floating-panel control (open/close/move/resize)
+            "google_workspace",  # v13.7: one coherent, explicitly-nameable
+                                  # agent for Gmail/Drive/Sheets/Slides/
+                                  # Calendar -- the same real ToolSpec
+                                  # objects mail/docs/scheduling already
+                                  # own, shared by reference. Deliberately
+                                  # excluded from find_agents_for_query's
+                                  # own automatic scoring (see planner.py's
+                                  # _ROLLUP_AGENT_NAMES) -- reached by name.
         }
 
     def test_orchestrator_exposes_delegate_task(self):

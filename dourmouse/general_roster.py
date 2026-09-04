@@ -4957,4 +4957,83 @@ def build_general_registry() -> DispatchRegistry:
             if _spec.name in ("drive_search", "drive_read") and _spec.name not in _docs_tool_names:
                 registry.extend_subagent("docs", _spec)
 
+    # -- google_workspace: one coherent agent for everything Google ------ #
+    #
+    # Explicit user request: "is there an agent for the google workspace,
+    # make one, for using everything in google workspace, give it access to
+    # every single tool". Before this, the real Google tools existed but
+    # were scattered across three agents that each own a slice for their
+    # own reasons (mail owns Gmail because Drive shares its OAuth token;
+    # docs owns Sheets/Slides/Drive-write; scheduling owns calendar) -- so
+    # there was no single identity to route a general "do something in my
+    # Google Workspace" request to, and no way for a human OR another model
+    # to discover the full set in one place.
+    #
+    # Built by REFERENCE, exactly like the drive_search/drive_read sharing
+    # immediately above -- the same real ToolSpec objects, never redefined
+    # or duplicated, so permission levels (REQUIRES_CONFIRMATION on every
+    # write/send/delete tool) and behaviour can never drift between the two
+    # places a tool is reachable from. mail/docs/scheduling keep every tool
+    # they already had; this adds a second, focused route to the same real
+    # handlers, it removes nothing and changes no existing agent's surface.
+    #
+    # Deliberately NOT included: read_inbox (mail's IMAP tool -- a
+    # different, non-Google protocol entirely, works against any IMAP
+    # provider) and atlas_calendar (ATLAS's own paper-trading calendar,
+    # unrelated to Google Calendar despite the name). Including either
+    # would misrepresent what this agent actually does.
+    _google_workspace_tool_names = (
+        # Gmail
+        "gmail_search", "gmail_read", "gmail_send", "gmail_archive",
+        "gmail_trash", "gmail_bulk_trash", "gmail_untrash",
+        "email_identity_status", "email_own_send",
+        # Drive
+        "drive_search", "drive_read", "drive_download", "drive_create_doc",
+        # Sheets / Slides
+        "sheets_read", "slides_create",
+        # Calendar
+        "list_calendar_events", "propose_time_slots",
+    )
+    _by_name: dict[str, ToolSpec] = {}
+    for _sub in registry.all_subagents():
+        for _t in _sub.tools:
+            if _t.name in _google_workspace_tool_names and _t.name not in _by_name:
+                _by_name[_t.name] = _t
+    _missing = [n for n in _google_workspace_tool_names if n not in _by_name]
+    if _missing:
+        # A tool this agent expects to exist was renamed or removed
+        # elsewhere in the roster. Surfacing this as a real exception at
+        # build time (not a silently smaller agent) is deliberate --
+        # exactly the kind of drift the "shared by reference" design above
+        # exists to prevent, and it must never pass silently.
+        raise RuntimeError(
+            "google_workspace agent: expected tool(s) not found in the "
+            f"registry: {_missing}. A Google tool was renamed or removed "
+            "elsewhere without updating this list."
+        )
+    registry.register_subagent(
+        _subagent(
+            "google_workspace",
+            "General",
+            "Everything in the signed-in user's Google Workspace: Gmail "
+            "(read, search, send, archive, trash, restore), Drive (search, "
+            "read, download, create Docs), Sheets (read), Slides (create), "
+            "and Calendar (list events, propose meeting times). One "
+            "coherent identity for the full real toolset that also lives, "
+            "unchanged, on mail/docs/scheduling — route here for any "
+            "general Google Workspace request rather than guessing which "
+            "of those three owns the specific tool needed. Every write, "
+            "send, archive, trash or restore action requires human "
+            "confirmation before it executes; nothing here ever runs "
+            "unconfirmed.",
+            [_by_name[n] for n in _google_workspace_tool_names],
+        )
+    )
+    # google_workspace is registered after the "every subagent except
+    # orchestrator/companion gets query_shared_memory" loop above already
+    # ran, so it needs the same extension explicitly, matching that loop's
+    # own rule exactly (it is neither orchestrator nor companion).
+    if _shared_memory_spec is not None:
+        registry.extend_subagent("google_workspace", _shared_memory_spec)
+
     return registry

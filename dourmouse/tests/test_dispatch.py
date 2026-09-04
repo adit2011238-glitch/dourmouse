@@ -1748,6 +1748,11 @@ class TestEndToEndThroughGeneralRoster:
                           # to orchestrator, for the Vision workspace chat panel
             "globe",  # v13: God's Eye View 3D globe control
             "panel_control",  # v13.4: floating-panel control (open/close/move/resize)
+            "google_workspace",  # v13.7: one coherent, explicitly-nameable
+                                  # Gmail/Drive/Sheets/Slides/Calendar agent,
+                                  # sharing its tools BY REFERENCE with
+                                  # mail/docs/scheduling (see
+                                  # general_roster.py's own comment).
         }
 
     def test_trading_subagent_added_later_dispatchable(self):
@@ -3107,7 +3112,18 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
             monkeypatch.setattr(_real_urllib_request, "urlopen", lambda req, timeout=None: _Resp())
         run_dispatch_messages(messages, registry, client=None, config=OllamaConfig(), event_sink=events.append)
         brain = next(e for e in events if e["type"] == "brain")
-        assert brain["backend"] == expected
+        # dispatch.py's own real "brain" event ALWAYS emits the mode
+        # "claude" as the label "claude_cli" (see the ~line 2455/3114
+        # backend_name assignments) -- expected must go through the same
+        # translation, or this compares two different, non-interchangeable
+        # spellings of the same choice. Previously masked entirely: on the
+        # roster size before google_workspace existed, "mail" happened to
+        # land on the "ollama_cloud" side of the alternating split (which
+        # has no such translation), so this comparison was never actually
+        # exercised on the "claude" branch until a 36th agent shifted the
+        # alphabetical parity and put mail on the other side.
+        expected_label = "claude_cli" if expected == "claude" else expected
+        assert brain["backend"] == expected_label
 
     def test_gibberish_with_no_agent_match_falls_back_to_claude(self, monkeypatch):
         from dourmouse.config import OllamaConfig

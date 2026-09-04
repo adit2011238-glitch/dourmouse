@@ -72,6 +72,11 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # below refuses them outright.
     "code_claude", "code_codex", "code_deepseek", "code_nvidia", "code_ollama",
     "orchestrator",
+    # The user's real Gmail/Drive/Sheets/Slides/Calendar. Textbook private
+    # data -- an inbox or a Drive file leaving the machine to answer a
+    # question the user thought was local is exactly what this policy
+    # exists to prevent.
+    "google_workspace",
 })
 
 #: Agents whose inputs are public by nature, where Gemini's large context and

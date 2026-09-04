@@ -32,6 +32,15 @@ _STOP_WORDS = {
     "please", "use", "using", "help", "need", "want", "like", "how",
 }
 
+#: Agents that exist as a coherent, explicitly-nameable ROLL-UP of tools
+#: that already live (by reference) on other, narrower agents — never as a
+#: target find_agents_for_query() scores automatically. See the skip inside
+#: the scoring loop below for the full, live-reproduced reason: a roll-up's
+#: wider toolset always accumulates more generic capability-verb credit
+#: than the narrower originals, so it would keep winning routing decisions
+#: that have nothing to do with what it actually exists for.
+_ROLLUP_AGENT_NAMES = frozenset({"google_workspace"})
+
 # Cheap multi-step markers: explicit sequencing language ("then", "after
 # that") or 2+ distinct outcome verbs. Deliberately conservative — a false
 # negative just means the model improvises as before; a false positive adds
@@ -294,6 +303,28 @@ def find_agents_for_query(
     nn = neural_agent_scores(query, agent_names)
     scored = []
     for sub in registry.all_subagents():
+        if sub.name in _ROLLUP_AGENT_NAMES:
+            # Real, live-reproduced regression: google_workspace re-exposes
+            # 17 tools ALREADY scored individually via mail/docs/scheduling
+            # (shared by reference, see general_roster.py's own comment on
+            # why). Its wider toolset means it accumulates capability-verb
+            # credit for every generic verb any ONE of those 17 satisfies --
+            # "create a file called hello.txt" (nothing to do with Google)
+            # scored google_workspace at 7, ahead of dev_coding's 4, purely
+            # because drive_create_doc/slides_create happen to contain
+            # "create". A roll-up agent that unions several existing
+            # agents' tools will ALWAYS out-score the narrower originals on
+            # generic verbs this way, no matter how the verb-credit is
+            # tuned, so it is excluded from automatic scoring entirely
+            # rather than chased with ever-more special cases.
+            #
+            # This does not make the agent unreachable: it is a real,
+            # fully-toolset-complete roster member, nameable explicitly via
+            # delegate_to_models(agent="google_workspace") and listed in
+            # full in the orchestrator's own capability preamble
+            # (model_context.py) — reached by NAME, which is how it is
+            # actually meant to be used, never by this heuristic guessing.
+            continue
         haystack = " ".join(
             [sub.name, sub.description]
             + [t.name + " " + t.description for t in sub.tools]
