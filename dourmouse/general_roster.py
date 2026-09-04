@@ -4892,6 +4892,50 @@ def build_general_registry() -> DispatchRegistry:
     )
     registry.extend_subagent("orchestrator", _delegate_models_spec)
 
+    # ---- The desktop's ~1M-chunk spatial vault, as a real RAG source ---- #
+    #
+    # Live-verified end to end (dourmouse/desktop_rag.py's own docstring
+    # carries the full receipt): embeds the query with the vault's own
+    # all-MiniLM-L6-v2 model ON the desktop over SSH, searches the real
+    # 226,076-vector FAISS index there, and returns real rows with a
+    # verify_cosine == 1.0 receipt proving the position->id resolution held.
+    def _query_desktop_vault_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.desktop_rag import format_desktop_rag
+
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            return "query_desktop_vault: 'query' is required. Nothing was run."
+        try:
+            limit = int(arguments.get("limit") or 5)
+        except (TypeError, ValueError):
+            limit = 5
+        return format_desktop_rag(query, limit=max(1, min(limit, 20)))
+
+    _desktop_vault_spec = ToolSpec(
+        name="query_desktop_vault",
+        description=(
+            "Search a large (~1,023,765-chunk) reference vault of general "
+            "knowledge and prose that lives on the user's Windows desktop, "
+            "reached over SSH. Real semantic search — the query is embedded "
+            "and matched against a real FAISS index, never a keyword guess. "
+            "Use for broad factual or research questions where a real "
+            "reference corpus beats web search or is unavailable. Honestly "
+            "reports NOT CONFIGURED or UNAVAILABLE if the desktop cannot be "
+            "reached — never fabricates a hit."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 5},
+            },
+            "required": ["query"],
+        },
+        handler=_query_desktop_vault_h,
+        permission=Permission.REGULAR,
+    )
+    registry.extend_subagent("research_info", _desktop_vault_spec)
+
     # Drive reads belong on the docs agent as well as on mail.
     #
     # Real routing failure, reported by the user: "it said it couldn't access
