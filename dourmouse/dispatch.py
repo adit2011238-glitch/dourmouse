@@ -1142,9 +1142,82 @@ class _OllamaTc:
         self.function = _OllamaTcFunction(name, arguments)
 
 
+# Live-reproduced real bug: gpt-oss:20b, specifically when it gets confused
+# about whether its own tool call actually returned a result (observed after
+# a genuinely slow ~17s tool call), sometimes emits its own internal
+# multi-channel deliberation format literally into .content instead of
+# clean final text -- raw markers like <|channel|>analysis<|message|>...
+# <|end|><|start|>assistant<|channel|>final<|message|>... showing up verbatim
+# in the answer the user reads. This is the model's own real output, not a
+# Dourmouse-side field-routing bug (the native adapter's clean
+# .thinking/.content split, documented above, is unaffected and correct
+# when the model behaves) -- but showing raw internal-format tokens to a
+# user is a real quality defect regardless of whose "fault" it is, so it is
+# stripped defensively before content is ever handed back.
+#
+# The pattern is deliberately narrow -- only the exact <|word|> marker
+# shape a handful of known Harmony/ChatML-family tokens use -- so it cannot
+# accidentally eat real content that happens to contain a pipe or angle
+# bracket (code snippets, "a<b" comparisons, table pipes).
+_HARMONY_MARKER_RE = re.compile(
+    r"<\|(?:start|end|message|channel|return|call|constrain)\|>"
+)
+# A leaked Harmony transcript is several CHANNELS concatenated into one flat
+# string: analysis (private reasoning), commentary (tool-call bookkeeping,
+# often carrying the raw JSON arguments), and final (the only part that was
+# ever meant to be user-visible). Matches one full "<|channel|>NAME ...
+# <|message|>BODY" segment, body running up to the next <|start|>/<|end|>/
+# <|channel|> marker or end of string, so multiple segments in one leaked
+# string are each captured separately.
+_HARMONY_CHANNEL_RE = re.compile(
+    r"<\|channel\|>\s*(\w+)[^<]*<\|message\|>(.*?)(?=<\|start\|>|<\|end\|>|<\|channel\|>|\Z)",
+    re.S,
+)
+
+
+def _strip_harmony_markup(text: str) -> str:
+    """Recover the real answer from a leaked Harmony-format transcript.
+
+    Live-reproduced real bug: gpt-oss:20b, specifically when it gets
+    confused about whether its own tool call actually returned a result
+    (observed after a genuinely slow ~17s tool call), sometimes emits its
+    own internal multi-channel deliberation format literally into .content
+    instead of clean final text -- analysis reasoning, raw tool-call JSON
+    arguments, and the actual answer, all concatenated into one string with
+    <|channel|>/<|message|>/<|start|>/<|end|> markers between them. This is
+    the model's own real output, not a Dourmouse-side field-routing bug
+    (the native adapter's clean .thinking/.content split, documented above,
+    is unaffected and correct when the model behaves) -- but showing a raw
+    internal transcript to a user is a real quality defect regardless of
+    whose "fault" it is.
+
+    When at least one real channel segment is found, ONLY the LAST "final"
+    channel's body is kept -- analysis/commentary channels are the model's
+    own private deliberation and tool-call bookkeeping, never meant to be
+    read, so they are discarded entirely rather than left in as stripped-
+    but-still-present noise. Falls back to a plain marker strip (still
+    strictly better than raw tokens) if no "final" channel is present, and
+    is a complete no-op for the common case of a response with no leakage
+    at all.
+    """
+    if "<|" not in text:
+        return text
+    segments = _HARMONY_CHANNEL_RE.findall(text)
+    finals = [body.strip() for name, body in segments if name == "final"]
+    if finals:
+        return finals[-1]
+    cleaned = _HARMONY_MARKER_RE.sub(" ", text)
+    cleaned = re.sub(
+        r"\b(?:analysis|commentary|final|to=functions\.\w+)\b(?=\s|$)",
+        "",
+        cleaned,
+    )
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
 class _OllamaMessage:
     def __init__(self, content: str, tool_calls: list[_OllamaTc] | None) -> None:
-        self.content = content
+        self.content = _strip_harmony_markup(content) if content else content
         self.tool_calls = tool_calls
 
 
