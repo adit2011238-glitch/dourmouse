@@ -1,0 +1,17 @@
+{
+  "name": "electron-claude-bridge",
+  "version": "1.0.0",
+  "description": "Electron main/preload/renderer wiring for the locally-authenticated Claude Code CLI, with live thinking/answer stream separation.",
+  "main": "dist/main.js",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "npm run build && electron ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "electron": "^33.4.11",
+    "typescript": "5.6"
+  }
+}

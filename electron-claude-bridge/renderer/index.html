@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- No remote origins, no inline script, no eval. The renderer loads exactly
+     one local bundle and can reach nothing on the network. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+<title>Claude</title>
+<style>
+  :root{
+    --canvas:#09090B; --layer:#18181B; --layer-hi:#27272A;
+    --line:#27272A; --line-focus:#3F3F46;
+    --fg:#FAFAFA; --fg-body:#A1A1AA; --fg-dim:#52525B;
+    --ok:#10B981; --active:#F59E0B; --error:#EF4444;
+    --mono:'Monaspace Neon','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--canvas);color:var(--fg-body);font-family:var(--mono);
+       font-size:13px;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+
+  header{flex:0 0 auto;display:flex;align-items:center;gap:10px;
+         padding:8px 12px;background:var(--layer);border-bottom:1px solid var(--line)}
+  #status{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+  #status[data-state=running]{color:var(--active)}
+  #status[data-state=error]{color:var(--error)}
+  #meta{margin-left:auto;font-size:11px;color:var(--fg-dim);
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+
+  main{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;overflow:auto}
+
+  details#thinkWrap{flex:0 0 auto;border-bottom:1px solid var(--line);background:var(--layer)}
+  details#thinkWrap[hidden]{display:none}
+  summary{cursor:pointer;padding:6px 12px;font-size:11px;letter-spacing:.08em;
+          text-transform:uppercase;color:var(--fg-dim);user-select:none}
+  summary::marker{color:var(--fg-dim)}
+  #thinking{max-height:34vh;overflow:auto;padding:0 12px 10px;margin:0;
+            white-space:pre-wrap;word-break:break-word;
+            font-size:12px;line-height:1.55;color:var(--fg-dim)}
+
+  #output{flex:1 1 auto;min-height:0;overflow:auto;padding:14px 12px;margin:0;
+          white-space:pre-wrap;word-break:break-word;
+          font-size:13px;line-height:1.65;color:var(--fg)}
+  /* Typewriter caret: a steady block on the trailing edge while running. */
+  body:has(#status[data-state=running]) #output::after{
+    content:"";display:inline-block;width:7px;height:1.05em;
+    background:var(--active);vertical-align:text-bottom;margin-left:2px;
+    animation:blink 1s steps(1,end) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  footer{flex:0 0 auto;display:flex;gap:8px;align-items:flex-end;
+         padding:10px 12px;background:var(--layer);border-top:1px solid var(--line)}
+  textarea{flex:1 1 auto;min-width:0;resize:vertical;min-height:44px;max-height:180px;
+           padding:8px;background:var(--canvas);color:var(--fg);
+           border:1px solid var(--line);border-radius:2px;
+           font-family:var(--mono);font-size:13px;line-height:1.5}
+  textarea:focus{outline:none;border-color:var(--line-focus)}
+  button{flex:0 0 auto;padding:9px 14px;background:var(--layer-hi);color:var(--fg);
+         border:1px solid var(--line);border-radius:2px;
+         font-family:var(--mono);font-size:12px;cursor:pointer;white-space:nowrap;
+         transition:background-color .2s ease-out,color .2s ease-out}
+  button:hover:not(:disabled){background:var(--line-focus)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+
+  @media (prefers-reduced-motion: reduce){*{animation-duration:1ms!important}}
+</style>
+</head>
+<body>
+  <header>
+    <strong style="color:var(--fg);letter-spacing:-.02em">CLAUDE</strong>
+    <span id="status" data-state="idle">idle</span>
+    <span id="meta"></span>
+  </header>
+
+  <main>
+    <details id="thinkWrap" hidden open>
+      <summary>Thinking</summary>
+      <pre id="thinking"></pre>
+    </details>
+    <pre id="output"></pre>
+  </main>
+
+  <footer>
+    <textarea id="prompt" rows="2" placeholder="Ask Claude…  (Enter to send, Shift+Enter for a newline)"></textarea>
+    <button id="send">Send</button>
+    <button id="stop" disabled>Stop</button>
+  </footer>
+
+  <script type="module" src="../dist/renderer.js"></script>
+</body>
+</html>
