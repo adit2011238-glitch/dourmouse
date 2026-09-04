@@ -1603,6 +1603,12 @@ class _Handler(BaseHTTPRequestHandler):
             # v5.22.9: the dedicated ALL HANDS window — one goal, every
             # resource (Claude/Codex/ChatGPT/DeepSeek/web) in parallel.
             self._serve_static("all_hands.html")
+        elif path in ("/design-system", "/design-system.html"):
+            # The live reference for ui/assets/dourmouse-ui.css: every
+            # component rendered at once, so a change to the shared design
+            # system can be eyeballed in one place instead of hunting for a
+            # screen that happens to use the control being changed.
+            self._serve_static("design-system.html")
         elif path.startswith("/agent/"):
             # v2.7: each agent gets its own LIVE window (/agent/<name>).
             agent_name = urllib.parse.unquote(path[len("/agent/"):]).strip("/")

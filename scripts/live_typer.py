@@ -23,7 +23,25 @@ import subprocess
 import sys
 import time
 
-SESSIONS_DIR = "/Applications/dourmouse-dist/workspace/sessions"
+# NOTE (2026-09-04): every path in this script points at the RETIRED
+# standalone deployment under /Applications/dourmouse-dist, not at the
+# current checkout. That directory is a separate ~1.2 GB installation with
+# its own venv, its own dourmouse package, and its own workspace; it is not
+# wired into the current app in either direction. This script has therefore
+# been dead since that deployment stopped being the live one -- it is kept
+# because the AXRaise/keystroke harness itself is still useful, but it will
+# not drive the current app without repointing these three constants.
+#
+# Override without editing the file:
+#   DOURMOUSE_LIVE_TYPER_SESSIONS=<path to workspace/sessions>
+#   DOURMOUSE_LIVE_TYPER_PYTHON=<path to the venv python>
+_LEGACY_DIST = "/Applications/dourmouse-dist"
+SESSIONS_DIR = os.environ.get(
+    "DOURMOUSE_LIVE_TYPER_SESSIONS", _LEGACY_DIST + "/workspace/sessions"
+)
+LIVE_TYPER_PYTHON = os.environ.get(
+    "DOURMOUSE_LIVE_TYPER_PYTHON", _LEGACY_DIST + "/.venv/bin/python"
+)
 MAIN_WIN = "DOURMOUSE // CENTRAL AGENT DISPATCH"
 FAIL_MARKERS = ("ERROR:", "Traceback", "CONFIRMATION REQUIRED",
                 "does not exist on this account", "No module named",
@@ -86,7 +104,7 @@ def _activate_app() -> None:
         "NSApplicationActivateIgnoringOtherApps)\n"
     )
     try:
-        subprocess.run(["/Applications/dourmouse-dist/.venv/bin/python", "-c", code],
+        subprocess.run([LIVE_TYPER_PYTHON, "-c", code],
                        capture_output=True, text=True, timeout=20)
     except Exception:  # noqa: BLE001
         pass
@@ -112,7 +130,7 @@ def _window_bounds() -> tuple[int, int, int, int] | None:
         "        break\n"
     )
     proc = subprocess.run(
-        ["/Applications/dourmouse-dist/.venv/bin/python", "-c", code],
+        [LIVE_TYPER_PYTHON, "-c", code],
         capture_output=True, text=True, timeout=30)
     try:
         x, y, w, h = json.loads(proc.stdout.strip().splitlines()[-1])
