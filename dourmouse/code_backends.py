@@ -619,6 +619,31 @@ def stream_claude(
         )
     timeout = max(1, min(int(timeout), 600))
     session_key = _claude_session_key(cwd)
+
+    # Tell the model what it is and what it has, once per session.
+    #
+    # Reported by the user: "the models don't know what tools or agents they
+    # can use". That was literally true. MCP tools are discoverable but not
+    # announced, so every turn opened with a ToolSearch round trip before any
+    # work could start -- and sometimes ended with the model concluding it had
+    # no relevant tool when it plainly did. Google Drive was reachable for
+    # weeks by an agent that never knew to look.
+    #
+    # Prepended to the FIRST prompt of a session only. The CLI is invoked with
+    # --session-id on the first call for a working directory and --resume
+    # after, so it holds the conversation itself; re-sending a ~2,300-token
+    # briefing every turn would be paid for every turn and would tell the
+    # model nothing it had not already been told.
+    with _CLAUDE_SESSIONS_LOCK:
+        _first_turn = session_key not in _CLAUDE_SESSIONS
+    if _first_turn:
+        try:
+            from dourmouse.model_context import claude_orchestrator_preamble
+
+            task = f"{claude_orchestrator_preamble()}\n\n---\n\n{task}"
+        except Exception:  # noqa: BLE001 - a briefing must never break a turn
+            pass
+
     mcp_args: list[str] = []
     try:
         mcp_args = [

@@ -181,7 +181,17 @@ def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
     started = time.monotonic()
     try:
         registry = build_general_registry()
-        messages: list[dict[str, Any]] = [{"role": "user", "content": task.prompt}]
+        # A delegated turn gets a short capability note of its own. It already
+        # has its tools attached; what it lacks is the knowledge that they are
+        # REAL and that an honest failure beats a plausible guess.
+        messages: list[dict[str, Any]] = []
+        try:
+            from dourmouse.model_context import agent_context
+
+            messages.append({"role": "system", "content": agent_context(task.agent)})
+        except Exception:  # noqa: BLE001 - context must never break a turn
+            pass
+        messages.append({"role": "user", "content": task.prompt})
         # client is left None on purpose: run_dispatch_messages builds the
         # right one itself, honouring the per-agent backend split. Handing it
         # a pre-built client here would bypass that routing.
