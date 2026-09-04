@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ATLAS // STRATEGY LAB</title>
+<link rel="stylesheet" href="/assets/dourmouse-ui.css">
 <style>
   /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
      — replaces --font-prose's previous "Inter" entry below, which was
@@ -21,43 +22,94 @@
     src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
   @font-face{font-family:'Fira Sans';font-style:normal;font-weight:700;font-display:swap;
     src:url('/assets/fonts/fira-sans-700-latin.woff2') format('woff2')}
+  /* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css,
+     linked above). Same method as ui/workspace.html: the variable NAMES are
+     unchanged, so all 182 call sites in this file keep working and the whole
+     look is one block to revert.
+
+       - --text/--text-dim/--line/--line-strong were rgba(cyan) over the
+         ground: every hairline and every "white" glyph on a dense financial
+         table was tinted cyan, which is the single biggest reason this page
+         read as a HUD instead of a terminal. Four solid neutrals now.
+       - --panel was rgba(14,20,32,.82) -- an alpha fill, so proposal cards
+         composited the page grid through themselves. It is a flat layer.
+       - --raised is NEW (additive, nothing renamed): the interactive/hover
+         layer, so an expanded table row is a filled row rather than an
+         8%-alpha cyan haze.
+       - --cyan stops being a hue and becomes the neutral primary text
+         colour. --gold collapses into --amber (two warm hues doing one job).
+         Amber/green/red survive only as active / ok / error.
+       - The alpha ladder stays defined for the handful of opacity call
+         sites, but no surface composites from it.
+       - Type goes mono-first: Departure Mono for structure, Monaspace Neon
+         for everything the machine says, prose and table cells included.
+
+     Previous values, for a one-step revert:
+       --ground:#070B12; --surface:#0E1420; --panel:rgba(14,20,32,0.82);
+       --cyan:#4FC3F7/79,195,247; --green:#26D07C/38,208,124;
+       --amber:#F5A623/245,166,35; --red:#EF5350/239,83,80;
+       --gold:#FFD232/255,210,50; --dead:#8A929E;
+       --text:rgba(cyan,.85); --text-dim:rgba(cyan,.45);
+       --line:rgba(cyan,.10); --line-strong:rgba(cyan,.30);
+       --font-display:"Exo 2"...; --font-mono:"JetBrains Mono"...;
+       --font-prose:"Fira Sans"...                                        */
   :root {
-    --ground: #070B12;
-    --surface: #0E1420;
-    --panel: rgba(14,20,32,0.82);
-    --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
-    --green: #26D07C; --green-rgb: 38,208,124;
-    --amber: #F5A623; --amber-rgb: 245,166,35;
-    --red:   #EF5350; --red-rgb:   239,83,80;
-    --gold:  #FFD232; --gold-rgb:  255,210,50;
-    --dead:  #8A929E;
+    --ground: #09090B;
+    --surface: #18181B;
+    --raised: #27272A;
+    --panel: #18181B;
+    --cyan:  #FAFAFA; --cyan-rgb:  250,250,250;
+    --green: #10B981; --green-rgb: 16,185,129;
+    --amber: #F59E0B; --amber-rgb: 245,158,11;
+    --red:   #EF4444; --red-rgb:   239,68,68;
+    --gold:  #F59E0B; --gold-rgb:  245,158,11;
+    --dead:  #52525B;
     --a06: 0.06; --a10: 0.10; --a16: 0.16; --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
-    --font-display: "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
-    --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
-    --font-prose: "Fira Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-    --text: rgba(var(--cyan-rgb), var(--a85));
-    --text-dim: rgba(var(--cyan-rgb), var(--a45));
-    --line: rgba(var(--cyan-rgb), var(--a10));
-    --line-strong: rgba(var(--cyan-rgb), var(--a30));
+    --font-display: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+    --font-mono: 'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+    --font-prose: 'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
+    --text: #FAFAFA;
+    --text-dim: #71717A;
+    --text-body: #A1A1AA;
+    --line: #27272A;
+    --line-strong: #3F3F46;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
+  /* REAL PRE-EXISTING BUG, found by measuring rather than reading (confirmed
+     against `git show HEAD:ui/atlas_lab.html`): `main` asked for
+     `height: calc(100% - 104px)` to leave room for the 108px of header +
+     toolbar above it, but v5.22.7 later added `#splitwrap { height: 100% }`
+     to the same element -- an ID selector, so it WINS on specificity and the
+     calc() has been dead ever since. Measured at 1280x800 on the previous
+     commit: header 59px + toolbar 49px = 108px of chrome, and <main> still
+     800px tall starting at y=108, so it ended at y=908 inside a
+     `body{overflow:hidden}` viewport of 800. The bottom 108px of the
+     leaderboard -- roughly the last two strategy rows -- could not be
+     scrolled to at all, because the clipping happened OUTSIDE main's own
+     scroller.
+     The fix is to stop guessing the chrome height: body becomes a real flex
+     column, the chrome rows are flex:none, and whichever view is showing
+     takes flex:1 with min-height:0. That also fixes the same bug's second
+     instance, #proposalsView, and the case nobody had allowed for at all --
+     .native-split-bar appearing and pushing the total chrome past 104px. */
   body {
-    background:
-      radial-gradient(1200px 600px at 80% -10%, rgba(var(--cyan-rgb), 0.07), transparent 60%),
-      radial-gradient(900px 500px at 10% 110%, rgba(var(--green-rgb), 0.05), transparent 60%),
-      linear-gradient(180deg, #0A101B 0%, var(--ground) 100%);
-    color: var(--text);
+    background: var(--ground);
+    color: var(--text-body);
     font-family: var(--font-prose);
     font-size: 13px;
     overflow: hidden;
+    display: flex; flex-direction: column;
   }
-  /* grid overlay */
+  /* The 44px workbench grid stays -- a bench grid is a real terminal idiom,
+     not ornament -- as a crisp solid rule at the structural layer colour
+     rather than a 2.5%-alpha cyan smear. The two radial washes and the
+     top-to-bottom gradient that used to sit on <body> are gone. */
   body::before {
     content: ""; position: fixed; inset: 0; pointer-events: none;
     background-image:
-      linear-gradient(rgba(var(--cyan-rgb), 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(var(--cyan-rgb), 0.025) 1px, transparent 1px);
+      linear-gradient(var(--surface) 1px, transparent 1px),
+      linear-gradient(90deg, var(--surface) 1px, transparent 1px);
     background-size: 44px 44px;
   }
 
@@ -65,234 +117,270 @@
     display: flex; align-items: center; gap: 14px;
     padding: 12px 20px;
     border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, rgba(var(--cyan-rgb), var(--a06)), transparent);
-    position: relative; z-index: 2;
+    background: var(--surface);
+    position: relative; z-index: 2; flex: none;
   }
+  /* The mark was a radial-gradient disc with an 18px halo AND a 12px text
+     glow. Flat tile, 2px corners, no shadow of any kind. */
   .mark {
     width: 34px; height: 34px; flex: none;
-    border: 1px solid var(--line-strong);
-    border-radius: 9px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
     display: grid; place-items: center;
-    font-family: var(--font-display); font-weight: 700; font-size: 17px;
-    color: var(--cyan);
-    background: radial-gradient(circle at 30% 30%, rgba(var(--cyan-rgb), 0.22), rgba(var(--cyan-rgb), 0.03));
-    box-shadow: 0 0 18px rgba(var(--cyan-rgb), 0.25);
-    text-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.8);
+    font-family: var(--font-display); font-weight: 400; font-size: 15px;
+    color: var(--text-dim);
+    background: var(--raised);
   }
   h1 {
     font-family: var(--font-display); font-weight: 600; font-size: 17px;
     letter-spacing: 2px; color: var(--text);
+    flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   h1 .dim { color: var(--text-dim); font-weight: 400; }
   .status {
     margin-left: auto; display: flex; align-items: center; gap: 16px;
     font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+    flex: 0 1 auto; min-width: 0; white-space: nowrap;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
   }
+  .status::-webkit-scrollbar { display: none; }
   .status .live {
-    display: flex; align-items: center; gap: 6px;
-    color: rgba(var(--green-rgb), 0.9);
+    display: flex; align-items: center; gap: 6px; flex: none;
+    color: var(--green);
   }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
-         box-shadow: 0 0 8px rgba(var(--green-rgb), 0.9); animation: pulse 2s infinite; }
+  /* Status is a solid 6px dot -- no halo. The opacity pulse stays; it
+     animates opacity only and cannot force layout. */
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green);
+         flex: none; animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
   button {
-    font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
-    color: var(--cyan); background: rgba(var(--cyan-rgb), 0.08);
-    border: 1px solid var(--line-strong); border-radius: 6px;
-    padding: 6px 12px; cursor: pointer; transition: all 0.15s;
+    font-family: var(--font-display); font-size: 11px; letter-spacing: 1px;
+    color: var(--text-body); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 12px; cursor: pointer; flex: none; white-space: nowrap;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
   }
-  button:hover { background: rgba(var(--cyan-rgb), 0.18); box-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.3); }
+  button:hover { background: var(--raised); color: var(--text); border-color: var(--line-strong); }
   button:disabled { opacity: 0.4; cursor: default; }
 
+  /* Horizontal control row: two filter groups, a counter and a search box.
+     It had no width discipline at all, so on a narrow window the later
+     chips simply left the page with no way to reach them. House fix. */
   .toolbar {
     display: flex; align-items: center; gap: 12px;
     padding: 10px 20px; border-bottom: 1px solid var(--line);
-    position: relative; z-index: 2;
+    position: relative; z-index: 2; flex: none;
+    min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 32px), transparent 100%);
+            mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 32px), transparent 100%);
   }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .toolbar > * { flex: none; }
   .toolbar .count { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
-  .toolbar .count b { color: var(--cyan); font-weight: 600; }
+  .toolbar .count b { color: var(--text); font-weight: 600; }
   .search {
     margin-left: auto; min-width: 220px;
-    background: rgba(var(--cyan-rgb), 0.05);
-    border: 1px solid var(--line); border-radius: 6px;
+    background: var(--ground);
+    border: 1px solid var(--line); border-radius: 2px;
     padding: 6px 10px; color: var(--text); font-family: var(--font-mono); font-size: 12px;
     outline: none; transition: border-color 0.15s;
   }
   .search:focus { border-color: var(--line-strong); }
   .filters { display: flex; gap: 6px; }
+  /* Was a 20px pill. Filters are structural controls, so they take the
+     system's 2px corner and read as a segmented control, not as chips. */
   .chip {
-    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px;
-    padding: 4px 10px; border-radius: 20px; cursor: pointer;
+    font-family: var(--font-display); font-size: 10px; letter-spacing: 1px;
+    padding: 4px 10px; border-radius: 2px; cursor: pointer; white-space: nowrap;
     border: 1px solid var(--line); color: var(--text-dim);
-    background: transparent; transition: all 0.15s;
+    background: transparent;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
   }
-  .chip:hover { border-color: var(--line-strong); color: var(--text); }
-  .chip.on { border-color: rgba(var(--cyan-rgb), 0.6); color: var(--cyan); background: rgba(var(--cyan-rgb), 0.1); }
+  .chip:hover { background: var(--surface); border-color: var(--line-strong); color: var(--text); }
+  .chip.on { border-color: var(--line-strong); color: var(--amber); background: var(--raised); }
 
-  main { position: relative; z-index: 1; height: calc(100% - 104px); overflow-y: auto; }
+  main { position: relative; z-index: 1; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   table { width: 100%; border-collapse: collapse; }
   thead th {
     position: sticky; top: 0; z-index: 3;
     text-align: left; padding: 9px 14px;
     font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px;
     color: var(--text-dim); font-weight: 500;
-    background: rgba(10,16,27,0.95); backdrop-filter: blur(6px);
+    background: var(--surface);
     border-bottom: 1px solid var(--line-strong);
   }
   tbody tr {
     border-bottom: 1px solid var(--line);
     transition: background 0.12s; cursor: pointer;
   }
-  tbody tr:hover { background: rgba(var(--cyan-rgb), 0.05); }
-  tbody tr.expanded { background: rgba(var(--cyan-rgb), 0.08); }
+  tbody tr:hover { background: var(--surface); }
+  tbody tr.expanded { background: var(--raised); }
   tbody td { padding: 9px 14px; font-family: var(--font-mono); font-size: 12px; vertical-align: middle; }
   .rank { color: var(--text-dim); width: 34px; }
-  .rank b { color: var(--cyan); font-weight: 600; }
+  .rank b { color: var(--text); font-weight: 600; }
   .strat { font-family: var(--font-prose); font-weight: 600; color: var(--text); letter-spacing: 0.5px; }
   .strat .dir { font-size: 10px; color: var(--text-dim); font-weight: 400; margin-left: 6px; }
   .num { text-align: right; }
-  .pos { color: rgba(var(--green-rgb), 0.95); }
-  .neg { color: rgba(var(--red-rgb), 0.95); }
+  /* Kept: on a returns table green/red is the data encoding itself, not
+     decoration. Solid tokens now instead of 95%-alpha. */
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
   .mut { color: var(--dead); }
+  /* Six tinted, differently-bordered verdict badges collapse to ONE
+     monochrome pill. Nothing is lost: unlike the tool chips on agent.html,
+     the badge's own text IS the verdict ("CANDIDATE", "FAIL"), so the colour
+     was carrying no information the label did not already carry -- it was
+     six hues competing with a dense numeric table for attention.
+     (Aside, found while collapsing them: .b-unknown's fill was
+     `rgba(var(--dead), 0.1)` where --dead is a hex literal, so that
+     declaration has never been valid CSS and the browser has always dropped
+     it. It is moot now.) */
   .badge {
-    display: inline-block; padding: 3px 9px; border-radius: 4px;
-    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; font-weight: 600;
+    display: inline-block; padding: 3px 9px; border-radius: 2px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; font-weight: 400;
+    background: var(--raised); color: var(--text-dim);
+    border: 1px solid transparent; white-space: nowrap;
   }
-  .b-candidate { color: var(--cyan); background: rgba(var(--cyan-rgb), 0.12); border: 1px solid rgba(var(--cyan-rgb), 0.4); }
-  .b-hold      { color: var(--amber); background: rgba(var(--amber-rgb), 0.12); border: 1px solid rgba(var(--amber-rgb), 0.4); }
-  .b-strong    { color: var(--green); background: rgba(var(--green-rgb), 0.12); border: 1px solid rgba(var(--green-rgb), 0.4); }
-  .b-paper     { color: var(--green); background: rgba(var(--green-rgb), 0.16); border: 1px solid rgba(var(--green-rgb), 0.6); }
-  .b-fail      { color: var(--red); background: rgba(var(--red-rgb), 0.12); border: 1px solid rgba(var(--red-rgb), 0.4); }
-  .b-unknown   { color: var(--dead); background: rgba(var(--dead), 0.1); border: 1px solid rgba(var(--dead), 0.3); }
 
   .detail-row { display: none; }
   tr.expanded + tr.detail-row { display: table-row; }
   .detail {
     padding: 14px 20px 18px 68px;
     font-family: var(--font-prose); font-size: 12.5px; line-height: 1.6;
-    color: rgba(226,236,248, 0.85);
-    background: rgba(var(--cyan-rgb), 0.03);
+    color: var(--text-body);
+    background: var(--surface);
   }
   .detail .gates { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 6px; }
   .error-banner {
     margin: 14px 20px 0; padding: 10px 14px;
-    border: 1px solid rgba(var(--red-rgb), 0.4); border-radius: 8px;
-    background: rgba(var(--red-rgb), 0.08);
-    color: rgba(var(--red-rgb), 0.95); font-family: var(--font-mono); font-size: 12px;
+    border: 1px solid var(--line-strong); border-radius: 2px;
+    background: var(--surface);
+    color: var(--red); font-family: var(--font-mono); font-size: 12px;
   }
   .empty { text-align: center; color: var(--text-dim); padding: 60px 0; font-family: var(--font-mono); }
 
   /* ---- v5.22.7: in-window split screen ---- */
-  #splitwrap { display: flex; height: 100%; }
+  /* height:100% here is what silently killed main's calc() above; the flex
+     column on <body> makes both of them unnecessary. */
+  #splitwrap { display: flex; min-height: 0; }
   #paneL { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
   #paneR {
     flex: 0 0 0; min-width: 0; display: none;
     flex-direction: column; border-left: 1px solid var(--line-strong);
-    background: rgba(10,16,27,0.6);
+    background: var(--surface);
   }
   body.split #paneR { flex: 1 1 50%; display: flex; }
   body.split #paneL { flex: 1 1 50%; }
   #divider {
     flex: 0 0 5px; cursor: col-resize; display: none;
-    background: rgba(var(--cyan-rgb), 0.15); transition: background 0.15s;
+    background: var(--line); transition: background-color 0.15s;
   }
   body.split #divider { display: block; }
-  #divider:hover, #divider.dragging { background: rgba(var(--cyan-rgb), 0.55); }
+  #divider:hover, #divider.dragging { background: var(--line-strong); }
   .pane2-bar {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 10px; border-bottom: 1px solid var(--line);
-    background: rgba(var(--cyan-rgb), 0.05); flex: none;
+    background: var(--surface); flex: none;
+    min-width: 0; overflow-x: auto; scrollbar-width: none;
   }
+  .pane2-bar::-webkit-scrollbar { display: none; }
   .pane2-bar .p2-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-dim); }
   .pane2-bar select, .pane2-bar input {
-    background: rgba(var(--cyan-rgb), 0.05); color: var(--text);
-    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+    background: var(--ground); color: var(--text);
+    border: 1px solid var(--line); border-radius: 2px; padding: 5px 8px;
     font-family: var(--font-mono); font-size: 11px; outline: none; max-width: 240px;
   }
   .pane2-bar input { flex: 1 1 auto; }
-  #pane2frame { flex: 1 1 auto; border: 0; width: 100%; background: #0B1019; }
-  .splitbtn.on { border-color: rgba(var(--green-rgb), 0.6); color: var(--green); background: rgba(var(--green-rgb), 0.12); }
+  #pane2frame { flex: 1 1 auto; border: 0; width: 100%; background: var(--ground); }
+  .splitbtn.on { border-color: var(--line-strong); color: var(--green); background: var(--raised); }
   .native-split-bar {
     margin: 8px 20px 0; padding: 8px 12px;
-    border: 1px solid rgba(var(--amber-rgb), 0.35); border-radius: 8px;
-    background: rgba(var(--amber-rgb), 0.07);
-    font-family: var(--font-mono); font-size: 11px; color: rgba(var(--amber-rgb), 0.9);
+    border: 1px solid var(--line); border-radius: 2px;
+    background: var(--surface);
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-body);
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   }
-  .native-split-bar select { background: rgba(var(--amber-rgb), 0.1); color: var(--text); border: 1px solid rgba(var(--amber-rgb), 0.4); border-radius: 6px; padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; }
+  .native-split-bar { flex: none; }
+  .native-split-bar select { background: var(--ground); color: var(--text); border: 1px solid var(--line); border-radius: 2px; padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; }
   .native-split-bar .note { font-size: 10px; color: var(--text-dim); }
-  .native-split-bar .err { color: rgba(var(--red-rgb), 0.95); }
+  .native-split-bar .err { color: var(--red); }
 
   /* ---- v8.16: strategy proposals — chat + human-gated review queue ---- */
-  #proposalsView { height: calc(100% - 104px); overflow-y: auto; padding: 18px 20px 40px; }
+  #proposalsView { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 20px 40px; }
   .idea-box {
     display: flex; gap: 10px; margin-bottom: 22px;
   }
   .idea-box textarea {
     flex: 1 1 auto; resize: vertical; min-height: 54px; max-height: 160px;
-    background: rgba(var(--cyan-rgb), 0.05); color: var(--text);
-    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    background: var(--ground); color: var(--text);
+    border: 1px solid var(--line); border-radius: 2px; padding: 10px 12px;
     font-family: var(--font-prose); font-size: 13px; outline: none;
   }
   .idea-box textarea:focus { border-color: var(--line-strong); }
   .idea-box button { flex: none; align-self: flex-end; }
   .gen-bar {
     display: flex; align-items: center; gap: 12px; margin-bottom: 22px;
-    padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
-    background: rgba(var(--gold-rgb), 0.04);
+    padding: 8px 12px; border: 1px solid var(--line); border-radius: 2px;
+    background: var(--surface);
   }
   .gen-status { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); flex: 1 1 auto; }
-  .gen-status b { color: var(--gold); }
-  #genRunNow { border-color: rgba(var(--gold-rgb), 0.4); color: var(--gold); }
-  #genRunNow:hover { background: rgba(var(--gold-rgb), 0.15); }
+  .gen-status b { color: var(--amber); }
+  #genRunNow { border-color: var(--line-strong); color: var(--amber); }
+  #genRunNow:hover { background: var(--raised); color: var(--amber); }
   .section-label {
     font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.5px;
     color: var(--text-dim); margin: 0 0 10px; padding-bottom: 6px;
     border-bottom: 1px solid var(--line);
   }
   .prop-card {
-    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 2px; background: var(--panel);
     padding: 14px 16px; margin-bottom: 12px;
   }
   .prop-card .prop-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .prop-card .prop-name { font-family: var(--font-prose); font-weight: 600; font-size: 14px; color: var(--text); }
   .prop-card .prop-src { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 1px; }
-  .prop-card .prop-explain { margin: 8px 0; font-size: 12.5px; line-height: 1.55; color: rgba(226,236,248,0.85); }
+  .prop-card .prop-explain { margin: 8px 0; font-size: 12.5px; line-height: 1.55; color: var(--text-body); }
   .prop-card details { margin: 8px 0; }
-  .prop-card summary { cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--cyan); }
+  .prop-card summary { cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
   .prop-card pre {
-    margin: 8px 0 0; padding: 10px 12px; border-radius: 6px; overflow-x: auto;
-    background: rgba(0,0,0,0.35); border: 1px solid var(--line);
-    font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: rgba(226,236,248,0.9);
+    margin: 8px 0 0; padding: 10px 12px; border-radius: 2px; overflow-x: auto;
+    background: var(--ground); border: 1px solid var(--line);
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: var(--text-body);
   }
   .prop-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
   .prop-actions select {
-    background: rgba(var(--cyan-rgb), 0.05); color: var(--text);
-    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+    background: var(--ground); color: var(--text);
+    border: 1px solid var(--line); border-radius: 2px; padding: 5px 8px;
     font-family: var(--font-mono); font-size: 11px;
   }
-  .btn-approve { border-color: rgba(var(--green-rgb), 0.5) !important; color: var(--green) !important; }
-  .btn-approve:hover { background: rgba(var(--green-rgb), 0.15) !important; }
-  .btn-reject { border-color: rgba(var(--red-rgb), 0.5) !important; color: var(--red) !important; }
-  .btn-reject:hover { background: rgba(var(--red-rgb), 0.15) !important; }
+  /* Approve/reject keep ok/error as their TEXT colour -- these commit a
+     strategy to paper trading or kill it, so the colour is the safety
+     signal, not a badge palette. Borders and grounds are monochrome. */
+  .btn-approve { border-color: var(--line-strong) !important; color: var(--green) !important; }
+  .btn-approve:hover { background: var(--raised) !important; }
+  .btn-reject { border-color: var(--line-strong) !important; color: var(--red) !important; }
+  .btn-reject:hover { background: var(--raised) !important; }
   .safety-note {
-    margin-top: 8px; padding: 8px 10px; border-radius: 6px;
-    background: rgba(var(--red-rgb), 0.08); border: 1px solid rgba(var(--red-rgb), 0.35);
-    font-family: var(--font-mono); font-size: 11px; color: rgba(var(--red-rgb), 0.95);
+    margin-top: 8px; padding: 8px 10px; border-radius: 2px;
+    background: var(--surface); border: 1px solid var(--line-strong);
+    font-family: var(--font-mono); font-size: 11px; color: var(--red);
   }
   .run-card { border-left: 3px solid var(--line-strong); padding-left: 12px; }
-  .run-card.done { border-left-color: rgba(var(--green-rgb), 0.6); }
-  .run-card.failed { border-left-color: rgba(var(--red-rgb), 0.6); }
-  .run-card.running { border-left-color: rgba(var(--amber-rgb), 0.6); }
+  /* Kept as accents: the 3px left rule is the only place a backtest's
+     outcome is shown at a glance, and it uses exactly the system's three
+     functional colours. Solid, no alpha. */
+  .run-card.done { border-left-color: var(--green); }
+  .run-card.failed { border-left-color: var(--red); }
+  .run-card.running { border-left-color: var(--amber); }
   .metric-grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 8px; margin: 10px 0; font-family: var(--font-mono); font-size: 11px;
   }
   .metric-grid .m-label { color: var(--text-dim); }
   .metric-grid .m-val { color: var(--text); font-weight: 600; }
-  .run-explain { font-size: 12.5px; line-height: 1.55; color: rgba(226,236,248,0.85); margin-top: 8px; }
+  .run-explain { font-size: 12.5px; line-height: 1.55; color: var(--text-body); margin-top: 8px; }
   .spin { display: inline-block; animation: pulse 1s infinite; }
-  .chart-wrap { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0,0,0,0.2); }
+  .chart-wrap { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 2px; background: var(--ground); }
   .chart-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-dim); }
   .chart-label .pos { color: var(--green); }
   .chart-label .neg { color: var(--red); }

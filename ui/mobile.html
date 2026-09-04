@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DOURMOUSE // PHONE LINK</title>
+<link rel="stylesheet" href="/assets/dourmouse-ui.css">
 <style>
   /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
      — this compact mobile view's body text deliberately stays on
@@ -13,34 +14,67 @@
     src:url('/assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
   @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
     src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
+  /* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css,
+     linked above). Same method as ui/workspace.html: variable NAMES unchanged,
+     so all 50 call sites keep working and this is one block to revert.
+
+       - --text/--text-dim/--line/--line-strong were rgba(cyan); solid
+         neutrals now.
+       - --panel was rgba(18,21,30,.72) behind a backdrop-filter, so every
+         card on a PHONE was compositing a blurred page through itself --
+         the most expensive possible way to draw a flat box. Flat layer, no
+         filter.
+       - --raised is NEW (additive) for the interactive layer.
+       - --gold folds into --amber; --cyan becomes the neutral primary text.
+       - Type goes mono-first, wordmark included.
+
+     KNOWN, NOT FIXED HERE (out of scope, one line in another file): the
+     pairing QR codes on this page are generated server-side by
+     dourmouse/webui.py's _qr_svg(), which hard-codes dark="#4FC3F7". They
+     are the last cyan left on the screen. They still scan perfectly against
+     the new ground, so this is cosmetic, but that literal wants the same
+     treatment next time webui.py is opened.
+
+     Previous values, for a one-step revert:
+       --ground:#0B0E14; --surface:#12151E;
+       --cyan:#4FC3F7/79,195,247; --amber:#F5A623/245,166,35;
+       --red:#EF5350/239,83,80; --gold:#FFD232/255,210,50;
+       --dead:#8A929E/138,146,158;
+       --text:rgba(cyan,.85); --text-dim:rgba(cyan,.45);
+       --line:rgba(cyan,.10); --line-strong:rgba(cyan,.30);
+       --panel:rgba(18,21,30,0.72);
+       --font-display:"Exo 2"...; --font-mono:"JetBrains Mono"...;
+       --font-wordmark:"Orbitron"...; --font-prose:"Fira Sans"...         */
   :root {
-    /* ---- JARVIS Scene Archive & Design System · palette ---- */
-    --ground: #0B0E14;
-    --surface: #12151E;
-    --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
-    --amber: #F5A623; --amber-rgb: 245,166,35;
-    --red:   #EF5350; --red-rgb:   239,83,80;
-    --gold:  #FFD232; --gold-rgb:  255,210,50;
-    --dead:  #8A929E; --dead-rgb:  138,146,158;
+    --ground: #09090B;
+    --surface: #18181B;
+    --raised: #27272A;
+    --cyan:  #FAFAFA; --cyan-rgb:  250,250,250;
+    --amber: #F59E0B; --amber-rgb: 245,158,11;
+    --red:   #EF4444; --red-rgb:   239,68,68;
+    --ok:    #10B981;
+    --gold:  #F59E0B; --gold-rgb:  245,158,11;
+    --dead:  #52525B; --dead-rgb:  82,82,91;
     --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22;
     --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
-    --font-display:  "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
-    --font-mono:     "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
-    --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
-    --font-prose: "Fira Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-    --text: rgba(var(--cyan-rgb), var(--a85));
-    --text-dim: rgba(var(--cyan-rgb), var(--a45));
-    --line: rgba(var(--cyan-rgb), var(--a10));
-    --line-strong: rgba(var(--cyan-rgb), var(--a30));
-    --panel: rgba(18,21,30,0.72);
+    --font-display:  'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+    --font-mono:     'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+    --font-wordmark: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+    --font-prose: 'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
+    --text: #FAFAFA;
+    --text-dim: #71717A;
+    --text-body: #A1A1AA;
+    --line: #27272A;
+    --line-strong: #3F3F46;
+    --panel: #18181B;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* Corner wash gone; the 34px rule grid stays as one crisp solid line. */
   body {
     background:
-      radial-gradient(900px 480px at 70% -10%, rgba(var(--cyan-rgb), 0.14), transparent 60%),
-      linear-gradient(rgba(var(--cyan-rgb), var(--a06)) 1px, transparent 1px) 0 0 / 34px 34px,
+      linear-gradient(var(--surface) 1px, transparent 1px) 0 0 / 34px 34px,
       var(--ground);
-    color: var(--text);
+    color: var(--text-body);
     font-family: var(--font-mono);
     padding: 28px 0 60px;
     min-height: 100vh;
@@ -49,18 +83,17 @@
   h1 {
     font-family: var(--font-wordmark); font-weight: 400;
     font-size: 15px; letter-spacing: 0.30em; color: var(--text);
-    text-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a45)), 0 0 50px rgba(var(--cyan-rgb), var(--a22));
-    margin-bottom: 8px;
+    margin-bottom: 8px; overflow-wrap: anywhere;
   }
   p.sub { font-size: 10px; font-weight: 300; color: var(--text-dim); margin-bottom: 22px; line-height: 1.6; }
   .card {
     border: 1px solid var(--line); background: var(--panel);
-    backdrop-filter: blur(10px); padding: 20px; margin-bottom: 16px;
-    position: relative;
+    padding: 20px; margin-bottom: 16px;
+    position: relative; border-radius: 2px;
   }
   .card h2 { font-size: 10px; letter-spacing: 0.16em; font-weight: 600; color: var(--text); margin-bottom: 12px; }
   .status { font-size: 11px; letter-spacing: 0.05em; line-height: 1.7; }
-  .ok  { color: var(--text); }
+  .ok  { color: var(--ok); }
   .bad { color: var(--red); }
   .warn{ color: var(--amber); }
   .urlrow { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); }
@@ -73,25 +106,25 @@
   .urlrow .note { font-size: 9px; color: var(--text-dim); margin-top: 3px; }
   label { display: block; font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); margin-bottom: 8px; }
   input {
-    width: 100%; background: rgba(11,14,20,0.9); border: 1px solid var(--line);
-    color: var(--text); font-family: var(--font-mono); font-size: 13px; font-weight: 300;
+    width: 100%; background: var(--ground); border: 1px solid var(--line); border-radius: 2px;
+    color: var(--text); font-family: var(--font-mono); font-size: 13px; font-weight: 400;
     padding: 12px 14px; letter-spacing: 0.06em; outline: none;
   }
-  input:focus { border-color: rgba(var(--cyan-rgb), var(--a45)); }
+  input:focus { border-color: var(--line-strong); }
   button {
     width: 100%; margin-top: 14px; padding: 12px; cursor: pointer;
-    background: rgba(var(--cyan-rgb), var(--a16));
-    border: 1px solid rgba(var(--cyan-rgb), var(--a30)); color: var(--text);
-    font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.13em;
-    transition: all .2s;
+    background: var(--raised); border-radius: 2px;
+    border: 1px solid var(--line-strong); color: var(--text);
+    font-family: var(--font-display); font-size: 11px; font-weight: 500; letter-spacing: 0.13em;
+    transition: background-color .2s, border-color .2s;
   }
-  button:hover { background: rgba(var(--cyan-rgb), var(--a22)); }
+  button:hover { background: var(--line-strong); }
   #msg { margin-top: 12px; font-size: 10px; min-height: 16px; color: var(--red); }
-  #msg.ok { color: var(--text); }
+  #msg.ok { color: var(--ok); }
   ol.steps { padding-left: 18px; font-size: 10px; color: var(--text-dim); line-height: 1.9; }
   .cmd {
-    background: rgba(11,14,20,0.9); border: 1px solid var(--line);
-    padding: 10px 12px; font-size: 10px; color: var(--gold);
+    background: var(--ground); border: 1px solid var(--line); border-radius: 2px;
+    padding: 10px 12px; font-size: 10px; color: var(--text);
     word-break: break-all; margin: 6px 0 2px; letter-spacing: 0.03em;
   }
 </style>

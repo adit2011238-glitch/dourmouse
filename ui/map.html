@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DOURMOUSE // AGENT ORCHESTRATION MAP</title>
+<!-- Shared terminal-IDE design system. Declares the @font-face rules for
+     Departure Mono (structure) and Monaspace Neon (machine output) in one
+     place across every screen, plus the --dm-* tokens. Linked BEFORE this
+     file's own <style> so anything below can override it. -->
+<link rel="stylesheet" href="assets/dourmouse-ui.css">
 <style>
   /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
      — replaces --font-prose's previous "Inter" entry below, which was
@@ -21,73 +26,135 @@
     src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
   @font-face{font-family:'Fira Sans';font-style:normal;font-weight:700;font-display:swap;
     src:url('/assets/fonts/fira-sans-700-latin.woff2') format('woff2')}
+  /* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css).
+     Same method as ui/workspace.html (commit a6f3a88): the variable NAMES are
+     unchanged on purpose -- 232 call sites across this file keep working
+     untouched, and the whole look is one block to revert.
+
+     What actually changed, and why, rather than just "new colours":
+
+       - --text / --text-dim / --line / --line-strong were all
+         rgba(var(--cyan-rgb), var(--aNN)): every one of them composited the
+         background through itself, so a label sitting on a panel sitting on
+         the grid read as three stacked hazes rather than as text on a
+         surface. They are now solid values.
+       - --panel was rgba(18,21,30,0.72) and --surface a near-ground tint,
+         which is exactly the translucent-wash failure the design brief names.
+         Both are now flat, opaque layer colours; agent cards, the detail
+         rail and the header all sit on real surfaces.
+       - The eight-step alpha scale (--a06 .. --a85) is kept DEFINED but no
+         longer used for any surface, border or text. It stays so this block
+         is a clean one-step revert and so nothing that reads the custom
+         properties at runtime breaks.
+       - --cyan keeps its name and its job (the single active/selection
+         accent) but is now amber; --amber, --gold and --cyan collapse to the
+         same accent, because a four-hue status palette on tags/pills is the
+         "coloured badge" failure the brief calls out. Red survives for
+         prohibited tools only.
+       - Type moves mono-first: Departure Mono carries structure (the
+         wordmark, view toggles, buttons), Monaspace Neon carries everything
+         the machine says, including prose. Fira Sans stays loaded and one
+         line away (--font-prose-alt) if mono prose reads too dense.
+       - --text-body is the one genuinely NEW variable: this file only had
+         two text levels (--text / --text-dim) and the new system has three.
+         Agent descriptions are prose and want the body value, not the label
+         value they were sharing.
+
+     Previous values, for a one-step revert:
+       --ground:#0B0E14; --surface:#12151E;
+       --cyan:#4FC3F7; --cyan-rgb:79,195,247;
+       --amber:#F5A623; --amber-rgb:245,166,35;
+       --red:#EF5350; --red-rgb:239,83,80;
+       --gold:#FFD232; --gold-rgb:255,210,50;
+       --dead:#8A929E; --dead-rgb:138,146,158;
+       --text:rgba(var(--cyan-rgb),var(--a85));
+       --text-dim:rgba(var(--cyan-rgb),var(--a45));
+       --line:rgba(var(--cyan-rgb),var(--a10));
+       --line-strong:rgba(var(--cyan-rgb),var(--a30));
+       --panel:rgba(18,21,30,0.72);
+       --font-display:"Exo 2",...; --font-mono:"JetBrains Mono",...;
+       --font-prose:"Fira Sans",...; --font-wordmark:"Orbitron",...          */
   :root {
-    /* ---- JARVIS Scene Archive & Design System · palette ---- */
-    --ground: #0B0E14;
-    --surface: #12151E;
-    --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
-    --amber: #F5A623; --amber-rgb: 245,166,35;
-    --red:   #EF5350; --red-rgb:   239,83,80;
-    --gold:  #FFD232; --gold-rgb:  255,210,50;
-    --dead:  #8A929E; --dead-rgb:  138,146,158;
+    /* ---- layers: four solid values, no alpha, no intermediates ---- */
+    --ground: #09090B;
+    --surface: #18181B;
+    --layer-hi: #27272A;
+    --cyan:  #F59E0B; --cyan-rgb:  245,158,11;
+    --amber: #F59E0B; --amber-rgb: 245,158,11;
+    --red:   #EF4444; --red-rgb:   239,68,68;
+    --gold:  #F59E0B; --gold-rgb:  245,158,11;
+    --ok:    #10B981;
+    --dead:  #52525B; --dead-rgb:  82,82,91;
+    /* Kept defined for a clean revert; no longer used for any surface. */
     --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22;
     --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
-    /* ---- type ---- */
-    --font-display:  "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
-    --font-mono:     "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
-    --font-prose:    "Fira Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-    --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
-    /* ---- semantic aliases ---- */
-    --text: rgba(var(--cyan-rgb), var(--a85));
-    --text-dim: rgba(var(--cyan-rgb), var(--a45));
-    --line: rgba(var(--cyan-rgb), var(--a10));
-    --line-strong: rgba(var(--cyan-rgb), var(--a30));
-    --panel: rgba(18,21,30,0.72);
+    /* ---- type: structure vs machine output ---- */
+    --font-display:  'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+    --font-mono:     'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --font-prose:    'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
+    --font-prose-alt:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+    --font-wordmark: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+    /* ---- semantic aliases: three solid text levels ---- */
+    --text: #FAFAFA;
+    --text-body: #A1A1AA;
+    --text-dim: #71717A;
+    --line: #27272A;
+    --line-strong: #3F3F46;
+    --panel: #18181B;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
+  /* The two radial-gradient washes that used to sit here are gone: a
+     coloured glow bleeding out of two corners is pure decoration. */
   body {
-    background:
-      radial-gradient(1100px 520px at 70% -12%, rgba(var(--cyan-rgb), 0.14), transparent 60%),
-      radial-gradient(800px 500px at -8% 112%, rgba(var(--cyan-rgb), 0.10), transparent 55%),
-      var(--ground);
-    color: var(--text);
+    background: var(--ground);
+    color: var(--text-body);
     font-family: var(--font-mono);
     overflow: hidden;
   }
-  .scanlines {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background: repeating-linear-gradient(0deg, rgba(var(--cyan-rgb), 0.014) 0 1px, transparent 1px 3px);
-    mix-blend-mode: overlay;
-  }
+  /* The scanline overlay was a 1.4%-alpha cyan grille in overlay blend mode
+     -- decoration, and one more translucent layer over everything. Kept as
+     an empty positioned element so the markup and any JS that looks it up
+     still work, but it paints nothing. */
+  .scanlines { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
   #app { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
 
   /* ---------------- header ---------------- */
+  /* Pre-existing overflow bug, found by measuring rather than reading: this
+     row is display:flex with no wrap and every child nowrap, so below about
+     1080px the title + search + view toggles + [OPEN DASHBOARD] were wider
+     than the header and the last control was clipped off the right edge
+     with no scroll and no overflow menu -- exactly the dock bug found in
+     workspace.html. The house pattern: the row scrolls, the scrollbar is
+     hidden, and the trailing edge fades to signal there is more. */
   #hdr {
     display: flex; align-items: center; gap: 16px; padding: 12px 20px;
-    border-bottom: 1px solid var(--line); background: rgba(18,21,30,0.72);
-    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line); background: var(--surface);
+    flex: 0 0 auto; min-width: 0; overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
   }
+  #hdr::-webkit-scrollbar { display: none; }
   #hdr .title {
-    font-family: var(--font-display); font-weight: 100; font-size: 15px; letter-spacing: 0.22em;
-    color: var(--text); text-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a30)); white-space: nowrap;
+    font-family: var(--font-display); font-weight: 400; font-size: 15px; letter-spacing: 0.14em;
+    color: var(--text); white-space: nowrap; flex: 0 0 auto;
   }
-  #hdr .sub { font-size: 8px; letter-spacing: 0.10em; font-weight: 300; color: var(--text-dim); }
-  #searchwrap { position: relative; flex: 1; max-width: 560px; }
+  #hdr .sub { font-size: 8px; letter-spacing: 0.10em; font-weight: 400; color: var(--text-dim); white-space: nowrap; }
+  #searchwrap { position: relative; flex: 1 1 240px; min-width: 160px; max-width: 560px; }
   #search {
-    width: 100%; padding: 10px 14px;
-    border: 1px solid var(--line-strong); background: rgba(18,21,30,0.8);
-    color: var(--text); font-family: var(--font-mono); font-size: 12px; font-weight: 300; outline: none;
-    box-shadow: 0 0 0 1px rgba(var(--cyan-rgb), var(--a06));
-    transition: border-color 200ms, box-shadow 200ms;
+    width: 100%; padding: 10px 14px; border-radius: 0;
+    border: 1px solid var(--line-strong); background: var(--ground);
+    color: var(--text); font-family: var(--font-mono); font-size: 12px; font-weight: 400; outline: none;
+    transition: border-color 200ms;
   }
-  #search:focus { border-color: var(--cyan); box-shadow: 0 0 22px rgba(var(--cyan-rgb), var(--a16)); }
-  #search::placeholder { color: var(--text-dim); opacity: 0.8; }
+  #search:focus { border-color: var(--cyan); }
+  #search::placeholder { color: var(--text-dim); opacity: 1; }
   #results {
     position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20;
     border: 1px solid var(--line-strong); overflow: hidden;
-    background: rgba(18,21,30,0.97); backdrop-filter: blur(8px); display: none;
-    box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+    background: var(--surface); display: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,.45);
   }
   #results.open { display: block; }
   .res-row {
@@ -95,141 +162,159 @@
     border-bottom: 1px solid var(--line); transition: background 120ms;
   }
   .res-row:last-child { border-bottom: none; }
-  .res-row:hover { background: rgba(var(--cyan-rgb), var(--a06)); }
-  .res-row .rn { color: var(--text); font-weight: 600; font-size: 11px; letter-spacing: 0.06em; }
+  .res-row:hover { background: var(--layer-hi); }
+  .res-row .rn { color: var(--text); font-weight: 500; font-size: 11px; letter-spacing: 0.06em; }
   .res-row .rt { font-size: 9px; color: var(--text-dim); margin-left: auto; white-space: nowrap; }
   .res-row .rt .sc { color: var(--text); }
-  #viewtoggle { display: flex; gap: 6px; }
+  #viewtoggle { display: flex; gap: 6px; flex: 0 0 auto; }
   .vt {
-    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; font-weight: 400;
-    padding: 7px 10px; border: 1px solid var(--line-strong);
-    background: transparent; color: var(--text-dim); cursor: pointer;
-    transition: all 150ms; white-space: nowrap;
+    font-family: var(--font-display); font-size: 9px; letter-spacing: 0.06em; font-weight: 400;
+    padding: 7px 10px; border: 1px solid var(--line); border-radius: 0;
+    background: var(--surface); color: var(--text-dim); cursor: pointer;
+    transition: background 150ms, color 150ms, border-color 150ms; white-space: nowrap;
   }
-  .vt:hover { color: var(--text); }
-  .vt.active { color: var(--text); background: rgba(var(--cyan-rgb), var(--a10)); box-shadow: 0 0 12px rgba(var(--cyan-rgb), var(--a16)); }
+  .vt:hover { color: var(--text); background: var(--layer-hi); }
+  .vt.active { color: var(--text); background: var(--layer-hi); border-color: var(--line-strong); }
   #hdr .open-dash {
-    margin-left: auto; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; font-weight: 600;
-    padding: 9px 14px; border: 1px solid var(--line-strong);
-    background: rgba(var(--cyan-rgb), var(--a16));
+    margin-left: auto; flex: 0 0 auto;
+    font-family: var(--font-display); font-size: 9px; letter-spacing: 0.06em; font-weight: 400;
+    padding: 9px 14px; border: 1px solid var(--line-strong); border-radius: 0;
+    background: var(--layer-hi);
     color: var(--text); cursor: pointer; text-decoration: none; white-space: nowrap;
-    transition: box-shadow 150ms, transform 120ms;
+    transition: border-color 150ms, color 150ms;
   }
-  #hdr .open-dash:hover { box-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a30)); transform: translateY(-1px); }
+  #hdr .open-dash:hover { border-color: var(--cyan); color: var(--cyan); }
 
   /* ---------------- body: map + detail ---------------- */
-  #body { flex: 1; display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+  #body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 380px; min-height: 0; }
 
+  /* The 34px workbench grid stays -- a grid is a real terminal idiom, not
+     ornament -- but it is a crisp solid rule at the structural layer colour
+     instead of a 6%-alpha cyan smear. */
   #map {
-    position: relative; overflow-y: auto; padding: 26px;
+    position: relative; overflow-y: auto; overflow-x: hidden; padding: 26px; min-width: 0;
     background:
-      linear-gradient(rgba(var(--cyan-rgb), var(--a06)) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(var(--cyan-rgb), var(--a06)) 1px, transparent 1px);
-    background-size: 34px 34px;
+      linear-gradient(var(--surface) 1px, transparent 1px),
+      linear-gradient(90deg, var(--surface) 1px, transparent 1px),
+      var(--ground);
+    background-size: 34px 34px, 34px 34px, auto;
   }
-  #maptitle { font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); margin-bottom: 18px; }
+  #maptitle { font-family: var(--font-display); font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); margin-bottom: 18px; }
   #nodes {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;
   }
   .node {
-    border: 1px solid var(--line); padding: 14px;
-    background: var(--panel); backdrop-filter: blur(6px); cursor: pointer;
-    transition: border-color 180ms ease-out, box-shadow 180ms ease-out, transform 180ms ease-out;
+    border: 1px solid var(--line); padding: 14px; min-width: 0;
+    background: var(--surface); cursor: pointer;
+    transition: border-color 180ms ease-out, background 180ms ease-out;
     position: relative; overflow: hidden;
   }
-  .node:hover { border-color: rgba(var(--cyan-rgb), var(--a30)); transform: translateY(-2px); }
-  .node.selected { border-color: var(--cyan); box-shadow: 0 0 22px rgba(var(--cyan-rgb), var(--a16)); }
+  .node:hover { border-color: var(--line-strong); background: var(--layer-hi); }
+  .node.selected { border-color: var(--cyan); background: var(--layer-hi); }
   .node .ring { position: absolute; inset: 0; pointer-events: none; }
-  .node.computing .ring { animation: ringpulse 1.1s ease-in-out infinite; }
-  @keyframes ringpulse { 0%,100% { box-shadow: inset 0 0 0 0 rgba(var(--cyan-rgb), 0); } 50% { box-shadow: inset 0 0 0 2px rgba(var(--cyan-rgb), var(--a45)); } }
-  .node.auth { border-color: rgba(var(--amber-rgb), var(--a45)); }
-  .nhead { display: flex; align-items: center; gap: 10px; }
+  /* The computing ring used to be a pulsing inset glow. It is now a solid
+     inset rule that blinks on and off -- same information, no halo. */
+  .node.computing .ring { animation: ringpulse 1.1s steps(1, end) infinite; }
+  @keyframes ringpulse { 0%,49% { box-shadow: inset 0 0 0 1px var(--cyan); } 50%,100% { box-shadow: inset 0 0 0 1px transparent; } }
+  .node.auth { border-color: var(--amber); }
+  .nhead { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .spinner { width: 30px; height: 30px; flex: none; }
   .spinner circle:last-child { transform-origin: center; transform-box: fill-box; animation: spin 2.4s linear infinite; }
   .node.computing .spinner circle:last-child { animation-duration: 0.55s; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .nname { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text); }
-  .ndomain { font-size: 8px; letter-spacing: 0.10em; font-weight: 300; color: var(--text-dim); }
+  .nname { font-size: 11px; font-weight: 500; letter-spacing: 0.06em; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ndomain { font-size: 8px; letter-spacing: 0.10em; font-weight: 400; color: var(--text-dim); white-space: nowrap; }
+  /* One monochrome pill, not a palette of coloured ones. State is carried
+     by the text inside the pill and by the row's own border, not by hue.
+     The single exception below is .auth, which is the one state that needs
+     a human to act -- it gets the accent, and only the accent. */
   .npill {
     margin-left: auto; flex: none; font-size: 8px; letter-spacing: 0.06em; font-weight: 400; padding: 3px 7px;
-    border: 1px solid; color: var(--text); border-color: rgba(var(--cyan-rgb), var(--a45));
-    background: rgba(var(--cyan-rgb), var(--a06));
+    border: 1px solid var(--line-strong); border-radius: 0;
+    color: var(--text-dim); background: var(--layer-hi); white-space: nowrap;
   }
-  .npill.computing { color: var(--text); border-color: rgba(var(--cyan-rgb), var(--a60)); background: rgba(var(--cyan-rgb), var(--a10)); animation: pulse 0.9s infinite; }
-  .npill.auth { color: var(--amber); border-color: rgba(var(--amber-rgb), var(--a60)); background: rgba(var(--amber-rgb), var(--a06)); animation: blink 0.8s step-start infinite; }
-  .npill.live { color: var(--text); border-color: rgba(var(--cyan-rgb), var(--a60)); background: rgba(var(--cyan-rgb), var(--a10)); animation: pulse 2.2s infinite; }
-  .node.live { border-color: rgba(var(--cyan-rgb), var(--a30)); }
+  .npill.computing { color: var(--text); animation: pulse 0.9s infinite; }
+  .npill.auth { color: var(--amber); border-color: var(--amber); animation: blink 0.8s step-start infinite; }
+  .npill.live { color: var(--ok); animation: pulse 2.2s infinite; }
+  .node.live { border-color: var(--line-strong); }
   .nunread {
     position: absolute; top: 10px; right: 10px; font-size: 8px; letter-spacing: 0.06em;
-    padding: 2px 6px; color: var(--text);
-    border: 1px solid rgba(var(--cyan-rgb), var(--a45)); background: rgba(var(--cyan-rgb), var(--a10));
+    padding: 2px 6px; color: var(--text); border-radius: 0;
+    border: 1px solid var(--line-strong); background: var(--layer-hi);
     animation: pulse 2s infinite;
   }
-  .fe.msg { border-color: rgba(var(--cyan-rgb), var(--a30)); background: rgba(var(--cyan-rgb), var(--a06)); }
-  .fe.msg .tag { color: var(--text); font-weight: 600; }
+  .fe.msg { border-color: var(--line-strong); }
+  .fe.msg .tag { color: var(--text); font-weight: 500; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
   @keyframes blink { 50% { opacity: 0.3; } }
-  .ndesc { font-size: 9px; font-weight: 300; color: var(--text-dim); margin: 9px 0 8px; line-height: 1.45; }
-  .nlast { font-size: 9px; font-weight: 300; color: var(--text-dim); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .nlast b { color: var(--text); font-weight: 600; }
+  .ndesc { font-size: 9px; font-weight: 400; color: var(--text-body); margin: 9px 0 8px; line-height: 1.45; }
+  .nlast { font-size: 9px; font-weight: 400; color: var(--text-dim); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nlast b { color: var(--text); font-weight: 500; }
 
   /* ---------------- detail panel ---------------- */
   #detail {
-    border-left: 1px solid var(--line); background: rgba(18,21,30,0.5);
-    display: flex; flex-direction: column; min-height: 0;
+    border-left: 1px solid var(--line); background: var(--surface);
+    display: flex; flex-direction: column; min-height: 0; min-width: 0;
   }
-  .dtitle { font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); padding: 12px 16px; border-bottom: 1px solid var(--line); }
-  #dbody { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .dempty { color: var(--text-dim); font-size: 10px; letter-spacing: 0.06em; font-weight: 300; line-height: 1.8; text-align: center; padding: 30px 10px; }
-  #dname { font-size: 14px; font-weight: 600; letter-spacing: 0.06em; color: var(--text); }
-  #dstatus { display: inline-block; margin-left: 8px; font-size: 8px; letter-spacing: 0.06em; font-weight: 400; padding: 3px 8px; border: 1px solid; color: var(--text); border-color: rgba(var(--cyan-rgb), var(--a45)); background: rgba(var(--cyan-rgb), var(--a06)); vertical-align: middle; }
-  #dstatus.computing { color: var(--text); border-color: rgba(var(--cyan-rgb), var(--a60)); background: rgba(var(--cyan-rgb), var(--a10)); animation: pulse 0.9s infinite; }
-  #dstatus.auth { color: var(--amber); border-color: rgba(var(--amber-rgb), var(--a60)); background: rgba(var(--amber-rgb), var(--a06)); animation: blink 0.8s infinite; }
-  #dstatus.live { color: var(--text); border-color: rgba(var(--cyan-rgb), var(--a60)); background: rgba(var(--cyan-rgb), var(--a10)); animation: pulse 2.2s infinite; }
-  #ddesc { font-size: 10px; font-weight: 300; color: var(--text-dim); line-height: 1.55; }
-  #dmodel { font-size: 9px; font-weight: 300; color: var(--text-dim); letter-spacing: 0.06em; margin-top: 7px; }
-  .sec { font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); margin: 4px 0 8px; }
-  .dtools { display: flex; flex-wrap: wrap; gap: 5px; }
-  .dchip { font-size: 8px; letter-spacing: 0.06em; font-weight: 400; padding: 3px 8px; background: rgba(var(--cyan-rgb), var(--a06)); border: 1px solid rgba(var(--cyan-rgb), var(--a16)); color: var(--text); }
-  .dchip.gated { background: rgba(var(--amber-rgb), var(--a06)); border-color: rgba(var(--amber-rgb), var(--a30)); color: var(--amber); }
-  .dchip.prohib { background: rgba(var(--red-rgb), var(--a06)); border-color: rgba(var(--red-rgb), var(--a30)); color: var(--red); }
-  #dispatchbox { border: 1px solid var(--line-strong); padding: 10px; background: rgba(18,21,30,0.7); }
-  #dispatchbox:focus-within { border-color: var(--cyan); box-shadow: 0 0 16px rgba(var(--cyan-rgb), var(--a16)); }
+  .dtitle { font-family: var(--font-display); font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  #dbody { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .dempty { color: var(--text-body); font-size: 10px; letter-spacing: 0.06em; font-weight: 400; line-height: 1.8; text-align: center; padding: 30px 10px; }
+  #dname { font-size: 14px; font-weight: 500; letter-spacing: 0.06em; color: var(--text); }
+  #dstatus { display: inline-block; margin-left: 8px; font-size: 8px; letter-spacing: 0.06em; font-weight: 400; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: 0; color: var(--text-dim); background: var(--layer-hi); vertical-align: middle; }
+  #dstatus.computing { color: var(--text); animation: pulse 0.9s infinite; }
+  #dstatus.auth { color: var(--amber); border-color: var(--amber); animation: blink 0.8s infinite; }
+  #dstatus.live { color: var(--ok); animation: pulse 2.2s infinite; }
+  #ddesc { font-size: 10px; font-weight: 400; color: var(--text-body); line-height: 1.55; }
+  #dmodel { font-size: 9px; font-weight: 400; color: var(--text-dim); letter-spacing: 0.06em; margin-top: 7px; }
+  .sec { font-family: var(--font-display); font-size: 9px; letter-spacing: 0.13em; font-weight: 400; color: var(--text-dim); margin: 4px 0 8px; }
+  .dtools { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+  /* One monochrome chip. "gated" and "prohibited" were an amber and a red
+     chip sitting beside the plain one -- three tag colours in a 380px rail.
+     They now differ by their border and their label, not by hue. */
+  .dchip { font-size: 8px; letter-spacing: 0.06em; font-weight: 400; padding: 3px 8px; border-radius: 0;
+    background: var(--layer-hi); border: 1px solid var(--line); color: var(--text-dim);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dchip.gated { border-color: var(--line-strong); color: var(--text-body); }
+  .dchip.prohib { border-color: var(--red); color: var(--red); }
+  #dispatchbox { border: 1px solid var(--line-strong); padding: 10px; background: var(--ground); min-width: 0; }
+  #dispatchbox:focus-within { border-color: var(--cyan); }
   /* v5.2: one-click suggested tasks in the dispatch box */
   .sugg {
     font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.05em;
-    color: var(--text-dim); border: 1px solid var(--line); background: rgba(18,21,30,0.6);
-    padding: 4px 9px; cursor: pointer; transition: color 140ms, border-color 140ms, box-shadow 140ms;
+    color: var(--text-dim); border: 1px solid var(--line); background: var(--surface);
+    padding: 4px 9px; cursor: pointer; transition: color 140ms, border-color 140ms; border-radius: 0;
     max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .sugg:hover { color: var(--text); border-color: var(--line-strong); box-shadow: 0 0 10px rgba(var(--cyan-rgb), var(--a16)); }
-  #dinput { width: 100%; background: transparent; border: none; outline: none; resize: none; color: var(--text); font-family: var(--font-mono); font-size: 11px; font-weight: 300; line-height: 1.5; }
-  #dinput::placeholder { color: var(--text-dim); opacity: 0.8; }
-  .drow { display: flex; gap: 8px; margin-top: 8px; }
+  .sugg:hover { color: var(--text); border-color: var(--line-strong); }
+  #dinput { width: 100%; background: transparent; border: none; outline: none; resize: none; color: var(--text); font-family: var(--font-mono); font-size: 11px; font-weight: 400; line-height: 1.5; }
+  #dinput::placeholder { color: var(--text-dim); opacity: 1; }
+  .drow { display: flex; gap: 8px; margin-top: 8px; min-width: 0; }
   #dsend, #dopenwin {
-    font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.06em;
-    padding: 9px 10px; border: 1px solid var(--line-strong);
-    background: rgba(var(--cyan-rgb), var(--a16)); color: var(--text);
-    cursor: pointer; transition: box-shadow 120ms, transform 120ms;
+    font-family: var(--font-display); font-size: 9px; font-weight: 400; letter-spacing: 0.06em;
+    padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 0;
+    background: var(--layer-hi); color: var(--text);
+    cursor: pointer; transition: border-color 120ms, color 120ms;
+    min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  #dsend { flex: 1; }
-  #dsend:hover:not(:disabled), #dopenwin:hover:not(:disabled) { box-shadow: 0 0 14px rgba(var(--cyan-rgb), var(--a30)); transform: translateY(-1px); }
+  #dsend { flex: 1 1 auto; }
+  #dopenwin { flex: 0 1 auto; }
+  #dsend:hover:not(:disabled), #dopenwin:hover:not(:disabled) { border-color: var(--cyan); color: var(--cyan); }
   #dsend:disabled, #dopenwin:disabled { opacity: 0.4; cursor: not-allowed; }
-  #dstatusline { font-size: 9px; font-weight: 300; color: var(--text-dim); letter-spacing: 0.04em; }
-  #dfeed { display: flex; flex-direction: column; gap: 6px; }
+  #dstatusline { font-size: 9px; font-weight: 400; color: var(--text-dim); letter-spacing: 0.04em; }
+  #dfeed { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .fe {
-    font-size: 10px; font-weight: 300; line-height: 1.5; padding: 7px 10px;
-    border: 1px solid var(--line); background: rgba(18,21,30,0.6); white-space: pre-wrap; word-break: break-word;
+    font-size: 10px; font-weight: 400; line-height: 1.5; padding: 7px 10px; color: var(--text-body);
+    border: 1px solid var(--line); background: var(--ground); white-space: pre-wrap; word-break: break-word;
   }
-  .fe .ts { color: rgba(var(--dead-rgb), var(--a45)); }
-  .fe.tool_use { border-color: rgba(var(--cyan-rgb), var(--a22)); }
-  .fe.tool_use .tag { color: var(--text); font-weight: 600; }
-  .fe.tool_result { border-color: rgba(var(--cyan-rgb), var(--a22)); }
-  .fe.tool_result .tag { color: var(--text); font-weight: 600; }
-  .fe.auth { border-color: rgba(var(--amber-rgb), var(--a30)); }
-  .fe.auth .tag { color: var(--amber); font-weight: 600; }
-  .fe.live { border-color: rgba(var(--cyan-rgb), var(--a30)); }
-  .fe.live .tag { color: var(--text); font-weight: 600; }
+  .fe .ts { color: var(--dead); }
+  .fe.tool_use { border-color: var(--line-strong); }
+  .fe.tool_use .tag { color: var(--text); font-weight: 500; }
+  .fe.tool_result { border-color: var(--line-strong); }
+  .fe.tool_result .tag { color: var(--text); font-weight: 500; }
+  .fe.auth { border-color: var(--amber); }
+  .fe.auth .tag { color: var(--amber); font-weight: 500; }
+  .fe.live { border-color: var(--line-strong); }
+  .fe.live .tag { color: var(--ok); font-weight: 500; }
 
   /* ---------------- neural link graph view ---------------- */
   #graph { position: relative; width: 100%; height: 100%; min-height: 540px; }
@@ -240,16 +325,17 @@
     font-size: 10px; letter-spacing: 0.05em; color: var(--text-dim);
     padding: 6px 4px 0; opacity: 0; transition: opacity 140ms ease;
   }
-  .g-link { stroke-width: 1; opacity: 0.26; transition: opacity 0.2s; }
-  .g-link.delegate { stroke: var(--cyan); stroke-dasharray: 4 5; }
-  .g-link.memory { stroke: var(--cyan); }
-  .g-link.peer { stroke: rgba(var(--dead-rgb), var(--a45)); }
-  .g-link.active { opacity: 1; animation: linkpulse 1.1s ease-in-out infinite; }
-  @keyframes linkpulse { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
+  .g-link { stroke-width: 1; opacity: 0.5; transition: opacity 0.2s; }
+  .g-link.delegate { stroke: var(--line-strong); stroke-dasharray: 4 5; }
+  .g-link.memory { stroke: var(--line-strong); }
+  .g-link.peer { stroke: var(--dead); }
+  .g-link.active { stroke: var(--cyan); opacity: 1; animation: linkpulse 1.1s ease-in-out infinite; }
+  @keyframes linkpulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
   .g-node { cursor: pointer; transition: transform 0.15s; }
   .g-node:hover { transform: scale(1.07); }
   .g-node circle { transition: stroke 0.2s; }
-  .g-node.selected circle { filter: drop-shadow(0 0 9px rgba(var(--cyan-rgb), var(--a85))); stroke: var(--cyan); stroke-width: 3; }
+  /* Selection is a heavier accent stroke, not a drop-shadow halo. */
+  .g-node.selected circle { stroke: var(--cyan); stroke-width: 3; }
   .g-node text { fill: var(--text); font-size: 9.5px; font-family: var(--font-mono); letter-spacing: 0.08em; pointer-events: none; }
   .g-node .glabel { font-size: 8px; fill: var(--text-dim); letter-spacing: 0.12em; }
   .g-node.active circle { animation: gpulse 1s ease-in-out infinite; }
@@ -258,38 +344,42 @@
   /* ---------------- live bus communication visualization ---------------- */
   .pulse-trail { pointer-events: none; }
   .pulse-dot { pointer-events: none; }
+  /* The flash used to be a 20px expanding glow ring. It is now the accent
+     border, held for the same duration -- the event still reads, without a
+     light source. */
   .node.flash { animation: nodeflash 0.7s ease-out; }
-  @keyframes nodeflash { 0% { box-shadow: 0 0 0 0 rgba(var(--cyan-rgb), var(--a60)); } 100% { box-shadow: 0 0 0 20px rgba(var(--cyan-rgb), 0); } }
+  @keyframes nodeflash { 0% { border-color: var(--cyan); } 100% { border-color: var(--line); } }
   #stream {
     position: fixed; left: 20px; bottom: 18px; z-index: 40;
-    display: flex; flex-direction: column-reverse; gap: 6px; max-width: 540px;
+    display: flex; flex-direction: column-reverse; gap: 6px; max-width: min(540px, calc(100vw - 40px));
     pointer-events: none;
   }
   .tic {
-    font-size: 9px; font-weight: 300; line-height: 1.5; padding: 8px 12px;
-    background: rgba(18,21,30,0.94); border: 1px solid rgba(var(--cyan-rgb), var(--a30));
-    box-shadow: 0 0 14px rgba(var(--cyan-rgb), var(--a16)); color: var(--text);
+    font-size: 9px; font-weight: 400; line-height: 1.5; padding: 8px 12px;
+    background: var(--surface); border: 1px solid var(--line-strong);
+    color: var(--text-body);
     animation: ticin 0.28s ease-out; transition: opacity 0.6s;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .tic b { color: var(--text); font-weight: 600; }
+  .tic b { color: var(--text); font-weight: 500; }
   .tic .tto { color: var(--text); }
-  .tic .tclose { color: rgba(var(--dead-rgb), var(--a45)); }
+  .tic .tclose { color: var(--dead); }
   @keyframes ticin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
   ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: rgba(var(--cyan-rgb), var(--a16)); }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(var(--cyan-rgb), var(--a30)); }
+  ::-webkit-scrollbar-track { background: var(--ground); }
+  ::-webkit-scrollbar-thumb { background: var(--layer-hi); border-radius: 0; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
 
   @media (max-width: 900px) {
-    #body { grid-template-columns: 1fr; }
+    #body { grid-template-columns: minmax(0, 1fr); }
     #detail { border-left: none; border-top: 1px solid var(--line); }
     #hdr .sub { display: none; }
   }
   /* phone-friendly layout — map becomes a single column with the detail
      panel below the graph. */
   @media (max-width: 760px) {
-    #body { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    #body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr auto; }
     #detail { max-height: 42vh; }
     .toolbar { flex-wrap: wrap; }
     .keyhint { display: none; }
@@ -304,40 +394,44 @@
      this file's own overlay convention (#results above): hidden by default,
      revealed by an .open class. .dmf-frame mirrors ui/workspace.html's
      .iframepanel. */
+  /* The scrim is the one place a translucent fill is doing real work --
+     it has to show that the page underneath is still there. It keeps the
+     alpha but loses the decorative blur behind it. */
   #dmframe {
     position: fixed; inset: 0; z-index: 92; display: none;
     align-items: center; justify-content: center; padding: 3vh 2vw;
-    background: rgba(6,8,14,0.74); backdrop-filter: blur(4px);
+    background: rgba(9,9,11,0.82);
   }
   #dmframe.open { display: flex; }
   .dmf-box {
     width: min(96vw, 1180px); height: min(94vh, 900px);
     display: flex; flex-direction: column; overflow: hidden;
     border: 1px solid var(--line-strong); background: var(--surface);
-    box-shadow: 0 0 70px rgba(var(--cyan-rgb), var(--a22));
+    box-shadow: 0 2px 8px rgba(0,0,0,.45);
   }
   .dmf-head {
     flex: 0 0 auto; display: flex; align-items: center; gap: 9px;
-    padding: 9px 12px; border-bottom: 1px solid var(--line);
+    padding: 9px 12px; border-bottom: 1px solid var(--line); min-width: 0;
   }
   .dmf-title {
-    flex: 1; min-width: 0; font-size: 10px; letter-spacing: 0.14em;
+    flex: 1 1 auto; min-width: 0; font-size: 10px; letter-spacing: 0.14em;
     color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .dmf-head button {
-    flex: 0 0 auto; font-family: var(--font-mono); font-size: 9px;
-    letter-spacing: 0.12em; color: var(--text); background: transparent;
-    border: 1px solid var(--line-strong); padding: 6px 11px; cursor: pointer;
+    flex: 0 0 auto; font-family: var(--font-display); font-size: 9px;
+    letter-spacing: 0.12em; color: var(--text-dim); background: var(--surface);
+    border: 1px solid var(--line-strong); border-radius: 0; padding: 6px 11px; cursor: pointer;
+    white-space: nowrap;
   }
-  .dmf-head button:hover { background: rgba(var(--cyan-rgb), var(--a10)); }
-  .dmf-body { flex: 1; min-height: 0; position: relative; background: #04080e; }
-  .dmf-frame { width: 100%; height: 100%; border: none; display: block; background: #04080e; }
+  .dmf-head button:hover { background: var(--layer-hi); color: var(--text); }
+  .dmf-body { flex: 1; min-height: 0; position: relative; background: var(--ground); }
+  .dmf-frame { width: 100%; height: 100%; border: none; display: block; background: var(--ground); }
   /* honest failure surface — shown only when the embed really did not load */
   .dmf-note {
     position: absolute; left: 0; right: 0; bottom: 0; display: none;
     font-size: 9px; letter-spacing: 0.08em; line-height: 1.6; color: var(--amber);
-    background: rgba(16,13,8,0.96); padding: 8px 12px;
-    border-top: 1px solid rgba(var(--amber-rgb), var(--a45));
+    background: var(--surface); padding: 8px 12px;
+    border-top: 1px solid var(--amber);
   }
   .dmf-note.show { display: block; }
   @media (max-width: 760px) {
@@ -572,7 +666,7 @@
       el.innerHTML = `
         <div class="ring"></div>
         <div class="nhead">
-          <svg class="spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="rgba(79,195,247,0.16)" stroke-width="2"/><circle cx="12" cy="12" r="10" fill="none" stroke="#4FC3F7" stroke-width="2" stroke-dasharray="15 47" stroke-linecap="round"/></svg>
+          <svg class="spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="var(--line-strong)" stroke-width="2"/><circle cx="12" cy="12" r="10" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-dasharray="15 47" stroke-linecap="round"/></svg>
           <div><div class="nname">${esc(ag.name)}</div><div class="ndomain">${esc(ag.domain)}</div></div>
           <div class="npill">[IDLE]</div>
         </div>
@@ -890,14 +984,13 @@
     trail.setAttribute('class', 'pulse-trail');
     trail.setAttribute('x1', sx); trail.setAttribute('y1', sy);
     trail.setAttribute('x2', tx); trail.setAttribute('y2', ty);
-    trail.setAttribute('stroke', '#4FC3F7'); trail.setAttribute('stroke-width', '2');
+    trail.setAttribute('stroke', 'var(--cyan)'); trail.setAttribute('stroke-width', '2');
     trail.setAttribute('opacity', '0.9');
     svg.appendChild(trail);
     const dot = document.createElementNS(NS, 'circle');
     dot.setAttribute('class', 'pulse-dot');
     dot.setAttribute('r', '5');
-    dot.setAttribute('fill', '#4FC3F7');
-    dot.setAttribute('filter', 'drop-shadow(0 0 6px #4FC3F7)');
+    dot.setAttribute('fill', 'var(--cyan)');
     svg.appendChild(dot);
     const t0 = performance.now(), dur = 650;
     function step(t) {
@@ -1013,13 +1106,13 @@
     for (const k of Object.keys(pos)) graphPos[k] = { x: pos[k].x, y: pos[k].y };
 
     let svg = `<svg viewBox="0 0 ${W} ${H}">`;
-    const kindColor = { delegate: '#4FC3F7', memory: '#4FC3F7', peer: '#8A929E' };
+    const kindColor = { delegate: 'var(--line-strong)', memory: 'var(--line-strong)', peer: 'var(--dead)' };
     for (const e of graphData.edges) {
       const s = pos[e.source], t = pos[e.target];
       if (!s || !t) continue;
       svg += `<line class="g-link ${e.kind}" data-src="${esc(e.source)}" data-tgt="${esc(e.target)}"
         x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}"
-        stroke="${kindColor[e.kind] || '#8A929E'}" stroke-width="1" stroke-dasharray="${e.kind === 'delegate' ? '4 5' : ''}"/>`;
+        stroke="${kindColor[e.kind] || 'var(--dead)'}" stroke-width="1" stroke-dasharray="${e.kind === 'delegate' ? '4 5' : ''}"/>`;
     }
     for (const n of graphData.nodes) {
       const p = pos[n.name];
@@ -1029,7 +1122,7 @@
       const tip = esc((n.description || '').slice(0, 140));
       svg += `<g class="g-node" data-name="${esc(n.name)}" transform="translate(${p.x},${p.y})">
         <title>${tip}</title>
-        <circle r="${p.r}" fill="rgba(18,21,30,0.9)" stroke="rgba(79,195,247,0.45)" stroke-width="2"/>
+        <circle r="${p.r}" fill="var(--surface)" stroke="var(--line-strong)" stroke-width="2"/>
         <text y="-8" text-anchor="middle" class="glabel">${esc(n.domain)}</text>
         <text y="7" text-anchor="middle">${esc(n.name)}</text>
         <text y="${p.r + 15}" text-anchor="middle" class="glabel">${n.tool_count} tools</text>

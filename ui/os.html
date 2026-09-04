@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Dourmouse</title>
+<link rel="stylesheet" href="/assets/dourmouse-ui.css">
 <style>
 /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
    — this is exactly the "humanist face" --sans below names in this
@@ -43,50 +44,86 @@
      interface is coloured — selection, focus and emphasis are carried by
      weight, ground and rule. If you see colour here, the system is telling
      you something. */
-  --v0:  #0A0A0B;   /* page */
-  --v1:  #0F0F11;   /* panel */
-  --v2:  #141417;   /* raised */
-  --v3:  #1A1A1E;   /* hover */
-  --v4:  #222227;   /* selected ground */
-  --line:#1F1F23;
-  --line-2:#2B2B31;
+  /* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css,
+     linked above), same method as ui/workspace.html: the variable NAMES are
+     unchanged, so all 285 call sites keep working and this is one block to
+     revert. This screen's own "achromatic by policy" note above still holds
+     word for word -- the shared system reaches the same conclusion and just
+     names the values.
 
-  --t0:  #F2F2F3;   /* primary text */
-  --t1:  #B4B4BA;   /* secondary */
-  --t2:  #85858D;   /* tertiary — meets AA on --v1 */
+       - v0..v4 were five near-black steps. The system has exactly FOUR solid
+         layers and no intermediates, so v1/v2 both land on the structural
+         layer and v3/v4 both on the interactive one. A surface that needs to
+         read deeper moves a layer; it never gets a half-step.
+       - --r/--r2 were 4px/8px. Everything structural is 2px now.
+       - up/wait/down keep their jobs and take the system's ok/active/error.
+       - --sans: this file's identity was "mono chrome, humanist prose", and
+         the shared system moves prose to mono as well. Fira Sans stays
+         bundled above and one line away as --sans-alt if the mono reading
+         turns out too dense in daily use -- exactly the escape hatch
+         workspace.html left itself.
+
+     Previous values, for a one-step revert:
+       --v0:#0A0A0B; --v1:#0F0F11; --v2:#141417; --v3:#1A1A1E; --v4:#222227;
+       --line:#1F1F23; --line-2:#2B2B31;
+       --t0:#F2F2F3; --t1:#B4B4BA; --t2:#85858D;
+       --up:#5BA97C; --wait:#C9A227; --down:#C2685C;
+       --r:4px; --r2:8px;
+       --mono:ui-monospace,SFMono-Regular...; --sans:"Fira Sans"...        */
+  --v0:  #09090B;   /* page */
+  --v1:  #18181B;   /* panel */
+  --v2:  #18181B;   /* raised */
+  --v3:  #27272A;   /* hover */
+  --v4:  #27272A;   /* selected ground */
+  --line:#27272A;
+  --line-2:#3F3F46;
+
+  --t0:  #FAFAFA;   /* primary text */
+  --t1:  #A1A1AA;   /* secondary */
+  --t2:  #71717A;   /* tertiary */
 
   /* semantic only */
-  --up:   #5BA97C;
-  --wait: #C9A227;
-  --down: #C2685C;
+  --up:   #10B981;
+  --wait: #F59E0B;
+  --down: #EF4444;
 
   --sel: var(--v4);
-  --r:  4px;
-  --r2: 8px;
+  --r:  2px;
+  --r2: 2px;
 
   /* Mono carries the chrome: labels, metadata, status, navigation. Prose is
      the only thing set in a humanist face. The split is the identity —
      an instrument that talks, not a chat app with a monospace font. */
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --sans: "Fira Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: 'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono', ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --display: 'Departure Mono','Commit Mono','Intel One Mono', ui-monospace, monospace;
+  --sans: 'Berkeley Mono','Monaspace Neon','JetBrains Mono', ui-monospace, monospace;
+  --sans-alt: "Fira Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 
   --rail: 220px;
   --gutter: 116px;   /* per-turn metadata column */
   --dur: 130ms;
 }
+/* LIGHT MODE IS KEPT. There is a real user-facing toggle for it (the
+   Settings panel row and the "Switch theme" command-palette item below), so
+   deleting it would remove a shipped feature, not tidy one up. The brief's
+   palette is dark-only, so these light values are DERIVED: the same neutral
+   zinc ladder read in the other direction, with the three functional accents
+   darkened only as far as they must be to stay legible on a light ground.
+   If the app is meant to be dark-only, this block and its [data-theme="light"]
+   twin are the two places to delete. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --v0:#FCFCFB; --v1:#FFFFFF; --v2:#F5F5F3; --v3:#EFEFEC; --v4:#E6E6E2;
-    --line:#E7E7E3; --line-2:#D5D5D0;
-    --t0:#131315; --t1:#4E4E55; --t2:#6B6B73;
-    --up:#2F7D52; --wait:#8A6A12; --down:#A63F33;
+    --v0:#FAFAFA; --v1:#F4F4F5; --v2:#F4F4F5; --v3:#E4E4E7; --v4:#E4E4E7;
+    --line:#E4E4E7; --line-2:#D4D4D8;
+    --t0:#09090B; --t1:#52525B; --t2:#71717A;
+    --up:#047857; --wait:#B45309; --down:#DC2626;
   }
 }
 :root[data-theme="light"] {
-  --v0:#FCFCFB; --v1:#FFFFFF; --v2:#F5F5F3; --v3:#EFEFEC; --v4:#E6E6E2;
-  --line:#E7E7E3; --line-2:#D5D5D0;
-  --t0:#131315; --t1:#4E4E55; --t2:#6B6B73;
-  --up:#2F7D52; --wait:#8A6A12; --down:#A63F33;
+  --v0:#FAFAFA; --v1:#F4F4F5; --v2:#F4F4F5; --v3:#E4E4E7; --v4:#E4E4E7;
+  --line:#E4E4E7; --line-2:#D4D4D8;
+  --t0:#09090B; --t1:#52525B; --t2:#71717A;
+  --up:#047857; --wait:#B45309; --down:#DC2626;
 }
 
 *{box-sizing:border-box}
@@ -98,7 +135,7 @@ body{
   font-feature-settings:"cv02","cv03","cv04","ss01";
 }
 button,input,textarea,select{font:inherit;color:inherit}
-:focus-visible{outline:2px solid var(--t0);outline-offset:2px;border-radius:3px}
+:focus-visible{outline:2px solid var(--t0);outline-offset:2px;border-radius:2px}
 ::selection{background:var(--t0);color:var(--v0)}
 
 /* ---------- shell ---------- */
@@ -110,10 +147,11 @@ header{
   grid-column:1/-1;display:flex;align-items:center;gap:14px;
   padding:0 14px;height:46px;background:var(--v1);
   border-bottom:1px solid var(--line);
+  overflow:hidden;min-width:0;
 }
 .wordmark{
-  display:flex;align-items:center;gap:9px;font-size:13px;
-  font-weight:620;letter-spacing:.14em;text-transform:uppercase;
+  display:flex;align-items:center;gap:9px;font-size:13px;flex:none;
+  font-weight:600;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;
 }
 .mk{width:7px;height:7px;background:var(--t0);border-radius:1px;transform:rotate(45deg)}
 .iconbtn{
@@ -123,7 +161,16 @@ header{
 }
 .iconbtn:hover{background:var(--v3);color:var(--t0)}
 .hspace{margin-left:auto}
-.hstats{display:flex;align-items:center;gap:4px}
+/* Horizontal readout row inside a 46px fixed bar. It had no width discipline,
+   so once enough stats were live the later ones left the bar with no way to
+   reach them -- header is overflow:hidden. House fix: scroll it, hide the
+   bar, fade the trailing edge. */
+.hstats{display:flex;align-items:center;gap:4px;
+  flex:0 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(to right,transparent 0,#000 24px,#000 100%);
+          mask-image:linear-gradient(to right,transparent 0,#000 24px,#000 100%)}
+.hstats::-webkit-scrollbar{display:none}
+.hstats > *{flex:none}
 .stat{
   display:flex;align-items:center;gap:7px;padding:5px 10px;
   border:1px solid var(--line);background:var(--v2);
@@ -132,10 +179,11 @@ header{
   min-height:30px;white-space:nowrap;
 }
 .stat:hover{border-color:var(--line-2);background:var(--v3);color:var(--t0)}
-.stat b{color:var(--t0);font-weight:550;font-family:var(--mono);font-size:11px}
+.stat b{color:var(--t0);font-weight:500;font-family:var(--mono);font-size:11px}
 .led{width:6px;height:6px;border-radius:50%;background:var(--t2);flex:none}
-.led.ok{background:var(--up);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--up) 18%,transparent)}
-.led.bad{background:var(--down);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--down) 18%,transparent)}
+/* Status is a solid dot -- the two colour-mix halo rings are gone. */
+.led.ok{background:var(--up)}
+.led.bad{background:var(--down)}
 .led.warn{background:var(--wait)}
 .led.live{animation:brk 1.4s ease-in-out infinite}
 @keyframes brk{0%,100%{opacity:1}50%{opacity:.32}}
@@ -150,10 +198,10 @@ header{
 .newbtn{
   width:100%;min-height:34px;display:flex;align-items:center;gap:9px;
   padding:8px 11px;border:1px solid var(--line-2);background:var(--v2);
-  border-radius:var(--r);cursor:pointer;font-size:13px;font-weight:520;
+  border-radius:var(--r);cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;
   transition:border-color var(--dur),background var(--dur);
 }
-.newbtn:hover{border-color:var(--t0);background:var(--v3)}
+.newbtn:hover{border-color:var(--line-2);background:var(--v3)}
 .newbtn kbd{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--t2)}
 
 .navsec{padding:6px 8px}
@@ -168,7 +216,7 @@ header{
   transition:background var(--dur),color var(--dur);
 }
 .nav:hover{background:var(--v3);color:var(--t0)}
-.nav[aria-current="page"]{background:var(--sel);color:var(--t0);font-weight:550}
+.nav[aria-current="page"]{background:var(--sel);color:var(--t0);font-weight:500}
 .nav .gl{width:14px;text-align:center;font-size:12px;flex:none;opacity:.85}
 .nav .tail{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--t2)}
 
@@ -198,10 +246,10 @@ header{
   text-align:left;padding:13px 14px;border:1px solid var(--line);
   background:var(--v1);border-radius:var(--r2);cursor:pointer;
   transition:border-color var(--dur),background var(--dur),transform var(--dur);
-  min-height:44px;
+  min-height:44px;min-width:0;
 }
-.card:hover{border-color:var(--t0);background:var(--v2);transform:translateY(-1px)}
-.card .h{font-size:13px;font-weight:550;margin-bottom:3px}
+.card:hover{border-color:var(--line-2);background:var(--v3);transform:translateY(-1px)}
+.card .h{font-size:13px;font-weight:500;margin-bottom:3px}
 .card .d{font-size:11.5px;color:var(--t2)}
 
 /* ---------- turns ---------- */
@@ -219,10 +267,10 @@ header{
 .msg ul,.msg ol{margin:10px 0;padding-left:20px}
 .msg li{margin-bottom:4px}
 .msg li::marker{color:var(--t0)}
-.msg strong{font-weight:620}
+.msg strong{font-weight:500}
 .msg a{color:var(--t0);text-underline-offset:2px}
-.msg h1,.msg h2,.msg h3{font-size:15px;font-weight:620;margin:16px 0 7px;letter-spacing:-.01em}
-.msg code{font-family:var(--mono);font-size:12.5px;background:var(--v3);border:1px solid var(--line);padding:1px 5px;border-radius:4px}
+.msg h1,.msg h2,.msg h3{font-family:var(--display);font-size:15px;font-weight:600;margin:16px 0 7px;letter-spacing:-.01em}
+.msg code{font-family:var(--mono);font-size:12.5px;background:var(--v3);border:1px solid var(--line);padding:1px 5px;border-radius:2px}
 .msg pre{
   font-family:var(--mono);font-size:12.5px;line-height:1.55;background:var(--v1);
   border:1px solid var(--line);border-radius:var(--r2);padding:12px 14px;
@@ -238,7 +286,7 @@ header{
 .act{
   display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--t2);
   padding:4px 9px;border:1px solid var(--line);background:var(--v1);
-  border-radius:5px;width:fit-content;max-width:100%;
+  border-radius:2px;width:fit-content;max-width:100%;min-width:0;
   animation:rise 200ms ease-out;
 }
 .act .nm{font-family:var(--mono);font-size:11px;color:var(--t1)}
@@ -250,26 +298,27 @@ header{
 .turn:hover .rowacts,.rowacts:focus-within{opacity:1}
 .tinybtn{
   border:1px solid var(--line);background:var(--v1);color:var(--t2);
-  border-radius:5px;padding:4px 9px;font-size:11px;cursor:pointer;min-height:28px;
+  border-radius:2px;padding:4px 9px;font-size:11px;cursor:pointer;min-height:28px;
+  white-space:nowrap;
 }
-.tinybtn:hover{border-color:var(--t0);color:var(--t0)}
+.tinybtn:hover{border-color:var(--line-2);background:var(--v3);color:var(--t0)}
 
 /* ---------- approval ---------- */
 .approve{
   border:1px solid var(--wait);border-left:2px solid var(--wait);
   background:var(--v1);border-radius:var(--r2);padding:14px 16px;margin:0 0 16px;
 }
-.approve .t{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--wait);font-weight:650;margin-bottom:7px}
+.approve .t{font-family:var(--display);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--wait);font-weight:600;margin-bottom:7px}
 .approve .p{font-size:14px;color:var(--t0);margin-bottom:13px;word-break:break-word;white-space:pre-wrap}
 .approve .r{display:flex;gap:7px;flex-wrap:wrap}
-.btn{min-height:36px;padding:8px 15px;border-radius:var(--r);border:1px solid var(--line-2);background:var(--v2);cursor:pointer;font-size:13px;font-weight:550}
-.btn:hover{border-color:var(--t0)}
+.btn{min-height:36px;padding:8px 15px;border-radius:var(--r);border:1px solid var(--line-2);background:var(--v2);cursor:pointer;font-family:var(--display);font-size:13px;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--v3);border-color:var(--line-2)}
 .btn.go{background:var(--t0);color:var(--v0);border-color:var(--t0)}
 .approve.done{border-color:var(--line);border-left-color:var(--t2)}
 .approve.done .t{color:var(--t2)}
 
 .errbox{border:1px solid var(--down);border-left:2px solid var(--down);background:var(--v1);border-radius:var(--r2);padding:13px 15px;margin-bottom:16px;font-size:13.5px}
-.errbox .t{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--down);font-weight:650;margin-bottom:5px}
+.errbox .t{font-family:var(--display);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--down);font-weight:600;margin-bottom:5px}
 .errbox .f{color:var(--t1);margin-top:7px;font-size:12.5px}
 
 /* ---------- composer ---------- */
@@ -278,12 +327,12 @@ header{
 .queue{display:flex;flex-direction:column;gap:5px;margin-bottom:8px}
 .qitem{
   display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--t1);
-  border:1px dashed var(--line-2);background:var(--v2);border-radius:var(--r);
+  border:1px solid var(--line-2);background:var(--v2);border-radius:var(--r);
   padding:7px 11px;animation:rise 180ms ease-out;
 }
 .qitem .qn{font-family:var(--mono);font-size:11px;color:var(--t0);flex:none}
 .qitem .qt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qitem button{border:none;background:none;color:var(--t2);cursor:pointer;font-size:14px;min-height:28px;min-width:28px;border-radius:4px}
+.qitem button{border:none;background:none;color:var(--t2);cursor:pointer;font-size:14px;min-height:28px;min-width:28px;border-radius:2px;flex:none}
 .qitem button:hover{color:var(--down);background:var(--v3)}
 
 .box{border:1px solid var(--line-2);background:var(--v2);border-radius:var(--r2);transition:border-color var(--dur)}
@@ -294,10 +343,12 @@ header{
   max-height:210px;min-height:46px;display:block;
 }
 .boxfoot{display:flex;align-items:center;gap:8px;padding:6px 8px 8px 13px}
+/* Was a 99px pill. One monochrome 2px tag, like every other tag in the app. */
 .chip{
   display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--t2);
-  border:1px solid var(--line);background:var(--v1);border-radius:99px;
+  border:1px solid var(--line);background:var(--v2);border-radius:2px;
   padding:4px 10px;min-height:28px;cursor:default;font-family:var(--mono);
+  white-space:nowrap;flex:none;
 }
 .chip.act{cursor:pointer}
 .chip.act:hover{border-color:var(--t0);color:var(--t0)}
@@ -307,10 +358,15 @@ header{
   font-weight:620;cursor:pointer;font-size:13px;
 }
 #go:disabled{opacity:.4;cursor:not-allowed}
+.boxfoot{min-width:0;overflow-x:auto;scrollbar-width:none}
+.boxfoot::-webkit-scrollbar{display:none}
 .hint{font-size:11px;color:var(--t2);margin-top:7px;display:flex;gap:12px;flex-wrap:wrap}
-.hint kbd{font-family:var(--mono);font-size:11px;color:var(--t1);border:1px solid var(--line);border-radius:3px;padding:0 4px}
+.hint kbd{font-family:var(--mono);font-size:11px;color:var(--t1);border:1px solid var(--line);border-radius:2px;padding:0 4px}
 
 /* ---------- panel ---------- */
+/* KEPT translucent on purpose: this is a modal scrim behind a slide-over
+   panel, not a panel fill. Dimming while the page stays visible is the whole
+   job of a scrim; a solid cover would be a different control. */
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity var(--dur);z-index:60}
 .scrim.on{opacity:1;pointer-events:auto}
 .panel{
@@ -321,21 +377,21 @@ header{
 }
 .panel.on{transform:none}
 .panelhead{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
-.panelhead h2{font-size:12px;font-weight:640;letter-spacing:.12em;text-transform:uppercase;margin:0}
+.panelhead h2{font-family:var(--display);font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;margin:0}
 .panelbody{flex:1;overflow-y:auto;padding:16px}
 .kv{display:grid;grid-template-columns:112px 1fr;gap:9px 12px;font-size:13px;margin-bottom:18px}
 .kv dt{color:var(--t2);font-size:11.5px;letter-spacing:.04em}
 .kv dd{margin:0;font-family:var(--mono);font-size:12.5px;word-break:break-word}
-.sec{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--t2);font-weight:650;margin:22px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.sec{font-family:var(--display);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--t2);font-weight:600;margin:22px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .sec:first-child{margin-top:0}
 .item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .item:last-child{border-bottom:none}
 .item .g{flex:1;min-width:0}
-.item .n{font-size:13px;font-weight:550}
+.item .n{font-size:13px;font-weight:500}
 .item .d{font-size:11.5px;color:var(--t2);word-break:break-word;margin-top:1px}
 .item .s{font-size:11px;font-family:var(--mono);color:var(--t2);flex:none;display:flex;align-items:center;gap:6px}
 .note{font-size:12.5px;color:var(--t2);line-height:1.55}
-.bar{height:3px;background:var(--v3);border-radius:2px;overflow:hidden;margin-top:6px}
+.bar{height:3px;background:var(--v3);border-radius:0;overflow:hidden;margin-top:6px}
 .bar i{display:block;height:100%;background:var(--t0)}
 
 /* ---------- responsive ---------- */
@@ -378,23 +434,27 @@ header{
 /* Stop / jump-to-latest */
 .stopbar{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;pointer-events:none;padding-bottom:10px}
 .stopbar button{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;
-  border:1px solid var(--line-2);background:var(--v1);color:var(--t0);
-  border-radius:99px;padding:8px 16px;min-height:36px;cursor:pointer;font-size:12.5px;
-  box-shadow:0 6px 20px -10px rgba(0,0,0,.6)}
-.stopbar button:hover{border-color:var(--t0)}
-.sq{width:9px;height:9px;background:currentColor;border-radius:2px}
+  border:1px solid var(--line-2);background:var(--v3);color:var(--t0);
+  border-radius:2px;padding:8px 16px;min-height:36px;cursor:pointer;font-size:12.5px;
+  white-space:nowrap;font-family:var(--display)}
+.stopbar button:hover{background:var(--line-2)}
+.sq{width:9px;height:9px;background:currentColor;border-radius:0;flex:none}
 /* Code block copy */
 .msg pre{position:relative}
 .copycode{position:absolute;top:7px;right:7px;border:1px solid var(--line);
-  background:var(--v2);color:var(--t2);border-radius:5px;padding:3px 9px;
-  font-size:11px;cursor:pointer;opacity:0;transition:opacity var(--dur);min-height:26px}
+  background:var(--v3);color:var(--t2);border-radius:2px;padding:3px 9px;
+  font-size:11px;cursor:pointer;opacity:0;transition:opacity var(--dur);min-height:26px;
+  white-space:nowrap}
 .msg pre:hover .copycode,.copycode:focus{opacity:1}
-.copycode:hover{color:var(--t0);border-color:var(--t0)}
+.copycode:hover{color:var(--t0);border-color:var(--line-2)}
 /* Command palette */
-.pal{position:fixed;inset:0;z-index:70;display:none;align-items:flex-start;justify-content:center;padding-top:12vh;background:rgba(0,0,0,.5)}
+/* The command palette follows the shared system exactly (.dm-palette): a
+   SOLID canvas cover, not a translucent scrim, and a flat box with no drop
+   shadow. (.scrim below keeps its translucency on purpose -- see there.) */
+.pal{position:fixed;inset:0;z-index:70;display:none;align-items:flex-start;justify-content:center;padding-top:12vh;background:var(--v0)}
 .pal.on{display:flex}
 .palbox{width:min(560px,92vw);background:var(--v1);border:1px solid var(--line-2);
-  border-radius:var(--r2);overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.7)}
+  border-radius:var(--r2);overflow:hidden}
 .palbox input{width:100%;border:none;background:none;outline:none;padding:15px 17px;font-size:15px;border-bottom:1px solid var(--line)}
 .pallist{max-height:min(52vh,420px);overflow-y:auto;padding:6px}
 .palrow{display:flex;align-items:center;gap:11px;width:100%;border:none;background:none;
@@ -404,9 +464,9 @@ header{
 .palempty{padding:16px;color:var(--t2);font-size:13px}
 /* follow-ups */
 .followups{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
-.fu{border:1px solid var(--line);background:var(--v1);border-radius:99px;padding:6px 13px;
-  font-size:12.5px;color:var(--t1);cursor:pointer;min-height:32px}
-.fu:hover{border-color:var(--t0);color:var(--t0)}
+.fu{border:1px solid var(--line);background:var(--v1);border-radius:2px;padding:6px 13px;
+  font-size:12.5px;color:var(--t1);cursor:pointer;min-height:32px;text-align:left}
+.fu:hover{background:var(--v3);border-color:var(--line-2);color:var(--t0)}
 
 
 /* ================= v3 · transcript, not a chat thread =================
@@ -439,7 +499,7 @@ header{
 .msg{font-size:15px;line-height:1.62;max-width:72ch}
 .who-row{display:none}          /* the gutter replaces it */
 .acts{gap:3px;margin-bottom:8px}
-.act{border-radius:3px;background:var(--v2)}
+.act{border-radius:2px;background:var(--v2)}
 .rowacts{margin-top:9px}
 
 /* Status dot in the gutter: the only colour on the page besides system state */
@@ -447,23 +507,24 @@ header{
 .gut .dot.up{background:var(--up)} .gut .dot.wait{background:var(--wait)} .gut .dot.down{background:var(--down)}
 
 /* Chrome is mono; only prose is humanist. */
-.nav,.newbtn,.conv .t,.stat,.chip,.tinybtn,.navlbl,.railfoot,.hint,.sec,.item .n,.item .d,.palrow,.gut{
+.nav,.newbtn,.conv .t,.stat,.chip,.tinybtn,.railfoot,.hint,.item .n,.item .d,.palrow,.gut{
   font-family:var(--mono);
 }
+.navlbl{font-family:var(--display)}
 .nav,.conv .t{font-size:12px;letter-spacing:.01em}
 .navlbl{font-size:10px;letter-spacing:.18em}
-.wordmark{font-family:var(--mono);letter-spacing:.22em;font-weight:500}
+.wordmark{font-family:var(--display);letter-spacing:.22em;font-weight:500}
 .mk{background:var(--t0);border-radius:0;transform:none;width:6px;height:6px}
-.welcome h1{font-family:var(--sans);font-size:22px;font-weight:550}
-.card .h{font-family:var(--mono);font-size:12px}
+.welcome h1{font-family:var(--display);font-size:22px;font-weight:600}
+.card .h{font-family:var(--display);font-size:12px}
 .msg,.welcome .sub,.turn.you .body,.approve .p{font-family:var(--sans)}
 
 /* selection reads by ground + a left mark, never by hue */
 .nav[aria-current="page"],.nav.on{background:var(--sel);color:var(--t0);box-shadow:inset 2px 0 0 var(--t0)}
 .palrow[aria-selected="true"]{background:var(--sel);color:var(--t0)}
-.card:hover,.newbtn:hover,.stat:hover,.tinybtn:hover,.fu:hover,.chip.act:hover{border-color:var(--line-2);color:var(--t0)}
-.box:focus-within{border-color:var(--line-2);box-shadow:0 0 0 1px var(--line-2)}
-#go{background:var(--t0);color:var(--v0);border-radius:var(--r);font-family:var(--mono);font-size:12px;letter-spacing:.04em}
+.card:hover,.newbtn:hover,.stat:hover,.tinybtn:hover,.fu:hover,.chip.act:hover{background:var(--v3);border-color:var(--line-2);color:var(--t0)}
+.box:focus-within{border-color:var(--line-2);box-shadow:none}
+#go{background:var(--v3);color:var(--t0);border:1px solid var(--line-2);border-radius:var(--r);font-family:var(--display);font-size:12px;letter-spacing:.04em}
 .btn.go{background:var(--t0);color:var(--v0);border-color:var(--t0)}
 .caret{background:var(--t0)}
 .msg li::marker{color:var(--t2)}
@@ -491,88 +552,101 @@ header{
 .navlbl,.conv .m,.nav .tail,.railfoot,.hint,.act,.chip,.palrow .pk,.card .d,.item .d,.item .s,.kv dt,.kv dd,.sec,.qitem,.copycode{font-size:11px}
 
 
-/* ================= NEON · cyan identity =================
-   The achromatic policy stays underneath: colour still means system state.
-   Cyan is added as the ONE identity signal — the mark, the active rail item,
-   focus, the caret, the boot reactor. It is never used for plain text or for
-   decoration that carries no meaning. */
+/* ================= identity accent =================
+   Was "NEON · cyan identity". The reasoning is unchanged and still correct --
+   ONE identity signal, on the mark, the active rail item, focus, the caret
+   and the boot reactor, never on plain text and never on decoration that
+   carries no meaning. Only the hue moves: the shared system's amber, so this
+   screen agrees with every other screen about what "this is the active thing"
+   looks like. --cy-hi stops being a brighter cyan and becomes plain primary
+   text, because a selected row should read as text on a filled ground, not as
+   a coloured word.
+   Previous values: --cy:#4FC3F7/79,195,247; --cy-hi:#7FE0FF;
+                    --gold:#F5A623/245,166,35;                              */
 :root{
-  --cy:  #4FC3F7;
-  --cy-rgb: 79,195,247;
-  --cy-hi:#7FE0FF;
-  --gold:#F5A623;
-  --gold-rgb:245,166,35;
+  --cy:  #F59E0B;
+  --cy-rgb: 245,158,11;
+  --cy-hi:#FAFAFA;
+  --gold:#F59E0B;
+  --gold-rgb:245,158,11;
 }
 .mk,.wordmark .mk{background:none}
 .wordmark{color:var(--t0)}
+/* Selection is a filled row plus one solid 2px accent rule -- never a
+   10%-alpha tint, and never a coloured word. */
 .nav[aria-current="page"],.nav.on{
-  background:rgba(var(--cy-rgb),.10);color:var(--cy-hi);
+  background:var(--sel);color:var(--t0);
   box-shadow:inset 2px 0 0 var(--cy);
 }
-.palrow[aria-selected="true"]{background:rgba(var(--cy-rgb),.10);color:var(--cy-hi)}
+.palrow[aria-selected="true"]{background:var(--sel);color:var(--t0);box-shadow:inset 2px 0 0 var(--cy)}
 :focus-visible{outline:2px solid var(--cy);outline-offset:2px}
-.box:focus-within{border-color:rgba(var(--cy-rgb),.55);box-shadow:0 0 0 1px rgba(var(--cy-rgb),.30),0 0 22px -6px rgba(var(--cy-rgb),.45)}
-#go{background:var(--cy);color:#06121A;box-shadow:0 0 18px -6px rgba(var(--cy-rgb),.7)}
-#go:hover{background:var(--cy-hi)}
-.btn.go{background:var(--cy);color:#06121A;border-color:var(--cy)}
-.caret{background:var(--cy-hi);box-shadow:0 0 8px rgba(var(--cy-rgb),.8)}
-.msg a{color:var(--cy-hi)}
-.msg li::marker{color:var(--cy)}
+.box:focus-within{border-color:var(--line-2);box-shadow:none}
+/* Send was an accent-filled slab wearing an 18px glow. In the shared system
+   the primary control is the interactive layer with a focus-weight border
+   (.dm-btn-primary); accent is reserved for state. */
+#go{background:var(--v3);color:var(--t0);border:1px solid var(--line-2);box-shadow:none}
+#go:hover{background:var(--line-2)}
+.btn.go{background:var(--v3);color:var(--t0);border-color:var(--line-2)}
+.caret{background:var(--cy);box-shadow:none}
+.msg a{color:var(--t0)}
+.msg li::marker{color:var(--t2)}
 .led.ok{background:var(--up)}
-.gut .dot.up{background:var(--cy);box-shadow:0 0 6px rgba(var(--cy-rgb),.9)}
+.gut .dot.up{background:var(--up)}
 .card:hover,.newbtn:hover,.stat:hover,.tinybtn:hover,.fu:hover,.chip.act:hover{
-  border-color:rgba(var(--cy-rgb),.45);color:var(--cy-hi)
+  background:var(--v3);border-color:var(--line-2);color:var(--t0)
 }
 .act .spin{border-top-color:var(--cy)}
 .brandmark{width:20px;height:20px;flex:none;color:var(--cy);display:inline-flex}
 .brandmark svg{width:100%;height:100%}
-.brandmark .glow{filter:drop-shadow(0 0 3px rgba(var(--cy-rgb),.8))}
+/* The mark's drop-shadow halo is gone; the class stays because the SVG
+   markup and its animation still reference it. */
+.brandmark .glow{filter:none}
 
 /* ================= LAUNCH SEQUENCE ================= */
+/* The launch screen keeps its choreography and loses its lighting: the
+   radial wash, the scan line's two halos and every drop-shadow below are
+   gone, and the ground is simply the page ground. */
 #boot{
   position:fixed;inset:0;z-index:200;display:grid;place-items:center;
-  /* Solid ground FIRST: the gradient alone left the app visible behind the
-     launch, which reads as a rendering fault rather than a boot screen. */
   background-color:var(--v0);
-  background-image:radial-gradient(760px 520px at 50% 42%, rgba(var(--cy-rgb),.16), transparent 70%);
   transition:opacity .8s ease;
 }
 #boot.done{opacity:0;pointer-events:none}
+/* The sweep animated `top`, which forces layout on every frame of a
+   full-screen animation. Same motion, on transform, where it belongs. */
 .bp-scan{
-  position:absolute;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,transparent,rgba(var(--cy-rgb),.9),transparent);
-  box-shadow:0 0 18px rgba(var(--cy-rgb),.8),0 0 60px rgba(var(--cy-rgb),.5);
+  position:absolute;left:0;right:0;top:0;height:1px;
+  background:var(--cy);
   opacity:0;animation:bpScan 2.6s cubic-bezier(.4,0,.2,1) both;
 }
-@keyframes bpScan{0%{top:-3%;opacity:0}4%{opacity:1}96%{opacity:1}100%{top:102%;opacity:0}}
+@keyframes bpScan{0%{transform:translateY(-3vh);opacity:0}4%{opacity:1}96%{opacity:1}100%{transform:translateY(102vh);opacity:0}}
 .boot-inner{text-align:center;padding:0 24px;position:relative}
 #bootlogo{width:clamp(150px,20vw,208px);height:auto;color:var(--cy);margin-bottom:18px}
-#bootlogo .ring{stroke:rgba(var(--cy-rgb),.55);fill:none;stroke-width:2.4;
+#bootlogo .ring{stroke:var(--line-2);fill:none;stroke-width:2.4;
   stroke-dasharray:534;stroke-dashoffset:534;animation:draw 1.5s cubic-bezier(.34,1.3,.5,1) .1s both}
-#bootlogo .grid{stroke:rgba(var(--cy-rgb),.30);fill:none;stroke-width:1.8;opacity:0;
+#bootlogo .grid{stroke:var(--line);fill:none;stroke-width:1.8;opacity:0;
   animation:fadeIn .7s ease-out .75s both}
-#bootlogo .letter{fill:var(--cy-hi);opacity:0;
-  animation:fadeIn .55s ease-out .95s both;filter:drop-shadow(0 0 10px rgba(var(--cy-rgb),.75))}
-#bootlogo .trend{stroke:var(--cy-hi);fill:none;stroke-width:5;stroke-linecap:round;stroke-linejoin:round;
+#bootlogo .letter{fill:var(--t0);opacity:0;
+  animation:fadeIn .55s ease-out .95s both}
+#bootlogo .trend{stroke:var(--cy);fill:none;stroke-width:5;stroke-linecap:round;stroke-linejoin:round;
   stroke-dasharray:420;stroke-dashoffset:420;
-  animation:draw 1.1s cubic-bezier(.4,0,.2,1) 1.25s both;filter:drop-shadow(0 0 8px rgba(var(--cy-rgb),.8))}
-#bootlogo .head{fill:var(--cy-hi);opacity:0;animation:fadeIn .3s ease-out 2.25s both}
-#bootlogo .mouse{fill:var(--cy-hi);opacity:0;animation:mouseIn .8s cubic-bezier(.34,1.4,.5,1) 1.9s both}
+  animation:draw 1.1s cubic-bezier(.4,0,.2,1) 1.25s both}
+#bootlogo .head{fill:var(--cy);opacity:0;animation:fadeIn .3s ease-out 2.25s both}
+#bootlogo .mouse{fill:var(--t0);opacity:0;animation:mouseIn .8s cubic-bezier(.34,1.4,.5,1) 1.9s both}
 @keyframes mouseIn{0%{opacity:0;transform:translateY(6px) scale(.9)}100%{opacity:.95;transform:none}}
 @keyframes draw{to{stroke-dashoffset:0}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes letterIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 .boot-word{
-  font-family:var(--mono);font-size:clamp(20px,3.4vw,30px);letter-spacing:.42em;
-  margin-left:.42em;color:var(--cy-hi);
-  text-shadow:0 0 24px rgba(var(--cy-rgb),.6),0 0 70px rgba(var(--cy-rgb),.3);
+  font-family:var(--display);font-size:clamp(20px,3.4vw,30px);letter-spacing:.42em;
+  margin-left:.42em;color:var(--t0);
 }
-.boot-word .dot{color:#FFC44D;text-shadow:0 0 20px rgba(var(--gold-rgb),.6)}
-.boot-sub{font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--t2);margin-top:12px}
+.boot-word .dot{color:var(--cy)}
+.boot-sub{font-family:var(--display);font-size:11px;letter-spacing:.3em;color:var(--t2);margin-top:12px}
 #bootlines{margin-top:22px;height:92px;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:3px}
 #bootlines .bl{font-family:var(--mono);font-size:11.5px;color:var(--t1);opacity:0;animation:fadeIn .3s ease-out both}
 #bootlines .bl .ok{color:var(--up)}
-#bootlines .bl .gold{color:#FFC44D}
+#bootlines .bl .gold{color:var(--cy)}
 @media (prefers-reduced-motion:reduce){
   #bootlogo *,.bp-scan,.boot-word span{animation:none!important;opacity:1!important;stroke-dashoffset:0!important}
 }

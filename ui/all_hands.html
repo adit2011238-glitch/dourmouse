@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ALL HANDS // EVERY RESOURCE</title>
+<link rel="stylesheet" href="/assets/dourmouse-ui.css">
 <style>
   /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
      — replaces --font-prose's previous "Inter" entry below, which was
@@ -21,59 +22,95 @@
     src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
   @font-face{font-family:'Fira Sans';font-style:normal;font-weight:700;font-display:swap;
     src:url('/assets/fonts/fira-sans-700-latin.woff2') format('woff2')}
+  /* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css,
+     linked above). Same method as ui/workspace.html: variable NAMES are
+     unchanged, so all 80 call sites keep working and this is one block to
+     revert.
+
+       - --text/--text-dim/--line/--line-strong were rgba(cyan) over the
+         ground, which is what made every rule and every "white" glyph on
+         this page faintly cyan. They are now four solid neutrals.
+       - --surface was #0E1420 and was, in practice, always used through an
+         rgba() at the call sites (rgba(14,20,32,.7) etc). Those call sites
+         are now flat layers, and --raised is NEW (additive) for the
+         interactive/hover layer this palette had no name for.
+       - --cyan stops being a hue and becomes the neutral primary text
+         colour. Amber/green/red survive only as the three functional
+         accents (active / ok / error), never as decoration.
+       - The alpha ladder is kept and still defined -- a couple of opacity
+         call sites read it -- but no surface is composited from it.
+       - Type goes mono-first: Departure Mono for structure, Monaspace Neon
+         for everything the machine says, prose included.
+
+     Previous values, for a one-step revert:
+       --ground:#070B12; --surface:#0E1420;
+       --cyan:#4FC3F7/79,195,247; --green:#26D07C/38,208,124;
+       --amber:#F5A623/245,166,35; --red:#EF5350/239,83,80;
+       --dead:#8A929E/138,146,158;
+       --text:rgba(cyan,.85); --text-dim:rgba(cyan,.45);
+       --line:rgba(cyan,.10); --line-strong:rgba(cyan,.30);
+       --font-display:"Exo 2"...; --font-mono:"JetBrains Mono"...;
+       --font-prose:"Fira Sans"...                                        */
   :root {
-    --ground: #070B12; --surface: #0E1420;
-    --cyan:  #4FC3F7; --cyan-rgb:  79,195,247;
-    --green: #26D07C; --green-rgb: 38,208,124;
-    --amber: #F5A623; --amber-rgb: 245,166,35;
-    --red:   #EF5350; --red-rgb:   239,83,80;
-    --dead:  #8A929E; --dead-rgb:  138,146,158;
+    --ground: #09090B; --surface: #18181B; --raised: #27272A;
+    --cyan:  #FAFAFA; --cyan-rgb:  250,250,250;
+    --green: #10B981; --green-rgb: 16,185,129;
+    --amber: #F59E0B; --amber-rgb: 245,158,11;
+    --red:   #EF4444; --red-rgb:   239,68,68;
+    --dead:  #52525B; --dead-rgb:  82,82,91;
     --a06:0.06; --a10:0.10; --a16:0.16; --a30:0.30; --a45:0.45; --a60:0.60; --a85:0.85;
-    --font-display: "Exo 2","Avenir Next","Helvetica Neue",Arial,sans-serif;
-    --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
-    --font-prose: "Fira Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-    --text: rgba(var(--cyan-rgb), var(--a85));
-    --text-dim: rgba(var(--cyan-rgb), var(--a45));
-    --line: rgba(var(--cyan-rgb), var(--a10));
-    --line-strong: rgba(var(--cyan-rgb), var(--a30));
+    --font-display: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+    --font-mono: 'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+    --font-prose: 'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
+    --text: #FAFAFA;
+    --text-dim: #71717A;
+    --text-body: #A1A1AA;
+    --line: #27272A;
+    --line-strong: #3F3F46;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
+  /* Two radial washes and a top-to-bottom gradient used to sit here. All
+     three were decoration; the ground is now one flat colour. */
   body {
-    background:
-      radial-gradient(1200px 600px at 80% -10%, rgba(var(--cyan-rgb), 0.07), transparent 60%),
-      radial-gradient(900px 500px at 10% 110%, rgba(var(--green-rgb), 0.05), transparent 60%),
-      linear-gradient(180deg, #0A101B 0%, var(--ground) 100%);
-    color: var(--text); font-family: var(--font-prose); font-size: 13px;
+    background: var(--ground);
+    color: var(--text-body); font-family: var(--font-prose); font-size: 13px;
     overflow-y: auto;
   }
+  /* The 44px workbench grid stays -- a bench grid is a real terminal idiom,
+     not ornament -- but it is a crisp solid rule at the structural layer
+     colour now instead of a 2.5%-alpha cyan smear. */
   body::before {
     content: ""; position: fixed; inset: 0; pointer-events: none;
     background-image:
-      linear-gradient(rgba(var(--cyan-rgb), 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(var(--cyan-rgb), 0.025) 1px, transparent 1px);
+      linear-gradient(var(--surface) 1px, transparent 1px),
+      linear-gradient(90deg, var(--surface) 1px, transparent 1px);
     background-size: 44px 44px;
   }
   header {
     display: flex; align-items: center; gap: 14px;
     padding: 12px 20px; border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, rgba(var(--cyan-rgb), var(--a06)), transparent);
+    background: var(--surface);
     position: sticky; top: 0; z-index: 5;
   }
+  /* The mark was a radial-gradient disc with an 18px cyan halo. It is now a
+     flat 2px-cornered tile on the interactive layer. */
   .mark {
     width: 34px; height: 34px; flex: none;
-    border: 1px solid var(--line-strong); border-radius: 9px;
+    border: 1px solid var(--line); border-radius: 2px;
     display: grid; place-items: center;
-    font-family: var(--font-display); font-weight: 700; font-size: 16px; color: var(--cyan);
-    background: radial-gradient(circle at 30% 30%, rgba(var(--cyan-rgb), 0.22), rgba(var(--cyan-rgb), 0.03));
-    box-shadow: 0 0 18px rgba(var(--cyan-rgb), 0.25);
+    font-family: var(--font-display); font-weight: 400; font-size: 14px; color: var(--text-dim);
+    background: var(--raised);
   }
-  h1 { font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: 2px; }
+  h1 { font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: 2px;
+       color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   h1 .dim { color: var(--text-dim); font-weight: 400; }
-  .status { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
-  .status .live { color: rgba(var(--green-rgb), 0.9); display: inline-flex; align-items: center; gap: 6px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
-         box-shadow: 0 0 8px rgba(var(--green-rgb), 0.9); animation: pulse 2s infinite; display: inline-block; }
+  .status { margin-left: auto; flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+  .status .live { color: var(--green); display: inline-flex; align-items: center; gap: 6px; }
+  /* Status is a solid dot. The 8px green halo is gone; the opacity pulse
+     stays (opacity only -- it cannot force layout). */
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green);
+         animation: pulse 2s infinite; display: inline-block; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
   .goal { padding: 16px 20px 4px; }
@@ -83,57 +120,72 @@
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; padding: 14px 20px; }
   .card {
-    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
-    background: rgba(14,20,32,0.7); position: relative; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 2px; padding: 12px 14px;
+    background: var(--surface); position: relative; overflow: hidden;
   }
-  .card.running { border-color: rgba(var(--amber-rgb), 0.45); }
-  .card.done { border-color: rgba(var(--green-rgb), 0.35); }
-  .card.error { border-color: rgba(var(--red-rgb), 0.5); }
+  /* Card borders no longer carry the status colour. There are exactly two
+     line values in this system, and every card already shows its state in
+     the badge two lines below, in the same card head. A running card is
+     lifted onto the interactive layer instead -- ground, not hue. */
+  .card.running { background: var(--raised); border-color: var(--line-strong); }
+  .card.done, .card.error { border-color: var(--line-strong); }
   .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .card-head .bname { font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 1px; }
+  .card-head .bname { font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: 1px;
+    color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* One pill shape, one monochrome ground, no coloured borders. The four
+     variants keep a text colour because these are not tags -- they are the
+     run's state, and they use exactly the system's three functional accents
+     (active / ok / error) with "pending" left dim. */
   .badge {
-    margin-left: auto; font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
-    padding: 2px 8px; border-radius: 4px; border: 1px solid;
+    margin-left: auto; flex: none; font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+    padding: 2px 8px; border-radius: 2px; border: 1px solid transparent;
+    background: var(--raised); color: var(--text-dim); white-space: nowrap;
   }
-  .badge.pending { color: var(--dead); border-color: rgba(var(--dead-rgb), 0.4); }
-  .badge.running { color: var(--amber); border-color: rgba(var(--amber-rgb), 0.5); }
-  .badge.done { color: var(--green); border-color: rgba(var(--green-rgb), 0.5); }
-  .badge.error { color: var(--red); border-color: rgba(var(--red-rgb), 0.6); }
-  .card .body { font-family: var(--font-mono); font-size: 11px; line-height: 1.6; color: rgba(226,236,248,0.82);
+  .badge.pending { color: var(--dead); }
+  .badge.running { color: var(--amber); }
+  .badge.done { color: var(--green); }
+  .badge.error { color: var(--red); }
+  .card .body { font-family: var(--font-mono); font-size: 11px; line-height: 1.6; color: var(--text-body);
                 max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
-  .card .body.err { color: rgba(var(--red-rgb), 0.95); }
+  .card .body.err { color: var(--red); }
   .card .elapsed { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-top: 8px; }
 
-  .synth { margin: 6px 20px 16px; border: 1px solid rgba(var(--green-rgb), 0.4); border-radius: 12px;
-           padding: 16px 18px; background: rgba(var(--green-rgb), 0.05); }
-  .synth .s-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: rgba(var(--green-rgb), 0.9); margin-bottom: 8px; }
-  .synth .s-body { font-size: 13px; line-height: 1.7; color: rgba(226,236,248,0.92); white-space: pre-wrap; word-break: break-word; }
-  .synth .s-err { color: rgba(var(--red-rgb), 0.95); }
+  /* Was a 5%-alpha green fill inside a 40%-alpha green border: a tinted
+     card floating on the page. It is a flat panel now, and "settled" is
+     carried by the one green label instead of by the whole surface. */
+  .synth { margin: 6px 20px 16px; border: 1px solid var(--line); border-radius: 2px;
+           padding: 16px 18px; background: var(--surface); }
+  .synth .s-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: var(--green); margin-bottom: 8px; }
+  .synth .s-body { font-size: 13px; line-height: 1.7; color: var(--text-body); white-space: pre-wrap; word-break: break-word; }
+  .synth .s-err { color: var(--red); }
 
   .new-run { margin: 16px 20px; display: flex; gap: 10px; }
   .new-run input {
-    flex: 1; background: rgba(var(--cyan-rgb), 0.05); border: 1px solid var(--line);
+    flex: 1 1 auto; min-width: 0; background: var(--ground); border: 1px solid var(--line);
     color: var(--text); font-family: var(--font-mono); font-size: 12px;
-    padding: 10px 12px; border-radius: 6px; outline: none;
+    padding: 10px 12px; border-radius: 2px; outline: none;
   }
   .new-run input:focus { border-color: var(--line-strong); }
   button {
-    font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
-    color: var(--cyan); background: rgba(var(--cyan-rgb), 0.08);
-    border: 1px solid var(--line-strong); border-radius: 6px; padding: 9px 16px; cursor: pointer;
+    font-family: var(--font-display); font-size: 11px; letter-spacing: 1px; flex: none;
+    color: var(--text-body); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 2px; padding: 9px 16px; cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 200ms, color 200ms, border-color 200ms;
   }
-  button:hover { background: rgba(var(--cyan-rgb), 0.18); }
+  button:hover { background: var(--raised); color: var(--text); border-color: var(--line-strong); }
 
   .runs { padding: 6px 20px 20px; }
   .runs .r-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: var(--text-dim); margin-bottom: 8px; }
   .run-row {
     display: flex; gap: 10px; align-items: center; padding: 8px 10px;
-    border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer;
-    background: rgba(14,20,32,0.5);
+    border: 1px solid var(--line); border-radius: 2px; margin-bottom: 6px; cursor: pointer;
+    background: var(--surface);
+    transition: background-color 200ms;
   }
-  .run-row:hover { border-color: var(--line-strong); }
-  .run-row .r-goal { flex: 1; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .run-row .r-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+  .run-row:hover { background: var(--raised); border-color: var(--line-strong); }
+  .run-row .r-goal { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-row .r-meta { flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); white-space: nowrap; }
   .empty { text-align: center; color: var(--text-dim); padding: 40px 0; font-family: var(--font-mono); }
 </style>
 </head>

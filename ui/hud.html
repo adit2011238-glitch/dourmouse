@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>STARK MK. ZERO INTERFACE</title>
+<link rel="stylesheet" href="/assets/dourmouse-ui.css">
 <style>
   /* v13.6: real Fira Sans, bundled locally (ui/assets/fonts/, OFL-licensed)
      — this "Stark MK. Zero" tactical HUD is deliberately all-monospace
@@ -13,214 +14,294 @@
     src:url('/assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
   @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
     src:url('/assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
+  /* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css,
+     linked above). Same method as ui/workspace.html: variable NAMES unchanged,
+     so all 83 call sites keep working and this is one block to revert.
+
+     This screen was built as a red tactical HUD -- red was not an accent
+     here, it was the chrome: panel headers, the wordmark, task bullets,
+     button fills, the arc-reactor core and 30-odd rgba(255,59,48,x) washes
+     all read from --red. That is the direct opposite of the shared system,
+     where red means one thing (something failed) and the accent budget for
+     ALL colour is about a tenth of the screen. So:
+
+       - --red stops being a hue and becomes the neutral body text colour.
+         Anything that was red because it was chrome is now a neutral; the
+         few places that genuinely mean "this is live / this is the current
+         state" moved to --amber, the one accent.
+       - --line was rgba(255,59,48,.18) -- every rule on the page was a
+         translucent red. Solid structural line now, plus a --line-2 (NEW,
+         additive) for focus and input borders.
+       - --panel/--raised are the flat structural and interactive layers.
+       - Every glow goes: the .glow/.glow-a text-shadow utilities, the
+         accent bar's shadow, the arc-reactor core's radial-gradient sphere
+         and 46px halo, the node halos, the progress-bar shadow, the command
+         icons text-shadow, and the two body washes.
+       - Type: --mono carries everything the machine says (Monaspace Neon),
+         and a --display (NEW, additive) carries the structural labels this
+         page is almost entirely made of.
+
+     Previous values, for a one-step revert:
+       --bg:#07070a; --panel:#0d0d12; --line:rgba(255,59,48,.18);
+       --red:#ff3b30; --amber:#ff9500; --dim:#8a8a92; --txt:#e8e8ec;
+       --mono:ui-monospace,"SF Mono"...; --font-prose:"Fira Sans"...      */
   :root {
-    --bg: #07070a;
-    --panel: #0d0d12;
-    --line: rgba(255, 59, 48, .18);
-    --red: #ff3b30;
-    --amber: #ff9500;
-    --dim: #8a8a92;
-    --txt: #e8e8ec;
-    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    --font-prose: "Fira Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+    --bg: #09090B;
+    --panel: #18181B;
+    --raised: #27272A;
+    --line: #27272A;
+    --line-2: #3F3F46;
+    --red: #A1A1AA;
+    --err: #EF4444;
+    --amber: #F59E0B;
+    --dim: #71717A;
+    --dim-2: #52525B;
+    --txt: #FAFAFA;
+    --mono: 'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --display: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+    --font-prose: 'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
+  /* The 44px bench grid stays as a crisp solid rule; the centre-of-screen
+     radial wash does not. */
   body {
     background:
-      linear-gradient(rgba(255,59,48,.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,59,48,.025) 1px, transparent 1px),
-      radial-gradient(ellipse 70% 55% at 50% 45%, rgba(255,59,48,.05), transparent 70%),
+      linear-gradient(var(--panel) 1px, transparent 1px),
+      linear-gradient(90deg, var(--panel) 1px, transparent 1px),
       var(--bg);
-    background-size: 44px 44px, 44px 44px, 100% 100%, 100% 100%;
-    color: var(--txt);
+    background-size: 44px 44px, 44px 44px, 100% 100%;
+    color: var(--red);
     font-family: var(--mono);
     display: flex; flex-direction: column; height: 100vh; overflow: hidden;
   }
-  .glow { text-shadow: 0 0 8px rgba(255,59,48,.6); }
-  .glow-a { text-shadow: 0 0 8px rgba(255,149,0,.55); }
+  /* .glow / .glow-a are kept as CLASS NAMES because the markup and a little
+     JS still apply them, but they no longer emit a shadow. Emptying the rule
+     was preferred to deleting the classes and hunting every call site. */
+  .glow, .glow-a { text-shadow: none; }
 
   /* ---------------- header ---------------- */
   header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 26px; border-bottom: 1px solid var(--line);
   }
-  .titlebox { display: flex; align-items: center; gap: 14px; }
-  .accentbar { width: 4px; align-self: stretch; background: linear-gradient(180deg, var(--red), var(--amber)); box-shadow: 0 0 12px var(--red); }
-  .titlebox h1 { font-size: 20px; font-weight: 700; letter-spacing: .16em; color: var(--red); }
-  .titlebox .sub { font-size: 11px; letter-spacing: .34em; color: var(--dim); margin-top: 2px; }
-  .hdrright { display: flex; align-items: center; gap: 22px; font-size: 11px; color: var(--dim); letter-spacing: .08em; }
+  .titlebox { display: flex; align-items: center; gap: 14px; flex: 0 1 auto; min-width: 0; }
+  /* Was a red-to-amber gradient bar with a 12px halo. One solid accent rule. */
+  .accentbar { width: 3px; flex: none; align-self: stretch; background: var(--amber); }
+  .titlebox h1 { font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: .16em; color: var(--txt); white-space: nowrap; }
+  .titlebox .sub { font-family: var(--display); font-size: 11px; letter-spacing: .34em; color: var(--dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Readout row: constrained and scrollable rather than pushing itself off
+     the end of the bar once a status string gets long. */
+  .hdrright { display: flex; align-items: center; gap: 22px; font-size: 11px; color: var(--dim); letter-spacing: .08em;
+    flex: 0 1 auto; min-width: 0; white-space: nowrap;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .hdrright::-webkit-scrollbar { display: none; }
   .hdrright b { color: var(--amber); font-weight: 500; }
 
   /* ---------------- main grid ---------------- */
-  main { flex: 1; display: grid; grid-template-columns: 300px 1fr 320px; gap: 14px; padding: 14px 26px; min-height: 0; }
-  .col { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  main { flex: 1; display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 14px; padding: 14px 26px; min-height: 0; min-width: 0; }
+  /* 300 + 320 + two 14px gaps + 52px of padding is 700px of fixed furniture,
+     so below roughly 1000px the centre column had nowhere to go and the
+     right column left the window -- inside a body{overflow:hidden}, so it
+     was unreachable rather than merely tight. Stack instead, and let the
+     page scroll. */
+  @media (max-width: 1000px) {
+    main { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  }
+  .col { display: flex; flex-direction: column; gap: 14px; min-height: 0; min-width: 0; }
   .col.center { display: flex; flex-direction: column; }
 
   /* ---------------- panels ---------------- */
   .panel {
-    background: linear-gradient(180deg, rgba(255,59,48,.03), transparent 40%), var(--panel);
-    border: 1px solid var(--line); border-radius: 6px; display: flex; flex-direction: column; min-height: 0;
+    background: var(--panel);
+    border: 1px solid var(--line); border-radius: 2px; display: flex; flex-direction: column; min-height: 0;
   }
   .panel > .phead {
     display: flex; align-items: center; justify-content: space-between;
     padding: 9px 13px; border-bottom: 1px solid var(--line);
-    font-size: 10.5px; letter-spacing: .22em; color: var(--red);
+    font-family: var(--display); font-size: 10.5px; letter-spacing: .22em; color: var(--dim);
+    background: var(--panel); flex: none; white-space: nowrap;
   }
-  .panel > .phead .tag { color: var(--amber); font-size: 10px; }
-  .panel > .pbody { padding: 11px 13px; overflow: hidden; flex: 1; min-height: 0; }
+  .panel > .phead .tag { color: var(--amber); font-size: 10px; flex: none; }
+  /* REAL PRE-EXISTING BUG (confirmed against `git show HEAD:ui/hud.html`,
+     found by measuring, not by reading): .pbody was `overflow: hidden`
+     inside a flex-sized panel, so whenever a panel's content was taller than
+     its share of the column the overflow was silently CLIPPED with no
+     scrollbar and no way to reach it. Measured at 1280x860 on the previous
+     commit, three panel bodies were over: 184px of content in 164px, 135 in
+     119, and 156 in 127 -- i.e. the bottom of SUIT DIAGNOSTICS, MATRIX
+     STATUS and MEMORY CORE were simply not readable. Making it scroll costs
+     nothing and is the whole fix. */
+  .panel > .pbody { padding: 11px 13px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; }
 
   /* TASK INTEL */
   .taskadd { display: flex; gap: 7px; margin-bottom: 10px; }
   .taskadd input {
-    flex: 1; background: #0a0a0f; border: 1px solid var(--line); border-radius: 4px;
+    flex: 1 1 auto; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 2px;
     color: var(--txt); font-family: var(--mono); font-size: 11.5px; padding: 7px 9px; outline: none;
   }
-  .taskadd input:focus { border-color: rgba(255,59,48,.5); }
+  .taskadd input:focus { border-color: var(--line-2); }
   .taskadd button {
-    background: var(--red); color: #1a0505; border: 0; border-radius: 4px;
-    font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: .12em;
-    padding: 0 14px; cursor: pointer;
+    background: var(--raised); color: var(--txt); border: 1px solid var(--line); border-radius: 2px;
+    font-family: var(--display); font-size: 10.5px; font-weight: 500; letter-spacing: .12em;
+    padding: 0 14px; cursor: pointer; flex: none; white-space: nowrap;
+    transition: background-color .15s ease, border-color .15s ease;
   }
-  .taskadd button:hover { filter: brightness(1.15); }
+  .taskadd button:hover { background: var(--line-2); border-color: var(--line-2); }
   .tasklist { overflow-y: auto; flex: 1; max-height: 150px; }
   .task {
     display: flex; align-items: center; gap: 9px; padding: 6px 2px;
-    font-size: 12px; color: var(--txt); border-bottom: 1px dashed rgba(255,59,48,.08);
+    font-size: 12px; color: var(--txt); border-bottom: 1px solid var(--line);
   }
-  .task .tmark { color: var(--red); }
+  .task .tmark { color: var(--dim); flex: none; }
   .task.done .tt { text-decoration: line-through; color: var(--dim); }
   .task .tt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .task .gear { color: var(--dim); font-size: 12px; cursor: pointer; }
+  .task .gear { color: var(--dim); font-size: 12px; cursor: pointer; flex: none; }
   .task .gear:hover { color: var(--amber); }
   .empty { color: var(--dim); font-size: 11.5px; padding: 8px 2px; }
 
   /* NEURAL ACTIVITY */
   .logbox {
-    position: relative; background: #050507; border: 1px solid rgba(255,59,48,.12);
-    border-radius: 4px; padding: 8px 10px; height: 158px; overflow: hidden;
+    position: relative; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 2px; padding: 8px 10px; height: 158px; overflow: hidden;
     font-size: 10.5px; line-height: 1.75;
   }
   .logbox .logline { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .logbox .logline .ts { color: #56565e; }
-  .logbox .logline .tagmem { color: var(--amber); }
-  .logbox .logline .tagact { color: var(--red); }
-  .logbox .logline .taglive { color: #ffd60a; }
+  /* Four tag colours in a log stream collapse to two: everything is dim,
+     and only "live" -- the one that means something is happening right now
+     -- takes the accent. */
+  .logbox .logline .ts { color: var(--dim-2); }
+  .logbox .logline .tagmem,
+  .logbox .logline .tagact { color: var(--dim); }
+  .logbox .logline .taglive { color: var(--amber); }
   .wm {
     position: absolute; right: 8px; bottom: 6px; font-size: 9px; letter-spacing: .3em;
-    color: rgba(255,59,48,.25); text-align: right; line-height: 1.6; pointer-events: none;
+    color: var(--dim-2); text-align: right; line-height: 1.6; pointer-events: none;
   }
 
   /* TACTICAL AUDIO */
   .audioRow { display: flex; align-items: center; gap: 12px; }
   .art {
-    width: 52px; height: 52px; border: 1px solid var(--line); border-radius: 4px;
+    width: 52px; height: 52px; border: 1px solid var(--line); border-radius: 2px;
     display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(circle at 35% 30%, rgba(255,149,0,.25), rgba(255,59,48,.12));
-    color: var(--amber); font-size: 20px; flex: none;
+    background: var(--raised);
+    color: var(--dim); font-size: 20px; flex: none;
   }
   .trkinfo .ttl { font-size: 12px; color: var(--txt); letter-spacing: .05em; }
   .trkinfo .artst { font-size: 10px; color: var(--dim); margin-top: 3px; }
   .audiocontrols { display: flex; gap: 8px; margin-top: 12px; }
   .audiocontrols button {
-    flex: 1; background: #0a0a0f; border: 1px solid var(--line); color: var(--red);
-    font-size: 14px; padding: 7px 0; border-radius: 4px; cursor: pointer; font-family: var(--mono);
+    flex: 1 1 0; min-width: 0; background: var(--bg); border: 1px solid var(--line); color: var(--red);
+    font-size: 14px; padding: 7px 0; border-radius: 2px; cursor: pointer; font-family: var(--mono);
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease;
   }
-  .audiocontrols button:hover { border-color: rgba(255,59,48,.5); color: var(--amber); }
+  .audiocontrols button:hover { background: var(--raised); border-color: var(--line-2); color: var(--txt); }
   .audstate { font-size: 10px; color: var(--dim); margin-top: 8px; letter-spacing: .06em; }
   .audstate b { color: var(--amber); }
 
   /* CENTER */
   .ctxbar {
     display: flex; align-items: center; gap: 14px; padding: 10px 14px;
-    border: 1px solid var(--line); border-radius: 6px; font-size: 11px; color: var(--dim);
-    background: linear-gradient(180deg, rgba(255,59,48,.03), transparent), var(--panel);
+    border: 1px solid var(--line); border-radius: 2px; font-size: 11px; color: var(--dim);
+    background: var(--panel); flex: none;
   }
-  .ctxbar .ctx { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctxbar .ctx { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ctxbar .ctx b { color: var(--txt); font-weight: 500; }
   .ctxbar .scan {
-    background: var(--red); color: #1a0505; border: 0; border-radius: 4px;
-    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .1em;
-    padding: 6px 12px; cursor: pointer; white-space: nowrap;
+    background: var(--raised); color: var(--txt); border: 1px solid var(--line); border-radius: 2px;
+    font-family: var(--display); font-size: 10px; font-weight: 500; letter-spacing: .1em;
+    padding: 6px 12px; cursor: pointer; white-space: nowrap; flex: none;
+    transition: background-color .15s ease, border-color .15s ease;
   }
-  .ctxbar .scan:hover { filter: brightness(1.15); }
+  .ctxbar .scan:hover { background: var(--line-2); border-color: var(--line-2); }
 
   .ringwrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; min-height: 0; }
   .ring { position: relative; width: min(42vh, 380px); aspect-ratio: 1; }
   .ring .rr { position: absolute; border-radius: 50%; }
-  .ring .r1 { inset: 0; border: 1px solid rgba(255,59,48,.4); box-shadow: 0 0 22px rgba(255,59,48,.15), inset 0 0 22px rgba(255,59,48,.10); }
-  .ring .r2 { inset: 9%; border: 1px dashed rgba(255,149,0,.35); animation: spin 30s linear infinite; }
-  .ring .r3 { inset: 19%; border: 1px solid rgba(255,59,48,.22); }
-  .ring .r4 { inset: 27%; border: 1px dashed rgba(255,59,48,.3); animation: spin 18s linear infinite reverse; }
+  /* The arc reactor stays -- it IS this screen, and the rotating rings are
+     its only ambient "the system is alive" signal -- but it is drawn now
+     instead of lit: solid rules at the two line colours, a flat core on the
+     interactive layer with one accent ring, and no halo anywhere. The two
+     spin animations are untouched; they animate transform only. */
+  .ring .r1 { inset: 0; border: 1px solid var(--line-2); }
+  .ring .r2 { inset: 9%; border: 1px dashed var(--line); animation: spin 30s linear infinite; }
+  .ring .r3 { inset: 19%; border: 1px solid var(--line); }
+  .ring .r4 { inset: 27%; border: 1px dashed var(--line); animation: spin 18s linear infinite reverse; }
   .ring .arc { position: absolute; border-radius: 50%; border: 1px solid transparent; border-top-color: var(--amber); }
-  .ring .a1 { inset: 4.5%; border-top-width: 2px; box-shadow: 0 0 10px rgba(255,149,0,.5); }
+  .ring .a1 { inset: 4.5%; border-top-width: 2px; }
   .ring .core {
     position: absolute; inset: 34%; border-radius: 50%;
-    background: radial-gradient(circle at 40% 32%, #ffd0c4 0%, #ff3b30 34%, #7a120b 68%, #240503 100%);
-    box-shadow: 0 0 46px rgba(255,59,48,.55), inset 0 0 30px rgba(0,0,0,.6);
+    background: var(--raised); border: 1px solid var(--amber);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
   }
-  .ring .core .c1 { font-size: clamp(13px, 2.2vw, 20px); letter-spacing: .3em; color: #ffd9d4; font-weight: 700; }
-  .ring .core .c2 { font-size: clamp(9px, 1.4vw, 12px); letter-spacing: .4em; color: #ffb3ab; margin-top: 5px; }
-  .ring .node { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 12px var(--red); }
+  .ring .core .c1 { font-family: var(--display); font-size: clamp(13px, 2.2vw, 20px); letter-spacing: .3em; color: var(--txt); font-weight: 600; }
+  .ring .core .c2 { font-family: var(--display); font-size: clamp(9px, 1.4vw, 12px); letter-spacing: .4em; color: var(--dim); margin-top: 5px; }
+  .ring .node { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
   .ring .n1 { top: 14%; right: 22%; animation: nodepulse 2.4s ease-in-out infinite; }
   .ring .n2 { bottom: 20%; left: 12%; width: 4px; height: 4px; animation: nodepulse 3.1s ease-in-out infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes nodepulse { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
   .intent {
     display: flex; align-items: center; gap: 12px;
-    border: 1px solid var(--line); border-radius: 999px; padding: 8px 18px;
+    border: 1px solid var(--line); border-radius: 2px; padding: 8px 18px;
     font-size: 11px; letter-spacing: .12em; color: var(--dim);
+    max-width: 100%; min-width: 0; white-space: nowrap;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
   }
-  .intent b { color: var(--amber); font-weight: 600; }
-  .intent .conf { color: var(--red); }
+  .intent::-webkit-scrollbar { display: none; }
+  .intent b { color: var(--amber); font-weight: 500; }
+  .intent .conf { color: var(--dim); }
 
   /* SUIT DIAGNOSTICS */
   .metric { margin-bottom: 10px; }
   .metric .mrow { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--dim); letter-spacing: .08em; margin-bottom: 4px; }
   .metric .mrow b { color: var(--txt); font-weight: 500; }
-  .bar { height: 5px; background: #14141a; border-radius: 3px; overflow: hidden; }
-  .bar > div { height: 100%; background: linear-gradient(90deg, var(--red), var(--amber)); box-shadow: 0 0 8px rgba(255,59,48,.6); }
-  .dualfoot { display: flex; justify-content: space-between; border-top: 1px dashed var(--line); padding-top: 9px; margin-top: 4px; font-size: 10px; color: var(--dim); letter-spacing: .1em; }
+  .bar { height: 5px; background: var(--raised); border-radius: 2px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--amber); }
+  .dualfoot { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 9px; margin-top: 4px; font-size: 10px; color: var(--dim); letter-spacing: .1em; }
   .dualfoot b { color: var(--amber); font-weight: 500; }
 
   /* MATRIX STATUS */
   .matrow { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--dim); letter-spacing: .08em; }
   .matrow b { color: var(--txt); font-weight: 500; }
   .wave { width: 100%; height: 52px; margin: 8px 0; display: block; }
-  .matfoot { display: flex; justify-content: space-between; border-top: 1px dashed var(--line); padding-top: 8px; font-size: 10px; color: var(--dim); }
+  .matfoot { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 8px; font-size: 10px; color: var(--dim); }
   .matfoot b { color: var(--amber); font-weight: 500; }
 
   /* MEMORY CORE */
   .memvec { margin-bottom: 8px; }
-  .quote { font-size: 10.5px; color: var(--dim); border-left: 2px solid var(--amber); padding: 6px 9px; margin: 8px 0; font-style: italic; }
-  .memfoot { display: flex; justify-content: space-between; border-top: 1px dashed var(--line); padding-top: 8px; font-size: 10px; color: var(--dim); }
+  .quote { font-size: 10.5px; color: var(--dim); border-left: 2px solid var(--line-2); padding: 6px 9px; margin: 8px 0; }
+  .memfoot { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 8px; font-size: 10px; color: var(--dim); }
   .memfoot b { color: var(--amber); font-weight: 500; }
   .lastwrite { text-align: right; font-size: 10px; color: var(--dim); margin-top: 6px; }
-  .lastwrite b { color: var(--red); font-weight: 500; }
+  .lastwrite b { color: var(--txt); font-weight: 500; }
 
   /* COMMAND GRID */
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .grid button {
-    background: #0a0a0f; border: 1px solid var(--line); border-radius: 5px;
-    color: var(--txt); font-family: var(--mono); cursor: pointer; padding: 11px 4px;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 2px;
+    color: var(--txt); font-family: var(--display); cursor: pointer; padding: 11px 4px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0;
+    transition: background-color .15s ease, border-color .15s ease;
   }
-  .grid button .ic { font-size: 17px; color: var(--red); text-shadow: 0 0 8px rgba(255,59,48,.5); }
-  .grid button .lb { font-size: 9.5px; letter-spacing: .18em; color: var(--dim); }
-  .grid button:hover { border-color: rgba(255,149,0,.55); background: #12121a; }
+  .grid button .ic { font-size: 17px; color: var(--dim); }
+  .grid button .lb { font-size: 9.5px; letter-spacing: .18em; color: var(--dim);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .grid button:hover { border-color: var(--line-2); background: var(--raised); }
   .grid button:hover .ic { color: var(--amber); }
 
   /* footer */
   footer {
     display: flex; align-items: center; justify-content: space-between;
     padding: 10px 26px; border-top: 1px solid var(--line);
-    font-size: 10.5px; color: var(--dim); letter-spacing: .1em;
+    font-size: 10.5px; color: var(--dim); letter-spacing: .1em; flex: none;
+    min-width: 0; overflow-x: auto; scrollbar-width: none; white-space: nowrap;
   }
+  footer::-webkit-scrollbar { display: none; }
   footer b { color: var(--amber); font-weight: 500; }
-  .standby { display: flex; align-items: center; gap: 14px; }
-  .standby .hashes { color: rgba(255,59,48,.4); letter-spacing: .2em; }
-  .standby .core { color: var(--red); }
+  .standby { display: flex; align-items: center; gap: 14px; flex: none; white-space: nowrap; }
+  .standby .hashes { color: var(--dim-2); letter-spacing: .2em; }
+  .standby .core { color: var(--amber); }
 </style>
 </head>
 <body>
@@ -515,8 +596,12 @@ function drawWave() {
   waveCanvas.width = waveCanvas.offsetWidth || 260;
   const w = waveCanvas.width, h = 52;
   waveCtx.clearRect(0, 0, w, h);
-  waveCtx.strokeStyle = 'rgba(255,59,48,.75)';
-  waveCtx.shadowColor = 'rgba(255,59,48,.6)'; waveCtx.shadowBlur = 5;
+  // Retheme: the telemetry trace was a translucent red line wearing a 5px
+  // canvas glow. It reads the live accent token off :root now, so the chart
+  // can never drift from the stylesheet, and draws a plain solid stroke.
+  waveCtx.strokeStyle = getComputedStyle(document.documentElement)
+    .getPropertyValue('--amber').trim() || '#F59E0B';
+  waveCtx.shadowColor = 'transparent'; waveCtx.shadowBlur = 0;
   waveCtx.beginPath();
   waveBuf.forEach((v, i) => { const x = (i / (waveBuf.length - 1)) * w; const y = h - (v / 100) * (h - 6) - 3; i ? waveCtx.lineTo(x, y) : waveCtx.moveTo(x, y); });
   waveCtx.stroke();

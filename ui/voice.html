@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DOURMOUSE // VOICE LAB</title>
+<link rel="stylesheet" href="assets/dourmouse-ui.css">
 <style>
   @font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/sekuya-regular.ttf') format('truetype');}
   @font-face{font-family:'Orbitron';font-style:normal;font-weight:700;font-display:swap;src:url('assets/fonts/orbitron-700-latin.woff2') format('woff2');}
@@ -20,29 +21,66 @@
   @font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;src:url('assets/fonts/fira-sans-400-latin.woff2') format('woff2');}
   @font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;src:url('assets/fonts/fira-sans-500-latin.woff2') format('woff2');}
   @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;src:url('assets/fonts/fira-sans-600-latin.woff2') format('woff2');}
+  /* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css,
+     linked above). Same method as ui/workspace.html: variable NAMES unchanged,
+     so all 92 call sites keep working and this is one block to revert.
+
+     This was the most heavily decorated screen in the app -- a glowing
+     radial-gradient sphere, four alpha rings, five separate box-shadow
+     halos, two text glows and a keyframe animation that animated box-shadow
+     itself. What survives and why:
+
+       - The ORB stays, and stays round and state-coloured: it is the actual
+         control ("tap the orb and talk") and its colour is the only place
+         idle / listening / thinking / speaking is shown. What goes is the
+         radial-gradient sphere shading and every halo -- it is a flat solid
+         disc now, on the system's own accent tokens.
+       - The MIC button stays round too. These two, the status dots and an
+         account avatar are the only circles in the app: they are circular
+         *targets*, not pill chrome. Every rectangular control on this page
+         went to the system's 2px corner.
+       - --cyan/--gold stop being hues: cyan becomes the neutral primary
+         text, gold folds into the single amber accent.
+       - --line was #182435, a blue-black; --panel was #0c1220. Solid layer
+         colours now.
+       - --text-body is NEW (additive) so transcript prose stops being
+         rgba(219,228,240,.72) over a panel.
+       - Type: Departure Mono for structure (--font-hud), Monaspace Neon for
+         everything the machine says, transcripts included. Rajdhani, Share
+         Tech Mono and Space Grotesk are no longer referenced by any rule;
+         their @font-face blocks are left in place above rather than deleted,
+         since they are shared with the other screens' asset set.
+
+     Previous values, for a one-step revert:
+       --bg:#070b12; --panel:#0c1220; --line:#182435;
+       --cyan:#22d3ee/34,211,238; --gold:#f5c86a/245,200,106;
+       --text:#dbe4f0; --dim:#64748b; --red:#f87171; --green:#5ee7a0;
+       --font-hud:'Rajdhani'...; --font-mono:'Share Tech Mono'...;
+       --font-prose:'Fira Sans'...                                        */
   :root {
-    --bg: #070b12;
-    --panel: #0c1220;
-    --line: #182435;
-    --cyan: #22d3ee;
-    --cyan-rgb: 34, 211, 238;
-    --gold: #f5c86a;
-    --gold-rgb: 245, 200, 106;
-    --text: #dbe4f0;
-    --dim: #64748b;
-    --red: #f87171;
-    --green: #5ee7a0;
-    --font-hud: 'Rajdhani', system-ui, sans-serif;
-    --font-mono: 'Share Tech Mono', ui-monospace, Menlo, monospace;
-    --font-prose: 'Fira Sans', system-ui, sans-serif;
+    --bg: #09090B;
+    --panel: #18181B;
+    --raised: #27272A;
+    --line: #27272A;
+    --line-2: #3F3F46;
+    --cyan: #FAFAFA;
+    --cyan-rgb: 250, 250, 250;
+    --gold: #F59E0B;
+    --gold-rgb: 245, 158, 11;
+    --text: #FAFAFA;
+    --text-body: #A1A1AA;
+    --dim: #71717A;
+    --red: #EF4444;
+    --green: #10B981;
+    --font-hud: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+    --font-mono: 'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,Menlo,monospace;
+    --font-prose: 'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
-    background:
-      radial-gradient(ellipse 80% 60% at 50% 38%, rgba(var(--cyan-rgb),.06), transparent 70%),
-      var(--bg);
-    color: var(--text);
+    background: var(--bg);
+    color: var(--text-body);
     font-family: var(--font-prose);
     display: flex; flex-direction: column; overflow: hidden;
     -webkit-user-select: none; user-select: none;
@@ -51,25 +89,36 @@
   header {
     display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
     padding: 14px 24px; border-bottom: 1px solid var(--line);
-    background: rgba(7,11,18,0.75);
+    background: var(--panel);
   }
-  .brand { display: flex; align-items: center; gap: 10px; font-family: 'Sekuya','Rajdhani',sans-serif; font-size: 16px; letter-spacing: .16em; }
-  .brand .shield { width: 18px; height: 18px; color: var(--cyan); }
-  .brand b { color: var(--cyan); font-weight: 400; text-shadow: 0 0 14px rgba(var(--cyan-rgb),.55); }
+  .brand { display: flex; align-items: center; gap: 10px; flex: none; font-family: var(--font-hud); font-size: 16px; letter-spacing: .16em; white-space: nowrap; }
+  .brand .shield { width: 18px; height: 18px; color: var(--dim); flex: none; }
+  .brand b { color: var(--text); font-weight: 400; }
   .brand .dot { color: var(--gold); }
   .brand .sub { color: var(--dim); font-size: 11px; letter-spacing: .24em; font-family: var(--font-mono); }
-  .topchips { display: flex; align-items: center; gap: 16px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; }
-  .chip { display: flex; align-items: center; gap: 7px; color: var(--dim); }
-  .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
-  .chip .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
-  .chip .dot.err { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  /* Horizontal readout row. It had no width discipline, so a long backend
+     or voice name pushed the later chips (and the auth button) off the end
+     of the bar with no way to reach them. House fix. */
+  .topchips { display: flex; align-items: center; gap: 16px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
+    flex: 1 1 auto; min-width: 0; justify-content: flex-end;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 32px, #000 100%);
+            mask-image: linear-gradient(to right, transparent 0, #000 32px, #000 100%); }
+  .topchips::-webkit-scrollbar { display: none; }
+  .chip { display: flex; align-items: center; gap: 7px; color: var(--dim); flex: none; white-space: nowrap; }
+  /* Status is a solid 6px dot -- the 8px coloured halos are gone. */
+  .chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); flex: none; }
+  .chip .dot.on { background: var(--green); }
+  .chip .dot.err { background: var(--red); }
   .chip b { color: var(--text); font-weight: 400; }
   .authbtn {
-    background: var(--cyan); color: #04121a; border: 0; border-radius: 6px;
-    padding: 6px 14px; font-family: var(--font-hud); font-size: 12px; font-weight: 700; letter-spacing: .08em; cursor: pointer;
+    background: var(--raised); color: var(--text); border: 1px solid var(--line-2); border-radius: 2px;
+    padding: 6px 14px; font-family: var(--font-hud); font-size: 12px; font-weight: 500; letter-spacing: .08em;
+    cursor: pointer; flex: none; white-space: nowrap;
+    transition: background-color .18s ease, color .18s ease;
   }
-  .authbtn:hover { filter: brightness(1.12); }
-  .authbtn.ok { background: rgba(var(--cyan-rgb),.12); color: var(--cyan); }
+  .authbtn:hover { background: var(--line-2); }
+  .authbtn.ok { background: var(--panel); color: var(--dim); border-color: var(--line); }
 
   /* ---------- stage ---------- */
   main { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
@@ -79,102 +128,113 @@
   }
   .statusline { text-align: center; }
   .statusline .kicker { font-family: var(--font-mono); font-size: 10px; letter-spacing: .34em; color: var(--dim); }
-  .statusline .big { font-family: var(--font-hud); font-size: 21px; font-weight: 700; letter-spacing: .22em; color: var(--cyan);
-    text-shadow: 0 0 22px rgba(var(--cyan-rgb),.5); margin-top: 4px; }
+  .statusline .big { font-family: var(--font-hud); font-size: 21px; font-weight: 600; letter-spacing: .22em; color: var(--text);
+    margin-top: 4px; white-space: nowrap; }
 
   /* ---------- orb ---------- */
   .radar { position: relative; width: 220px; height: 220px; flex: none; }
-  .radar .ring { position: absolute; border: 1px solid rgba(var(--cyan-rgb),.16); border-radius: 50%; }
+  /* Four concentric rules, solid, at the structural line colour instead of
+     a 16%-to-8% alpha cyan fade. */
+  .radar .ring { position: absolute; border: 1px solid var(--line); border-radius: 50%; }
   .radar .r1 { inset: 0; }
-  .radar .r2 { inset: 28px; border-color: rgba(var(--cyan-rgb),.12); }
-  .radar .r3 { inset: 56px; border-color: rgba(var(--cyan-rgb),.10); }
-  .radar .r4 { inset: 84px; border-color: rgba(var(--cyan-rgb),.08); }
+  .radar .r2 { inset: 28px; }
+  .radar .r3 { inset: 56px; }
+  .radar .r4 { inset: 84px; }
+  /* The orb was a shaded sphere (four-stop radial gradient) wearing a 44px
+     halo, and every state swapped the sphere for a differently-shaded one
+     with a bigger halo. It is now a flat solid disc: state is the fill
+     colour, full stop. The breathing animation stays because it animates
+     transform only. */
   .orb {
     position: absolute; inset: 58px; border-radius: 50%;
-    background: radial-gradient(circle at 38% 32%, #a5f3fc 0%, var(--cyan) 28%, #0e7490 62%, #083344 100%);
-    box-shadow: 0 0 44px rgba(var(--cyan-rgb),.5), inset 0 0 26px rgba(7,11,18,.55);
+    background: var(--raised); border: 1px solid var(--line-2);
     animation: breathe 4s ease-in-out infinite;
   }
   @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
-  .radar.listening .orb { animation: breathfast .7s ease-in-out infinite; box-shadow: 0 0 70px rgba(var(--cyan-rgb),.85), inset 0 0 26px rgba(7,11,18,.55); }
+  .radar.listening .orb { animation: breathfast .7s ease-in-out infinite; background: var(--cyan); border-color: var(--cyan); }
   @keyframes breathfast { 0%,100% { transform: scale(1.02); } 50% { transform: scale(1.1); } }
-  .radar.listening .ring { border-color: rgba(var(--cyan-rgb),.34); }
-  .radar.think .orb { background: radial-gradient(circle at 38% 32%, #fdf3d8 0%, var(--gold) 30%, #a5761c 65%, #4a3606 100%); box-shadow: 0 0 54px rgba(var(--gold-rgb),.6), inset 0 0 26px rgba(7,11,18,.55); }
-  .radar.speak .orb { background: radial-gradient(circle at 38% 32%, #d9ffe9 0%, var(--green) 30%, #0f7a4a 65%, #06341f 100%); box-shadow: 0 0 54px rgba(94,231,160,.6), inset 0 0 26px rgba(7,11,18,.55); }
+  .radar.listening .ring { border-color: var(--line-2); }
+  .radar.think .orb { background: var(--gold); border-color: var(--gold); }
+  .radar.speak .orb { background: var(--green); border-color: var(--green); }
 
   /* ---------- mic ---------- */
   .micwrap { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: none; }
   .micbtn {
-    width: 62px; height: 62px; border-radius: 50%; border: 1px solid var(--cyan);
-    background: rgba(var(--cyan-rgb),.06); color: var(--cyan); cursor: pointer;
+    width: 62px; height: 62px; border-radius: 50%; border: 1px solid var(--line-2);
+    background: var(--panel); color: var(--text); cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 0 24px rgba(var(--cyan-rgb),.25), inset 0 0 16px rgba(var(--cyan-rgb),.10);
-    transition: all .18s ease;
+    transition: background-color .18s ease, transform .18s ease;
   }
-  .micbtn:hover { background: rgba(var(--cyan-rgb),.14); box-shadow: 0 0 34px rgba(var(--cyan-rgb),.45); }
+  .micbtn:hover { background: var(--raised); }
   .micbtn:active { transform: scale(.94); }
+  /* Recording was signalled by a keyframe that animated box-shadow -- a
+     property that cannot be composited. Solid red fill plus an opacity
+     pulse says the same thing and stays on the compositor. */
   .micbtn.rec {
-    background: var(--red); border-color: var(--red); color: #2b0a0a;
-    box-shadow: 0 0 34px rgba(248,113,113,.6);
+    background: var(--red); border-color: var(--red); color: var(--bg);
     animation: pulse 1s ease-in-out infinite;
   }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 34px rgba(248,113,113,.6);} 50% { box-shadow: 0 0 52px rgba(248,113,113,.9);} }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
   .micbtn svg { width: 24px; height: 24px; }
   .miclabel { font-family: var(--font-mono); font-size: 10px; letter-spacing: .3em; color: var(--dim); }
-  .miclabel.hot { color: var(--cyan); }
+  .miclabel.hot { color: var(--gold); }
 
   /* ---------- deck: transcript + profile ---------- */
   .deck { flex: 1; display: grid; grid-template-columns: 1fr 250px; gap: 14px; padding: 0 24px 18px; min-height: 0; }
   .convo {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 2px;
     overflow-y: auto; padding: 14px 16px; min-height: 0;
     font-size: 13.5px; line-height: 1.6;
   }
   .convo:empty::before { content: "TAP THE ORB AND TALK — WATCH DOURMOUSE THINK, ACT, THEN REPLY."; color: var(--dim); font-family: var(--font-mono); font-size: 10px; letter-spacing: .2em; display: block; text-align: center; margin-top: 30px; }
   .turn { margin-bottom: 16px; }
   .tq { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
-  .tq .who { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .26em; color: var(--cyan); flex: none; }
+  .tq .who { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .26em; color: var(--dim); flex: none; }
   .tq .q { color: var(--text); }
-  .th { border-left: 2px solid rgba(var(--gold-rgb), .5); padding: 4px 0 4px 12px; margin: 4px 0 8px; }
+  .th { border-left: 2px solid var(--line-2); padding: 4px 0 4px 12px; margin: 4px 0 8px; }
   .th-head { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .24em; color: var(--gold); margin-bottom: 4px; }
-  .th-line { font-size: 12.5px; color: rgba(219,228,240,.72); margin: 2px 0; }
+  .th-line { font-size: 12.5px; color: var(--text-body); margin: 2px 0; }
   .th-line .caret { display: inline-block; width: 6px; height: 12px; background: var(--gold); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
   .ac { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; margin: 3px 0; color: var(--text); }
-  .ac .tag { flex: none; font-size: 9px; letter-spacing: .12em; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--dim); }
-  .ac .nm { color: var(--cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
+  /* One monochrome pill for every tool tag -- the ".done" variant no longer
+     recolours the pill; the status word beside it already says DONE. */
+  .ac .tag { flex: none; font-size: 9px; letter-spacing: .12em; padding: 2px 6px; border: 1px solid transparent; border-radius: 2px; background: var(--raised); color: var(--dim); }
+  .ac .nm { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
   .ac .st { margin-left: auto; flex: none; color: var(--dim); font-size: 9.5px; letter-spacing: .16em; }
   .ac.done .st { color: var(--green); }
-  .ac.done .tag { color: var(--green); border-color: rgba(94,231,160,.4); }
+  .ac.done .tag { color: var(--dim); }
   .ac .snip { color: var(--dim); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
-  .rep { border-left: 2px solid rgba(var(--cyan-rgb), .5); padding: 4px 0 4px 12px; margin-top: 8px; }
-  .rp-head { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .24em; color: var(--cyan); margin-bottom: 4px; }
+  .rep { border-left: 2px solid var(--gold); padding: 4px 0 4px 12px; margin-top: 8px; }
+  .rp-head { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .24em; color: var(--dim); margin-bottom: 4px; }
   .rp-head .voice { color: var(--dim); letter-spacing: .14em; }
   .rp-body { white-space: pre-wrap; }
-  .rp-body .caret { display: inline-block; width: 7px; height: 14px; background: var(--cyan); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  .rp-body .caret { display: inline-block; width: 7px; height: 14px; background: var(--gold); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
   .err { color: var(--red); font-size: 12.5px; }
   @keyframes blink { 50% { opacity: 0; } }
 
   .side { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .card .k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .26em; color: var(--gold); margin-bottom: 10px; }
-  .card .row { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--dim); padding: 4px 0; border-bottom: 1px dashed rgba(24,36,53,.7); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 2px; padding: 12px 14px; }
+  .card .k { font-family: var(--font-hud); font-size: 9.5px; letter-spacing: .26em; color: var(--dim); margin-bottom: 10px; text-transform: uppercase; }
+  .card .row { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--dim); padding: 4px 0; border-bottom: 1px solid var(--line); }
   .card .row:last-of-type { border-bottom: 0; }
   .card .row b { color: var(--text); font-weight: 400; }
   .card .note { font-size: 11px; color: var(--dim); line-height: 1.5; margin-top: 8px; }
   .qbtn {
-    width: 100%; margin-top: 10px; background: rgba(var(--gold-rgb),.1); color: var(--gold);
-    border: 1px solid rgba(var(--gold-rgb),.4); border-radius: 6px; padding: 8px 10px;
-    font-family: var(--font-hud); font-size: 11px; font-weight: 700; letter-spacing: .12em; cursor: pointer;
+    width: 100%; margin-top: 10px; background: var(--panel); color: var(--text-body);
+    border: 1px solid var(--line); border-radius: 2px; padding: 8px 10px;
+    font-family: var(--font-hud); font-size: 11px; font-weight: 500; letter-spacing: .12em; cursor: pointer;
+    white-space: nowrap;
+    transition: background-color .18s ease, color .18s ease, border-color .18s ease;
   }
-  .qbtn:hover { background: rgba(var(--gold-rgb),.2); }
+  .qbtn:hover { background: var(--raised); color: var(--text); border-color: var(--line-2); }
   .qbtn:disabled { opacity: .5; cursor: default; }
 
   #authnote {
     position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
-    background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.35); color: var(--red);
-    font-size: 12.5px; padding: 8px 16px; border-radius: 8px; display: none; z-index: 5;
+    background: var(--panel); border: 1px solid var(--line-2); color: var(--red);
+    font-size: 12.5px; padding: 8px 16px; border-radius: 2px; display: none; z-index: 5;
   }
-  #authnote a { color: var(--cyan); }
+  #authnote a { color: var(--gold); }
   @media (max-width: 860px) {
     .deck { grid-template-columns: 1fr; }
     .side { flex-direction: row; flex-wrap: wrap; }
