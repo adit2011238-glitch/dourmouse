@@ -204,7 +204,16 @@ class TestTool:
         sub = reg.get_subagent("orchestrator")
         # v8.31: the orchestrator's tool set grew by one native self-dispatch
         # tool (delegate_parallel), but publish_artifact still never rides it.
-        assert {t.name for t in sub.tools} == {"delegate_task", "delegate_parallel"}
+        # v5.21: delegate_to_models joined them -- routes ACROSS models
+        # (local Ollama vs cloud Gemini) rather than spawning another nested
+        # run against the same model, and never re-enters a coding CLI, so it
+        # carries none of the recursion risk that keeps delegate_task and
+        # delegate_parallel off publish_artifact's own path.
+        assert {t.name for t in sub.tools} == {
+            "delegate_task",
+            "delegate_parallel",
+            "delegate_to_models",
+        }
 
     def test_tool_permission_is_regular(self):
         spec = art.build_artifact_tool_spec()
