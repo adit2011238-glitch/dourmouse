@@ -649,6 +649,15 @@ def _stream_completion(
     content_parts: list[str] = []
     tool_acc: dict[int, dict[str, str]] = {}
     stream_usage: Any = None
+    # v13.8: on_delta is what the SSE assistant_delta stream (and therefore
+    # the console UI, permanently -- see _HarmonyDeltaFilter's own docstring)
+    # actually shows the user live. content_parts still accumulates the RAW
+    # text unchanged (the final _OllamaMessage(...) below still runs it
+    # through _strip_harmony_markup for any non-streaming caller/log), but
+    # on_delta itself must go through the live filter or a Harmony leak is
+    # visible on screen well before the turn (and this offline cleanup)
+    # ever completes.
+    harmony_filter = _HarmonyDeltaFilter(on_delta)
     for chunk in stream:
         # The usage-bearing final chunk carries an EMPTY choices list, so
         # this must be read before the choices guard below skips it.
@@ -663,7 +672,7 @@ def _stream_completion(
         text = getattr(delta, "content", None)
         if text:
             content_parts.append(text)
-            on_delta(text)
+            harmony_filter.feed(text)
         thinking_text = getattr(delta, "thinking", None)
         if thinking_text and on_thinking is not None:
             on_thinking(thinking_text)
@@ -678,6 +687,7 @@ def _stream_completion(
                     acc["name"] = fn.name
                 if getattr(fn, "arguments", None):
                     acc["args"] += fn.arguments
+    harmony_filter.finish()
     if tool_acc:
         tool_calls = [
             _OllamaTc(a["id"], a["name"], a["args"])
@@ -1219,6 +1229,143 @@ class _OllamaMessage:
     def __init__(self, content: str, tool_calls: list[_OllamaTc] | None) -> None:
         self.content = _strip_harmony_markup(content) if content else content
         self.tool_calls = tool_calls
+
+
+# Matches a complete "<|channel|>NAME ... <|message|>" header -- used by
+# _HarmonyDeltaFilter to recognize a channel boundary the instant it has
+# fully arrived (never before, since a header split across two stream
+# chunks must not be matched half-formed).
+_HARMONY_HEADER_RE = re.compile(r"<\|channel\|>\s*(\w+)[^<]*<\|message\|>")
+
+
+class _HarmonyDeltaFilter:
+    """Live-streaming counterpart to _strip_harmony_markup, above.
+
+    Real, live-reproduced gap in that function's own original scope: it only
+    ever sanitizes the FINAL, fully-assembled ``_OllamaMessage.content`` --
+    but the console UI has no later "clean re-render" step. What streams
+    into the ``assistant_delta`` SSE events via ``on_delta`` in
+    ``_stream_completion`` IS, permanently, what the user sees; nothing
+    overwrites it afterward. So when gpt-oss:20b emits raw Harmony markup
+    (observed live: ``...Next Step...<|channel|>final<|message|>Email
+    Sent...`` landed on screen with the marker literally visible, right
+    after a real, successful gmail_send), the offline-only fix did nothing
+    for it.
+
+    This wraps ``on_delta`` so only "final"-channel body text (or, for the
+    common case of a backend that never emits Harmony markup at all, ALL
+    text) reaches the real callback -- live, incrementally, not just at the
+    end. Analysis/commentary channel bodies (private reasoning, raw
+    tool-call JSON) are buffered and dropped, exactly like the offline
+    function's "only the last final segment" behavior, but decided as each
+    channel header arrives instead of only after the whole message is done.
+
+    Scope, stated plainly: text emitted BEFORE the very first ``<|`` marker
+    is passed straight through immediately (this is what keeps ordinary,
+    non-Harmony backends streaming with zero added latency or behavior
+    change). If a model's leak includes a stray role-name word ahead of
+    its first marker (the older, separately-covered case in
+    _strip_harmony_markup's own test fixture), that word is NOT caught
+    here -- narrower than the offline function on that one edge, in
+    exchange for correct, low-latency passthrough for every backend that
+    never leaks Harmony markup in the first place.
+    """
+
+    def __init__(self, on_delta: Callable[[str], None]) -> None:
+        self._on_delta = on_delta
+        self._buf = ""
+        self._scanning = True  # True until the first "<|" is seen at all
+        self._channel: str | None = None
+
+    def feed(self, text: str) -> None:
+        if not text:
+            return
+        self._buf += text
+        self._drain()
+
+    def _drain(self) -> None:
+        while self._buf:
+            if self._scanning:
+                idx = self._buf.find("<|")
+                if idx == -1:
+                    # Hold back a possible split "<" / "<|" at the very
+                    # tail so the next chunk can complete it.
+                    tail_hold = 1 if self._buf.endswith("<") else 0
+                    if tail_hold < len(self._buf):
+                        self._on_delta(self._buf[: len(self._buf) - tail_hold])
+                        self._buf = self._buf[len(self._buf) - tail_hold :]
+                    return
+                if idx > 0:
+                    self._on_delta(self._buf[:idx])
+                    self._buf = self._buf[idx:]
+                self._scanning = False
+                continue
+            # Not scanning: buf starts at (or with) a "<|" boundary. Try to
+            # match a complete channel header first.
+            m = _HARMONY_HEADER_RE.match(self._buf)
+            if m:
+                self._channel = m.group(1)
+                self._buf = self._buf[m.end() :]
+                continue
+            if self._buf.startswith("<|channel|>"):
+                # The bare "<|channel|>" token is ALSO one of
+                # _HARMONY_MARKER_RE's own alternatives, so it must be
+                # checked here, before the generic marker match below --
+                # otherwise a header whose name/<|message|> hasn't fully
+                # arrived yet gets prematurely (and wrongly) treated as a
+                # standalone boundary marker on its own. Real Harmony output
+                # never emits "<|channel|>" without a following name and
+                # "<|message|>", so always wait for the rest.
+                if len(self._buf) > 64:
+                    if self._channel == "final":
+                        self._on_delta(self._buf[0])
+                    self._buf = self._buf[1:]
+                    continue
+                return
+            m2 = _HARMONY_MARKER_RE.match(self._buf)
+            if m2:
+                # A non-header marker (<|end|>, <|start|>, <|return|>,
+                # <|call|>). Ends the current channel; the next segment
+                # starts unknown (dropped) until its own header names it.
+                self._buf = self._buf[m2.end() :]
+                self._channel = None
+                continue
+            if self._buf.startswith("<|"):
+                # A marker is starting to arrive but isn't complete yet --
+                # wait for more text, UNLESS this has grown implausibly
+                # long for any real marker, meaning it's not actually one
+                # (a literal "<|" in real content, e.g. a shell pipe
+                # example). Bail out and treat the leading "<" as content.
+                if len(self._buf) > 64:
+                    if self._channel == "final":
+                        self._on_delta(self._buf[0])
+                    self._buf = self._buf[1:]
+                    continue
+                return
+            # We're between markers, inside a channel's body. Emit live if
+            # it's the final channel; otherwise drop it (never reaches the
+            # user, same as the offline function). Stop at the next "<|" or
+            # a held-back possible-split tail.
+            nxt = self._buf.find("<|")
+            if nxt == -1:
+                tail_hold = 1 if self._buf.endswith("<") else 0
+                chunk = self._buf[: len(self._buf) - tail_hold] if tail_hold < len(self._buf) else ""
+                if chunk:
+                    if self._channel == "final":
+                        self._on_delta(chunk)
+                    self._buf = self._buf[len(chunk) :]
+                return
+            chunk = self._buf[:nxt]
+            if chunk and self._channel == "final":
+                self._on_delta(chunk)
+            self._buf = self._buf[nxt:]
+
+    def finish(self) -> None:
+        """Flush any trailing held-back text (e.g. a lone trailing "<" that
+        never turned out to be a marker) once the stream is truly done."""
+        if self._buf and (self._scanning or self._channel == "final"):
+            self._on_delta(self._buf)
+        self._buf = ""
 
 
 class _OllamaResponse:

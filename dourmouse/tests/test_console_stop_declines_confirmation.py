@@ -111,12 +111,15 @@ class TestStopDeclinesPendingConfirmation:
 
     def test_confirmation_requested_registers_into_this_calls_own_map(self):
         script = _extract_inline_script()
-        assert 'addApproval(node,e,myDeclines)' in script
+        # v13.8: addApproval also takes targetScreen now, so submit() can
+        # resolve an open "send it"/"confirm" reply directly instead of
+        # queuing it behind the still-streaming turn that opened the box.
+        assert 'addApproval(node,e,myDeclines,targetScreen)' in script
 
     def test_add_approval_accepts_and_uses_the_decline_map(self):
         script = _extract_inline_script()
-        m = re.search(r"function addApproval\(node, evt, declineMap\)\{(.*?)\n\}\n", script, re.S)
-        assert m, "addApproval(node, evt, declineMap) not found with the new signature"
+        m = re.search(r"function addApproval\(node, evt, declineMap, screenKey\)\{(.*?)\n\}\n", script, re.S)
+        assert m, "addApproval(node, evt, declineMap, screenKey) not found with the new signature"
         body = m.group(1)
         # Registers a real decline callback keyed by this box's confirm id...
         assert "declineMap.set(evt.id" in body

@@ -1209,8 +1209,39 @@ const queueByScreen = {};
 const ctrlByScreen = {};
 const pendingDeclinesByScreen = {};
 const stopHandlerByScreen = {};
+// v13.8 (real, live-reproduced bug): the single open approval box for each
+// screen, keyed the same way. Exists so "send it"/"confirm" typed while the
+// turn that OPENED the box is still streaming can resolve it immediately
+// instead of sitting in queueFor(key) behind that turn's completion. The
+// server has ALWAYS supported this out-of-band (webui.py's
+// _is_imperative_affirm block runs BEFORE session_lock specifically so a
+// second request can resolve a confirmation the first request is blocked
+// on) -- but the frontend's busy-queue gate in submit() below silently
+// swallowed every such reply into the queue, so that server-side path was
+// unreachable from the UI. Live-reproduced: typed "send it"/"CONFIRM" into
+// an open "SEND THIS EMAIL?" card while gpt-oss:20b was still narrating the
+// same turn -- both queued instead of sending, and the turn eventually
+// timed out/produced a zero-tool-call answer instead of ever seeing the
+// approval.
+const pendingApprovalByScreen = {};
 function threadKey(name){ return THREAD_SCREENS.includes(name) ? name : "HOME"; }
 function queueFor(key){ return queueByScreen[key] || (queueByScreen[key] = []); }
+// Client-side mirror of webui.py's _IMPERATIVE_AFFIRM_PHRASES/_is_imperative_affirm
+// (kept in exact sync -- see that file's own comment on why this is a curated
+// whole-message set, never a substring test). Used ONLY to decide whether a
+// reply typed while busy should bypass the queue and resolve the open
+// approval box directly; the server independently re-validates the same way
+// when this ever reaches it as a normal turn instead.
+const IMPERATIVE_AFFIRM_PHRASES = new Set([
+  "yes","y","yeah","yep","confirm","confirmed","approve","approved","send",
+  "send it","go","go ahead","do it","do it now","send now","yes send",
+  "yes send it","yes go ahead","yes do it","ok send it","ok go ahead",
+  "okay send it","confirm it",
+]);
+function isImperativeAffirm(text){
+  const normalized = (text||"").trim().toLowerCase().replace(/[!.\s]+$/,"").trim().replace(/\s+/g," ");
+  return IMPERATIVE_AFFIRM_PHRASES.has(normalized);
+}
 /* v13: the NEWS screen's live feed state — see startNewsStream() and
    paintNews() below. newsFeed accumulates newest-first, capped so an
    all-day session never grows this unbounded; newsWatcherStatus is the
@@ -2034,7 +2065,7 @@ function _isEmailSendPrompt(promptText){
   const p = promptText||"";
   return p.startsWith("Send Gmail to ") || p.startsWith("Send mail FROM the Dourmouse identity");
 }
-function addApproval(node, evt, declineMap){
+function addApproval(node, evt, declineMap, screenKey){
   const box=document.createElement("div"); box.className="approve";
   const isEmail = _isEmailSendPrompt(evt.prompt);
   box.innerHTML = isEmail
@@ -2049,6 +2080,12 @@ function addApproval(node, evt, declineMap){
   const buttons=box.querySelectorAll("button"); let done=false;
   const decide=async(ok)=>{ if(done)return; done=true;
     if(declineMap) declineMap.delete(evt.id);
+    // v13.8: clear the pending-approval pointer submit() uses, but only if
+    // it's still THIS box (a newer box on the same screen must not have its
+    // pointer clobbered-then-cleared by a late decide() from an old one).
+    if(screenKey && pendingApprovalByScreen[screenKey] && pendingApprovalByScreen[screenKey].id===evt.id){
+      delete pendingApprovalByScreen[screenKey];
+    }
     box.classList.add("done"); box.querySelector(".t").textContent = ok?"◆ APPROVED":(isEmail?"◆ CANCELLED":"◆ DECLINED");
     box.querySelector(".r").remove();
     liveAdd(ok?"done":"err", ok?"You approved it":"You declined it","");
@@ -2058,6 +2095,10 @@ function addApproval(node, evt, declineMap){
   // v13.2: STOP needs a way to auto-decline this exact box (see pendingDeclines
   // at its declaration) — registered here, not just wired to the buttons.
   if(declineMap) declineMap.set(evt.id, ()=>decide(false));
+  // v13.8: register this as the screen's one open approval so submit() can
+  // resolve it directly (see pendingApprovalByScreen's declaration) instead
+  // of queuing an affirm/decline reply behind the turn that's still open.
+  if(screenKey) pendingApprovalByScreen[screenKey] = {id: evt.id, decide};
   if(isEmail){
     buttons[0].onclick=()=>decide(false);
     buttons[0].focus();
@@ -2162,7 +2203,20 @@ function paintQueue(){
 async function submit(){
   const text = ta.value.trim(); if(!text) return;
   const key = threadKey(screen);
-  if(busyByScreen[key]){ queueFor(key).push(text); ta.value=""; ta.style.height="auto"; paintQueue(); return; }
+  if(busyByScreen[key]){
+    // v13.8: an affirm/decline reply to the screen's own open approval box
+    // resolves it directly (mirrors webui.py's _is_imperative_affirm) rather
+    // than queuing behind the still-streaming turn -- see
+    // pendingApprovalByScreen's declaration for the live-reproduced bug this
+    // fixes.
+    const pending = pendingApprovalByScreen[key];
+    if(pending && isImperativeAffirm(text)){
+      ta.value=""; ta.style.height="auto";
+      pending.decide(true);
+      return;
+    }
+    queueFor(key).push(text); ta.value=""; ta.style.height="auto"; paintQueue(); return;
+  }
   ta.value=""; ta.style.height="auto";
   await run(text);
   const q = queueFor(key);
@@ -2328,7 +2382,7 @@ async function run(text){
               liveAdd(e.ok?"done":"err", "Branch finished: "+(e.agent||"any"), modelShown);
             }
             break; }
-          case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e,myDeclines); break;
+          case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e,myDeclines,targetScreen); break;
           case "assistant_delta": foldThink(); contentRevealer.enqueue(e.text||""); break;
           case "assistant_text": foldThink(); contentRevealer.setTotal(e.text||""); break;
           case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;

@@ -36,6 +36,10 @@ _BROWSER_TOOLS = {
     # query_shared_memory (shared_rag.py) rides every non-orchestrator
     # subagent — see build_general_registry's own comment.
     "query_shared_memory",
+    # v13.7: query_desktop_vault (desktop_rag.py) rides alongside it too,
+    # extended onto every real agent so a "check the RAG database" request
+    # never mis-routes to an agent that can't answer it.
+    "query_desktop_vault",
 }
 
 

@@ -173,5 +173,10 @@ class TestAppBoot:
         assert "atlas_ui" in registry.subagent_names
         sub = registry.get_subagent("atlas_ui")
         # query_shared_memory (shared_rag.py) rides every non-orchestrator
-        # subagent — see build_general_registry's own comment.
-        assert {t.name for t in sub.tools} == {"atlas_terminal_status", "query_shared_memory"}
+        # subagent — see build_general_registry's own comment. v13.7:
+        # query_desktop_vault (desktop_rag.py) rides alongside it now too,
+        # extended onto every real agent so a "check the RAG database"
+        # request never mis-routes to an agent that can't answer it.
+        assert {t.name for t in sub.tools} == {
+            "atlas_terminal_status", "query_shared_memory", "query_desktop_vault",
+        }

@@ -342,8 +342,9 @@ class TestPreloadedAgents:
         # questions (sport, elections) have a correct destination; without it
         # they routed into stock_quote and died on a Yahoo 404.
         # query_shared_memory (shared_rag.py) rides every non-orchestrator
-        # subagent — see build_general_registry's own comment.
-        assert tools == {"news_headlines", "news_search", "query_shared_memory"}
+        # subagent — see build_general_registry's own comment. v13.7:
+        # query_desktop_vault (desktop_rag.py) rides alongside it now too.
+        assert tools == {"news_headlines", "news_search", "query_shared_memory", "query_desktop_vault"}
 
     def test_markets_agent_tools(self):
         registry = build_general_registry()
@@ -369,12 +370,13 @@ class TestPreloadedAgents:
         # v8.4: archive / trash / untrash. All three are reversible and
         # confirmation-gated; permanent deletion is deliberately absent.
         # query_shared_memory (shared_rag.py) rides every non-orchestrator
-        # subagent — see build_general_registry's own comment.
+        # subagent — see build_general_registry's own comment. v13.7:
+        # query_desktop_vault (desktop_rag.py) rides alongside it now too.
         assert {"read_inbox", "gmail_search", "gmail_read", "gmail_send",
                 "gmail_archive", "gmail_trash", "gmail_bulk_trash", "gmail_untrash",
                 "drive_read", "drive_search",
                 "email_identity_status", "email_own_send",
-                "query_shared_memory"} == tools
+                "query_shared_memory", "query_desktop_vault"} == tools
 
     def test_tasks_agent_tools(self):
         registry = build_general_registry()
