@@ -53,15 +53,22 @@ class TestExposedTools:
         names = {t.name for t in exposed_tools(registry)}
         assert "echo" in names
 
-    def test_requires_confirmation_tool_is_excluded(self):
-        """Real safety boundary, not an oversight: a headless CLI
-        subprocess has no confirmation-gate UI to route a human approval
-        through (see WebConfirmationGate in webui.py for the real gate
-        every other path uses) — exposing this here would silently bypass
-        it."""
+    def test_requires_confirmation_tool_is_exposed(self):
+        """Regression test for a real live bug: asked to send an email, an
+        MCP-connected Claude could not see gmail_send/email_own_send at all
+        (both REQUIRES_CONFIRMATION, both excluded here) and improvised with
+        send_message -- the INTERNAL inter-agent bus, not an email tool --
+        hallucinating a sender name.
+
+        The fix is not to remove the safety boundary, it is to notice the
+        boundary was never actually about which tools are LISTED: it comes
+        from _execute_tool()'s confirmation_gate check, which this bridge's
+        _handle_tools_call() now routes every call through. A gated tool is
+        visible and correctly named, and still cannot execute unconfirmed --
+        see TestGatedToolsAreVisibleButNeverExecuteUnconfirmed below for the proof."""
         registry = _registry_with(_tool("send_email", Permission.REQUIRES_CONFIRMATION))
         names = {t.name for t in exposed_tools(registry)}
-        assert "send_email" not in names
+        assert "send_email" in names
 
     def test_prohibited_tool_is_excluded(self):
         registry = _registry_with(_tool("dangerous", Permission.PROHIBITED))
@@ -117,6 +124,67 @@ class TestExposedTools:
         assert names == ["shared_tool"]
 
 
+class TestGatedToolsAreVisibleButNeverExecuteUnconfirmed:
+    """The actual safety property this bridge exists to preserve. Not
+    "is the tool listed" -- it's "can it run without a human approving it" --
+    and that comes from _execute_tool()'s own confirmation_gate check, not
+    from hiding the tool name."""
+
+    def test_a_gated_tool_call_reports_confirmation_required_and_never_runs(self):
+        ran = {"called": False}
+
+        def handler(args):
+            ran["called"] = True
+            return "SENT (this must never appear in the test result)"
+
+        registry = _registry_with(_tool("send_email", Permission.REQUIRES_CONFIRMATION, handler=handler))
+        server = McpBridgeServer(registry)
+
+        result = server._handle_tools_call({"name": "send_email", "arguments": {}})
+
+        assert ran["called"] is False, "the real handler executed despite no confirmation"
+        text = result["content"][0]["text"]
+        assert "CONFIRMATION REQUIRED" in text
+        assert "NOT executed" in text
+        assert result["isError"] is False
+
+    def test_a_prohibited_tool_is_not_reachable_at_all(self):
+        registry = _registry_with(_tool("dangerous", Permission.PROHIBITED))
+        server = McpBridgeServer(registry)
+        result = server._handle_tools_call({"name": "dangerous", "arguments": {}})
+        assert "unknown tool" in result["content"][0]["text"]
+        assert result["isError"] is True
+
+    def test_the_real_gmail_send_tool_is_exposed_and_still_refuses_to_run(self):
+        """Against the REAL registry, not a fake one -- proves the fix
+        actually reaches the tool that was reported broken."""
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        names = {t.name for t in exposed_tools(registry)}
+        assert "gmail_send" in names
+        assert "email_own_send" in names
+        assert "drive_create_doc" in names
+
+        server = McpBridgeServer(registry)
+        result = server._handle_tools_call({
+            "name": "gmail_send",
+            "arguments": {"to": "nobody@example.com", "subject": "x", "body": "x"},
+        })
+        text = result["content"][0]["text"]
+        assert "CONFIRMATION REQUIRED" in text
+        assert "NOT executed" in text
+
+    def test_a_regular_tool_still_executes_normally_through_the_same_path(self):
+        """The gate change must not slow down or alter REGULAR tools --
+        they still call straight through to the real handler."""
+        registry = _registry_with(_tool("echo"))
+        server = McpBridgeServer(registry)
+        result = server._handle_tools_call({"name": "echo", "arguments": {}})
+        assert result["isError"] is False
+        assert "CONFIRMATION REQUIRED" not in result["content"][0]["text"]
+
+
 class TestToolToMcpSchema:
     def test_parameters_reused_as_input_schema_not_re_derived(self):
         from dourmouse.mcp_bridge import _tool_to_mcp_schema
@@ -166,10 +234,14 @@ class TestJsonRpcProtocol:
         assert out == []
 
     def test_tools_list_returns_the_real_exposed_set(self):
+        """tools/list echoes back whatever this server was constructed
+        with -- both a plain and a gated tool are listed. Gating happens at
+        CALL time (see TestGatedToolsAreVisibleButNeverExecuteUnconfirmed),
+        not by hiding the tool's existence."""
         server = self._server([_tool("read_thing"), _tool("write_thing", Permission.REQUIRES_CONFIRMATION)])
         out = _drive(server, _rpc("tools/list"))
         names = {t["name"] for t in out[0]["result"]["tools"]}
-        assert names == {"read_thing"}  # the gated one never appears
+        assert names == {"read_thing", "write_thing"}
 
     def test_tools_call_runs_the_real_handler(self):
         calls = []
@@ -193,13 +265,21 @@ class TestJsonRpcProtocol:
         assert "unknown tool" in result["content"][0]["text"]
 
     def test_tools_call_a_raising_handler_is_an_honest_error_not_a_crash(self):
+        """_execute_tool() (dispatch.py) now catches the raise itself and
+        turns it into a real, readable "ERROR: tool 'x' failed: ..." text
+        result -- with real obs logging behind it -- rather than letting it
+        surface as a bare JSON-RPC isError flag with no detail. This matches
+        how every other tool-calling path in this codebase already treats a
+        failed tool: a normal string result the model reads and reacts to,
+        not an exception. isError stays False; the content says ERROR."""
         def boom(args):
             raise RuntimeError("real failure")
 
         server = self._server([_tool("boom", handler=boom)])
         out = _drive(server, _rpc("tools/call", {"name": "boom", "arguments": {}}))
         result = out[0]["result"]
-        assert result["isError"] is True
+        assert result["isError"] is False
+        assert "ERROR: tool 'boom' failed" in result["content"][0]["text"]
         assert "real failure" in result["content"][0]["text"]
 
     def test_unknown_method_with_id_gets_a_json_rpc_error_not_a_hang(self):

@@ -89,3 +89,39 @@ class TestPreambleIsSentOncePerSession:
         assert "claude_orchestrator_preamble" in source
         assert "_first_turn" in source
         assert "session_key not in _CLAUDE_SESSIONS" in source
+
+
+class TestPreambleDisambiguatesSendMessageFromRealTools:
+    """Regression test for a real live bug: asked to send an email, Claude
+    called send_message (the INTERNAL inter-agent bus) with a hallucinated
+    from_agent 'Dourmouse', producing 'REFUSED: unknown sender'. The tool
+    was superficially named like what was needed and nothing told the model
+    otherwise."""
+
+    def setup_method(self):
+        reset_cache()
+
+    def teardown_method(self):
+        reset_cache()
+
+    def test_it_explicitly_warns_against_send_message_for_real_messages(self):
+        text = claude_orchestrator_preamble()
+        assert "send_message" in text
+        assert "INTERNAL" in text
+        assert "Never use send_message to send an email" in text
+
+    def test_it_states_a_default_of_calling_tools_directly(self):
+        text = claude_orchestrator_preamble()
+        assert "call your own tool directly for one action" in text
+
+    def test_it_restricts_delegation_to_genuinely_independent_work(self):
+        text = claude_orchestrator_preamble()
+        assert "genuinely INDEPENDENT parts" in text
+        assert "must be avoided" in text  # delegating a single step
+
+    def test_it_tells_the_model_gated_tool_calls_are_safe_to_make(self):
+        """A gated call degrading to CONFIRMATION REQUIRED rather than
+        executing is what makes it safe to call directly -- the model needs
+        to know that so it doesn't avoid the real tool out of caution."""
+        text = claude_orchestrator_preamble()
+        assert "gated tool call is always" in text.lower() or "a gated tool call is always safe" in text

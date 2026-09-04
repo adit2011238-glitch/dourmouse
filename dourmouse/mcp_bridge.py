@@ -30,12 +30,7 @@ forever in sync with the real registry (no hand-curated list to drift).
 
 Deliberately EXCLUDED, for real safety reasons, not laziness:
 
-- REQUIRES_CONFIRMATION / PROHIBITED tools (Rule: a headless CLI
-  subprocess launched via --mcp-config has no confirmation-gate UI to ask
-  a human through — see WebConfirmationGate in webui.py for the real gate
-  every other path in this codebase goes through before a destructive
-  action runs. Exposing a gated tool here would silently bypass that gate
-  entirely, which is a real regression this bridge must never cause.)
+- PROHIBITED tools (never execute, by policy, full stop).
 - delegate_task / delegate_parallel (Dourmouse's OWN recursive
   self-dispatch tools — an external CLI calling back INTO Dourmouse's own
   orchestration loop has no budget tracker, no depth guard, and no
@@ -45,6 +40,27 @@ Deliberately EXCLUDED, for real safety reasons, not laziness:
   — if the caller reaching this bridge IS Claude or Codex already, letting
   it re-invoke itself or a sibling CLI through Dourmouse is pointless at
   best and a real recursion risk at worst.)
+
+REQUIRES_CONFIRMATION tools (gmail_send, drive_create_doc, gmail_trash, ...)
+ARE exposed, as of the fix for a real live bug: asked to send an email, an
+MCP-connected Claude could not see gmail_send/email_own_send at all (they
+were excluded here), so it improvised with send_message -- the INTERNAL
+inter-agent bus, not an email tool -- hallucinating a sender name and
+producing "REFUSED: unknown sender 'Dourmouse'". Excluding the tool did not
+protect anything; it just meant Claude reached for the nearest wrong one.
+
+The safety property this bridge exists to preserve -- no destructive action
+without a human confirming it -- was never actually about which tools are
+listed. It comes from _execute_tool()'s own confirmation_gate check
+(dispatch.py): a REQUIRES_CONFIRMATION tool called with confirmation_gate=
+None (this subprocess has no synchronous UI channel back to a browser)
+returns "CONFIRMATION REQUIRED: <prompt> (no confirmation channel attached;
+NOT executed)" and genuinely never runs the handler. _handle_tools_call()
+below routes every call through that exact function rather than invoking
+tool.handler() directly, so gated tools are now visible, correctly named,
+AND still cannot execute unconfirmed -- the same "draft, never send"
+contract the rest of this codebase already holds Claude to (see this
+module's own general_roster.py system-prompt Rule 1).
 
 Run standalone (mostly for manual testing — normally launched by the CLI
 itself via --mcp-config, see build_mcp_config_file() below):
@@ -58,7 +74,7 @@ import subprocess
 import sys
 from typing import Any
 
-from dourmouse.dispatch import DispatchRegistry, Permission, ToolSpec
+from dourmouse.dispatch import DispatchRegistry, Permission, ToolSpec, _execute_tool
 
 #: MCP protocol version this server speaks (the current stable spec
 #: version at the time this was built — the handshake is a real
@@ -80,17 +96,25 @@ _EXCLUDED_TOOL_NAMES = {
 
 
 def exposed_tools(registry: DispatchRegistry) -> list[ToolSpec]:
-    """The real, live tool set this bridge exposes — every REGULAR-
-    permission tool in the given registry, minus the excluded names above.
-    Deterministic, sorted by name so tools/list responses are stable
-    across restarts (Rule 2.8-adjacent: nothing here should look random
-    to a client diffing tool lists between sessions)."""
+    """The real, live tool set this bridge exposes — every tool in the
+    registry that is not PROHIBITED and not structurally excluded above.
+    REQUIRES_CONFIRMATION tools ARE included; see the module docstring for
+    why that is safe. Deterministic, sorted by name so tools/list responses
+    are stable across restarts (Rule 2.8-adjacent: nothing here should look
+    random to a client diffing tool lists between sessions)."""
     seen: dict[str, ToolSpec] = {}
     for sub in registry.all_subagents():
         for tool in sub.tools:
             if tool.name in _EXCLUDED_TOOL_NAMES:
                 continue
-            if tool.permission is not Permission.REGULAR:
+            # PROHIBITED tools never execute regardless of caller, so there
+            # is nothing to gain by listing them. REQUIRES_CONFIRMATION
+            # tools ARE included -- see the module docstring for why this is
+            # safe: _handle_tools_call() routes every call through the same
+            # confirmation-gate check the rest of the codebase uses, so a
+            # gated tool called here reports CONFIRMATION REQUIRED and never
+            # actually runs.
+            if tool.permission is Permission.PROHIBITED:
                 continue
             seen[tool.name] = tool
     return [seen[name] for name in sorted(seen)]
@@ -225,7 +249,12 @@ class McpBridgeServer:
                 "isError": True,
             }
         try:
-            result_text = tool.handler(arguments)
+            # confirmation_gate=None is the load-bearing part: for a REGULAR
+            # tool this is a plain pass-through to tool.handler(); for a
+            # REQUIRES_CONFIRMATION tool it makes _execute_tool() return an
+            # honest "CONFIRMATION REQUIRED ... NOT executed" string and
+            # genuinely never call the handler. See the module docstring.
+            result_text = _execute_tool(tool, arguments, confirmation_gate=None)
         except Exception as exc:  # noqa: BLE001 - Rule 2.2: a real failure is reported, never fabricated
             return {
                 "content": [{"type": "text", "text": f"ERROR: tool '{name}' failed: {exc}"}],
