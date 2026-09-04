@@ -4503,6 +4503,24 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=400)
             return
+        except RemoteMemoryStoreUnavailable as exc:
+            # Same reasoning as the search half: a remote dependency being
+            # down is a 503 with an actionable message, not this server
+            # erroring with a urllib traceback the user cannot act on.
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "hint": (
+                        "This machine is configured to keep its memory on another machine "
+                        "(DOURMOUSE_MEMORY_REMOTE_URL in .env). Start Dourmouse "
+                        "there, or unset that variable to use this machine's own "
+                        "local memory store instead."
+                    ),
+                },
+                status=503,
+            )
+            return
         except Exception as exc:  # noqa: BLE001
             self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
@@ -4531,6 +4549,24 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             result = import_all_history(self.server.memory)
+        except RemoteMemoryStoreUnavailable as exc:
+            # Importing history writes into the memory store, so with a
+            # remote store configured and unreachable this is a downed
+            # dependency (503), not this server failing (500).
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "hint": (
+                        "This machine is configured to keep its memory on another "
+                        "machine (DOURMOUSE_MEMORY_REMOTE_URL in .env). Start "
+                        "Dourmouse there, or unset that variable to import into "
+                        "this machine's own local memory store instead."
+                    ),
+                },
+                status=503,
+            )
+            return
         except Exception as exc:  # honest failure surface (Rule 2.2)
             self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
