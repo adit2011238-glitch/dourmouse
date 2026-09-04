@@ -979,7 +979,17 @@ async function sendChatMessage(p, text){
   try{
     const res = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: text, focus_agent: focusAgent }),
+      // screen identifies THIS tab to the server, which keys the Claude
+      // conversation on it. Without it every panel defaulted to "HOME" and
+      // they all shared one session: two tabs used in parallel interleaved
+      // their turns, and an answer meant for one could surface in the other.
+      // p.type is stable per panel (openPanel reuses an existing panel of the
+      // same type), so a tab keeps its own history across messages.
+      body: JSON.stringify({
+        prompt: text,
+        focus_agent: focusAgent,
+        screen: String(p.type || "PANEL").toUpperCase(),
+      }),
     });
     if(!res.ok || !res.body) throw new Error("HTTP " + res.status);
     const rd = res.body.getReader(), dec = new TextDecoder(); let carry = "";

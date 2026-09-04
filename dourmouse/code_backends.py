@@ -160,8 +160,22 @@ def _ensure_mcp_config_path() -> str:
         return _mcp_config_path_cache
 
 
-def _claude_session_key(cwd: str | None) -> str:
-    return cwd or "."
+def _claude_session_key(cwd: str | None, tab: str | None = None) -> str:
+    """The key a Claude conversation is tracked under.
+
+    Includes the tab id, and that is the point. Before this, every tab in
+    the app shared one key (the working directory), so they shared ONE
+    Claude session: two tabs used in parallel interleaved their turns into
+    the same conversation, and an answer meant for one could surface in the
+    other. Tabs are meant to be independent workspaces, so each gets its own
+    session id and its own history.
+
+    A caller that passes no tab keeps the old single-session behaviour,
+    which is what non-UI callers (tools, scheduled jobs) actually want.
+    """
+    base = cwd or "."
+    tab = (tab or "").strip()
+    return f"{base}::{tab}" if tab else base
 
 
 def _claude_session_args(key: str, *, fresh: bool = False) -> list[str]:
@@ -585,6 +599,7 @@ def stream_claude(
     *,
     cwd: str | None,
     timeout: int,
+    tab: str | None = None,
     on_delta: Callable[[str], None],
     on_thinking: Callable[[str], None] | None = None,
     on_tool_use: Callable[[str, str], None] | None = None,
@@ -618,7 +633,7 @@ def stream_claude(
             "CLAUDE_CODE_CLI=/absolute/path/to/claude in .env. Nothing was run."
         )
     timeout = max(1, min(int(timeout), 600))
-    session_key = _claude_session_key(cwd)
+    session_key = _claude_session_key(cwd, tab)
 
     # Tell the model what it is and what it has, once per session.
     #

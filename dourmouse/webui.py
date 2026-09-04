@@ -3604,6 +3604,11 @@ class _Handler(BaseHTTPRequestHandler):
                 prompt,
                 cwd=str(_PROJECT_ROOT),
                 timeout=300,
+                # Each tab is its own workspace, so each gets its own Claude
+                # session. Without this every tab shared one conversation:
+                # two used in parallel interleaved their turns, and an answer
+                # meant for one could surface in the other.
+                tab=screen,
                 on_delta=lambda text: sink({"type": "assistant_delta", "text": text}),
                 on_thinking=lambda text: sink({"type": "thinking_delta", "text": text}),
                 on_tool_use=lambda name, args: sink(

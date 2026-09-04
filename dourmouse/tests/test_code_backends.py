@@ -1242,3 +1242,40 @@ class TestCliResolutionSurvivesAGuiLaunch:
             "also pass --strict-mcp-config, or the broken claude.ai Gmail "
             "connector comes back and wins again"
         )
+
+
+class TestTabScopedClaudeSessions:
+    """Regression tests for "each tab should work separately... the output
+    should only be shown within that tab so other tabs can be used at the
+    same time in parallel". Before this, every tab shared one session key
+    (the working directory alone), so two tabs used concurrently interleaved
+    their turns into the same Claude conversation.
+    """
+
+    def test_different_tabs_get_different_session_keys(self):
+        from dourmouse.code_backends import _claude_session_key
+
+        a = _claude_session_key("/repo", "CHAT")
+        b = _claude_session_key("/repo", "RESEARCH")
+        assert a != b
+
+    def test_same_tab_is_stable_across_calls(self):
+        from dourmouse.code_backends import _claude_session_key
+
+        assert _claude_session_key("/repo", "CHAT") == _claude_session_key("/repo", "CHAT")
+
+    def test_no_tab_keeps_the_old_single_session_behaviour(self):
+        """Non-UI callers (tools, scheduled jobs) pass no tab and must keep
+        working exactly as before this change."""
+        from dourmouse.code_backends import _claude_session_key
+
+        assert _claude_session_key("/repo") == "/repo"
+        assert _claude_session_key("/repo", None) == "/repo"
+
+    def test_stream_claude_forwards_screen_as_tab(self):
+        import inspect
+
+        from dourmouse import webui
+
+        source = inspect.getsource(webui)
+        assert "tab=screen" in source
