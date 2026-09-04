@@ -16,6 +16,7 @@
   <meta name="apple-mobile-web-app-title" content="DourMouse">
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
   <link rel="icon" type="image/png" href="/assets/icon-192.png">
+<link rel="stylesheet" href="assets/dourmouse-ui.css">
 <style>
 /* =====================================================================
    DOURMOUSE CONSOLE
@@ -46,17 +47,46 @@
 @font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
   src:url('assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
 
+/* ARC CORE, the default skin, rethemed onto the shared terminal-IDE
+   design system (assets/dourmouse-ui.css). Variable NAMES are unchanged,
+   so every one of this file's call sites keeps working and the whole look
+   is one block to revert.
+
+   Only the DEFAULT theme moves. The three alternative skins below --
+   AETHER, PROTOCOL, KEEP -- are deliberate designs the user chose to
+   build and are left exactly as they are; retheming them would delete a
+   real feature rather than restyle one.
+
+   What actually changed, beyond swapping hex values:
+     - --panel/--panel2 were near-black navies used under rgba() lines,
+       which is what produced the soft low-contrast wash the brief calls
+       out. They are now the flat structural and interactive layers.
+     - --line/--line-2 and --amber-line/--amber-soft were all alpha over
+       the background. Now solid.
+     - --map-land moves to the interactive layer so real landmasses stay
+       legible against the darker canvas rather than disappearing into it.
+     - Type goes mono-first: Departure Mono for structure, Monaspace Neon
+       for everything the machine says, prose included.
+
+   Previous values, for a one-step revert:
+     --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
+     --amber:#f2b73d; --amber-hi:#ffd27a; --amber-ink:#08111c;
+     --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6; --blue-deep:#6f97b3;
+     --line:rgba(120,175,210,.18); --line-2:rgba(120,175,210,.30);
+     --amber-line:rgba(242,183,61,.35); --amber-soft:rgba(242,183,61,.14);
+     --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c; --map-land:#12283a;      */
 :root{
-  --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
-  --amber:#f2b73d; --amber-hi:#ffd27a; --amber-ink:#08111c;
-  --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6; --blue-deep:#6f97b3;
-  --line:rgba(120,175,210,.18); --line-2:rgba(120,175,210,.30);
-  --amber-line:rgba(242,183,61,.35); --amber-soft:rgba(242,183,61,.14);
-  --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c;
-  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --display:'Sekuya','JetBrains Mono',ui-monospace,monospace;
-  --font-prose:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
-  --map-land:#12283a;
+  --bg:#09090B; --panel:#18181B; --panel2:#27272A;
+  --amber:#F59E0B; --amber-hi:#FAFAFA; --amber-ink:#09090B;
+  --blue:#A1A1AA; --blue-dim:#71717A; --blue-hi:#FAFAFA; --blue-deep:#52525B;
+  --line:#27272A; --line-2:#3F3F46;
+  --amber-line:#3F3F46; --amber-soft:#27272A;
+  --ok:#10B981; --warn:#F59E0B; --bad:#EF4444;
+  --mono:'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --display:'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
+  --font-prose:'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
+  --font-prose-alt:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --map-land:#27272A;
 }
 
 /* =====================================================================
@@ -460,7 +490,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .globetoolbar{display:flex;align-items:center;gap:10px;padding:8px 12px;
   background:rgba(255,255,255,.04);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
   border-bottom:1px solid var(--line)}
-.globetoolbar .dot{width:7px;height:7px;border-radius:50%;background:#3ecf6e;box-shadow:0 0 6px #3ecf6e}
+.globetoolbar .dot{width:7px;height:7px;border-radius:50%;background:#3ecf6e;}
 .globetoolbar .lbl2{font-size:10.5px;letter-spacing:.08em;color:var(--blue-hi);font-family:var(--mono)}
 .globetoolbar a{margin-left:auto;font-size:10.5px;color:var(--blue-hi);text-decoration:none;font-family:var(--mono)}
 .globetoolbar a:hover{color:var(--amber)}
@@ -716,7 +746,7 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
 .orb::before{content:"";position:absolute;inset:-13px;border-radius:50%;
   border:1px solid rgba(242,183,61,.18)}
 .orb.listening::before{animation:pulse 1.7s ease-out infinite}
-.orb.speaking{border-color:var(--amber);box-shadow:0 0 34px -8px rgba(242,183,61,.5)}
+.orb.speaking{border-color:var(--amber);}
 @keyframes pulse{0%{transform:scale(1);opacity:.8}100%{transform:scale(1.28);opacity:0}}
 .orb .g{font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--amber)}
 .vstate{font-size:10px;letter-spacing:.18em;color:var(--blue-dim)}
@@ -1306,9 +1336,15 @@ const THEMES = {
     /* Named AMBER DISPATCH, not "ARC CORE": ARC CORE is already the title
        of the HOME screen, and having a theme share that name made the
        masthead read as if the theme were the screen. */
-    name:"AMBER DISPATCH",
-    desc:"Amber on deep navy. The dense operator HUD — highest information per pixel.",
-    sw:{bg:"#04080e",dot:"#f2b73d",bars:["#f2b73d","#7ea9c9","#3f6480"]}
+    /* Renamed and re-swatched when this theme was moved onto the shared
+       terminal-IDE design system. It is no longer "amber on deep navy" --
+       the navy is gone, the surfaces are flat zinc layers, and amber
+       survives only as the single selection accent. Leaving the old name
+       and swatch in place would have made the picker advertise a design
+       the console no longer draws. */
+    name:"TERMINAL CORE",
+    desc:"Flat zinc layers, hairline rules, mono throughout. The dense operator workbench — highest information per pixel.",
+    sw:{bg:"#09090B",dot:"#F59E0B",bars:["#FAFAFA","#A1A1AA","#3F3F46"]}
   },
   aether: {
     name:"AETHER WORKSPACE",
