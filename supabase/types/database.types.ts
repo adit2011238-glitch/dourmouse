@@ -2,7 +2,6 @@
 // Do not hand-edit. Regenerate after any schema change:
 //   supabase gen types typescript --project-id hpmruavpiloegvhdvcib \
 //     > supabase/types/database.types.ts
-// (Tier 3 rule 9: no untyped table/column string lookups anywhere.)
 
 export type Json =
   | string
@@ -49,6 +48,60 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "devices_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          chunk_text: string
+          created_at: string
+          device_id: string | null
+          embedding: string
+          embedding_model: string
+          id: string
+          metadata: Json
+          source: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          chunk_text: string
+          created_at?: string
+          device_id?: string | null
+          embedding: string
+          embedding_model?: string
+          id?: string
+          metadata?: Json
+          source: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          chunk_text?: string
+          created_at?: string
+          device_id?: string | null
+          embedding?: string
+          embedding_model?: string
+          id?: string
+          metadata?: Json
+          source?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "devices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -193,6 +246,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      match_documents: {
+        Args: {
+          filter?: Json
+          match_count?: number
+          match_model?: string
+          query_embedding: string
+        }
+        Returns: {
+          chunk_text: string
+          id: string
+          metadata: Json
+          similarity: number
+          source: string
+          title: string
+        }[]
+      }
       sync_facts: {
         Args: { p_device_id: string; p_facts: Json }
         Returns: {
