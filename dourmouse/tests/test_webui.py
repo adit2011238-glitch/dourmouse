@@ -2041,7 +2041,7 @@ class TestCodeClaudePassthrough:
         assert seen["task"] == "list the files here"
 
     def test_deltas_and_thinking_and_tool_use_reach_the_sse_stream(self, code_claude_server, monkeypatch):
-        def fake_stream_claude(task, *, cwd, timeout, on_delta,
+        def fake_stream_claude(task, *, cwd, timeout, on_delta, tab=None,
                                 on_thinking=None, on_tool_use=None, on_tool_result=None, on_usage=None):
             on_thinking("reasoning...")
             on_delta("Hel")
@@ -2072,7 +2072,7 @@ class TestCodeClaudePassthrough:
         one or the other."""
         monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path / "cfg"))
 
-        def fake_stream_claude(task, *, cwd, timeout, on_delta, on_thinking=None,
+        def fake_stream_claude(task, *, cwd, timeout, on_delta, tab=None, on_thinking=None,
                                 on_tool_use=None, on_tool_result=None, on_usage=None):
             on_delta("Hello.")
             if on_usage:
