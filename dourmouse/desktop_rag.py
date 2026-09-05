@@ -131,6 +131,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time as _time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -362,7 +363,46 @@ def _parse_sentinel(stdout: str) -> dict[str, Any]:
     )
 
 
+#: A brief pause before the one retry _remote_call gives an UNREACHABLE/
+#: TIMEOUT failure. Live-reproduced real finding: the desktop compute node
+#: genuinely went unreachable mid-session (Tailscale/LAN blip, confirmed
+#: NOT a code bug — a hand-replayed `ssh`/`ping` succeeded a minute later
+#: with no config change at all) then recovered entirely on its own. A
+#: single short-delay retry absorbs exactly that kind of brief flap without
+#: masking a REAL, persistent outage — one retry either recovers fast or
+#: still fails fast, it never turns a real outage into a long hidden hang.
+_RETRY_DELAY_S = 2.0
+
+
 def _remote_call(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    timeout: int,
+    runner: Runner | None,
+    *,
+    retries: int = 1,
+    sleep: Callable[[float], None] | None = None,
+) -> dict[str, Any]:
+    """``_remote_call_once`` with one automatic retry on a transient-shaped
+    failure (UNREACHABLE or TIMEOUT only — never REMOTE_ERROR/BAD_RESPONSE/
+    MAPPING_MISMATCH/etc, which retrying cannot fix and would only delay
+    reporting honestly). ``retries=0`` restores the original no-retry
+    behavior for callers (or tests) that need it; ``sleep`` is injectable
+    so tests never actually pause."""
+    _sleep = sleep or _time.sleep
+    last_exc: DesktopRagError | None = None
+    for attempt in range(retries + 1):
+        try:
+            return _remote_call_once(cfg, payload, timeout, runner)
+        except DesktopRagError as exc:
+            last_exc = exc
+            if exc.kind not in ("UNREACHABLE", "TIMEOUT") or attempt >= retries:
+                raise
+            _sleep(_RETRY_DELAY_S)
+    raise last_exc  # pragma: no cover - loop above always returns or raises
+
+
+def _remote_call_once(
     cfg: dict[str, Any],
     payload: dict[str, Any],
     timeout: int,

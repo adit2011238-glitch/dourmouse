@@ -2687,6 +2687,19 @@ def build_general_registry() -> DispatchRegistry:
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"DRIVE DOC CREATE FAILED: {type(exc).__name__}: {exc}"
 
+    def _docs_append_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import docs_append
+
+        try:
+            return docs_append(
+                arguments.get("document_id", ""),
+                arguments.get("text", ""),
+            )
+        except RuntimeError as exc:
+            return f"DOCS APPEND (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DOCS APPEND FAILED: {type(exc).__name__}: {exc}"
+
     def _slides_create_h(arguments: dict[str, Any]) -> str:
         from dourmouse.google_services import slides_create
 
@@ -2706,9 +2719,11 @@ def build_general_registry() -> DispatchRegistry:
             "General",
             "Google Sheets, Drive, and Slides — reads link-shared Sheets, "
             "downloads link-shared Drive items, creates Google Docs and "
-            "Slides presentations in the SIGNED-IN user's Drive (real write, "
-            "requires confirmation + the Google sign-in with Drive write "
-            "scope).",
+            "Slides presentations in the SIGNED-IN user's Drive, and can "
+            "APPEND more text to an existing Doc afterward (docs_append) "
+            "to build a long document across multiple calls instead of "
+            "only ever creating a fresh one (real write, requires "
+            "confirmation + the Google sign-in with Drive write scope).",
             [
                 ToolSpec(
                     name="sheets_read",
@@ -2773,6 +2788,39 @@ def build_general_registry() -> DispatchRegistry:
                     confirm_prompt=lambda a: (
                         f"Create a Google Doc titled {a.get('title', '?')!r} "
                         f"in your Drive ({(a.get('content') or '')[:80]}...)?"
+                    ),
+                ),
+                ToolSpec(
+                    name="docs_append",
+                    description=(
+                        "Append text to the END of an EXISTING Google Doc's "
+                        "body — real write, REQUIRES human confirmation. "
+                        "Unlike drive_create_doc (which only ever creates a "
+                        "brand-new document and can only write its content "
+                        "ONCE), this is how to build a long document "
+                        "INCREMENTALLY across multiple calls/turns — e.g. "
+                        "write one section, append the next, append the "
+                        "next. Never replaces existing content. Needs a "
+                        "real document_id (from drive_create_doc's own "
+                        "result, drive_search, or the doc's URL) and the "
+                        "Google sign-in with Drive/Docs write scope "
+                        "(GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT "
+                        "CONFIGURED honestly without a signed-in user, or a "
+                        "clear error if the document_id doesn't exist."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "document_id": {"type": "string", "description": "the token in the doc URL between /d/ and /edit"},
+                            "text": {"type": "string", "description": "the text to append at the end of the document"},
+                        },
+                        "required": ["document_id", "text"],
+                    },
+                    handler=_docs_append_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Append {len(a.get('text') or ''):,} characters to "
+                        f"the end of Google Doc {a.get('document_id', '?')!r}?"
                     ),
                 ),
                 ToolSpec(
@@ -5032,6 +5080,7 @@ def build_general_registry() -> DispatchRegistry:
         "email_identity_status", "email_own_send",
         # Drive
         "drive_search", "drive_read", "drive_download", "drive_create_doc",
+        "docs_append",
         # Sheets / Slides
         "sheets_read", "slides_create",
         # Calendar
@@ -5060,8 +5109,10 @@ def build_general_registry() -> DispatchRegistry:
             "General",
             "Everything in the signed-in user's Google Workspace: Gmail "
             "(read, search, send, archive, trash, restore), Drive (search, "
-            "read, download, create Docs), Sheets (read), Slides (create), "
-            "and Calendar (list events, propose meeting times). One "
+            "read, download, create Docs, and APPEND more text to an "
+            "existing Doc for building a long document across multiple "
+            "calls), Sheets (read), Slides (create), and Calendar (list "
+            "events, propose meeting times). One "
             "coherent identity for the full real toolset that also lives, "
             "unchanged, on mail/docs/scheduling — route here for any "
             "general Google Workspace request rather than guessing which "

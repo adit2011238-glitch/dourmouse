@@ -49,6 +49,18 @@ def _clean_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_retry_delay(monkeypatch):
+    """_remote_call's one-retry-on-transient-failure (added for a real,
+    live-reproduced brief Tailscale/LAN blip) sleeps for real between
+    attempts in production. No test needs that real delay to prove
+    correctness, and letting every UNREACHABLE/TIMEOUT test in this file
+    actually sleep would just make the suite slower for no signal."""
+    import dourmouse.desktop_rag as desktop_rag_module
+
+    monkeypatch.setattr(desktop_rag_module, "_RETRY_DELAY_S", 0.0)
+
+
 @pytest.fixture
 def configured_env(monkeypatch):
     monkeypatch.setenv("DOURMOUSE_DESKTOP_RAG_HOST", "100.98.97.23")
@@ -196,6 +208,74 @@ class TestQueryDesktopRagRealShape:
         with pytest.raises(DesktopRagError) as exc:
             query_desktop_rag("x", runner=_fake_runner(returncode=0, stdout="ok but no marker"))
         assert exc.value.kind == "BAD_RESPONSE"
+
+
+class TestTransientFailureRetry:
+    """Real, live-reproduced finding: the desktop compute node went
+    genuinely UNREACHABLE mid-session, then recovered entirely on its own
+    seconds later with no config change -- confirmed transient, not a code
+    bug, by hand-replaying the exact same ssh probe. _remote_call now
+    absorbs exactly that shape of brief flap with one retry."""
+
+    def test_unreachable_recovers_on_the_second_attempt(self, configured_env):
+        calls = {"n": 0}
+        good_stdout = _sentinel_line({"ok": True, "hits": []})
+
+        def flaky(cmd, timeout, stdin_path=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return SimpleNamespace(returncode=255, stdout="", stderr="Connection timed out")
+            return SimpleNamespace(returncode=0, stdout=good_stdout, stderr="")
+
+        result = query_desktop_rag("x", runner=flaky)
+        assert result == []
+        assert calls["n"] == 2
+
+    def test_a_timeout_also_gets_one_retry(self, configured_env):
+        import subprocess
+
+        calls = {"n": 0}
+        good_stdout = _sentinel_line({"ok": True, "hits": []})
+
+        def flaky(cmd, timeout, stdin_path=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            return SimpleNamespace(returncode=0, stdout=good_stdout, stderr="")
+
+        result = query_desktop_rag("x", runner=flaky)
+        assert result == []
+        assert calls["n"] == 2
+
+    def test_still_failing_after_the_retry_raises_the_real_kind(self, configured_env):
+        calls = {"n": 0}
+
+        def always_down(cmd, timeout, stdin_path=None):
+            calls["n"] += 1
+            return SimpleNamespace(returncode=255, stdout="", stderr="Connection timed out")
+
+        with pytest.raises(DesktopRagError) as exc:
+            query_desktop_rag("x", runner=always_down)
+        assert exc.value.kind == "UNREACHABLE"
+        assert calls["n"] == 2  # one real attempt + one retry, never more
+
+    def test_a_non_transient_error_never_retries(self, configured_env):
+        """MAPPING_MISMATCH (and REMOTE_ERROR/BAD_RESPONSE generally) is a
+        real logic/data problem a retry cannot fix -- retrying it would
+        only delay reporting an honest failure for no benefit."""
+        calls = {"n": 0}
+        stdout = _sentinel_line(
+            {"ok": False, "kind": "MAPPING_MISMATCH", "detail": "cosine 0.41 at position 5"}
+        )
+
+        def once(cmd, timeout, stdin_path=None):
+            calls["n"] += 1
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        with pytest.raises(DesktopRagError) as exc:
+            query_desktop_rag("x", runner=once)
+        assert exc.value.kind == "MAPPING_MISMATCH"
+        assert calls["n"] == 1  # no retry attempted
 
 
 class TestDesktopAvailable:

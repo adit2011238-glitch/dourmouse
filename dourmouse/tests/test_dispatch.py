@@ -2659,6 +2659,75 @@ class TestCallWithRetryHeartbeat:
 
 
 # --------------------------------------------------------------------------- #
+# Model call deadline (real, live-reproduced bug this fixes): a local
+# gpt-oss:20b turn stalled 200-300s+ with the heartbeat honestly showing
+# "still alive" the whole time, and nothing ever aborted it — the only
+# recovery was the user manually clicking STOP. _call_with_retry must now
+# give up honestly after DOURMOUSE_MODEL_CALL_DEADLINE_S rather than
+# blocking forever.
+# --------------------------------------------------------------------------- #
+
+class TestCallWithRetryDeadline:
+    def test_a_call_slower_than_the_deadline_raises_honestly(self, monkeypatch):
+        monkeypatch.setattr(dispatch_module, "_HEARTBEAT_INTERVAL_S", 0.02)
+        monkeypatch.setattr(dispatch_module, "_model_call_deadline_s", lambda: 0.05)
+        client = _SlowFakeClient(_FakeMessage(content="done"), delay=5.0)
+        with pytest.raises(dispatch_module.ModelCallDeadlineExceeded, match="exceeded"):
+            dispatch_module._call_with_retry(
+                client, model="gpt-oss:20b", messages=[], tools=[], config=None,
+            )
+
+    def test_a_call_faster_than_the_deadline_is_unaffected(self, monkeypatch):
+        """The watchdog must be purely additive on the ordinary path — a
+        call that finishes well within the deadline behaves exactly as
+        before this feature existed."""
+        monkeypatch.setattr(dispatch_module, "_model_call_deadline_s", lambda: 30.0)
+        client = _SlowFakeClient(_FakeMessage(content="done"), delay=0.02)
+        response = dispatch_module._call_with_retry(
+            client, model="m", messages=[], tools=[], config=None,
+        )
+        assert response.choices[0].message.content == "done"
+
+    def test_deadline_exceeded_is_a_timeout_error_subclass(self):
+        """Deliberately a TimeoutError subclass so it flows through the
+        existing _is_transient_error retry/fallback machinery unchanged."""
+        assert issubclass(dispatch_module.ModelCallDeadlineExceeded, TimeoutError)
+        exc = dispatch_module.ModelCallDeadlineExceeded("boom")
+        assert dispatch_module._is_transient_error(exc)
+
+    def test_abandoned_call_never_delivers_a_late_delta(self, monkeypatch):
+        """Once the deadline fires, a chunk arriving later from the
+        orphaned worker thread must never reach the caller's on_delta —
+        that stream has already been reported as failed."""
+        monkeypatch.setattr(dispatch_module, "_HEARTBEAT_INTERVAL_S", 0.02)
+        monkeypatch.setattr(dispatch_module, "_model_call_deadline_s", lambda: 0.05)
+
+        class _SlowStreamingCompletions:
+            def create(self, **kwargs):
+                on_delta = None
+                # _stream_completion calls client.chat.completions.create
+                # directly; simulate its own delay by sleeping before ever
+                # producing a stream, matching _SlowFakeCompletions' shape.
+                time.sleep(0.3)
+                return iter([])
+
+        class _SlowStreamingClient:
+            def __init__(self):
+                self.chat = _FakeChat(_SlowStreamingCompletions())
+
+        deltas: list[str] = []
+        with pytest.raises(dispatch_module.ModelCallDeadlineExceeded):
+            dispatch_module._call_with_retry(
+                _SlowStreamingClient(), model="m", messages=[], tools=[],
+                config=None, on_delta=deltas.append,
+            )
+        # Give the orphaned worker thread time to actually run past the
+        # point the deadline already fired.
+        time.sleep(0.4)
+        assert deltas == []
+
+
+# --------------------------------------------------------------------------- #
 # v13.1: Aider port part 4/4 (dourmouse/model_router.py) — multi-account
 # rotation wired into _call_with_retry_inner's retry loop via the
 # additive client_factory parameter.
@@ -3224,3 +3293,44 @@ class TestSystemPromptDisambiguatesDeleteFileFromDriveDelete:
         assert "delete_file" in text
         assert "Google Drive" in text
         assert "sandbox" in text.lower()
+
+
+class TestSystemPromptRequiresCallingTheToolNotAskingInChat:
+    """Real, live-reproduced regression: told 'send a real email... send it
+    for real, don't just draft it', the local/Ollama backend answered in
+    plain chat text ('I am ready to send... please confirm') instead of
+    actually calling gmail_send -- zero tool calls, no real confirmation
+    card ever surfaced, correctly flagged by Grounded Mode as ungrounded.
+    Only resolved once the user typed 'send it' a second time, which
+    finally triggered the real tool call and its own real confirmation
+    card. Fixed by an explicit rule that a clear send/execute instruction
+    must go straight to the real (confirmation-gated) tool call."""
+
+    def test_system_prompt_requires_calling_the_tool_for_a_clear_send_instruction(self):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+
+        text = system_message(build_general_registry())
+        assert "CALL THE REAL TOOL" in text
+        assert "not an" in text.lower() or "not equivalent" in text.lower() or "NOT an" in text
+
+
+class TestSystemPromptChecksTheRosterInsteadOfAssumingATooIsMissing:
+    """Real, live-reproduced regression: asked to write an essay into a new
+    Google Doc, the model's own visible THINKING trace reasoned 'There's no
+    drive_create tool in roster... We cannot create doc directly' and gave
+    up with manual copy-paste instructions -- despite drive_create_doc
+    having already been called successfully TWICE earlier in the exact
+    same conversation. It never even attempted the tool call; it just
+    reasoned incorrectly from memory of an earlier turn. A single follow-up
+    directly asserting the tool's existence fixed it instantly. Fixed by an
+    explicit rule to check the roster (or just try the tool) rather than
+    asserting absence from memory."""
+
+    def test_system_prompt_says_to_check_the_roster_rather_than_assume(self):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+
+        text = system_message(build_general_registry())
+        assert "roster" in text.lower()
+        assert "doesn't exist" in text or "does not exist" in text or "does exist" in text

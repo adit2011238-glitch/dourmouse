@@ -64,6 +64,94 @@ class TestDriveCreateDoc:
         assert "Nothing was created" in out
 
 
+class TestDocsAppend:
+    """v13.9 — real capability gap fix, live-caught this session:
+    drive_create_doc's content write is a full media-upload PATCH (it
+    REPLACES the whole body), so there was no way to build a long document
+    incrementally across multiple turns. docs_append uses the real Docs
+    API's own batchUpdate + insertText(endOfSegmentLocation) mechanism to
+    append at the end without touching existing content (hermetic: fake
+    token + fake REST, no network)."""
+
+    def test_not_configured_without_signed_in_user(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: None)
+        monkeypatch.setattr(gs, "_oauth_user_needs_reauth", lambda a: None)
+        out = gs.docs_append("doc123", "more text")
+        assert out.startswith("NOT CONFIGURED")
+        assert "Nothing was appended" in out
+
+    def test_missing_document_id_is_a_clear_error(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        out = gs.docs_append("", "some text")
+        assert out.startswith("ERROR")
+        assert "document_id" in out
+
+    def test_empty_text_is_a_clear_error(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        out = gs.docs_append("doc123", "   ")
+        assert out.startswith("ERROR")
+        assert "text" in out
+
+    def test_happy_path_appends_via_batch_update(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        calls = []
+
+        def fake_http_json(method, url, token, body=None):
+            calls.append((method, url, body))
+            return {"documentId": "doc123"}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.docs_append("doc123", "Section two: the aftermath.")
+        assert "DOCS APPEND OK" in out
+        assert "doc123" in out
+        assert len(calls) == 1
+        method, url, body = calls[0]
+        assert method == "POST"
+        assert url == "https://docs.googleapis.com/v1/documents/doc123:batchUpdate"
+        req = body["requests"][0]["insertText"]
+        # endOfSegmentLocation, not a hand-computed index -- this is the
+        # real reason it can never mis-index into existing content.
+        assert req["endOfSegmentLocation"] == {}
+        assert req["text"] == "Section two: the aftermath."
+
+    def test_403_surfaces_scope_fix(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 403 on .../batchUpdate: insufficient permissions")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.docs_append("doc123", "more text")
+        assert "403" in out
+        assert "GOOGLE_OAUTH_FULL_SCOPES" in out
+        assert "Nothing was appended" in out
+
+    def test_404_reports_the_bad_id_honestly(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 404 on .../batchUpdate: not found")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.docs_append("bogus-id", "more text")
+        assert "404" in out
+        assert "bogus-id" in out
+        assert "Nothing was appended" in out
+
+    def test_wired_onto_the_docs_agent_and_gated(self):
+        registry = build_general_registry()
+        sub = registry.get_subagent("docs")
+        spec = next(t for t in sub.tools if t.name == "docs_append")
+        assert spec.permission == Permission.REQUIRES_CONFIRMATION
+        assert "docs_append" in registry.gated_tool_names
+
+    def test_wired_onto_google_workspace_too(self):
+        registry = build_general_registry()
+        sub = registry.get_subagent("google_workspace")
+        names = {t.name for t in sub.tools}
+        assert "docs_append" in names
+
+
 class TestDriveSearchFileType:
     """v13.8 (real, live-reproduced bug): drive_search's ONLY parameter was
     a freeform text string, unconditionally wrapped as a

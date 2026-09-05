@@ -44,10 +44,12 @@ from dourmouse import email_identity
 #: Swappable in tests (hermetic HTTP, no network).
 urlopen = urllib.request.urlopen
 
-#: Google REST bases for the per-user OAuth path (v5.15; Drive v5.18).
+#: Google REST bases for the per-user OAuth path (v5.15; Drive v5.18; Docs
+#: append — see docs_append below).
 _GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 _CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 _DRIVE_API = "https://www.googleapis.com/drive/v3"
+_DOCS_API = "https://docs.googleapis.com/v1/documents"
 
 #: Google-native mime types read via the export endpoint (text/plain) — a
 #: binary ``alt=media`` download of a Docs file would return export blobs.
@@ -540,6 +542,100 @@ def drive_create_doc(title: str, content: str = "") -> str:
         "user's OAuth session with Drive WRITE scope. No user is signed in — "
         "sign in at /login (with GOOGLE_OAUTH_FULL_SCOPES=1 in .env so the "
         "session grants Drive), then retry. Nothing was created."
+    )
+
+
+# -- v13.9: Google Docs append (write, per-user OAuth) -------------------- #
+#
+# Real capability gap, live-caught this session: drive_create_doc's own
+# content write is a full media-upload PATCH -- it REPLACES the whole body,
+# so there was no way to build a document incrementally across multiple
+# turns (e.g. a long essay written section by section as RAG queries feed
+# in more real content) without either re-sending the ENTIRE accumulated
+# text on every call, or creating a brand-new document each time. The Docs
+# API's own batchUpdate + insertText with endOfSegmentLocation genuinely
+# appends at the end of the document body in one small, cheap request --
+# this is the real, documented mechanism for exactly this, not a guess.
+
+
+def _docs_append_oauth(token: str, document_id: str, text: str) -> str:
+    """Append ``text`` to the end of an existing Google Doc's body via one
+    real ``documents.batchUpdate`` call (v13.9).
+
+    ``endOfSegmentLocation`` (an empty object -- no index math, no prior
+    ``documents.get`` needed) is the Docs API's own real mechanism for
+    "insert at the end of this segment"; using it means this can never
+    mis-index into the middle of existing content. Requires Drive/Docs
+    WRITE scope -- a 403 here is surfaced with the exact fix, never masked,
+    matching drive_create_doc's own convention.
+    """
+    doc_id = (document_id or "").strip()
+    if not doc_id:
+        return "ERROR: docs_append requires a document_id."
+    body_text = text or ""
+    if not body_text.strip():
+        return "ERROR: docs_append requires non-empty text to append."
+    try:
+        _http_json(
+            "POST",
+            f"{_DOCS_API}/{urllib.parse.quote(doc_id)}:batchUpdate",
+            token,
+            {
+                "requests": [
+                    {"insertText": {"endOfSegmentLocation": {}, "text": body_text}}
+                ]
+            },
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg:
+            raise RuntimeError(
+                msg
+                + " — Drive/Docs WRITE needs the full scopes "
+                "(GOOGLE_OAUTH_FULL_SCOPES=1). Nothing was appended."
+            ) from exc
+        if "404" in msg:
+            raise RuntimeError(
+                msg
+                + f" — no document with id {doc_id!r} was found (wrong id, "
+                "or it isn't a Google Doc). Nothing was appended."
+            ) from exc
+        raise
+    return (
+        f"DOCS APPEND OK: {len(body_text):,} chars appended to the end of "
+        f"document {doc_id} — open at "
+        f"https://docs.google.com/document/d/{doc_id}"
+    )
+
+
+def docs_append(document_id: str, text: str) -> str:
+    """Append text to the END of an existing Google Doc's body (SIGNED-IN
+    user's OAuth token; v13.9, write).
+
+    Never replaces existing content — unlike drive_create_doc, which can
+    only ever create a brand-new document with its content written once.
+    This is what makes building a long document across MULTIPLE turns
+    (e.g. a long essay, one RAG-grounded section per call) possible at
+    all. Honest NOT CONFIGURED when no OAuth user is signed in, honest
+    re-sign-in when the session is stale — same per-user guarantee as
+    drive_create_doc/drive_search. Should be confirmation-gated upstream:
+    it writes to a real file.
+    """
+    token = _oauth_access_token()
+    if token:
+        try:
+            return _docs_append_oauth(token, document_id, text)
+        except RuntimeError as exc:
+            return f"DOCS APPEND (reported honestly): {exc}"
+    reauth = _oauth_user_needs_reauth("DOCS WRITE")
+    if reauth:
+        return reauth
+    return (
+        "NOT CONFIGURED: appending to a Google Doc needs the signed-in "
+        "Google user's OAuth session with Drive/Docs WRITE scope. No user "
+        "is signed in — sign in at /login (with GOOGLE_OAUTH_FULL_SCOPES=1 "
+        "in .env so the session grants Docs), then retry. Nothing was "
+        "appended."
     )
 
 

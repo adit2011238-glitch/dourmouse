@@ -32,6 +32,7 @@ crashes and not fabricated success.
 
 from __future__ import annotations
 
+import concurrent.futures
 import difflib
 import json
 import os
@@ -160,6 +161,51 @@ def _is_transient_error(exc: Exception) -> bool:
 # second constant for that case.
 _DEFAULT_MAX_TOKENS = 4000
 _MAX_RESPONSE_TOKENS_ENV = "DOURMOUSE_MAX_RESPONSE_TOKENS"
+
+# Live-reproduced real bug: a local (gpt-oss:20b/Ollama) turn stalled for
+# 200-300s+ with the heartbeat above honestly showing "still alive" the
+# whole time -- the model was genuinely still generating, just far slower
+# than any reasonable wait, and nothing ever aborted it. The only recovery
+# was the user manually clicking STOP. This constant bounds the TOTAL
+# wall-clock a single _call_with_retry_inner attempt-sequence may run
+# before _call_with_retry gives up on it and raises an honest
+# ModelCallDeadlineExceeded -- never a fabricated answer, never a silent
+# hang. Generous on purpose: real cold local-model turns have been
+# measured well past 90s (see desktop_rag's own 76s cold-load note), so
+# this must not fire on ordinary slowness, only on the multi-minute
+# stalls this was written for. Overridable via
+# DOURMOUSE_MODEL_CALL_DEADLINE_S for a deployment with faster or slower
+# real hardware.
+_DEFAULT_MODEL_CALL_DEADLINE_S = 240.0
+_MODEL_CALL_DEADLINE_ENV = "DOURMOUSE_MODEL_CALL_DEADLINE_S"
+
+
+def _model_call_deadline_s() -> float:
+    raw = os.environ.get(_MODEL_CALL_DEADLINE_ENV, "").strip()
+    if raw:
+        try:
+            return max(30.0, float(raw))
+        except ValueError:
+            pass
+    return _DEFAULT_MODEL_CALL_DEADLINE_S
+
+
+class ModelCallDeadlineExceeded(TimeoutError):
+    """Raised when a single model call exceeds _model_call_deadline_s().
+
+    Deliberately a TimeoutError subclass so it flows through the existing
+    ``_is_transient_error`` retry/fallback machinery unchanged (a
+    isinstance(exc, TimeoutError) check already exists there) rather than
+    needing its own special-cased handling at every call site.
+
+    The underlying HTTP request is NOT forcibly killed (Python cannot
+    safely do that to an arbitrary blocking network call) -- it keeps
+    running on its own orphaned thread until the far end's own timeout or
+    completion, and its eventual result is discarded. That is a real,
+    disclosed trade-off (an orphaned thread and a wasted local-model
+    generation) in exchange for the thing that actually matters here:
+    this call site never blocks the user past the deadline again.
+    """
 
 
 def _default_max_tokens() -> int:
@@ -467,8 +513,27 @@ def _call_with_retry(
 
         heartbeat_thread = threading.Thread(target=_beat, daemon=True)
         heartbeat_thread.start()
+    # Real, live-reproduced stall bound (see ModelCallDeadlineExceeded's own
+    # docstring): run the actual call on a worker thread and stop WAITING
+    # on it past the deadline, rather than blocking the request forever.
+    # abandoned guards on_delta/on_thinking so a late chunk arriving from
+    # the orphaned worker after we've already raised can never write into
+    # a response stream that has already been closed with an error.
+    abandoned = threading.Event()
+    _real_on_delta = on_delta
+    _real_on_thinking = on_thinking
+    if _real_on_delta is not None:
+        def on_delta(text: str) -> None:  # noqa: F811 - deliberate shadow, scoped to this call
+            if not abandoned.is_set():
+                _real_on_delta(text)
+    if _real_on_thinking is not None:
+        def on_thinking(text: str) -> None:  # noqa: F811 - deliberate shadow, scoped to this call
+            if not abandoned.is_set():
+                _real_on_thinking(text)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        response = _call_with_retry_inner(
+        future = executor.submit(
+            _call_with_retry_inner,
             client,
             model=model,
             messages=messages,
@@ -479,12 +544,31 @@ def _call_with_retry(
             on_thinking=on_thinking,
             client_factory=client_factory,
         )
+        try:
+            response = future.result(timeout=_model_call_deadline_s())
+        except concurrent.futures.TimeoutError as exc:
+            abandoned.set()
+            deadline = _model_call_deadline_s()
+            elapsed = round(time.perf_counter() - start, 1)
+            raise ModelCallDeadlineExceeded(
+                f"model call to {model!r} exceeded the {deadline:.0f}s "
+                f"deadline (ran {elapsed}s) — this matches a known "
+                "slow-local-model stall, not a real answer being "
+                "withheld. Nothing was fabricated; the underlying "
+                "request was abandoned, not the model's eventual output."
+            ) from exc
         return response
     except BaseException:
         ok = False
         response = None
         raise
     finally:
+        # wait=False: never block shutdown on the exact call this whole
+        # mechanism exists to stop waiting on. A still-running orphaned
+        # attempt (only possible on the deadline-exceeded path above)
+        # finishes or dies on its own; the executor object itself is just
+        # garbage-collected once that happens.
+        executor.shutdown(wait=False)
         stop_heartbeat.set()
         if heartbeat_thread is not None:
             heartbeat_thread.join(timeout=1.0)
@@ -993,9 +1077,20 @@ _SYSTEM_PROMPT = (
     "task list every 1 min. Results are broadcast on the inter-agent bus and "
     "keep each LIVE agent current — never present a poll result as new "
     "research or as the operator's data.\n"
-    "  - When asked to summarize the day or review what happened, run the "
-    "honest daily self-review via the memory agent's daily_digest tool — "
-    "never fabricate a digest from memory alone.\n"
+    "  - When asked to summarize the day, review what happened, or recap "
+    "'today's testing'/'this session'/'what we've done' in any similar "
+    "phrasing, run the honest daily self-review via the memory agent's "
+    "daily_digest tool — never fabricate a digest from memory alone. "
+    "Live-caught real bug: asked to draft a recap of 'today's testing "
+    "session', the model invented a plausible-sounding but ungrounded "
+    "summary (a false 'no issues encountered' among other unverifiable "
+    "claims) instead of running daily_digest or otherwise checking. If "
+    "daily_digest itself cannot answer the specific framing asked (e.g. "
+    "'this session' rather than 'today'), say plainly that you don't "
+    "have a verified record to summarize rather than inventing generic, "
+    "plausible-sounding bullet points to fill the gap — a short, honest "
+    "'I don't have grounded specifics for that' beats a confident, "
+    "ungrounded recap every time.\n"
     "  - Surface anything time-sensitive the live feeds expose; do not "
     "silently drop a poll result that matters.\n"
     "12. NEVER proactively call write_note, remember, or any other "
@@ -1021,7 +1116,31 @@ _SYSTEM_PROMPT = (
     "the user must do it themselves in Drive — never call delete_file "
     "with a Drive file ID as the path just because it is the closest-"
     "sounding tool; that asks to permanently delete an unrelated local "
-    "path and does not touch the Drive file at all."
+    "path and does not touch the Drive file at all.\n"
+    "15. Once the user has clearly instructed a send/execute action "
+    "(e.g. 'send it', 'send this email', 'archive it', 'actually do X "
+    "now') — CALL THE REAL TOOL immediately; do not instead write a "
+    "chat message asking 'shall I proceed?' or 'please confirm and I'll "
+    "send it'. The tool itself is what pauses for real human "
+    "confirmation (Rule 2/4) — a REQUIRES_CONFIRMATION tool call "
+    "surfaces its own real, gated, user-facing approval prompt. Asking "
+    "in plain chat text instead of calling the tool is NOT an "
+    "equivalent, enforceable confirmation step; it just stalls the "
+    "turn and forces the user to repeat themselves before anything "
+    "real happens. Only skip the tool call and ask a clarifying "
+    "question in chat when a genuinely required detail is actually "
+    "missing (e.g. no recipient was given at all) — never as a default "
+    "extra step before an already-complete, already-confirmed-by-the-"
+    "user action.\n"
+    "16. If you are not sure whether a tool exists, check the roster "
+    "below or just try calling it — an unknown-tool call safely returns "
+    "an honest ERROR (with a 'did you mean' suggestion when a close "
+    "name exists), it never crashes the turn. Never tell the user a "
+    "capability 'doesn't exist' or 'isn't in the roster' from memory of "
+    "an earlier reasoning step alone, especially one you have already "
+    "used successfully earlier in this same conversation — that is "
+    "reasoning about the roster instead of reading it, and it has been "
+    "live-caught being wrong."
 )
 
 

@@ -198,6 +198,9 @@ class TestRosterShape:
             # design_3d: can silently overwrite an existing named manifest
             # entry with no diff shown, same rationale as write_note.
             "write_manifest_entry",
+            # v13.9: real write to an existing Google Doc, same
+            # confirmation bar as drive_create_doc right above it.
+            "docs_append",
         }
 
     def test_internet_tools_registered(self):
