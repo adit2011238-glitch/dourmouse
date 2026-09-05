@@ -85,8 +85,25 @@ def requested_scopes() -> str:
 #: Backwards-compatible module-level reference (tests + status() use it).
 SCOPES = requested_scopes()
 
-_SESSION_TTL = timedelta(days=30)
+#: v13.10 ("stay logged in forever" feature, explicit user request): this is
+#: a single-user desktop app on the user's own machine, not a shared
+#: multi-tenant web service — the real risk profile of a long-lived session
+#: here is closer to "stays signed into your own laptop" than "a shared
+#: site remembers a stranger". 3650 days (10 years) rather than a literal
+#: unbounded/no-expiry value, so every date computation against this
+#: constant stays ordinary datetime arithmetic with no special-cased
+#: "never expires" branch anywhere that touches it.
+_SESSION_TTL = timedelta(days=3650)
 _TOKEN_SKEW = timedelta(seconds=60)
+
+
+def session_ttl_seconds() -> int:
+    """Public accessor so a Set-Cookie header's own Max-Age can derive from
+    the SAME real value AuthStore.session_email checks server-side, rather
+    than a second hardcoded number that could silently drift out of sync
+    with it (exactly the kind of magic-number duplication this replaces —
+    webui.py used to hardcode 2592000 directly at each Set-Cookie site)."""
+    return int(_SESSION_TTL.total_seconds())
 
 #: Swappable in tests (hermetic HTTP, no network).
 urlopen = urllib.request.urlopen

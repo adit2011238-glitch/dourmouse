@@ -392,3 +392,78 @@ class TestVisionBridgeHook:
         app = tray.TrayApp(kill_switch=ks)
         bridge = app._bridge_factory(lambda: ks.state)
         assert isinstance(bridge, VisionBridgeServer)
+
+
+# --------------------------------------------------------------------------- #
+# v13.10: run_detached() — the tray icon lives in desktop.py's own process
+# (sharing its one real webview.start() / NSApplication loop) instead of a
+# separate subprocess.
+# --------------------------------------------------------------------------- #
+
+class _FakeDetachableIcon:
+    def __init__(self):
+        self.run_detached_called = False
+        self.stopped = False
+
+    def run_detached(self):
+        self.run_detached_called = True
+
+    def stop(self):
+        self.stopped = True
+
+
+class TestRunDetached:
+    def test_run_detached_starts_the_bridge_and_calls_icon_run_detached(self, tmp_path, capsys):
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+        bridges = []
+
+        def fake_bridge_factory(state_reader):
+            b = _FakeBridge(state_reader)
+            bridges.append(b)
+            return b
+
+        fake_icon = _FakeDetachableIcon()
+        app = tray.TrayApp(kill_switch=ks, bridge_factory=fake_bridge_factory)
+        app._icon_factory = lambda: (None, None, None)
+        app._build_icon = lambda: fake_icon
+
+        returned = app.run_detached()
+
+        assert returned is fake_icon
+        assert fake_icon.run_detached_called is True
+        assert len(bridges) == 1
+        assert bridges[0].started is True
+        assert "vision bridge" in capsys.readouterr().out
+
+    def test_run_detached_never_blocks(self, tmp_path):
+        """The whole point: unlike run(), this must return immediately."""
+        import time
+
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+        app = tray.TrayApp(kill_switch=ks, bridge_factory=lambda sr: _FakeBridge(sr))
+        app._icon_factory = lambda: (None, None, None)
+        app._build_icon = lambda: _FakeDetachableIcon()
+
+        t0 = time.perf_counter()
+        app.run_detached()
+        assert time.perf_counter() - t0 < 1.0
+
+    def test_stop_detached_stops_both_icon_and_bridge(self, tmp_path):
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+        bridge = _FakeBridge(lambda: ks.state)
+        app = tray.TrayApp(kill_switch=ks, bridge_factory=lambda sr: bridge)
+        app._icon_factory = lambda: (None, None, None)
+        fake_icon = _FakeDetachableIcon()
+        app._build_icon = lambda: fake_icon
+
+        app.run_detached()
+        app.stop_detached()
+
+        assert fake_icon.stopped is True
+        assert bridge.stopped is True
+
+    def test_stop_detached_before_run_detached_never_raises(self, tmp_path):
+        """A caller that tears down before ever starting must not crash."""
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+        app = tray.TrayApp(kill_switch=ks)
+        app.stop_detached()  # no icon, no bridge -- must be a clean no-op

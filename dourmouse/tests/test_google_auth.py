@@ -221,6 +221,42 @@ class TestAuthStore:
         assert store.session_email(sid) is None
         store.close()
 
+    def test_a_session_created_today_is_still_valid_years_from_now(self, tmp_path, monkeypatch):
+        """v13.10 ("stay logged in forever" feature, explicit user request):
+        _SESSION_TTL was extended from 30 days to 3650 days (10 years) so a
+        real desktop app's sign-in survives being quit and reopened
+        indefinitely for all practical purposes, without a literal
+        unbounded/no-expiry special case anywhere in the date arithmetic."""
+        import datetime as _dt
+
+        store = AuthStore(tmp_path / "auth.db")
+        sid = store.create_session("u@example.com")
+        assert store.session_email(sid) == "u@example.com"
+
+        real_datetime = google_auth.datetime
+
+        class _FutureDatetime(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime.now(tz) + _dt.timedelta(days=365 * 3)
+
+        monkeypatch.setattr(google_auth, "datetime", _FutureDatetime)
+        assert store.session_email(sid) == "u@example.com"
+        store.close()
+
+
+class TestSessionTtlSeconds:
+    def test_matches_the_real_configured_ttl(self):
+        assert google_auth.session_ttl_seconds() == int(
+            google_auth._SESSION_TTL.total_seconds()
+        )
+
+    def test_is_a_real_long_lived_duration_not_the_old_thirty_days(self):
+        """Guards against silently reverting to the old 30-day (2,592,000s)
+        behavior this feature explicitly replaced."""
+        thirty_days_seconds = 30 * 24 * 60 * 60
+        assert google_auth.session_ttl_seconds() > thirty_days_seconds
+
     def test_access_token_returns_valid_directly(self, tmp_path, monkeypatch):
         import time
         from datetime import datetime, timedelta, timezone

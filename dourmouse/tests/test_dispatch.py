@@ -10,6 +10,7 @@ LLM side of the conversation, never the tools' output.
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 import pytest
@@ -2687,6 +2688,27 @@ class TestCallWithRetryDeadline:
             client, model="m", messages=[], tools=[], config=None,
         )
         assert response.choices[0].message.content == "done"
+
+    def test_the_ordinary_fast_path_never_leaks_the_worker_thread(self, monkeypatch):
+        """Real, live-caught regression: shutdown() always used wait=False,
+        even on the ordinary success path where the worker thread had
+        ALREADY finished — waiting there costs nothing. Across a full test
+        suite making thousands of real _call_with_retry calls, new thread
+        pools were created far faster than their already-finished worker
+        threads could wind down asynchronously, and the accumulation
+        reproducibly stalled the suite partway through a full run. On the
+        fast path the executor's one worker thread must be fully joined
+        (not just asked to stop) before _call_with_retry returns."""
+        monkeypatch.setattr(dispatch_module, "_model_call_deadline_s", lambda: 30.0)
+        before = threading.active_count()
+        for _ in range(20):
+            client = _SlowFakeClient(_FakeMessage(content="done"), delay=0.01)
+            dispatch_module._call_with_retry(
+                client, model="m", messages=[], tools=[], config=None,
+            )
+        # No real-world scheduling slack needed -- wait=True on this path
+        # means the thread is already joined by the time the call returns.
+        assert threading.active_count() == before
 
     def test_deadline_exceeded_is_a_timeout_error_subclass(self):
         """Deliberately a TimeoutError subclass so it flows through the

@@ -563,12 +563,21 @@ def _call_with_retry(
         response = None
         raise
     finally:
-        # wait=False: never block shutdown on the exact call this whole
-        # mechanism exists to stop waiting on. A still-running orphaned
-        # attempt (only possible on the deadline-exceeded path above)
-        # finishes or dies on its own; the executor object itself is just
-        # garbage-collected once that happens.
-        executor.shutdown(wait=False)
+        # Real, live-caught regression in this exact mechanism: shutdown
+        # always used wait=False, even on the ordinary fast/success path
+        # where the worker thread had ALREADY finished (future.result()
+        # already returned) — waiting there costs nothing. Across a full
+        # test suite making thousands of real _call_with_retry calls, new
+        # thread pools were created far faster than their (already-done)
+        # worker threads could actually wind down asynchronously, and the
+        # accumulation reproducibly stalled the suite partway through at
+        # a consistent ~24 CPU-seconds mark. wait=abandoned.is_set() is
+        # False keeps the ONE case this was built for -- a genuinely still-
+        # running orphaned attempt past the deadline -- non-blocking,
+        # while every ordinary call now actually joins its own thread
+        # before returning, exactly like code that never used a thread
+        # pool at all.
+        executor.shutdown(wait=not abandoned.is_set())
         stop_heartbeat.set()
         if heartbeat_thread is not None:
             heartbeat_thread.join(timeout=1.0)

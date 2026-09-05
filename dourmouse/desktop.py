@@ -53,29 +53,57 @@ def _pick_port() -> int:
         return _DEFAULT_PORT
 
 
-# -- Vision helper auto-start (v13) ------------------------------------------
-# Real gap found and fixed here: dourmouse/tray.py (system tray + camera/mic
-# kill switch + the vision_bridge hand-tracking reaches into), overlay.py
-# (the always-on-top ambient status window — its own docstring: "not
-# something you open, something that is simply there"), and wakeword.py
-# (the local wake-word listener) are all real, tested, shipped modules —
-# but NOTHING launched any of them. A user opening the packaged desktop app
-# got a VISION screen whose entire dashboard honestly reported "not
-# running" for every single row, forever, because nothing ever started
-# what it was reporting on. Each is independently runnable
-# (`.venv/bin/python -m dourmouse.<module>`) but expecting a non-technical
-# user to open three extra terminals to get the feature they see in the UI
-# is not a real product. This starts each as its own subprocess (not a
-# thread — each owns a blocking native event loop of its own: pystray's
-# icon.run(), a second pywebview window, a continuous mic-capture loop —
-# and pywebview in particular only tolerates one .start() per process) the
-# same way `npm run dev` starts a dev server without the user typing it
-# manually. Best-effort per helper: one failing to start (missing
-# pystray/pyaudio, no display, whatever) never blocks the other two or the
-# main app — this mirrors every other "real result or honest degrade,
-# never block the app" contract in this codebase.
+def _webview_storage_path() -> Path:
+    """Where pywebview keeps its cookie jar / localStorage / IndexedDB when
+    started with private_mode=False (v13.10). Same DOURMOUSE_WORKSPACE
+    convention as chat.py's _default_sessions_dir and every other
+    persisted-state directory in this app, so one env var still controls
+    every DourMouse data location consistently."""
+    raw = os.environ.get("DOURMOUSE_WORKSPACE", "").strip()
+    root = Path(raw).expanduser() if raw else Path(__file__).resolve().parent.parent / "workspace"
+    path = root / "webview_storage"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# -- Vision helper auto-start (v13, single-process since v13.11) ------------
+# Real gap found and fixed here (v13): dourmouse/tray.py (system tray +
+# camera/mic kill switch + the vision_bridge hand-tracking reaches into),
+# overlay.py (the always-on-top ambient status window — its own docstring:
+# "not something you open, something that is simply there"), and
+# wakeword.py (the local wake-word listener) are all real, tested, shipped
+# modules — but NOTHING launched any of them. A user opening the packaged
+# desktop app got a VISION screen whose entire dashboard honestly reported
+# "not running" for every single row, forever, because nothing ever
+# started what it was reporting on.
+#
+# v13.11 ("package it as one application", explicit user request):
+# originally started as three separate subprocesses (v13's own reasoning,
+# kept here for history: pystray's icon.run(), a second pywebview window,
+# and a continuous mic-capture loop each look like they need their own
+# process). That reasoning turned out to be more conservative than
+# necessary once actually checked against these libraries' real source:
+#   - overlay.py's window is now created via overlay.create_overlay_window()
+#     on THIS process's own already-loaded ``webview`` module, before the
+#     ONE shared webview.start() call below — pywebview tolerates any
+#     number of windows created before that single call, it only refuses a
+#     SECOND .start().
+#   - wakeword.py's WakeWordListener never had a GUI loop at all — it is a
+#     sounddevice.InputStream (its own internal callback thread) plus a
+#     plain watchdog thread. It was only ever a subprocess by association
+#     with the other two, not because it needed to be.
+#   - tray.py's pystray icon uses TrayApp.run_detached() (confirmed by
+#     reading the installed pystray._darwin backend directly): it calls
+#     _mark_ready() only, never NSApplication.run() — the real loop pumped
+#     is the SAME AppKit.NSApplication.sharedApplication() singleton
+#     pywebview's own .start() already runs, since neither library was
+#     told to use a different one.
+# Net result: one process, one native event loop, three fewer things
+# showing up as separate "Python" entries in Activity Monitor — the exact
+# complaint that prompted this. Best-effort per helper still applies
+# (one failing to start never blocks the other two or the main app), same
+# as the subprocess version did.
 _VISION_AUTOSTART_ENV = "DOURMOUSE_VISION_AUTOSTART"
-_VISION_HELPER_MODULES = ("dourmouse.tray", "dourmouse.overlay", "dourmouse.wakeword")
 
 
 def vision_autostart_enabled() -> bool:
@@ -83,65 +111,73 @@ def vision_autostart_enabled() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
-def _spawn_vision_helper(module: str, port: int) -> subprocess.Popen | None:
-    """Launch one helper module as a real background subprocess. Returns
-    the Popen handle, or None on any failure to start (never raises —
-    Rule 2.1/2.2 concern here is about the MAIN app's own startup, which
-    must never fail because an optional ambient helper couldn't). Output
-    is captured (DEVNULL) rather than left to inherit this process's
-    stdout — three extra chatty subprocesses interleaving with
-    "[DESKTOP] ..." lines would make the main app's own console output
-    unreadable; each module already degrades honestly to its caller (exit
-    code / self-contained window), not to stdout text a user is expected
-    to read."""
-    env = dict(os.environ)
-    env[_PORT_ENV] = str(port)
+def _start_vision_helpers_in_process(webview: Any, url: str) -> dict[str, Any]:
+    """Start overlay + wakeword + tray IN THIS PROCESS (v13.11). Returns a
+    dict of the live handles ``_stop_vision_helpers_in_process`` needs to
+    tear them back down — deliberately a plain dict, not a dataclass, so a
+    helper that fails to import/construct is simply absent from it rather
+    than needing a sentinel value. Best-effort per helper: one raising
+    (missing pystray/pyaudio, no display, whatever) is caught and reported,
+    never lets a failing OPTIONAL helper take down the real app underneath
+    it."""
+    handles: dict[str, Any] = {}
+
     try:
-        return subprocess.Popen(
-            [sys.executable, "-m", module],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-        )
-    except OSError as exc:
-        print(f"[DESKTOP] vision helper {module!r} could not start: {exc}")
-        return None
+        from dourmouse.overlay import create_overlay_window
+
+        window, poller = create_overlay_window(webview, base_url=url)
+        handles["overlay_window"] = window
+        handles["overlay_poller"] = poller
+        print("[DESKTOP] overlay window started")
+    except Exception as exc:  # noqa: BLE001 - an optional helper must never block launch
+        print(f"[DESKTOP] overlay could not start (non-fatal): {exc}")
+
+    try:
+        from dourmouse.wakeword import WakeWordListener
+
+        listener = WakeWordListener()
+        ok, reason = listener.start()
+        handles["wakeword_listener"] = listener
+        print(f"[DESKTOP] wakeword: {reason}")
+    except Exception as exc:  # noqa: BLE001 - an optional helper must never block launch
+        print(f"[DESKTOP] wakeword could not start (non-fatal): {exc}")
+
+    try:
+        from dourmouse.tray import TrayApp
+
+        tray_app = TrayApp()
+        tray_app.run_detached()
+        handles["tray_app"] = tray_app
+        print("[DESKTOP] tray icon started")
+    except Exception as exc:  # noqa: BLE001 - an optional helper must never block launch
+        print(f"[DESKTOP] tray icon could not start (non-fatal): {exc}")
+
+    return handles
 
 
-def _start_vision_helpers(port: int) -> list[subprocess.Popen]:
-    """Best-effort launch of every vision helper; see this section's own
-    module-level comment for why these are subprocesses, not threads."""
-    procs: list[subprocess.Popen] = []
-    for module in _VISION_HELPER_MODULES:
-        proc = _spawn_vision_helper(module, port)
-        if proc is not None:
-            procs.append(proc)
-    return procs
-
-
-def _stop_vision_helpers(procs: list[subprocess.Popen]) -> None:
-    """Graceful terminate, then a bounded wait, then kill — the same
-    escalation every process-supervision code in this codebase uses
-    (atlas_command.py's AtlasRunManager included). Best-effort: a helper
-    that's already dead or unkillable must never stop the main app's own
-    shutdown from completing."""
-    for proc in procs:
+def _stop_vision_helpers_in_process(handles: dict[str, Any]) -> None:
+    """Best-effort teardown for every handle _start_vision_helpers_in_process
+    may have returned. A helper that was never started (missing from
+    ``handles``, e.g. it failed at startup) is simply skipped — same
+    best-effort discipline as the startup side."""
+    poller = handles.get("overlay_poller")
+    if poller is not None:
         try:
-            if proc.poll() is not None:
-                continue  # already exited on its own
-            proc.terminate()
+            poller.stop()
         except Exception:  # noqa: BLE001 - shutdown must never raise
             pass
-    for proc in procs:
+    listener = handles.get("wakeword_listener")
+    if listener is not None:
         try:
-            proc.wait(timeout=3)
-        except Exception:  # noqa: BLE001 - covers subprocess.TimeoutExpired
-            # and any other polling failure; escalate to kill either way
-            try:
-                proc.kill()
-            except Exception:  # noqa: BLE001 - best-effort
-                pass
+            listener.stop()
+        except Exception:  # noqa: BLE001 - shutdown must never raise
+            pass
+    tray_app = handles.get("tray_app")
+    if tray_app is not None:
+        try:
+            tray_app.stop_detached()
+        except Exception:  # noqa: BLE001 - shutdown must never raise
+            pass
 
 
 def _import_webview() -> Any:
@@ -774,6 +810,7 @@ def launch(
     open_all_windows: bool = False,
     deep_link: str | None = None,
     vision_autostart: bool | None = None,
+    session_file: Path | str | None = None,
 ) -> int:
     """Launch the DOURMOUSE desktop app. Returns a process exit code.
 
@@ -785,6 +822,21 @@ def launch(
     Pass ``open_all_windows=True`` only for testing (and if you really want
     every agent's window at launch — the pre-v5.22.2 behaviour).
     ``webview_loader`` is the test seam for ``_import_webview``.
+    ``session_file`` (v13.10): threaded straight through to
+    ``webui.run_server`` — None (default, unchanged) mints a fresh session
+    every call, exactly as before this parameter existed, so every existing
+    caller (every test in this file included) is byte-for-byte unaffected.
+    Deliberately NOT resolved to "the most recent workspace/sessions/*.jsonl"
+    inside this function itself — hermetic tests call launch() directly and
+    must never reach into the real, shared, growing workspace directory on
+    disk (live-caught: doing that here made a real test hang, picking up
+    an actual multi-hundred-KB session from real live testing and racing
+    other concurrently-running test processes writing to the same real
+    directory). The real desktop entry point (this module's own
+    __main__ block) resolves chat.most_recent_session_file() and passes
+    it in explicitly instead — the convenience the feature is FOR still
+    exists for a real launch, it just isn't an implicit default every
+    caller of this function inherits.
     ``live_polling`` (v2.8): start the always-on live agent loops (env
     DOURMOUSE_LIVE=0 still disables them, see live_runtime.live_enabled).
     ``memory`` (v2.9): long-term store for the Store & Learn loop. None
@@ -827,6 +879,7 @@ def launch(
         config=config,
         live_polling=live_polling,
         memory=memory,
+        session_file=session_file,
     )
     actual_port = server.server_address[1]
     url = f"http://{host}:{actual_port}"
@@ -857,9 +910,11 @@ def launch(
         )
 
     autostart = vision_autostart_enabled() if vision_autostart is None else vision_autostart
-    vision_procs: list[subprocess.Popen] = _start_vision_helpers(actual_port) if autostart else []
-    if autostart:
-        print(f"[DESKTOP] {len(vision_procs)}/{len(_VISION_HELPER_MODULES)} vision helper(s) started")
+    # v13.11: started INSIDE the try below, once `webview` is loaded (the
+    # overlay window needs it) — declared here, outside the try, so the
+    # finally block can always reference it, same discipline as
+    # notifier_sink/proactive_sink right below.
+    vision_handles: dict[str, Any] = {}
 
     # The notification sink and its hub are initialized OUTSIDE the try so
     # the finally block can always reference them — a loader failure that
@@ -992,6 +1047,12 @@ def launch(
 
             proactive_sink = _ProactiveSink()
             events_hub.register(proactive_sink)
+        # v13.11: overlay/wakeword/tray, IN this process — must come after
+        # `webview` is loaded (overlay needs it) and before the one shared
+        # webview.start() below (pywebview only tolerates windows created
+        # before that single call, not after).
+        if autostart:
+            vision_handles.update(_start_vision_helpers_in_process(webview, url))
         # Brand the native app before starting the window loop — sets the
         # Dock icon and menu-bar name to "DourMouse" instead of "Python".
         _brand_native_app()
@@ -999,14 +1060,33 @@ def launch(
         # GUI backend fails at start() (headless/SSH session, missing pyobjc),
         # degrade to the browser with a clear message — the server stays up.
         try:
-            webview.start()
+            # v13.10 ("stay logged in / keep my preferences" feature):
+            # pywebview's own webview.start() defaults to private_mode=True
+            # (confirmed live against the installed version's real
+            # signature) -- an incognito-style context that wipes cookies
+            # AND localStorage on every single app quit, regardless of how
+            # long-lived the server-side session already is. This is the
+            # real, root cause of "doesn't stay signed in": the
+            # dourmouse_user_session cookie (google_auth.py) already
+            # carries a real 30-day Max-Age, and console.html's theme/
+            # backend-mode/details-toggle/projects preferences already
+            # persist to localStorage (their own try/catch comments
+            # already say "private mode: session-only" -- an accepted,
+            # known degradation, not a bug in that code). None of that
+            # durable design ever got a chance to survive a restart while
+            # the window itself ran in a wiped-clean private context.
+            # private_mode=False + a real on-disk storage_path (kept next
+            # to the rest of this app's own persisted state) is the fix --
+            # the existing 30-day session/localStorage design does the
+            # rest with no further change needed.
+            webview.start(private_mode=False, storage_path=str(_webview_storage_path()))
         except KeyboardInterrupt:
             pass
         except Exception as exc:
             return _fallback_to_browser(url + initial_href, f"Native window could not start: {exc}")
         return 0
     finally:
-        _stop_vision_helpers(vision_procs)
+        _stop_vision_helpers_in_process(vision_handles)
         if notifier_sink is not None and events_hub is not None:
             try:
                 events_hub.unregister(notifier_sink)
@@ -1040,7 +1120,17 @@ if __name__ == "__main__":
         # v5.19: macOS/Windows re-launch the app with a dourmouse:// URL in
         # argv when the scheme is registered — only the validated parse of
         # it is ever used.
-        sys.exit(launch(deep_link=deep_link_from_argv(sys.argv)))
+        # v13.10 ("stay logged in / keep my chats" feature): the REAL
+        # desktop launch (never a hermetic test — see launch()'s own
+        # session_file docstring for why this lookup does not live inside
+        # launch() itself) resumes the most recently written conversation
+        # instead of always starting a brand-new, empty one.
+        from dourmouse.chat import most_recent_session_file
+
+        sys.exit(launch(
+            deep_link=deep_link_from_argv(sys.argv),
+            session_file=most_recent_session_file(),
+        ))
     finally:
         try:
             os.remove(pid_file)

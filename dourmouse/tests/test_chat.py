@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from dourmouse.chat import ChatSession
+from dourmouse.chat import ChatSession, most_recent_session_file
 from dourmouse.dispatch import DispatchRegistry, Permission, Subagent, ToolSpec
 
 
@@ -400,6 +400,57 @@ class TestPersistence:
         (tmp_path / "session.messages.json").write_text("{not json")
         with pytest.raises(RuntimeError, match="cannot resume"):
             ChatSession(_registry(), client=FakeClient([]), session_file=session_file)
+
+
+class TestMostRecentSessionFile:
+    """v13.10 ("stay logged in / keep my chats" feature): the plumbing to
+    RESUME a conversation across a process restart (session_file passed
+    into ChatSession, exercised above by TestPersistence) already existed;
+    nothing ever found which file to resume with. This is that lookup."""
+
+    def test_empty_directory_returns_none(self, tmp_path):
+        assert most_recent_session_file(tmp_path) is None
+
+    def test_returns_the_single_real_session_file(self, tmp_path):
+        f = tmp_path / "session_20260101_000000.jsonl"
+        f.write_text("{}\n")
+        assert most_recent_session_file(tmp_path) == f
+
+    def test_picks_the_real_most_recently_modified_file_by_mtime(self, tmp_path):
+        """Real mtimes, not filename sort order — an operator-supplied
+        session_file need not follow the session_<timestamp>.jsonl naming
+        at all, so sorting by name could silently misorder or skip one."""
+        import os
+        import time
+
+        older = tmp_path / "session_a.jsonl"
+        newer = tmp_path / "session_z_but_actually_older_name.jsonl"
+        older.write_text("{}\n")
+        time.sleep(0.01)
+        newer.write_text("{}\n")
+        # Force newer's mtime clearly ahead regardless of filesystem
+        # timestamp resolution.
+        now = time.time()
+        os.utime(older, (now - 100, now - 100))
+        os.utime(newer, (now, now))
+        assert most_recent_session_file(tmp_path) == newer
+
+    def test_ignores_non_jsonl_and_non_session_files(self, tmp_path):
+        (tmp_path / "session_1.messages.json").write_text("[]")  # the state snapshot, not a ledger
+        (tmp_path / "notes.txt").write_text("hello")
+        real = tmp_path / "session_1.jsonl"
+        real.write_text("{}\n")
+        assert most_recent_session_file(tmp_path) == real
+
+    def test_defaults_to_the_real_workspace_sessions_dir(self, monkeypatch, tmp_path):
+        """No explicit dir -> the same DOURMOUSE_WORKSPACE-driven location
+        every other persisted-state directory in this app already uses."""
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        assert most_recent_session_file() is None
+        f = (tmp_path / "sessions" / "session_x.jsonl")
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("{}\n")
+        assert most_recent_session_file() == f
 
 
 class TestGatedToolThroughChat:

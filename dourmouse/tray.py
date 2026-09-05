@@ -356,6 +356,46 @@ class TrayApp:
                 except Exception:  # noqa: BLE001 -- shutdown must never raise
                     pass
 
+    def run_detached(self) -> Any:
+        """Non-blocking: for a caller that ALREADY owns the process's one
+        real native event loop (v13.10 — desktop.py's own ``webview.start()``
+        call, so the tray icon lives in the SAME process instead of its own
+        subprocess). Returns the real ``pystray.Icon`` so the caller can
+        call ``.stop()`` on it during its own shutdown.
+
+        Real, checked-against-source reason this is safe rather than a
+        guess: pystray's own ``Icon.run_detached()`` (confirmed by reading
+        the installed ``pystray._darwin`` backend directly) only calls
+        ``_mark_ready()`` — it never calls ``self._app.run()`` the way the
+        blocking ``run()`` does. ``self._app`` itself defaults to
+        ``AppKit.NSApplication.sharedApplication()`` — the SAME process-wide
+        singleton pywebview's own Cocoa backend already pumps via its own
+        ``webview.start()`` — so the tray icon's NSStatusItem becomes live
+        and interactive once that shared loop is running, with no second,
+        competing ``NSApplication.run()`` call anywhere. Same vision-bridge
+        startup and cleanup discipline as ``run()`` above; the difference is
+        only which method is called on the icon and that this returns
+        immediately instead of blocking.
+        """
+        self._start_vision_bridge()
+        self._icon = self._build_icon()
+        self._icon.run_detached()
+        return self._icon
+
+    def stop_detached(self) -> None:
+        """Counterpart to run_detached() — stops the icon and the vision
+        bridge, mirroring run()'s own finally block."""
+        if self._icon is not None:
+            try:
+                self._icon.stop()
+            except Exception:  # noqa: BLE001 -- shutdown must never raise
+                pass
+        if self._bridge is not None:
+            try:
+                self._bridge.stop()
+            except Exception:  # noqa: BLE001 -- shutdown must never raise
+                pass
+
 
 def launch() -> int:
     try:

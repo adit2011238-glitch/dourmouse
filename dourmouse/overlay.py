@@ -259,27 +259,26 @@ def _corner_x(width: int) -> int | None:
         return None
 
 
-def launch(
+def create_overlay_window(
+    webview: Any,
     *,
     base_url: str | None = None,
-    webview_loader: Callable[[], Any] | None = None,
     width: int = _OVERLAY_WIDTH,
     height: int = _OVERLAY_HEIGHT,
-) -> int:
-    """Start the standalone always-on-top status overlay. Returns a process
-    exit code (0 success, 1 pywebview unavailable).
+) -> tuple[Any, OverlayStatusPoller]:
+    """Create the overlay window + its status poller on an ALREADY-LOADED
+    ``webview`` module, and wire the poller to stop when the window closes.
+    Does NOT call ``webview.start()`` — the caller owns that (v13.10: this
+    is what lets desktop.launch() create this window alongside its own main
+    window, sharing ONE process-wide ``webview.start()`` call instead of
+    overlay.py running as a second standalone process — pywebview only
+    tolerates one ``.start()`` per process, but happily serves any number
+    of windows created before that single call).
 
-    ``webview_loader`` is the test seam (mirrors dourmouse.desktop.launch).
+    Returns ``(window, poller)`` — the caller is responsible for calling
+    ``poller.stop()`` on its own shutdown path too (the ``events.closed``
+    wiring here only covers the window being closed on its own).
     """
-    from dourmouse.desktop import _import_webview
-
-    loader = webview_loader or _import_webview
-    try:
-        webview = loader()
-    except RuntimeError as exc:
-        print(f"[OVERLAY] {exc}")
-        return 1
-
     window = webview.create_window(
         "DOURMOUSE STATUS",
         html=_OVERLAY_HTML,
@@ -305,6 +304,40 @@ def launch(
         window.events.closed += poller.stop
     except Exception:  # noqa: BLE001 -- cleanup wiring is best-effort
         pass
+
+    return window, poller
+
+
+def launch(
+    *,
+    base_url: str | None = None,
+    webview_loader: Callable[[], Any] | None = None,
+    width: int = _OVERLAY_WIDTH,
+    height: int = _OVERLAY_HEIGHT,
+) -> int:
+    """Start the standalone always-on-top status overlay. Returns a process
+    exit code (0 success, 1 pywebview unavailable).
+
+    ``webview_loader`` is the test seam (mirrors dourmouse.desktop.launch).
+    Kept as a genuinely runnable standalone entry point (``python -m
+    dourmouse.overlay``) even though the real packaged app now creates this
+    window inside desktop.py's own process by default (see
+    create_overlay_window / desktop.py's vision-helper section) — a
+    standalone overlay against an already-running server elsewhere is still
+    a real, valid use.
+    """
+    from dourmouse.desktop import _import_webview
+
+    loader = webview_loader or _import_webview
+    try:
+        webview = loader()
+    except RuntimeError as exc:
+        print(f"[OVERLAY] {exc}")
+        return 1
+
+    _window, poller = create_overlay_window(
+        webview, base_url=base_url, width=width, height=height
+    )
 
     try:
         webview.start()

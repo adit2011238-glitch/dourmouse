@@ -3962,7 +3962,8 @@ class _Handler(BaseHTTPRequestHandler):
                 # apply.
                 self.send_header(
                     "Set-Cookie",
-                    f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000",
+                    f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; "
+                    f"Max-Age={google_auth.session_ttl_seconds()}",
                 )
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", "0")
@@ -3991,6 +3992,8 @@ class _Handler(BaseHTTPRequestHandler):
         in. Single-use + TTL-pruned — a code can be redeemed once, ever.
         Pre-auth (like /api/auth/status): it only reveals a session the
         caller's own claim code unlocked."""
+        from dourmouse import google_auth
+
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
         code = (qs.get("code") or [""])[0].strip()
@@ -4010,10 +4013,12 @@ class _Handler(BaseHTTPRequestHandler):
         sid = claim["sid"]
         self.send_response(200)
         # Same cookie contract as the in-app callback: HttpOnly, SameSite,
-        # 30-day lifetime. The webview gets this response and is signed in.
+        # same long lifetime (google_auth.session_ttl_seconds()). The
+        # webview gets this response and is signed in.
         self.send_header(
             "Set-Cookie",
-            f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000",
+            f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; "
+            f"Max-Age={google_auth.session_ttl_seconds()}",
         )
         self._send_json({"ok": True, "me": {
             "email": claim["email"],
@@ -5974,6 +5979,7 @@ def serve_forever(
     ``host`` (v4.0): None resolves DOURMOUSE_HOST env (default 127.0.0.1) so
     the app binds where the operator says, with the auth warning above.
     """
+    from dourmouse.chat import most_recent_session_file
     from dourmouse.config import bind_host
 
     if host is None:
@@ -5999,6 +6005,10 @@ def serve_forever(
         freebuff_events=True,
         # v13: the real serving path runs the forever-refreshing news feed.
         news_stream=True,
+        # v13.10: resume the most recent conversation across a process
+        # restart — see desktop.launch's identical fix and chat.py's
+        # most_recent_session_file docstring for the full history.
+        session_file=most_recent_session_file(),
     )
     print(f"Dourmouse UI running at http://{host}:{port}")
     print(f"Registry: {', '.join(sorted(registry.subagent_names))}")

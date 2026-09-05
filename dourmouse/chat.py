@@ -55,6 +55,31 @@ def _default_sessions_dir() -> Path:
     return sessions
 
 
+def most_recent_session_file(sessions_dir: Path | None = None) -> Path | None:
+    """The most recently written ``session_*.jsonl`` ledger, or None when
+    none exist yet (a genuinely fresh workspace, or the directory was wiped).
+
+    This is what makes a conversation survive a full process RESTART, not
+    just a browser reload -- ``run_server``'s own ``session_file`` docstring
+    (v8.31) already documented exactly this usage ("passes the same path
+    back in ... the most recent workspace/sessions/*.jsonl"), but no caller
+    ever actually did it until now: every real launch (desktop.py,
+    serve_forever) minted a brand-new empty session on every single
+    restart, silently discarding the plumbing this function fulfills.
+
+    Compares real mtimes rather than trusting filename sort order — the
+    filename timestamp has only second resolution and, more importantly,
+    an operator-supplied ``session_file`` (test harnesses, a manually named
+    ledger) need not follow the ``session_<timestamp>.jsonl`` pattern at
+    all, so sorting by name would silently misorder or skip those.
+    """
+    d = sessions_dir or _default_sessions_dir()
+    candidates = [p for p in d.glob("session_*.jsonl") if p.is_file()]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
 class ChatSession:
     """A persistent multi-turn conversation against a DispatchRegistry.
 

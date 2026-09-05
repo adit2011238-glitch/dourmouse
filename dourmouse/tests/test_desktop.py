@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from dourmouse import desktop
+from dourmouse import desktop, webui
 from dourmouse.tests.test_webui import _echo_registry
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -87,14 +87,16 @@ class _FakeWebview:
     def __init__(self):
         self.windows: list[_FakeWindow] = []
         self.started = False
+        self.start_kwargs: dict = {}
 
     def create_window(self, title, url=None, **kwargs):
         win = _FakeWindow(title, url, **kwargs)
         self.windows.append(win)
         return win
 
-    def start(self):
+    def start(self, **kwargs):
         self.started = True
+        self.start_kwargs = kwargs
 
 
 def _loader(fake: _FakeWebview):
@@ -160,7 +162,7 @@ class TestStartFailureFallback:
         monkeypatch.setenv("DOURMOUSE_LEARN", "0")  # v2.9: hermetic — no real memory store
 
         class _BrokenWebview(_FakeWebview):
-            def start(self):
+            def start(self, **kwargs):
                 raise RuntimeError("no GUI session available")
 
         opened: list[str] = []
@@ -316,7 +318,7 @@ class TestNativeWindowLaunch:
         monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
         monkeypatch.setenv("DOURMOUSE_LEARN", "0")  # v2.9: hermetic — no real memory store
 
-        def _probe_and_start():
+        def _probe_and_start(**_kwargs):
             main = next(w for w in fake.windows if w.title.startswith("DOURMOUSE"))
             # v13.6: real urllib.parse instead of naive string-splitting —
             # main.url now carries a real path (initial_href defaults to
@@ -341,6 +343,72 @@ class TestNativeWindowLaunch:
         monkeypatch.setattr(fake, "start", _probe_and_start)
         code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
         assert code == 0
+
+    def test_launch_never_touches_the_real_workspace_sessions_dir_by_default(
+        self, monkeypatch, tmp_path
+    ):
+        """Real, live-caught regression: launch() briefly resolved "the
+        most recent session" via a real, unguarded filesystem lookup
+        INSIDE itself. Every hermetic test in this file calls launch()
+        directly with no DOURMOUSE_WORKSPACE override, so that lookup
+        reached into this actual repo's real, shared, actively-growing
+        workspace/sessions/ directory — picking up a real multi-hundred-KB
+        session from live testing and racing other concurrently-running
+        test processes writing to that same real directory. Confirmed live:
+        this specific test genuinely hung. session_file must default to
+        None and be threaded straight through, unresolved, unless a caller
+        passes one explicitly."""
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))  # belt-and-suspenders isolation
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        captured = {}
+        real_run_server = webui.run_server
+
+        def _capturing_run_server(*args, **kwargs):
+            captured["session_file"] = kwargs.get("session_file")
+            return real_run_server(*args, **kwargs)
+
+        monkeypatch.setattr(webui, "run_server", _capturing_run_server)
+        fake = _FakeWebview()
+        code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
+        assert code == 0
+        # The parameter reaches run_server, unresolved -- launch() itself
+        # never called most_recent_session_file().
+        assert captured["session_file"] is None
+
+    def test_launch_threads_an_explicit_session_file_through_to_run_server(
+        self, monkeypatch, tmp_path
+    ):
+        """A caller (the real __main__ entry point) that DOES pass a real
+        session_file gets it honored end to end -- a real message sent
+        through the real running server lands in that exact file."""
+        import http.client
+        import urllib.parse
+
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
+        monkeypatch.setenv("DOURMOUSE_LEARN", "0")
+        target = tmp_path / "session_prior.jsonl"
+        fake = _FakeWebview()
+
+        def _probe_and_start(**_kwargs):
+            main = next(w for w in fake.windows if w.title.startswith("DOURMOUSE"))
+            parsed = urllib.parse.urlsplit(main.url)
+            conn = http.client.HTTPConnection(parsed.hostname, int(parsed.port), timeout=5)
+            conn.request(
+                "POST", "/api/chat",
+                body='{"prompt": "hi"}',
+                headers={"Content-Type": "application/json"},
+            )
+            conn.getresponse().read()
+            conn.close()
+            fake.started = True
+
+        monkeypatch.setattr(fake, "start", _probe_and_start)
+        code = desktop.launch(
+            _echo_registry(), port=0, webview_loader=_loader(fake), session_file=target,
+        )
+        assert code == 0
+        assert target.exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -866,120 +934,167 @@ class TestVisionAutostartConfig:
         assert desktop.vision_autostart_enabled() is True
 
 
-class _FakePopen:
-    """Records the argv/env it was launched with; poll()/wait()/terminate()/
-    kill() behave like a process that's still running until told otherwise."""
+# --------------------------------------------------------------------------- #
+# v13.11 ("package it as one application"): overlay/wakeword/tray now run
+# IN this process (see desktop.py's own module comment for the real
+# pystray/pywebview source-reading behind this) instead of as three
+# subprocesses. Each helper is faked at its own real import boundary
+# (dourmouse.overlay.create_overlay_window, dourmouse.wakeword.
+# WakeWordListener, dourmouse.tray.TrayApp) exactly where
+# _start_vision_helpers_in_process lazily imports it.
+# --------------------------------------------------------------------------- #
 
-    instances: list["_FakePopen"] = []
+class _FakeOverlayPoller:
+    def __init__(self):
+        self.stopped = False
 
-    def __init__(self, argv, **kwargs):
-        self.argv = argv
-        self.env = kwargs.get("env")
-        self.terminated = False
-        self.killed = False
-        self._exited = False
-        _FakePopen.instances.append(self)
+    def stop(self):
+        self.stopped = True
 
-    def poll(self):
-        return 0 if self._exited else None
 
-    def terminate(self):
-        self.terminated = True
-        self._exited = True
+class _FakeOverlayWindow:
+    def __init__(self):
+        class _Events:
+            closed = None
+        self.events = _Events()
 
-    def kill(self):
-        self.killed = True
-        self._exited = True
 
-    def wait(self, timeout=None):
-        return 0
+def _fake_create_overlay_window(webview, base_url=None):
+    return _FakeOverlayWindow(), _FakeOverlayPoller()
+
+
+class _FakeWakeWordListener:
+    instances: list["_FakeWakeWordListener"] = []
+
+    def __init__(self, start_ok=True, start_reason="listening"):
+        self.started = False
+        self.stopped = False
+        self._start_ok = start_ok
+        self._start_reason = start_reason
+        _FakeWakeWordListener.instances.append(self)
+
+    def start(self):
+        self.started = True
+        return self._start_ok, self._start_reason
+
+    def stop(self):
+        self.stopped = True
+
+
+class _FakeTrayApp:
+    instances: list["_FakeTrayApp"] = []
+
+    def __init__(self):
+        self.run_detached_called = False
+        self.stop_detached_called = False
+        _FakeTrayApp.instances.append(self)
+
+    def run_detached(self):
+        self.run_detached_called = True
+
+    def stop_detached(self):
+        self.stop_detached_called = True
 
 
 @pytest.fixture(autouse=True)
-def _reset_fake_popen():
-    _FakePopen.instances = []
+def _reset_fake_vision_helpers():
+    _FakeWakeWordListener.instances = []
+    _FakeTrayApp.instances = []
     yield
-    _FakePopen.instances = []
+    _FakeWakeWordListener.instances = []
+    _FakeTrayApp.instances = []
+
+
+@pytest.fixture
+def _patched_vision_helper_imports(monkeypatch):
+    """Patches every real module _start_vision_helpers_in_process lazily
+    imports from, so no test here ever touches a real camera, mic, or
+    system tray."""
+    import dourmouse.overlay as overlay_module
+    import dourmouse.tray as tray_module
+    import dourmouse.wakeword as wakeword_module
+
+    monkeypatch.setattr(overlay_module, "create_overlay_window", _fake_create_overlay_window)
+    monkeypatch.setattr(wakeword_module, "WakeWordListener", _FakeWakeWordListener)
+    monkeypatch.setattr(tray_module, "TrayApp", _FakeTrayApp)
 
 
 class TestSpawnVisionHelpers:
-    def test_spawns_all_three_modules_with_the_real_port(self, monkeypatch):
-        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
-        procs = desktop._start_vision_helpers(9999)
-        assert len(procs) == 3
-        modules = {p.argv[-1] for p in procs}
-        assert modules == set(desktop._VISION_HELPER_MODULES)
-        for p in procs:
-            assert p.argv[0] == sys.executable
-            assert "-m" in p.argv
-            assert p.env[desktop._PORT_ENV] == "9999"
+    def test_starts_all_three_helpers_in_process(self, _patched_vision_helper_imports):
+        handles = desktop._start_vision_helpers_in_process(_FakeWebview(), "http://x")
+        assert isinstance(handles.get("overlay_window"), _FakeOverlayWindow)
+        assert isinstance(handles.get("overlay_poller"), _FakeOverlayPoller)
+        assert len(_FakeWakeWordListener.instances) == 1
+        assert _FakeWakeWordListener.instances[0].started is True
+        assert handles["wakeword_listener"] is _FakeWakeWordListener.instances[0]
+        assert len(_FakeTrayApp.instances) == 1
+        assert _FakeTrayApp.instances[0].run_detached_called is True
+        assert handles["tray_app"] is _FakeTrayApp.instances[0]
 
-    def test_a_failing_helper_does_not_block_the_others(self, monkeypatch):
-        calls = []
+    def test_a_failing_helper_does_not_block_the_others(self, monkeypatch, capsys):
+        import dourmouse.overlay as overlay_module
+        import dourmouse.tray as tray_module
+        import dourmouse.wakeword as wakeword_module
 
-        def _flaky_popen(argv, **kwargs):
-            calls.append(argv)
-            if "dourmouse.tray" in argv:
-                raise OSError("no such thing")
-            return _FakePopen(argv, **kwargs)
+        def _broken_overlay(webview, base_url=None):
+            raise RuntimeError("no display")
 
-        monkeypatch.setattr(desktop.subprocess, "Popen", _flaky_popen)
-        procs = desktop._start_vision_helpers(9999)
-        assert len(calls) == 3  # every module was attempted
-        assert len(procs) == 2  # tray's failure didn't stop overlay/wakeword
+        monkeypatch.setattr(overlay_module, "create_overlay_window", _broken_overlay)
+        monkeypatch.setattr(wakeword_module, "WakeWordListener", _FakeWakeWordListener)
+        monkeypatch.setattr(tray_module, "TrayApp", _FakeTrayApp)
 
-    def test_stop_terminates_then_waits(self, monkeypatch):
-        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
-        procs = desktop._start_vision_helpers(9999)
-        desktop._stop_vision_helpers(procs)
-        assert all(p.terminated for p in procs)
-        assert not any(p.killed for p in procs)  # graceful wait succeeded
+        handles = desktop._start_vision_helpers_in_process(_FakeWebview(), "http://x")
+        assert "overlay_window" not in handles  # the broken one is simply absent
+        assert "wakeword_listener" in handles  # the other two still started
+        assert "tray_app" in handles
+        assert "non-fatal" in capsys.readouterr().out
 
-    def test_stop_kills_a_process_that_wont_wait(self, monkeypatch):
-        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
-        procs = desktop._start_vision_helpers(9999)
-        procs[0].wait = lambda timeout=None: (_ for _ in ()).throw(subprocess.TimeoutExpired("x", timeout))
-        desktop._stop_vision_helpers(procs)
-        assert procs[0].killed is True
+    def test_stop_stops_every_started_helper(self, _patched_vision_helper_imports):
+        handles = desktop._start_vision_helpers_in_process(_FakeWebview(), "http://x")
+        desktop._stop_vision_helpers_in_process(handles)
+        assert handles["overlay_poller"].stopped is True
+        assert handles["wakeword_listener"].stopped is True
+        assert handles["tray_app"].stop_detached_called is True
 
-    def test_stop_skips_an_already_exited_process(self, monkeypatch):
-        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
-        procs = desktop._start_vision_helpers(9999)
-        procs[0]._exited = True
-        desktop._stop_vision_helpers(procs)
-        assert procs[0].terminated is False  # never re-terminated a dead process
+    def test_stop_skips_a_helper_that_never_started(self, _patched_vision_helper_imports):
+        """A helper missing from `handles` (it failed at startup) must be
+        silently skipped, never crash the shutdown path."""
+        desktop._stop_vision_helpers_in_process({})  # must not raise
 
 
 class TestLaunchWithVisionAutostart:
-    def test_launch_spawns_helpers_by_default(self, monkeypatch):
+    def test_launch_starts_helpers_in_process_by_default(
+        self, monkeypatch, _patched_vision_helper_imports
+    ):
         fake = _FakeWebview()
         monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
         monkeypatch.setenv("DOURMOUSE_LEARN", "0")
         monkeypatch.delenv(desktop._VISION_AUTOSTART_ENV, raising=False)
-        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
         code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
         assert code == 0
-        assert len(_FakePopen.instances) == 3
+        assert len(_FakeWakeWordListener.instances) == 1
+        assert len(_FakeTrayApp.instances) == 1
         # the launch's own finally block must have cleaned them all up
-        assert all(p.terminated for p in _FakePopen.instances)
+        assert _FakeWakeWordListener.instances[0].stopped is True
+        assert _FakeTrayApp.instances[0].stop_detached_called is True
 
-    def test_launch_respects_explicit_false(self, monkeypatch):
+    def test_launch_respects_explicit_false(self, monkeypatch, _patched_vision_helper_imports):
         fake = _FakeWebview()
         monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
         monkeypatch.setenv("DOURMOUSE_LEARN", "0")
-        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
         code = desktop.launch(
             _echo_registry(), port=0, webview_loader=_loader(fake), vision_autostart=False
         )
         assert code == 0
-        assert _FakePopen.instances == []
+        assert _FakeWakeWordListener.instances == []
+        assert _FakeTrayApp.instances == []
 
-    def test_launch_respects_env_var_off(self, monkeypatch):
+    def test_launch_respects_env_var_off(self, monkeypatch, _patched_vision_helper_imports):
         fake = _FakeWebview()
         monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
         monkeypatch.setenv("DOURMOUSE_LEARN", "0")
         monkeypatch.setenv(desktop._VISION_AUTOSTART_ENV, "0")
-        monkeypatch.setattr(desktop.subprocess, "Popen", _FakePopen)
         code = desktop.launch(_echo_registry(), port=0, webview_loader=_loader(fake))
         assert code == 0
-        assert _FakePopen.instances == []
+        assert _FakeWakeWordListener.instances == []
+        assert _FakeTrayApp.instances == []
