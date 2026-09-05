@@ -1012,7 +1012,16 @@ _SYSTEM_PROMPT = (
     "related. Never call send_message to send an email, a Slack/Discord/"
     "SMS message, or anything a human outside this machine will read — if "
     "no real tool exists for that channel, say so honestly rather than "
-    "routing it through send_message and reporting it as delivered."
+    "routing it through send_message and reporting it as delivered.\n"
+    "14. delete_file ONLY deletes a file inside the local workspace "
+    "sandbox on THIS machine — its 'path' argument is a sandbox-relative "
+    "path, never a Google Drive file ID. There is currently no tool that "
+    "deletes or trashes a Google Drive file. If asked to delete, trash, "
+    "or clean up a Drive file, say plainly that no such tool exists and "
+    "the user must do it themselves in Drive — never call delete_file "
+    "with a Drive file ID as the path just because it is the closest-"
+    "sounding tool; that asks to permanently delete an unrelated local "
+    "path and does not touch the Drive file at all."
 )
 
 

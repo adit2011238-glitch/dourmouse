@@ -3202,3 +3202,25 @@ class TestSystemPromptDisambiguatesSendMessageFromRealChannels:
         assert "send_message" in text
         assert "INTERNAL" in text
         assert "never leaves the machine" in text.lower() or "never leave the machine" in text.lower() or "on this" in text.lower()
+
+
+class TestSystemPromptDisambiguatesDeleteFileFromDriveDelete:
+    """Real, live-reproduced regression: asked to trash a duplicate Google
+    Drive file (by its Drive file ID), the live local/Ollama backend called
+    admin_ops's delete_file with the Drive file ID as the sandbox 'path' and
+    surfaced a REQUIRES_CONFIRMATION prompt reading "Permanently delete
+    workspace file '<drive-id>'?" -- delete_file only ever touches the local
+    workspace sandbox and has nothing to do with Google Drive; there is no
+    Drive-delete/trash tool in the roster at all. Declined before it could
+    run (it would have permanently deleted an unrelated local path, or
+    silently no-op'd if that path didn't exist, while NOT touching the real
+    Drive file). Fixed by adding an explicit disambiguation rule."""
+
+    def test_system_prompt_warns_against_delete_file_for_drive_files(self):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+
+        text = system_message(build_general_registry())
+        assert "delete_file" in text
+        assert "Google Drive" in text
+        assert "sandbox" in text.lower()
