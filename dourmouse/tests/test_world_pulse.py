@@ -147,16 +147,35 @@ _LAUNCHES_JSON = json.dumps({
         {
             "name": "Test Rocket Flight 1", "net": "2026-08-24T10:00:00Z",
             "status": {"name": "Go for Launch"},
-            "pad": {"name": "LC-39A", "location": {"latitude": "28.6080", "longitude": "-80.6040"}},
+            # Real LL2 (non-list-mode) shape, checked live against the
+            # actual API: latitude/longitude sit directly on "pad", and its
+            # "location" sub-object (site name/country) carries no
+            # coordinates at all.
+            "pad": {"name": "LC-39A", "latitude": "28.6080", "longitude": "-80.6040",
+                     "location": {"name": "Cape Canaveral", "country_code": "USA"}},
         },
         {
             "name": "Test Rocket Flight 2", "net": "2026-08-25T04:00:00Z",
             "status": {"name": "To Be Determined"},
-            "pad": {"name": "Vostochny", "location": {"latitude": "51.8843", "longitude": "128.3327"}},
+            "pad": {"name": "Vostochny", "latitude": "51.8843", "longitude": "128.3327",
+                     "location": {"name": "Vostochny Cosmodrome", "country_code": "RUS"}},
         },
     ]
 })
 _LAUNCHES_EMPTY_JSON = json.dumps({"results": []})
+# Real, live-reproduced shape: Launch Library 2's "mode=list" flattens
+# "pad" down to a plain display string with no coordinates at all, which
+# crashed the old parsing with "'str' object has no attribute 'get'".
+_LAUNCHES_LIST_MODE_JSON = json.dumps({
+    "results": [
+        {
+            "name": "Spectrum | Onward and Upward", "net": "2026-09-05T20:00:00Z",
+            "status": {"name": "Go"},
+            "pad": "Orbital Launch Pad",
+            "location": "Andøya Spaceport",
+        },
+    ]
+})
 
 _OVERPASS_JSON = json.dumps({
     "elements": [
@@ -914,6 +933,38 @@ class TestNewChannels:
             lambda url: _LAUNCHES_EMPTY_JSON if "thespacedevs" in url else _fake_http_get(url),
         )
         with pytest.raises(RuntimeError, match="no upcoming launches"):
+            wp._fetch_launches()
+
+    def test_launches_never_requests_list_mode(self):
+        """Real, live-reproduced regression: '&mode=list' flattens "pad"
+        to a plain string with no coordinates, crashing the parser with
+        "'str' object has no attribute 'get'" on every real call. The
+        fetch must never ask for it."""
+        captured = {}
+
+        def _capture(url):
+            captured["url"] = url
+            return _LAUNCHES_JSON
+
+        import dourmouse.world_pulse as wp_mod
+        original = wp_mod._http_get
+        wp_mod._http_get = _capture
+        try:
+            wp._fetch_launches()
+        finally:
+            wp_mod._http_get = original
+        assert "mode=list" not in captured["url"]
+
+    def test_launches_skips_a_flattened_string_pad_instead_of_crashing(self, monkeypatch):
+        """Same live-reproduced shape as above, defended directly: even if
+        a future response (or a stray '&mode=list') ever flattens "pad" to
+        a string, this must skip the row honestly rather than raise
+        AttributeError."""
+        monkeypatch.setattr(
+            wp, "_http_get",
+            lambda url: _LAUNCHES_LIST_MODE_JSON if "thespacedevs" in url else _fake_http_get(url),
+        )
+        with pytest.raises(RuntimeError, match="no usable pad coordinates"):
             wp._fetch_launches()
 
     # --- infrastructure (OSM Overpass) --------------------------------------

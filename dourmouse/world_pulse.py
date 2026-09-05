@@ -922,24 +922,35 @@ def _fetch_launches() -> list[dict[str, Any]]:
     result here is treated as a fetch problem, not a real "nothing
     scheduled" state.
     """
-    raw = _http_get("https://ll.thespacedevs.com/2.0.0/launch/upcoming/?limit=8&mode=list")
+    # Deliberately NOT "&mode=list": live-reproduced real bug — list mode
+    # flattens "pad" (and "location") down to a plain display STRING with
+    # no coordinates at all, so `pad_obj.get(...)` below crashed with
+    # "'str' object has no attribute 'get'" on every real call. The default
+    # (omitted mode, i.e. "detailed") keeps pad/location as real nested
+    # objects, which is what this parsing has always assumed.
+    raw = _http_get("https://ll.thespacedevs.com/2.0.0/launch/upcoming/?limit=8")
     try:
         data = json.loads(raw)
     except ValueError as exc:
         raise RuntimeError(f"unparseable Launch Library response: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"Launch Library response was {type(data).__name__}, not an object"
+        )
     results = data.get("results") or []
     if not results:
         raise RuntimeError("Launch Library returned no upcoming launches")
     out: list[dict[str, Any]] = []
     for r in results[:_MAX_ITEMS_PER_SOURCE]:
-        # The pad's own name ("LC-39A") and its coordinates live at two
-        # different nesting levels in LL2's shape: pad.name is the specific
-        # pad, pad.location.{latitude,longitude,name} is the broader site
-        # — read each from the level that actually carries it, not one
-        # borrowed from the other.
-        pad_obj = r.get("pad") or {}
-        location = pad_obj.get("location") or {}
-        lat, lon = location.get("latitude"), location.get("longitude")
+        # Real LL2 shape (checked live against the actual API, not
+        # guessed): pad.name is the specific pad, and pad.latitude /
+        # pad.longitude live DIRECTLY on the pad object — pad.location is a
+        # separate nested object (site name/country) that carries NO
+        # coordinates at all, despite how tempting that nesting looks.
+        pad_obj = r.get("pad")
+        if not isinstance(pad_obj, dict):
+            continue  # e.g. a future list-mode-style flattened string
+        lat, lon = pad_obj.get("latitude"), pad_obj.get("longitude")
         if lat is None or lon is None:
             continue
         status = (r.get("status") or {}).get("name", "?")
