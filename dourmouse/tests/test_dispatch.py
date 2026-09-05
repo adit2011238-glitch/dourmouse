@@ -3141,3 +3141,27 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
         run_dispatch_messages(messages, registry, client=None, config=OllamaConfig(), event_sink=events.append)
         brain = next(e for e in events if e["type"] == "brain")
         assert brain["backend"] == "claude_cli"
+
+
+class TestSystemPromptDisambiguatesSendMessageFromRealChannels:
+    """v13.8 (real, live-reproduced regression): a real background /api/chat
+    test against the actual running local (Ollama) backend reproduced the
+    ORIGINAL session-starting bug -- "send it" (confirming a real gmail_send
+    draft) got answered with a call to send_message (the internal
+    inter-agent bus) instead, then reported the email as "delivered ... via
+    the inter-agent bus" with no real send ever happening. An earlier fix
+    this session added the equivalent warning to model_context.py's
+    Claude-CLI-only orchestrator preamble, but that module is NOT what the
+    default local/Ollama dispatch loop uses -- system_message() /
+    _SYSTEM_PROMPT (this file) is the actually-shared, always-loaded prompt,
+    and it never mentioned send_message at all. Fixed by adding the same
+    disambiguation directly here."""
+
+    def test_system_prompt_warns_against_send_message_for_real_channels(self):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+
+        text = system_message(build_general_registry())
+        assert "send_message" in text
+        assert "INTERNAL" in text
+        assert "never leaves the machine" in text.lower() or "never leave the machine" in text.lower() or "on this" in text.lower()

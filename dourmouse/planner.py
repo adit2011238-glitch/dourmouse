@@ -424,7 +424,18 @@ def build_plan(prompt: str, registry: Any, max_steps: int = 6) -> list[dict[str,
     # Split on sequencing connectors first, then on plain sentence breaks.
     pieces = [p.strip() for p in _SUBTASK_SPLIT.split(prompt) if p.strip()]
     if len(pieces) < 2:
-        pieces = [p.strip() for p in re.split(r"[.,;]", prompt) if p.strip()]
+        # v13.8 (real, live-reproduced bug): a bare "." here split ANY
+        # period, including one inside a word -- "send an email to
+        # valerygordon200@gmail.com, subject 'X', body Y" produced a step
+        # "gmail" immediately followed by a separate step "com" (routed to
+        # a totally unrelated agent), because "gmail.com" itself was cut in
+        # half. Any email address, domain name, filename (".py"), version
+        # string ("v1.2"), or decimal number in a prompt hit this the same
+        # way. A sentence-ending period is followed by whitespace or is the
+        # end of the string; one embedded in a word/domain never is -- the
+        # lookahead below is the whole fix, comma/semicolon splitting is
+        # unchanged.
+        pieces = [p.strip() for p in re.split(r"[,;]|\.(?=\s|$)", prompt) if p.strip()]
     if len(pieces) < 2:
         # Single clause but multi-step language ("search X then summarize"):
         # treat the whole prompt as one planned step for visibility.

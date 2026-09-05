@@ -1002,7 +1002,16 @@ _SYSTEM_PROMPT = (
     "seemed useful. A finished answer is a deliverable in the chat, not "
     "something to file away on its own — only persist when the user "
     "explicitly asked you to save/remember/note it, or when the request "
-    "was itself a request to store something."
+    "was itself a request to store something.\n"
+    "13. send_message is the INTERNAL bus between subagents on THIS "
+    "machine only — nothing it sends ever leaves the machine or reaches a "
+    "real person. A tool whose description matches what the user actually "
+    "asked for (gmail_send for an email, a real chat/message tool for a "
+    "message) is ALWAYS correct over send_message, which merely sounds "
+    "related. Never call send_message to send an email, a Slack/Discord/"
+    "SMS message, or anything a human outside this machine will read — if "
+    "no real tool exists for that channel, say so honestly rather than "
+    "routing it through send_message and reporting it as delivered."
 )
 
 

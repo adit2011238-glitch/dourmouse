@@ -186,6 +186,48 @@ class TestBuildPlan:
         assert plan is not None
         assert all(s["subagent"] == "orchestrator" for s in plan)
 
+    def test_a_domain_name_is_not_split_on_its_own_period(self):
+        """v13.8, live-reproduced via a real background /api/chat test: the
+        old fallback regex re.split(r"[.,;]", prompt) split ANY period,
+        including one inside a word -- "send an email to
+        valerygordon200@gmail.com, subject 'X', body Y" produced a step
+        literally "com" (the tail of "gmail.com"), routed to a completely
+        unrelated agent. Same failure mode for any prompt containing a
+        domain, filename, version string, or decimal number."""
+        registry = build_general_registry()
+        plan = build_plan(
+            "send a real test email to valerygordon200@gmail.com, "
+            "subject 'Dourmouse Native App Test', body confirming this is a test",
+            registry,
+        )
+        assert plan is not None
+        tasks = [s["task"] for s in plan]
+        assert not any(t == "com" for t in tasks), f"email address was split on its own period: {tasks}"
+        assert not any(t.endswith("gmail") for t in tasks), f"email address was split on its own period: {tasks}"
+
+    def test_a_decimal_number_is_not_split(self):
+        registry = build_general_registry()
+        plan = build_plan(
+            "look up the current bitcoin price, then tell me if 3.14 is bigger",
+            registry,
+        )
+        assert plan is not None
+        tasks = [s["task"] for s in plan]
+        assert not any(t == "14" for t in tasks)
+
+    def test_a_real_sentence_ending_period_still_splits(self):
+        """The fix must not regress the original, intended behavior: a
+        genuine sentence break (period followed by whitespace) is still a
+        real split point when the connector-based first pass doesn't
+        already catch it."""
+        registry = build_general_registry()
+        plan = build_plan(
+            "Search the web for NVIDIA earnings. Write a one-line summary",
+            registry,
+        )
+        assert plan is not None
+        assert len(plan) >= 2
+
 
 class TestFindAgentsQueryStillWorks:
     def test_webui_reexport_matches(self):
