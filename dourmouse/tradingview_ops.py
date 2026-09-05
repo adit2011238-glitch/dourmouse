@@ -331,6 +331,24 @@ def _rewrite_paper_rows(rows: list[list[str]]) -> bool:
 _PAPER_LOCK = __import__("threading").Lock()
 
 
+def _signal_timestamp(signal: dict[str, Any]) -> str:
+    """The signal's own `time` when it's a parseable ISO datetime, else now.
+
+    entry_date/exit_date must reflect the day the signal claims to be for
+    (atlas_scheduler stamps this with the evaluated trading day, which can
+    differ from wall-clock "now" under a --date override) rather than
+    always the real system clock.
+    """
+    raw = str(signal.get("time") or "").strip()
+    if raw:
+        try:
+            datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return raw
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 def route_to_paper(signal: dict[str, Any]) -> dict[str, Any]:
     """Apply a validated TradingView signal to the seasonal paper log.
 
@@ -369,7 +387,7 @@ def route_to_paper(signal: dict[str, Any]) -> dict[str, Any]:
         return {"applied": False, "action": "unknown",
                 "reason": "FOREX_DATA_PATH not set — paper log unavailable"}
 
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = _signal_timestamp(signal)
     contract = leg["ticker"]
     with _PAPER_LOCK:
         rows = _read_paper_rows()

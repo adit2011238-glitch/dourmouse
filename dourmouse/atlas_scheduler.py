@@ -214,6 +214,20 @@ def _load_env() -> None:
         pass
 
 
+def _timestamp_for(today: date) -> str:
+    """ISO timestamp on `today`'s date (current UTC time-of-day).
+
+    Signals must carry the evaluated trading day, not the real wall-clock
+    date — otherwise a --date override (testing, backfill) writes an
+    entry_date that doesn't match the window `run_once` just checked,
+    breaking the open/close idempotency checks on the next run.
+    """
+    now = datetime.now(timezone.utc)
+    return datetime.combine(today, now.time(), tzinfo=timezone.utc).isoformat(
+        timespec="seconds"
+    )
+
+
 def _side_for(key: str, action: str) -> str:
     """route_to_paper expects alert-style sides: short leg opens on sell,
     closes on buy; long leg opens on buy, closes on sell."""
@@ -263,7 +277,7 @@ def run_once(today: date | None = None, dry_run: bool = False) -> list[dict[str,
                         "ticker": leg["ticker"],
                         "side": _side_for(key, "open"),
                         "price": str(price),
-                        "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "time": _timestamp_for(today),
                     }
                     record_signal(sig)
                     applied = route_to_paper(sig)
@@ -290,7 +304,7 @@ def run_once(today: date | None = None, dry_run: bool = False) -> list[dict[str,
                         "ticker": leg["ticker"],
                         "side": _side_for(key, "close"),
                         "price": str(price),
-                        "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "time": _timestamp_for(today),
                     }
                     record_signal(sig)
                     applied = route_to_paper(sig)
