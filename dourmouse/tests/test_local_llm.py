@@ -104,7 +104,20 @@ class TestOllamaCloudWiring:
         monkeypatch.delenv("OLLAMA_CLOUD_MODEL", raising=False)
         cfg = load_ollama_config()
         assert cfg.api_key == "real-cloud-key-123"
-        assert cfg.base_url == "https://ollama.com"
+        # v13.8 (real, live-reproduced bug): this used to be the bare
+        # "https://ollama.com" -- correct for dispatch.py's OWN
+        # OllamaNativeClient consumer (native /api/chat, no /v1), but this
+        # config feeds code_backends._run_openai_compat's plain OpenAI SDK
+        # client instead, which always appends "/chat/completions" to
+        # base_url itself. Without "/v1" every real call landed on
+        # ollama.com's own catch-all, which served back its marketing
+        # homepage HTML as if it were a normal response -- live-reproduced
+        # via an actual /all ALL HANDS run's synthesis-fallback failure
+        # ("ollama fallback (gpt-oss:20b API call failed: <!doctype
+        # html>...<title>Ollama</title>...)"). See
+        # TestOllamaNativeClientToleratesEitherCloudBaseUrlShape below for
+        # why this does NOT break the native-client consumers.
+        assert cfg.base_url == "https://ollama.com/v1"
         assert cfg.is_cloud is True
         # NOT a silent fallback to the (local-oriented) OLLAMA_MODEL default
         # — the known-real cloud default, unless OLLAMA_CLOUD_MODEL is set.
@@ -167,6 +180,28 @@ class TestOllamaCloudWiring:
         monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
         cfg = load_ollama_config()
         assert cfg.model_for_agent("orchestrator") == "qwen2.5:7b"
+
+
+class TestOllamaNativeClientToleratesEitherCloudBaseUrlShape:
+    """v13.8: confirms the config.py fix above (adding "/v1" to the cloud
+    base_url) cannot regress dispatch.py's/remote_server.py's OWN native
+    (/api/chat) consumers of the SAME load_ollama_config() -- they're built
+    to tolerate a base_url with or without a trailing "/v1" already
+    (OllamaNativeClient.__init__ strips it if present), which is exactly
+    what makes it safe to add "/v1" for the OpenAI-compat consumer without
+    a second, native-only copy of this config."""
+
+    def test_root_strips_a_trailing_v1(self):
+        client = dispatch_module.OllamaNativeClient(
+            OllamaConfig(base_url="https://ollama.com/v1", model="gpt-oss:20b")
+        )
+        assert client._root == "https://ollama.com"
+
+    def test_root_is_unchanged_without_a_trailing_v1(self):
+        client = dispatch_module.OllamaNativeClient(
+            OllamaConfig(base_url="https://ollama.com", model="gpt-oss:20b")
+        )
+        assert client._root == "https://ollama.com"
 
 
 # --------------------------------------------------------------------------- #

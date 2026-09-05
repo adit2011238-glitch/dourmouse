@@ -352,17 +352,33 @@ def load_nvidia_config() -> NvidiaConfig:
 # v4.0 — Local LLM backend (Ollama). Keyless, OpenAI-compatible, default.
 # --------------------------------------------------------------------------- #
 
-# Ollama Cloud's real OpenAI-compatible endpoint. NOT a new guess — this is
-# the exact same URL + default model dispatch.py's own _ollama_cloud_config()
-# already uses live for the agent-split feature (_agent_split_backend), so
-# this is reusing an already-established, presumably-verified real endpoint
-# rather than inventing one. Kept as its own copy here (not imported from
-# dispatch.py) because config.py sits BELOW dispatch.py in this codebase's
-# import graph (dispatch.py imports FROM config.py) — importing the other
-# direction would be circular. A future cleanup could have dispatch.py's
-# copy import these instead of duplicating the literals; not attempted here
-# to keep this fix's blast radius to the actual reported bug.
-_OLLAMA_CLOUD_BASE_URL = "https://ollama.com"
+# Ollama Cloud's real OpenAI-compatible endpoint.
+#
+# v13.8 (real, live-reproduced bug): this constant used to be a bare
+# "https://ollama.com", copied from dispatch.py's own _ollama_cloud_config()
+# on the assumption it was "an already-established, presumably-verified real
+# endpoint" — true for THAT copy, but misleading here: dispatch.py's version
+# feeds OllamaNativeClient, which calls Ollama's NATIVE `/api/chat` route
+# directly (bare "https://ollama.com" + "/api/chat" is correct there). THIS
+# constant feeds code_backends._run_openai_compat's plain `OpenAI(base_url=
+# ...)` SDK client, which always appends "/chat/completions" to base_url
+# itself — so it needs the "/v1" prefix Ollama's OpenAI-COMPATIBLE route
+# actually lives under, exactly like _OLLAMA_DEFAULT_BASE_URL below already
+# has for the local case. Without it, every real call through this path
+# (code_backends.py, remote_server.py) posted to
+# "https://ollama.com/chat/completions" — not a real API route — and
+# ollama.com's own catch-all served back its plain marketing homepage HTML
+# as if it were a normal response. Live-reproduced via an actual /all
+# ALL HANDS run: the synthesis step's nvidia-then-ollama fallback failed
+# with "ollama fallback (gpt-oss:20b API call failed: <!doctype html>...
+# <title>Ollama</title>...)" — the exact homepage markup, not a JSON error.
+# Kept as its own copy here (not imported from dispatch.py) because
+# config.py sits BELOW dispatch.py in this codebase's import graph
+# (dispatch.py imports FROM config.py) — importing the other direction
+# would be circular. A future cleanup could have dispatch.py's copy import
+# these instead of duplicating the literals; not attempted here to keep
+# this fix's blast radius to the actual reported bug.
+_OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1"
 _OLLAMA_CLOUD_DEFAULT_MODEL = "gpt-oss:20b"
 _OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 # world-monitor-expansion (systematic backend verification, 2026-08-29): was
@@ -1058,3 +1074,136 @@ def load_llm_config() -> NvidiaConfig | OllamaConfig | OmniRouteConfig:
     if backend == "omniroute":
         return load_omniroute_config()
     return load_nvidia_config()
+
+
+# --------------------------------------------------------------------------- #
+# Google AI Studio (Gemini) — third real LLM backend (2026-09-04).
+#
+# Same dataclass + loader shape as the NVIDIA / Ollama / OmniRoute blocks
+# above; the transport lives in dourmouse/gemini_backend.py, which imports
+# the names below so there is exactly one definition of the model id and
+# endpoint (Integration Rule 7).
+#
+# Two deliberate, documented divergences from those blocks — both because
+# copying a field that nothing implements would advertise behaviour that
+# does not exist (Rule 2.2):
+#   * no ``max_retries`` / ``retry_backoff`` / ``fallback_model``. Those
+#     exist on the other configs because ``dispatch._call_with_retry``
+#     actually reads them. Nothing retries the Gemini path today.
+#   * ``load_gemini_config()`` does NOT raise on a missing key, unlike
+#     ``load_nvidia_config``. It mirrors ``load_ollama_config`` instead and
+#     returns ``api_key=""``, because ``gemini_backend.gemini_status()`` is
+#     the honest gate here and a status PROBE must be able to report "no
+#     key" without catching an exception. Callers that need a key get the
+#     NOT CONFIGURED error from ``gemini_backend._require_key`` at the
+#     moment a request would otherwise be sent.
+#
+# Not wired into ``load_llm_config`` / ``llm_backend`` / ``backend_identity``
+# — this pass adds the backend and its config, not a fourth value for
+# DOURMOUSE_LLM_BACKEND. ``backend_identity(GeminiConfig(...))`` therefore
+# honestly returns ("unknown", False) rather than a wrong guess.
+# --------------------------------------------------------------------------- #
+
+_GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+# Verified against Google's own current published docs on 2026-09-04
+# (ai.google.dev/gemini-api/docs/models and the gemini-3.5-flash model
+# page), NOT against a live API call — this machine has no Gemini key, so
+# ListModels could not be run. What the docs said, recorded so the next
+# person can tell evidence from assumption:
+#   * "gemini-2.0-flash" is listed as SHUT DOWN. It was this task's
+#     suggested default and would have 404'd on the first real request.
+#     Not used.
+#   * "gemini-3.5-flash" is stable/GA, input 1,048,576 tokens, output
+#     65,536 tokens. Chosen: it is the longest-standing current stable
+#     Flash model, which is what a default should be.
+#   * "gemini-3.8-flash" is also stable and is the newest ("most
+#     intelligent Flash model, engineered for long-horizon software
+#     engineering", 1M in / 64k out). A reasonable GEMINI_MODEL override
+#     for coding work; not the default only because "newest" and "safest
+#     default" are different jobs.
+#   * "gemini-flash-latest" exists as a moving alias. Deliberately NOT the
+#     default: a floating alias silently changes the model under a running
+#     deployment, which is exactly the class of surprise the NVIDIA
+#     per-agent block above was written to stop.
+_GEMINI_DEFAULT_MODEL = "gemini-3.5-flash"
+
+# Public aliases (same convention as the NVIDIA/Ollama/OmniRoute defaults).
+GEMINI_DEFAULT_BASE_URL = _GEMINI_DEFAULT_BASE_URL
+GEMINI_DEFAULT_MODEL = _GEMINI_DEFAULT_MODEL
+
+#: Env var names checked for the key, in order. GEMINI_API_KEY is the name
+#: Google's own docs and SDKs use; GOOGLE_AI_STUDIO_KEY is accepted as a
+#: fallback so an operator who named it after the console does not get a
+#: silent "not configured". Order is precedence: first non-empty wins.
+GEMINI_ENV_KEYS = ("GEMINI_API_KEY", "GOOGLE_AI_STUDIO_KEY")
+
+
+@dataclass(frozen=True)
+class GeminiConfig:
+    """Google AI Studio (Gemini) backend config.
+
+    ``api_key`` is "" when no key is set anywhere — the honest
+    not-configured state, never a placeholder that would be sent to the
+    real endpoint. Per-agent overrides come from
+    ``DOURMOUSE_GEMINI_MODEL_<AGENT>``, mirroring the
+    ``DOURMOUSE_MODEL_`` (NVIDIA) and ``DOURMOUSE_OLLAMA_MODEL_``
+    conventions, resolved deterministically (Rule 2.8).
+    """
+
+    api_key: str = ""
+    base_url: str = _GEMINI_DEFAULT_BASE_URL
+    model: str = _GEMINI_DEFAULT_MODEL
+    agent_models: dict[str, str] = field(default_factory=dict)
+
+    def model_for_agent(self, agent: str | None) -> str:
+        """The Gemini model a specific subagent runs on (deterministic).
+
+        Same precedence as the other backends' ``model_for_agent``: the
+        per-agent env override, then (orchestrator only) the persisted
+        orchestrator-model setting — which ``_persisted_model_for_backend``
+        only returns when it was actually saved FOR "gemini", so an Ollama
+        or NVIDIA model id can never leak onto this backend — then the
+        run's default model.
+        """
+        key = (agent or "").strip().upper()
+        if key and key in self.agent_models:
+            return self.agent_models[key]
+        if key == "ORCHESTRATOR":
+            persisted = _persisted_model_for_backend("gemini")
+            if persisted:
+                return persisted
+        return self.model
+
+
+def load_gemini_config() -> GeminiConfig:
+    """Build the Gemini backend config from env (defaults when unset).
+
+    Never raises on a missing key — see the section comment above for why
+    this mirrors ``load_ollama_config`` rather than ``load_nvidia_config``.
+    """
+    api_key = ""
+    for name in GEMINI_ENV_KEYS:
+        value = os.environ.get(name, "").strip()
+        if value:
+            api_key = value
+            break
+    base_url = os.environ.get(
+        "GEMINI_BASE_URL", _GEMINI_DEFAULT_BASE_URL
+    ).strip() or _GEMINI_DEFAULT_BASE_URL
+    model = os.environ.get(
+        "GEMINI_MODEL", _GEMINI_DEFAULT_MODEL
+    ).strip() or _GEMINI_DEFAULT_MODEL
+    agent_models = {}
+    prefix = "DOURMOUSE_GEMINI_MODEL_"
+    for env_name, value in os.environ.items():
+        if env_name.startswith(prefix) and value.strip():
+            agent_name = env_name[len(prefix):].strip().upper()
+            if agent_name:
+                agent_models[agent_name] = value.strip()
+    return GeminiConfig(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        agent_models=agent_models,
+    )

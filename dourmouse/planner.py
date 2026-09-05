@@ -290,6 +290,29 @@ def find_agents_for_query(
     # the exact tool name, so it cannot fire for "build a web app" (no
     # "search" token) or credit any other agent.
     compound_web_search = tokens >= {"search", "web"}
+    # v13.8 (live-reproduced, vague-prompt test): "am I free tomorrow
+    # afternoon" has no domain word at all -- "calendar"/"schedule"/
+    # "meeting" are all absent -- so it scored 0 for `scheduling` and the
+    # model honestly (but wrongly) answered "I don't have access to your
+    # calendar", even though list_calendar_events/propose_time_slots are
+    # real, working tools ("check my calendar for tomorrow afternoon", one
+    # word different, routed and worked correctly in the same live test).
+    # A bare "free" domain word was tried and rejected: it is a real,
+    # literal word in code_deepseek's ("free DeepSeek backend"), t212's,
+    # mt5's, and design_3d's own descriptions/tools (checked directly
+    # against the live registry), so it would misroute e.g. "is deepseek
+    # free" toward scheduling. Gating on "free" together with a temporal
+    # word -- the same compound-phrase pattern as compound_web_search
+    # above -- keeps it safe: none of those other agents' real text pairs
+    # "free" with a day/time-of-day word.
+    compound_free_when = "free" in tokens and bool(
+        tokens
+        & {
+            "today", "tomorrow", "tonight", "morning", "afternoon", "evening",
+            "week", "weekend", "monday", "tuesday", "wednesday", "thursday",
+            "friday", "saturday", "sunday", "busy",
+        }
+    )
     # Learned evidence (v5.6), computed ONCE per query (not per agent): the
     # neural orchestrator's routing head adds positive evidence only —
     # 0.5 * max(0, logit). Its max boost (~2) sits BELOW the deterministic
@@ -366,6 +389,10 @@ def find_agents_for_query(
         if sub.name in domain_targets:
             score += 4
         if compound_web_search and any(t.name == "web_search" for t in sub.tools):
+            score += 3
+        if compound_free_when and any(
+            t.name in ("list_calendar_events", "propose_time_slots") for t in sub.tools
+        ):
             score += 3
         if nn is not None and sub.name in nn:
             score += _ROUTE_LAMBDA * max(0.0, nn[sub.name])

@@ -2383,6 +2383,32 @@ async function run(text){
             }
             break; }
           case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e,myDeclines,targetScreen); break;
+          // v13.8 (real, live-reproduced gap): all_hands.py's own "ALL HANDS
+          // STARTED" chat text unconditionally promises "Progress is
+          // streaming in the ALL HANDS window" -- true for index.html/
+          // workspace.html/all_hands.html (each has a real openFramePanel/
+          // allhands_started handler), but console.html had NO case for
+          // this event at all, so it silently fell through the switch: on
+          // this UI the run genuinely starts server-side (a real run_id,
+          // real parallel work) with ZERO way to see or reach it -- exactly
+          // the "the multi prompt feature doesn't really work" experience,
+          // even though the underlying mechanism runs correctly. Fixed with
+          // the smallest safe surface: a real link to the same /all-hands
+          // route the other frontends already open, inserted the same way
+          // addApproval inserts its box (a sibling before node.body, so a
+          // later paint() of the streamed answer can never wipe it out).
+          case "allhands_started":{
+            if(e.run_id){
+              const href = "/all-hands?run=" + encodeURIComponent(e.run_id);
+              const box = document.createElement("div"); box.className="approve";
+              box.innerHTML = `<div class="t">◆ ALL HANDS STARTED</div>`+
+                `<div class="p">Run <b>${esc(e.run_id)}</b> — every resource is on the goal.</div>`+
+                `<div class="r"><a class="btn" href="${esc(href)}" target="_blank" rel="noopener" `+
+                `style="text-decoration:none;display:inline-block">OPEN ALL HANDS</a></div>`;
+              node.body.parentNode.insertBefore(box, node.body);
+              liveAdd("act","ALL HANDS started", "run "+e.run_id);
+            }
+            break; }
           case "assistant_delta": foldThink(); contentRevealer.enqueue(e.text||""); break;
           case "assistant_text": foldThink(); contentRevealer.setTotal(e.text||""); break;
           case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;

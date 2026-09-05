@@ -91,6 +91,32 @@ class TestFindAgents:
         assert matches[0]["score"] >= 1
         assert "web_search" in matches[0]["tools"]
 
+    def test_am_i_free_tomorrow_ranks_scheduling_first(self):
+        """v13.8, live-reproduced: "am I free tomorrow afternoon" has no
+        domain word at all ("calendar"/"schedule"/"meeting" all absent), so
+        it scored 0 for scheduling and the model honestly-but-wrongly
+        answered "I don't have access to your calendar" even though
+        list_calendar_events/propose_time_slots are real, working tools --
+        confirmed live: "check my calendar for tomorrow afternoon", one
+        word different, routed and worked correctly."""
+        registry = build_general_registry()
+        matches = find_agents_for_query(registry, "am I free tomorrow afternoon", limit=3)
+        assert matches, "expected at least one match"
+        assert matches[0]["name"] == "scheduling"
+        assert "list_calendar_events" in matches[0]["tools"]
+
+    def test_bare_free_does_not_misroute_unrelated_queries(self):
+        """The compound trigger requires "free" PLUS a temporal word,
+        specifically because a bare "free" domain word was checked against
+        the live registry and found to be a real, literal word in
+        code_deepseek's ("free DeepSeek backend"), t212's, mt5's, and
+        design_3d's own descriptions/tools -- these must not get shoved
+        toward scheduling."""
+        registry = build_general_registry()
+        matches = find_agents_for_query(registry, "is deepseek free", limit=3)
+        assert matches, "expected at least one match"
+        assert matches[0]["name"] != "scheduling"
+
     def test_draft_email_ranks_comms_first(self):
         registry = build_general_registry()
         matches = find_agents_for_query(registry, "draft an email to the team", limit=3)
