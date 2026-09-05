@@ -672,6 +672,43 @@ class TestLoop:
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "unknown tool" in result["text"]
 
+    def test_unknown_tool_near_a_real_name_suggests_it(self):
+        """v13.8 (real, live-reproduced pattern -- a dozen+ distinct
+        instances this session): the model regularly guesses a plausible-
+        sounding tool name close to a real one instead of the real
+        registered name itself ("google_drive_create_document" for a real
+        "drive_create_doc", "read_calendar" for a real "list_calendar_
+        events", ...). A close-match suggestion in the error text lets it
+        self-correct in the SAME turn instead of retrying blind or giving
+        up. Uses this file's own _test_registry (echo_agent/echo tool) --
+        "ech0" is a deliberate one-character near-miss of the real "echo"."""
+        tool_call = _FakeToolCall("call_1", "ech0", "{}")
+        first = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))
+        second = _FakeResponse(_FakeMessage(content="ok"))
+        client = FakeClient([first, second])
+
+        report = run_dispatch("x", _test_registry(), client=client)
+
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "unknown tool" in result["text"]
+        assert "Did you mean" in result["text"]
+        assert "echo" in result["text"]
+
+    def test_unknown_tool_with_no_close_match_gets_the_plain_error(self):
+        """The suggestion must never fire on a genuinely unrelated guess --
+        a plain, honest error stays plain rather than volunteering a
+        misleading near-miss that isn't actually close."""
+        tool_call = _FakeToolCall("call_1", "completely_unrelated_xyz_zzz", "{}")
+        first = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))
+        second = _FakeResponse(_FakeMessage(content="ok"))
+        client = FakeClient([first, second])
+
+        report = run_dispatch("x", _test_registry(), client=client)
+
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "unknown tool" in result["text"]
+        assert "Did you mean" not in result["text"]
+
     def test_malformed_arguments_reported_not_crash(self):
         tool_call = _FakeToolCall("call_1", "echo", "{nope")
         first = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))

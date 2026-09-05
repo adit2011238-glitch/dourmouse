@@ -3864,7 +3864,11 @@ def build_general_registry() -> DispatchRegistry:
         from dourmouse.google_services import drive_search
 
         try:
-            return drive_search(arguments.get("query", ""), arguments.get("max_results", 10))
+            return drive_search(
+                arguments.get("query", ""),
+                arguments.get("max_results", 10),
+                arguments.get("file_type"),
+            )
         except RuntimeError as exc:
             return f"DRIVE SEARCH (reported honestly): {exc}"
         except Exception as exc:  # noqa: BLE001 - network failures, readable
@@ -4380,12 +4384,23 @@ def build_general_registry() -> DispatchRegistry:
                         "by subject/from/body words. Works with the Google "
                         "sign-in (gmail.readonly scope); otherwise uses the "
                         "shared App-Password setup or reports NOT CONFIGURED "
-                        "honestly."
+                        "honestly. Like Gmail's own search box, Trash and Spam "
+                        "are excluded by default — a message being genuinely "
+                        "absent from a plain search does NOT mean it isn't in "
+                        "Trash; add 'in:trash' or 'in:spam' to query to search "
+                        "those specifically, or 'in:anywhere' for everything."
                     ),
                     parameters={
                         "type": "object",
                         "properties": {
-                            "query": {"type": "string"},
+                            "query": {
+                                "type": "string",
+                                "description": (
+                                    "Gmail search syntax, e.g. 'from:x subject:y' "
+                                    "or 'in:trash rate limit'. Empty string browses "
+                                    "the default (non-Trash, non-Spam) inbox."
+                                ),
+                            },
                             "max_results": {"type": "integer", "default": 10},
                         },
                         "required": ["query"],
@@ -4414,7 +4429,11 @@ def build_general_registry() -> DispatchRegistry:
                         "Search the signed-in Google user's Drive (read-only) "
                         "by name/content words — newest first. Needs the user's "
                         "Google sign-in (drive.readonly scope); otherwise "
-                        "reports NOT CONFIGURED honestly. Never deletes."
+                        "reports NOT CONFIGURED honestly. Never deletes. To find "
+                        "only spreadsheets/docs/slides/folders/PDFs, use the "
+                        "file_type parameter — never put mimeType or other raw "
+                        "Drive query syntax inside query itself, that is a "
+                        "plain name/content text search only."
                     ),
                     parameters={
                         "type": "object",
@@ -4422,6 +4441,13 @@ def build_general_registry() -> DispatchRegistry:
                             "query": {"type": "string",
                                        "description": "name/content words, e.g. 'q3 report' (empty = browse recent files)"},
                             "max_results": {"type": "integer", "default": 10},
+                            "file_type": {
+                                "type": "string",
+                                "description": (
+                                    "optional: 'spreadsheet', 'doc', 'slide', "
+                                    "'folder', or 'pdf' to filter by kind"
+                                ),
+                            },
                         },
                     },
                     handler=_drive_search_h,

@@ -336,17 +336,61 @@ def _calendar_events_oauth(token: str, max_results: int) -> str:
 # -- v5.18: Google Drive (read-only, per-user OAuth) ---------------------- #
 
 
-def _drive_search_oauth(token: str, query: str, max_results: int) -> str:
+# v13.8 (real, live-reproduced bug): drive_search's ONLY parameter was a
+# freeform text string, unconditionally wrapped as a name/fullText
+# "contains" clause. A real request to filter by file type ("find my
+# spreadsheets") had no real way to express that, so the model tried
+# passing raw Drive query syntax straight into the freeform field
+# (query="mimeType='application/vnd.google-apps.spreadsheet'") -- which
+# this function then wrapped AGAIN as a literal quoted string inside its
+# own `name contains '...'` clause, producing doubly-nested quotes that
+# are not valid Drive query syntax at all. Google's own API correctly
+# rejected it with a real 400 "Invalid Value" (not a fabrication — the
+# tool genuinely had no working way to do this). Fixed by giving
+# file_type its own real, separate, safely-built clause, with friendly
+# aliases so the model never has to know Google's raw mimeType strings.
+_DRIVE_MIME_ALIASES: dict[str, str] = {
+    "spreadsheet": "application/vnd.google-apps.spreadsheet",
+    "spreadsheets": "application/vnd.google-apps.spreadsheet",
+    "sheet": "application/vnd.google-apps.spreadsheet",
+    "sheets": "application/vnd.google-apps.spreadsheet",
+    "doc": "application/vnd.google-apps.document",
+    "docs": "application/vnd.google-apps.document",
+    "document": "application/vnd.google-apps.document",
+    "documents": "application/vnd.google-apps.document",
+    "slide": "application/vnd.google-apps.presentation",
+    "slides": "application/vnd.google-apps.presentation",
+    "presentation": "application/vnd.google-apps.presentation",
+    "presentations": "application/vnd.google-apps.presentation",
+    "folder": "application/vnd.google-apps.folder",
+    "folders": "application/vnd.google-apps.folder",
+    "pdf": "application/pdf",
+}
+
+
+def _drive_search_oauth(
+    token: str, query: str, max_results: int, file_type: str | None = None
+) -> str:
     """Drive files.list (per-user token): name/fullText contains query,
-    newest first, trashed excluded. Real rows — never fabricated files."""
+    newest first, trashed excluded. Real rows — never fabricated files.
+
+    ``file_type`` is a SEPARATE, safely-built clause (never concatenated
+    into the freeform query string) — either a friendly alias
+    (spreadsheet/doc/slide/folder/pdf) or a literal mimeType string for
+    anything not in the alias table.
+    """
     q = (query or "").strip()
+    clauses = ["trashed = false"]
     if q:
-        # Drive q syntax: single quotes are escaped by doubling; ``and``
-        # keeps trashed files out of the result.
+        # Drive q syntax: single quotes are escaped by doubling.
         safe = q.replace("'", "''")
-        clause = f"trashed = false and (name contains '{safe}' or fullText contains '{safe}')"
-    else:
-        clause = "trashed = false"
+        clauses.append(f"(name contains '{safe}' or fullText contains '{safe}')")
+    ftype = (file_type or "").strip().lower()
+    if ftype:
+        mime = _DRIVE_MIME_ALIASES.get(ftype, file_type.strip())
+        safe_mime = mime.replace("'", "''")
+        clauses.append(f"mimeType = '{safe_mime}'")
+    clause = " and ".join(clauses)
     params = urllib.parse.urlencode(
         {
             "q": clause,
@@ -787,7 +831,7 @@ def drive_share(
     )
 
 
-def drive_search(query: str, max_results: int = 10) -> str:
+def drive_search(query: str, max_results: int = 10, file_type: str | None = None) -> str:
     """Search the SIGNED-IN user's Google Drive (read-only, v5.18).
 
     Real files.list results for the logged-in Google user's own account —
@@ -795,10 +839,14 @@ def drive_search(query: str, max_results: int = 10) -> str:
     valid token gets an honest re-sign-in message (never another account),
     and with no user signed in this reports NOT CONFIGURED (Drive has no
     legacy shared path to fall back to).
+
+    ``file_type`` (v13.8) filters by kind — a friendly alias (spreadsheet/
+    doc/slide/folder/pdf) or a literal mimeType string — built as its own
+    safe query clause, never smuggled into the freeform ``query`` text.
     """
     token = _oauth_access_token()
     if token:
-        return _drive_search_oauth(token, query, max_results)
+        return _drive_search_oauth(token, query, max_results, file_type)
     reauth = _oauth_user_needs_reauth("DRIVE")
     if reauth:
         return reauth

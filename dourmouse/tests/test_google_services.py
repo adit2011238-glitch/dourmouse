@@ -63,6 +63,111 @@ class TestDriveCreateDoc:
         assert "GOOGLE_OAUTH_FULL_SCOPES" in out
         assert "Nothing was created" in out
 
+
+class TestDriveSearchFileType:
+    """v13.8 (real, live-reproduced bug): drive_search's ONLY parameter was
+    a freeform text string, unconditionally wrapped as a
+    name/fullText-"contains" clause -- a real request to filter by file
+    type had no working way to express that, so the model tried passing
+    raw Drive query syntax (mimeType='...') straight into the freeform
+    field, which got wrapped AGAIN as a literal quoted string inside the
+    function's own clause -- doubly-nested quotes that are not valid Drive
+    query syntax. Google's real API correctly rejected it with a real 400
+    "Invalid Value" (confirmed live against the actual running app, not a
+    mock). Fixed with a separate, safely-built file_type clause and
+    friendly aliases so the model never has to guess Google's raw mimeType
+    strings or smuggle query syntax into the text field."""
+
+    def _capture_q(self, monkeypatch):
+        captured = {}
+
+        def fake_http_json(method, url, token):
+            import urllib.parse
+
+            captured["q"] = urllib.parse.parse_qs(url.split("?", 1)[1])["q"][0]
+            return {"files": []}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        return captured
+
+    def test_bare_query_unchanged_from_before(self, monkeypatch):
+        captured = self._capture_q(monkeypatch)
+        gs._drive_search_oauth("tok", "q3 report", 10)
+        assert captured["q"] == (
+            "trashed = false and (name contains 'q3 report' "
+            "or fullText contains 'q3 report')"
+        )
+
+    def test_file_type_alias_builds_a_separate_safe_clause(self, monkeypatch):
+        captured = self._capture_q(monkeypatch)
+        gs._drive_search_oauth("tok", "", 10, file_type="spreadsheet")
+        assert captured["q"] == (
+            "trashed = false and mimeType = "
+            "'application/vnd.google-apps.spreadsheet'"
+        )
+
+    def test_file_type_combines_with_a_real_text_query(self, monkeypatch):
+        captured = self._capture_q(monkeypatch)
+        gs._drive_search_oauth("tok", "budget", 10, file_type="doc")
+        assert captured["q"] == (
+            "trashed = false and (name contains 'budget' or "
+            "fullText contains 'budget') and mimeType = "
+            "'application/vnd.google-apps.document'"
+        )
+
+    def test_a_literal_mimetype_not_in_the_alias_table_still_works(self, monkeypatch):
+        captured = self._capture_q(monkeypatch)
+        gs._drive_search_oauth("tok", "", 10, file_type="image/png")
+        assert captured["q"] == "trashed = false and mimeType = 'image/png'"
+
+    def test_raw_query_syntax_never_gets_smuggled_into_the_text_clause(self, monkeypatch):
+        """The exact live-reproduced shape: query itself holding
+        "mimeType='...'" is treated as ordinary literal search TEXT (single
+        quotes escaped, never interpreted as Drive syntax) -- this is what
+        makes the fix safe, not just what makes file_type work."""
+        captured = self._capture_q(monkeypatch)
+        gs._drive_search_oauth(
+            "tok", "mimeType='application/vnd.google-apps.spreadsheet'", 10
+        )
+        # The single quotes are escaped by doubling, per the function's own
+        # existing (unchanged) contract -- never left as raw Drive syntax.
+        assert "''application/vnd.google-apps.spreadsheet''" in captured["q"]
+        assert captured["q"].count("mimeType =") == 0
+
+    def test_public_drive_search_threads_file_type_through(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        captured = self._capture_q(monkeypatch)
+        gs.drive_search("", 10, file_type="folder")
+        assert "application/vnd.google-apps.folder" in captured["q"]
+
+
+class TestGmailSearchDescriptionWarnsAboutTrashDefault:
+    """v13.8 (real, live-reproduced confusion, not a code bug): Gmail's own
+    search API excludes Trash/Spam by default, exactly like Gmail's own
+    search box in the browser -- gmail_search passes the query straight
+    through with no default label filter of its own, so this was always
+    real, correct, expected Gmail behavior. Live-reproduced: asked to
+    "restore the most recently trashed email," the model searched with
+    plain keywords, got a real (accurate, per Gmail's own default
+    semantics) "no messages matched," and honestly-but-wrongly concluded
+    there was nothing in Trash at all -- a real message WAS there
+    (confirmed via a separate follow-up query). Not fixable by changing
+    _gmail_search_oauth's real behavior (that would silently change what
+    an ordinary "search my inbox" returns for every other case) -- fixed by
+    telling the model the real, correct in:trash/in:spam/in:anywhere
+    operators up front, the same documentation-level fix as drive_search's
+    file_type guidance above."""
+
+    def test_tool_description_names_the_real_gmail_operators(self):
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        spec = registry.lookup("gmail_search")
+        assert spec is not None
+        assert "in:trash" in spec.description
+        assert "in:spam" in spec.description
+        assert "Trash and Spam are excluded by default" in spec.description
+
     def test_roster_wiring_gated(self):
         registry = build_general_registry()
         # v5.27: drive_create_doc lives on the docs agent — the planner

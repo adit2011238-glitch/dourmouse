@@ -32,6 +32,7 @@ crashes and not fabricated success.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -3815,9 +3816,36 @@ def _run_dispatch_loop(
                         f"subagent='{name}'."
                     )
                 else:
-                    result_text = (
-                        f"ERROR: unknown tool '{name}' — not in the registered roster."
+                    # v13.8 (real, live-reproduced pattern -- a dozen+
+                    # distinct instances this session): the model regularly
+                    # guesses a plausible-sounding tool name instead of the
+                    # real registered one -- "google_drive_create_document"
+                    # for drive_create_doc, "read_calendar"/
+                    # "google_calendar_list_events" for
+                    # list_calendar_events, "search" for web_search/
+                    # news_search, and more. Every one observed live was a
+                    # near-miss of a REAL tool's name, not a random guess --
+                    # the same self-correction idea as the agent-name guard
+                    # above (v8.11), applied generally: a close-match
+                    # suggestion lets the model fix itself within the same
+                    # turn instead of retrying blind or (worse, separately
+                    # documented) fabricating a fake success. Real stdlib
+                    # string similarity, deterministic, no LLM judgment
+                    # (Rule 2.8) -- cutoff tuned so it only fires on a
+                    # genuine near-miss, never volunteers an unrelated tool.
+                    close = difflib.get_close_matches(
+                        name, registry.tool_names, n=3, cutoff=0.6
                     )
+                    if close:
+                        result_text = (
+                            f"ERROR: unknown tool '{name}' — not in the "
+                            f"registered roster. Did you mean: "
+                            f"{', '.join(close)}?"
+                        )
+                    else:
+                        result_text = (
+                            f"ERROR: unknown tool '{name}' — not in the registered roster."
+                        )
             elif rbac is not None and not rbac.allows(name):
                 # Deterministic RBAC refusal BEFORE anything executes (spec:
                 # role-based access control).
