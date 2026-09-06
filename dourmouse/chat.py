@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -413,6 +414,43 @@ class ChatSession:
         self._prev_hash = record["hash"]
         # Snapshot the full message state for resumability.
         self._state_file.write_text(json.dumps(self.messages))
+        # Backlog item 3 slice — auto-save chat to RAG. Runs from the SAME
+        # persist path used by both ask() and record_slash(), so every
+        # completed exchange (typed or slash-command) is covered.
+        self._autosave_chat_to_rag(record)
+
+    def _autosave_chat_to_rag(self, record: dict[str, Any]) -> None:
+        """Index one completed user+assistant exchange into the long-term
+        store under its own "chat_history" source.
+
+        Distinct from the "Store & Learn" ``session:<stem>`` ingestion above
+        (v2.9, gated on ``learn_enabled()``) — this is backlog item 3's own
+        slice, always attempted whenever a memory store is attached,
+        independent of whether Store & Learn is on. Reuses ``remember()``'s
+        content_hash dedup (76a779a): a resumed session replaying an
+        already-persisted turn re-derives the SAME (source, title), so the
+        upsert overwrites the existing row in place instead of inserting a
+        new one — a replayed turn yields zero new rows. Gated behind
+        ``DOURMOUSE_AUTOSAVE_CHAT_RAG`` (default enabled) as a one-line kill
+        switch; unset, "1", "true", "yes", "on" all mean enabled, anything
+        in the falsy set below disables it. A broken/unavailable store must
+        never break the conversation, so failures here are swallowed.
+        """
+        if self.memory is None:
+            return
+        flag = os.environ.get("DOURMOUSE_AUTOSAVE_CHAT_RAG", "1").strip().lower()
+        if flag in ("0", "false", "no", "off"):
+            return
+        user = (record.get("user") or "").strip()
+        answer = (record.get("final_text") or "").strip()
+        if not user or not answer:
+            return  # nothing worth indexing from a failed/empty turn
+        body = f"USER: {user}\nASSISTANT: {answer}"
+        title = f"{self.session_file.stem}/{record.get('turn', '?')}"
+        try:
+            self.memory.remember("chat_history", title, body)
+        except Exception:
+            pass
 
     def record_slash(self, prompt: str, final_text: str,
                      tools: list[str] | None = None,

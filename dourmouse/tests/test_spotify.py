@@ -547,8 +547,9 @@ class TestPollCache:
 
 
 class TestTransportActions:
-    """playback_control must cover all four of the widget's transport
-    buttons: play, pause, next, previous."""
+    """playback_control must cover all of the widget's transport buttons:
+    pause, next, previous, resume. There is no bare "play" action — starting
+    playback of a URI is spotify_play's job, not playback_control's."""
 
     def _capture(self, monkeypatch):
         calls: list[tuple[str, str]] = []
@@ -563,7 +564,6 @@ class TestTransportActions:
     @pytest.mark.parametrize(
         "action,expected",
         [
-            ("play", ("PUT", "/me/player/play")),
             ("resume", ("PUT", "/me/player/play")),
             ("pause", ("PUT", "/me/player/pause")),
             ("next", ("POST", "/me/player/next")),
@@ -578,17 +578,21 @@ class TestTransportActions:
         assert "ERROR" not in text
         assert action in text
 
-    def test_play_and_resume_are_equivalent_aliases(self, _workspace, monkeypatch):
+    def test_bare_play_is_not_a_valid_action(self, _workspace, monkeypatch):
+        """"play" was removed as a dead alias — confirmed unused by both the
+        roster tool schema (next|previous|pause|resume|volume) and the
+        floating widget (which only posts next|previous|pause|resume).
+        Starting playback of a URI goes through spotify_play, not here."""
         _set_client_id(monkeypatch)
         calls = self._capture(monkeypatch)
-        ss.playback_control("play")
-        ss.playback_control("resume")
-        assert calls == [("PUT", "/me/player/play"), ("PUT", "/me/player/play")]
+        text = ss.playback_control("play")
+        assert calls == []
+        assert "ERROR" in text
 
     def test_action_is_case_and_whitespace_insensitive(self, _workspace, monkeypatch):
         _set_client_id(monkeypatch)
         calls = self._capture(monkeypatch)
-        ss.playback_control("  PLAY  ")
+        ss.playback_control("  RESUME  ")
         assert calls == [("PUT", "/me/player/play")]
 
 

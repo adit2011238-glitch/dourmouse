@@ -1624,6 +1624,10 @@ class _Handler(BaseHTTPRequestHandler):
             # live at ui/assets/<file> — re-add the directory before serving
             # (a latent bug: every /assets/* request used to 404).
             self._serve_static("assets/" + path[len("/assets/"):])
+        elif path == "/ui/spotify_widget.css":
+            self._serve_static("spotify_widget.css")
+        elif path == "/ui/spotify_widget.js":
+            self._serve_static("spotify_widget.js")
         elif path == "/sw.js":
             # v5.20: the offline-shell service worker (desktop portfolio
             # Phase 5). Real JS content type; no-store keeps the SW script
@@ -3275,12 +3279,21 @@ class _Handler(BaseHTTPRequestHandler):
                 body = body.replace(marker, inject, 1)
         # v13.x — backlog item 8: the floating Spotify widget appears on
         # every screen EXCEPT the pre-auth login/setup pages (the designer
-        # lane's retheme). One injection point here instead of hand-adding
-        # <link>/<script> tags to 12+ HTML files. Guarded by a file-exists
-        # check so this commit lands safely even in a worktree state where
-        # the designer lane hasn't shipped ui/spotify_widget.css/.js yet —
-        # injection is silently skipped, never an error.
-        if ctype == "text/html" and rel not in ("login.html", "setup.html"):
+        # lane's retheme) and index.html/hud.html/console.html, which already
+        # ship their own inline Spotify controls (index.html's #spotifypanel,
+        # hud.html's /api/spotify polling, console.html's inline controls) —
+        # injecting the floating widget there would double it up. One
+        # injection point here instead of hand-adding <link>/<script> tags to
+        # every other HTML file. Guarded by a file-exists check so this
+        # commit lands safely even if ui/spotify_widget.css/.js are ever
+        # removed — injection is silently skipped, never an error.
+        if ctype == "text/html" and rel not in (
+            "login.html",
+            "setup.html",
+            "index.html",
+            "hud.html",
+            "console.html",
+        ):
             widget_css = _UI_DIR / "spotify_widget.css"
             widget_js = _UI_DIR / "spotify_widget.js"
             if widget_css.exists() and widget_js.exists():

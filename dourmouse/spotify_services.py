@@ -551,22 +551,21 @@ def _playback_state_uncached() -> str:
 
 
 def playback_control(action: str) -> str:
-    """Control playback: next|previous|pause|play (alias resume)|shuffle|volume.
+    """Control playback: next|previous|pause|resume|volume.
 
     Confirmation-gated at the roster level (changes the user's playback).
-    Volume takes an integer 0-100 (e.g. ``volume 60``). ``play`` and
-    ``resume`` are the same action (both hit ``PUT /me/player/play``) — the
-    floating widget's four transport buttons (play/pause/next/previous) use
-    ``play``, while the older HUD control panel already shipped with
-    ``resume``; both names are accepted so neither caller needs to change.
+    Volume takes an integer 0-100 (e.g. ``volume 60``). ``resume`` hits
+    ``PUT /me/player/play`` — the only real path for STARTING playback of a
+    specific URI is ``spotify_play``/``play_uri``; there is no bare "play"
+    action here (confirmed dead: the roster tool schema and the floating
+    widget's transport buttons only ever send next|previous|pause|resume).
     """
     action = (action or "").strip().lower()
-    if action in ("next", "previous", "pause", "play", "resume"):
+    if action in ("next", "previous", "pause", "resume"):
         endpoint = {
             "next": ("/me/player/next", "POST"),
             "previous": ("/me/player/previous", "POST"),
             "pause": ("/me/player/pause", "PUT"),
-            "play": ("/me/player/play", "PUT"),
             "resume": ("/me/player/play", "PUT"),
         }[action]
         _api(endpoint[1], endpoint[0])
@@ -582,7 +581,7 @@ def playback_control(action: str) -> str:
         return f"SPOTIFY: volume set to {max(0, min(100, volume))}%."
     return (
         "ERROR: playback_control action must be one of: "
-        "play | pause | next | previous | resume | volume <0-100>. "
+        "pause | next | previous | resume | volume <0-100>. "
         "Use spotify_play to play specific music."
     )
 
