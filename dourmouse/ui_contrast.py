@@ -122,6 +122,41 @@ def extract_tokens(css_or_html: str) -> dict[str, str]:
     return out
 
 
+_VAR_REF = re.compile(r"var\(\s*(--[A-Za-z0-9-]+)\s*(?:,\s*([^()]*))?\)")
+
+
+def resolve_var_refs(value: str, tokens: dict[str, str], _depth: int = 0) -> str:
+    """Substitute `var(--name[, fallback])` references against `tokens`.
+
+    product.html/hub.html/graveyard.html define their text tokens as
+    `rgba(var(--cyan-rgb), var(--a45))` rather than a literal hex/rgba like
+    every other audited screen — `parse_color` can't see through a nested
+    `var(...)`, so left unresolved these tokens silently read as
+    unparseable and `audit_tokens` skips them outright (the same "dropped
+    token" danger `extract_tokens`'s own docstring already warns about: a
+    real regression goes unreported instead of failing loudly). This walks
+    the token table and substitutes known names (falling back to the
+    var()'s own default, or leaving it as-is if neither resolves), up to a
+    small recursion depth — generous for a token layer that is at most two
+    `var()` hops deep anywhere in this codebase.
+    """
+    if _depth > 6 or not value or "var(" not in value:
+        return value
+
+    def _sub(m: re.Match[str]) -> str:
+        name = m.group(1)
+        default = m.group(2)
+        resolved = tokens.get(name)
+        if resolved is not None:
+            return resolved
+        return default.strip() if default is not None else m.group(0)
+
+    substituted = _VAR_REF.sub(_sub, value)
+    if substituted == value:
+        return value
+    return resolve_var_refs(substituted, tokens, _depth + 1)
+
+
 # Text tokens that must stay legible on the page's own ground, with the
 # threshold each is actually held to. Decorative tokens are not listed: a
 # glow or a hairline is not text and does not owe 4.5:1.
@@ -150,12 +185,12 @@ def audit_tokens(
     tokens = extract_tokens(source)
     grounds: list[tuple[str, tuple[float, float, float]]] = []
     for g in (ground_tokens if ground_tokens is not None else GROUND_TOKENS):
-        parsed = parse_color(tokens.get(g, ""))
+        parsed = parse_color(resolve_var_refs(tokens.get(g, ""), tokens))
         if parsed:
             grounds.append((g, parsed[:3]))
     rows: list[dict[str, object]] = []
     for token, threshold in (text_tokens if text_tokens is not None else TEXT_TOKENS).items():
-        fg = parse_color(tokens.get(token, ""))
+        fg = parse_color(resolve_var_refs(tokens.get(token, ""), tokens))
         if not fg:
             continue
         for gname, gcolor in grounds:
@@ -206,6 +241,42 @@ def ui_workspace_path() -> Path:
 
 def ui_voice_path() -> Path:
     return Path(__file__).resolve().parent.parent / "ui" / "voice.html"
+
+
+def ui_agent_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "agent.html"
+
+
+def ui_all_hands_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "all_hands.html"
+
+
+def ui_atlas_lab_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "atlas_lab.html"
+
+
+def ui_map_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "map.html"
+
+
+def ui_mobile_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "mobile.html"
+
+
+def ui_product_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "product.html"
+
+
+def ui_hub_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "hub.html"
+
+
+def ui_graveyard_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "graveyard.html"
+
+
+def ui_design_system_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "design-system.html"
 
 
 _ROOT_BLOCK = re.compile(r":root\s*\{([^{}]*)\}")

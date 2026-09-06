@@ -67,6 +67,36 @@ BASELINE_FOCUS_VISIBLE_COUNT = {
     "os": 4,
     "login": 1,
     "setup": 2,
+    # agent.html/all_hands.html/atlas_lab.html/map.html/mobile.html and
+    # product.html/hub.html/graveyard.html each had ZERO :focus-visible (or
+    # any outline/:focus) rules before this cycle — every control on all
+    # eight relied entirely on the browser's native default ring. Each got
+    # the same one global bare `:focus-visible{...}` rule already
+    # established on console.html/hud.html/workspace.html/voice.html, using
+    # the file's own --amber accent.
+    "agent": 1,
+    "all_hands": 1,
+    "atlas_lab": 1,
+    "map": 1,
+    "mobile": 1,
+    "product": 1,
+    "hub": 1,
+    "graveyard": 1,
+    # design-system.html is different in kind: it renders entirely through
+    # the shared dourmouse-ui.css design system and defines no CSS of its
+    # own beyond three layout rules, so it had zero :focus-visible text
+    # in-file even though the shared stylesheet it links DOES define one
+    # (`.dm-btn:focus-visible{outline:none;...}`) — which turned out to be
+    # the same "outline:none + a near-invisible border-color swap" bug
+    # already fixed everywhere else (--dm-line-focus measures 1.19-1.91:1
+    # against this page's panel/canvas backgrounds, far under the 3:1 SC
+    # 1.4.11 floor). Fixed page-locally (not in the shared file, which
+    # every other screen also links and is out of this cycle's narrow
+    # scope): one global bare rule plus two class-scoped overrides
+    # (`.dm-btn:focus-visible`, `.dm-select:focus-visible,
+    # .dm-textarea:focus-visible`) that match the shared rules' own
+    # specificity and win by coming later in the cascade on this page.
+    "design-system": 4,
 }
 
 _PATHS = {
@@ -74,6 +104,15 @@ _PATHS = {
     "os": uc.ui_os_path,
     "login": uc.ui_login_path,
     "setup": uc.ui_setup_path,
+    "agent": uc.ui_agent_path,
+    "all_hands": uc.ui_all_hands_path,
+    "atlas_lab": uc.ui_atlas_lab_path,
+    "map": uc.ui_map_path,
+    "mobile": uc.ui_mobile_path,
+    "product": uc.ui_product_path,
+    "hub": uc.ui_hub_path,
+    "graveyard": uc.ui_graveyard_path,
+    "design-system": uc.ui_design_system_path,
 }
 
 
@@ -96,7 +135,7 @@ def _focus_visible_rule_count(source: str) -> int:
     return _COMMENT.sub("", source).count(":focus-visible")
 
 
-@pytest.mark.parametrize("screen", ["console", "os", "login", "setup"])
+@pytest.mark.parametrize("screen", list(BASELINE_FOCUS_VISIBLE_COUNT))
 def test_focus_visible_count_does_not_regress(screen):
     count = _focus_visible_rule_count(_source(screen))
     baseline = BASELINE_FOCUS_VISIBLE_COUNT[screen]
@@ -212,3 +251,78 @@ def test_setup_key_and_node_inputs_have_a_working_focus_indicator():
     bg = uc.parse_color(tokens["--bg"])[:3]
     amber = uc.parse_color(tokens["--amber"])
     assert uc.contrast_ratio(amber, bg) >= 3.0
+
+
+# --------------------------------------------------------------------------- #
+# agent.html, all_hands.html, atlas_lab.html, map.html, mobile.html,
+# product.html, hub.html, graveyard.html -- eight screens confirmed via grep
+# to have ZERO :focus-visible (or any :focus/outline) rules before this
+# cycle, the same "nothing here at all" shape workspace.html/voice.html were
+# in (see dourmouse/ui_contrast.py's own tests for those two), not a
+# defeated-existing-rule shape like console.html/os.html/login.html/
+# setup.html above. All eight got the identical one-line fix: a global bare
+# `:focus-visible{outline:1px solid var(--amber);outline-offset:2px}` rule,
+# and all eight happen to name both tokens identically (--amber, --ground),
+# so one parametrized check covers all eight rather than duplicating the
+# per-screen functions above.
+# --------------------------------------------------------------------------- #
+
+_AMBER_GROUND_SCREENS = [
+    "agent", "all_hands", "atlas_lab", "map", "mobile", "product", "hub", "graveyard",
+]
+
+
+@pytest.mark.parametrize("screen", _AMBER_GROUND_SCREENS)
+def test_amber_ground_screen_has_the_new_global_focus_ring(screen):
+    """Each of these screens had zero focus-visible rules; the fix must be
+    the real global rule, not just any occurrence of the substring."""
+    source = _source(screen)
+    assert ":focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }" in source
+
+
+@pytest.mark.parametrize("screen", _AMBER_GROUND_SCREENS)
+def test_amber_ground_screen_focus_ring_is_legible(screen):
+    """--amber on --ground measures 9.26:1 (agent/all_hands/atlas_lab/map/
+    mobile) or 9.53:1 (product/hub/graveyard) on every one of these
+    screens' own shipping tokens -- comfortably past the 3:1 WCAG 2.1
+    SC 1.4.11 a non-text focus indicator needs."""
+    tokens = uc.extract_tokens(uc.default_root_block(_source(screen)))
+    ground = uc.parse_color(tokens["--ground"])[:3]
+    amber = uc.parse_color(tokens["--amber"])
+    assert uc.contrast_ratio(amber, ground) >= 3.0
+
+
+# --------------------------------------------------------------------------- #
+# design-system.html -- renders entirely through the shared dourmouse-ui.css
+# design system; see the BASELINE_FOCUS_VISIBLE_COUNT entry above for why
+# its fix is page-local overrides of shared classes rather than a single
+# global rule.
+# --------------------------------------------------------------------------- #
+
+def test_design_system_shared_controls_have_a_working_focus_indicator():
+    """.dm-btn/.dm-select/.dm-textarea inherit outline:none (+ a
+    near-invisible border-color swap, see BASELINE_FOCUS_VISIBLE_COUNT's
+    comment above) from the shared stylesheet. This page must carry its
+    own compensating :focus-visible overrides for each, plus the global
+    default other zero-rule screens use, all painting a real (>=3:1)
+    --dm-active ring."""
+    source = _source("design-system")
+    assert ":focus-visible { outline: 1px solid var(--dm-active); outline-offset: 2px; }" in source
+    assert re.search(r"\.dm-btn:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--dm-active\)", source)
+    assert re.search(
+        r"\.dm-select:focus-visible,\s*\.dm-textarea:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--dm-active\)",
+        source,
+    )
+
+
+def test_design_system_focus_ring_is_legible():
+    """--dm-active (amber) is defined in the shared dourmouse-ui.css, not
+    this page -- read it from there, then check it against this page's own
+    canvas background."""
+    css_path = Path(uc.ui_design_system_path()).resolve().parent / "assets" / "dourmouse-ui.css"
+    if not css_path.exists():
+        pytest.skip(f"shared stylesheet not present at {css_path}")
+    shared_tokens = uc.extract_tokens(uc.default_root_block(css_path.read_text(encoding="utf-8", errors="replace")))
+    canvas = uc.parse_color(shared_tokens["--dm-canvas"])[:3]
+    active = uc.parse_color(shared_tokens["--dm-active"])
+    assert uc.contrast_ratio(active, canvas) >= 3.0
