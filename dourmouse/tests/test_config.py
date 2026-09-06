@@ -285,6 +285,65 @@ class TestOrchestratorModelSetting:
         assert load_ollama_config().model_for_agent("orchestrator") != "ollama/persisted-choice"
 
 
+class TestClaudeFrontModeSetting:
+    """Persisted, ON-by-default Claude-front-mode toggle (the mirror image
+    of Grounded Mode below — opt-OUT, not opt-in, per the user's explicit
+    ask that Claude-front be the default). See
+    config.claude_front_mode_enabled / save_claude_front_mode_setting."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_on_by_default(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import claude_front_mode_enabled
+
+        assert claude_front_mode_enabled() is True
+
+    def test_save_false_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import claude_front_mode_enabled, save_claude_front_mode_setting
+
+        result = save_claude_front_mode_setting(False)
+        assert result["ok"] is True
+        assert claude_front_mode_enabled() is False
+
+    def test_save_true_after_false_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import claude_front_mode_enabled, save_claude_front_mode_setting
+
+        save_claude_front_mode_setting(False)
+        save_claude_front_mode_setting(True)
+        assert claude_front_mode_enabled() is True
+
+    def test_save_merges_with_existing_file(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_claude_front_mode_setting, user_env_path
+
+        path = user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("NVIDIA_API_KEY=nvapi-existing\n", encoding="utf-8")
+        save_claude_front_mode_setting(False)
+        contents = path.read_text(encoding="utf-8")
+        assert "NVIDIA_API_KEY=nvapi-existing" in contents
+        assert "DOURMOUSE_CLAUDE_FRONT_MODE=off" in contents
+
+    def test_key_is_distinct_from_orchestrator_backend_setting_key(self):
+        """Real bug this guards against: this key must NEVER collide with
+        ORCHESTRATOR_BACKEND_SETTING_KEY (an unrelated, already-shipped
+        setting — "which backend a persisted orchestrator MODEL belongs
+        to" — that a user picking e.g. "ollama" would have set to a value
+        this feature doesn't recognize)."""
+        from dourmouse.config import CLAUDE_FRONT_MODE_SETTING_KEY, ORCHESTRATOR_BACKEND_SETTING_KEY
+
+        assert CLAUDE_FRONT_MODE_SETTING_KEY != ORCHESTRATOR_BACKEND_SETTING_KEY
+
+
 class TestGroundedModeSetting:
     """Persisted (not just env), off-by-default Grounded Mode toggle — the
     backend half of the Settings UI's grounded-mode switch. See

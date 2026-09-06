@@ -2958,9 +2958,31 @@ class TestNvidiaAccountPoolWiring:
 # --------------------------------------------------------------------------- #
 
 class TestOrchestratorBackendMode:
-    def test_unset_is_empty(self, monkeypatch):
+    def test_claude_front_explicitly_disabled_is_empty(self, monkeypatch):
+        """The conftest.py autouse fixture (_claude_front_mode_off) sets
+        exactly this env var to "off" for every OTHER test in the suite —
+        this test makes that dependency explicit rather than implicit,
+        by setting it the same way itself. "off" is returned literally
+        (not translated to "") — it just doesn't match any special mode
+        downstream, functioning identically to "" everywhere it's
+        actually consumed (_build_client, claude_orchestrator_enabled)."""
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "off")
+        assert dispatch_module._orchestrator_backend_mode() == "off"
+        assert dispatch_module.claude_orchestrator_enabled() is False
+
+    def test_no_env_override_and_claude_front_enabled_defaults_to_split(self, monkeypatch):
+        """The real, intended default (the user's own explicit ask):
+        Claude-front by default, no env var needed at all. Explicitly
+        re-enables past the conftest.py autouse fixture, same pattern
+        test_audio_denoise.py already uses for DOURMOUSE_DENOISE."""
         monkeypatch.delenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, raising=False)
-        assert dispatch_module._orchestrator_backend_mode() == ""
+        monkeypatch.setattr("dourmouse.config.claude_front_mode_enabled", lambda: True)
+        assert dispatch_module._orchestrator_backend_mode() == "split"
+
+    def test_env_override_always_wins_over_the_settings_default(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.config.claude_front_mode_enabled", lambda: True)
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "gemini")
+        assert dispatch_module._orchestrator_backend_mode() == "gemini"
 
     @pytest.mark.parametrize("raw,expected", [("claude", True), ("CLAUDE_CLI", True), ("ollama_cloud", False), ("", False)])
     def test_claude_orchestrator_enabled(self, monkeypatch, raw, expected):
@@ -3097,9 +3119,13 @@ class TestClaudeCliClient:
 
 class TestBuildClientOrchestratorRouting:
     def test_default_mode_is_unaffected(self, monkeypatch):
-        """No env set at all — _build_client must behave exactly as
-        before this feature existed."""
-        monkeypatch.delenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, raising=False)
+        """Claude-front mode explicitly off — _build_client must behave
+        exactly as before this feature existed. (Genuinely unset now
+        defaults to "split", the real intended behavior — this test's
+        old premise of "unset == old behavior" no longer holds by
+        design; explicit-off is the case that still needs to match
+        exactly.)"""
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "off")
         from dourmouse.config import OllamaConfig
 
         cfg = OllamaConfig()
@@ -3227,10 +3253,12 @@ class TestBrainEventReportsTheRealOrchestratorBackend:
         assert brain["local"] is False
 
     def test_unset_mode_is_unaffected(self, monkeypatch):
-        """No orchestrator-backend override — the brain event must stay
+        """Claude-front mode explicitly off — the brain event must stay
         exactly as it always was (derived from the injected fake client's
-        own config), zero behavior change for every existing caller."""
-        monkeypatch.delenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, raising=False)
+        own config), zero behavior change for every existing caller.
+        (Genuinely unset now defaults to "split" by design — see
+        test_default_mode_is_unaffected's own updated docstring.)"""
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "off")
         client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
         events = self._run("hey", client=client)
         brain = next(e for e in events if e["type"] == "brain")

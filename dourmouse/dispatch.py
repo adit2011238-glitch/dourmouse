@@ -2184,7 +2184,16 @@ def _execute_tool(
 # response reports NO tool_calls to dispatch.py — Claude already did
 # whatever tool work was needed internally — so a turn through this
 # client is exactly ONE call, not several.
-_CLAUDE_ORCHESTRATOR_ENV = "DOURMOUSE_ORCHESTRATOR_BACKEND"
+#: Renamed from "DOURMOUSE_ORCHESTRATOR_BACKEND" — that string collided
+#: with config.py's ORCHESTRATOR_BACKEND_SETTING_KEY, an unrelated,
+#: already-shipped setting ("which backend a persisted orchestrator
+#: MODEL belongs to") that gets loaded into real os.environ via
+#: load_dotenv(). A user who'd ever used the existing orchestrator-model
+#: Settings picker (e.g. picked "ollama") would have silently set THIS
+#: key too, to a value this module doesn't recognize. Caught before
+#: shipping, not live — genuinely two different features, now genuinely
+#: two different names.
+_CLAUDE_ORCHESTRATOR_ENV = "DOURMOUSE_ORCHESTRATOR_MODE"
 _OLLAMA_CLOUD_BASE_URL = "https://ollama.com"
 #: Ollama Cloud model verified live against the real API tonight
 #: (https://ollama.com/api/chat, real key, 677ms real response). A real,
@@ -2193,17 +2202,31 @@ _OLLAMA_CLOUD_DEFAULT_MODEL = "gpt-oss:20b"
 
 
 def _orchestrator_backend_mode() -> str:
-    """DOURMOUSE_ORCHESTRATOR_BACKEND — the opt-in experiment switch:
-    unset/'' -> unchanged local/configured behavior; 'claude'/'claude_cli'
-    -> every feature routed through the real Claude Code CLI (see
-    ClaudeCliClient); 'ollama_cloud'/'cloud' -> every feature routed
-    through a real Ollama Cloud account (real API key, real GPU compute,
-    NOT this machine's); 'split' -> deterministically divide the roster
-    between the two (see _agent_split_backend) rather than picking one
-    for everything — the user's own explicit ask, to compare both at once
-    rather than testing them one at a time.
+    """DOURMOUSE_ORCHESTRATOR_MODE — a real env var ALWAYS wins when set
+    (power-user/test override, checked via os.environ same as always).
+    Otherwise defers to the Settings-panel toggle
+    (config.claude_front_mode_enabled(), read FRESH from disk on every
+    call — same "no restart needed" pattern as
+    config.model_for_agent("orchestrator") already uses — a live Settings
+    change must take effect on the next turn, not require a restart).
+
+    'claude'/'claude_cli' -> every feature routed through the real Claude
+    Code CLI (see ClaudeCliClient); 'ollama_cloud'/'cloud' -> every
+    feature routed through a real Ollama Cloud account; 'gemini' ->
+    every feature routed through Gemini; 'split' -> the DEFAULT (the
+    user's own explicit ask, Claude-front by default): Claude for a free
+    top-level chat and heavy workflows, the roster's non-heavy agents
+    split between Ollama/Gemini per model_delegation.route_for(). '' only
+    when the user has explicitly turned Claude-front OFF in Settings —
+    falls through to this machine's plain configured default, unchanged
+    from pre-this-feature behavior.
     """
-    return os.environ.get(_CLAUDE_ORCHESTRATOR_ENV, "").strip().lower()
+    env_val = os.environ.get(_CLAUDE_ORCHESTRATOR_ENV, "").strip().lower()
+    if env_val:
+        return env_val
+    from dourmouse.config import claude_front_mode_enabled
+
+    return "split" if claude_front_mode_enabled() else ""
 
 
 def claude_orchestrator_enabled() -> bool:

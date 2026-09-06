@@ -872,6 +872,64 @@ def save_orchestrator_model_setting(model: str, backend: str = "") -> dict[str, 
     return {"ok": True, "detail": "saved", "model": model, "backend": backend or None, "path": str(path)}
 
 
+#: The user's own explicit ask: Claude is the default front-end for every
+#: tab; behind the scenes, non-heavy work splits across Ollama/Gemini
+#: (see dispatch.py's _agent_split_backend). Deliberately a DIFFERENT key
+#: than ORCHESTRATOR_BACKEND_SETTING_KEY above — that one already means
+#: "which backend a persisted orchestrator MODEL belongs to" and is
+#: loaded into real os.environ via load_dotenv(); reusing it for this
+#: unrelated on/off flag would have silently collided the two features
+#: (a user picking "ollama" as their orchestrator model would have set
+#: this same key to "ollama", an unrecognized value here — caught before
+#: shipping, not live).
+CLAUDE_FRONT_MODE_SETTING_KEY = "DOURMOUSE_CLAUDE_FRONT_MODE"
+
+
+def claude_front_mode_setting() -> str:
+    """The persisted Claude-front-mode choice, read fresh from disk.
+    "" (nothing saved) means the real default applies — ON — this is
+    an opt-OUT setting, not opt-in, per the user's explicit ask that
+    Claude-front be the default. "off"/"0"/"false"/"no" means the user
+    explicitly disabled it; anything else truthy is an explicit ON
+    (redundant with the default, but a real signal the user affirmed it
+    after having turned it off before).
+    """
+    return _read_user_config_file().get(CLAUDE_FRONT_MODE_SETTING_KEY, "").strip().lower()
+
+
+def claude_front_mode_enabled() -> bool:
+    """True unless the user has explicitly turned it off. Real default-
+    on/opt-out semantics, not default-off/opt-in — see the setting key's
+    own docstring for why."""
+    return claude_front_mode_setting() not in ("off", "0", "false", "no")
+
+
+def save_claude_front_mode_setting(enabled: bool) -> dict[str, Any]:
+    """Persist the Claude-front-mode on/off choice. Same merge-with-
+    existing-file discipline as save_orchestrator_model_setting above —
+    never clobbers unrelated saved settings."""
+    path = user_env_path()
+    try:
+        user_config_dir().mkdir(parents=True, exist_ok=True)
+        existing = _read_user_config_file()
+        existing[CLAUDE_FRONT_MODE_SETTING_KEY] = "on" if enabled else "off"
+        body = [
+            "# Dourmouse configuration — written by first-run setup / settings.",
+            "# This file holds credentials. Keep it to yourself; it is never",
+            "# bundled into a build or uploaded anywhere.",
+            "",
+        ]
+        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        return {"ok": False, "detail": f"could not write config: {exc}"}
+    return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
+
+
 # --------------------------------------------------------------------------- #
 # v13 — Grounded Mode: user-controllable "must actually use a tool" strictness
 # --------------------------------------------------------------------------- #

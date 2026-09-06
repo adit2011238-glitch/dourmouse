@@ -76,6 +76,34 @@ def _hands_free_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _claude_front_mode_off(monkeypatch):
+    """Same "hermetic by default, opt in explicitly" convention as every
+    other fixture in this file: dispatch.py's Claude-front mode now
+    defaults to ON (the user's own explicit ask — Claude-front by
+    default, real Claude Code CLI subprocess calls for a plain unmatched
+    query and every heavy-workflow agent). Left on by default, every
+    dispatch test unrelated to this specific feature (per-agent model
+    overrides, fast-lane routing, the plain "no override" client-
+    construction tests, ...) would silently start routing through a real
+    subprocess call instead of the fake/local client they were actually
+    written to exercise — confirmed: 11 real test failures the moment
+    this default flipped, none of them about Claude-front mode itself.
+
+    A real env var, not a function monkeypatch on config.py — matching
+    every other fixture here (_denoise_off sets DOURMOUSE_DENOISE=0 the
+    same way), and deliberately so: dispatch._orchestrator_backend_mode()
+    checks this env var BEFORE ever consulting
+    config.claude_front_mode_enabled(), so setting it here means
+    config.py's OWN tests (TestClaudeFrontModeSetting) exercise the real,
+    unpatched function untouched — a function-level monkeypatch here
+    would have silently broken every one of those instead.
+    Tests that specifically exercise Claude-front mode
+    (TestOrchestratorBackendMode and friends) explicitly override this
+    env var themselves."""
+    monkeypatch.setenv("DOURMOUSE_ORCHESTRATOR_MODE", "off")
+
+
+@pytest.fixture(autouse=True)
 def _denoise_off(monkeypatch):
     """v13.5: dourmouse/audio_denoise.py's RnnoiseDenoiser is real and
     live-verified (see test_audio_denoise.py, which explicitly opts back

@@ -569,6 +569,50 @@ class TestStudyTab:
         assert data["path"] == str(real_dir)
 
 
+class TestClaudeFrontModeEndpoint:
+    """The Settings UI's backend half for the Claude-front-mode toggle —
+    ON by default, changeable, mirroring TestStudyTab's real-HTTP pattern."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_get_reports_on_by_default(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/claude-front-mode")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["enabled"] is True
+
+    def test_post_false_then_get_reflects_it(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/settings/claude-front-mode",
+            body=json.dumps({"enabled": False}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        post_data = json.loads(resp.read())
+        conn.close()
+        assert post_data["ok"] is True
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/claude-front-mode")
+        resp = conn.getresponse()
+        get_data = json.loads(resp.read())
+        conn.close()
+        assert get_data["enabled"] is False
+
+
 class TestSessionTranscriptEndpoint:
     """GET /api/session/current and /api/session/<id> — reload-survival
     groundwork: the live ChatSession already writes one hash-chained JSONL

@@ -4131,6 +4131,11 @@ function paintSettings(){
       <div id="groundedRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
     <div class="note" id="groundedNote">Loading…</div>
+    <div class="toolbar">
+      <span class="lbl">CLAUDE FRONT MODE</span>
+      <div id="claudeFrontRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+    <div class="note" id="claudeFrontNote">Loading…</div>
     <div class="sec">MEMORY</div>
     <div class="row"><div class="g"><div class="n">${m.count!=null?`${m.count} facts stored`:"—"}</div>
       <div class="d">${m.active?"learning loop on":esc(m.gate||"")}</div></div></div>
@@ -4300,6 +4305,56 @@ function paintSettings(){
       }
     } catch (err) {
       note.textContent = "Could not load Grounded Mode: " + (err.message || err);
+    }
+  })();
+
+  /* Claude-front mode: ON by default (the user's own explicit ask — every
+     tab's visible chat is Claude Code; behind the scenes, non-heavy work
+     splits across Ollama/Gemini per model_delegation.route_for(), and
+     Claude itself handles a free top-level chat and any heavy workflow).
+     Same chip-pair pattern as GROUNDED MODE above, ON/OFF reversed since
+     this is opt-OUT, not opt-in. */
+  (async () => {
+    const row = $("claudeFrontRow"), note = $("claudeFrontNote");
+    if (!row) return;
+    try {
+      const r = await fetch("/api/settings/claude-front-mode");
+      const j = await r.json();
+      row.innerHTML = "";
+      [[true, "ON"], [false, "OFF"]].forEach(([val, label]) => {
+        const btn = document.createElement("button");
+        const on = j.enabled === val;
+        btn.className = "chip" + (on ? " on" : "");
+        btn.type = "button"; btn.textContent = label;
+        btn.setAttribute("aria-pressed", String(on));
+        btn.onclick = async () => {
+          note.textContent = "Saving…";
+          try {
+            const rr = await fetch("/api/settings/claude-front-mode", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({enabled: val}),
+            });
+            const jj = await rr.json();
+            note.textContent = jj.ok
+              ? (val
+                  ? "On — Claude Code is the front for every tab; non-heavy work splits across Ollama/Gemini behind the scenes."
+                  : "Off — this machine's plain configured default backend answers directly, unchanged from before this feature.")
+              : "Could not save: " + (jj.detail || "unknown error");
+          } catch (err) {
+            note.textContent = "Save failed: " + (err.message || err);
+          }
+          paintSettings();
+        };
+        row.appendChild(btn);
+      });
+      if (!note.textContent || note.textContent === "Loading…") {
+        note.textContent = j.enabled
+          ? "On — Claude Code is the front for every tab; non-heavy work splits across Ollama/Gemini behind the scenes."
+          : "Off — this machine's plain configured default backend answers directly, unchanged from before this feature.";
+      }
+    } catch (err) {
+      note.textContent = "Could not load Claude Front Mode: " + (err.message || err);
     }
   })();
 

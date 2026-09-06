@@ -1776,6 +1776,16 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"enabled": grounded_mode_enabled()})
             except Exception as exc:  # noqa: BLE001 - a settings read must never 500
                 self._send_json({"enabled": False, "error": str(exc)[:200]})
+        elif path == "/api/settings/claude-front-mode":
+            # backend half of the Claude-front-mode toggle — ON by
+            # default (the user's own explicit ask), see
+            # config.claude_front_mode_enabled's own docstring.
+            try:
+                from dourmouse.config import claude_front_mode_enabled
+
+                self._send_json({"enabled": claude_front_mode_enabled()})
+            except Exception as exc:  # noqa: BLE001 - a settings read must never 500
+                self._send_json({"enabled": True, "error": str(exc)[:200]})
         elif path == "/api/setup/status":
             # v8.9 first-run setup. Every field is a REAL probe (is Ollama
             # actually answering, is a key actually present) — setup must
@@ -2589,6 +2599,11 @@ class _Handler(BaseHTTPRequestHandler):
             # config.save_grounded_mode_setting). Same post-first-run
             # settings-change auth posture as the orchestrator-model POST.
             self._handle_grounded_mode_post()
+        elif parsed.path == "/api/settings/claude-front-mode":
+            # persists the Claude-front-mode toggle (see
+            # config.save_claude_front_mode_setting). Same post-first-run
+            # settings-change auth posture as the orchestrator-model POST.
+            self._handle_claude_front_mode_post()
         elif parsed.path == "/api/vision/kill-switch":
             # world-monitor-expansion: a REAL toggle for dourmouse/tray.py's
             # privacy kill switch, reachable from the browser console even
@@ -4486,6 +4501,15 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         enabled = bool(body.get("enabled"))
         result = cfg_mod.save_grounded_mode_setting(enabled)
+        self._send_json(result)
+
+    def _handle_claude_front_mode_post(self) -> None:
+        """POST /api/settings/claude-front-mode. Body: {"enabled": bool}."""
+        from dourmouse import config as cfg_mod
+
+        body = self._read_json_body()
+        enabled = bool(body.get("enabled"))
+        result = cfg_mod.save_claude_front_mode_setting(enabled)
         self._send_json(result)
 
     def _handle_memory_api(self) -> None:
