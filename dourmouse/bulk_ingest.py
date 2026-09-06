@@ -47,6 +47,8 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from dourmouse.memory_store import is_duplicate_result
+
 # -- what actually has extractable text ------------------------------------ #
 
 #: Read as plain UTF-8 text, verbatim.
@@ -155,7 +157,10 @@ def ingest_local_tree(
     root = Path(root).expanduser().resolve()
     checkpoint_path = Path(checkpoint_path)
     done = _load_checkpoint(checkpoint_path)
-    stats = {"scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0, "errors": 0}
+    stats = {
+        "scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0,
+        "skipped_duplicate": 0, "errors": 0,
+    }
     for path in iter_local_files(root):
         key = str(path)
         if key in done:
@@ -178,8 +183,15 @@ def ingest_local_tree(
         if len(text) > _MAX_TEXT_CHARS:
             body += f"\n\n[TRUNCATED — {len(text):,} real chars, indexed first {_MAX_TEXT_CHARS:,}]"
         try:
-            store.remember("laptop_file", key, body)
-            stats["indexed"] += 1
+            result = store.remember("laptop_file", key, body)
+            if is_duplicate_result(result):
+                # Same content already indexed under a different path (a
+                # copy/move, or a checkpoint-less re-run of a renamed file)
+                # — real dedup, not an error, and not double-counted as
+                # "indexed".
+                stats["skipped_duplicate"] += 1
+            else:
+                stats["indexed"] += 1
         except Exception as exc:  # noqa: BLE001
             stats["errors"] += 1
             if log:
@@ -283,7 +295,10 @@ def ingest_drive(
     Checkpointed by Drive file id (stable across runs, unlike a path)."""
     checkpoint_path = Path(checkpoint_path)
     done = _load_checkpoint(checkpoint_path)
-    stats = {"scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0, "errors": 0}
+    stats = {
+        "scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0,
+        "skipped_duplicate": 0, "errors": 0,
+    }
     for f in list_all_drive_files(token):
         fid = f.get("id")
         if not fid:
@@ -310,8 +325,14 @@ def ingest_drive(
             body += f"\n\n[TRUNCATED — {len(text):,} real chars, indexed first {_MAX_DRIVE_TEXT:,}]"
         title = f"{name} (drive id {fid})"
         try:
-            store.remember("gdrive_file", title, body)
-            stats["indexed"] += 1
+            result = store.remember("gdrive_file", title, body)
+            if is_duplicate_result(result):
+                # Same content already indexed under a different Drive file
+                # (e.g. "Make a copy" duplicates, or the same file re-shared
+                # with a new id) — real dedup, not an error.
+                stats["skipped_duplicate"] += 1
+            else:
+                stats["indexed"] += 1
         except Exception as exc:  # noqa: BLE001
             stats["errors"] += 1
             if log:
