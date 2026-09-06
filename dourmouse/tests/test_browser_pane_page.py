@@ -1,0 +1,60 @@
+"""Structural checks for the embedded browser pane's real markup/JS in
+ui/console.html (backlog #8). The backend trigger is covered by
+test_browser_pane.py / test_browser_pane_wiring.py; this covers the
+frontend piece actually shipped alongside it.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def _console_html() -> str:
+    return (Path(__file__).resolve().parents[2] / "ui" / "console.html").read_text(encoding="utf-8")
+
+
+class TestBrowserPaneMarkup:
+    def test_pane_element_exists_hidden_by_default(self):
+        html = _console_html()
+        assert 'id="browserPane" class="bp-pane" hidden' in html
+
+    def test_has_nav_controls(self):
+        html = _console_html()
+        for control_id in ("bpBack", "bpFwd", "bpReload", "bpAddr", "bpGo", "bpClose"):
+            assert f'id="{control_id}"' in html, control_id
+
+    def test_has_an_iframe_with_a_sandbox_attribute(self):
+        html = _console_html()
+        assert 'id="bpFrame"' in html
+        assert "sandbox=" in html
+
+    def test_has_a_real_fallback_for_frames_that_refuse_embedding(self):
+        html = _console_html()
+        assert 'id="bpFallback"' in html
+        assert 'id="bpFallbackLink"' in html
+
+
+class TestBrowserPaneJs:
+    def test_open_closes_reuse_one_shared_iframe(self):
+        """Global Panel Manager (Phase 2 of the user's own spec): one
+        shared instance, not one per tab."""
+        html = _console_html()
+        assert "function openBrowserPane(url)" in html
+        assert "function closeBrowserPane()" in html
+
+    def test_close_actually_unloads_the_frame(self):
+        """Real RAM-back semantics, not just hiding a live page."""
+        html = _console_html()
+        assert 'frame.src = ""' in html
+
+    def test_listens_for_the_real_sse_event_type(self):
+        html = _console_html()
+        assert '"browser_pane_open"' in html
+
+    def test_autofocuses_on_open(self):
+        html = _console_html()
+        assert "frame.focus()" in html
+
+    def test_has_a_bounded_fallback_timeout(self):
+        html = _console_html()
+        assert "BP_LOAD_TIMEOUT_MS" in html

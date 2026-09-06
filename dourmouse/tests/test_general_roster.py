@@ -20,6 +20,7 @@ from dourmouse.general_roster import (
     _draft_message_tool,
     _edit_file_tool,
     _fetch_url_tool,
+    _open_browser_pane_tool,
     _open_url_tool,
     _list_calendar_events_tool,
     _list_files_tool,
@@ -320,6 +321,38 @@ class TestResearchInfo:
         monkeypatch.setattr("webbrowser.open", lambda *a, **k: False)
         result = _open_url_tool({"url": "https://example.com"})
         assert "OPEN FAILED" in result
+
+
+class TestOpenBrowserPane:
+    """backlog #8: the embedded, human-visible pane — distinct from
+    browser_open (invisible automation)."""
+
+    def setup_method(self):
+        from dourmouse.browser_pane import set_browser_pane_requests
+
+        set_browser_pane_requests(None)
+
+    def teardown_method(self):
+        from dourmouse.browser_pane import set_browser_pane_requests
+
+        set_browser_pane_requests(None)
+
+    def test_requires_a_url(self):
+        result = _open_browser_pane_tool({})
+        assert "ERROR" in result
+
+    def test_refuses_non_http_schemes(self):
+        result = _open_browser_pane_tool({"url": "javascript:alert(1)"})
+        assert result.startswith("REFUSED")
+
+    def test_opens_and_notifies_observers(self):
+        from dourmouse.browser_pane import get_browser_pane_requests
+
+        seen = []
+        get_browser_pane_requests().on_request(seen.append)
+        result = _open_browser_pane_tool({"url": "https://example.com"})
+        assert "OPENED BROWSER PANE" in result
+        assert seen == [{"type": "browser_pane_open", "url": "https://example.com"}]
 
 
 class TestComms:

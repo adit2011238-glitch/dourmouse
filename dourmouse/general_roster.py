@@ -702,6 +702,25 @@ def _open_url_tool(arguments: dict[str, Any]) -> str:
     return f"OPENED IN BROWSER: {url}"
 
 
+def _open_browser_pane_tool(arguments: dict[str, Any]) -> str:
+    """backlog #8's human-visible half: an <iframe>-based pane embedded
+    in console.html — separate from the headless automation engine
+    below. See dourmouse/browser_pane.py's own module docstring for the
+    full architecture and why it's a bridge singleton, not a direct
+    server reference (this function has no access to the live HTTP
+    server object, same reason message_bus tools use get_message_bus())."""
+    from dourmouse.browser_agent import _is_http_url
+    from dourmouse.browser_pane import get_browser_pane_requests
+
+    url = (arguments.get("url") or "").strip()
+    if not url:
+        return "ERROR: open_browser_pane requires a non-empty 'url'."
+    if not _is_http_url(url):
+        return f"REFUSED: open_browser_pane only accepts http(s) URLs, got {url!r}."
+    get_browser_pane_requests().request_open(url)
+    return f"OPENED BROWSER PANE: {url} (visible to the user now, embedded in the app)."
+
+
 # --------------------------------------------------------------------------- #
 # Study (backlog #9) — sandboxed, read-only access to the user's real
 # study resource folder (~/Documents/MYP data folder). Own subagent so the
@@ -4082,6 +4101,23 @@ def build_general_registry() -> DispatchRegistry:
             "to open pages, fill forms, sign up and log in. Submitting forms, "
             "logging in, and storing credentials always require confirmation.",
             [
+                ToolSpec(
+                    name="open_browser_pane",
+                    description=(
+                        "Open a URL in a real, HUMAN-VISIBLE pane embedded in "
+                        "the app itself — use this when the user should SEE the "
+                        "page (e.g. 'show me github.com', 'pull up the docs for "
+                        "X'), unlike browser_open which drives an invisible "
+                        "automation engine the user never sees. Only http(s) "
+                        "URLs are ever opened."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"url": {"type": "string"}},
+                        "required": ["url"],
+                    },
+                    handler=_open_browser_pane_tool,
+                ),
                 ToolSpec(
                     name="browser_open",
                     description=(

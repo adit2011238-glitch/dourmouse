@@ -5545,6 +5545,7 @@ def run_server(
     state=None,
     auth=None,
     session_file: Path | str | None = None,
+    browser_pane_requests: Any | None = None,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns the running ThreadingHTTPServer.
 
@@ -5945,6 +5946,18 @@ def run_server(
     # Map, or a native shell that hasn't wired an SSE client yet) is
     # completely unaffected; this is additive.
     server.tracker.set_broadcast(server.events_broadcast.broadcast)
+    # backlog #8: the embedded browser pane's trigger. open_browser_pane
+    # (general_roster.py) has no server reference — same reason
+    # message_bus's on_post bridge exists above — so it posts to a
+    # module-level singleton (dourmouse/browser_pane.py) instead; this
+    # observer rebroadcasts it on the SAME real hud/console hub, one more
+    # `data.type` case for a frontend that's already listening.
+    from dourmouse.browser_pane import get_browser_pane_requests
+
+    server.browser_pane_requests = (
+        browser_pane_requests if browser_pane_requests is not None else get_browser_pane_requests()
+    )
+    server.browser_pane_requests.on_request(server.events_broadcast.broadcast)
     # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
     # HUD and the dedicated window listen to (live per-brain cards).
     from dourmouse import all_hands

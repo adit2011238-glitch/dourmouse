@@ -17,6 +17,7 @@ from dourmouse.dispatch import Permission
 from dourmouse.general_roster import build_general_registry
 
 _BROWSER_TOOLS = {
+    "open_browser_pane",
     "browser_open",
     "browser_snapshot",
     "browser_fill",
