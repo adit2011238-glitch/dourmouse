@@ -326,14 +326,30 @@ class _FakeWebview:
     def __init__(self):
         self.windows = []
         self.started = False
+        self.start_kwargs: dict = {}
 
     def create_window(self, title, url=None, **kwargs):
         win = _FakeWindow(title, url, **kwargs)
         self.windows.append(win)
         return win
 
-    def start(self):
+    def start(self, **kwargs):
+        # v13.10 (confirmed indefinite-hang root cause): desktop.launch()
+        # calls ``webview.start(private_mode=False, storage_path=...)`` —
+        # this fake used to take no arguments at all, so that call raised
+        # TypeError, which launch()'s own except-Exception handler quietly
+        # swallowed into _fallback_to_browser(), which then blocks in
+        # _wait_forever() (an unconditional ``while True: time.sleep(3600)``
+        # with no test seam, only broken by KeyboardInterrupt) — hanging the
+        # whole suite forever. dourmouse/tests/test_desktop.py's own
+        # _FakeWebview.start() already takes **kwargs for exactly this
+        # reason; this duplicate class was never updated to match when
+        # launch() grew those two arguments. Accepting (and recording, for
+        # any test that wants to assert on them) **kwargs here keeps
+        # start() a true no-op again, so launch() takes its normal
+        # `return 0` path instead of the browser-fallback path.
         self.started = True
+        self.start_kwargs = kwargs
 
 
 class TestOpenAllAgents:
@@ -366,9 +382,28 @@ class TestOpenAllAgents:
         monkeypatch.setenv("DOURMOUSE_UI_PORT", "0")
         monkeypatch.setenv("DOURMOUSE_LEARN", "0")  # v2.9: hermetic — no real memory store
         fake = _FakeWebview()
+        # v13.11 (confirmed indefinite-hang fix, root-caused via a
+        # faulthandler SIGABRT dump of the stuck process — traceback landed
+        # in desktop.py's own _wait_forever() <- _fallback_to_browser() <-
+        # launch()'s ``except Exception`` around the real
+        # ``webview.start(private_mode=..., storage_path=...)`` call):
+        # _FakeWebview.start() (further up this file) used to take NO
+        # arguments, so that real call raised TypeError, which launch()
+        # quietly turned into an honest browser-fallback -- which really
+        # calls webbrowser.open() and then blocks forever in
+        # _wait_forever()'s unconditional ``while True: time.sleep(3600)``
+        # (only broken by KeyboardInterrupt). Fixed at the source: the fake
+        # now takes **kwargs (matching test_desktop.py's own _FakeWebview,
+        # which already did and is why that file's launch() tests never
+        # hung). vision_autostart=False is added here too, matching every
+        # launch() call in test_desktop.py's autouse-fixture-protected file
+        # (see its _no_real_vision_helpers) — this file has no such
+        # fixture, and vision_autostart_enabled() defaults ON, so leaving
+        # it unset would let this call start the real in-process tray/
+        # overlay/wakeword helpers as an unrelated hermeticity gap.
         code = desktop.launch(
             _echo_registry(), port=0, webview_loader=lambda: fake,
-            live_polling=False, open_all_windows=True,
+            live_polling=False, open_all_windows=True, vision_autostart=False,
         )
         assert code == 0
         titles = [w.title for w in fake.windows]
