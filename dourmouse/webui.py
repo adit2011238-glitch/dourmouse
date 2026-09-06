@@ -71,7 +71,7 @@ from dourmouse.governance import RbacPolicy
 from dourmouse.learn import learn_enabled, open_default_store, record_feedback
 from dourmouse.live_runtime import LiveRuntime, live_enabled
 from dourmouse.memory_store import MemoryStore, RemoteMemoryStoreUnavailable
-from dourmouse.message_bus import MessageBus, get_message_bus
+from dourmouse.message_bus import BROADCAST, MessageBus, get_message_bus
 from dourmouse.planner import find_agents_for_query  # re-exported for callers
 
 
@@ -2555,6 +2555,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_chat()
         elif parsed.path == "/api/confirm":
             self._handle_confirm()
+        elif parsed.path == "/api/messages":
+            self._handle_messages_post()
         elif parsed.path == "/api/attention/dismiss":
             body = self._read_json_body()
             try:
@@ -5403,6 +5405,25 @@ class _Handler(BaseHTTPRequestHandler):
                 "count": bus.count(),
             }
         )
+
+    def _handle_messages_post(self) -> None:
+        """Let the human post into the agent-to-agent bus directly — the
+        real "optionally join" half of the human-viewable agent chat
+        surface (the GET side, /api/messages, already existed and already
+        renders on map.html/index.html; this is the missing write path).
+        ``from`` defaults to "human" — the one identity no real subagent
+        ever uses (checked: no roster name is literally "human") — so a
+        person's own messages are never confused with an agent's."""
+        body = self._read_json_body()
+        to_agent = str(body.get("to") or BROADCAST).strip()[:80] or BROADCAST
+        text = str(body.get("body") or "").strip()
+        if not text:
+            self._send_json({"ok": False, "detail": "body must be non-empty"})
+            return
+        subject = str(body.get("subject") or "").strip()[:200]
+        bus = getattr(self.server, "bus", None) or get_message_bus()
+        message = bus.post("human", to_agent, subject, text)
+        self._send_json({"ok": True, "message": message})
 
     def _handle_role(self) -> None:
         """Phase A3: switch THIS conversation's RBAC role (audited).

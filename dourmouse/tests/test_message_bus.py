@@ -336,6 +336,54 @@ class TestMessagesApi:
             srv.server_close()
             thread.join(timeout=2)
 
+    def test_post_lets_a_human_join_the_conversation(self):
+        """The write half of the human-viewable agent chat surface — the
+        GET side already existed and already renders on map.html/index.html;
+        this is what lets a person actually post into the same bus."""
+        bus = MessageBus()
+        srv = run_server(_echo_registry(), port=0, client=None, config=None, bus=bus)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            import http.client
+
+            conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+            payload = json.dumps({"to": "echo_agent", "body": "hello from the user"}).encode()
+            conn.request("POST", "/api/messages", body=payload, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            data = json.loads(resp.read().decode())
+            conn.close()
+            assert resp.status == 200
+            assert data["ok"] is True
+            assert data["message"]["from"] == "human"
+            assert data["message"]["to"] == "echo_agent"
+            assert data["message"]["body"] == "hello from the user"
+            assert bus.count() == 1
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
+    def test_post_requires_a_non_empty_body(self):
+        bus = MessageBus()
+        srv = run_server(_echo_registry(), port=0, client=None, config=None, bus=bus)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            import http.client
+
+            conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+            conn.request("POST", "/api/messages", body=json.dumps({"to": "echo_agent"}).encode(), headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            data = json.loads(resp.read().decode())
+            conn.close()
+            assert data["ok"] is False
+            assert bus.count() == 0
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
     def test_agent_endpoint_includes_inbox_and_unread(self):
         bus = MessageBus()
         srv = run_server(_echo_registry(), port=0, client=None, config=None, bus=bus)

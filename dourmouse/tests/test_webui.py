@@ -423,7 +423,12 @@ class TestSpotifyWidgetInjection:
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
         srv, port = server
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        conn.request("GET", "/")
+        # NOT "/" — that serves console.html (the default since v8.7),
+        # which is correctly EXCLUDED (it ships its own inline Spotify
+        # controls, per _serve_static's own exclusion-list comment).
+        # os.html has no inline controls of its own, so it's a real
+        # "should get the floating widget" page.
+        conn.request("GET", "/os.html")
         resp = conn.getresponse()
         assert resp.status == 200
         body = resp.read()
