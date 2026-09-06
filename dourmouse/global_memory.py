@@ -34,12 +34,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+from dourmouse.config import user_config_dir
 
 __all__ = [
     "GlobalMemory",
@@ -55,7 +58,51 @@ EMBED_MODEL = os.environ.get("DOURMOUSE_EMBED_MODEL", "nomic-embed-text")
 EMBED_DIM = int(os.environ.get("DOURMOUSE_EMBED_DIM", "768"))  # nomic-embed-text's real output size
 _OLLAMA_URL = os.environ.get("DOURMOUSE_OLLAMA_URL", "http://127.0.0.1:11434")
 
-_DEFAULT_DB = Path(__file__).resolve().parent.parent / "global_memory.sqlite3"
+# Pre-fix location (repo root, beside the package) — real bug: this broke
+# in a frozen/installed build (the package dir is read-only / wiped on
+# update) and, on a dev checkout, dumped user memory into the repo tree
+# instead of the per-user config dir every other piece of user state (the
+# .env, the session file) already uses. Kept only as the one-time
+# migration source below — never written to again.
+_LEGACY_DB = Path(__file__).resolve().parent.parent / "global_memory.sqlite3"
+
+
+def _default_db_path() -> Path:
+    """Where GlobalMemory stores its sqlite3 file absent an explicit
+    ``db_path``: the platform-correct per-user config directory
+    (``dourmouse.config.user_config_dir()`` — already handles Windows/
+    macOS/XDG and the ``DOURMOUSE_CONFIG_DIR`` test override; reused here
+    rather than duplicated, exactly like ``firstrun.py`` and
+    ``code_backends.py`` already do).
+
+    Read fresh on every call (not cached at import time) so the
+    ``DOURMOUSE_CONFIG_DIR`` test override — set per-test by conftest's
+    autouse ``_user_config_isolated`` fixture, AFTER this module is
+    imported — is honored, the same reasoning ``config.py``'s own
+    ``_read_user_config_file`` already documents for reading that env var
+    fresh rather than once.
+
+    Backward compatible: a legacy DB at the OLD repo-root path
+    (``_LEGACY_DB``, pre-fix installs) is copied — never moved — to the
+    new location the first time nothing exists there yet, so an existing
+    user's memory is not silently orphaned by this fix. Logged loudly
+    (Rule 2.2 honesty) rather than done silently; a copy failure is
+    logged and swallowed (never raised) so a permissions hiccup on the
+    legacy file can't break memory store construction — the caller just
+    starts a fresh store at the new location, same as a brand-new install.
+    """
+    new_path = user_config_dir() / "global_memory.sqlite3"
+    if not new_path.exists() and _LEGACY_DB.exists():
+        try:
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_LEGACY_DB, new_path)
+            print(
+                f"[GLOBAL_MEMORY] migrated legacy DB from {_LEGACY_DB} to "
+                f"{new_path} (one-time; old copy left in place, not deleted)"
+            )
+        except OSError as exc:
+            print(f"[GLOBAL_MEMORY] could not migrate legacy DB: {exc}")
+    return new_path
 
 
 def global_memory_enabled() -> bool:
@@ -141,7 +188,7 @@ class GlobalMemory:
     actual shape)."""
 
     def __init__(self, db_path: str | Path | None = None):
-        self.db_path = Path(db_path) if db_path else _DEFAULT_DB
+        self.db_path = Path(db_path) if db_path else _default_db_path()
         self._conn = sqlite3.connect(str(self.db_path))
         self._conn.execute(
             """CREATE TABLE IF NOT EXISTS memory (

@@ -5,9 +5,12 @@ mocking discipline: no real backend needed to exercise this)."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
+from dourmouse import global_memory as global_memory_module
+from dourmouse.config import user_config_dir
 from dourmouse.global_memory import (
     GlobalMemory,
     cosine_similarity,
@@ -212,3 +215,61 @@ class TestIngestCorpusFile:
         corpus_path.write_text(json.dumps({"not": "a list"}))
         with pytest.raises(ValueError, match="must contain a JSON array"):
             ingest_corpus_file(corpus_path)
+
+
+class TestDefaultDbPath:
+    """Real data-storage bug fix: the default sqlite3 location must be the
+    platform-correct per-user config dir (dourmouse.config.user_config_dir()
+    — conftest's autouse _user_config_isolated fixture already points this
+    at a per-test tmp dir), not beside the package. _LEGACY_DB is
+    monkeypatched in every test here so the developer's REAL repo-root
+    global_memory.sqlite3 (if one exists on this machine) is never touched
+    or read by the test suite."""
+
+    def test_resolves_under_the_per_user_config_dir(self, monkeypatch):
+        monkeypatch.setattr(global_memory_module, "_LEGACY_DB", Path("/nonexistent/legacy.sqlite3"))
+        resolved = global_memory_module._default_db_path()
+        assert resolved == user_config_dir() / "global_memory.sqlite3"
+
+    def test_no_migration_when_no_legacy_file_exists(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(global_memory_module, "_LEGACY_DB", tmp_path / "no-such-file.sqlite3")
+        resolved = global_memory_module._default_db_path()
+        assert resolved == user_config_dir() / "global_memory.sqlite3"
+        assert not resolved.exists()
+
+    def test_migrates_legacy_db_once_when_nothing_at_new_location(self, tmp_path, monkeypatch, capsys):
+        legacy = tmp_path / "legacy" / "global_memory.sqlite3"
+        legacy.parent.mkdir()
+        legacy.write_bytes(b"legacy-sqlite-bytes")
+        monkeypatch.setattr(global_memory_module, "_LEGACY_DB", legacy)
+
+        resolved = global_memory_module._default_db_path()
+
+        assert resolved == user_config_dir() / "global_memory.sqlite3"
+        assert resolved.exists()
+        assert resolved.read_bytes() == b"legacy-sqlite-bytes"
+        assert legacy.exists()  # old copy left in place, never deleted
+        assert "migrated legacy DB" in capsys.readouterr().out
+
+    def test_does_not_overwrite_existing_data_at_the_new_location(self, tmp_path, monkeypatch):
+        legacy = tmp_path / "legacy" / "global_memory.sqlite3"
+        legacy.parent.mkdir()
+        legacy.write_bytes(b"legacy-bytes")
+        monkeypatch.setattr(global_memory_module, "_LEGACY_DB", legacy)
+
+        new_path = user_config_dir() / "global_memory.sqlite3"
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        new_path.write_bytes(b"already-real-user-data")
+
+        resolved = global_memory_module._default_db_path()
+
+        assert resolved == new_path
+        assert resolved.read_bytes() == b"already-real-user-data"
+
+    def test_globalmemory_default_construction_uses_the_new_location(self, monkeypatch):
+        monkeypatch.setattr(global_memory_module, "_LEGACY_DB", Path("/nonexistent/legacy.sqlite3"))
+        mem = global_memory_module.GlobalMemory()
+        try:
+            assert mem.db_path == user_config_dir() / "global_memory.sqlite3"
+        finally:
+            mem.close()
