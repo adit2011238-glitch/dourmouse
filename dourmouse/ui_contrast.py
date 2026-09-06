@@ -192,6 +192,14 @@ def ui_setup_path() -> Path:
     return Path(__file__).resolve().parent.parent / "ui" / "setup.html"
 
 
+def ui_app_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "app.html"
+
+
+def ui_hud_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "hud.html"
+
+
 _ROOT_BLOCK = re.compile(r":root\s*\{([^{}]*)\}")
 
 

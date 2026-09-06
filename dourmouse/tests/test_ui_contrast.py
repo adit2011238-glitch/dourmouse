@@ -329,3 +329,156 @@ def test_dim_token_stays_no_brighter_than_primary(screen, dim_token):
     primary_lum = uc.relative_luminance(uc.parse_color(tokens[_PRIMARY_TOKEN[screen]])[:3])
     dim_lum = uc.relative_luminance(uc.parse_color(tokens[dim_token])[:3])
     assert dim_lum <= primary_lum
+
+
+# --------------------------------------------------------------------------- #
+# app.html and hud.html -- the desktop shell and the tactical HUD screen.
+#
+# app.html carries three live variants of the same --ink/--ink-2/--ink-3
+# trio on --bg/--surface/--surface-2: a light default `:root { ... }`, a
+# `prefers-color-scheme: dark` override (`:root:not([data-theme="light"])`),
+# and an explicit `:root[data-theme="dark"]`. default_root_block() only
+# ever matches the first *bare* `:root { ... }` -- neither qualified
+# selector fits its regex -- so here it captures the LIGHT default (the
+# opposite role it plays for os.html, whose bare default is dark and whose
+# override is qualified). The two dark variants are pulled with a small
+# local block extractor: same "no nested braces inside the body" assumption
+# default_root_block relies on, just keyed by literal selector text instead
+# of "the first bare :root".
+#
+# hud.html has no theme variants at all -- a single unconditional `:root`
+# -- so default_root_block is the same no-op safety net there that it is
+# for login.html/setup.html.
+# --------------------------------------------------------------------------- #
+
+APP_TEXT_TOKENS = {"--ink": uc.AA_NORMAL, "--ink-2": uc.AA_NORMAL, "--ink-3": uc.AA_NORMAL}
+APP_GROUND_TOKENS = ("--bg", "--surface", "--surface-2")
+
+HUD_TEXT_TOKENS = {"--txt": uc.AA_NORMAL, "--red": uc.AA_NORMAL, "--dim": uc.AA_NORMAL, "--dim-2": uc.AA_NORMAL}
+HUD_GROUND_TOKENS = ("--bg", "--panel", "--raised")
+
+
+def _named_root_block(source: str, selector: str) -> str:
+    """Extract one `<selector> { ... }` block by literal selector text.
+
+    Only valid for a block with no nested braces in its body -- true of
+    every token block these two screens declare -- so this stays a
+    test-local helper next to default_root_block() rather than growing
+    that module's public API for a shape it hasn't needed before.
+    """
+    start = source.index(selector)
+    brace_open = source.index("{", start)
+    brace_close = source.index("}", brace_open)
+    return source[brace_open : brace_close + 1]
+
+
+def _app_variant(name: str) -> str:
+    path = uc.ui_app_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if name == "light":
+        return uc.default_root_block(text)
+    if name == "dark-system":
+        return _named_root_block(text, ':root:not([data-theme="light"])')
+    if name == "dark-explicit":
+        return _named_root_block(text, ':root[data-theme="dark"]')
+    raise ValueError(name)
+
+
+_APP_VARIANTS = ["light", "dark-system", "dark-explicit"]
+
+
+@pytest.mark.parametrize("variant", _APP_VARIANTS)
+def test_app_shipping_text_tokens_meet_AA(variant):
+    rows = uc.audit_tokens(_app_variant(variant), APP_TEXT_TOKENS, APP_GROUND_TOKENS)
+    assert rows, f"no text tokens found for app.html ({variant}) -- has the token block moved?"
+    failures = [r for r in rows if not r["passes"]]
+    assert not failures, f"app.html ({variant}) text tokens below WCAG AA: " + "; ".join(
+        f"{r['token']} on {r['ground']} = {r['ratio']}:1 (needs {r['threshold']})"
+        for r in failures
+    )
+
+
+@pytest.mark.parametrize("variant", _APP_VARIANTS)
+def test_app_ink3_was_the_known_failing_zinc_500_value(variant):
+    """Pins the regression: --ink-3 must no longer be #71717A, the value
+    that measured 3.81-4.63:1 (light) / 3.08-4.12:1 (dark) against
+    app.html's own grounds -- below the 4.5:1 its real caption/hint text
+    (.mode .sub, .who, .topbar .hint, .status, .chint) needs."""
+    tokens = uc.extract_tokens(_app_variant(variant))
+    assert tokens["--ink-3"].upper() != "#71717A"
+
+
+@pytest.mark.parametrize("variant", _APP_VARIANTS)
+def test_app_ink3_stays_no_more_prominent_than_ink2(variant):
+    """The fix ties --ink-3 to --ink-2 in every variant (same accepted
+    outcome as login.html's --text-dim tying --text-body) -- it must not
+    overshoot into reading as more prominent than the token above it.
+    Contrast-against-ground, not raw luminance, is the right ordering
+    here: app.html's light variant wants the darker of two inks to read as
+    more prominent, the opposite direction from every dark-themed screen
+    the luminance-based checks above assume."""
+    tokens = uc.extract_tokens(_app_variant(variant))
+    bg = uc.parse_color(tokens["--bg"])[:3]
+    ink2 = uc.contrast_ratio(uc.parse_color(tokens["--ink-2"]), bg)
+    ink3 = uc.contrast_ratio(uc.parse_color(tokens["--ink-3"]), bg)
+    assert ink3 <= ink2 + 1e-9
+
+
+@pytest.fixture(scope="module")
+def hud_root():
+    path = uc.ui_hud_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    return uc.default_root_block(path.read_text(encoding="utf-8", errors="replace"))
+
+
+def test_hud_shipping_text_tokens_meet_AA(hud_root):
+    rows = uc.audit_tokens(hud_root, HUD_TEXT_TOKENS, HUD_GROUND_TOKENS)
+    assert rows, "no text tokens found for hud.html -- has the token block moved?"
+    failures = [r for r in rows if not r["passes"]]
+    assert not failures, "hud.html text tokens below WCAG AA: " + "; ".join(
+        f"{r['token']} on {r['ground']} = {r['ratio']}:1 (needs {r['threshold']})"
+        for r in failures
+    )
+
+
+def test_hud_dim_tokens_were_the_known_failing_values(hud_root):
+    """Pins the regression: --dim (was #71717A, 3.08-4.12:1 on
+    bg/panel/raised) and --dim-2 (was #52525B, 1.93-2.57:1) must no longer
+    be those failing values, on real 10.5-12px labels (.phead, .titlebox
+    .sub, .hdrright, .logbox timestamps), not decorative glyphs."""
+    tokens = uc.extract_tokens(hud_root)
+    assert tokens["--dim"].upper() != "#71717A"
+    assert tokens["--dim-2"].upper() != "#52525B"
+
+
+def test_hud_dim_tokens_stay_no_more_prominent_than_txt(hud_root):
+    """--dim/--dim-2 now equal --red exactly (same collapsed-distinction
+    outcome console.html/setup.html already accepted for their own
+    --blue-dim/--blue-deep) -- none of the three may end up more prominent
+    than --txt, the brightest/primary token on this screen."""
+    tokens = uc.extract_tokens(hud_root)
+    bg = uc.parse_color(tokens["--bg"])[:3]
+    txt_ratio = uc.contrast_ratio(uc.parse_color(tokens["--txt"]), bg)
+    for name in ("--red", "--dim", "--dim-2"):
+        assert uc.contrast_ratio(uc.parse_color(tokens[name]), bg) <= txt_ratio + 1e-9
+
+
+def test_hud_taskadd_input_focus_visible_ring_is_legible():
+    """.taskadd input set outline:none and, before this cycle, had no
+    :focus-visible compensator at all -- every other control on the page
+    relied on the browser default ring, which this red/amber terminal HUD
+    never styled for, and this one input actively defeated. The new rule
+    must paint a real, legible ring: --amber on --bg measures 9.26:1, well
+    past the 3:1 SC 1.4.11 needs for a non-text UI-component indicator."""
+    path = uc.ui_hud_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    source = path.read_text(encoding="utf-8", errors="replace")
+    assert ".taskadd input:focus-visible" in source
+    assert "outline: 1px solid var(--amber)" in source
+    tokens = uc.extract_tokens(uc.default_root_block(source))
+    ratio = uc.contrast_ratio(uc.parse_color(tokens["--amber"]), uc.parse_color(tokens["--bg"])[:3])
+    assert ratio >= uc.AA_LARGE

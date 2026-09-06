@@ -54,8 +54,20 @@
     --red: #A1A1AA;
     --err: #EF4444;
     --amber: #F59E0B;
-    --dim: #71717A;
-    --dim-2: #52525B;
+    /* --dim/--dim-2 were #71717A (zinc-500, 4.12/3.67/3.08:1 on
+       bg/panel/raised) and #52525B (zinc-600, 2.57/2.29/1.93:1) -- both
+       below the 4.5:1 WCAG 2.1 SC 1.4.3 needs, on real 10.5-12px labels
+       (.phead, .titlebox .sub, .hdrright, .logbox timestamps), not
+       decorative glyphs. Same failing value the contrast audit already
+       found and fixed in console.html/os.html/login.html/setup.html.
+       Raised both to zinc-400 (#A1A1AA), this file's own --red -- already
+       used here as the neutral body colour at 7.76/6.91/5.81:1 -- rather
+       than inventing an unproven third value. That collapses the
+       dim/dim-2 distinction (same outcome as os.html's --t1/--t2 and
+       console.html's --blue/--blue-dim after their fixes), not a new
+       contrast defect. */
+    --dim: #A1A1AA;
+    --dim-2: #A1A1AA;
     --txt: #FAFAFA;
     --mono: 'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,"SF Mono",Menlo,Consolas,monospace;
     --display: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
@@ -63,6 +75,12 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
+  /* This screen had ZERO :focus-visible rules -- every button (.taskadd,
+     .audiocontrols, .grid, header) relied on the browser's native default
+     ring, which a red/amber terminal HUD never styled for and one input
+     actively defeats (below). Matching console.html's own global default
+     exactly: 1px amber, 2px offset. */
+  :focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
   /* The 44px bench grid stays as a crisp solid rule; the centre-of-screen
      radial wash does not. */
   body {
@@ -140,7 +158,14 @@
     flex: 1 1 auto; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 2px;
     color: var(--txt); font-family: var(--mono); font-size: 11.5px; padding: 7px 9px; outline: none;
   }
-  .taskadd input:focus { border-color: var(--line-2); }
+  /* .taskadd input set outline:none above; its only compensator was this
+     plain :focus border-color shift (--line #27272A -> --line-2 #3F3F46,
+     1.34:1 -> 1.91:1 against --bg) -- the identical bug class 506c078 and
+     the login/setup cycle already found and fixed elsewhere (same two
+     hex values, same non-indicator), just never checked on this screen.
+     :focus-visible (not :focus, matching the rest of this fix family) now
+     also draws a real 2px-offset --amber ring (9.26:1 on --bg). */
+  .taskadd input:focus-visible { border-color: var(--line-2); outline: 1px solid var(--amber); outline-offset: 2px; }
   .taskadd button {
     background: var(--raised); color: var(--txt); border: 1px solid var(--line); border-radius: 2px;
     font-family: var(--display); font-size: 10.5px; font-weight: 500; letter-spacing: .12em;
