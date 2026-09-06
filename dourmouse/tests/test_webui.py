@@ -522,6 +522,53 @@ class TestStartupCheckInjection:
         assert self._STARTUP_TAG not in body
 
 
+class TestStudyTab:
+    """backlog #9: the Study tab — a real page served at /study, plus the
+    honest folder-status endpoint it polls on load."""
+
+    def test_study_page_is_served(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/study")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert b"Study" in body
+        assert b"focus_agent" in body
+
+    def test_study_html_alias_also_works(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/study.html")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        conn.close()
+
+    def test_study_status_endpoint_is_honest_about_a_missing_folder(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(tmp_path / "not-there"))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/study/status")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["exists"] is False
+
+    def test_study_status_endpoint_reports_a_real_folder(self, server, monkeypatch, tmp_path):
+        real_dir = tmp_path / "study"
+        real_dir.mkdir()
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(real_dir))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/study/status")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["exists"] is True
+        assert data["path"] == str(real_dir)
+
+
 class TestSessionTranscriptEndpoint:
     """GET /api/session/current and /api/session/<id> — reload-survival
     groundwork: the live ChatSession already writes one hash-chained JSONL

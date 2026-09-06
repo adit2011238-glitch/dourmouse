@@ -1584,6 +1584,10 @@ class _Handler(BaseHTTPRequestHandler):
             # alongside the HUD rather than replacing it, so the operator
             # surface stays available at "/".
             self._serve_static("app.html")
+        elif path in ("/study", "/study.html"):
+            # backlog #9: the Study tab — chat scoped to the "study"
+            # subagent (real, read-only access to the user's study folder).
+            self._serve_static("study.html")
         elif path in ("/map", "/map.html"):
             self._serve_static("map.html")
         elif path in ("/workspace", "/workspace.html"):
@@ -1947,6 +1951,12 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.connections import check_connections
 
             self._send_json(check_connections())
+        elif path == "/api/study/status":
+            # backlog #9: honest existence check for the Study tab's real
+            # resource folder — never claim it's there when it isn't.
+            from dourmouse.study_agent import study_folder_status
+
+            self._send_json(study_folder_status())
         elif path == "/api/browser/status":
             # v5.25: browser-agent engine/state (never launches Chrome here).
             from dourmouse.browser_agent import browser_status

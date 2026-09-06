@@ -1752,6 +1752,7 @@ class TestEndToEndThroughGeneralRoster:
         assert registry.subagent_names == {
             "orchestrator",
             "research_info",
+            "study",  # backlog #9: Study tab, sandboxed access to the MYP folder
             "comms",
             "scheduling",
             "dev_coding",

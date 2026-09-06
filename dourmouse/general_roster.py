@@ -703,6 +703,42 @@ def _open_url_tool(arguments: dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Study (backlog #9) — sandboxed, read-only access to the user's real
+# study resource folder (~/Documents/MYP data folder). Own subagent so the
+# UI's Study tab has a real, dedicated identity to route to.
+# --------------------------------------------------------------------------- #
+
+def _study_list_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.study_agent import StudyPathError, list_study_files
+
+    rel_path = arguments.get("path") or ""
+    try:
+        result = list_study_files(rel_path)
+    except StudyPathError as exc:
+        return f"ERROR: {exc}"
+    if not result["entries"]:
+        return f"STUDY FOLDER {rel_path or '.'!r}: empty (honest — nothing to list)."
+    lines = [
+        f"{'[dir] ' if e['is_dir'] else ''}{e['name']}" for e in result["entries"]
+    ]
+    return f"STUDY FOLDER {rel_path or '.'!r} ({len(lines)} items):\n" + "\n".join(lines)
+
+
+def _study_read_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.study_agent import StudyPathError, read_study_file
+
+    rel_path = (arguments.get("path") or "").strip()
+    if not rel_path:
+        return "ERROR: study_read_file requires a non-empty 'path'."
+    try:
+        result = read_study_file(rel_path)
+    except StudyPathError as exc:
+        return f"ERROR: {exc}"
+    suffix = "\n[...truncated]" if result["truncated"] else ""
+    return f"STUDY FILE {rel_path} ({len(result['content'])} chars):\n{result['content']}{suffix}"
+
+
+# --------------------------------------------------------------------------- #
 # Comms — draft is real; sending is confirmation-gated + NOT CONFIGURED
 # --------------------------------------------------------------------------- #
 
@@ -2554,6 +2590,60 @@ def build_general_registry() -> DispatchRegistry:
                     confirm_prompt=lambda a: (
                         f"Open {a.get('url', '?')} in your browser?"
                     ),
+                ),
+            ],
+        )
+    )
+
+    registry.register_subagent(
+        _subagent(
+            "study",
+            "General",
+            "Study tab: real, read-only access to the user's own study resource "
+            "folder (~/Documents/MYP data folder) — textbooks, past assessments, "
+            "notes.",
+            [
+                ToolSpec(
+                    name="study_list_files",
+                    description=(
+                        "List real files/folders in the user's study resource "
+                        "folder (or a subfolder of it). Use this to see what "
+                        "material actually exists before claiming a topic isn't "
+                        "covered by their own resources."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "subfolder path, relative to the study folder root; empty for the root",
+                                "default": "",
+                            },
+                        },
+                    },
+                    handler=_study_list_tool,
+                ),
+                ToolSpec(
+                    name="study_read_file",
+                    description=(
+                        "Read a real text file from the user's study resource "
+                        "folder. PRIORITIZE YOUR OWN KNOWLEDGE for well-established "
+                        "concepts — only reach for this when the user's own "
+                        "specific material (their notes, a specific past "
+                        "assessment, their textbook's exact wording) actually "
+                        "matters for the answer."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "file path, relative to the study folder root",
+                            },
+                        },
+                        "required": ["path"],
+                    },
+                    handler=_study_read_tool,
                 ),
             ],
         )
