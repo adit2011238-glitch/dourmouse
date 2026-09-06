@@ -423,20 +423,23 @@ class ChatSession:
         """Index one completed user+assistant exchange into the long-term
         store under its own "chat_history" source.
 
-        Distinct from the "Store & Learn" ``session:<stem>`` ingestion above
-        (v2.9, gated on ``learn_enabled()``) — this is backlog item 3's own
-        slice, always attempted whenever a memory store is attached,
-        independent of whether Store & Learn is on. Reuses ``remember()``'s
-        content_hash dedup (76a779a): a resumed session replaying an
-        already-persisted turn re-derives the SAME (source, title), so the
-        upsert overwrites the existing row in place instead of inserting a
-        new one — a replayed turn yields zero new rows. Gated behind
-        ``DOURMOUSE_AUTOSAVE_CHAT_RAG`` (default enabled) as a one-line kill
-        switch; unset, "1", "true", "yes", "on" all mean enabled, anything
-        in the falsy set below disables it. A broken/unavailable store must
-        never break the conversation, so failures here are swallowed.
+        Also gated on ``learn_enabled()`` (the master "Store & Learn"
+        switch) — real fix, caught by a pre-existing test this feature
+        broke: a user who disables Store & Learn reasonably expects
+        NOTHING to be stored about them, not "the other ingestion path
+        stops but chat history keeps getting written anyway." Reuses
+        ``remember()``'s content_hash dedup (76a779a): a resumed session
+        replaying an already-persisted turn re-derives the SAME (source,
+        title), so the upsert overwrites the existing row in place instead
+        of inserting a new one — a replayed turn yields zero new rows.
+        Also gated behind ``DOURMOUSE_AUTOSAVE_CHAT_RAG`` (default enabled)
+        as its own, separate one-line kill switch for turning this OFF
+        while leaving ordinary Store & Learn recall on; unset, "1", "true",
+        "yes", "on" all mean enabled, anything in the falsy set below
+        disables it. A broken/unavailable store must never break the
+        conversation, so failures here are swallowed.
         """
-        if self.memory is None:
+        if self.memory is None or not learn_enabled():
             return
         flag = os.environ.get("DOURMOUSE_AUTOSAVE_CHAT_RAG", "1").strip().lower()
         if flag in ("0", "false", "no", "off"):

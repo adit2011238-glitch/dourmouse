@@ -194,15 +194,20 @@ class TestQuerySpatialVault:
         assert exc.value.kind == "NOT_CONFIGURED"
 
     def test_missing_faiss_dependency_is_honest(self, tmp_path, monkeypatch):
-        """REAL test, not a simulation: faiss-cpu is genuinely absent from
-        this venv (confirmed directly via `import faiss` before writing
-        this module at all), so this exercises the actual honest-degrade
-        path this codebase will hit on any machine without it installed."""
+        """faiss-cpu is now genuinely installed in this venv (it wasn't
+        when this test was first written) -- plain
+        ``monkeypatch.delitem(sys.modules, "faiss")`` only clears the
+        import CACHE, it does not stop Python re-importing an actually-
+        installed package, so the missing-dependency path was never
+        really exercised by that trick anymore. ``sys.modules["faiss"] =
+        None`` is the real, correct way to force ``import faiss`` to
+        raise ImportError regardless of what's on disk -- Python's import
+        system treats a None entry as "deliberately blocked"."""
         db = tmp_path / "vault.db"
         _make_db(db, rows=[(1, "hi")])
         (tmp_path / "vector.index").write_bytes(b"placeholder")
         monkeypatch.setenv("DOURMOUSE_SPATIAL_VAULT_PATH", str(db))
-        monkeypatch.delitem(sys.modules, "faiss", raising=False)
+        monkeypatch.setitem(sys.modules, "faiss", None)
         with pytest.raises(ExternalCorpusError) as exc:
             query_spatial_vault("hello")
         assert exc.value.kind == "MISSING_DEPENDENCY"

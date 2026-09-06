@@ -449,8 +449,11 @@ class TestMemoryApi:
             conn.close()
             assert resp.status == 200
             assert data["ok"] is True
-            # The turn auto-ingested (1) + the feedback fact (1).
-            assert store.count() == 2
+            # The turn auto-ingested via "Store & Learn" (1) + the SAME
+            # turn auto-saved to RAG under its own separate "chat_history"
+            # source/title (1, backlog #3 — distinct real row, not deduped,
+            # different source/title pair) + the feedback fact (1) = 3.
+            assert store.count() == 3
             fb_hits = store.search("rated good")
             assert fb_hits  # the feedback fact is genuinely learnable
         finally:
