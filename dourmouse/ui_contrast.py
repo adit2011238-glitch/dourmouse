@@ -200,6 +200,14 @@ def ui_hud_path() -> Path:
     return Path(__file__).resolve().parent.parent / "ui" / "hud.html"
 
 
+def ui_workspace_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "workspace.html"
+
+
+def ui_voice_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "voice.html"
+
+
 _ROOT_BLOCK = re.compile(r":root\s*\{([^{}]*)\}")
 
 

@@ -196,14 +196,37 @@ SETUP_TEXT_TOKENS = {
 }
 SETUP_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
 
+# workspace.html and voice.html -- the "Vision" floating-window workbench
+# and the hands-free voice lab, the two highest-value screens not yet
+# covered (workspace.html is the flagship God's-Eye-View shell and the
+# in-progress Tauri rewrite target; voice.html is the vision/hands-free
+# surface). Both were retthemed to this app's shared zinc/amber system in
+# an earlier pass and, like console.html/setup.html before them, name their
+# tokens with that system's own vocabulary rather than --text/--ground:
+# workspace.html reuses console.html's exact names (--blue/--blue-dim/
+# --blue-hi on --bg/--panel/--panel2); voice.html has its own --text/
+# --text-body/--dim on --bg/--panel/--raised. Neither carries an alternate
+# theme or data-theme block, so default_root_block is a no-op safety net
+# here, same as login.html/setup.html.
+WORKSPACE_TEXT_TOKENS = {"--blue": uc.AA_NORMAL, "--blue-dim": uc.AA_NORMAL, "--blue-hi": uc.AA_NORMAL}
+WORKSPACE_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
+
+VOICE_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-body": uc.AA_NORMAL, "--dim": uc.AA_NORMAL}
+VOICE_GROUND_TOKENS = ("--bg", "--panel", "--raised")
+
 _SCREENS = {
     "console": (uc.ui_console_path, CONSOLE_TEXT_TOKENS, CONSOLE_GROUND_TOKENS),
     "os": (uc.ui_os_path, OS_TEXT_TOKENS, OS_GROUND_TOKENS),
     "login": (uc.ui_login_path, LOGIN_TEXT_TOKENS, LOGIN_GROUND_TOKENS),
     "setup": (uc.ui_setup_path, SETUP_TEXT_TOKENS, SETUP_GROUND_TOKENS),
+    "workspace": (uc.ui_workspace_path, WORKSPACE_TEXT_TOKENS, WORKSPACE_GROUND_TOKENS),
+    "voice": (uc.ui_voice_path, VOICE_TEXT_TOKENS, VOICE_GROUND_TOKENS),
 }
 
-_PRIMARY_TOKEN = {"console": "--blue-hi", "os": "--t0", "login": "--text", "setup": "--blue-hi"}
+_PRIMARY_TOKEN = {
+    "console": "--blue-hi", "os": "--t0", "login": "--text", "setup": "--blue-hi",
+    "workspace": "--blue-hi", "voice": "--text",
+}
 
 
 def _screen_root_block(name: str) -> str:
@@ -214,7 +237,7 @@ def _screen_root_block(name: str) -> str:
     return uc.default_root_block(path.read_text(encoding="utf-8", errors="replace"))
 
 
-@pytest.mark.parametrize("screen", ["console", "os", "login", "setup"])
+@pytest.mark.parametrize("screen", ["console", "os", "login", "setup", "workspace", "voice"])
 def test_screen_shipping_text_tokens_meet_AA(screen):
     _, text_tokens, ground_tokens = _SCREENS[screen]
     rows = uc.audit_tokens(_screen_root_block(screen), text_tokens, ground_tokens)
@@ -226,7 +249,7 @@ def test_screen_shipping_text_tokens_meet_AA(screen):
     )
 
 
-@pytest.mark.parametrize("screen", ["console", "os", "login", "setup"])
+@pytest.mark.parametrize("screen", ["console", "os", "login", "setup", "workspace", "voice"])
 def test_screen_primary_text_stays_brightest(screen):
     """Whichever fix clears AA must not invert the hierarchy: the primary
     ('--blue-hi' / '--t0' / '--text') token must stay the brightest of its
@@ -318,7 +341,7 @@ def test_setup_blue_deep_was_the_known_failing_zinc_500_value():
 
 @pytest.mark.parametrize(
     "screen,dim_token",
-    [("login", "--text-dim"), ("setup", "--blue-deep")],
+    [("login", "--text-dim"), ("setup", "--blue-deep"), ("workspace", "--blue-dim"), ("voice", "--dim")],
 )
 def test_dim_token_stays_no_brighter_than_primary(screen, dim_token):
     """The AA fix must not invert the hierarchy: a secondary/tertiary token
@@ -481,4 +504,69 @@ def test_hud_taskadd_input_focus_visible_ring_is_legible():
     assert "outline: 1px solid var(--amber)" in source
     tokens = uc.extract_tokens(uc.default_root_block(source))
     ratio = uc.contrast_ratio(uc.parse_color(tokens["--amber"]), uc.parse_color(tokens["--bg"])[:3])
+    assert ratio >= uc.AA_LARGE
+
+
+# --------------------------------------------------------------------------- #
+# workspace.html and voice.html -- the floating-window workbench and the
+# hands-free voice lab. Both had the identical WCAG 2.1 SC 1.4.3 failure
+# already found in every prior screen (--blue-dim / --dim at #71717A, the
+# same zinc-500 value), and, unlike any of the six screens above, NEITHER
+# had a single :focus-visible or outline rule anywhere in the file -- every
+# focusable control (dockbtn, #voxText/#voxGo, panel inputs, the mic/auth/
+# queue buttons) relied entirely on the browser's native default ring. This
+# is the same "ZERO focus-visible rules" shape hud.html was in before
+# d7e4a32, not a defeated-rule shape -- fixed the same way: one global bare
+# `:focus-visible` rule using each file's own accent name (--amber /
+# --gold), per Apple HIG's requirement that focus be clearly and
+# consistently indicated.
+# --------------------------------------------------------------------------- #
+
+def test_workspace_blue_dim_was_the_known_failing_zinc_500_value():
+    """Pins the regression: --blue-dim must no longer be the #71717A value
+    that measured 3.08-4.12:1 against workspace.html's own --bg/--panel/
+    --panel2, below the 4.5:1 its real 9.5-13px labels/captions need
+    (.brand small, .hfpill, .mailrow .d, .turn .meta, .brstatus, and more)."""
+    tokens = uc.extract_tokens(_screen_root_block("workspace"))
+    assert tokens["--blue-dim"].upper() != "#71717A"
+
+
+def test_voice_dim_was_the_known_failing_zinc_500_value():
+    """Pins the regression: --dim must no longer be the #71717A value that
+    measured 3.08-4.12:1 against voice.html's own --bg/--panel/--raised,
+    below the 4.5:1 its real 9.5-11px labels/captions need (.brand .sub,
+    .chip, .miclabel, .statusline .kicker, .card .k/.row/.note)."""
+    tokens = uc.extract_tokens(_screen_root_block("voice"))
+    assert tokens["--dim"].upper() != "#71717A"
+
+
+def test_workspace_focus_visible_ring_is_legible():
+    """workspace.html had ZERO :focus-visible rules before this cycle -- the
+    same shape hud.html was in pre-d7e4a32, not a defeated-rule shape. The
+    new global rule must paint a real, legible ring: --amber on --bg
+    measures 9.26:1, well past the 3:1 SC 1.4.11 needs for a non-text
+    UI-component indicator."""
+    path = uc.ui_workspace_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    source = path.read_text(encoding="utf-8", errors="replace")
+    assert ":focus-visible{outline:1px solid var(--amber);outline-offset:2px}" in source
+    tokens = uc.extract_tokens(uc.default_root_block(source))
+    ratio = uc.contrast_ratio(uc.parse_color(tokens["--amber"]), uc.parse_color(tokens["--bg"])[:3])
+    assert ratio >= uc.AA_LARGE
+
+
+def test_voice_focus_visible_ring_is_legible():
+    """voice.html had ZERO :focus-visible rules before this cycle -- the mic,
+    auth and queue buttons all relied on the browser default. The new global
+    rule must paint a real, legible ring using this file's own accent name:
+    --gold on --bg measures 9.26:1, well past the 3:1 SC 1.4.11 needs for a
+    non-text UI-component indicator."""
+    path = uc.ui_voice_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    source = path.read_text(encoding="utf-8", errors="replace")
+    assert ":focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }" in source
+    tokens = uc.extract_tokens(uc.default_root_block(source))
+    ratio = uc.contrast_ratio(uc.parse_color(tokens["--gold"]), uc.parse_color(tokens["--bg"])[:3])
     assert ratio >= uc.AA_LARGE
