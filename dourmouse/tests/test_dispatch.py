@@ -3414,3 +3414,18 @@ class TestSystemPromptChecksTheRosterInsteadOfAssumingATooIsMissing:
         text = system_message(build_general_registry())
         assert "roster" in text.lower()
         assert "doesn't exist" in text or "does not exist" in text or "does exist" in text
+
+
+class TestSystemPromptScopesToolCallsToTheRequest:
+    """Real user complaint: turns were timing out from calling tools far
+    more than the question needed. Rule 17: scope the number of calls to
+    the actual request, look at a result before chaining another call."""
+
+    def test_system_prompt_has_the_scoping_rule(self):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+
+        text = system_message(build_general_registry())
+        assert "17." in text
+        assert "needs ONE call" in text
+        assert "speculative calls" in text
