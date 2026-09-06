@@ -1419,6 +1419,116 @@ class TestSseChat:
             t2.join(timeout=2)
 
 
+class TestPerTabSessions:
+    """backlog #7: each browser tab gets its own real ChatSession — the
+    user's own explicit ask. Additive: no tab_id sent (every test above
+    this class) is completely unaffected — proven by this whole file's
+    pre-existing suite passing unchanged. This class proves the NEW,
+    opted-in behavior actually isolates two tabs from each other, both
+    conversation history and (the part a half-measure would get wrong)
+    the confirmation gate itself.
+    """
+
+    def _stream_until_done_or_confirm(self, resp):
+        events = []
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                event = json.loads(line[6:])
+                events.append(event)
+                if event["type"] in ("confirmation_requested", "done"):
+                    break
+        return events
+
+    def test_two_tabs_get_two_distinct_sessions(self, server):
+        srv, port = server
+        srv.client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat",
+            body=json.dumps({"prompt": "hi", "tab_id": "tabA"}),
+            headers={"Content-Type": "application/json"},
+        )
+        self._stream_until_done_or_confirm(conn.getresponse())
+        conn.close()
+        assert "tabA" in srv.sessions_by_tab
+        assert srv.sessions_by_tab["tabA"] is not srv.session
+
+    def test_same_tab_id_reuses_the_same_session(self, server):
+        srv, port = server
+        srv.client = FakeClient([
+            _FakeResponse(_FakeMessage(content="one")),
+            _FakeResponse(_FakeMessage(content="two")),
+        ])
+        for _ in range(2):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            conn.request(
+                "POST", "/api/chat",
+                body=json.dumps({"prompt": "hi", "tab_id": "tabA"}),
+                headers={"Content-Type": "application/json"},
+            )
+            self._stream_until_done_or_confirm(conn.getresponse())
+            conn.close()
+        session = srv.sessions_by_tab["tabA"]
+        # Both turns landed on the SAME session's own history, not two
+        # separate ones — real conversation continuity per tab.
+        assert len(session.messages) >= 4  # 2 user + 2 assistant turns minimum
+
+    def test_a_confirmation_pending_in_one_tab_is_invisible_to_another(self, server):
+        """The real point of a per-tab GATE, not just a per-tab session:
+        a half-measure (separate ChatSession, same shared gate) would let
+        tab B's "send it" resolve tab A's pending confirmation. This
+        proves it can't."""
+        srv, port = server
+        srv.client = FakeClient([
+            _FakeResponse(
+                _FakeMessage(
+                    content=None,
+                    tool_calls=[_FakeToolCall("c1", "gated_echo", json.dumps({"text": "secret-a"}))],
+                )
+            ),
+            _FakeResponse(_FakeMessage(content="ok-b")),
+        ])
+        connA = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        connA.request(
+            "POST", "/api/chat",
+            body=json.dumps({"prompt": "gated", "tab_id": "tabA"}),
+            headers={"Content-Type": "application/json"},
+        )
+        events_a = self._stream_until_done_or_confirm(connA.getresponse())
+        assert events_a[-1]["type"] == "confirmation_requested"
+
+        # tabB has never sent a message, so it has NO pending confirmation
+        # of its own — resolving tabA's real id but tagged as tabB's must
+        # fail (there's no confirm_resolvers_by_tab["tabB"] entry at all).
+        connB = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        connB.request(
+            "POST", "/api/confirm",
+            body=json.dumps({"id": events_a[-1]["id"], "approved": True, "tab_id": "tabB"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp_b = connB.getresponse()
+        data_b = json.loads(resp_b.read())
+        connB.close()
+        assert data_b["ok"] is False
+        assert resp_b.status == 409
+
+        # The REAL owner (tabA) can still resolve its own confirmation —
+        # tabB's failed attempt didn't corrupt tabA's real pending state.
+        connA2 = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        connA2.request(
+            "POST", "/api/confirm",
+            body=json.dumps({"id": events_a[-1]["id"], "approved": True, "tab_id": "tabA"}),
+            headers={"Content-Type": "application/json"},
+        )
+        data_a = json.loads(connA2.getresponse().read())
+        connA2.close()
+        assert data_a["ok"] is True
+        connA.close()
+
+
 class TestSpotifyPlayEndpoints:
     """v5.21 HUD music section: the play-anything POST endpoints. The
     spotify_services functions are stubbed at the module level (the handlers

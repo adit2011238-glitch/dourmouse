@@ -3369,6 +3369,48 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _session_gate_lock_for_tab(self, tab_id: str) -> tuple[Any, Any, threading.Lock]:
+        """backlog #4/#7 (per-tab agents): each browser TAB gets its own
+        real ChatSession (own conversation history/context) — a real
+        distinct "agent" per tab, the user's own explicit ask. Purely
+        additive: an empty/missing ``tab_id`` (every caller that predates
+        this feature, and every endpoint this wasn't threaded into)
+        resolves to EXACTLY ``self.server.session``/``.gate``/
+        ``.session_lock`` — the same single shared objects as before this
+        method existed, zero behavior change for anyone not opting in.
+
+        A genuinely isolated gate/lock per tab, not just a separate
+        ChatSession sharing the old shared gate — a half-measure there
+        (same gate, different conversation) would let tab A's pending
+        confirmation collide with tab B's, worse than not isolating at
+        all. RBAC is deliberately NOT split per tab: it's a real
+        per-USER concept (one signed-in person, one role), not a
+        per-conversation one — splitting it would let two tabs drift to
+        different roles for the same person, which is the actual bug a
+        naive full split would introduce.
+        """
+        tab_id = (tab_id or "").strip()
+        if not tab_id:
+            return self.server.session, self.server.gate, self.server.session_lock
+        with self.server.tab_state_lock:
+            session = self.server.sessions_by_tab.get(tab_id)
+            if session is None:
+                session = ChatSession(
+                    self.server.registry,
+                    session_file=None,  # a fresh, independent thread per tab
+                    client=self.server.client,
+                    config=self.server.config,
+                    job_tracker=self.server.jobs,
+                    rbac=self.server.session.rbac,  # shared — see docstring above
+                    memory=self.server.memory,
+                )
+                gate = WebConfirmationGate(lambda _e: None)
+                lock = threading.Lock()
+                self.server.sessions_by_tab[tab_id] = session
+                self.server.gates_by_tab[tab_id] = gate
+                self.server.locks_by_tab[tab_id] = lock
+            return session, self.server.gates_by_tab[tab_id], self.server.locks_by_tab[tab_id]
+
     def _handle_chat(self) -> None:
         # v5.15: bind the logged-in Google user to THIS request thread so the
         # agent tools (gmail_search/read/send, calendar) act on the signed-in
@@ -3393,6 +3435,11 @@ class _Handler(BaseHTTPRequestHandler):
         if not prompt:
             self._send_json({"error": "prompt is required"}, status=400)
             return
+        # backlog #7: which tab's own ChatSession/gate/lock this turn runs
+        # against. Empty (the default — every pre-existing client) means
+        # exactly the old single shared session; see
+        # _session_gate_lock_for_tab's own docstring.
+        tab_id = (body.get("tab_id") or "").strip()
         # v8.18: voice/text response split. The speak-and-listen UI
         # (ui/voice.html) marks its /api/chat calls with voice: true because
         # it transcribes the request and speaks the reply back with zero
@@ -3465,11 +3512,12 @@ class _Handler(BaseHTTPRequestHandler):
             self.server.tracker.on_event(entry)
             self.server.attention.on_event(entry, screen=screen)
 
-        # ONE shared gate per server. The wiring (emit swap + resolver) and
-        # the run must be atomic under session_lock so a concurrent request
-        # can never steal the shared gate's emit or resolver mid-flight.
-        gate = self.server.gate
-        session = self.server.session
+        # ONE shared gate per server (or, with a real tab_id, one per tab —
+        # see _session_gate_lock_for_tab). The wiring (emit swap + resolver)
+        # and the run must be atomic under the resolved lock so a
+        # concurrent request can never steal this gate's emit or resolver
+        # mid-flight.
+        session, gate, session_lock = self._session_gate_lock_for_tab(tab_id)
         previous_gate = session.confirmation_gate
         report: dict[str, Any] | None = None
         error_msg: str | None = None
@@ -3521,10 +3569,10 @@ class _Handler(BaseHTTPRequestHandler):
         # its session.ask() call, so taking the lock here would deadlock
         # against the very confirmation we're trying to resolve.
         if _is_imperative_affirm(raw_prompt):
-            pending = self.server.gate.pending_items()
+            pending = gate.pending_items()
             if len(pending) == 1:
                 confirm_id, prompt_text = pending[0]
-                ok = self._resolve_confirmation(confirm_id, True)
+                ok = self._resolve_confirmation(confirm_id, True, tab_id=tab_id)
                 final_text = (
                     f"Approved: {prompt_text}"
                     if ok
@@ -3557,10 +3605,13 @@ class _Handler(BaseHTTPRequestHandler):
             # (e.g. the user really did just type "yes" or "go ahead" as a
             # conversational reply), so fall through to the normal turn.
 
-        with self.server.session_lock:
+        with session_lock:
             gate.set_emit(stream.emit)
             session.confirmation_gate = gate
-            self.server.confirm_resolver = gate.resolve
+            if tab_id:
+                self.server.confirm_resolvers_by_tab[tab_id] = gate.resolve
+            else:
+                self.server.confirm_resolver = gate.resolve
             try:
                 report = session.ask(
                     prompt,
@@ -3589,7 +3640,10 @@ class _Handler(BaseHTTPRequestHandler):
                 error_msg = str(exc)
             finally:
                 session.confirmation_gate = previous_gate
-                self.server.confirm_resolver = None
+                if tab_id:
+                    self.server.confirm_resolvers_by_tab.pop(tab_id, None)
+                else:
+                    self.server.confirm_resolver = None
                 gate.set_emit(lambda _e: None)
                 if artifacts_store is not None:
                     artifacts_store.set_sink(None)
@@ -3772,16 +3826,23 @@ class _Handler(BaseHTTPRequestHandler):
             hub.unregister(stream)
             self.close_connection = True
 
-    def _resolve_confirmation(self, confirm_id: str, approved: bool) -> bool:
-        """Resolve a pending confirmation via the shared gate resolver.
+    def _resolve_confirmation(self, confirm_id: str, approved: bool, tab_id: str = "") -> bool:
+        """Resolve a pending confirmation via the shared (or, with a real
+        tab_id, per-tab — backlog #7) gate resolver.
 
         The gate lives on the active chat request thread; ``confirm_resolver``
-        is the shared handle to reach it. This is the ONE path that resolves
-        a confirmation — both the UI-click POST /api/confirm handler and the
+        is the handle to reach it. This is the ONE path that resolves a
+        confirmation — both the UI-click POST /api/confirm handler and the
         "just say send" chat intercept call through here so approval logic
-        never forks.
+        never forks. An empty tab_id resolves to the same shared
+        ``self.server.confirm_resolver`` as before this method took a
+        tab_id at all.
         """
-        resolver = getattr(self.server, "confirm_resolver", None)
+        tab_id = (tab_id or "").strip()
+        if tab_id:
+            resolver = self.server.confirm_resolvers_by_tab.get(tab_id)
+        else:
+            resolver = getattr(self.server, "confirm_resolver", None)
         if resolver is None:
             return False
         return resolver(confirm_id, approved)
@@ -3790,10 +3851,16 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         confirm_id = body.get("id") or ""
         approved = bool(body.get("approved"))
-        if getattr(self.server, "confirm_resolver", None) is None:
+        tab_id = (body.get("tab_id") or "").strip()
+        has_resolver = (
+            tab_id in self.server.confirm_resolvers_by_tab
+            if tab_id
+            else getattr(self.server, "confirm_resolver", None) is not None
+        )
+        if not has_resolver:
             self._send_json({"ok": False, "error": "no active chat"}, status=409)
             return
-        ok = self._resolve_confirmation(confirm_id, approved)
+        ok = self._resolve_confirmation(confirm_id, approved, tab_id=tab_id)
         self._send_json({"ok": ok, "id": confirm_id, "approved": approved})
 
     def _handle_login(self) -> None:
@@ -5880,6 +5947,14 @@ def run_server(
     )
     server.session_lock = threading.Lock()
     server.gate = WebConfirmationGate(lambda _e: None)  # shared; emit swapped per request
+    # backlog #7 (per-tab agents): additive per-tab state, lazily populated
+    # by _session_gate_lock_for_tab. Every existing caller (no tab_id sent)
+    # is completely untouched — these dicts simply stay empty for them.
+    server.sessions_by_tab: dict[str, ChatSession] = {}
+    server.gates_by_tab: dict[str, WebConfirmationGate] = {}
+    server.locks_by_tab: dict[str, threading.Lock] = {}
+    server.confirm_resolvers_by_tab: dict[str, Any] = {}
+    server.tab_state_lock = threading.Lock()
     server.daemon_threads = True
     # v2.8: always-on live agent loops (news/markets/mail/tasks/rnd). The
     # runtime emits into the SAME tracker the agent windows poll, so live

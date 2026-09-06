@@ -1487,6 +1487,22 @@ const THEMES = {
     sw:{bg:"#0d1117",dot:"#0a84ff",bars:["#0a84ff","#bf5af2","#32d74b"]}
   }
 };
+// backlog #7: each browser TAB gets its own real ChatSession server-side
+// (see webui.py's _session_gate_lock_for_tab). sessionStorage is the
+// real mechanism here — genuinely per-tab, unlike localStorage which is
+// shared across every tab of the same origin. Generated once, reused for
+// every /api/chat and /api/confirm call this tab makes.
+const TAB_ID_KEY = "dm_tab_id_v1";
+function tabId(){
+  try{
+    let id = sessionStorage.getItem(TAB_ID_KEY);
+    if(!id){
+      id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2));
+      sessionStorage.setItem(TAB_ID_KEY, id);
+    }
+    return id;
+  }catch{ return ""; }  // private mode / storage blocked: falls back to the shared default session, same as before this feature
+}
 const THEME_KEY = "dm_theme_v1";
 function themeGet(){ try{ const t=localStorage.getItem(THEME_KEY); return THEMES[t]?t:null; }catch{ return null; } }
 function themeSet(t){
@@ -2144,7 +2160,7 @@ function addApproval(node, evt, declineMap, screenKey){
     box.querySelector(".r").remove();
     liveAdd(ok?"done":"err", ok?"You approved it":"You declined it","");
     try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id:evt.id,approved:ok})}); }catch{}
+      body:JSON.stringify({id:evt.id,approved:ok,tab_id:tabId()})}); }catch{}
   };
   // v13.2: STOP needs a way to auto-decline this exact box (see pendingDeclines
   // at its declaration) — registered here, not just wired to the buttons.
@@ -2350,7 +2366,7 @@ async function run(text){
   };
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:text, focus_agent:directiveFocusAgent(), screen:targetScreen}), signal:myCtrl.signal});
+      body:JSON.stringify({prompt:text, focus_agent:directiveFocusAgent(), screen:targetScreen, tab_id:tabId()}), signal:myCtrl.signal});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -3069,7 +3085,7 @@ async function sendMail(to, subject, body){
   const directive = `Send an email to ${to} with subject "${subject}" and this exact body:\n\n${body}`;
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:directive, focus_agent:"mail", screen:"COMMS"})});
+      body:JSON.stringify({prompt:directive, focus_agent:"mail", screen:"COMMS", tab_id:tabId()})});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -3090,10 +3106,10 @@ async function sendMail(to, subject, body){
           const [yes,no]=status.querySelectorAll("button");
           yes.onclick=async()=>{ status.textContent="Sending…";
             try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({id:e.id,approved:true})}); }catch{} };
+              body:JSON.stringify({id:e.id,approved:true,tab_id:tabId()})}); }catch{} };
           no.onclick=async()=>{ status.textContent="Declined.";
             try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({id:e.id,approved:false})}); }catch{} };
+              body:JSON.stringify({id:e.id,approved:false,tab_id:tabId()})}); }catch{} };
         } else if(e.type==="done" && e.final_text){
           status.textContent = e.final_text;
         } else if(e.type==="assistant_text" && e.text){
@@ -3636,7 +3652,7 @@ async function dispatchDesignDirective(directive, statusEl, opts){
   statusEl.textContent = opts.pending || "Working…";
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:directive, focus_agent:"design_3d", screen:"DESIGN3D"})});
+      body:JSON.stringify({prompt:directive, focus_agent:"design_3d", screen:"DESIGN3D", tab_id:tabId()})});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -3656,10 +3672,10 @@ async function dispatchDesignDirective(directive, statusEl, opts){
           const [yes,no]=statusEl.querySelectorAll("button");
           yes.onclick=async()=>{ statusEl.textContent="Approved — writing…";
             try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({id:e.id,approved:true})}); }catch{} };
+              body:JSON.stringify({id:e.id,approved:true,tab_id:tabId()})}); }catch{} };
           no.onclick=async()=>{ statusEl.textContent="Declined.";
             try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({id:e.id,approved:false})}); }catch{} };
+              body:JSON.stringify({id:e.id,approved:false,tab_id:tabId()})}); }catch{} };
         } else if(e.type==="tool_result" && opts.onToolResult){
           opts.onToolResult(e);
         } else if(e.type==="error"){
