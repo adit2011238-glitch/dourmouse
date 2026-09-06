@@ -2650,11 +2650,29 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.project_bookkeeper import create_project
 
             try:
+                # path is now optional (backlog #10) — create_project()
+                # auto-creates a real directory under the user's
+                # Documents folder when omitted.
                 record = create_project(
                     name=body.get("name") or "",
                     path=body.get("path") or "",
                     description=body.get("description") or "",
                 )
+            except ValueError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self._send_json({"ok": True, "project": record})
+        elif parsed.path == "/api/projects/open":
+            # backlog #10: "the projects can't be opened" — the real,
+            # missing write path. See project_bookkeeper.open_project's
+            # own docstring for the honest scope note (validates + bumps
+            # last_active; does not yet route into a dedicated workspace
+            # view).
+            body = self._read_json_body()
+            from dourmouse.project_bookkeeper import open_project
+
+            try:
+                record = open_project(path=body.get("path") or "")
             except ValueError as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=400)
                 return

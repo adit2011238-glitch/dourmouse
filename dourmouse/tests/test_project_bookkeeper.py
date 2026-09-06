@@ -16,6 +16,7 @@ import os
 import sqlite3
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +24,7 @@ from dourmouse.project_bookkeeper import (
     create_project,
     delete_project,
     get_bookkeeper,
+    open_project,
     refresh,
 )
 
@@ -411,12 +413,36 @@ class TestCreateAndDeleteProject:
         view = get_bookkeeper(store_path=sp)
         assert any(p["name"] == "My Thing" for p in view["projects"])
 
-    def test_create_requires_name_and_path(self, tmp_path):
+    def test_create_requires_a_name(self, tmp_path):
         sp = tmp_path / "store.json"
         with pytest.raises(ValueError):
             create_project("", str(tmp_path), store_path=sp)
-        with pytest.raises(ValueError):
-            create_project("Name", "", store_path=sp)
+
+    def test_create_with_no_path_auto_creates_under_documents(self, tmp_path):
+        """backlog #10, the user's own explicit ask: no path required —
+        it should create a real directory in Documents."""
+        sp = tmp_path / "store.json"
+        docs = tmp_path / "Documents"
+        record = create_project("My Auto Project", "", store_path=sp, documents_root=docs)
+        expected = docs / "Dourmouse Projects" / "My Auto Project"
+        assert record["path"] == str(expected)
+        assert expected.is_dir()
+        assert record["exists"] is True
+
+    def test_create_with_no_path_sanitizes_unsafe_characters(self, tmp_path):
+        sp = tmp_path / "store.json"
+        docs = tmp_path / "Documents"
+        record = create_project("weird/name:here?", "", store_path=sp, documents_root=docs)
+        assert "/" not in Path(record["path"]).name
+        assert Path(record["path"]).is_dir()
+
+    def test_create_with_no_path_avoids_a_real_collision(self, tmp_path):
+        sp = tmp_path / "store.json"
+        docs = tmp_path / "Documents"
+        first = create_project("Dup", "", store_path=sp, documents_root=docs)
+        second = create_project("Dup", "", store_path=Path(tmp_path / "store2.json"), documents_root=docs)
+        assert first["path"] != second["path"]
+        assert Path(first["path"]).is_dir() and Path(second["path"]).is_dir()
 
     def test_create_refuses_duplicate_path(self, tmp_path):
         sp = tmp_path / "store.json"
@@ -445,6 +471,37 @@ class TestCreateAndDeleteProject:
     def test_delete_unknown_path_returns_false_not_an_error(self, tmp_path):
         sp = tmp_path / "store.json"
         assert delete_project(str(tmp_path / "never-existed"), store_path=sp) is False
+
+
+class TestOpenProject:
+    """backlog #10: "the projects can't be opened" — the real, previously
+    entirely-missing write path (see open_project's own docstring for the
+    honest scope note on what "opened" does and doesn't do yet)."""
+
+    def test_open_a_real_tracked_project_bumps_last_active(self, tmp_path):
+        sp = tmp_path / "store.json"
+        path = str(tmp_path / "proj")
+        Path(path).mkdir()
+        before = create_project("Real Project", path, store_path=sp)
+        record = open_project(path, store_path=sp)
+        assert record["path"] == before["path"]
+        assert record["last_active"] >= before["last_active"]
+
+    def test_open_refuses_a_project_not_on_the_bookshelf(self, tmp_path):
+        sp = tmp_path / "store.json"
+        with pytest.raises(ValueError):
+            open_project(str(tmp_path / "never-tracked"), store_path=sp)
+
+    def test_open_refuses_honestly_when_directory_is_gone(self, tmp_path):
+        """Rule 2.2 — a stale record for a deleted folder must not be
+        silently "opened" as if the directory were still there."""
+        sp = tmp_path / "store.json"
+        path = tmp_path / "will_vanish"
+        path.mkdir()
+        create_project("Vanishing", str(path), store_path=sp)
+        path.rmdir()
+        with pytest.raises(ValueError):
+            open_project(str(path), store_path=sp)
 
     def test_manual_project_survives_a_refresh_call(self, tmp_path, monkeypatch):
         """The real bug this whole feature would have hit without a
