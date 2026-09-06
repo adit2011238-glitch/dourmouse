@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from pathlib import Path
+
 from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
@@ -15,6 +17,7 @@ from dourmouse.config import (
     load_nvidia_config,
     load_omniroute_config,
     omniroute_available,
+    workspace_dir,
 )
 
 
@@ -477,3 +480,56 @@ class TestBackendIdentity:
 
     def test_unrecognized_object_is_honestly_unknown(self):
         assert backend_identity(object()) == ("unknown", False)
+
+
+class TestWorkspaceDir:
+    """workspace_dir() is the single source of truth this test guards
+    against re-drifting: google_auth.default_auth_store, chat.
+    _default_sessions_dir, desktop._webview_storage_path, general_roster.
+    _workspace_root and design_3d_ops._manifest_path all resolve the
+    workspace root through this one function now (previously five
+    independent reimplementations of the same env-fallback logic)."""
+
+    def test_env_var_wins_and_is_expanded(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "custom_ws"))
+        assert workspace_dir() == tmp_path / "custom_ws"
+
+    def test_env_var_supports_tilde_expansion(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", "~/dourmouse_ws_test_marker")
+        assert workspace_dir() == Path.home() / "dourmouse_ws_test_marker"
+
+    def test_blank_env_var_falls_back_to_project_workspace(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", "   ")
+        result = workspace_dir()
+        assert result.name == "workspace"
+        assert result.parent == Path(__file__).resolve().parent.parent.parent
+
+    def test_unset_env_var_falls_back_to_project_workspace(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_WORKSPACE", raising=False)
+        result = workspace_dir()
+        assert result.name == "workspace"
+        # <project_root>/workspace, i.e. two levels above dourmouse/config.py
+        assert result.parent == Path(__file__).resolve().parent.parent.parent
+
+    def test_does_not_create_the_directory(self, monkeypatch, tmp_path):
+        target = tmp_path / "not_yet_created"
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(target))
+        result = workspace_dir()
+        assert result == target
+        assert not target.exists()
+
+    def test_five_call_sites_share_this_resolution(self, monkeypatch, tmp_path):
+        """Regression guard for the path-drift bug: AuthStore's db path and
+        every other workspace-rooted path must come from the SAME root."""
+        ws = tmp_path / "shared_ws"
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(ws))
+
+        from dourmouse.chat import _default_sessions_dir
+        from dourmouse.desktop import _webview_storage_path
+        from dourmouse.general_roster import _workspace_root
+        from dourmouse.google_auth import default_auth_store
+
+        assert _default_sessions_dir().parent == ws
+        assert _webview_storage_path().parent == ws
+        assert _workspace_root() == ws
+        assert default_auth_store().path.parent.parent == ws

@@ -58,14 +58,13 @@ from dourmouse.dispatch import (
     run_dispatch_messages,
     system_message,
 )
-from dourmouse import git_safety, net_errors
+from dourmouse import config, git_safety, net_errors
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.system_access import build_system_subagent
 
 _DELEGATE_RESULT_CAP = 6_000
 
 
-_WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
 _VAULT_ENV = "OBSIDIAN_VAULT_PATH"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -76,8 +75,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def _workspace_root() -> Path:
     """Workspace root: DOURMOUSE_WORKSPACE env or <project>/workspace. Created."""
-    raw = os.environ.get(_WORKSPACE_ENV)
-    root = Path(raw).expanduser() if raw else _PROJECT_ROOT / "workspace"
+    root = config.workspace_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root
 

@@ -36,6 +36,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from dourmouse import config
+
 #: Google OAuth endpoints (fixed, deterministic).
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -403,8 +405,7 @@ def current_user() -> str | None:
 
 def default_auth_store() -> "AuthStore":
     """The persistent store the real serving path mounts (workspace/auth)."""
-    raw = os.environ.get("DOURMOUSE_WORKSPACE")
-    root = Path(raw).expanduser() if raw else Path(__file__).resolve().parent.parent / "workspace"
+    root = config.workspace_dir()
     return AuthStore(root / "auth" / "dourmouse_auth.db")
 
 

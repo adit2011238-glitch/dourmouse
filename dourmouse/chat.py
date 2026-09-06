@@ -22,14 +22,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from dourmouse.config import NvidiaConfig
+from dourmouse.config import NvidiaConfig, workspace_dir
 from dourmouse.dispatch import (
     DispatchRegistry,
     JobTracker,
@@ -42,14 +41,10 @@ from dourmouse.memory_store import MemoryStore
 
 # Delay general_roster import so chat.py stays importable for engine tests
 # without pulling in every tool backend.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _default_sessions_dir() -> Path:
-    # Reuse the workspace root convention from general_roster without
-    # importing it (avoids a cycle): env var wins, else <project>/workspace.
-    raw = os.environ.get("DOURMOUSE_WORKSPACE")
-    root = Path(raw).expanduser() if raw else _PROJECT_ROOT / "workspace"
+    root = workspace_dir()
     sessions = root / "sessions"
     sessions.mkdir(parents=True, exist_ok=True)
     return sessions
