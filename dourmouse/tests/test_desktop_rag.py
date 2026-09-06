@@ -25,28 +25,13 @@ from dourmouse.desktop_rag import (
     query_desktop_rag,
 )
 
-_ENV_KEYS = (
-    "DOURMOUSE_DESKTOP_RAG_HOST",
-    "DOURMOUSE_DESKTOP_RAG_USER",
-    "DOURMOUSE_DESKTOP_RAG_KEY",
-    "DOURMOUSE_DESKTOP_RAG_DB",
-    "DOURMOUSE_DESKTOP_RAG_INDEX",
-    "DOURMOUSE_DESKTOP_RAG_TABLE",
-    "DOURMOUSE_DESKTOP_RAG_MODEL",
-    "DOURMOUSE_DESKTOP_RAG_PYTHON",
-    "DOURMOUSE_DESKTOP_RAG_ID_FILTER_SQL",
-    "DOURMOUSE_DESKTOP_RAG_ID_ORDER_SQL",
-    "DOURMOUSE_DESKTOP_RAG_TIMEOUT",
-    "DOURMOUSE_DESKTOP_RAG_PROBE_TIMEOUT",
-)
-
-
-@pytest.fixture(autouse=True)
-def _clean_env(monkeypatch):
-    """No test may inherit this machine's real .env values -- otherwise
-    "not configured" tests would silently pass for the wrong reason."""
-    for key in _ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
+# The env-clearing that used to live here (the _clean_env autouse fixture +
+# its _ENV_KEYS tuple) is now the shared _desktop_rag_env_isolated fixture in
+# dourmouse/tests/conftest.py, so test_model_context.py and
+# test_google_workspace_agent.py -- which also reach desktop_rag_status()
+# transitively via model_context.claude_orchestrator_preamble() -- get the
+# same isolation. No test may inherit this machine's real .env values,
+# otherwise "not configured" tests would silently pass for the wrong reason.
 
 
 @pytest.fixture(autouse=True)
