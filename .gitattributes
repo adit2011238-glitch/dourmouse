@@ -1,0 +1,20 @@
+# Git LFS for large binaries committed as plain blobs.
+#
+# lora-dourmouse-claude.gguf (~22MB, repo root): fine-tune weights loaded
+# only by the local backend (dourmouse/code_backends.py et al.) — never
+# served as a static asset. Safe to move to LFS.
+*.gguf filter=lfs diff=lfs merge=lfs -text
+
+# site/downloads/DourmouseSetup-8.9.0.exe (~28MB) is intentionally EXCLUDED
+# from LFS tracking here. site/_headers is a Netlify custom-headers file
+# (matches "/downloads/*" with Content-Disposition: attachment) and
+# site/index.html links straight to "/downloads/DourmouseSetup-8.9.0.exe" —
+# strong evidence a Netlify (or similar static-host) deploy pulls this repo's
+# site/ directory and serves that file byte-for-byte from the git checkout.
+# No netlify.toml/vercel.json enabling LFS smudge on the build was found in
+# this repo. Converting it to an LFS pointer without confirming the deploy
+# host resolves LFS pointers would silently break the live download button
+# (visitors would receive the ~130-byte pointer text file instead of the
+# installer). See README.md "Binary assets & Git LFS" for the follow-up.
+#
+# site/downloads/*.exe filter=lfs diff=lfs merge=lfs -text   # NOT enabled — see note above

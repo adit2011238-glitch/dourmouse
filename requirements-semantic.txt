@@ -12,4 +12,4 @@
 # app's real scale). Embeddings themselves reuse the already-existing
 # dourmouse/memory_embed.py (Ollama nomic-embed-text) — this wheel adds
 # ONLY the real vector-index/search layer on top.
-qdrant-client>=1.9
+qdrant-client==1.19.0

@@ -9,6 +9,36 @@
   html, body { height: 100%; margin: 0; }
   body { background: var(--dm-canvas); }
   #app { height: 100vh; }
+  /* This page renders entirely through the shared design system
+     (ui/assets/dourmouse-ui.css) and defines no tokens or interactive
+     styling of its own, so a per-file grep for ":focus-visible" found
+     zero here -- but the shared rules it inherits carry the same bug
+     already fixed on every other screen in this audit: --dm-line
+     (#27272A) -> --dm-line-focus (#3F3F46) measures 1.19:1 -> 1.7:1
+     against --dm-layer (the .dm-btn background) and 1.91:1 against
+     --dm-canvas -- both far under the 3:1 WCAG 2.1 SC 1.4.11 a non-text
+     focus indicator needs, so .dm-btn's existing `outline:none` +
+     border-color swap is functionally invisible, the same "close/
+     identical colour" shape as .d3dNum (console.html) and the login/
+     setup token inputs. .dm-input/.dm-select/.dm-textarea share the
+     identical outline:none + --dm-line-focus swap on a plain :focus (not
+     even :focus-visible). .dm-tab has no focus rule at all and is left on
+     the browser default, which is fine.
+
+     Fixed here, page-locally, WITHOUT touching the shared
+     dourmouse-ui.css (out of this cycle's narrow scope -- every other
+     screen that links it would be affected): these selectors match the
+     shared rules' own specificity (one class + one pseudo-class) and this
+     block sits after the stylesheet <link> in the page, so they win the
+     cascade on this page alone. --dm-active (amber) on --dm-layer/
+     --dm-canvas measures 8.25-9.26:1. */
+  :focus-visible { outline: 1px solid var(--dm-active); outline-offset: 2px; }
+  .dm-btn:focus-visible {
+    outline: 1px solid var(--dm-active); outline-offset: 2px;
+  }
+  .dm-select:focus-visible, .dm-textarea:focus-visible {
+    outline: 1px solid var(--dm-active); outline-offset: 2px;
+  }
 </style>
 </head>
 <body class="dm">

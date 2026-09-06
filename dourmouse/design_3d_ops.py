@@ -25,11 +25,13 @@ Manifest path resolution (CONFIGURABLE, three layers, checked in order):
   2. the ``DOURMOUSE_UI_MANIFEST_PATH`` env var (process-wide override —
      on the eventual desktop deployment this would point at the real
      ``D:\\spatial_ai_library\\ui_components\\ui_manifest.json``)
-  3. the default: ``<DOURMOUSE_WORKSPACE>/design_3d/ui_manifest.json``
-     (``DOURMOUSE_WORKSPACE`` falls back to a relative ``workspace`` dir
-     when unset) — same env-var convention every other module in this
-     codebase uses (see ``world_watch_regions.py``, ``live_feeds.py``,
-     ``general_roster.py``'s own ``_workspace_root``).
+  3. the default: ``<workspace>/design_3d/ui_manifest.json``, where
+     ``<workspace>`` is ``config.workspace_dir()`` (``DOURMOUSE_WORKSPACE``
+     env var, else ``<project_root>/workspace``) — the single shared
+     resolution every workspace-rooted module in this codebase now calls
+     through (``world_watch_regions.py``, ``live_feeds.py``,
+     ``general_roster.py``'s own ``_workspace_root``, ``chat.py``,
+     ``desktop.py``, ``google_auth.py``).
 
 The manifest file itself is the exact shape the desktop scaffold already
 uses for UI components: a flat JSON object of ``name -> {category,
@@ -55,6 +57,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from dourmouse import config
+
 _MANIFEST_PATH_ENV = "DOURMOUSE_UI_MANIFEST_PATH"
 _DEFAULT_MANIFEST_RELPATH = Path("design_3d") / "ui_manifest.json"
 
@@ -74,7 +78,7 @@ def _manifest_path(arguments: dict[str, Any]) -> Path:
     env = os.environ.get(_MANIFEST_PATH_ENV, "").strip()
     if env:
         return Path(env).expanduser()
-    root = Path(os.environ.get("DOURMOUSE_WORKSPACE", "").strip() or "workspace")
+    root = config.workspace_dir()
     return (root / _DEFAULT_MANIFEST_RELPATH).expanduser()
 
 

@@ -62,13 +62,30 @@
     --font-wordmark: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
     --font-prose: 'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
     --text: #FAFAFA;
-    --text-dim: #71717A;
+    /* --text-dim was #71717A (zinc-500) -- the identical WCAG 2.1 SC 1.4.3
+       failure already found and fixed across every other screen in this
+       audit family: 3-4:1 against this file's own --ground/--surface/
+       --raised, below the 4.5:1 AA needs, on real 9-10px labels/captions
+       (p.sub, .urlrow .label/.note, label, ol.steps), not decorative
+       glyphs. Raised to zinc-400 (#A1A1AA), the same step every prior fix
+       took, and the exact value this file's own --text-body already
+       uses. */
+    --text-dim: #A1A1AA;
     --text-body: #A1A1AA;
     --line: #27272A;
     --line-strong: #3F3F46;
     --panel: #18181B;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* This screen had ZERO :focus-visible rules -- every link and control
+     relied entirely on the browser's native default ring, which this dark
+     zinc/amber mobile companion never styled for. Matching the shared
+     default already established on console.html/hud.html/workspace.html/
+     voice.html/agent.html/all_hands.html/atlas_lab.html/map.html: one
+     global bare rule, this file's own --amber accent. --amber on --ground
+     measures 9.26:1, well past the 3:1 WCAG 2.1 SC 1.4.11 a non-text
+     focus indicator needs. */
+  :focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
   /* Corner wash gone; the 34px rule grid stays as one crisp solid line. */
   body {
     background:

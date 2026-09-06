@@ -14,10 +14,29 @@
     --font-mono: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
     --font-wordmark: "Orbitron","Exo 2","Avenir Next",sans-serif;
     --text: rgba(var(--cyan-rgb), var(--a85));
-    --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    /* --text-dim composited at --a45 (0.45) measured 2.77-2.80:1 against
+       this file's own --ground/--surface/--surface2 -- a real WCAG 2.1
+       SC 1.4.3 failure, well under the 4.5:1 AA needs, on real 10-11px
+       labels/captions (.clock, .zone-h .q, th, .card-sub, .why-box p),
+       not decorative glyphs. This file's alpha ladder has no already-
+       defined step between --a45 and --a85 that clears 4.5:1 (--a85
+       itself is the first one that does, at 6.55-7.18:1), so the fix
+       reuses --a85 directly -- the same "tie the failing token to an
+       already-used, brighter value" step every prior fix in this audit
+       took, here landing on --text's own alpha rather than an
+       intermediate tier this file never defined. */
+    --text-dim: rgba(var(--cyan-rgb), var(--a85));
     --line: rgba(var(--cyan-rgb), var(--a10));
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* This screen had ZERO :focus-visible rules -- every button and control
+     relied entirely on the browser's native default ring, which this
+     dark cyan/amber terminal never styled for. Matching the shared
+     default already established across this audit family: one global
+     bare rule, this file's own --amber accent. --amber on --ground
+     measures 9.53:1, well past the 3:1 WCAG 2.1 SC 1.4.11 a non-text
+     focus indicator needs. */
+  :focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
   body { background: var(--ground); color: var(--text); font-family: var(--font-mono);
          min-height: 100vh; display: flex; flex-direction: column; }
   header { display: flex; align-items: center; gap: 16px; padding: 10px 18px;

@@ -1,7 +1,7 @@
 """ATLAS idea generator — the autonomous half of the v8.16 proposal system
 (Phase 2, 2026-08-18).
 
-Reads past proposals/runs (dourmouse.atlas_proposals) and periodically
+Reads past proposals/runs (dourmouse.atlas.atlas_proposals) and periodically
 writes ONE new idea — either genuinely novel or an explicit improvement on
 a specific past strategy — through the SAME propose_from_idea entry point
 chat ideas use, tagged source="generator". This module never approves or
@@ -28,7 +28,7 @@ import threading
 import time
 from typing import Any
 
-from dourmouse import atlas_proposals as ap
+from dourmouse.atlas import atlas_proposals as ap
 
 _GENERATOR_INTERVAL_SECONDS = float(os.environ.get("ATLAS_GENERATOR_INTERVAL", "1800"))
 _MAX_PENDING_GENERATED = int(os.environ.get("ATLAS_GENERATOR_MAX_PENDING", "5"))

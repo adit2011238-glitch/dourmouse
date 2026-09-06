@@ -41,6 +41,8 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Callable
 
+from dourmouse import config
+
 _PORT_ENV = "DOURMOUSE_UI_PORT"
 _DEFAULT_PORT = 8765
 
@@ -55,13 +57,12 @@ def _pick_port() -> int:
 
 def _webview_storage_path() -> Path:
     """Where pywebview keeps its cookie jar / localStorage / IndexedDB when
-    started with private_mode=False (v13.10). Same DOURMOUSE_WORKSPACE
-    convention as chat.py's _default_sessions_dir and every other
-    persisted-state directory in this app, so one env var still controls
-    every DourMouse data location consistently."""
-    raw = os.environ.get("DOURMOUSE_WORKSPACE", "").strip()
-    root = Path(raw).expanduser() if raw else Path(__file__).resolve().parent.parent / "workspace"
-    path = root / "webview_storage"
+    started with private_mode=False (v13.10). Resolved through config.
+    workspace_dir() (single source of truth), same as chat.py's
+    _default_sessions_dir and every other persisted-state directory in
+    this app, so one env var still controls every DourMouse data location
+    consistently."""
+    path = config.workspace_dir() / "webview_storage"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

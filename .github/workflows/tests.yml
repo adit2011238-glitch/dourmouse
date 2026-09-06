@@ -6,9 +6,13 @@ on:
   pull_request:
 
 # Phase 0.4 (COMMERCIAL_CHECKLIST): the suite is the product's honesty
-# engine — it must pass on every OS before anything ships. As of 731b1dd
-# the suite is 100% green on Windows (1024 passed / 0 failed) and was
-# proven green on macOS; this matrix enforces that on every push.
+# engine — it must pass on every OS before anything ships. As of c4ee954
+# (fixing a confirmed indefinite hang in test_live_runtime.py that stalled
+# the whole suite forever at ~50-56%) the suite is 100% green on macOS —
+# 3854 passed / 3 skipped / 0 failed, a real `pytest dourmouse/tests/`
+# run to full completion, not the 1024/Windows figure this comment
+# previously (and by then stale-ly) cited from 731b1dd; this matrix
+# enforces green on every OS on every push.
 jobs:
   dourmouse-suite:
     name: suite (${{ matrix.os }})

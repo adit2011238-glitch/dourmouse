@@ -1,4 +1,4 @@
-"""Tests for dourmouse/atlas_generator.py (v8.16 Phase 2 — autonomous idea
+"""Tests for dourmouse/atlas/atlas_generator.py (v8.16 Phase 2 — autonomous idea
 generator). Workspace isolation is automatic (conftest.py's autouse
 _workspace_isolated fixture), same as test_atlas_proposals.py — this
 module shares atlas_proposals' persistent store.
@@ -10,8 +10,8 @@ import json
 
 import pytest
 
-from dourmouse import atlas_generator as gen
-from dourmouse import atlas_proposals as ap
+from dourmouse.atlas import atlas_generator as gen
+from dourmouse.atlas import atlas_proposals as ap
 from dourmouse.tests.test_webui import server  # noqa: F401 — shared server fixture
 
 

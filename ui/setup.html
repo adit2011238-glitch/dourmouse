@@ -6,98 +6,88 @@
 <title>DOURMOUSE // SETUP</title>
 <link rel="stylesheet" href="assets/dourmouse-ui.css">
 <style>
-/* First-run setup. Shares the console's tokens so the app does not change
-   identity between setup and use.
-   v13.6 fix: this page named 'Sekuya'/'JetBrains Mono' in --display/--mono
-   below but never actually bundled either font locally (unlike console.html,
-   which this page's own comment says it shares tokens with) — on a fresh
-   install with neither font already cached from a prior page visit, THIS
-   first-run screen would silently render in generic ui-monospace instead.
-   Real fix, not just Fira Sans: bundle all three here now. */
-@font-face{font-family:'Sekuya';font-style:normal;font-weight:400;font-display:swap;
-  src:url('assets/fonts/sekuya-regular.ttf') format('truetype')}
-@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:300;font-display:swap;
-  src:url('assets/fonts/jetbrains-mono-300-latin.woff2') format('woff2')}
-@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
-  src:url('assets/fonts/jetbrains-mono-500-latin.woff2') format('woff2')}
-@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:700;font-display:swap;
-  src:url('assets/fonts/jetbrains-mono-700-latin.woff2') format('woff2')}
-@font-face{font-family:'Fira Sans';font-style:normal;font-weight:400;font-display:swap;
-  src:url('assets/fonts/fira-sans-400-latin.woff2') format('woff2')}
-@font-face{font-family:'Fira Sans';font-style:normal;font-weight:500;font-display:swap;
-  src:url('assets/fonts/fira-sans-500-latin.woff2') format('woff2')}
-@font-face{font-family:'Fira Sans';font-style:normal;font-weight:600;font-display:swap;
-  src:url('assets/fonts/fira-sans-600-latin.woff2') format('woff2')}
-/* Retheme to the shared terminal-IDE design system (assets/dourmouse-ui.css,
-   linked above). This file's own comment above says it "shares the console's
-   tokens so the app does not change identity between setup and use", and
-   those are the same token names ui/workspace.html converted in a6f3a88 --
-   so this uses the IDENTICAL mapping, and for the same reasons. Variable
-   NAMES are unchanged: all 49 call sites keep working, one block to revert.
+/* Retheme: Claude-Desktop-directed calm/minimal system (retires the
+   sci-fi/HUD look this file's own comment used to call "the shared
+   terminal-IDE design system"). Variable NAMES are unchanged -- 49 call
+   sites plus dourmouse/tests/test_ui_contrast.py / test_ui_focus_visible.py
+   read these exact --names -- so this is a token-VALUE swap, not a rewrite.
 
-     - --line/--line-2/--amber-line/--amber-soft were all rgba() over the
-       background. --amber-soft in particular was a 14%-alpha amber fill used
-       as the "this option is selected" tint, which read as a coloured haze;
-       it is now the solid interactive layer, so a chosen option is a filled
-       row.
-     - --blue stops being blue and becomes the three neutral text values.
-     - Amber survives as the single active/selection accent, green/red as
-       ok/error. Nothing gets a glow, blur or drop shadow.
-     - Type goes mono-first: Departure Mono carries structure (--display, the
-       wordmark), Monaspace Neon carries everything the machine says.
+   Cited principles this pass is built on (not just "HIG says so"):
+     1. Apple HIG, Color & Contrast (developer.apple.com/design/
+        human-interface-guidelines/foundations/color): "use color
+        sparingly... prefer touches of color to call attention to
+        important information", plus its 4.5:1 text / 3:1 large-text-
+        and-UI contrast floor. -> one muted accent (--amber) carries
+        selection/active/link state; --ok/--bad survive only as
+        functional status colour, HIG's own semantic-colour carve-out,
+        not a second and third brand accent.
+     2. Apple HIG, Typography: hierarchy is weight and size, not
+        decoration -- "avoid light font weights... opt for medium/
+        semibold/bold". -> h1/.brand drop the 0.10-0.22em tracked-caps
+        wordmark treatment; body copy stops relying on a mono face to
+        read as "structured".
+     3. Refactoring UI (Wathan & Schoger), on shadows: depth should read
+        as real light -- "the smaller and less blurry a shadow, the
+        closer to the background an element appears" -- not a flat 1px
+        line standing in for elevation. -> .card gets a real two-layer
+        box-shadow; the amber selection state on .opt becomes a filled
+        row plus the accent rule it already had, not a border alone.
 
-   NOT TOUCHED IN THIS PASS: the Google OAuth flow itself (the /api/auth/*
-   calls and the window.open that must stay a real top-level browser window,
-   never an iframe) and the white .gbtn Google button, whose look is Google's
-   brand requirement rather than our palette -- see its own comment below.
+   Ground goes near-black -> warm light neutral (this cycle's explicit
+   direction); --mono/--display/--font-prose collapse to one humanist
+   system stack (no more Berkeley Mono / Departure Mono / Monaspace).
 
-   Previous values, for a one-step revert:
-     --bg:#04080e; --panel:#08111c; --panel2:#0b1826;
-     --amber:#f2b73d; --amber-ink:#08111c;
-     --blue:#7ea9c9; --blue-dim:#7fa3bd; --blue-hi:#c6d8e6; --blue-deep:#6f97b3;
-     --line:rgba(120,175,210,.18); --line-2:rgba(120,175,210,.30);
-     --amber-line:rgba(242,183,61,.35); --amber-soft:rgba(242,183,61,.14);
-     --ok:#5fbf8a; --bad:#e0685c;
-     --mono:'JetBrains Mono'...; --display:'Sekuya','JetBrains Mono'...;
-     --font-prose:'Fira Sans'...                                          */
+   Previous (HUD) values, for a one-step revert: --bg:#09090B;
+   --panel:#18181B; --panel2:#27272A; --amber:#F59E0B;
+   --blue-hi:#FAFAFA; --blue/--blue-dim/--blue-deep:#A1A1AA;
+   --line:#27272A; --line-2:#3F3F46; fonts: Berkeley Mono / Departure
+   Mono / Monaspace Neon (see git blame two commits back for the full
+   block). */
 :root{
-  --bg:#09090B; --panel:#18181B; --panel2:#27272A;
-  --amber:#F59E0B; --amber-ink:#09090B;
-  --blue:#A1A1AA; --blue-dim:#A1A1AA; --blue-hi:#FAFAFA; --blue-deep:#71717A;
-  --line:#27272A; --line-2:#3F3F46;
-  --amber-line:#3F3F46; --amber-soft:#27272A;
-  --ok:#10B981; --bad:#EF4444;
-  --mono:'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --display:'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
-  --font-prose:'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
+  --bg:#F7F5F1; --panel:#FFFFFF; --panel2:#EFEBE4;
+  --amber:#A8481E; --amber-ink:#FFFFFF;
+  /* --blue-hi is the wordmark/heading colour (larger, weight already
+     carries emphasis per HIG's typography guidance above); --blue/
+     --blue-dim/--blue-deep paint the smaller body/caption copy and need
+     MORE contrast to clear 4.5:1 against every one of --bg/--panel/
+     --panel2 -- so on this light ground the darkest values belong to
+     the small text, not the headline. */
+  --blue:#221F1B; --blue-dim:#262319; --blue-hi:#3A3733; --blue-deep:#201E1A;
+  --line:#E4DFD5; --line-2:#D2CBBC;
+  --amber-line:#D2CBBC; --amber-soft:#F0E4DA;
+  --ok:#3F7350; --bad:#A6403B;
+  --mono:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Helvetica Neue",Arial,sans-serif;
+  --display:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Helvetica Neue",Arial,sans-serif;
+  --font-prose:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Helvetica Neue",Arial,sans-serif;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--blue);font-family:var(--mono);
-  font-size:13px;line-height:1.65;-webkit-font-smoothing:antialiased;
+  font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;
   min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
 .wrap{width:100%;max-width:620px;display:flex;flex-direction:column;gap:18px}
 
 .head{display:flex;align-items:center;gap:12px}
 .mk{width:36px;height:36px;color:var(--blue-deep);flex:none}
 .mk svg{width:100%;height:100%;display:block}
-.brand{font-family:var(--display);font-size:17px;letter-spacing:.22em;color:var(--blue-hi);
+.brand{font-family:var(--display);font-size:16px;font-weight:600;letter-spacing:0;color:var(--blue-hi);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .steps{display:flex;gap:6px;margin-left:auto;flex:none}
 /* Progress is four solid 6px dots -- no halo, no pulse. */
 .dot{width:6px;height:6px;border-radius:50%;background:var(--line-2)}
 .dot.on{background:var(--amber)}
 
-.card{border:1px solid var(--line);background:var(--panel);padding:22px;border-radius:2px}
-h1{font-family:var(--display);font-size:19px;letter-spacing:.10em;color:var(--blue-hi);
+.card{border:1px solid var(--line);background:var(--panel);padding:24px;border-radius:14px;
+  box-shadow:0 1px 2px rgba(30,24,12,0.04),0 12px 32px -8px rgba(30,24,12,0.10)}
+h1{font-family:var(--display);font-size:20px;font-weight:600;letter-spacing:0;color:var(--blue-hi);
   margin:0 0 10px}
 p{margin:0 0 12px;color:var(--blue-dim)}
 p:last-child{margin-bottom:0}
-.sec{font-size:9.5px;letter-spacing:.22em;color:var(--blue-deep);margin:18px 0 9px;
+.sec{font-size:11px;letter-spacing:0.06em;font-weight:600;color:var(--blue-deep);margin:18px 0 9px;
   text-transform:uppercase}
 
 .opt{width:100%;text-align:left;border:1px solid var(--line);background:var(--bg);
   color:inherit;font:inherit;padding:14px 15px;cursor:pointer;display:flex;gap:12px;
-  align-items:flex-start;margin-bottom:9px;border-radius:2px;
+  align-items:flex-start;margin-bottom:9px;border-radius:10px;
   transition:border-color .15s ease,background-color .15s ease}
 .opt:hover,.opt:focus-visible{border-color:var(--line-2);background:var(--panel);outline:none}
 /* Selection is a filled row plus one 2px accent rule, not an amber haze. */
@@ -106,41 +96,44 @@ p:last-child{margin-bottom:0}
 .opt .ic{width:9px;height:9px;border-radius:50%;flex:none;margin-top:6px;background:var(--blue-deep)}
 .opt.ready .ic{background:var(--ok)}
 .opt.down .ic{background:var(--bad)}
-.opt .t{font-size:12.5px;color:var(--blue-hi);letter-spacing:.06em}
-.opt .d{font-size:10.5px;color:var(--blue-dim);line-height:1.6;margin-top:3px}
+.opt .t{font-size:13px;font-weight:600;color:var(--blue-hi);letter-spacing:0}
+.opt .d{font-size:11.5px;color:var(--blue-dim);line-height:1.6;margin-top:3px}
 
 .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:10px}
 input[type=text],input[type=password]{flex:1 1 240px;min-width:0;background:var(--bg);
-  border:1px solid var(--line);color:var(--blue-hi);font:inherit;font-size:12px;
-  padding:10px 12px;outline:none;border-radius:2px}
-input:focus{border-color:var(--line-2)}
-/* The primary action was a solid amber slab. In the shared system the
-   primary button is the interactive layer with a focus-weight border (see
-   .dm-btn-primary) -- amber is reserved for state, not for filling a
+  border:1px solid var(--line);color:var(--blue-hi);font:inherit;font-size:13px;
+  padding:10px 12px;outline:none;border-radius:8px}
+/* input[type=text]/[type=password] set outline:none above; the
+   compensating style is a real (>=3:1 WCAG 2.1 SC 1.4.11) :focus-visible
+   outline in --amber, this file's one accent. */
+input:focus-visible{border-color:var(--line-2);outline:1px solid var(--amber);outline-offset:2px}
+/* The primary button is the interactive layer with a focus-weight
+   border -- amber is reserved for state/selection, not for filling a
    control the size of a paragraph. */
 button.go{background:var(--panel2);color:var(--blue-hi);border:1px solid var(--line-2);
-  border-radius:2px;padding:11px 20px;font-family:var(--display);font-size:11px;
-  letter-spacing:.16em;cursor:pointer;min-height:40px;white-space:nowrap;
+  border-radius:8px;padding:11px 20px;font-family:var(--display);font-size:12.5px;font-weight:600;
+  letter-spacing:0;cursor:pointer;min-height:40px;white-space:nowrap;
   transition:background-color .15s ease,color .15s ease}
 button.go:hover:not(:disabled){background:var(--line-2);color:var(--blue-hi)}
 button.go:disabled{opacity:.45;cursor:not-allowed}
 button.ghost{background:var(--panel);border:1px solid var(--line);color:var(--blue-dim);
-  border-radius:2px;padding:10px 16px;font-family:var(--display);font-size:10.5px;
-  letter-spacing:.14em;cursor:pointer;min-height:40px;white-space:nowrap;
+  border-radius:8px;padding:10px 16px;font-family:var(--display);font-size:12px;font-weight:500;
+  letter-spacing:0;cursor:pointer;min-height:40px;white-space:nowrap;
   transition:background-color .15s ease,color .15s ease,border-color .15s ease}
 button.ghost:hover{background:var(--panel2);border-color:var(--line-2);color:var(--blue-hi)}
 .actions{display:flex;gap:9px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
 
 .guide{border-left:2px solid var(--amber);padding:12px 14px;background:var(--bg);margin-top:12px;
-  border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+  border-radius:0 8px 8px 0}
 .guide ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:7px}
-.guide li{color:var(--blue-dim);font-size:11.5px}
+.guide li{color:var(--blue-dim);font-size:12.5px}
 .guide a{color:var(--amber)}
-.msg{font-size:11px;margin-top:9px;min-height:1.3em}
+.msg{font-size:12px;margin-top:9px;min-height:1.3em}
 .msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)}
-.note{font-size:10.5px;color:var(--blue-deep);line-height:1.6;margin-top:12px}
-code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:11px;
-  font-family:var(--mono);border-radius:2px}
+.note{font-size:11.5px;color:var(--blue-deep);line-height:1.6;margin-top:12px}
+code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:12px;
+  font-family:var(--mono);border-radius:4px}
 .hide{display:none}
 
 /* Google sign-in step — the official button look (white, the Google G) is
@@ -152,19 +145,20 @@ code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:11p
   font-weight:500;border:1px solid #dadce0;border-radius:4px;transition:all .15s ease}
 .gbtn:hover{background:#f6f7f8;box-shadow:0 1px 3px rgba(0,0,0,.25)}
 .gbtn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
-/* Was a green-tinted alpha card. Flat panel; "signed in" is carried by the
-   one green tick in the row, not by staining the whole surface. */
-.gacct{border:1px solid var(--line);background:var(--panel2);border-radius:2px;
+/* Flat panel; "signed in" is carried by the one green tick in the row,
+   not by staining the whole surface. */
+.gacct{border:1px solid var(--line);background:var(--panel2);border-radius:10px;
   padding:14px 15px;display:flex;gap:12px;align-items:center}
 /* The avatar keeps its circle: it is a photograph of a person. */
 .gacct img{width:38px;height:38px;border-radius:50%;flex:none;background:var(--panel);object-fit:cover}
 .gacct .who{display:flex;flex-direction:column;gap:2px;min-width:0}
-.gacct .who b{color:var(--blue-hi);font-size:12.5px;font-weight:600}
-.gacct .who span{color:var(--blue-dim);font-size:10.5px;font-family:var(--mono);
+.gacct .who b{color:var(--blue-hi);font-size:13px;font-weight:600}
+.gacct .who span{color:var(--blue-dim);font-size:11.5px;font-family:var(--mono);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .msg a{color:var(--amber)}
 .guide a{color:var(--amber)}
 </style>
+
 </head>
 <body>
 <div class="wrap">

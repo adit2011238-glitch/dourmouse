@@ -114,7 +114,15 @@
 :root{
   --bg:#09090B; --panel:#18181B; --panel2:#27272A;
   --amber:#F59E0B; --amber-hi:#FAFAFA; --amber-ink:#09090B;
-  --blue:#A1A1AA; --blue-dim:#71717A; --blue-hi:#FAFAFA;
+  /* --blue-dim was #71717A (zinc-500) -- the identical WCAG 2.1 SC 1.4.3
+     failure already found and fixed in console.html/os.html (506c078) and
+     login.html/setup.html (fc538ac): 3.08-4.12:1 against this file's own
+     --bg/--panel/--panel2, below the 4.5:1 AA needs, on real 9.5-13px
+     labels/captions (.brand small, .hfpill, .mailrow .d, .turn .meta,
+     .brstatus, and 30+ more sites), not decorative glyphs. Raised to
+     zinc-400 (#A1A1AA), the same step every prior fix took, and a value
+     already used elsewhere in this file's own token set (--blue). */
+  --blue:#A1A1AA; --blue-dim:#A1A1AA; --blue-hi:#FAFAFA;
   --line:#27272A; --line-2:#3F3F46;
   --amber-line:#3F3F46; --amber-soft:#27272A;
   --ok:#10B981; --warn:#F59E0B; --bad:#EF4444;
@@ -126,6 +134,15 @@
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--blue-hi);
   font-family:var(--mono);overflow:hidden;-webkit-font-smoothing:antialiased}
+/* This screen had ZERO :focus-visible rules -- every dockbtn, panel button,
+   and input (#voxText, #voxGo, the per-panel chat/prompt inputs, upload
+   file picker) relied solely on the browser's native default ring, which
+   this dark zinc/amber workbench never styled for. Matching console.html's
+   and hud.html's own global default exactly (Apple HIG: focus must be
+   clearly and consistently indicated): 1px amber, 2px offset. --amber on
+   --bg measures 9.26:1, well past the 3:1 WCAG 2.1 SC 1.4.11 a non-text
+   focus indicator needs. */
+:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
 
 /* The two radial-gradient washes that used to sit here are gone: they were
    pure decoration, and a coloured glow bleeding out of two corners is the

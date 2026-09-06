@@ -120,6 +120,56 @@ def test_audit_passes_legible_tokens():
 
 
 # --------------------------------------------------------------------------- #
+# resolve_var_refs -- product.html/hub.html/graveyard.html name their text
+# tokens as `rgba(var(--cyan-rgb), var(--a45))` rather than a literal hex or
+# rgba like every other audited screen. parse_color can't see through a
+# nested var(), so without this these tokens would silently read as
+# unparseable and audit_tokens would skip them outright -- the same
+# "dropped token" danger extract_tokens's own docstring warns about.
+# --------------------------------------------------------------------------- #
+
+def test_resolve_var_refs_substitutes_a_known_token():
+    tokens = {"--cyan-rgb": "79,195,247", "--a85": "0.85"}
+    assert uc.resolve_var_refs("rgba(var(--cyan-rgb), var(--a85))", tokens) == "rgba(79,195,247, 0.85)"
+
+
+def test_resolve_var_refs_uses_the_fallback_when_unknown():
+    assert uc.resolve_var_refs("var(--missing, 0.5)", {}) == "0.5"
+
+
+def test_resolve_var_refs_leaves_truly_unresolvable_values_alone():
+    assert uc.resolve_var_refs("var(--missing)", {}) == "var(--missing)"
+
+
+def test_resolve_var_refs_is_a_noop_for_plain_hex():
+    tokens = {"--text": "#FAFAFA"}
+    assert uc.resolve_var_refs("#FAFAFA", tokens) == "#FAFAFA"
+
+
+def test_audit_tokens_resolves_nested_var_refs_before_parsing():
+    """The real shape this fixes: without resolution these rows either
+    vanish (fg unparseable) or the ground is wrong -- both hide the actual
+    regression (--text-dim at 0.45 alpha is nowhere near AA on this ground)."""
+    css = """
+    :root {
+      --cyan-rgb: 79,195,247; --a45: 0.45; --a85: 0.85;
+      --ground: #0B0E14;
+      --text: rgba(var(--cyan-rgb), var(--a85));
+      --text-dim: rgba(var(--cyan-rgb), var(--a45));
+    }
+    """
+    rows = uc.audit_tokens(
+        css,
+        {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL},
+        ("--ground",),
+    )
+    by_token = {r["token"]: r for r in rows}
+    assert by_token["--text"]["passes"] is True
+    assert by_token["--text-dim"]["passes"] is False
+    assert by_token["--text-dim"]["ratio"] < 3.0
+
+
+# --------------------------------------------------------------------------- #
 # the live stylesheet — this is the regression guard
 # --------------------------------------------------------------------------- #
 
@@ -148,3 +198,550 @@ def test_text_dim_stays_distinguishable_from_text(ui_source):
     dim = uc.parse_color(tokens["--text-dim"])
     assert text and dim
     assert uc.relative_luminance(text[:3]) > uc.relative_luminance(dim[:3])
+
+
+# --------------------------------------------------------------------------- #
+# console.html and os.html — the two other primary live screens.
+#
+# Neither names its tokens --text/--ground: console.html paints with
+# --blue/--blue-hi/--blue-dim on --bg/--panel/--panel2, os.html with
+# --t0/--t1/--t2 on --v0..--v4. audit_tokens() takes those names directly
+# rather than teaching it every screen's vocabulary.
+#
+# Both files also carry alternate themes as sibling selectors
+# ([data-theme="x"], and in os.html a prefers-color-scheme block) that
+# redeclare the same token names. extract_tokens' "last wins" doesn't know
+# about selectors, so run on the whole file it would silently score
+# whichever theme happens to sit last in the stylesheet (aurora, in
+# console.html) instead of the one that actually renders by default.
+# default_root_block() scopes each source to its base `:root { ... }`
+# first so the regression guard checks what ships with no data-theme
+# attribute set and no OS light-mode preference.
+# --------------------------------------------------------------------------- #
+
+CONSOLE_TEXT_TOKENS = {"--blue": uc.AA_NORMAL, "--blue-hi": uc.AA_NORMAL, "--blue-dim": uc.AA_NORMAL}
+CONSOLE_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
+
+OS_TEXT_TOKENS = {"--t0": uc.AA_NORMAL, "--t1": uc.AA_NORMAL, "--t2": uc.AA_NORMAL}
+OS_GROUND_TOKENS = ("--v0", "--v1", "--v2", "--v3", "--v4")
+
+# login.html and setup.html -- the sign-in and onboarding screens, the two
+# still furthest from the rest of the app's polish. Neither uses index.html's
+# --text/--ground names either: login.html has its own --text/--text-dim/
+# --text-body on --ground/--surface/--raised; setup.html reuses console.html's
+# naming exactly (--blue/--blue-dim/--blue-hi/--blue-deep on --bg/--panel/
+# --panel2) since its own header comment says it deliberately shares
+# console's tokens. Both carry a single, unconditional `:root { ... }` with
+# no sibling [data-theme] or prefers-color-scheme block, so default_root_block
+# is a no-op safety net here rather than the load-bearing fix it is for
+# console/os -- kept for consistency should a theme variant land later.
+LOGIN_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL, "--text-body": uc.AA_NORMAL}
+LOGIN_GROUND_TOKENS = ("--ground", "--surface", "--raised")
+
+SETUP_TEXT_TOKENS = {
+    "--blue": uc.AA_NORMAL,
+    "--blue-dim": uc.AA_NORMAL,
+    "--blue-hi": uc.AA_NORMAL,
+    "--blue-deep": uc.AA_NORMAL,
+}
+SETUP_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
+
+# workspace.html and voice.html -- the "Vision" floating-window workbench
+# and the hands-free voice lab, the two highest-value screens not yet
+# covered (workspace.html is the flagship God's-Eye-View shell and the
+# in-progress Tauri rewrite target; voice.html is the vision/hands-free
+# surface). Both were retthemed to this app's shared zinc/amber system in
+# an earlier pass and, like console.html/setup.html before them, name their
+# tokens with that system's own vocabulary rather than --text/--ground:
+# workspace.html reuses console.html's exact names (--blue/--blue-dim/
+# --blue-hi on --bg/--panel/--panel2); voice.html has its own --text/
+# --text-body/--dim on --bg/--panel/--raised. Neither carries an alternate
+# theme or data-theme block, so default_root_block is a no-op safety net
+# here, same as login.html/setup.html.
+WORKSPACE_TEXT_TOKENS = {"--blue": uc.AA_NORMAL, "--blue-dim": uc.AA_NORMAL, "--blue-hi": uc.AA_NORMAL}
+WORKSPACE_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
+
+VOICE_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-body": uc.AA_NORMAL, "--dim": uc.AA_NORMAL}
+VOICE_GROUND_TOKENS = ("--bg", "--panel", "--raised")
+
+# agent.html, all_hands.html, atlas_lab.html, map.html, mobile.html -- five
+# screens confirmed via grep to have ZERO :focus-visible rules (see that
+# fix at the bottom of this file). All five share index.html's own
+# --text/--text-dim[/--text-body] vocabulary on --ground/--surface/(a third
+# raised layer, named --raised except map.html's --layer-hi) -- unlike
+# workspace.html/voice.html, these were retro-fitted from an older
+# rgba(cyan)-on-dark palette to this shared zinc/amber system (see each
+# file's own in-file revert-note comment), landing on the same token names
+# as console.html/os.html's sibling screens. agent.html alone kept the
+# OLDER two-tier shape (--text/--text-dim, no --text-body) rather than the
+# newer three-tier one the other four already carry.
+#
+# All five had the identical WCAG 2.1 SC 1.4.3 failure already found and
+# fixed on every other screen in this audit: --text-dim was #71717A
+# (zinc-500), 3-4:1 against each file's own grounds, on real 8-11px labels/
+# captions, not decorative glyphs. Raised to zinc-400 (#A1A1AA) in each --
+# the same step every prior fix took.
+AGENT_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL}
+AGENT_GROUND_TOKENS = ("--ground", "--surface", "--raised")
+
+ALL_HANDS_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL, "--text-body": uc.AA_NORMAL}
+ALL_HANDS_GROUND_TOKENS = ("--ground", "--surface", "--raised")
+
+ATLAS_LAB_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL, "--text-body": uc.AA_NORMAL}
+ATLAS_LAB_GROUND_TOKENS = ("--ground", "--surface", "--raised")
+
+MAP_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-body": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL}
+MAP_GROUND_TOKENS = ("--ground", "--surface", "--layer-hi")
+
+MOBILE_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL, "--text-body": uc.AA_NORMAL}
+MOBILE_GROUND_TOKENS = ("--ground", "--surface", "--raised")
+
+# product.html, hub.html, graveyard.html -- the second batch, also ZERO
+# :focus-visible rules. Unlike every screen above, these three never got
+# retro-fitted off the older palette: --text/--text-dim are still
+# `rgba(var(--cyan-rgb), var(--a85|a45))` -- a translucent cyan composited
+# over the ground, the exact nested-var() shape resolve_var_refs exists
+# for. The real failure: --text-dim at 0.45 alpha measures 2.77-2.80:1
+# against every one of this file's grounds -- not just below 4.5:1 AA, but
+# below the 3:1 large-text/UI floor too. None of these files' alpha ladders
+# define a step between 0.45 and 0.85 that clears 4.5:1, so each reuses
+# --a85 directly (ties --text-dim's rendered value to --text's).
+PRODUCT_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL}
+PRODUCT_GROUND_TOKENS = ("--ground", "--surface", "--surface2")
+
+HUB_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL}
+HUB_GROUND_TOKENS = ("--ground", "--surface", "--surface2")
+
+GRAVEYARD_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL}
+GRAVEYARD_GROUND_TOKENS = ("--ground", "--surface", "--surface2")
+
+_SCREENS = {
+    "console": (uc.ui_console_path, CONSOLE_TEXT_TOKENS, CONSOLE_GROUND_TOKENS),
+    "os": (uc.ui_os_path, OS_TEXT_TOKENS, OS_GROUND_TOKENS),
+    "login": (uc.ui_login_path, LOGIN_TEXT_TOKENS, LOGIN_GROUND_TOKENS),
+    "setup": (uc.ui_setup_path, SETUP_TEXT_TOKENS, SETUP_GROUND_TOKENS),
+    "workspace": (uc.ui_workspace_path, WORKSPACE_TEXT_TOKENS, WORKSPACE_GROUND_TOKENS),
+    "voice": (uc.ui_voice_path, VOICE_TEXT_TOKENS, VOICE_GROUND_TOKENS),
+    "agent": (uc.ui_agent_path, AGENT_TEXT_TOKENS, AGENT_GROUND_TOKENS),
+    "all_hands": (uc.ui_all_hands_path, ALL_HANDS_TEXT_TOKENS, ALL_HANDS_GROUND_TOKENS),
+    "atlas_lab": (uc.ui_atlas_lab_path, ATLAS_LAB_TEXT_TOKENS, ATLAS_LAB_GROUND_TOKENS),
+    "map": (uc.ui_map_path, MAP_TEXT_TOKENS, MAP_GROUND_TOKENS),
+    "mobile": (uc.ui_mobile_path, MOBILE_TEXT_TOKENS, MOBILE_GROUND_TOKENS),
+    "product": (uc.ui_product_path, PRODUCT_TEXT_TOKENS, PRODUCT_GROUND_TOKENS),
+    "hub": (uc.ui_hub_path, HUB_TEXT_TOKENS, HUB_GROUND_TOKENS),
+    "graveyard": (uc.ui_graveyard_path, GRAVEYARD_TEXT_TOKENS, GRAVEYARD_GROUND_TOKENS),
+}
+
+_PRIMARY_TOKEN = {
+    "console": "--blue-hi", "os": "--t0", "login": "--text", "setup": "--blue-hi",
+    "workspace": "--blue-hi", "voice": "--text",
+    "agent": "--text", "all_hands": "--text", "atlas_lab": "--text", "map": "--text",
+    "mobile": "--text", "product": "--text", "hub": "--text", "graveyard": "--text",
+}
+
+_ALL_SCREENS = list(_SCREENS.keys())
+
+
+def _screen_root_block(name: str) -> str:
+    path_fn, _, _ = _SCREENS[name]
+    path = path_fn()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    return uc.default_root_block(path.read_text(encoding="utf-8", errors="replace"))
+
+
+@pytest.mark.parametrize("screen", _ALL_SCREENS)
+def test_screen_shipping_text_tokens_meet_AA(screen):
+    _, text_tokens, ground_tokens = _SCREENS[screen]
+    rows = uc.audit_tokens(_screen_root_block(screen), text_tokens, ground_tokens)
+    assert rows, f"no text tokens found for {screen}.html — has the token block moved?"
+    failures = [r for r in rows if not r["passes"]]
+    assert not failures, f"{screen}.html text tokens below WCAG AA: " + "; ".join(
+        f"{r['token']} on {r['ground']} = {r['ratio']}:1 (needs {r['threshold']})"
+        for r in failures
+    )
+
+
+@pytest.mark.parametrize("screen", _ALL_SCREENS)
+def test_screen_primary_text_stays_brightest(screen):
+    """Whichever fix clears AA must not invert the hierarchy: the primary
+    ('--blue-hi' / '--t0' / '--text') token must stay the brightest of its
+    file's audited text tokens.
+
+    Values are resolved through resolve_var_refs before parsing -- a no-op
+    for every screen here (all plain hex), but load-bearing for the
+    product/hub/graveyard family below, whose tokens nest var(...)."""
+    _, text_tokens, _ = _SCREENS[screen]
+    tokens = uc.extract_tokens(_screen_root_block(screen))
+    primary = _PRIMARY_TOKEN[screen]
+    primary_lum = uc.relative_luminance(uc.parse_color(uc.resolve_var_refs(tokens[primary], tokens))[:3])
+    for name in text_tokens:
+        if name == primary:
+            continue
+        other_lum = uc.relative_luminance(uc.parse_color(uc.resolve_var_refs(tokens[name], tokens))[:3])
+        assert primary_lum >= other_lum, f"{primary} is no longer the brightest text token in {screen}.html"
+
+
+def test_default_root_block_scopes_past_alternate_theme_selectors():
+    """console.html's ARC CORE default (--blue-hi:#FAFAFA) must not be
+    shadowed by a later [data-theme="..."] block's own --blue-hi."""
+    source = uc.ui_console_path().read_text(encoding="utf-8", errors="replace")
+    root = uc.default_root_block(source)
+    tokens = uc.extract_tokens(root)
+    assert tokens["--blue-hi"] == "#FAFAFA"
+    # The full, unscoped file DOES contain other themes' conflicting
+    # values for the same name (aurora, the theme block that happens to
+    # sit last in the file) — this documents why scoping matters, not
+    # just that it happens to work.
+    assert "--blue-hi:#eef1f5" in source.replace(" ", "").lower()
+    unscoped = uc.extract_tokens(source)
+    assert unscoped["--blue-hi"] != tokens["--blue-hi"]
+
+
+def test_extract_tokens_survives_a_colon_bearing_bullet_comment():
+    """Regression for the real bug this cycle found: a revert-note comment
+    written as `- --name: prose, no semicolon nearby` (this is os.html's
+    actual documentation style) makes the naive `[^;}]+` value capture
+    swallow every real declaration up to the next semicolon -- which can
+    be a real, different token's whole declaration."""
+    css = """
+    :root {
+      /* - --sans: this file's identity was "mono chrome", no semicolon
+         for several lines, so a naive parser keeps reading right through
+         the next real declaration. */
+      --v0: #010101;
+      --t0: #fefefe;
+    }
+    """
+    tokens = uc.extract_tokens(css)
+    assert tokens["--v0"] == "#010101"
+    assert tokens["--t0"] == "#fefefe"
+
+
+def test_os_default_root_block_excludes_light_theme_override():
+    """os.html's dark default is the real regression surface; its
+    prefers-color-scheme/[data-theme="light"] blocks re-declare --t2 with
+    a different, already-passing value that must not mask the dark one."""
+    source = uc.ui_os_path().read_text(encoding="utf-8", errors="replace")
+    root = uc.default_root_block(source)
+    tokens = uc.extract_tokens(root)
+    # The light override sets --t0 to a near-black value; the dark
+    # default's --t0 stays near-white. If the light block leaked in here,
+    # this would flip.
+    assert uc.relative_luminance(uc.parse_color(tokens["--t0"])[:3]) > 0.5
+
+
+# --------------------------------------------------------------------------- #
+# login.html and setup.html -- the sign-in and onboarding screens.
+#
+# Both had a real WCAG 2.1 SC 1.4.3 failure: login.html's --text-dim and
+# setup.html's --blue-deep were each #71717A (zinc-500) -- the identical
+# value 506c078 already found failing in console.html/os.html, on real
+# 9-13px labels/captions, not decorative glyphs. Both raised to #A1A1AA
+# (zinc-400), the value each file's own token set already used elsewhere.
+# --------------------------------------------------------------------------- #
+
+def test_login_text_dim_was_the_known_failing_zinc_500_value():
+    """Pins the regression this cycle fixed: --text-dim must no longer be
+    the #71717A value that measured 3.08-4.12:1 against login.html's own
+    grounds, below the 4.5:1 its real label/caption text needs."""
+    tokens = uc.extract_tokens(uc.default_root_block(uc.ui_login_path().read_text(encoding="utf-8", errors="replace")))
+    assert tokens["--text-dim"].upper() != "#71717A"
+
+
+def test_setup_blue_deep_was_the_known_failing_zinc_500_value():
+    """Same regression, setup.html's name for the same role: --blue-deep
+    paints .sec/.note captions and must no longer be the failing #71717A."""
+    tokens = uc.extract_tokens(uc.default_root_block(uc.ui_setup_path().read_text(encoding="utf-8", errors="replace")))
+    assert tokens["--blue-deep"].upper() != "#71717A"
+
+
+@pytest.mark.parametrize(
+    "screen,dim_token",
+    [
+        ("login", "--text-dim"), ("setup", "--blue-deep"), ("workspace", "--blue-dim"), ("voice", "--dim"),
+        ("agent", "--text-dim"), ("all_hands", "--text-dim"), ("atlas_lab", "--text-dim"),
+        ("map", "--text-dim"), ("mobile", "--text-dim"),
+        ("product", "--text-dim"), ("hub", "--text-dim"), ("graveyard", "--text-dim"),
+    ],
+)
+def test_dim_token_stays_no_brighter_than_primary(screen, dim_token):
+    """The AA fix must not invert the hierarchy: a secondary/tertiary token
+    must not end up brighter than its screen's primary text token (it may
+    now tie it, as login's --text-dim ties --text-body, and as product's/
+    hub's/graveyard's --text-dim now ties --text exactly -- that collapses
+    a visual distinction, not a contrast defect).
+
+    Values are resolved through resolve_var_refs before comparing luminance
+    -- a no-op for every plain-hex screen, load-bearing for product.html/
+    hub.html/graveyard.html's nested rgba(var(...), var(...)) tokens."""
+    tokens = uc.extract_tokens(_screen_root_block(screen))
+    primary_lum = uc.relative_luminance(
+        uc.parse_color(uc.resolve_var_refs(tokens[_PRIMARY_TOKEN[screen]], tokens))[:3]
+    )
+    dim_lum = uc.relative_luminance(uc.parse_color(uc.resolve_var_refs(tokens[dim_token], tokens))[:3])
+    assert dim_lum <= primary_lum
+
+
+# --------------------------------------------------------------------------- #
+# app.html and hud.html -- the desktop shell and the tactical HUD screen.
+#
+# app.html carries three live variants of the same --ink/--ink-2/--ink-3
+# trio on --bg/--surface/--surface-2: a light default `:root { ... }`, a
+# `prefers-color-scheme: dark` override (`:root:not([data-theme="light"])`),
+# and an explicit `:root[data-theme="dark"]`. default_root_block() only
+# ever matches the first *bare* `:root { ... }` -- neither qualified
+# selector fits its regex -- so here it captures the LIGHT default (the
+# opposite role it plays for os.html, whose bare default is dark and whose
+# override is qualified). The two dark variants are pulled with a small
+# local block extractor: same "no nested braces inside the body" assumption
+# default_root_block relies on, just keyed by literal selector text instead
+# of "the first bare :root".
+#
+# hud.html has no theme variants at all -- a single unconditional `:root`
+# -- so default_root_block is the same no-op safety net there that it is
+# for login.html/setup.html.
+# --------------------------------------------------------------------------- #
+
+APP_TEXT_TOKENS = {"--ink": uc.AA_NORMAL, "--ink-2": uc.AA_NORMAL, "--ink-3": uc.AA_NORMAL}
+APP_GROUND_TOKENS = ("--bg", "--surface", "--surface-2")
+
+HUD_TEXT_TOKENS = {"--txt": uc.AA_NORMAL, "--red": uc.AA_NORMAL, "--dim": uc.AA_NORMAL, "--dim-2": uc.AA_NORMAL}
+HUD_GROUND_TOKENS = ("--bg", "--panel", "--raised")
+
+
+def _named_root_block(source: str, selector: str) -> str:
+    """Extract one `<selector> { ... }` block by literal selector text.
+
+    Only valid for a block with no nested braces in its body -- true of
+    every token block these two screens declare -- so this stays a
+    test-local helper next to default_root_block() rather than growing
+    that module's public API for a shape it hasn't needed before.
+    """
+    start = source.index(selector)
+    brace_open = source.index("{", start)
+    brace_close = source.index("}", brace_open)
+    return source[brace_open : brace_close + 1]
+
+
+def _app_variant(name: str) -> str:
+    path = uc.ui_app_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if name == "light":
+        return uc.default_root_block(text)
+    if name == "dark-system":
+        return _named_root_block(text, ':root:not([data-theme="light"])')
+    if name == "dark-explicit":
+        return _named_root_block(text, ':root[data-theme="dark"]')
+    raise ValueError(name)
+
+
+_APP_VARIANTS = ["light", "dark-system", "dark-explicit"]
+
+
+@pytest.mark.parametrize("variant", _APP_VARIANTS)
+def test_app_shipping_text_tokens_meet_AA(variant):
+    rows = uc.audit_tokens(_app_variant(variant), APP_TEXT_TOKENS, APP_GROUND_TOKENS)
+    assert rows, f"no text tokens found for app.html ({variant}) -- has the token block moved?"
+    failures = [r for r in rows if not r["passes"]]
+    assert not failures, f"app.html ({variant}) text tokens below WCAG AA: " + "; ".join(
+        f"{r['token']} on {r['ground']} = {r['ratio']}:1 (needs {r['threshold']})"
+        for r in failures
+    )
+
+
+@pytest.mark.parametrize("variant", _APP_VARIANTS)
+def test_app_ink3_was_the_known_failing_zinc_500_value(variant):
+    """Pins the regression: --ink-3 must no longer be #71717A, the value
+    that measured 3.81-4.63:1 (light) / 3.08-4.12:1 (dark) against
+    app.html's own grounds -- below the 4.5:1 its real caption/hint text
+    (.mode .sub, .who, .topbar .hint, .status, .chint) needs."""
+    tokens = uc.extract_tokens(_app_variant(variant))
+    assert tokens["--ink-3"].upper() != "#71717A"
+
+
+@pytest.mark.parametrize("variant", _APP_VARIANTS)
+def test_app_ink3_stays_no_more_prominent_than_ink2(variant):
+    """The fix ties --ink-3 to --ink-2 in every variant (same accepted
+    outcome as login.html's --text-dim tying --text-body) -- it must not
+    overshoot into reading as more prominent than the token above it.
+    Contrast-against-ground, not raw luminance, is the right ordering
+    here: app.html's light variant wants the darker of two inks to read as
+    more prominent, the opposite direction from every dark-themed screen
+    the luminance-based checks above assume."""
+    tokens = uc.extract_tokens(_app_variant(variant))
+    bg = uc.parse_color(tokens["--bg"])[:3]
+    ink2 = uc.contrast_ratio(uc.parse_color(tokens["--ink-2"]), bg)
+    ink3 = uc.contrast_ratio(uc.parse_color(tokens["--ink-3"]), bg)
+    assert ink3 <= ink2 + 1e-9
+
+
+@pytest.fixture(scope="module")
+def hud_root():
+    path = uc.ui_hud_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    return uc.default_root_block(path.read_text(encoding="utf-8", errors="replace"))
+
+
+def test_hud_shipping_text_tokens_meet_AA(hud_root):
+    rows = uc.audit_tokens(hud_root, HUD_TEXT_TOKENS, HUD_GROUND_TOKENS)
+    assert rows, "no text tokens found for hud.html -- has the token block moved?"
+    failures = [r for r in rows if not r["passes"]]
+    assert not failures, "hud.html text tokens below WCAG AA: " + "; ".join(
+        f"{r['token']} on {r['ground']} = {r['ratio']}:1 (needs {r['threshold']})"
+        for r in failures
+    )
+
+
+def test_hud_dim_tokens_were_the_known_failing_values(hud_root):
+    """Pins the regression: --dim (was #71717A, 3.08-4.12:1 on
+    bg/panel/raised) and --dim-2 (was #52525B, 1.93-2.57:1) must no longer
+    be those failing values, on real 10.5-12px labels (.phead, .titlebox
+    .sub, .hdrright, .logbox timestamps), not decorative glyphs."""
+    tokens = uc.extract_tokens(hud_root)
+    assert tokens["--dim"].upper() != "#71717A"
+    assert tokens["--dim-2"].upper() != "#52525B"
+
+
+def test_hud_dim_tokens_stay_no_more_prominent_than_txt(hud_root):
+    """--dim/--dim-2 now equal --red exactly (same collapsed-distinction
+    outcome console.html/setup.html already accepted for their own
+    --blue-dim/--blue-deep) -- none of the three may end up more prominent
+    than --txt, the brightest/primary token on this screen."""
+    tokens = uc.extract_tokens(hud_root)
+    bg = uc.parse_color(tokens["--bg"])[:3]
+    txt_ratio = uc.contrast_ratio(uc.parse_color(tokens["--txt"]), bg)
+    for name in ("--red", "--dim", "--dim-2"):
+        assert uc.contrast_ratio(uc.parse_color(tokens[name]), bg) <= txt_ratio + 1e-9
+
+
+def test_hud_taskadd_input_focus_visible_ring_is_legible():
+    """.taskadd input set outline:none and, before this cycle, had no
+    :focus-visible compensator at all -- every other control on the page
+    relied on the browser default ring, which this red/amber terminal HUD
+    never styled for, and this one input actively defeated. The new rule
+    must paint a real, legible ring: --amber on --bg measures 9.26:1, well
+    past the 3:1 SC 1.4.11 needs for a non-text UI-component indicator."""
+    path = uc.ui_hud_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    source = path.read_text(encoding="utf-8", errors="replace")
+    assert ".taskadd input:focus-visible" in source
+    assert "outline: 1px solid var(--amber)" in source
+    tokens = uc.extract_tokens(uc.default_root_block(source))
+    ratio = uc.contrast_ratio(uc.parse_color(tokens["--amber"]), uc.parse_color(tokens["--bg"])[:3])
+    assert ratio >= uc.AA_LARGE
+
+
+# --------------------------------------------------------------------------- #
+# workspace.html and voice.html -- the floating-window workbench and the
+# hands-free voice lab. Both had the identical WCAG 2.1 SC 1.4.3 failure
+# already found in every prior screen (--blue-dim / --dim at #71717A, the
+# same zinc-500 value), and, unlike any of the six screens above, NEITHER
+# had a single :focus-visible or outline rule anywhere in the file -- every
+# focusable control (dockbtn, #voxText/#voxGo, panel inputs, the mic/auth/
+# queue buttons) relied entirely on the browser's native default ring. This
+# is the same "ZERO focus-visible rules" shape hud.html was in before
+# d7e4a32, not a defeated-rule shape -- fixed the same way: one global bare
+# `:focus-visible` rule using each file's own accent name (--amber /
+# --gold), per Apple HIG's requirement that focus be clearly and
+# consistently indicated.
+# --------------------------------------------------------------------------- #
+
+def test_workspace_blue_dim_was_the_known_failing_zinc_500_value():
+    """Pins the regression: --blue-dim must no longer be the #71717A value
+    that measured 3.08-4.12:1 against workspace.html's own --bg/--panel/
+    --panel2, below the 4.5:1 its real 9.5-13px labels/captions need
+    (.brand small, .hfpill, .mailrow .d, .turn .meta, .brstatus, and more)."""
+    tokens = uc.extract_tokens(_screen_root_block("workspace"))
+    assert tokens["--blue-dim"].upper() != "#71717A"
+
+
+def test_voice_dim_was_the_known_failing_zinc_500_value():
+    """Pins the regression: --dim must no longer be the #71717A value that
+    measured 3.08-4.12:1 against voice.html's own --bg/--panel/--raised,
+    below the 4.5:1 its real 9.5-11px labels/captions need (.brand .sub,
+    .chip, .miclabel, .statusline .kicker, .card .k/.row/.note)."""
+    tokens = uc.extract_tokens(_screen_root_block("voice"))
+    assert tokens["--dim"].upper() != "#71717A"
+
+
+def test_workspace_focus_visible_ring_is_legible():
+    """workspace.html had ZERO :focus-visible rules before this cycle -- the
+    same shape hud.html was in pre-d7e4a32, not a defeated-rule shape. The
+    new global rule must paint a real, legible ring: --amber on --bg
+    measures 9.26:1, well past the 3:1 SC 1.4.11 needs for a non-text
+    UI-component indicator."""
+    path = uc.ui_workspace_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    source = path.read_text(encoding="utf-8", errors="replace")
+    assert ":focus-visible{outline:1px solid var(--amber);outline-offset:2px}" in source
+    tokens = uc.extract_tokens(uc.default_root_block(source))
+    ratio = uc.contrast_ratio(uc.parse_color(tokens["--amber"]), uc.parse_color(tokens["--bg"])[:3])
+    assert ratio >= uc.AA_LARGE
+
+
+def test_voice_focus_visible_ring_is_legible():
+    """voice.html had ZERO :focus-visible rules before this cycle -- the mic,
+    auth and queue buttons all relied on the browser default. The new global
+    rule must paint a real, legible ring using this file's own accent name:
+    --gold on --bg measures 9.26:1, well past the 3:1 SC 1.4.11 needs for a
+    non-text UI-component indicator."""
+    path = uc.ui_voice_path()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    source = path.read_text(encoding="utf-8", errors="replace")
+    assert ":focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }" in source
+    tokens = uc.extract_tokens(uc.default_root_block(source))
+    ratio = uc.contrast_ratio(uc.parse_color(tokens["--gold"]), uc.parse_color(tokens["--bg"])[:3])
+    assert ratio >= uc.AA_LARGE
+
+
+# --------------------------------------------------------------------------- #
+# agent.html, all_hands.html, atlas_lab.html, map.html, mobile.html -- five
+# more screens confirmed via grep to have ZERO :focus-visible rules, same
+# shape as workspace.html/voice.html above (not a defeated-rule shape).
+# Focus-visible presence/legibility is verified in test_ui_focus_visible.py
+# alongside the other zero-rule screens from this same cycle; this file
+# covers the token-value regression each of these five also carried.
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("screen", ["agent", "all_hands", "atlas_lab", "map", "mobile"])
+def test_zinc_family_text_dim_was_the_known_failing_zinc_500_value(screen):
+    """Pins the regression: --text-dim must no longer be the #71717A value
+    that measured 3-4:1 against each file's own grounds, below the 4.5:1
+    its real 8-11px labels/captions need."""
+    tokens = uc.extract_tokens(_screen_root_block(screen))
+    assert tokens["--text-dim"].upper() != "#71717A"
+
+
+# --------------------------------------------------------------------------- #
+# product.html, hub.html, graveyard.html -- the second batch, also ZERO
+# :focus-visible rules, and the one family in this whole audit that never
+# got retro-fitted off the older rgba(cyan)-on-dark palette: --text-dim is
+# `rgba(var(--cyan-rgb), var(--a45))`, not a literal hex. Pinning "not
+# #71717A" doesn't apply here -- the regression to pin is the alpha
+# reference itself.
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("screen", ["product", "hub", "graveyard"])
+def test_rgba_family_text_dim_no_longer_uses_the_failing_alpha(screen):
+    """Pins the regression: --text-dim must no longer reference --a45 (0.45
+    alpha measured 2.77-2.80:1 against every one of this file's grounds --
+    below even the 3:1 large-text floor, let alone the 4.5:1 AA needs)."""
+    tokens = uc.extract_tokens(_screen_root_block(screen))
+    assert "var(--a45)" not in tokens["--text-dim"]
+
+
+@pytest.mark.parametrize("screen", ["product", "hub", "graveyard"])
+def test_rgba_family_text_dim_now_resolves_to_a_legible_composite(screen):
+    """The alpha swap must actually land on a passing value once resolved
+    against the real ground -- not just avoid the old literal."""
+    tokens = uc.extract_tokens(_screen_root_block(screen))
+    ground = uc.parse_color(uc.resolve_var_refs(tokens["--ground"], tokens))[:3]
+    dim = uc.parse_color(uc.resolve_var_refs(tokens["--text-dim"], tokens))
+    assert uc.contrast_ratio(dim, ground) >= uc.AA_NORMAL

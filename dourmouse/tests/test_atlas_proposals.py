@@ -1,4 +1,4 @@
-"""Tests for dourmouse/atlas_proposals.py (v8.16 — LLM-authored strategy
+"""Tests for dourmouse/atlas/atlas_proposals.py (v8.16 — LLM-authored strategy
 code, human-gated). Workspace isolation is automatic (see conftest.py's
 autouse _workspace_isolated fixture) — no test here touches the real
 workspace/atlas_lab/proposals.json.
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from dourmouse import atlas_proposals as ap
+from dourmouse.atlas import atlas_proposals as ap
 from dourmouse.tests.test_webui import server  # noqa: F401 — shared server fixture
 
 # custom_backtest.py is read from the atlas-strategy-lab submodule's

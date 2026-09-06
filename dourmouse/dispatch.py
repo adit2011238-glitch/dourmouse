@@ -60,7 +60,7 @@ from dourmouse.config import (
     load_llm_config,
 )
 from dourmouse import model_router
-from dourmouse.backend_fallback import load_llm_config_with_fallback
+from dourmouse.backend_fallback import load_llm_config_with_fallback, probe_ollama_fallback
 from dourmouse.governance import (
     BudgetTracker,
     DlpFilter,
@@ -624,7 +624,7 @@ def _call_with_retry_inner(
     call_log: list[dict[str, Any]] | None = None,
     on_delta: Callable[[str], None] | None = None,
     on_thinking: Callable[[str], None] | None = None,
-    client_factory: Callable[[], Any] | None = None,
+    client_factory: Callable[[], tuple[Any, str] | None] | None = None,
 ) -> Any:
     """LLM call with bounded retry + backoff, and optional model fallback.
 
@@ -642,6 +642,16 @@ def _call_with_retry_inner(
     already marked the current account's cooldown (see _build_client's
     multi-account wiring) so the factory naturally returns a DIFFERENT
     account's client when one is configured and available.
+
+    v_next (cross-backend fallback closes backend_fallback.py's mid-call
+    gap): the factory returns ``(client, model)`` rather than just a
+    client, because the account-pool-exhaustion case (see
+    ``_nvidia_rotation_factory``) may switch to a DIFFERENT backend
+    entirely (e.g. local Ollama), which also means a different model
+    string. Returning ``None`` means "nothing changed" — this call keeps
+    its current ``client``/``model`` and the existing retry/fallback_model
+    machinery below still runs, so a truly exhausted pool with no reachable
+    fallback still surfaces the real error instead of hanging or pretending.
     """
     retries = max(0, int(config.max_retries)) if config else 0
     backoff = float(config.retry_backoff) if config else 0.5
@@ -677,9 +687,11 @@ def _call_with_retry_inner(
             if attempt < retries:
                 if client_factory is not None and model_router.is_rate_limit_error(exc):
                     try:
-                        client = client_factory()
+                        switched = client_factory()
                     except Exception:  # noqa: BLE001 - a bad factory must not break the retry itself
-                        pass
+                        switched = None
+                    if switched is not None:
+                        client, model = switched
                 time.sleep(backoff * (2**attempt))
     if fallback and fallback != model:
         if call_log is not None:
@@ -1149,7 +1161,19 @@ _SYSTEM_PROMPT = (
     "an earlier reasoning step alone, especially one you have already "
     "used successfully earlier in this same conversation — that is "
     "reasoning about the roster instead of reading it, and it has been "
-    "live-caught being wrong."
+    "live-caught being wrong.\n"
+    "17. Scope how many tool calls a turn needs to the actual request — "
+    "real user complaint, real cause: turns were timing out from calling "
+    "tools far more than the question needed. A simple, direct question "
+    "with an obvious single tool (or none at all — your own knowledge is "
+    "a real answer for a well-established, non-time-sensitive fact) "
+    "needs ONE call, not a chain of exploratory ones 'just in case'. "
+    "Reserve multiple calls for requests that genuinely have multiple "
+    "real steps (e.g. 'check my calendar AND email the results'). When "
+    "unsure, make the smallest tool call that could answer the question, "
+    "look at its real result, and only call again if that result "
+    "actually shows more is needed — never chain speculative calls "
+    "before seeing what the first one returned."
 )
 
 
@@ -1867,8 +1891,10 @@ def _reset_account_pools_for_testing() -> None:
 
 
 def _nvidia_rotation_factory(
-    initial_client: Any, config: NvidiaConfig | OllamaConfig | OmniRouteConfig | None
-) -> Callable[[], Any] | None:
+    initial_client: Any,
+    config: NvidiaConfig | OllamaConfig | OmniRouteConfig | None,
+    model: str = "",
+) -> Callable[[], tuple[Any, str] | None] | None:
     """None (no rotation) unless 2+ NVIDIA accounts are actually
     configured — a single-account setup (the overwhelmingly common case)
     is completely untouched by this: _call_with_retry_inner's
@@ -1878,7 +1904,18 @@ def _nvidia_rotation_factory(
     When 2+ accounts ARE configured: returns a closure that, each time
     _call_with_retry_inner calls it after a rate-limit error, marks the
     account that just failed into cooldown and builds a fresh OpenAI
-    client against the next available one.
+    client against the next available one — same provider, same ``model``,
+    just a different NVIDIA account.
+
+    v_next: when the pool is EXHAUSTED (model_router.pool_exhausted —
+    every account cooling down mid-conversation), this closes the gap
+    backend_fallback.py always had: that module's own fallback only ever
+    probes at config-load, never reacts to a mid-call rate-limit signal.
+    Here, exhaustion instead probes local Ollama
+    (backend_fallback.probe_ollama_fallback) and, if it answers, switches
+    the turn to a DIFFERENT CONFIGURED BACKEND — which is why the factory
+    returns ``(client, model)`` rather than just a client: a backend switch
+    changes the model string too, not only the client.
     """
     if not isinstance(config, NvidiaConfig):
         return None
@@ -1887,19 +1924,36 @@ def _nvidia_rotation_factory(
         return None
     state: dict[str, model_router.Account | None] = {"current": None}
 
-    def factory() -> Any:
+    def factory() -> tuple[Any, str] | None:
         previous = state["current"]
         if previous is not None:
             pool.mark_rate_limited(previous.name)
         account = pool.select(exclude=previous.name if previous else None)
-        if account is None:
-            # every account is cooling down — keep serving on the one we
+        if account is not None:
+            state["current"] = account
+            return (
+                OpenAI(api_key=account.api_key or "local-keyless", base_url=config.base_url),
+                model,
+            )
+        if not model_router.pool_exhausted(pool):
+            # Transient: select() couldn't honor `exclude` but the pool
+            # isn't actually empty (shouldn't happen given select()'s own
+            # relaxation, but never invent a fallback when one isn't real).
+            return None
+        fallback_cfg = probe_ollama_fallback()
+        if fallback_cfg is None:
+            # Every NVIDIA account is cooling down AND no other configured
+            # backend answered either — keep serving on the client we
             # already have rather than raising here; the caller's own
             # retry/fallback machinery still runs against it and surfaces
-            # the real error if it genuinely can't succeed.
-            return initial_client
-        state["current"] = account
-        return OpenAI(api_key=account.api_key or "local-keyless", base_url=config.base_url)
+            # the real error if it genuinely can't succeed (Rule 2.2).
+            return None
+        print(
+            "[BACKEND] NVIDIA account pool exhausted (all accounts "
+            f"cooling down) mid-conversation; switching to local Ollama "
+            f"({fallback_cfg.model}) for the rest of this turn."
+        )
+        return OllamaNativeClient(fallback_cfg), fallback_cfg.model
 
     return factory
 
@@ -1920,6 +1974,8 @@ def _build_client(
         return ClaudeCliClient()
     if mode in ("ollama_cloud", "cloud"):
         return OllamaNativeClient(_ollama_cloud_config())
+    if mode == "gemini":
+        return GeminiClient()
     # Ollama: talk to the native API (fast, streaming, think disabled).
     # NVIDIA / OmniRoute: the OpenAI SDK, with a non-empty sentinel key
     # (Ollama/OmniRoute ignore key values, but the SDK rejects empty strings
@@ -2151,6 +2207,24 @@ def claude_orchestrator_enabled() -> bool:
 _agent_split_cache: dict[str, str] | None = None
 
 
+#: Real Claude calls are reserved for genuinely heavy workflows (the
+#: user's own explicit ask), not part of the even Ollama/Gemini split
+#: below. "Heavy" here is a real, checkable signal — an agent name
+#: containing one of these substrings — not a guess: code_* and
+#: cn_backends already shell out to real toolchains (Claude Code/Codex
+#: CLI) and research_*/atlas_* agents are the roster's own known
+#: multi-step, tool-call-heavy categories (see agent_prompts.py's own
+#: descriptions for each).
+_HEAVY_WORKFLOW_AGENT_MARKERS = ("code_", "cn_", "research", "atlas_")
+
+
+def _is_heavy_workflow_agent(agent_name: str | None) -> bool:
+    if not agent_name:
+        return False
+    lowered = agent_name.lower()
+    return any(marker in lowered for marker in _HEAVY_WORKFLOW_AGENT_MARKERS)
+
+
 def _agent_split_map() -> dict[str, str]:
     """Real, verifiably even split of the ACTUAL registered roster —
     computed once (module-lifetime cache, same pattern as
@@ -2161,6 +2235,12 @@ def _agent_split_map() -> dict[str, str]:
     near "evenly split", the user's own explicit ask). Alphabetical sort
     keeps it deterministic across restarts without needing to persist
     anything.
+
+    Split targets are Ollama Cloud and Gemini — NOT Claude. Claude is
+    reserved for heavy workflows only (_is_heavy_workflow_agent), checked
+    separately in _agent_split_backend before this map is even consulted,
+    so heavy agents never dilute the even split between the two cheap
+    backends.
     """
     global _agent_split_cache
     if _agent_split_cache is not None:
@@ -2168,8 +2248,15 @@ def _agent_split_map() -> dict[str, str]:
     from dourmouse.general_roster import build_general_registry
 
     names = sorted(s.name for s in build_general_registry().all_subagents())
+    # Alternate over the NON-heavy names only — indexing parity across the
+    # full roster (heavy agents interspersed) would skew the split once
+    # heavy agents are filtered out downstream (measured on the real
+    # roster: 15/13, not even). Heavy agents never consult this map at
+    # all (see _agent_split_backend's early return), so they're excluded
+    # here too rather than occupying a slot that throws off parity.
+    non_heavy = [n for n in names if not _is_heavy_workflow_agent(n)]
     _agent_split_cache = {
-        name: ("claude" if i % 2 == 0 else "ollama_cloud") for i, name in enumerate(names)
+        name: ("ollama_cloud" if i % 2 == 0 else "gemini") for i, name in enumerate(non_heavy)
     }
     return _agent_split_cache
 
@@ -2206,19 +2293,24 @@ def _effective_split_agent(
 
 def _agent_split_backend(agent_name: str | None) -> str:
     """Deterministic (Rule 2.8) even split of the roster across the two
-    real backends — see _agent_split_map's own docstring. An agent name
-    outside the current registry (a stale reference, a test double)
-    falls back to a stable hash of the name so it never crashes and
-    still lands the same side every time."""
+    cheap real backends — see _agent_split_map's own docstring. A heavy
+    workflow (_is_heavy_workflow_agent) escalates to real Claude instead
+    of the split, regardless of which side it would otherwise land on —
+    the user's own explicit ask. An agent name outside the current
+    registry (a stale reference, a test double) falls back to a stable
+    hash of the name so it never crashes and still lands the same side
+    every time."""
     if not agent_name:
         return "claude"  # no single agent resolved (a free top-level chat) — Claude by default
+    if _is_heavy_workflow_agent(agent_name):
+        return "claude"
     mapped = _agent_split_map().get(agent_name)
     if mapped is not None:
         return mapped
     import hashlib
 
     digest = hashlib.sha256(agent_name.encode("utf-8")).hexdigest()
-    return "claude" if int(digest, 16) % 2 == 0 else "ollama_cloud"
+    return "ollama_cloud" if int(digest, 16) % 2 == 0 else "gemini"
 
 
 def _ollama_cloud_config() -> OllamaConfig:
@@ -2308,6 +2400,69 @@ class ClaudeCliClient:
 
 class _ClaudeCliCompletions:
     def __init__(self, client: "ClaudeCliClient") -> None:
+        self._client = client
+
+    def create(
+        self,
+        *,
+        model: str | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+        extra_body: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        stream: bool = False,
+    ) -> Any:
+        return self._client._create(model=model, messages=messages, tools=tools, max_tokens=max_tokens, stream=stream)
+
+
+# -- Gemini, as a real split-backend target (alongside Ollama Cloud) ------- #
+# The user's own explicit ask: Claude Code is the only thing the user talks
+# to, in every tab, by default; behind the scenes the actual sub-agent
+# roster is split between Ollama Cloud and Gemini, with real Claude calls
+# reserved for genuinely heavy workflows (see _HEAVY_WORKFLOW_MARKERS).
+# gemini_backend.py already exists (a real, tested, hermetic module built
+# 2026-09-04 — 40/40 tests passing) — this just wires it in as a third
+# chat.completions-shaped client, same pattern as ClaudeCliClient.
+class GeminiClient:
+    def __init__(self, timeout: float = 60.0) -> None:
+        self.timeout = timeout
+        self.chat = type("_Chat", (), {"completions": _GeminiCompletions(self)})()
+
+    def _create(
+        self,
+        *,
+        model: str | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        stream: bool = False,
+    ) -> Any:
+        from dourmouse import gemini_backend
+
+        last_user = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+            "",
+        )
+        system = "\n".join(
+            str(m.get("content", "")) for m in messages if m.get("role") == "system"
+        ) or None
+        try:
+            text = gemini_backend.call_gemini(
+                str(last_user), system=system, max_tokens=max_tokens, timeout=self.timeout
+            )
+        except RuntimeError as exc:
+            # Same "reported honestly" contract as ClaudeCliClient/every
+            # other backend failure path (Rule 2.1/2.2) — never fabricate.
+            text = f"GEMINI (reported honestly): {exc}"
+        message = _OllamaMessage(text, None)
+        if stream:
+            return iter([_OllamaChunk(_OllamaDelta(content=text))])
+        return _OllamaResponse(message)
+
+
+class _GeminiCompletions:
+    def __init__(self, client: "GeminiClient") -> None:
         self._client = client
 
     def create(
@@ -2823,6 +2978,10 @@ def run_dispatch_messages(
         model, backend_name, backend_local = "claude-sonnet-5 (CLI)", "claude_cli", False
     elif _orch_mode in ("ollama_cloud", "cloud"):
         model, backend_name, backend_local = _OLLAMA_CLOUD_DEFAULT_MODEL, "ollama_cloud", False
+    elif _orch_mode == "gemini":
+        from dourmouse.gemini_backend import GEMINI_DEFAULT_MODEL
+
+        model, backend_name, backend_local = GEMINI_DEFAULT_MODEL, "gemini", False
     # The chosen brain is surfaced honestly so the UI can show which model
     # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
     # of the tree: nested delegate runs ride the parent's event sink, so a
@@ -3481,6 +3640,10 @@ def _run_dispatch_loop(
                     model, _routed_backend, _routed_local = "claude-sonnet-5 (CLI)", "claude_cli", False
                 elif _orch_mode2 in ("ollama_cloud", "cloud"):
                     model, _routed_backend, _routed_local = _OLLAMA_CLOUD_DEFAULT_MODEL, "ollama_cloud", False
+                elif _orch_mode2 == "gemini":
+                    from dourmouse.gemini_backend import GEMINI_DEFAULT_MODEL
+
+                    model, _routed_backend, _routed_local = GEMINI_DEFAULT_MODEL, "gemini", False
                 _emit_event(
                     event_sink,
                     {
@@ -3643,7 +3806,7 @@ def _run_dispatch_loop(
         # actually configured — see _nvidia_rotation_factory's own
         # docstring for why a single-account setup is completely
         # unaffected by this existing at all.
-        client_factory = _nvidia_rotation_factory(client, ctx.config)
+        client_factory = _nvidia_rotation_factory(client, ctx.config, model)
 
         # v4.2 speed: the LLM sees a bounded rolling window (system +
         # in-flight exchange + recent history), never the unbounded

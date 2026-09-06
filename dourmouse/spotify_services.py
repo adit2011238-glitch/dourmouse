@@ -453,10 +453,55 @@ def _populate_account_id() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Short-TTL poll cache — lets the floating widget poll every few seconds
+# without re-hitting the Spotify API per open tab/device. In-process, so it
+# is per-server-instance (fine: the widget polls the same running server).
+# --------------------------------------------------------------------------- #
+_POLL_CACHE_TTL = float(os.environ.get("SPOTIFY_POLL_CACHE_TTL", "4"))
+_cache_lock = threading.Lock()
+_cache: dict[str, tuple[float, str]] = {}
+
+
+def _cached(key: str, fn: Any) -> str:
+    """Return ``fn()``'s cached result if it is younger than the TTL.
+
+    A lock guards the shared dict against concurrent pollers (multiple
+    widget tabs/devices hitting the same server), but the (possibly slow)
+    network call itself runs outside the lock so one poller never blocks
+    another.
+    """
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+    if hit is not None and now - hit[0] < _POLL_CACHE_TTL:
+        return hit[1]
+    result = fn()
+    with _cache_lock:
+        _cache[key] = (now, result)
+    return result
+
+
+def _invalidate_cache() -> None:
+    """Drop cached reads — called after a control action so the very next
+    poll reflects the change instead of serving up to TTL-seconds-stale
+    state (e.g. showing 'playing' right after the widget's pause button)."""
+    with _cache_lock:
+        _cache.clear()
+
+
+# --------------------------------------------------------------------------- #
 # Read tools
 # --------------------------------------------------------------------------- #
 def now_playing() -> str:
-    """What is currently playing on the linked account (or nothing)."""
+    """What is currently playing on the linked account (or nothing).
+
+    Cached for ``_POLL_CACHE_TTL`` seconds (default 4s) so a poller (e.g.
+    the floating widget) can call this every few seconds cheaply.
+    """
+    return _cached("now_playing", _now_playing_uncached)
+
+
+def _now_playing_uncached() -> str:
     data = _api("GET", "/me/player/currently-playing")
     if not data or not data.get("item"):
         return "SPOTIFY: nothing is currently playing."
@@ -473,7 +518,15 @@ def now_playing() -> str:
 
 
 def playback_state() -> str:
-    """Current playback state: device, shuffle, repeat, volume, track."""
+    """Current playback state: device, shuffle, repeat, volume, track.
+
+    Cached for ``_POLL_CACHE_TTL`` seconds (default 4s) — same rationale as
+    ``now_playing``.
+    """
+    return _cached("playback_state", _playback_state_uncached)
+
+
+def _playback_state_uncached() -> str:
     try:
         data = _api("GET", "/me/player")
     except RuntimeError:
@@ -498,10 +551,14 @@ def playback_state() -> str:
 
 
 def playback_control(action: str) -> str:
-    """Control playback: next|previous|pause|resume|shuffle|volume.
+    """Control playback: next|previous|pause|resume|volume.
 
     Confirmation-gated at the roster level (changes the user's playback).
-    Volume takes an integer 0-100 (e.g. ``volume 60``).
+    Volume takes an integer 0-100 (e.g. ``volume 60``). ``resume`` hits
+    ``PUT /me/player/play`` — the only real path for STARTING playback of a
+    specific URI is ``spotify_play``/``play_uri``; there is no bare "play"
+    action here (confirmed dead: the roster tool schema and the floating
+    widget's transport buttons only ever send next|previous|pause|resume).
     """
     action = (action or "").strip().lower()
     if action in ("next", "previous", "pause", "resume"):
@@ -512,6 +569,7 @@ def playback_control(action: str) -> str:
             "resume": ("/me/player/play", "PUT"),
         }[action]
         _api(endpoint[1], endpoint[0])
+        _invalidate_cache()  # next poll must reflect the change, not stale state
         return f"SPOTIFY: {action} — done."
     if action.startswith("volume "):
         try:
@@ -519,10 +577,11 @@ def playback_control(action: str) -> str:
         except ValueError:
             return "ERROR: volume must be 0-100 (e.g. 'volume 60')."
         _api("PUT", "/me/player/volume", {"volume_percent": max(0, min(100, volume))})
+        _invalidate_cache()
         return f"SPOTIFY: volume set to {max(0, min(100, volume))}%."
     return (
         "ERROR: playback_control action must be one of: "
-        "next | previous | pause | resume | volume <0-100>. "
+        "pause | next | previous | resume | volume <0-100>. "
         "Use spotify_play to play specific music."
     )
 

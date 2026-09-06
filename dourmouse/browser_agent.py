@@ -58,6 +58,37 @@ _UA_NOTE = (
     "headless Chrome driven by Dourmouse, never hidden."
 )
 
+#: backlog #8, Phase 4 of the user's own spec ("Ad & Media Blocking...
+#: speeds up page loads by up to 5x"). Conservative on purpose: only
+#: video/audio streams (a real, large, page-load-blocking cost with zero
+#: value for text/structure-based tool use) and a short real list of
+#: well-known tracker domains — NOT images/CSS/scripts wholesale, which
+#: would risk breaking the very page structure browser_snapshot needs to
+#: read. Overridable via DOURMOUSE_BROWSER_BLOCK_MEDIA=0 for a page where
+#: media genuinely matters.
+_BLOCKED_RESOURCE_TYPES = frozenset({"media"})
+_BLOCKED_HOST_SUBSTRINGS = (
+    "doubleclick.net",
+    "google-analytics.com",
+    "googletagmanager.com",
+    "googlesyndication.com",
+    "facebook.com/tr",
+    "connect.facebook.net",
+    "scorecardresearch.com",
+    "adservice.google.com",
+)
+
+
+def _should_block_request(url: str, resource_type: str) -> bool:
+    """Pure predicate (independently testable — no real network/Playwright
+    involved) deciding whether a request should be aborted for speed."""
+    if os.environ.get("DOURMOUSE_BROWSER_BLOCK_MEDIA", "1").strip() == "0":
+        return False
+    if resource_type in _BLOCKED_RESOURCE_TYPES:
+        return True
+    lowered = url.lower()
+    return any(host in lowered for host in _BLOCKED_HOST_SUBSTRINGS)
+
 
 # --------------------------------------------------------------------------- #
 # Event-loop plumbing — one thread owns the browser; tools submit coroutines.
@@ -147,6 +178,15 @@ async def _ensure_browser() -> Any:
             ),
         )
         page = await context.new_page()
+
+        async def _route_handler(route: Any) -> None:
+            req = route.request
+            if _should_block_request(req.url, req.resource_type):
+                await route.abort()
+            else:
+                await route.continue_()
+
+        await context.route("**/*", _route_handler)
     except Exception as exc:  # noqa: BLE001 - context failures, readable
         _LAUNCH_ERROR = f"BROWSER CONTEXT FAILED: {type(exc).__name__}: {exc}"
         raise RuntimeError(_LAUNCH_ERROR) from exc

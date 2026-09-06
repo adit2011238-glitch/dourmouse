@@ -96,6 +96,28 @@ def user_env_path() -> Path:
     return user_config_dir() / ".env"
 
 
+def workspace_dir() -> Path:
+    """The DourMouse workspace root: ``DOURMOUSE_WORKSPACE`` env var when
+    set, else ``<project_root>/workspace`` (this file's grandparent dir).
+
+    Single source of truth for this resolution. Before this helper existed
+    it was independently reimplemented in five places (google_auth.py's
+    ``default_auth_store``, chat.py's ``_default_sessions_dir``, desktop.py's
+    ``_webview_storage_path``, general_roster.py's ``_workspace_root``,
+    design_3d_ops.py's ``_manifest_path``) — a real path-drift risk: if any
+    copy diverged, AuthStore's ``dourmouse_auth.db`` and the rest of the app
+    would resolve different workspace roots and login would silently break.
+    All five now call this instead.
+
+    Does not create the directory — callers that need it to exist still
+    call ``.mkdir(parents=True, exist_ok=True)`` on the result themselves.
+    """
+    raw = os.environ.get("DOURMOUSE_WORKSPACE", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return Path(__file__).resolve().parent.parent / "workspace"
+
+
 def is_configured() -> bool:
     """True when SOME working backend is reachable.
 

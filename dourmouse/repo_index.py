@@ -229,7 +229,7 @@ def scan_repo(
     ``repo:<folder>`` for a non-default project. Returns ``{source, scanned,
     added, updated, skipped, unchanged, removed, total_facts}``.
     """
-    from dourmouse.atlas_ops import get_atlas_repo_path
+    from dourmouse.atlas.atlas_ops import get_atlas_repo_path
 
     if root is None:
         root = get_atlas_repo_path()
@@ -436,7 +436,7 @@ def _repo_scan_tool(arguments: dict[str, Any]) -> str:
         if isinstance(target, str):
             return f"REPO INDEX (honest): {target}"
         if target is None:
-            from dourmouse.atlas_ops import AtlasNotConfiguredError, get_atlas_repo_path
+            from dourmouse.atlas.atlas_ops import AtlasNotConfiguredError, get_atlas_repo_path
 
             try:
                 root = get_atlas_repo_path()

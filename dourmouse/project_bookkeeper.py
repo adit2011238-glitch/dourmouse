@@ -439,18 +439,63 @@ def _public_view(store: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#: v13.x (backlog #10, the user's own explicit ask): "remove the
+#: requirement for giving the file path — it should create a file in the
+#: user's Documents folder". Every auto-created project lives under here.
+_DEFAULT_PROJECTS_DIRNAME = "Dourmouse Projects"
+
+
+def _safe_project_dirname(name: str) -> str:
+    """A filesystem-safe folder name derived from the project name — no
+    path separators, no leading dots (hidden dir), no empty result. Real
+    collisions (two projects named the same) are handled by the caller
+    appending a numeric suffix, not here (this function is deterministic
+    for a given name, on purpose, so it's independently testable)."""
+    import re as _re
+
+    cleaned = _re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "-", name).strip().strip(".")
+    return cleaned or "untitled-project"
+
+
+def _default_project_path(name: str, documents_root: Path | str | None = None) -> Path:
+    """Where an auto-created project (no path given) lands: real
+    Documents folder, not a guess — Path.home()/"Documents" is the same
+    real location every other Documents-writing feature in this repo
+    uses (see the Study tab / MYP data folder for the sibling convention).
+    ``documents_root`` overrides the Documents folder itself (tests only —
+    real callers never pass it, so real behavior is unchanged). A name
+    collision gets a numeric suffix rather than silently reusing (and
+    polluting) an existing folder."""
+    docs = Path(documents_root) if documents_root is not None else (Path.home() / "Documents")
+    base = docs / _DEFAULT_PROJECTS_DIRNAME
+    dirname = _safe_project_dirname(name)
+    candidate = base / dirname
+    n = 2
+    while candidate.exists():
+        candidate = base / f"{dirname}-{n}"
+        n += 1
+    return candidate
+
+
 def create_project(
     name: str,
-    path: str,
+    path: str = "",
     description: str = "",
     store_path: Path | str | None = None,
+    documents_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Manually register a project on the bookshelf — real user request
     (v13.4), for a project that has no Claude/Codex session history yet
     (a brand-new folder) or that the user simply wants tracked/pinned.
-    Does NOT create the directory itself (Rule 2.2: no silent side
-    effects a caller didn't ask for) -- ``path`` is recorded whether or
-    not it exists yet; ``exists`` reflects the real, current filesystem
+
+    ``path`` is now OPTIONAL (v13.x, backlog #10): when omitted, a real
+    directory is created under ~/Documents/Dourmouse Projects/<name> (an
+    EXPECTED side effect this time — the user's own explicit ask was to
+    remove the path requirement, not to record a path that leads nowhere).
+    An explicitly-given ``path`` keeps the original, more conservative
+    behavior: recorded whether or not it exists yet, never auto-created
+    (Rule 2.2 — no silent side effects the caller didn't ask for on a
+    path THEY chose). ``exists`` reflects the real, current filesystem
     state at creation time and is honestly re-checked, not assumed.
 
     Returns the same per-project card shape refresh()'s auto-discovered
@@ -462,7 +507,9 @@ def create_project(
     if not name:
         raise ValueError("create_project requires a non-empty 'name'.")
     if not path:
-        raise ValueError("create_project requires a non-empty 'path'.")
+        default_path = _default_project_path(name, documents_root=documents_root)
+        default_path.mkdir(parents=True, exist_ok=True)
+        path = str(default_path)
     resolved = str(Path(path).expanduser())
     sp = Path(store_path) if store_path is not None else _store_path()
     store = _load_store(sp)
@@ -489,6 +536,45 @@ def create_project(
     # A hidden auto-discovered project at the same path, re-created
     # manually, should reappear -- an explicit re-add un-hides it.
     store["hidden_paths"] = [p for p in store.get("hidden_paths", []) if p != resolved]
+    _save_store(store, sp)
+    return record
+
+
+def open_project(path: str, store_path: Path | str | None = None) -> dict[str, Any]:
+    """Open a tracked project — real user request (backlog #10: "the
+    projects can't be opened"). Validates the project is actually on the
+    bookshelf and its directory still really exists (honest — a stale
+    record for a deleted folder is reported as such, not silently
+    "opened" anyway), bumps ``last_active`` so it sorts to the top like
+    genuine session activity would, and returns the record.
+
+    Scope note (explicit, not silently dropped): this does not yet route
+    the client into a dedicated project-workspace VIEW the way Claude
+    Desktop's Projects do — that needs either a new UI surface or
+    extending code_backends.py's cwd resolution to accept a client-chosen
+    directory, both bigger than this fix. What's real here: the API call
+    that a UI "Open" button needs actually exists and works, instead of
+    there being nothing to call at all.
+    """
+    resolved = str(Path(path).expanduser())
+    sp = Path(store_path) if store_path is not None else _store_path()
+    store = _load_store(sp)
+    projects = store.get("projects", {})
+    manual = store.get("manual_projects", {})
+    record = projects.get(resolved) or manual.get(resolved)
+    if record is None:
+        raise ValueError(f"no project tracked at {resolved!r} — create it first.")
+    exists = Path(resolved).exists()
+    record = dict(record)
+    record["exists"] = exists
+    if not exists:
+        # Honest, not silently "opened" — Rule 2.2.
+        raise ValueError(f"project directory no longer exists on disk: {resolved!r}")
+    record["last_active"] = _now_iso()
+    if resolved in projects:
+        store["projects"][resolved] = record
+    else:
+        store["manual_projects"][resolved] = record
     _save_store(store, sp)
     return record
 

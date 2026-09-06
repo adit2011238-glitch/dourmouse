@@ -99,14 +99,62 @@ def contrast_ratio(
 
 
 _DECL = re.compile(r"(--[A-Za-z0-9-]+)\s*:\s*([^;}]+)[;}]")
+_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
 def extract_tokens(css_or_html: str) -> dict[str, str]:
-    """Collect `--name: value` declarations, last definition winning."""
+    """Collect `--name: value` declarations, last definition winning.
+
+    Comments are stripped first. Without this, a documentation comment
+    written as `- --sans: this file's identity was ...` (a real style in
+    this codebase's revert notes) reads as a token declaration whose
+    "value" is the entire greedy `[^;}]+` run up to the next semicolon —
+    which can be lines away, swallowing a real declaration (`--v0:#...;`)
+    in between so it never gets its own match. That dropped token then
+    silently fails to appear in the result rather than raising, which is
+    the dangerous failure mode: a ground or text token goes missing and
+    `audit_tokens` just skips it instead of reporting the gap.
+    """
+    stripped = _COMMENT.sub("", css_or_html)
     out: dict[str, str] = {}
-    for name, value in _DECL.findall(css_or_html):
+    for name, value in _DECL.findall(stripped):
         out[name] = value.strip()
     return out
+
+
+_VAR_REF = re.compile(r"var\(\s*(--[A-Za-z0-9-]+)\s*(?:,\s*([^()]*))?\)")
+
+
+def resolve_var_refs(value: str, tokens: dict[str, str], _depth: int = 0) -> str:
+    """Substitute `var(--name[, fallback])` references against `tokens`.
+
+    product.html/hub.html/graveyard.html define their text tokens as
+    `rgba(var(--cyan-rgb), var(--a45))` rather than a literal hex/rgba like
+    every other audited screen — `parse_color` can't see through a nested
+    `var(...)`, so left unresolved these tokens silently read as
+    unparseable and `audit_tokens` skips them outright (the same "dropped
+    token" danger `extract_tokens`'s own docstring already warns about: a
+    real regression goes unreported instead of failing loudly). This walks
+    the token table and substitutes known names (falling back to the
+    var()'s own default, or leaving it as-is if neither resolves), up to a
+    small recursion depth — generous for a token layer that is at most two
+    `var()` hops deep anywhere in this codebase.
+    """
+    if _depth > 6 or not value or "var(" not in value:
+        return value
+
+    def _sub(m: re.Match[str]) -> str:
+        name = m.group(1)
+        default = m.group(2)
+        resolved = tokens.get(name)
+        if resolved is not None:
+            return resolved
+        return default.strip() if default is not None else m.group(0)
+
+    substituted = _VAR_REF.sub(_sub, value)
+    if substituted == value:
+        return value
+    return resolve_var_refs(substituted, tokens, _depth + 1)
 
 
 # Text tokens that must stay legible on the page's own ground, with the
@@ -120,17 +168,29 @@ TEXT_TOKENS: dict[str, float] = {
 GROUND_TOKENS = ("--ground", "--surface")
 
 
-def audit_tokens(source: str) -> list[dict[str, object]]:
-    """Check each text token against each ground. Returns one row per pair."""
+def audit_tokens(
+    source: str,
+    text_tokens: dict[str, float] | None = None,
+    ground_tokens: tuple[str, ...] | None = None,
+) -> list[dict[str, object]]:
+    """Check each text token against each ground. Returns one row per pair.
+
+    `text_tokens` / `ground_tokens` default to index.html's own vocabulary
+    (`--text`/`--text-dim` on `--ground`/`--surface`). console.html and
+    os.html name the same four roles differently (`--blue`/`--blue-dim` on
+    `--bg`/`--panel`; `--t0`/`--t1`/`--t2` on `--v0`/`--v1`) — pass the
+    file's own names rather than teaching this function every screen's
+    palette.
+    """
     tokens = extract_tokens(source)
     grounds: list[tuple[str, tuple[float, float, float]]] = []
-    for g in GROUND_TOKENS:
-        parsed = parse_color(tokens.get(g, ""))
+    for g in (ground_tokens if ground_tokens is not None else GROUND_TOKENS):
+        parsed = parse_color(resolve_var_refs(tokens.get(g, ""), tokens))
         if parsed:
             grounds.append((g, parsed[:3]))
     rows: list[dict[str, object]] = []
-    for token, threshold in TEXT_TOKENS.items():
-        fg = parse_color(tokens.get(token, ""))
+    for token, threshold in (text_tokens if text_tokens is not None else TEXT_TOKENS).items():
+        fg = parse_color(resolve_var_refs(tokens.get(token, ""), tokens))
         if not fg:
             continue
         for gname, gcolor in grounds:
@@ -149,3 +209,92 @@ def audit_tokens(source: str) -> list[dict[str, object]]:
 
 def ui_index_path() -> Path:
     return Path(__file__).resolve().parent.parent / "ui" / "index.html"
+
+
+def ui_console_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "console.html"
+
+
+def ui_os_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "os.html"
+
+
+def ui_login_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "login.html"
+
+
+def ui_setup_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "setup.html"
+
+
+def ui_app_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "app.html"
+
+
+def ui_hud_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "hud.html"
+
+
+def ui_workspace_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "workspace.html"
+
+
+def ui_voice_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "voice.html"
+
+
+def ui_agent_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "agent.html"
+
+
+def ui_all_hands_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "all_hands.html"
+
+
+def ui_atlas_lab_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "atlas_lab.html"
+
+
+def ui_map_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "map.html"
+
+
+def ui_mobile_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "mobile.html"
+
+
+def ui_product_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "product.html"
+
+
+def ui_hub_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "hub.html"
+
+
+def ui_graveyard_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "graveyard.html"
+
+
+def ui_design_system_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "design-system.html"
+
+
+_ROOT_BLOCK = re.compile(r":root\s*\{([^{}]*)\}")
+
+
+def default_root_block(source: str) -> str:
+    """Return the file's base, unconditional `:root { ... }` block.
+
+    console.html and os.html both carry alternate themes as sibling
+    `[data-theme="x"]` rules (and, in os.html, an
+    `@media (prefers-color-scheme: light)` block) that redeclare the same
+    token names. `extract_tokens`'s "last definition wins" rule is a
+    faithful reading of a plain cascade, but it knows nothing about
+    selectors — fed the whole stylesheet, "last" is just whichever theme
+    block happens to sit at the bottom of the file (alphabetically or
+    otherwise), not the one that actually renders with no `data-theme`
+    attribute set and no OS light-mode preference. Scoping to the first
+    bare `:root { ... }` gets the real default back.
+    """
+    m = _ROOT_BLOCK.search(source)
+    return m.group(0) if m else source

@@ -158,7 +158,7 @@ class TestScan:
 
     def test_not_configured_without_repo_path(self, store, monkeypatch):
         monkeypatch.delenv("ATLAS_REPO_PATH", raising=False)
-        from dourmouse.atlas_ops import AtlasNotConfiguredError
+        from dourmouse.atlas.atlas_ops import AtlasNotConfiguredError
 
         with pytest.raises(AtlasNotConfiguredError):
             scan_repo(store)  # no root -> must read ATLAS_REPO_PATH and fail honestly

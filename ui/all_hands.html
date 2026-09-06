@@ -63,13 +63,29 @@
     --font-mono: 'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
     --font-prose: 'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
     --text: #FAFAFA;
-    --text-dim: #71717A;
+    /* --text-dim was #71717A (zinc-500) -- the identical WCAG 2.1 SC 1.4.3
+       failure already found and fixed across every other screen in this
+       audit family: 3-4:1 against this file's own --ground/--surface/
+       --raised, below the 4.5:1 AA needs, on real 10-11px labels/captions
+       (h1 .dim, .status, .goal .g-label/.meta, .card chips, .runs .r-title,
+       .empty), not decorative glyphs. Raised to zinc-400 (#A1A1AA), the
+       same step every prior fix took, and the exact value this file's own
+       --text-body already uses. */
+    --text-dim: #A1A1AA;
     --text-body: #A1A1AA;
     --line: #27272A;
     --line-strong: #3F3F46;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
+  /* This screen had ZERO :focus-visible rules -- every button and control
+     relied entirely on the browser's native default ring, which this dark
+     zinc/amber terminal never styled for. Matching the shared default
+     already established on console.html/hud.html/workspace.html/
+     voice.html/agent.html: one global bare rule, this file's own --amber
+     accent. --amber on --ground measures 9.26:1, well past the 3:1 WCAG
+     2.1 SC 1.4.11 a non-text focus indicator needs. */
+  :focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
   /* Two radial washes and a top-to-bottom gradient used to sit here. All
      three were decoration; the ground is now one flat colour. */
   body {

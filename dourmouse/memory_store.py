@@ -32,8 +32,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from dourmouse.rag_common import content_hash as _content_hash
+
 _DEFAULT_DIR_NAME = "memory"
 _DEFAULT_DB_NAME = "atlas_memory.db"
+
+#: Prefix on remember()'s return string when content-hash dedup found an
+#: existing fact with identical content under a DIFFERENT (source, title)
+#: key and skipped the insert (Cycle 1 RAG storage audit — the confirmed
+#: gap: zero content-dedup logic existed anywhere in the RAG stack before
+#: this). Callers (bulk_ingest.py) check this via is_duplicate_result()
+#: instead of re-deriving the string.
+DUPLICATE_PREFIX = "MEMORY DUPLICATE"
+
+
+def is_duplicate_result(result: str) -> bool:
+    """True if a remember() call was skipped as a content-hash duplicate."""
+    return isinstance(result, str) and result.startswith(DUPLICATE_PREFIX)
 
 
 class MemoryStoreUnavailable(RuntimeError):
@@ -111,6 +126,31 @@ class MemoryStore:
                 )
                 """
             )
+            # Content-hash dedup column (Cycle 1 RAG audit fix). ALTER TABLE
+            # ADD COLUMN is additive and safe against an existing on-disk DB
+            # from before this fix shipped — checked via table_info rather
+            # than a bare ADD COLUMN so re-opening an already-migrated store
+            # never raises "duplicate column name".
+            cur.execute("PRAGMA table_info(facts)")
+            existing_cols = {row[1] for row in cur.fetchall()}
+            if "content_hash" not in existing_cols:
+                cur.execute("ALTER TABLE facts ADD COLUMN content_hash TEXT")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_facts_source_hash "
+                "ON facts(source, content_hash)"
+            )
+            # Backfill: rows written before this fix (or the ALTER above on
+            # first migration) have no content_hash yet. Compute it once so
+            # dedup covers the whole table, not just facts written after
+            # this deploy.
+            stale = cur.execute(
+                "SELECT id, body FROM facts WHERE content_hash IS NULL"
+            ).fetchall()
+            for row in stale:
+                cur.execute(
+                    "UPDATE facts SET content_hash = ? WHERE id = ?",
+                    (_content_hash(row["body"]), row["id"]),
+                )
             # v4.1 (P6): optional semantic-recall layer. Cached embeddings for
             # fact bodies (one row per fact, json vector). Empty by design —
             # the layer is populated lazily only when DOURMOUSE_EMBED is on.
@@ -155,17 +195,39 @@ class MemoryStore:
         if not title or not body:
             raise ValueError("remember requires a non-empty title and body")
         now = datetime.now().isoformat(timespec="seconds")
+        content_hash = _content_hash(body)
         with self._lock:
             cur = self._conn.cursor()
+            # Content-hash dedup (Cycle 1 RAG audit fix): the (source, title)
+            # UNIQUE constraint below only catches a literal re-remember of
+            # the SAME key (an upsert, handled by ON CONFLICT). It never
+            # caught identical content arriving under a DIFFERENT title —
+            # the real, confirmed gap (e.g. a resumed bulk_ingest checkpoint
+            # re-scanning a moved/renamed file, or the same note ingested
+            # from two paths). Scoped to the same source: two different
+            # sources legitimately holding the same text (e.g. a vault note
+            # quoted inside a session ledger) are not duplicates of each
+            # other.
+            dup = cur.execute(
+                "SELECT source, title FROM facts "
+                "WHERE source = ? AND content_hash = ? AND title != ?",
+                (source, content_hash, title),
+            ).fetchone()
+            if dup is not None:
+                return (
+                    f"{DUPLICATE_PREFIX}: identical content already stored "
+                    f"as [{dup['source']}] {dup['title']} — skipped re-insert"
+                )
             cur.execute(
                 """
-                INSERT INTO facts(source, title, body, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO facts(source, title, body, content_hash, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source, title) DO UPDATE SET
                     body = excluded.body,
+                    content_hash = excluded.content_hash,
                     updated_at = excluded.updated_at
                 """,
-                (source, title, body, now, now),
+                (source, title, body, content_hash, now, now),
             )
             # v4.1 (P6): an updated fact body invalidates its cached embedding
             # so semantic recall never scores against a stale vector (the

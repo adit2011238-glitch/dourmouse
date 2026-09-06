@@ -178,6 +178,55 @@ class TestIngestLocalTree:
         assert len(row["body"]) < len(big)
 
 
+class TestIngestLocalTreeDedup:
+    """Cycle 1 RAG audit fix: content-hash dedup at the ingest entry point,
+    not just inside MemoryStore.remember() directly — real end-to-end
+    coverage of the confirmed gap (identical content, two paths/ids)."""
+
+    def test_identical_content_two_paths_is_deduped_not_double_indexed(self, tmp_path, store):
+        root = tmp_path / "docs"
+        root.mkdir()
+        (root / "original.txt").write_text("2000 in Afghanistan")
+        (root / "copy.txt").write_text("2000 in Afghanistan")
+        checkpoint = tmp_path / "ckpt.json"
+
+        stats = ingest_local_tree(store, root, checkpoint)
+        assert stats["indexed"] == 1
+        assert stats["skipped_duplicate"] == 1
+        assert stats["errors"] == 0
+        assert store.count(source="laptop_file") == 1
+
+    def test_resumed_run_after_file_move_does_not_reintroduce_duplicate(self, tmp_path, store):
+        # Simulates the checkpointed-resume scenario the audit called out:
+        # a file gets moved/renamed between runs (new path -> new checkpoint
+        # key), so the checkpoint alone can't skip it, but its content is
+        # identical to what a prior run already indexed under the old path.
+        root = tmp_path / "docs2"
+        root.mkdir()
+        original = root / "notes.txt"
+        original.write_text("duplicate-prone content")
+        checkpoint = tmp_path / "ckpt2.json"
+
+        first = ingest_local_tree(store, root, checkpoint)
+        assert first["indexed"] == 1
+
+        original.rename(root / "notes_renamed.txt")
+        second = ingest_local_tree(store, root, checkpoint)
+        assert second["indexed"] == 0
+        assert second["skipped_duplicate"] == 1
+        assert store.count(source="laptop_file") == 1
+
+    def test_distinct_files_are_not_deduped(self, tmp_path, store):
+        root = tmp_path / "docs3"
+        root.mkdir()
+        (root / "a.txt").write_text("first real document")
+        (root / "b.txt").write_text("second real document")
+        checkpoint = tmp_path / "ckpt3.json"
+        stats = ingest_local_tree(store, root, checkpoint)
+        assert stats["indexed"] == 2
+        assert stats["skipped_duplicate"] == 0
+
+
 class _FakeDriveResp:
     def __init__(self, payload: bytes):
         self._payload = payload
@@ -288,3 +337,21 @@ class TestIngestDrive:
         stats = ingest_drive(store, "tok", checkpoint)
         assert stats["indexed"] == 1
         assert stats["errors"] == 1
+
+    def test_identical_content_two_drive_ids_is_deduped(self, tmp_path, store, monkeypatch):
+        # e.g. a Drive "Make a copy" duplicate, or the same content
+        # re-shared under a second file id.
+        def fake_list(token, page_size=1000):
+            yield {"id": "f1", "name": "original.txt", "mimeType": "text/plain"}
+            yield {"id": "f2", "name": "original copy.txt", "mimeType": "text/plain"}
+
+        monkeypatch.setattr("dourmouse.bulk_ingest.list_all_drive_files", fake_list)
+        monkeypatch.setattr(
+            "dourmouse.bulk_ingest._read_drive_file_text",
+            lambda token, meta: "identical drive content",
+        )
+        checkpoint = tmp_path / "drive_ckpt4.json"
+        stats = ingest_drive(store, "tok", checkpoint)
+        assert stats["indexed"] == 1
+        assert stats["skipped_duplicate"] == 1
+        assert store.count(source="gdrive_file") == 1

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import pathlib
 import threading
 import time
 import urllib.parse
@@ -387,6 +388,185 @@ class TestHttpEndpoints:
         resp = conn.getresponse()
         assert resp.status == 404
         conn.close()
+
+
+class TestSpotifyWidgetInjection:
+    """v13.x backlog item 8: the floating widget is injected at serve time
+    (dourmouse/webui.py::_serve_static) onto every screen EXCEPT the
+    pre-auth login/setup pages, which the designer lane owns this cycle.
+
+    The widget files (ui/spotify_widget.css/.js) are the designer lane's
+    deliverable, not this test's — created here only to exercise the
+    file-exists-guarded injection, and removed afterwards so a real
+    worktree state without them is unaffected.
+    """
+
+    _WIDGET_TAGS = (
+        b'<link rel="stylesheet" href="/ui/spotify_widget.css">'
+        b'<script defer src="/ui/spotify_widget.js"></script>'
+    )
+
+    @pytest.fixture
+    def with_widget_files(self):
+        css = webui_module._UI_DIR / "spotify_widget.css"
+        js = webui_module._UI_DIR / "spotify_widget.js"
+        pre_existing = css.exists() or js.exists()
+        if not pre_existing:
+            css.write_text("/* test widget */", encoding="utf-8")
+            js.write_text("// test widget", encoding="utf-8")
+        yield
+        if not pre_existing:
+            css.unlink(missing_ok=True)
+            js.unlink(missing_ok=True)
+
+    def test_injected_into_a_non_login_setup_page(self, server, monkeypatch, with_widget_files):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        # NOT "/" — that serves console.html (the default since v8.7),
+        # which is correctly EXCLUDED (it ships its own inline Spotify
+        # controls, per _serve_static's own exclusion-list comment).
+        # os.html has no inline controls of its own, so it's a real
+        # "should get the floating widget" page.
+        conn.request("GET", "/os.html")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._WIDGET_TAGS in body
+
+    def test_absent_from_login_and_setup_pages(self, server, with_widget_files):
+        srv, port = server
+        for path in ("/login", "/setup"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            assert resp.status == 200, path
+            body = resp.read()
+            conn.close()
+            assert self._WIDGET_TAGS not in body, path
+
+    def test_injection_silently_skipped_when_widget_files_absent(self, server, monkeypatch):
+        """Simulate a worktree state without the designer lane's widget
+        files — regardless of whether ui/spotify_widget.css/.js actually
+        exist on disk in THIS checkout (post-6cf7a26 they do) — by forcing
+        just those two exists() lookups to False. Injection must no-op, not
+        error, and every other Path.exists() call (serving the real
+        index.html, etc.) is left untouched."""
+        real_exists = pathlib.Path.exists
+        widget_names = {"spotify_widget.css", "spotify_widget.js"}
+
+        def fake_exists(self, *args, **kwargs):
+            if self.name in widget_names:
+                return False
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(pathlib.Path, "exists", fake_exists)
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._WIDGET_TAGS not in body
+
+
+class TestStartupCheckInjection:
+    """backlog #6: startup animation + real claude/codex/Google sign-in
+    check, injected on the default landing page only (console.html) —
+    login.html/setup.html already have their own real sign-in UI."""
+
+    _STARTUP_TAG = b'<script defer src="/assets/startup_check.js"></script>'
+
+    def test_injected_on_the_default_landing_page(self, server, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._STARTUP_TAG in body
+
+    def test_absent_from_login_and_setup_pages(self, server):
+        srv, port = server
+        for path in ("/login", "/setup"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            assert resp.status == 200, path
+            body = resp.read()
+            conn.close()
+            assert self._STARTUP_TAG not in body, path
+
+    def test_injection_silently_skipped_when_script_absent(self, server, monkeypatch):
+        real_exists = pathlib.Path.exists
+
+        def fake_exists(self, *args, **kwargs):
+            if self.name == "startup_check.js":
+                return False
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(pathlib.Path, "exists", fake_exists)
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._STARTUP_TAG not in body
+
+
+class TestStudyTab:
+    """backlog #9: the Study tab — a real page served at /study, plus the
+    honest folder-status endpoint it polls on load."""
+
+    def test_study_page_is_served(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/study")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert b"Study" in body
+        assert b"focus_agent" in body
+
+    def test_study_html_alias_also_works(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/study.html")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        conn.close()
+
+    def test_study_status_endpoint_is_honest_about_a_missing_folder(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(tmp_path / "not-there"))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/study/status")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["exists"] is False
+
+    def test_study_status_endpoint_reports_a_real_folder(self, server, monkeypatch, tmp_path):
+        real_dir = tmp_path / "study"
+        real_dir.mkdir()
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(real_dir))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/study/status")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["exists"] is True
+        assert data["path"] == str(real_dir)
 
 
 class TestSessionTranscriptEndpoint:

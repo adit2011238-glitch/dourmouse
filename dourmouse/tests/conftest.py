@@ -150,3 +150,44 @@ def _user_config_isolated(tmp_path_factory, monkeypatch):
     _sandbox_path_note does for the workspace root.
     """
     monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path_factory.mktemp("cfg")))
+
+
+# Env keys that dourmouse/desktop_rag.py reads to decide whether the desktop
+# spatial-vault RAG bridge is configured. If any of the first three (HOST/
+# USER/KEY) are present, desktop_rag_status() will shell out to a real ssh
+# subprocess against the real remote desktop.
+_DESKTOP_RAG_ENV_KEYS = (
+    "DOURMOUSE_DESKTOP_RAG_HOST",
+    "DOURMOUSE_DESKTOP_RAG_USER",
+    "DOURMOUSE_DESKTOP_RAG_KEY",
+    "DOURMOUSE_DESKTOP_RAG_DB",
+    "DOURMOUSE_DESKTOP_RAG_INDEX",
+    "DOURMOUSE_DESKTOP_RAG_TABLE",
+    "DOURMOUSE_DESKTOP_RAG_MODEL",
+    "DOURMOUSE_DESKTOP_RAG_PYTHON",
+    "DOURMOUSE_DESKTOP_RAG_ID_FILTER_SQL",
+    "DOURMOUSE_DESKTOP_RAG_ID_ORDER_SQL",
+    "DOURMOUSE_DESKTOP_RAG_TIMEOUT",
+    "DOURMOUSE_DESKTOP_RAG_PROBE_TIMEOUT",
+)
+
+
+@pytest.fixture(autouse=True)
+def _desktop_rag_env_isolated(monkeypatch):
+    """Same real leak class as _memory_remote_isolated / _ollama_cloud_isolated
+    above. config.py's module-level load_dotenv() pulls this dev machine's real
+    .env into os.environ on import, and this machine's .env sets
+    DOURMOUSE_DESKTOP_RAG_HOST/USER/KEY. Any test that reaches
+    model_context.claude_orchestrator_preamble() (test_model_context.py,
+    test_google_workspace_agent.py) then has desktop_rag.desktop_rag_status()
+    fire a REAL ssh subprocess at the real remote desktop — bounded (~26s
+    worst case via desktop_rag's own timeouts) but real, slow, and
+    network-dependent, violating Rule 2.1 (never touches the network).
+
+    test_desktop_rag.py had its own local copy of this fixture; it now lives
+    here so all three files share one. Tests that genuinely want the bridge
+    configured set the env vars themselves, same override-the-fixture
+    convention as every other isolation fixture in this file.
+    """
+    for key in _DESKTOP_RAG_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)

@@ -288,7 +288,7 @@ def build_atlas_tool_specs() -> list[Any]:
 
 def _cli_specs() -> list[Any]:
     """The v5.4 CLI-bridge tools (real atlas commands via the ATLAS venv)."""
-    from dourmouse.atlas_cli import build_atlas_cli_specs
+    from dourmouse.atlas.atlas_cli import build_atlas_cli_specs
 
     return build_atlas_cli_specs()
 

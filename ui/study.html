@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE // STUDY</title>
+<link rel="stylesheet" href="assets/dourmouse-ui.css">
+<style>
+  /* Same calm token set as login.html/agent_chat.html. */
+  :root {
+    --ground: #F7F5F1; --surface: #FFFFFF; --raised: #EFEBE4;
+    --amber: #A8481E; --dead: #A39C8E;
+    --font-prose: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
+    --text-dim: #201E1A; --text-body: #221F1B;
+    --line: #E4DFD5; --line-strong: #D2CBBC; --panel: #FFFFFF;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--ground); color: var(--text-body); font-family: var(--font-prose);
+    display: flex; flex-direction: column; max-width: 760px; margin: 0 auto; padding: 24px 20px;
+  }
+  h1 { font-size: 18px; font-weight: 600; color: var(--text-dim); margin-bottom: 4px; }
+  .sub { font-size: 13px; color: var(--dead); margin-bottom: 6px; }
+  .folder-status { font-size: 12px; color: var(--dead); margin-bottom: 16px; }
+  .folder-status.missing { color: var(--amber); }
+  #feed {
+    flex: 1; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--panel); padding: 16px; min-height: 360px;
+    box-shadow: 0 1px 2px rgba(30,24,12,0.04), 0 12px 32px -8px rgba(30,24,12,0.10);
+  }
+  .turn { margin-bottom: 16px; }
+  .turn .who { font-size: 12px; font-weight: 600; color: var(--dead); margin-bottom: 3px; }
+  .turn.user .who { color: var(--amber); }
+  .turn .text { font-size: 14px; white-space: pre-wrap; line-height: 1.5; }
+  .empty { color: var(--dead); font-size: 13px; padding: 20px; text-align: center; }
+  form { display: flex; gap: 8px; margin-top: 14px; }
+  input[type=text] {
+    flex: 1; border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px;
+    font-family: var(--font-prose); font-size: 14px; background: var(--surface); color: var(--text-body);
+  }
+  input[type=text]:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+  button {
+    border: none; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600;
+    background: var(--amber); color: #FFF; cursor: pointer;
+  }
+  button:focus-visible { outline: 2px solid var(--text-dim); outline-offset: 2px; }
+  button:disabled { background: var(--dead); cursor: default; }
+</style>
+</head>
+<body>
+  <h1>Study</h1>
+  <div class="sub">Ask about anything — this uses its own knowledge first, and can pull from your real study folder when it matters.</div>
+  <div class="folder-status" id="folder-status">Checking study folder…</div>
+  <div id="feed"><div class="empty">Ask a question to get started.</div></div>
+  <form id="ask-form">
+    <input type="text" id="ask-input" placeholder="Ask a study question…" autocomplete="off">
+    <button type="submit" id="ask-btn">Ask</button>
+  </form>
+
+<script>
+(function () {
+  var feed = document.getElementById('feed');
+  var turns = [];
+
+  function esc(s) {
+    var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML;
+  }
+
+  function render() {
+    if (!turns.length) { feed.innerHTML = '<div class="empty">Ask a question to get started.</div>'; return; }
+    feed.innerHTML = turns.map(function (t) {
+      return '<div class="turn ' + (t.who === 'you' ? 'user' : '') + '"><div class="who">' +
+        esc(t.who) + '</div><div class="text">' + esc(t.text) + '</div></div>';
+    }).join('');
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  // GET-only EventSource can't POST, and /api/chat is a POST SSE stream —
+  // fetch() with a streaming reader is the real mechanism the rest of the
+  // app already uses for this endpoint. Only "assistant_delta" is
+  // rendered here; every other real event type (tool calls, confirmation
+  // prompts) is parsed but intentionally not visualized in this first
+  // pass — console.html's richer chat view already covers those.
+  function ask(prompt) {
+    var answerTurn = { who: 'study', text: '' };
+    turns.push({ who: 'you', text: prompt });
+    turns.push(answerTurn);
+    render();
+    var buf = '';
+    return fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: prompt, focus_agent: 'study', screen: 'STUDY' }),
+    }).then(function (resp) {
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) return;
+          buf += decoder.decode(r.value, { stream: true });
+          var parts = buf.split('\n\n');
+          buf = parts.pop();
+          parts.forEach(function (chunk) {
+            var line = chunk.split('\n').find(function (l) { return l.indexOf('data: ') === 0; });
+            if (!line) return;
+            try {
+              var evt = JSON.parse(line.slice(6));
+              if (evt.type === 'assistant_delta' && evt.text) {
+                answerTurn.text += evt.text;
+                render();
+              }
+            } catch (e) { /* a malformed/partial chunk — next read completes it */ }
+          });
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function () {
+      answerTurn.text = answerTurn.text || '(request failed — see console)';
+      render();
+    });
+  }
+
+  document.getElementById('ask-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var input = document.getElementById('ask-input');
+    var text = input.value.trim();
+    if (!text) return;
+    var btn = document.getElementById('ask-btn');
+    btn.disabled = true;
+    input.value = '';
+    ask(text).finally(function () { btn.disabled = false; });
+  });
+
+  fetch('/api/connections').catch(function () {});
+  var statusEl = document.getElementById('folder-status');
+  fetch('/api/study/status').then(function (r) { return r.json(); }).then(function (s) {
+    if (s && s.exists) {
+      statusEl.textContent = 'Study folder: ' + s.path;
+    } else {
+      statusEl.textContent = 'Study folder not found on disk' + (s && s.path ? ' (' + s.path + ')' : '') + ' — I can still help from general knowledge.';
+      statusEl.classList.add('missing');
+    }
+  }).catch(function () { statusEl.textContent = ''; });
+})();
+</script>
+</body>
+</html>

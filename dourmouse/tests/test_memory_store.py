@@ -23,6 +23,7 @@ from dourmouse.memory_store import (
     RemoteMemoryStore,
     RemoteMemoryStoreUnavailable,
     _fts_query,
+    is_duplicate_result,
 )
 
 
@@ -202,6 +203,82 @@ class TestMemoryStoreUnavailable:
             MemoryStore(tmp_path / "nofs.db")
         result = _remember_tool({"title": "t", "body": "b"})
         assert "NOT CONFIGURED" in result
+
+
+class TestContentHashDedup:
+    """Cycle 1 RAG storage audit: the confirmed gap was zero content-dedup
+    logic anywhere in the RAG stack (the only hashlib hit was a cache
+    filename in desktop_rag.py, unrelated to dedup) — the real-world
+    symptom being the unresolved 'duplicate pair' in the remote vault
+    (same content, two ids, per dourmouse_universe.md). These tests
+    exercise the fix at its actual entry point: MemoryStore.remember()."""
+
+    def test_identical_content_under_new_title_is_not_reinserted(self, store):
+        store.remember("laptop_file", "/home/user/notes/afghanistan.md", "2000 in Afghanistan")
+        result = store.remember("laptop_file", "/home/user/backup/afghanistan_copy.md", "2000 in Afghanistan")
+        assert is_duplicate_result(result)
+        assert store.count() == 1
+        assert store.count(source="laptop_file") == 1
+
+    def test_duplicate_message_names_the_original(self, store):
+        store.remember("vault", "notes/original.md", "the same paragraph, verbatim")
+        result = store.remember("vault", "notes/renamed.md", "the same paragraph, verbatim")
+        assert "notes/original.md" in result
+        assert "[vault]" in result
+
+    def test_dedup_is_scoped_per_source(self, store):
+        # The same text arriving under two DIFFERENT sources (e.g. a vault
+        # note quoted inside a session ledger) is not a duplicate of itself
+        # — each source is a legitimately separate corpus.
+        store.remember("vault", "notes/a.md", "shared paragraph text")
+        result = store.remember("session:s1", "turn 1", "shared paragraph text")
+        assert not is_duplicate_result(result)
+        assert store.count() == 2
+
+    def test_trivial_whitespace_differences_still_dedup(self, store):
+        store.remember("laptop_file", "/a/one.txt", "line one\nline two")
+        result = store.remember("laptop_file", "/a/two.txt", "line one   \nline two\n")
+        assert is_duplicate_result(result)
+        assert store.count() == 1
+
+    def test_real_content_difference_is_not_a_duplicate(self, store):
+        store.remember("laptop_file", "/a/one.txt", "the report says X")
+        result = store.remember("laptop_file", "/a/two.txt", "the report says Y")
+        assert not is_duplicate_result(result)
+        assert store.count() == 2
+
+    def test_same_key_upsert_is_unaffected_by_dedup(self, store):
+        # Re-remembering the SAME (source, title) with the SAME body must
+        # still be the plain idempotent upsert, not a "duplicate" skip.
+        store.remember("laptop_file", "/a/one.txt", "stable content")
+        result = store.remember("laptop_file", "/a/one.txt", "stable content")
+        assert not is_duplicate_result(result)
+        assert "MEMORY STORED" in result
+        assert store.count() == 1
+
+    def test_backfill_dedups_pre_existing_rows_on_reopen(self, tmp_path):
+        # Simulate content_hash not existing yet on an on-disk DB (as every
+        # store created before this fix would have): drop the column, then
+        # reopen — the migration must backfill it so dedup covers rows that
+        # predate the fix, not just newly-written ones.
+        db_path = tmp_path / "legacy.db"
+        s = MemoryStore(db_path)
+        s.remember("laptop_file", "/old/path.txt", "legacy duplicate content")
+        s._conn.execute("ALTER TABLE facts RENAME COLUMN content_hash TO content_hash_old")
+        s._conn.execute("ALTER TABLE facts ADD COLUMN content_hash TEXT")
+        s._conn.commit()
+        s.close()
+
+        s2 = MemoryStore(db_path)
+        try:
+            row = s2._conn.execute(
+                "SELECT content_hash FROM facts WHERE title = ?", ("/old/path.txt",)
+            ).fetchone()
+            assert row["content_hash"] is not None
+            result = s2.remember("laptop_file", "/new/path.txt", "legacy duplicate content")
+            assert is_duplicate_result(result)
+        finally:
+            s2.close()
 
 
 class TestConcurrentProcessSafety:

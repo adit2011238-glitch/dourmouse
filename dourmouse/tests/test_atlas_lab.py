@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from dourmouse import atlas_lab as al
+from dourmouse.atlas import atlas_lab as al
 
 # Reuse the real-server fixture from test_webui (a plain pytest fixture in
 # the same package) so these tests exercise the ACTUAL /atlas-lab routes.
@@ -217,13 +217,13 @@ class TestLatestBacktest:
     """v5.22.15: get_latest_backtest — the briefing reads completed backtests."""
 
     def test_returns_none_when_no_backtests(self):
-        from dourmouse.atlas_lab import get_latest_backtest
+        from dourmouse.atlas.atlas_lab import get_latest_backtest
         # Fresh state with an empty requests dict.
         al._LAB_STATE = al.StrategyLabState()
         assert get_latest_backtest() is None
 
     def test_returns_most_recent_completed(self):
-        from dourmouse.atlas_lab import get_latest_backtest, BacktestRequest
+        from dourmouse.atlas.atlas_lab import get_latest_backtest, BacktestRequest
         state = al.StrategyLabState()
         state.backtest_requests["bt_old"] = BacktestRequest(
             id="bt_old", pair="EURUSD", status="done",
@@ -250,7 +250,7 @@ class TestLatestBacktest:
     def test_backtest_completed_broadcasts_via_hub(self, monkeypatch):
         """When a backtest finishes, a backtest_completed event must be
         broadcast on the SSE hub so the HUD shows it live."""
-        from dourmouse import atlas_cli
+        from dourmouse.atlas import atlas_cli
 
         events: list[dict] = []
         hub = type("FakeHub", (), {"broadcast": lambda self, p: events.append(p)})()

@@ -85,3 +85,37 @@ def load_llm_config_with_fallback() -> dict:
 
     # omniroute or auto: use as-is (omniroute is a gateway, fallback is implicit).
     return cfg
+
+
+def probe_ollama_fallback(timeout: float = 3.0) -> "OllamaConfig | None":
+    """Mid-call counterpart to ``load_llm_config_with_fallback()``'s
+    pre-flight probe above -- that one only ever runs once, at config-load,
+    against the /models endpoint of the configured primary backend. It has
+    no way to react to a backend that answered fine at startup and then
+    started rate-limiting every account mid-conversation.
+
+    This is that reaction: given a primary backend that just ran out of
+    usable accounts (see ``model_router.pool_exhausted`` /
+    dispatch.py's ``_nvidia_rotation_factory``), probe local Ollama right
+    now and, if it answers, return the config to switch the REST OF THIS
+    TURN to. Returns None if Ollama is not reachable either, or fallback is
+    disabled for tests -- the caller then keeps serving its current
+    (exhausted) client and lets its own retry/fallback_model machinery
+    surface the real error (Rule 2.2: never pretend a dead pool is fine).
+
+    Deliberately does NOT construct a client -- that stays dispatch.py's
+    job (``_build_client`` / ``OllamaNativeClient``), so this module never
+    needs to import dispatch (which already imports this module) and stays
+    free of any circular-import risk.
+    """
+    if os.environ.get("DOURMOUSE_FALLBACK_DISABLED", "").strip().lower() in (
+        "1", "true", "yes"
+    ):
+        return None
+    local_url = "http://127.0.0.1:11434"
+    if not _probe_backend(local_url, timeout=timeout):
+        return None
+    from dourmouse.config import OllamaConfig
+
+    model = os.environ.get("OLLAMA_MODEL", "phi:2b").strip() or "phi:2b"
+    return OllamaConfig(base_url=local_url, model=model)

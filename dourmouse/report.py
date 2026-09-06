@@ -26,7 +26,7 @@ from typing import Any, Callable
 # v5.22.13: the ATLAS strategy leaderboard (lab, GitHub-synced). Imported at
 # module level so tests can monkeypatch the attribute; the lab itself never
 # imports report.py, so there is no cycle.
-from dourmouse import atlas_lab  # noqa: E402
+from dourmouse.atlas import atlas_lab  # noqa: E402
 
 # Sections, in display order. Each is (label, tool_name, args, max_len).
 _SECTIONS: list[tuple[str, str, dict[str, Any], int]] = [

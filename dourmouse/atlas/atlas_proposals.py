@@ -282,7 +282,7 @@ def _llm_chat(prompt: str, system: str) -> str:
     # response cap is not worth becoming the first thing that does. One
     # constant, one env var (ATLAS_LLM_MAX_TOKENS), shared by both ATLAS
     # LLM paths — see the max_tokens call site below.
-    from dourmouse.atlas_lab import _atlas_llm_max_tokens
+    from dourmouse.atlas.atlas_lab import _atlas_llm_max_tokens
 
     api_key = os.environ.get("NVIDIA_API_KEY", "")
     if not api_key:

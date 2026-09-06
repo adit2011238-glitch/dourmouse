@@ -1752,6 +1752,7 @@ class TestEndToEndThroughGeneralRoster:
         assert registry.subagent_names == {
             "orchestrator",
             "research_info",
+            "study",  # backlog #9: Study tab, sandboxed access to the MYP folder
             "comms",
             "scheduling",
             "dev_coding",
@@ -2788,7 +2789,7 @@ class TestClientFactoryRotation:
 
         def factory():
             factory_calls.append(1)
-            return succeeding
+            return succeeding, "m"
 
         config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1)
         response = dispatch_module._call_with_retry(
@@ -2870,7 +2871,7 @@ class TestNvidiaAccountPoolWiring:
         monkeypatch.setenv("NVIDIA_API_KEY", "only-key")
         monkeypatch.delenv("NVIDIA_API_KEY_2", raising=False)
         config = NvidiaConfig(api_key="only-key", base_url="https://x", model="m")
-        factory = dispatch_module._nvidia_rotation_factory(object(), config)
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
         assert factory is None
 
     def test_two_accounts_yields_a_working_rotation_factory(self, monkeypatch):
@@ -2880,18 +2881,19 @@ class TestNvidiaAccountPoolWiring:
         monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
         config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
         initial_client = object()
-        factory = dispatch_module._nvidia_rotation_factory(initial_client, config)
+        factory = dispatch_module._nvidia_rotation_factory(initial_client, config, "m")
         assert factory is not None
-        rotated = factory()
-        assert rotated is not initial_client
-        assert isinstance(rotated, dispatch_module.OpenAI)
+        rotated_client, rotated_model = factory()
+        assert rotated_client is not initial_client
+        assert isinstance(rotated_client, dispatch_module.OpenAI)
+        assert rotated_model == "m"
 
     def test_non_nvidia_config_yields_no_factory(self, monkeypatch):
         from dourmouse.config import OllamaConfig
 
         monkeypatch.setenv("NVIDIA_API_KEY", "key1")
         monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
-        factory = dispatch_module._nvidia_rotation_factory(object(), OllamaConfig())
+        factory = dispatch_module._nvidia_rotation_factory(object(), OllamaConfig(), "m")
         assert factory is None
 
     def test_pool_state_persists_across_factory_calls(self, monkeypatch):
@@ -2903,10 +2905,49 @@ class TestNvidiaAccountPoolWiring:
         monkeypatch.setenv("NVIDIA_API_KEY", "key1")
         monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
         config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
-        factory = dispatch_module._nvidia_rotation_factory(object(), config)
-        first = factory()
-        second = factory()
-        assert first.api_key != second.api_key
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
+        first_client, first_model = factory()
+        second_client, second_model = factory()
+        assert first_client.api_key != second_client.api_key
+        assert first_model == second_model == "m"
+
+    def test_pool_exhaustion_falls_back_to_ollama_when_reachable(self, monkeypatch):
+        """Both NVIDIA accounts cooling down mid-conversation -> the closure
+        must probe backend_fallback.probe_ollama_fallback() and switch to
+        it, instead of silently re-serving the exhausted client."""
+        from dourmouse.config import NvidiaConfig, OllamaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "key1")
+        monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
+        config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
+        fallback_cfg = OllamaConfig(base_url="http://127.0.0.1:11434", model="phi:2b")
+        monkeypatch.setattr(
+            dispatch_module, "probe_ollama_fallback", lambda: fallback_cfg
+        )
+        initial_client = object()
+        factory = dispatch_module._nvidia_rotation_factory(initial_client, config, "m")
+        pool = dispatch_module._get_nvidia_account_pool()
+        for account in pool.accounts():
+            pool.mark_rate_limited(account.name)
+        client, model = factory()
+        assert isinstance(client, dispatch_module.OllamaNativeClient)
+        assert model == "phi:2b"
+
+    def test_pool_exhaustion_with_no_fallback_returns_none(self, monkeypatch):
+        """Both accounts cooling down AND Ollama unreachable -> None, so
+        the caller keeps its current (exhausted) client/model and its own
+        retry/fallback_model machinery still surfaces the real error."""
+        from dourmouse.config import NvidiaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "key1")
+        monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
+        config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
+        monkeypatch.setattr(dispatch_module, "probe_ollama_fallback", lambda: None)
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
+        pool = dispatch_module._get_nvidia_account_pool()
+        for account in pool.accounts():
+            pool.mark_rate_limited(account.name)
+        assert factory() is None
 
 
 # --------------------------------------------------------------------------- #
@@ -2934,23 +2975,37 @@ class TestAgentSplitBackend:
     def test_deterministic_across_calls(self):
         assert dispatch_module._agent_split_backend("mail") == dispatch_module._agent_split_backend("mail")
 
-    def test_real_roster_splits_evenly(self):
+    def test_real_roster_splits_evenly_excluding_heavy_workflow_agents(self):
         """The alphabetical-alternation split (_agent_split_map) must be
-        exactly even (off by at most 1 for an odd-sized roster) — the
-        user's own explicit ask. A raw hash-parity split on this real
-        roster measured 12/22, nowhere close; this is what replaced it."""
+        exactly even (off by at most 1) between Ollama Cloud and Gemini —
+        the user's own explicit ask — EXCLUDING heavy-workflow agents,
+        which escalate to real Claude instead (also the user's own
+        explicit ask) and are not part of the even split at all. A raw
+        hash-parity split on this real roster measured 12/22, nowhere
+        close; the alternating map is what replaced it."""
         from dourmouse.general_roster import build_general_registry
 
         names = [s.name for s in build_general_registry().all_subagents()]
         backends = [dispatch_module._agent_split_backend(n) for n in names]
         claude_count = backends.count("claude")
         cloud_count = backends.count("ollama_cloud")
-        assert claude_count + cloud_count == len(names)
-        assert abs(claude_count - cloud_count) <= 1
+        gemini_count = backends.count("gemini")
+        assert claude_count + cloud_count + gemini_count == len(names)
+        heavy_count = sum(1 for n in names if dispatch_module._is_heavy_workflow_agent(n))
+        assert claude_count == heavy_count
+        assert abs(cloud_count - gemini_count) <= 1
 
     def test_every_result_is_a_valid_backend_name(self):
-        for name in ("mail", "code_claude", "research_info", "worldmonitor", "atlas"):
-            assert dispatch_module._agent_split_backend(name) in ("claude", "ollama_cloud")
+        for name in ("mail", "code_claude", "research_info", "worldmonitor", "atlas", "tasks"):
+            assert dispatch_module._agent_split_backend(name) in ("claude", "ollama_cloud", "gemini")
+
+    def test_heavy_workflow_agents_always_escalate_to_claude(self):
+        for name in ("code_claude", "cn_backends_probe", "research_info", "atlas_lab"):
+            assert dispatch_module._agent_split_backend(name) == "claude"
+
+    def test_non_heavy_agents_never_land_on_claude(self):
+        for name in ("mail", "worldmonitor", "tasks", "calendar"):
+            assert dispatch_module._agent_split_backend(name) in ("ollama_cloud", "gemini")
 
 
 class TestOllamaCloudConfig:
@@ -3061,6 +3116,8 @@ class TestBuildClientOrchestratorRouting:
             client = dispatch_module._build_client(OllamaConfig(), forced_agent=agent)
             if expected == "claude":
                 assert isinstance(client, dispatch_module.ClaudeCliClient), agent
+            elif expected == "gemini":
+                assert isinstance(client, dispatch_module.GeminiClient), agent
             else:
                 assert isinstance(client, dispatch_module.OllamaNativeClient) and client._root == "https://ollama.com", agent
 
@@ -3215,6 +3272,8 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
         ]
         if expected in ("claude", "claude_cli"):
             monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")
+        elif expected == "gemini":
+            monkeypatch.setattr("dourmouse.gemini_backend.call_gemini", lambda *a, **k: "hi")
         else:
             class _Resp:
                 _BODY = json.dumps({"message": {"content": "hi"}}).encode()
@@ -3356,3 +3415,18 @@ class TestSystemPromptChecksTheRosterInsteadOfAssumingATooIsMissing:
         text = system_message(build_general_registry())
         assert "roster" in text.lower()
         assert "doesn't exist" in text or "does not exist" in text or "does exist" in text
+
+
+class TestSystemPromptScopesToolCallsToTheRequest:
+    """Real user complaint: turns were timing out from calling tools far
+    more than the question needed. Rule 17: scope the number of calls to
+    the actual request, look at a result before chaining another call."""
+
+    def test_system_prompt_has_the_scoping_rule(self):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+
+        text = system_message(build_general_registry())
+        assert "17." in text
+        assert "needs ONE call" in text
+        assert "speculative calls" in text

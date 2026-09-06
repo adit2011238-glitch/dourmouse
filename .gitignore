@@ -51,3 +51,11 @@ sync_log.txt
 
 # v8.30: runtime artifact of dourmouse/global_memory.py's default store
 global_memory.sqlite3
+
+# ── Large binaries ───────────────────────────────────────────────────────
+# lora-dourmouse-claude.gguf and site/downloads/*.exe are intentionally NOT
+# listed here — they stay git-tracked (see .gitattributes: the .gguf is
+# Git LFS; the installer .exe is a deliberate plain-blob exception because
+# an external static-site deploy serves it straight from this repo's
+# working tree). Don't add them to this file without re-reading that note
+# and README.md "Binary assets & Git LFS" first.

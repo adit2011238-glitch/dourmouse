@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dourmouse import atlas_command as ac
+from dourmouse.atlas import atlas_command as ac
 from dourmouse.general_roster import build_general_registry
 
 STANDARD = {

@@ -71,7 +71,7 @@ from dourmouse.governance import RbacPolicy
 from dourmouse.learn import learn_enabled, open_default_store, record_feedback
 from dourmouse.live_runtime import LiveRuntime, live_enabled
 from dourmouse.memory_store import MemoryStore, RemoteMemoryStoreUnavailable
-from dourmouse.message_bus import MessageBus, get_message_bus
+from dourmouse.message_bus import BROADCAST, MessageBus, get_message_bus
 from dourmouse.planner import find_agents_for_query  # re-exported for callers
 
 
@@ -1584,6 +1584,10 @@ class _Handler(BaseHTTPRequestHandler):
             # alongside the HUD rather than replacing it, so the operator
             # surface stays available at "/".
             self._serve_static("app.html")
+        elif path in ("/study", "/study.html"):
+            # backlog #9: the Study tab — chat scoped to the "study"
+            # subagent (real, read-only access to the user's study folder).
+            self._serve_static("study.html")
         elif path in ("/map", "/map.html"):
             self._serve_static("map.html")
         elif path in ("/workspace", "/workspace.html"):
@@ -1624,6 +1628,10 @@ class _Handler(BaseHTTPRequestHandler):
             # live at ui/assets/<file> — re-add the directory before serving
             # (a latent bug: every /assets/* request used to 404).
             self._serve_static("assets/" + path[len("/assets/"):])
+        elif path == "/ui/spotify_widget.css":
+            self._serve_static("spotify_widget.css")
+        elif path == "/ui/spotify_widget.js":
+            self._serve_static("spotify_widget.js")
         elif path == "/sw.js":
             # v5.20: the offline-shell service worker (desktop portfolio
             # Phase 5). Real JS content type; no-store keeps the SW script
@@ -1943,6 +1951,12 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.connections import check_connections
 
             self._send_json(check_connections())
+        elif path == "/api/study/status":
+            # backlog #9: honest existence check for the Study tab's real
+            # resource folder — never claim it's there when it isn't.
+            from dourmouse.study_agent import study_folder_status
+
+            self._send_json(study_folder_status())
         elif path == "/api/browser/status":
             # v5.25: browser-agent engine/state (never launches Chrome here).
             from dourmouse.browser_agent import browser_status
@@ -2082,12 +2096,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(world_pulse_status())
         elif path == "/api/atlas":
             # v5.4: ATLAS quant-engine panel — real telemetry + last run.
-            from dourmouse.atlas_cli import atlas_panel_snapshot
+            from dourmouse.atlas.atlas_cli import atlas_panel_snapshot
 
             self._send_json(atlas_panel_snapshot())
         elif path == "/api/atlas-lab":
             # v5.22.1: ATLAS LAB — LLM backtesting + strategy catalog.
-            from dourmouse.atlas_lab import get_state
+            from dourmouse.atlas.atlas_lab import get_state
 
             state = get_state()
             self._send_json({
@@ -2099,12 +2113,12 @@ class _Handler(BaseHTTPRequestHandler):
                 "backtest_queue": len(state.backtest_requests),
             })
         elif path == "/api/atlas-lab/strategies":
-            from dourmouse.atlas_lab import list_strategies
+            from dourmouse.atlas.atlas_lab import list_strategies
 
             self._send_json({"ok": True, "strategies": list_strategies()})
         elif path == "/api/atlas-lab/leaderboard":
             # v5.22.6: best→worst ranked strategies for the Atlas window.
-            from dourmouse.atlas_lab import leaderboard
+            from dourmouse.atlas.atlas_lab import leaderboard
 
             self._send_json({"ok": True, "leaderboard": leaderboard()})
         elif path == "/api/allhands":
@@ -2123,15 +2137,15 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"ok": True, "run": snap})
         elif path == "/api/atlas-lab/reports":
-            from dourmouse.atlas_lab import get_reports
+            from dourmouse.atlas.atlas_lab import get_reports
 
             self._send_json({"ok": True, "reports": get_reports()})
         elif path == "/api/atlas-lab/backtest":
-            from dourmouse.atlas_lab import list_backtests
+            from dourmouse.atlas.atlas_lab import list_backtests
 
             self._send_json({"ok": True, "backtests": list_backtests()})
         elif path.startswith("/api/atlas-lab/backtest/"):
-            from dourmouse.atlas_lab import get_backtest_status
+            from dourmouse.atlas.atlas_lab import get_backtest_status
 
             req_id = path[len("/api/atlas-lab/backtest/"):]
             result = get_backtest_status(req_id)
@@ -2140,7 +2154,7 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"ok": True, "backtest": result})
         elif path.startswith("/api/atlas-lab/strategies/"):
-            from dourmouse.atlas_lab import get_strategy_detail
+            from dourmouse.atlas.atlas_lab import get_strategy_detail
 
             strategy_id = path[len("/api/atlas-lab/strategies/"):]
             detail = get_strategy_detail(strategy_id)
@@ -2151,13 +2165,13 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/atlas-lab/proposals":
             # v8.16: strategy-proposal review queue (LLM-authored code,
             # human-gated — see atlas_proposals.py module docstring).
-            from dourmouse.atlas_proposals import list_proposals
+            from dourmouse.atlas.atlas_proposals import list_proposals
 
             qs = urllib.parse.parse_qs(parsed.query)
             status = (qs.get("status") or [None])[0]
             self._send_json({"ok": True, "proposals": list_proposals(status=status)})
         elif path.startswith("/api/atlas-lab/proposals/"):
-            from dourmouse.atlas_proposals import get_proposal
+            from dourmouse.atlas.atlas_proposals import get_proposal
 
             proposal_id = path[len("/api/atlas-lab/proposals/"):]
             proposal = get_proposal(proposal_id)
@@ -2166,13 +2180,13 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"ok": True, "proposal": proposal})
         elif path == "/api/atlas-lab/runs":
-            from dourmouse.atlas_proposals import list_runs
+            from dourmouse.atlas.atlas_proposals import list_runs
 
             qs = urllib.parse.parse_qs(parsed.query)
             proposal_id = (qs.get("proposal_id") or [None])[0]
             self._send_json({"ok": True, "runs": list_runs(proposal_id=proposal_id)})
         elif path.startswith("/api/atlas-lab/runs/"):
-            from dourmouse.atlas_proposals import get_run
+            from dourmouse.atlas.atlas_proposals import get_run
 
             run_id = path[len("/api/atlas-lab/runs/"):]
             run = get_run(run_id)
@@ -2181,7 +2195,7 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"ok": True, "run": run})
         elif path == "/api/atlas-lab/generator/status":
-            from dourmouse import atlas_generator as gen
+            from dourmouse.atlas import atlas_generator as gen
 
             self._send_json({
                 "ok": True,
@@ -2551,6 +2565,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_chat()
         elif parsed.path == "/api/confirm":
             self._handle_confirm()
+        elif parsed.path == "/api/messages":
+            self._handle_messages_post()
         elif parsed.path == "/api/attention/dismiss":
             body = self._read_json_body()
             try:
@@ -2644,11 +2660,29 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.project_bookkeeper import create_project
 
             try:
+                # path is now optional (backlog #10) — create_project()
+                # auto-creates a real directory under the user's
+                # Documents folder when omitted.
                 record = create_project(
                     name=body.get("name") or "",
                     path=body.get("path") or "",
                     description=body.get("description") or "",
                 )
+            except ValueError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self._send_json({"ok": True, "project": record})
+        elif parsed.path == "/api/projects/open":
+            # backlog #10: "the projects can't be opened" — the real,
+            # missing write path. See project_bookkeeper.open_project's
+            # own docstring for the honest scope note (validates + bumps
+            # last_active; does not yet route into a dedicated workspace
+            # view).
+            body = self._read_json_body()
+            from dourmouse.project_bookkeeper import open_project
+
+            try:
+                record = open_project(path=body.get("path") or "")
             except ValueError as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=400)
                 return
@@ -2716,7 +2750,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_atlas_run()
         elif parsed.path == "/api/atlas-lab/sync":
             # v5.22.1: force a GitHub sync of the strategy lab.
-            from dourmouse.atlas_lab import sync
+            from dourmouse.atlas.atlas_lab import sync
 
             result = sync()
             self._send_json(result)
@@ -2733,7 +2767,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "run_id": run_id})
         elif parsed.path == "/api/atlas-lab/backtest":
             # v5.22.1: submit a prompt-driven backtest.
-            from dourmouse.atlas_lab import submit_backtest
+            from dourmouse.atlas.atlas_lab import submit_backtest
 
             body = self._read_json_body()
             prompt = (body.get("prompt") or "").strip()
@@ -2750,7 +2784,7 @@ class _Handler(BaseHTTPRequestHandler):
             # v8.16: idea -> LLM-authored strategy code, queued for review.
             # Synchronous (the LLM call is the only latency, ~5-30s — same
             # order as any chat response, no background thread needed).
-            from dourmouse.atlas_proposals import propose_from_idea
+            from dourmouse.atlas.atlas_proposals import propose_from_idea
 
             body = self._read_json_body()
             prompt = (body.get("prompt") or "").strip()
@@ -2767,7 +2801,7 @@ class _Handler(BaseHTTPRequestHandler):
             # Execution can take up to 90s (sandboxed subprocess) — this
             # returns a "running" placeholder immediately; poll
             # /api/atlas-lab/runs/<id> for the real result.
-            from dourmouse.atlas_proposals import approve_and_run_async
+            from dourmouse.atlas.atlas_proposals import approve_and_run_async
 
             proposal_id = parsed.path[len("/api/atlas-lab/proposals/"):-len("/approve")]
             body = self._read_json_body()
@@ -2780,7 +2814,7 @@ class _Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=400)
         elif parsed.path.startswith("/api/atlas-lab/proposals/") and parsed.path.endswith("/reject"):
-            from dourmouse.atlas_proposals import reject_proposal
+            from dourmouse.atlas.atlas_proposals import reject_proposal
 
             proposal_id = parsed.path[len("/api/atlas-lab/proposals/"):-len("/reject")]
             body = self._read_json_body()
@@ -2794,7 +2828,7 @@ class _Handler(BaseHTTPRequestHandler):
             # v8.16: manual trigger — same 2-LLM-call latency as any chat
             # idea, so synchronous is fine (matches propose_from_idea's own
             # HTTP handler above).
-            from dourmouse import atlas_generator as gen
+            from dourmouse.atlas import atlas_generator as gen
 
             try:
                 proposal = gen.generate_and_propose()
@@ -3273,6 +3307,46 @@ class _Handler(BaseHTTPRequestHandler):
             )
             if marker in body:
                 body = body.replace(marker, inject, 1)
+        # v13.x — backlog item 8: the floating Spotify widget appears on
+        # every screen EXCEPT the pre-auth login/setup pages (the designer
+        # lane's retheme) and index.html/hud.html/console.html, which already
+        # ship their own inline Spotify controls (index.html's #spotifypanel,
+        # hud.html's /api/spotify polling, console.html's inline controls) —
+        # injecting the floating widget there would double it up. One
+        # injection point here instead of hand-adding <link>/<script> tags to
+        # every other HTML file. Guarded by a file-exists check so this
+        # commit lands safely even if ui/spotify_widget.css/.js are ever
+        # removed — injection is silently skipped, never an error.
+        if ctype == "text/html" and rel not in (
+            "login.html",
+            "setup.html",
+            "index.html",
+            "hud.html",
+            "console.html",
+        ):
+            widget_css = _UI_DIR / "spotify_widget.css"
+            widget_js = _UI_DIR / "spotify_widget.js"
+            if widget_css.exists() and widget_js.exists():
+                widget_tags = (
+                    b'<link rel="stylesheet" href="/ui/spotify_widget.css">'
+                    b'<script defer src="/ui/spotify_widget.js"></script>'
+                )
+                idx = body.rfind(b"</body>")
+                if idx != -1:
+                    body = body[:idx] + widget_tags + body[idx:]
+        # v13.x — backlog item 6: startup animation + a real claude/codex/
+        # Google sign-in check on the app's default landing page only
+        # (console.html — pre-auth login/setup pages have their own real
+        # sign-in UI already, checking there would be redundant). Same
+        # guarded, file-exists-checked injection pattern as the widget
+        # above.
+        if rel == "console.html":
+            startup_js = _UI_DIR / "assets" / "startup_check.js"
+            if startup_js.exists():
+                startup_tag = b'<script defer src="/assets/startup_check.js"></script>'
+                idx = body.rfind(b"</body>")
+                if idx != -1:
+                    body = body[:idx] + startup_tag + body[idx:]
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -5030,7 +5104,7 @@ class _Handler(BaseHTTPRequestHandler):
         never queued. The command's real progress/result is polled via
         GET /api/atlas (last_run). Unknown commands are rejected 400.
         """
-        from dourmouse.atlas_cli import atlas_run_manager
+        from dourmouse.atlas.atlas_cli import atlas_run_manager
 
         body = self._read_json_body()
         command = (body.get("command") or "").strip()
@@ -5297,7 +5371,7 @@ class _Handler(BaseHTTPRequestHandler):
         and returns it. Honest errors: memory off -> 409, unset/invalid repo
         path -> NOT CONFIGURED, scan failure -> 500 with the real reason.
         """
-        from dourmouse.atlas_ops import AtlasNotConfiguredError, get_atlas_repo_path
+        from dourmouse.atlas.atlas_ops import AtlasNotConfiguredError, get_atlas_repo_path
         from dourmouse.learn import learn_enabled
         from dourmouse.repo_index import save_scan_meta, scan_repo
 
@@ -5372,6 +5446,25 @@ class _Handler(BaseHTTPRequestHandler):
                 "count": bus.count(),
             }
         )
+
+    def _handle_messages_post(self) -> None:
+        """Let the human post into the agent-to-agent bus directly — the
+        real "optionally join" half of the human-viewable agent chat
+        surface (the GET side, /api/messages, already existed and already
+        renders on map.html/index.html; this is the missing write path).
+        ``from`` defaults to "human" — the one identity no real subagent
+        ever uses (checked: no roster name is literally "human") — so a
+        person's own messages are never confused with an agent's."""
+        body = self._read_json_body()
+        to_agent = str(body.get("to") or BROADCAST).strip()[:80] or BROADCAST
+        text = str(body.get("body") or "").strip()
+        if not text:
+            self._send_json({"ok": False, "detail": "body must be non-empty"})
+            return
+        subject = str(body.get("subject") or "").strip()[:200]
+        bus = getattr(self.server, "bus", None) or get_message_bus()
+        message = bus.post("human", to_agent, subject, text)
+        self._send_json({"ok": True, "message": message})
 
     def _handle_role(self) -> None:
         """Phase A3: switch THIS conversation's RBAC role (audited).
@@ -5835,7 +5928,7 @@ def run_server(
     all_hands.bind_events_hub(server.events_broadcast)
     # v5.22.14: the ATLAS strategy lab also broadcasts sync events on the same
     # hub — the HUD shows the leaderboard updating live without any refresh.
-    from dourmouse import atlas_lab
+    from dourmouse.atlas import atlas_lab
 
     atlas_lab.bind_events_hub(server.events_broadcast)
     # Start the auto-sync loop at boot so strategies from the GitHub repo
@@ -5848,7 +5941,7 @@ def run_server(
         # v8.16: the autonomous idea generator — same reporting gate as
         # auto-sync above, for the same reason (tests never want a
         # background LLM loop touching the real proposal store).
-        from dourmouse import atlas_generator
+        from dourmouse.atlas import atlas_generator
 
         atlas_generator.start_idea_generator()
         # v5.32: keep the compute-node health probe warm. The fast lane reads

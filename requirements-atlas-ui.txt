@@ -1,5 +1,5 @@
-streamlit>=1.50
-plotly>=6.0
-pandas>=2.1
-requests>=2.32
-python-dotenv>=1.0
+streamlit>=1.50  # NOT INSTALLED in .venv (pip show confirms absent) — left floating rather than fabricating a pin
+plotly>=6.0  # NOT INSTALLED in .venv (pip show confirms absent) — left floating rather than fabricating a pin
+pandas==3.0.5
+requests==2.34.2
+python-dotenv==1.2.2

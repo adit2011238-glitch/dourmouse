@@ -69,7 +69,15 @@
     --gold-rgb: 245, 158, 11;
     --text: #FAFAFA;
     --text-body: #A1A1AA;
-    --dim: #71717A;
+    /* --dim was #71717A (zinc-500) -- the identical WCAG 2.1 SC 1.4.3
+       failure already found and fixed in console.html/os.html (506c078),
+       login.html/setup.html (fc538ac), and workspace.html (this cycle):
+       3.08-4.12:1 against this file's own --bg/--panel/--raised, below the
+       4.5:1 AA needs, on real 9.5-11px labels/captions (.brand .sub, .chip,
+       .miclabel, .statusline .kicker, .card .k/.row/.note, and more).
+       Raised to zinc-400 (#A1A1AA), the same step every prior fix took, and
+       the exact value this file's own --text-body already uses. */
+    --dim: #A1A1AA;
     --red: #EF4444;
     --green: #10B981;
     --font-hud: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
@@ -78,6 +86,15 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
+  /* This screen had ZERO :focus-visible rules -- the mic button, auth
+     button, queue button and the shield/orb controls all relied solely on
+     the browser's native default ring, which this dark zinc/gold voice lab
+     never styled for. Matching console.html's/hud.html's own global default
+     (Apple HIG: focus must be clearly and consistently indicated), using
+     this file's own accent name: 1px gold, 2px offset. --gold on --bg
+     measures 9.26:1, well past the 3:1 WCAG 2.1 SC 1.4.11 a non-text focus
+     indicator needs. */
+  :focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
   body {
     background: var(--bg);
     color: var(--text-body);

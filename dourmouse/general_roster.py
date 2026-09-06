@@ -58,14 +58,13 @@ from dourmouse.dispatch import (
     run_dispatch_messages,
     system_message,
 )
-from dourmouse import git_safety, net_errors
+from dourmouse import config, git_safety, net_errors
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.system_access import build_system_subagent
 
 _DELEGATE_RESULT_CAP = 6_000
 
 
-_WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
 _VAULT_ENV = "OBSIDIAN_VAULT_PATH"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -76,8 +75,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def _workspace_root() -> Path:
     """Workspace root: DOURMOUSE_WORKSPACE env or <project>/workspace. Created."""
-    raw = os.environ.get(_WORKSPACE_ENV)
-    root = Path(raw).expanduser() if raw else _PROJECT_ROOT / "workspace"
+    root = config.workspace_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -702,6 +700,42 @@ def _open_url_tool(arguments: dict[str, Any]) -> str:
     if not opened:
         return f"OPEN FAILED: browser returned False for {url!r} (honest)."
     return f"OPENED IN BROWSER: {url}"
+
+
+# --------------------------------------------------------------------------- #
+# Study (backlog #9) — sandboxed, read-only access to the user's real
+# study resource folder (~/Documents/MYP data folder). Own subagent so the
+# UI's Study tab has a real, dedicated identity to route to.
+# --------------------------------------------------------------------------- #
+
+def _study_list_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.study_agent import StudyPathError, list_study_files
+
+    rel_path = arguments.get("path") or ""
+    try:
+        result = list_study_files(rel_path)
+    except StudyPathError as exc:
+        return f"ERROR: {exc}"
+    if not result["entries"]:
+        return f"STUDY FOLDER {rel_path or '.'!r}: empty (honest — nothing to list)."
+    lines = [
+        f"{'[dir] ' if e['is_dir'] else ''}{e['name']}" for e in result["entries"]
+    ]
+    return f"STUDY FOLDER {rel_path or '.'!r} ({len(lines)} items):\n" + "\n".join(lines)
+
+
+def _study_read_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.study_agent import StudyPathError, read_study_file
+
+    rel_path = (arguments.get("path") or "").strip()
+    if not rel_path:
+        return "ERROR: study_read_file requires a non-empty 'path'."
+    try:
+        result = read_study_file(rel_path)
+    except StudyPathError as exc:
+        return f"ERROR: {exc}"
+    suffix = "\n[...truncated]" if result["truncated"] else ""
+    return f"STUDY FILE {rel_path} ({len(result['content'])} chars):\n{result['content']}{suffix}"
 
 
 # --------------------------------------------------------------------------- #
@@ -2563,6 +2597,60 @@ def build_general_registry() -> DispatchRegistry:
 
     registry.register_subagent(
         _subagent(
+            "study",
+            "General",
+            "Study tab: real, read-only access to the user's own study resource "
+            "folder (~/Documents/MYP data folder) — textbooks, past assessments, "
+            "notes.",
+            [
+                ToolSpec(
+                    name="study_list_files",
+                    description=(
+                        "List real files/folders in the user's study resource "
+                        "folder (or a subfolder of it). Use this to see what "
+                        "material actually exists before claiming a topic isn't "
+                        "covered by their own resources."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "subfolder path, relative to the study folder root; empty for the root",
+                                "default": "",
+                            },
+                        },
+                    },
+                    handler=_study_list_tool,
+                ),
+                ToolSpec(
+                    name="study_read_file",
+                    description=(
+                        "Read a real text file from the user's study resource "
+                        "folder. PRIORITIZE YOUR OWN KNOWLEDGE for well-established "
+                        "concepts — only reach for this when the user's own "
+                        "specific material (their notes, a specific past "
+                        "assessment, their textbook's exact wording) actually "
+                        "matters for the answer."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "file path, relative to the study folder root",
+                            },
+                        },
+                        "required": ["path"],
+                    },
+                    handler=_study_read_tool,
+                ),
+            ],
+        )
+    )
+
+    registry.register_subagent(
+        _subagent(
             "comms",
             "General",
             "Drafts emails/messages. Draft only — sending requires confirmation.",
@@ -3145,7 +3233,7 @@ def build_general_registry() -> DispatchRegistry:
     # Real telemetry about the ATLAS quant repo: status, FX-archive
     # bootstrap progress, deliverables. Deterministic (Rule 2.8), honest
     # NOT CONFIGURED when ATLAS_REPO_PATH is unset (Rule 2.2).
-    from dourmouse.atlas_ops import build_atlas_tool_specs
+    from dourmouse.atlas.atlas_ops import build_atlas_tool_specs
 
     registry.register_subagent(
         _subagent(
@@ -3440,7 +3528,7 @@ def build_general_registry() -> DispatchRegistry:
 
     # -- v8.0 ATLAS Terminal agent ------------------------------------ #
     # What the ATLAS Terminal (streamlit, atlas_terminal/) shows right now.
-    from dourmouse.atlas_ui_ops import build_atlas_ui_tool_specs
+    from dourmouse.atlas.atlas_ui_ops import build_atlas_ui_tool_specs
 
     registry.register_subagent(
         _subagent(
@@ -3455,7 +3543,7 @@ def build_general_registry() -> DispatchRegistry:
     # RUN the real research pipeline from here: validation suite, walk-
     # forward, backtest, paper log, calendar, events refresh. Also owns
     # the locked STANDARD (reports/validation_standard.json).
-    from dourmouse.atlas_command import build_atlas_cmd_tool_specs
+    from dourmouse.atlas.atlas_command import build_atlas_cmd_tool_specs
 
     registry.register_subagent(
         _subagent(

@@ -1,13 +1,13 @@
-openai>=2.52.0
-psutil>=5.9.0  # v5.22.14 host telemetry (HUD MEM_LOAD + metrics micro-bars); optional-guarded
-python-dotenv>=1.0.0
-numpy>=2.0.0  # v5.6 neural orchestrator (pure-numpy MLP, no torch)
-pandas>=2.1  # v8.16 ATLAS strategy sandbox — load() returns a DataFrame
-pyarrow>=15  # parquet engine for pandas — forex_ops event archive reads .parquet, and pandas bundles no engine of its own
-segno>=1.6.0  # v5.13 phone-link QR codes (pure-Python, zero native deps)
-worldmonitor-sdk>=0.1.1  # v5.18 World Monitor tab (country briefs / risk feeds); module-level import
-pywebview>=6.0  # v5.19 desktop shell native window (documented browser fallback without it)
-playwright>=1.40  # v5.25 browser agent (drives the system Google Chrome via channel='chrome' — no browser download)
-faiss-cpu>=1.8.0  # dourmouse/shared_rag.py — reads the desktop's hybrid_vault vector.index (FAISS-named artifact, never confirmed live); imported lazily so its absence never breaks anything else, this pin only matters once that code actually runs where the vault lives
-tree_sitter>=0.26.0  # dourmouse/repo_map.py — Aider-port tree-sitter structural codebase map (part 2/4); imported lazily, repo_map tool reports NOT CONFIGURED honestly if missing
-tree_sitter_language_pack>=1.15.0  # grammars for python/js/ts/tsx/go/rust/java/ruby, used by repo_map.py
+openai==2.53.0
+psutil==7.2.2  # v5.22.14 host telemetry (HUD MEM_LOAD + metrics micro-bars); optional-guarded
+python-dotenv==1.2.2
+numpy==2.5.1  # v5.6 neural orchestrator (pure-numpy MLP, no torch)
+pandas==3.0.5  # v8.16 ATLAS strategy sandbox — load() returns a DataFrame
+pyarrow==25.0.1  # parquet engine for pandas — forex_ops event archive reads .parquet, and pandas bundles no engine of its own
+segno==1.6.6  # v5.13 phone-link QR codes (pure-Python, zero native deps)
+worldmonitor-sdk==0.1.1  # v5.18 World Monitor tab (country briefs / risk feeds); module-level import
+pywebview==6.2.1  # v5.19 desktop shell native window (documented browser fallback without it)
+playwright==1.62.0  # v5.25 browser agent (drives the system Google Chrome via channel='chrome' — no browser download)
+faiss-cpu>=1.8.0  # NOT INSTALLED in .venv (pip show confirms absent) — left floating rather than fabricating a pin; dourmouse/shared_rag.py — reads the desktop's hybrid_vault vector.index (FAISS-named artifact, never confirmed live); imported lazily so its absence never breaks anything else, this pin only matters once that code actually runs where the vault lives
+tree_sitter==0.26.0  # dourmouse/repo_map.py — Aider-port tree-sitter structural codebase map (part 2/4); imported lazily, repo_map tool reports NOT CONFIGURED honestly if missing
+tree_sitter_language_pack==1.15.8  # grammars for python/js/ts/tsx/go/rust/java/ruby, used by repo_map.py

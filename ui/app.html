@@ -80,7 +80,18 @@
 
   --ink:         #09090B;
   --ink-2:       #52525B;
-  --ink-3:       #71717A;
+  /* --ink-3 was #71717A (zinc-500): 4.63:1 on --bg but 4.40:1 on
+     --surface and 3.81:1 on --surface-2 -- below the 4.5:1 WCAG 2.1
+     SC 1.4.3 needs, on real 12.5-13px caption/hint text (.mode .sub,
+     .who, .topbar .hint, .status, .chint), not decorative glyphs. On a
+     light ground the fix direction is darker, not lighter (the zinc-400
+     used to raise the same failure on this file's own dark palette below
+     would be near-invisible here) -- so this raises to zinc-600, this
+     file's own --ink-2 value (7.41/7.03/6.09:1), rather than inventing
+     an unproven intermediate. That ties ink-3 to ink-2 (same accepted
+     outcome as login.html's --text-dim tying --text-body after its own
+     fix), not a new contrast defect. */
+  --ink-3:       #52525B;
 
   --accent:      #B45309;
   --accent-ink:  #FAFAFA;
@@ -112,7 +123,12 @@
 
     --ink:         #FAFAFA;
     --ink-2:       #A1A1AA;
-    --ink-3:       #71717A;
+    /* Same zinc-500-on-dark-ground failure as hud.html's --dim (3.67:1 on
+       --surface, 3.08:1 on --surface-2) -- reachable by anyone with an OS
+       dark-mode preference, not just the explicit toggle below. Raised to
+       zinc-400, matching --ink-2 above (this file's own already-passing
+       dark value), same fix as hud.html. */
+    --ink-3:       #A1A1AA;
 
     --accent:      #F59E0B;
     --accent-ink:  #09090B;
@@ -133,7 +149,9 @@
   --line-soft:   #27272A;
   --ink:         #FAFAFA;
   --ink-2:       #A1A1AA;
-  --ink-3:       #71717A;
+  /* Same fix as the prefers-color-scheme block above -- kept in sync so
+     the explicit "◐ Theme" toggle doesn't reintroduce the failure. */
+  --ink-3:       #A1A1AA;
   --accent:      #F59E0B;
   --accent-ink:  #09090B;
   --accent-soft: #27272A;

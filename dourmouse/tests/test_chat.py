@@ -14,6 +14,7 @@ import pytest
 
 from dourmouse.chat import ChatSession, most_recent_session_file
 from dourmouse.dispatch import DispatchRegistry, Permission, Subagent, ToolSpec
+from dourmouse.memory_store import MemoryStore
 
 
 class _FakeFunction:
@@ -513,6 +514,72 @@ class TestShouldStopThroughChat:
         session = ChatSession(_registry(), client=client, session_file=tmp_path / "nostop.jsonl")
         report = session.ask("hello")
         assert report["final_text"] == "all good"
+
+
+class TestAutosaveChatToRag:
+    """Backlog item 3 slice: each completed exchange lands in the memory
+    store under source="chat_history", deduped via remember()'s
+    content_hash check (76a779a) so a resumed/replayed session never
+    double-indexes."""
+
+    def _chat_history_count(self, memory: MemoryStore) -> int:
+        return memory._conn.execute(
+            "SELECT COUNT(*) FROM facts WHERE source = 'chat_history'"
+        ).fetchone()[0]
+
+    def test_one_turn_yields_exactly_one_new_row(self, tmp_path):
+        memory = MemoryStore(tmp_path / "mem.db")
+        client = FakeClient([_FakeResponse(_FakeMessage(content="hello there"))])
+        session = ChatSession(
+            _registry(), client=client, session_file=tmp_path / "s1.jsonl", memory=memory
+        )
+        session.ask("hi")
+        assert self._chat_history_count(memory) == 1
+        row = memory._conn.execute(
+            "SELECT title, body FROM facts WHERE source = 'chat_history'"
+        ).fetchone()
+        assert row["title"] == "s1/1"
+        assert "USER: hi" in row["body"] and "ASSISTANT: hello there" in row["body"]
+
+    def test_replaying_the_identical_turn_yields_zero_new_rows(self, tmp_path):
+        session_file = tmp_path / "s2.jsonl"
+        memory = MemoryStore(tmp_path / "mem2.db")
+        client1 = FakeClient([_FakeResponse(_FakeMessage(content="same answer"))])
+        session1 = ChatSession(
+            _registry(), client=client1, session_file=session_file, memory=memory
+        )
+        session1.ask("same prompt")
+        assert self._chat_history_count(memory) == 1
+
+        # A resumed session (fresh ChatSession over the SAME session_file)
+        # replays an identical user+assistant exchange — same source, same
+        # body, but a NEW title (turn index moved on). content_hash dedup
+        # must catch this: zero new rows, not a second insert.
+        client2 = FakeClient([_FakeResponse(_FakeMessage(content="same answer"))])
+        session2 = ChatSession(
+            _registry(), client=client2, session_file=session_file, memory=memory
+        )
+        session2.ask("same prompt")
+        assert self._chat_history_count(memory) == 1
+
+    def test_kill_switch_disables_autosave(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_AUTOSAVE_CHAT_RAG", "0")
+        memory = MemoryStore(tmp_path / "mem3.db")
+        client = FakeClient([_FakeResponse(_FakeMessage(content="answer"))])
+        session = ChatSession(
+            _registry(), client=client, session_file=tmp_path / "s3.jsonl", memory=memory
+        )
+        session.ask("hi")
+        assert self._chat_history_count(memory) == 0
+
+    def test_no_memory_store_is_a_silent_noop(self, tmp_path):
+        # memory=None (the default) must not raise — most callers (engine
+        # tests, non-learning sessions) never attach a store.
+        client = FakeClient([_FakeResponse(_FakeMessage(content="answer"))])
+        session = ChatSession(
+            _registry(), client=client, session_file=tmp_path / "s4.jsonl"
+        )
+        session.ask("hi")  # no exception
 
 
 class TestChatImportLaziness:
