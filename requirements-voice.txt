@@ -2,19 +2,19 @@
 # Without these wheels the voice endpoints report NOT CONFIGURED honestly
 # (macOS still gets TTS via the built-in 'say' — zero dependencies).
 # Install with: pip install -r requirements.txt -r requirements-voice.txt
-faster-whisper>=1.0
+faster-whisper==1.2.1
 # >= 1.6 required: the voice module uses the 1.6 API (download_voice flat
 # layout + synthesize_wav). Older versions make the endpoint report NOT
 # CONFIGURED honestly.
-piper-tts>=1.6
+piper-tts==1.6.0
 # Vision stage 4 (dourmouse/wakeword.py) — local, open-weight wake-word
 # detection (ONNX, runs on onnxruntime which requirements.txt/piper already
 # pull in) + the mic-capture side (PortAudio bindings; real Core Audio
 # device access verified on macOS in this project's .venv). Without these
 # wheels dourmouse.wakeword.wakeword_status() reports NOT CONFIGURED
 # honestly and dourmouse.wakeword.launch() refuses to start.
-openwakeword>=0.6.0
-sounddevice>=0.5.0
+openwakeword==0.6.0
+sounddevice==0.5.6
 # Vision OS checklist item 5 (dourmouse/audio_denoise.py) — real-time
 # RNNoise noise scrubbing ahead of faster-whisper. Uses pyrnnoise's
 # low-level pyrnnoise.rnnoise ctypes binding directly (NOT its higher-
@@ -24,9 +24,9 @@ sounddevice>=0.5.0
 # docstring). Without this wheel, DOURMOUSE_DENOISE reports "not
 # installed" honestly via audio_denoise.create_default() -> None, and
 # the hands-free pipeline runs undenoised (its original behavior).
-pyrnnoise>=0.4.0
+pyrnnoise==0.4.3
 # The actual 16kHz<->48kHz resampling audio_denoise.py does (exact 3:1/
 # 1:3 polyphase ratio). Was already present in this venv as a transitive
 # dependency of other packages but never explicitly declared anywhere —
 # pinned here now that a REAL, direct import depends on it.
-scipy>=1.10
+scipy==1.18.1
