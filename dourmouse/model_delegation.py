@@ -77,6 +77,9 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # question the user thought was local is exactly what this policy
     # exists to prevent.
     "google_workspace",
+    # The user's own study folder (~/Documents/MYP data folder) -- their
+    # own documents, same privacy class as mail/docs above.
+    "study",
 })
 
 #: Agents whose inputs are public by nature, where Gemini's large context and
