@@ -1976,6 +1976,12 @@ def _build_client(
         return OllamaNativeClient(_ollama_cloud_config())
     if mode == "gemini":
         return GeminiClient()
+    # mode == "local" (from _agent_split_backend's privacy-first verdict)
+    # deliberately matches nothing above — it means "don't override",
+    # falling through to whatever this machine's own configured default
+    # backend already is, which is the actual privacy-preserving choice
+    # (NOT the "ollama_cloud" branch above, a hosted call that isn't
+    # privacy-equivalent to staying on this machine).
     # Ollama: talk to the native API (fast, streaming, think disabled).
     # NVIDIA / OmniRoute: the OpenAI SDK, with a non-empty sentinel key
     # (Ollama/OmniRoute ignore key values, but the SDK rejects empty strings
@@ -2226,37 +2232,36 @@ def _is_heavy_workflow_agent(agent_name: str | None) -> bool:
 
 
 def _agent_split_map() -> dict[str, str]:
-    """Real, verifiably even split of the ACTUAL registered roster —
-    computed once (module-lifetime cache, same pattern as
-    code_backends.py's own _CLAUDE_SESSIONS): sort every real subagent
-    name alphabetically and alternate, so a 34-agent roster splits
-    17/17, not whatever a per-name hash happens to land on (measured: a
-    sha256-parity split on this real roster came out 12/22 — nowhere
-    near "evenly split", the user's own explicit ask). Alphabetical sort
-    keeps it deterministic across restarts without needing to persist
-    anything.
+    """The non-heavy roster's ollama-vs-gemini split, delegated to
+    dourmouse.model_delegation.route_for() — a real, pre-existing,
+    privacy-first classification (mail/docs/study/money/the user's own
+    repos stay LOCAL; research/news/public-input work may go to Gemini),
+    built to the same user instruction this split was, and more mature
+    than an arbitrary even alternation. Merged deliberately rather than
+    keeping two competing routing philosophies: this module still owns
+    the heavy-workflow-escalates-to-real-Claude decision (something
+    model_delegation.py doesn't have at all, since that module assumes
+    Claude already always orchestrates); model_delegation.py owns the
+    ollama-vs-gemini choice for everything else, since privacy-based
+    classification is real, considered, and tested (17 cases) where an
+    even split was arbitrary.
 
-    Split targets are Ollama Cloud and Gemini — NOT Claude. Claude is
-    reserved for heavy workflows only (_is_heavy_workflow_agent), checked
-    separately in _agent_split_backend before this map is even consulted,
-    so heavy agents never dilute the even split between the two cheap
-    backends.
+    "local" here is a deliberate sentinel, NOT "ollama_cloud" — a hosted
+    Ollama Cloud call is not privacy-equivalent to routing that stays on
+    this machine (see _build_client's own "local" branch): a LOCAL
+    verdict means "don't override the backend at all", falling through
+    to whatever this machine's own configured default already is.
     """
     global _agent_split_cache
     if _agent_split_cache is not None:
         return _agent_split_cache
     from dourmouse.general_roster import build_general_registry
+    from dourmouse.model_delegation import CLOUD, route_for
 
     names = sorted(s.name for s in build_general_registry().all_subagents())
-    # Alternate over the NON-heavy names only — indexing parity across the
-    # full roster (heavy agents interspersed) would skew the split once
-    # heavy agents are filtered out downstream (measured on the real
-    # roster: 15/13, not even). Heavy agents never consult this map at
-    # all (see _agent_split_backend's early return), so they're excluded
-    # here too rather than occupying a slot that throws off parity.
     non_heavy = [n for n in names if not _is_heavy_workflow_agent(n)]
     _agent_split_cache = {
-        name: ("ollama_cloud" if i % 2 == 0 else "gemini") for i, name in enumerate(non_heavy)
+        name: ("gemini" if route_for(name) == CLOUD else "local") for name in non_heavy
     }
     return _agent_split_cache
 
@@ -2292,14 +2297,15 @@ def _effective_split_agent(
 
 
 def _agent_split_backend(agent_name: str | None) -> str:
-    """Deterministic (Rule 2.8) even split of the roster across the two
-    cheap real backends — see _agent_split_map's own docstring. A heavy
-    workflow (_is_heavy_workflow_agent) escalates to real Claude instead
-    of the split, regardless of which side it would otherwise land on —
-    the user's own explicit ask. An agent name outside the current
-    registry (a stale reference, a test double) falls back to a stable
-    hash of the name so it never crashes and still lands the same side
-    every time."""
+    """Privacy-first ollama-vs-gemini split (delegated to
+    model_delegation.route_for — see _agent_split_map's own docstring for
+    why), with a heavy-workflow escalation to real Claude layered on top
+    (_is_heavy_workflow_agent) — the user's own explicit ask, and
+    something model_delegation.py doesn't itself decide. An agent name
+    outside the current registry (a stale reference, a test double) still
+    gets a real answer: route_for() itself defaults unknown agents to
+    LOCAL (its own documented, deliberate default), so falling through to
+    it directly here is correct, not a guess."""
     if not agent_name:
         return "claude"  # no single agent resolved (a free top-level chat) — Claude by default
     if _is_heavy_workflow_agent(agent_name):
@@ -2307,10 +2313,9 @@ def _agent_split_backend(agent_name: str | None) -> str:
     mapped = _agent_split_map().get(agent_name)
     if mapped is not None:
         return mapped
-    import hashlib
+    from dourmouse.model_delegation import CLOUD, route_for
 
-    digest = hashlib.sha256(agent_name.encode("utf-8")).hexdigest()
-    return "ollama_cloud" if int(digest, 16) % 2 == 0 else "gemini"
+    return "gemini" if route_for(agent_name) == CLOUD else "local"
 
 
 def _ollama_cloud_config() -> OllamaConfig:

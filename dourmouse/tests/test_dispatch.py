@@ -2975,29 +2975,38 @@ class TestAgentSplitBackend:
     def test_deterministic_across_calls(self):
         assert dispatch_module._agent_split_backend("mail") == dispatch_module._agent_split_backend("mail")
 
-    def test_real_roster_splits_evenly_excluding_heavy_workflow_agents(self):
-        """The alphabetical-alternation split (_agent_split_map) must be
-        exactly even (off by at most 1) between Ollama Cloud and Gemini —
-        the user's own explicit ask — EXCLUDING heavy-workflow agents,
-        which escalate to real Claude instead (also the user's own
-        explicit ask) and are not part of the even split at all. A raw
-        hash-parity split on this real roster measured 12/22, nowhere
-        close; the alternating map is what replaced it."""
+    def test_real_roster_is_fully_classified_and_agrees_with_model_delegation(self):
+        """Merged routing (the user's own explicit ask): heavy-workflow
+        agents escalate to real Claude (this module's own addition);
+        everything else defers to model_delegation.route_for()'s real,
+        privacy-first classification — NOT an artificial even split, so
+        this does not assert near-evenness (a raw hash-parity split
+        measured 12/22 on an earlier roster size, which is what the old
+        even-alternation replaced; privacy-first routing has no such
+        target to hit, it's however many real agents are privacy-
+        sensitive vs not)."""
         from dourmouse.general_roster import build_general_registry
+        from dourmouse.model_delegation import CLOUD, route_for
 
         names = [s.name for s in build_general_registry().all_subagents()]
         backends = [dispatch_module._agent_split_backend(n) for n in names]
         claude_count = backends.count("claude")
-        cloud_count = backends.count("ollama_cloud")
+        local_count = backends.count("local")
         gemini_count = backends.count("gemini")
-        assert claude_count + cloud_count + gemini_count == len(names)
+        assert claude_count + local_count + gemini_count == len(names)
         heavy_count = sum(1 for n in names if dispatch_module._is_heavy_workflow_agent(n))
         assert claude_count == heavy_count
-        assert abs(cloud_count - gemini_count) <= 1
+        # Every non-heavy agent's verdict must actually MATCH what
+        # model_delegation itself would say — the whole point of merging
+        # rather than keeping a second, independent classification.
+        for name, backend in zip(names, backends):
+            if backend == "claude":
+                continue
+            assert backend == ("gemini" if route_for(name) == CLOUD else "local"), name
 
     def test_every_result_is_a_valid_backend_name(self):
         for name in ("mail", "code_claude", "research_info", "worldmonitor", "atlas", "tasks"):
-            assert dispatch_module._agent_split_backend(name) in ("claude", "ollama_cloud", "gemini")
+            assert dispatch_module._agent_split_backend(name) in ("claude", "local", "gemini")
 
     def test_heavy_workflow_agents_always_escalate_to_claude(self):
         for name in ("code_claude", "cn_backends_probe", "research_info", "atlas_lab"):
@@ -3005,7 +3014,15 @@ class TestAgentSplitBackend:
 
     def test_non_heavy_agents_never_land_on_claude(self):
         for name in ("mail", "worldmonitor", "tasks", "calendar"):
-            assert dispatch_module._agent_split_backend(name) in ("ollama_cloud", "gemini")
+            assert dispatch_module._agent_split_backend(name) in ("local", "gemini")
+
+    def test_privacy_sensitive_agents_stay_local_not_cloud(self):
+        """The real value of merging with model_delegation.py: mail/docs/
+        money/the user's own repos must never land on the cloud side,
+        which an arbitrary even split could do and privacy-first routing
+        never should."""
+        for name in ("mail", "docs", "memory", "markets", "forex", "dev_coding"):
+            assert dispatch_module._agent_split_backend(name) == "local"
 
 
 class TestOllamaCloudConfig:
@@ -3119,7 +3136,11 @@ class TestBuildClientOrchestratorRouting:
             elif expected == "gemini":
                 assert isinstance(client, dispatch_module.GeminiClient), agent
             else:
-                assert isinstance(client, dispatch_module.OllamaNativeClient) and client._root == "https://ollama.com", agent
+                # "local" falls through to the passed-in config as-is —
+                # the REAL local Ollama root, not the cloud one, since
+                # forcing a hosted call for a privacy-routed agent would
+                # defeat the entire point of routing it local.
+                assert isinstance(client, dispatch_module.OllamaNativeClient) and client._root != "https://ollama.com", agent
 
 
 class TestBrainEventReportsTheRealOrchestratorBackend:
@@ -3300,16 +3321,14 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
         run_dispatch_messages(messages, registry, client=None, config=OllamaConfig(), event_sink=events.append)
         brain = next(e for e in events if e["type"] == "brain")
         # dispatch.py's own real "brain" event ALWAYS emits the mode
-        # "claude" as the label "claude_cli" (see the ~line 2455/3114
-        # backend_name assignments) -- expected must go through the same
-        # translation, or this compares two different, non-interchangeable
-        # spellings of the same choice. Previously masked entirely: on the
-        # roster size before google_workspace existed, "mail" happened to
-        # land on the "ollama_cloud" side of the alternating split (which
-        # has no such translation), so this comparison was never actually
-        # exercised on the "claude" branch until a 36th agent shifted the
-        # alphabetical parity and put mail on the other side.
-        expected_label = "claude_cli" if expected == "claude" else expected
+        # "claude" as the label "claude_cli", and "local" (a routing-only
+        # sentinel, never itself a client type) as whatever
+        # backend_identity(config) really reports for the config actually
+        # used — "ollama" for the plain OllamaConfig this test passes in
+        # (see the ~line 2455/3114 backend_name assignments and
+        # _build_client's own "local" branch for why there's no override
+        # to translate).
+        expected_label = {"claude": "claude_cli", "local": "ollama"}.get(expected, expected)
         assert brain["backend"] == expected_label
 
     def test_gibberish_with_no_agent_match_falls_back_to_claude(self, monkeypatch):
