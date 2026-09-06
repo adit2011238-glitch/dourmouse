@@ -41,6 +41,10 @@ def _workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
     monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
     monkeypatch.setattr(ss, "SPOTIFY_CLIENT_ID", None, raising=False)
+    # The poll cache (now_playing/playback_state) is a module-level dict —
+    # reset it per test so one test's cached result never leaks into the
+    # next (which would otherwise get a stale value from a prior mock).
+    monkeypatch.setattr(ss, "_cache", {}, raising=False)
     return tmp_path
 
 
@@ -434,6 +438,158 @@ class TestApiClient:
         _set_client_id(monkeypatch)
         text = ss.playback_control("bogus-action")
         assert "ERROR" in text
+
+
+# --------------------------------------------------------------------------- #
+# Floating widget (backlog item 8) — short-TTL poll cache + transport actions
+# --------------------------------------------------------------------------- #
+class TestPollCache:
+    """now_playing()/playback_state() must serve repeated polls (multiple
+    widget tabs/devices) from a short-TTL cache instead of re-hitting the
+    Spotify API every time, without ever serving state past the TTL."""
+
+    def _fake_api(self, monkeypatch, calls: list[str]):
+        def fake_api(method, path, params=None, body=None):
+            calls.append(path)
+            if path == "/me/player/currently-playing":
+                return {
+                    "is_playing": True,
+                    "progress_ms": 1000,
+                    "item": {"name": "Track", "artists": [{"name": "Artist"}], "duration_ms": 2000},
+                }
+            if path == "/me/player":
+                return {
+                    "device": {"name": "Mac", "volume_percent": 50},
+                    "shuffle_state": False,
+                    "repeat_state": "off",
+                    "is_playing": True,
+                    "item": {"name": "Track", "artists": [{"name": "Artist"}]},
+                }
+            raise AssertionError(f"unexpected call: {path}")
+
+        monkeypatch.setattr(ss, "_api", fake_api)
+
+    def test_now_playing_cache_hit_within_ttl(self, _workspace, monkeypatch):
+        _set_client_id(monkeypatch)
+        ss._save_tokens(
+            {"access_token": "t", "refresh_token": "r", "expires_at": time.time() + 9999}
+        )
+        calls: list[str] = []
+        self._fake_api(monkeypatch, calls)
+
+        first = ss.now_playing()
+        second = ss.now_playing()  # simulates a second widget tab polling
+        assert first == second
+        assert calls.count("/me/player/currently-playing") == 1  # only one real API hit
+
+    def test_playback_state_cache_hit_within_ttl(self, _workspace, monkeypatch):
+        _set_client_id(monkeypatch)
+        ss._save_tokens(
+            {"access_token": "t", "refresh_token": "r", "expires_at": time.time() + 9999}
+        )
+        calls: list[str] = []
+        self._fake_api(monkeypatch, calls)
+
+        first = ss.playback_state()
+        second = ss.playback_state()
+        assert first == second
+        assert calls.count("/me/player") == 1
+
+    def test_cache_expires_after_ttl(self, _workspace, monkeypatch):
+        _set_client_id(monkeypatch)
+        ss._save_tokens(
+            {"access_token": "t", "refresh_token": "r", "expires_at": time.time() + 9999}
+        )
+        calls: list[str] = []
+        self._fake_api(monkeypatch, calls)
+        monkeypatch.setattr(ss, "_POLL_CACHE_TTL", 0.05)
+
+        ss.now_playing()
+        time.sleep(0.1)
+        ss.now_playing()
+        assert calls.count("/me/player/currently-playing") == 2  # cache expired, re-fetched
+
+    def test_now_playing_and_playback_state_cached_independently(self, _workspace, monkeypatch):
+        """Distinct cache keys: polling one must not serve the other's data
+        or suppress its own API call."""
+        _set_client_id(monkeypatch)
+        ss._save_tokens(
+            {"access_token": "t", "refresh_token": "r", "expires_at": time.time() + 9999}
+        )
+        calls: list[str] = []
+        self._fake_api(monkeypatch, calls)
+
+        ss.now_playing()
+        ss.playback_state()
+        assert calls == ["/me/player/currently-playing", "/me/player"]
+
+    def test_control_action_invalidates_cache(self, _workspace, monkeypatch):
+        """After a transport action, the very next poll must re-fetch —
+        never keep serving pre-action cached state for up to TTL seconds."""
+        _set_client_id(monkeypatch)
+        ss._save_tokens(
+            {"access_token": "t", "refresh_token": "r", "expires_at": time.time() + 9999}
+        )
+        calls: list[str] = []
+
+        def fake_api(method, path, params=None, body=None):
+            calls.append(path)
+            if path == "/me/player/currently-playing":
+                return {"is_playing": True, "item": {"name": "T", "artists": [], "duration_ms": 0}}
+            return {}  # control endpoints answer empty on success
+
+        monkeypatch.setattr(ss, "_api", fake_api)
+
+        ss.now_playing()
+        ss.playback_control("pause")
+        ss.now_playing()
+        assert calls.count("/me/player/currently-playing") == 2  # not served from cache
+
+
+class TestTransportActions:
+    """playback_control must cover all four of the widget's transport
+    buttons: play, pause, next, previous."""
+
+    def _capture(self, monkeypatch):
+        calls: list[tuple[str, str]] = []
+
+        def fake_api(method, path, params=None, body=None):
+            calls.append((method, path))
+            return {}
+
+        monkeypatch.setattr(ss, "_api", fake_api)
+        return calls
+
+    @pytest.mark.parametrize(
+        "action,expected",
+        [
+            ("play", ("PUT", "/me/player/play")),
+            ("resume", ("PUT", "/me/player/play")),
+            ("pause", ("PUT", "/me/player/pause")),
+            ("next", ("POST", "/me/player/next")),
+            ("previous", ("POST", "/me/player/previous")),
+        ],
+    )
+    def test_each_transport_action_routes_correctly(self, _workspace, monkeypatch, action, expected):
+        _set_client_id(monkeypatch)
+        calls = self._capture(monkeypatch)
+        text = ss.playback_control(action)
+        assert calls == [expected]
+        assert "ERROR" not in text
+        assert action in text
+
+    def test_play_and_resume_are_equivalent_aliases(self, _workspace, monkeypatch):
+        _set_client_id(monkeypatch)
+        calls = self._capture(monkeypatch)
+        ss.playback_control("play")
+        ss.playback_control("resume")
+        assert calls == [("PUT", "/me/player/play"), ("PUT", "/me/player/play")]
+
+    def test_action_is_case_and_whitespace_insensitive(self, _workspace, monkeypatch):
+        _set_client_id(monkeypatch)
+        calls = self._capture(monkeypatch)
+        ss.playback_control("  PLAY  ")
+        assert calls == [("PUT", "/me/player/play")]
 
 
 # --------------------------------------------------------------------------- #
