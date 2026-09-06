@@ -93,3 +93,16 @@ def test_design_3d_prompt_is_honest_about_scope() -> None:
     assert ".obj" in lowered and ".glb" in lowered
     assert "confirmation" in lowered
     assert "write_manifest_entry" in prompt
+
+
+def test_research_info_scopes_effort_to_the_request() -> None:
+    # backlog #11, real user complaint: the research agent "uses too many
+    # tool calls and often overcomplicates" simple requests. Regression
+    # lock for the fix — a real EFFORT SCALING section with a concrete
+    # simple-vs-complex example, not just vague "be efficient" advice.
+    prompt = AGENT_SYSTEM_PROMPTS["research_info"]
+    assert "EFFORT SCALING" in prompt
+    assert "0-1 tool" in prompt
+    lowered = prompt.lower()
+    assert "boiling point of water" in lowered  # the simple-case example
+    assert "diverge" in lowered  # the genuine-multi-step-case example
