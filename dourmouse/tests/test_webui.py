@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import pathlib
 import threading
 import time
 import urllib.parse
@@ -441,11 +442,21 @@ class TestSpotifyWidgetInjection:
             assert self._WIDGET_TAGS not in body, path
 
     def test_injection_silently_skipped_when_widget_files_absent(self, server, monkeypatch):
-        """No pre-existing designer-lane files in this worktree state —
-        injection must no-op, not error."""
-        css = webui_module._UI_DIR / "spotify_widget.css"
-        js = webui_module._UI_DIR / "spotify_widget.js"
-        assert not css.exists() and not js.exists()
+        """Simulate a worktree state without the designer lane's widget
+        files — regardless of whether ui/spotify_widget.css/.js actually
+        exist on disk in THIS checkout (post-6cf7a26 they do) — by forcing
+        just those two exists() lookups to False. Injection must no-op, not
+        error, and every other Path.exists() call (serving the real
+        index.html, etc.) is left untouched."""
+        real_exists = pathlib.Path.exists
+        widget_names = {"spotify_widget.css", "spotify_widget.js"}
+
+        def fake_exists(self, *args, **kwargs):
+            if self.name in widget_names:
+                return False
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(pathlib.Path, "exists", fake_exists)
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
         srv, port = server
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
