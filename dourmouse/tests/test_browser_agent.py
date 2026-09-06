@@ -165,3 +165,28 @@ class TestRosterWiring:
         registry = build_general_registry()
         for name in ("browser_submit", "browser_signin", "browser_creds_store", "browser_creds_forget"):
             assert name in registry.gated_tool_names, name
+
+
+class TestAdMediaBlocking:
+    """backlog #8, Phase 4 of the user's own spec: block heavy media and
+    known trackers for speed. Pure predicate — no real Chrome needed."""
+
+    def test_video_audio_streams_are_blocked(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_BROWSER_BLOCK_MEDIA", raising=False)
+        assert ba._should_block_request("https://example.com/video.mp4", "media") is True
+
+    def test_known_tracker_domains_are_blocked(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_BROWSER_BLOCK_MEDIA", raising=False)
+        assert ba._should_block_request("https://www.google-analytics.com/collect", "script") is True
+        assert ba._should_block_request("https://doubleclick.net/pixel", "image") is True
+
+    def test_ordinary_page_resources_are_not_blocked(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_BROWSER_BLOCK_MEDIA", raising=False)
+        assert ba._should_block_request("https://example.com/index.html", "document") is False
+        assert ba._should_block_request("https://example.com/style.css", "stylesheet") is False
+        assert ba._should_block_request("https://example.com/logo.png", "image") is False
+
+    def test_env_override_disables_blocking_entirely(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_BROWSER_BLOCK_MEDIA", "0")
+        assert ba._should_block_request("https://example.com/video.mp4", "media") is False
+        assert ba._should_block_request("https://doubleclick.net/pixel", "image") is False
