@@ -2974,23 +2974,37 @@ class TestAgentSplitBackend:
     def test_deterministic_across_calls(self):
         assert dispatch_module._agent_split_backend("mail") == dispatch_module._agent_split_backend("mail")
 
-    def test_real_roster_splits_evenly(self):
+    def test_real_roster_splits_evenly_excluding_heavy_workflow_agents(self):
         """The alphabetical-alternation split (_agent_split_map) must be
-        exactly even (off by at most 1 for an odd-sized roster) — the
-        user's own explicit ask. A raw hash-parity split on this real
-        roster measured 12/22, nowhere close; this is what replaced it."""
+        exactly even (off by at most 1) between Ollama Cloud and Gemini —
+        the user's own explicit ask — EXCLUDING heavy-workflow agents,
+        which escalate to real Claude instead (also the user's own
+        explicit ask) and are not part of the even split at all. A raw
+        hash-parity split on this real roster measured 12/22, nowhere
+        close; the alternating map is what replaced it."""
         from dourmouse.general_roster import build_general_registry
 
         names = [s.name for s in build_general_registry().all_subagents()]
         backends = [dispatch_module._agent_split_backend(n) for n in names]
         claude_count = backends.count("claude")
         cloud_count = backends.count("ollama_cloud")
-        assert claude_count + cloud_count == len(names)
-        assert abs(claude_count - cloud_count) <= 1
+        gemini_count = backends.count("gemini")
+        assert claude_count + cloud_count + gemini_count == len(names)
+        heavy_count = sum(1 for n in names if dispatch_module._is_heavy_workflow_agent(n))
+        assert claude_count == heavy_count
+        assert abs(cloud_count - gemini_count) <= 1
 
     def test_every_result_is_a_valid_backend_name(self):
-        for name in ("mail", "code_claude", "research_info", "worldmonitor", "atlas"):
-            assert dispatch_module._agent_split_backend(name) in ("claude", "ollama_cloud")
+        for name in ("mail", "code_claude", "research_info", "worldmonitor", "atlas", "tasks"):
+            assert dispatch_module._agent_split_backend(name) in ("claude", "ollama_cloud", "gemini")
+
+    def test_heavy_workflow_agents_always_escalate_to_claude(self):
+        for name in ("code_claude", "cn_backends_probe", "research_info", "atlas_lab"):
+            assert dispatch_module._agent_split_backend(name) == "claude"
+
+    def test_non_heavy_agents_never_land_on_claude(self):
+        for name in ("mail", "worldmonitor", "tasks", "calendar"):
+            assert dispatch_module._agent_split_backend(name) in ("ollama_cloud", "gemini")
 
 
 class TestOllamaCloudConfig:
@@ -3101,6 +3115,8 @@ class TestBuildClientOrchestratorRouting:
             client = dispatch_module._build_client(OllamaConfig(), forced_agent=agent)
             if expected == "claude":
                 assert isinstance(client, dispatch_module.ClaudeCliClient), agent
+            elif expected == "gemini":
+                assert isinstance(client, dispatch_module.GeminiClient), agent
             else:
                 assert isinstance(client, dispatch_module.OllamaNativeClient) and client._root == "https://ollama.com", agent
 
@@ -3255,6 +3271,8 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
         ]
         if expected in ("claude", "claude_cli"):
             monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")
+        elif expected == "gemini":
+            monkeypatch.setattr("dourmouse.gemini_backend.call_gemini", lambda *a, **k: "hi")
         else:
             class _Resp:
                 _BODY = json.dumps({"message": {"content": "hi"}}).encode()

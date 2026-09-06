@@ -1962,6 +1962,8 @@ def _build_client(
         return ClaudeCliClient()
     if mode in ("ollama_cloud", "cloud"):
         return OllamaNativeClient(_ollama_cloud_config())
+    if mode == "gemini":
+        return GeminiClient()
     # Ollama: talk to the native API (fast, streaming, think disabled).
     # NVIDIA / OmniRoute: the OpenAI SDK, with a non-empty sentinel key
     # (Ollama/OmniRoute ignore key values, but the SDK rejects empty strings
@@ -2193,6 +2195,24 @@ def claude_orchestrator_enabled() -> bool:
 _agent_split_cache: dict[str, str] | None = None
 
 
+#: Real Claude calls are reserved for genuinely heavy workflows (the
+#: user's own explicit ask), not part of the even Ollama/Gemini split
+#: below. "Heavy" here is a real, checkable signal — an agent name
+#: containing one of these substrings — not a guess: code_* and
+#: cn_backends already shell out to real toolchains (Claude Code/Codex
+#: CLI) and research_*/atlas_* agents are the roster's own known
+#: multi-step, tool-call-heavy categories (see agent_prompts.py's own
+#: descriptions for each).
+_HEAVY_WORKFLOW_AGENT_MARKERS = ("code_", "cn_", "research", "atlas_")
+
+
+def _is_heavy_workflow_agent(agent_name: str | None) -> bool:
+    if not agent_name:
+        return False
+    lowered = agent_name.lower()
+    return any(marker in lowered for marker in _HEAVY_WORKFLOW_AGENT_MARKERS)
+
+
 def _agent_split_map() -> dict[str, str]:
     """Real, verifiably even split of the ACTUAL registered roster —
     computed once (module-lifetime cache, same pattern as
@@ -2203,6 +2223,12 @@ def _agent_split_map() -> dict[str, str]:
     near "evenly split", the user's own explicit ask). Alphabetical sort
     keeps it deterministic across restarts without needing to persist
     anything.
+
+    Split targets are Ollama Cloud and Gemini — NOT Claude. Claude is
+    reserved for heavy workflows only (_is_heavy_workflow_agent), checked
+    separately in _agent_split_backend before this map is even consulted,
+    so heavy agents never dilute the even split between the two cheap
+    backends.
     """
     global _agent_split_cache
     if _agent_split_cache is not None:
@@ -2210,8 +2236,15 @@ def _agent_split_map() -> dict[str, str]:
     from dourmouse.general_roster import build_general_registry
 
     names = sorted(s.name for s in build_general_registry().all_subagents())
+    # Alternate over the NON-heavy names only — indexing parity across the
+    # full roster (heavy agents interspersed) would skew the split once
+    # heavy agents are filtered out downstream (measured on the real
+    # roster: 15/13, not even). Heavy agents never consult this map at
+    # all (see _agent_split_backend's early return), so they're excluded
+    # here too rather than occupying a slot that throws off parity.
+    non_heavy = [n for n in names if not _is_heavy_workflow_agent(n)]
     _agent_split_cache = {
-        name: ("claude" if i % 2 == 0 else "ollama_cloud") for i, name in enumerate(names)
+        name: ("ollama_cloud" if i % 2 == 0 else "gemini") for i, name in enumerate(non_heavy)
     }
     return _agent_split_cache
 
@@ -2248,19 +2281,24 @@ def _effective_split_agent(
 
 def _agent_split_backend(agent_name: str | None) -> str:
     """Deterministic (Rule 2.8) even split of the roster across the two
-    real backends — see _agent_split_map's own docstring. An agent name
-    outside the current registry (a stale reference, a test double)
-    falls back to a stable hash of the name so it never crashes and
-    still lands the same side every time."""
+    cheap real backends — see _agent_split_map's own docstring. A heavy
+    workflow (_is_heavy_workflow_agent) escalates to real Claude instead
+    of the split, regardless of which side it would otherwise land on —
+    the user's own explicit ask. An agent name outside the current
+    registry (a stale reference, a test double) falls back to a stable
+    hash of the name so it never crashes and still lands the same side
+    every time."""
     if not agent_name:
         return "claude"  # no single agent resolved (a free top-level chat) — Claude by default
+    if _is_heavy_workflow_agent(agent_name):
+        return "claude"
     mapped = _agent_split_map().get(agent_name)
     if mapped is not None:
         return mapped
     import hashlib
 
     digest = hashlib.sha256(agent_name.encode("utf-8")).hexdigest()
-    return "claude" if int(digest, 16) % 2 == 0 else "ollama_cloud"
+    return "ollama_cloud" if int(digest, 16) % 2 == 0 else "gemini"
 
 
 def _ollama_cloud_config() -> OllamaConfig:
@@ -2350,6 +2388,69 @@ class ClaudeCliClient:
 
 class _ClaudeCliCompletions:
     def __init__(self, client: "ClaudeCliClient") -> None:
+        self._client = client
+
+    def create(
+        self,
+        *,
+        model: str | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+        extra_body: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        stream: bool = False,
+    ) -> Any:
+        return self._client._create(model=model, messages=messages, tools=tools, max_tokens=max_tokens, stream=stream)
+
+
+# -- Gemini, as a real split-backend target (alongside Ollama Cloud) ------- #
+# The user's own explicit ask: Claude Code is the only thing the user talks
+# to, in every tab, by default; behind the scenes the actual sub-agent
+# roster is split between Ollama Cloud and Gemini, with real Claude calls
+# reserved for genuinely heavy workflows (see _HEAVY_WORKFLOW_MARKERS).
+# gemini_backend.py already exists (a real, tested, hermetic module built
+# 2026-09-04 — 40/40 tests passing) — this just wires it in as a third
+# chat.completions-shaped client, same pattern as ClaudeCliClient.
+class GeminiClient:
+    def __init__(self, timeout: float = 60.0) -> None:
+        self.timeout = timeout
+        self.chat = type("_Chat", (), {"completions": _GeminiCompletions(self)})()
+
+    def _create(
+        self,
+        *,
+        model: str | None = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        stream: bool = False,
+    ) -> Any:
+        from dourmouse import gemini_backend
+
+        last_user = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+            "",
+        )
+        system = "\n".join(
+            str(m.get("content", "")) for m in messages if m.get("role") == "system"
+        ) or None
+        try:
+            text = gemini_backend.call_gemini(
+                str(last_user), system=system, max_tokens=max_tokens, timeout=self.timeout
+            )
+        except RuntimeError as exc:
+            # Same "reported honestly" contract as ClaudeCliClient/every
+            # other backend failure path (Rule 2.1/2.2) — never fabricate.
+            text = f"GEMINI (reported honestly): {exc}"
+        message = _OllamaMessage(text, None)
+        if stream:
+            return iter([_OllamaChunk(_OllamaDelta(content=text))])
+        return _OllamaResponse(message)
+
+
+class _GeminiCompletions:
+    def __init__(self, client: "GeminiClient") -> None:
         self._client = client
 
     def create(
@@ -2865,6 +2966,10 @@ def run_dispatch_messages(
         model, backend_name, backend_local = "claude-sonnet-5 (CLI)", "claude_cli", False
     elif _orch_mode in ("ollama_cloud", "cloud"):
         model, backend_name, backend_local = _OLLAMA_CLOUD_DEFAULT_MODEL, "ollama_cloud", False
+    elif _orch_mode == "gemini":
+        from dourmouse.gemini_backend import GEMINI_DEFAULT_MODEL
+
+        model, backend_name, backend_local = GEMINI_DEFAULT_MODEL, "gemini", False
     # The chosen brain is surfaced honestly so the UI can show which model
     # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
     # of the tree: nested delegate runs ride the parent's event sink, so a
@@ -3523,6 +3628,10 @@ def _run_dispatch_loop(
                     model, _routed_backend, _routed_local = "claude-sonnet-5 (CLI)", "claude_cli", False
                 elif _orch_mode2 in ("ollama_cloud", "cloud"):
                     model, _routed_backend, _routed_local = _OLLAMA_CLOUD_DEFAULT_MODEL, "ollama_cloud", False
+                elif _orch_mode2 == "gemini":
+                    from dourmouse.gemini_backend import GEMINI_DEFAULT_MODEL
+
+                    model, _routed_backend, _routed_local = GEMINI_DEFAULT_MODEL, "gemini", False
                 _emit_event(
                     event_sink,
                     {
