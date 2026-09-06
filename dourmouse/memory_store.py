@@ -24,7 +24,6 @@ connection access guarded by ``check_same_thread=False``.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import sqlite3
@@ -32,6 +31,8 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from dourmouse.rag_common import content_hash as _content_hash
 
 _DEFAULT_DIR_NAME = "memory"
 _DEFAULT_DB_NAME = "atlas_memory.db"
@@ -48,19 +49,6 @@ DUPLICATE_PREFIX = "MEMORY DUPLICATE"
 def is_duplicate_result(result: str) -> bool:
     """True if a remember() call was skipped as a content-hash duplicate."""
     return isinstance(result, str) and result.startswith(DUPLICATE_PREFIX)
-
-
-def _content_hash(body: str) -> str:
-    """Stable hash of a fact body for exact-content dedup.
-
-    Normalizes only trivial formatting noise (surrounding whitespace, and
-    trailing whitespace per line) so re-ingesting byte-identical content
-    that merely picked up a stray trailing space or blank line still
-    matches — NOT a fuzzy/semantic hash. Two facts with any real content
-    difference get different hashes and are both kept.
-    """
-    normalized = "\n".join(line.rstrip() for line in body.strip().splitlines())
-    return hashlib.sha256(normalized.encode("utf-8", errors="replace")).hexdigest()
 
 
 class MemoryStoreUnavailable(RuntimeError):

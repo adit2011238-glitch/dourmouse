@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from dourmouse.memory_store import is_duplicate_result
+from dourmouse.rag_common import content_hash
 
 # -- what actually has extractable text ------------------------------------ #
 
@@ -161,6 +162,13 @@ def ingest_local_tree(
         "scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0,
         "skipped_duplicate": 0, "errors": 0,
     }
+    # In-run content-hash dedup (rag_common.content_hash — the same
+    # primitive store.remember() uses for its own persisted dedup). Two
+    # different paths under this walk with byte-identical text (a copy, a
+    # symlink farm, a build output checked into two places) are caught
+    # here without a DB round trip; anything that survives this still goes
+    # through store.remember()'s cross-run dedup below.
+    seen_hashes: set[str] = set()
     for path in iter_local_files(root):
         key = str(path)
         if key in done:
@@ -182,6 +190,13 @@ def ingest_local_tree(
         body = text[:_MAX_TEXT_CHARS]
         if len(text) > _MAX_TEXT_CHARS:
             body += f"\n\n[TRUNCATED — {len(text):,} real chars, indexed first {_MAX_TEXT_CHARS:,}]"
+        digest = content_hash(body)
+        if digest in seen_hashes:
+            # Same content already remembered earlier in THIS run (caught
+            # before touching the store at all).
+            stats["skipped_duplicate"] += 1
+            done.add(key)
+            continue
         try:
             result = store.remember("laptop_file", key, body)
             if is_duplicate_result(result):
@@ -192,6 +207,7 @@ def ingest_local_tree(
                 stats["skipped_duplicate"] += 1
             else:
                 stats["indexed"] += 1
+                seen_hashes.add(digest)
         except Exception as exc:  # noqa: BLE001
             stats["errors"] += 1
             if log:
@@ -299,6 +315,7 @@ def ingest_drive(
         "scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0,
         "skipped_duplicate": 0, "errors": 0,
     }
+    seen_hashes: set[str] = set()  # see ingest_local_tree's in-run dedup note
     for f in list_all_drive_files(token):
         fid = f.get("id")
         if not fid:
@@ -324,6 +341,11 @@ def ingest_drive(
         if len(text) > _MAX_DRIVE_TEXT:
             body += f"\n\n[TRUNCATED — {len(text):,} real chars, indexed first {_MAX_DRIVE_TEXT:,}]"
         title = f"{name} (drive id {fid})"
+        digest = content_hash(body)
+        if digest in seen_hashes:
+            stats["skipped_duplicate"] += 1
+            done.add(fid)
+            continue
         try:
             result = store.remember("gdrive_file", title, body)
             if is_duplicate_result(result):
@@ -333,6 +355,7 @@ def ingest_drive(
                 stats["skipped_duplicate"] += 1
             else:
                 stats["indexed"] += 1
+                seen_hashes.add(digest)
         except Exception as exc:  # noqa: BLE001
             stats["errors"] += 1
             if log:
