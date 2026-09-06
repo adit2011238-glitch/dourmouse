@@ -473,6 +473,55 @@ class TestSpotifyWidgetInjection:
         assert self._WIDGET_TAGS not in body
 
 
+class TestStartupCheckInjection:
+    """backlog #6: startup animation + real claude/codex/Google sign-in
+    check, injected on the default landing page only (console.html) —
+    login.html/setup.html already have their own real sign-in UI."""
+
+    _STARTUP_TAG = b'<script defer src="/assets/startup_check.js"></script>'
+
+    def test_injected_on_the_default_landing_page(self, server, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._STARTUP_TAG in body
+
+    def test_absent_from_login_and_setup_pages(self, server):
+        srv, port = server
+        for path in ("/login", "/setup"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            assert resp.status == 200, path
+            body = resp.read()
+            conn.close()
+            assert self._STARTUP_TAG not in body, path
+
+    def test_injection_silently_skipped_when_script_absent(self, server, monkeypatch):
+        real_exists = pathlib.Path.exists
+
+        def fake_exists(self, *args, **kwargs):
+            if self.name == "startup_check.js":
+                return False
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(pathlib.Path, "exists", fake_exists)
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._STARTUP_TAG not in body
+
+
 class TestSessionTranscriptEndpoint:
     """GET /api/session/current and /api/session/<id> — reload-survival
     groundwork: the live ChatSession already writes one hash-chained JSONL
