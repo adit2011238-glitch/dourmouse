@@ -38,7 +38,7 @@ class _FakeTracker:
 
 
 def _fake_lab(leaderboard_fn, backtest_fn=None):
-    """A stand-in for dourmouse.atlas_lab (SimpleNamespace — NOT a class, so
+    """A stand-in for dourmouse.atlas.atlas_lab (SimpleNamespace — NOT a class, so
     the lambda is a plain attribute, never bound as a method).
 
     ``backtest_fn`` is the stand-in for ``get_latest_backtest()`` (v5.22.15).

@@ -26,8 +26,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from dourmouse import atlas_cli
-from dourmouse.atlas_cli import AtlasNotConfiguredError
+from dourmouse.atlas import atlas_cli
+from dourmouse.atlas.atlas_cli import AtlasNotConfiguredError
 from dourmouse.general_roster import build_general_registry
 
 _ECHO_SCRIPT = "#!/usr/bin/env bash\necho \"FAKE_RAN:$*\"\nexit 0\n"

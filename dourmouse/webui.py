@@ -2082,12 +2082,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(world_pulse_status())
         elif path == "/api/atlas":
             # v5.4: ATLAS quant-engine panel — real telemetry + last run.
-            from dourmouse.atlas_cli import atlas_panel_snapshot
+            from dourmouse.atlas.atlas_cli import atlas_panel_snapshot
 
             self._send_json(atlas_panel_snapshot())
         elif path == "/api/atlas-lab":
             # v5.22.1: ATLAS LAB — LLM backtesting + strategy catalog.
-            from dourmouse.atlas_lab import get_state
+            from dourmouse.atlas.atlas_lab import get_state
 
             state = get_state()
             self._send_json({
@@ -2099,12 +2099,12 @@ class _Handler(BaseHTTPRequestHandler):
                 "backtest_queue": len(state.backtest_requests),
             })
         elif path == "/api/atlas-lab/strategies":
-            from dourmouse.atlas_lab import list_strategies
+            from dourmouse.atlas.atlas_lab import list_strategies
 
             self._send_json({"ok": True, "strategies": list_strategies()})
         elif path == "/api/atlas-lab/leaderboard":
             # v5.22.6: best→worst ranked strategies for the Atlas window.
-            from dourmouse.atlas_lab import leaderboard
+            from dourmouse.atlas.atlas_lab import leaderboard
 
             self._send_json({"ok": True, "leaderboard": leaderboard()})
         elif path == "/api/allhands":
@@ -2123,15 +2123,15 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"ok": True, "run": snap})
         elif path == "/api/atlas-lab/reports":
-            from dourmouse.atlas_lab import get_reports
+            from dourmouse.atlas.atlas_lab import get_reports
 
             self._send_json({"ok": True, "reports": get_reports()})
         elif path == "/api/atlas-lab/backtest":
-            from dourmouse.atlas_lab import list_backtests
+            from dourmouse.atlas.atlas_lab import list_backtests
 
             self._send_json({"ok": True, "backtests": list_backtests()})
         elif path.startswith("/api/atlas-lab/backtest/"):
-            from dourmouse.atlas_lab import get_backtest_status
+            from dourmouse.atlas.atlas_lab import get_backtest_status
 
             req_id = path[len("/api/atlas-lab/backtest/"):]
             result = get_backtest_status(req_id)
@@ -2140,7 +2140,7 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"ok": True, "backtest": result})
         elif path.startswith("/api/atlas-lab/strategies/"):
-            from dourmouse.atlas_lab import get_strategy_detail
+            from dourmouse.atlas.atlas_lab import get_strategy_detail
 
             strategy_id = path[len("/api/atlas-lab/strategies/"):]
             detail = get_strategy_detail(strategy_id)
@@ -2151,13 +2151,13 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/atlas-lab/proposals":
             # v8.16: strategy-proposal review queue (LLM-authored code,
             # human-gated — see atlas_proposals.py module docstring).
-            from dourmouse.atlas_proposals import list_proposals
+            from dourmouse.atlas.atlas_proposals import list_proposals
 
             qs = urllib.parse.parse_qs(parsed.query)
             status = (qs.get("status") or [None])[0]
             self._send_json({"ok": True, "proposals": list_proposals(status=status)})
         elif path.startswith("/api/atlas-lab/proposals/"):
-            from dourmouse.atlas_proposals import get_proposal
+            from dourmouse.atlas.atlas_proposals import get_proposal
 
             proposal_id = path[len("/api/atlas-lab/proposals/"):]
             proposal = get_proposal(proposal_id)
@@ -2166,13 +2166,13 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"ok": True, "proposal": proposal})
         elif path == "/api/atlas-lab/runs":
-            from dourmouse.atlas_proposals import list_runs
+            from dourmouse.atlas.atlas_proposals import list_runs
 
             qs = urllib.parse.parse_qs(parsed.query)
             proposal_id = (qs.get("proposal_id") or [None])[0]
             self._send_json({"ok": True, "runs": list_runs(proposal_id=proposal_id)})
         elif path.startswith("/api/atlas-lab/runs/"):
-            from dourmouse.atlas_proposals import get_run
+            from dourmouse.atlas.atlas_proposals import get_run
 
             run_id = path[len("/api/atlas-lab/runs/"):]
             run = get_run(run_id)
@@ -2181,7 +2181,7 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"ok": True, "run": run})
         elif path == "/api/atlas-lab/generator/status":
-            from dourmouse import atlas_generator as gen
+            from dourmouse.atlas import atlas_generator as gen
 
             self._send_json({
                 "ok": True,
@@ -2716,7 +2716,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_atlas_run()
         elif parsed.path == "/api/atlas-lab/sync":
             # v5.22.1: force a GitHub sync of the strategy lab.
-            from dourmouse.atlas_lab import sync
+            from dourmouse.atlas.atlas_lab import sync
 
             result = sync()
             self._send_json(result)
@@ -2733,7 +2733,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "run_id": run_id})
         elif parsed.path == "/api/atlas-lab/backtest":
             # v5.22.1: submit a prompt-driven backtest.
-            from dourmouse.atlas_lab import submit_backtest
+            from dourmouse.atlas.atlas_lab import submit_backtest
 
             body = self._read_json_body()
             prompt = (body.get("prompt") or "").strip()
@@ -2750,7 +2750,7 @@ class _Handler(BaseHTTPRequestHandler):
             # v8.16: idea -> LLM-authored strategy code, queued for review.
             # Synchronous (the LLM call is the only latency, ~5-30s — same
             # order as any chat response, no background thread needed).
-            from dourmouse.atlas_proposals import propose_from_idea
+            from dourmouse.atlas.atlas_proposals import propose_from_idea
 
             body = self._read_json_body()
             prompt = (body.get("prompt") or "").strip()
@@ -2767,7 +2767,7 @@ class _Handler(BaseHTTPRequestHandler):
             # Execution can take up to 90s (sandboxed subprocess) — this
             # returns a "running" placeholder immediately; poll
             # /api/atlas-lab/runs/<id> for the real result.
-            from dourmouse.atlas_proposals import approve_and_run_async
+            from dourmouse.atlas.atlas_proposals import approve_and_run_async
 
             proposal_id = parsed.path[len("/api/atlas-lab/proposals/"):-len("/approve")]
             body = self._read_json_body()
@@ -2780,7 +2780,7 @@ class _Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=400)
         elif parsed.path.startswith("/api/atlas-lab/proposals/") and parsed.path.endswith("/reject"):
-            from dourmouse.atlas_proposals import reject_proposal
+            from dourmouse.atlas.atlas_proposals import reject_proposal
 
             proposal_id = parsed.path[len("/api/atlas-lab/proposals/"):-len("/reject")]
             body = self._read_json_body()
@@ -2794,7 +2794,7 @@ class _Handler(BaseHTTPRequestHandler):
             # v8.16: manual trigger — same 2-LLM-call latency as any chat
             # idea, so synchronous is fine (matches propose_from_idea's own
             # HTTP handler above).
-            from dourmouse import atlas_generator as gen
+            from dourmouse.atlas import atlas_generator as gen
 
             try:
                 proposal = gen.generate_and_propose()
@@ -5030,7 +5030,7 @@ class _Handler(BaseHTTPRequestHandler):
         never queued. The command's real progress/result is polled via
         GET /api/atlas (last_run). Unknown commands are rejected 400.
         """
-        from dourmouse.atlas_cli import atlas_run_manager
+        from dourmouse.atlas.atlas_cli import atlas_run_manager
 
         body = self._read_json_body()
         command = (body.get("command") or "").strip()
@@ -5297,7 +5297,7 @@ class _Handler(BaseHTTPRequestHandler):
         and returns it. Honest errors: memory off -> 409, unset/invalid repo
         path -> NOT CONFIGURED, scan failure -> 500 with the real reason.
         """
-        from dourmouse.atlas_ops import AtlasNotConfiguredError, get_atlas_repo_path
+        from dourmouse.atlas.atlas_ops import AtlasNotConfiguredError, get_atlas_repo_path
         from dourmouse.learn import learn_enabled
         from dourmouse.repo_index import save_scan_meta, scan_repo
 
@@ -5835,7 +5835,7 @@ def run_server(
     all_hands.bind_events_hub(server.events_broadcast)
     # v5.22.14: the ATLAS strategy lab also broadcasts sync events on the same
     # hub — the HUD shows the leaderboard updating live without any refresh.
-    from dourmouse import atlas_lab
+    from dourmouse.atlas import atlas_lab
 
     atlas_lab.bind_events_hub(server.events_broadcast)
     # Start the auto-sync loop at boot so strategies from the GitHub repo
@@ -5848,7 +5848,7 @@ def run_server(
         # v8.16: the autonomous idea generator — same reporting gate as
         # auto-sync above, for the same reason (tests never want a
         # background LLM loop touching the real proposal store).
-        from dourmouse import atlas_generator
+        from dourmouse.atlas import atlas_generator
 
         atlas_generator.start_idea_generator()
         # v5.32: keep the compute-node health probe warm. The fast lane reads

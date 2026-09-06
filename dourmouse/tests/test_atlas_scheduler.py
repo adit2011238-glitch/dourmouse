@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dourmouse import atlas_scheduler as sched
+from dourmouse.atlas import atlas_scheduler as sched
 
 
 @pytest.fixture(autouse=True)

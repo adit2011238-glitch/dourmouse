@@ -286,7 +286,7 @@ def check_connections() -> dict[str, dict[str, Any]]:
     # saw before); imports stay lazy + failure-safe so a broken module never
     # kills the report (this module's contract).
     try:
-        from dourmouse.atlas_ops import get_atlas_repo_path as _atlas_repo
+        from dourmouse.atlas.atlas_ops import get_atlas_repo_path as _atlas_repo
         from dourmouse.research_agent import get_atlas_venv_python as _atlas_venv
 
         atlas_repo_resolves = True

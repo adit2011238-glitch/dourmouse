@@ -99,7 +99,7 @@ Run it: `./start_atlas_ui.sh` → http://127.0.0.1:8501 (needs
 
 ## ATLAS Command Center (v8.1) — run everything from here
 
-The `atlas_cmd` roster agent (`dourmouse/atlas_command.py`) turns Dourmouse
+The `atlas_cmd` roster agent (`dourmouse/atlas/atlas_command.py`) turns Dourmouse
 into the single control surface for the research pipeline. Its tools EXECUTE
 the real scripts (subprocess, cwd=FOREX_DATA_PATH, honest failures):
 

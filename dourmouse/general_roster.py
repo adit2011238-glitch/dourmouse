@@ -3145,7 +3145,7 @@ def build_general_registry() -> DispatchRegistry:
     # Real telemetry about the ATLAS quant repo: status, FX-archive
     # bootstrap progress, deliverables. Deterministic (Rule 2.8), honest
     # NOT CONFIGURED when ATLAS_REPO_PATH is unset (Rule 2.2).
-    from dourmouse.atlas_ops import build_atlas_tool_specs
+    from dourmouse.atlas.atlas_ops import build_atlas_tool_specs
 
     registry.register_subagent(
         _subagent(
@@ -3440,7 +3440,7 @@ def build_general_registry() -> DispatchRegistry:
 
     # -- v8.0 ATLAS Terminal agent ------------------------------------ #
     # What the ATLAS Terminal (streamlit, atlas_terminal/) shows right now.
-    from dourmouse.atlas_ui_ops import build_atlas_ui_tool_specs
+    from dourmouse.atlas.atlas_ui_ops import build_atlas_ui_tool_specs
 
     registry.register_subagent(
         _subagent(
@@ -3455,7 +3455,7 @@ def build_general_registry() -> DispatchRegistry:
     # RUN the real research pipeline from here: validation suite, walk-
     # forward, backtest, paper log, calendar, events refresh. Also owns
     # the locked STANDARD (reports/validation_standard.json).
-    from dourmouse.atlas_command import build_atlas_cmd_tool_specs
+    from dourmouse.atlas.atlas_command import build_atlas_cmd_tool_specs
 
     registry.register_subagent(
         _subagent(

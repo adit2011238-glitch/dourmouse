@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from dourmouse import atlas_ops
-from dourmouse.atlas_ops import (
+from dourmouse.atlas import atlas_ops
+from dourmouse.atlas.atlas_ops import (
     AtlasNotConfiguredError,
     atlas_bootstrap_status,
     atlas_deliverables,

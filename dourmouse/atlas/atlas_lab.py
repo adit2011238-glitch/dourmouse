@@ -732,7 +732,7 @@ def _run_backtest_worker(req_id: str) -> None:
         # Step 2: Run the atlas fx-research with the strategy parameters.
         pair = spec.get("pair", req.pair)
         # We'll use the atlas CLI to run fx-research on the pair.
-        from dourmouse.atlas_cli import run_atlas_cli
+        from dourmouse.atlas.atlas_cli import run_atlas_cli
 
         with _LAB_LOCK:
             if req_id in state.backtest_requests:

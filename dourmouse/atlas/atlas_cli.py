@@ -800,7 +800,7 @@ def atlas_panel_snapshot() -> dict[str, Any]:
     except AtlasNotConfiguredError as exc:
         return {"configured": False, "error": str(exc)}
 
-    from dourmouse import atlas_ops
+    from dourmouse.atlas import atlas_ops
 
     payload: dict[str, Any] = {
         "configured": True,

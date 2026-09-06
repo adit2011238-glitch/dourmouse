@@ -5,7 +5,7 @@ which makes them useless for the three locked seasonal legs — their entry and
 exit are *calendar events* (first trading day of month M in, last trading day
 of month M out), not price events. This scheduler fires those signals itself:
 
-    python -m dourmouse.atlas_scheduler [--once] [--date YYYY-MM-DD]
+    python -m dourmouse.atlas.atlas_scheduler [--once] [--date YYYY-MM-DD]
                                          [--dry-run] [--daemon] [--interval 1800]
 
 Every run it walks the locked legs in tradingview_ops.LEGS and decides, for
