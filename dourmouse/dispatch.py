@@ -60,7 +60,7 @@ from dourmouse.config import (
     load_llm_config,
 )
 from dourmouse import model_router
-from dourmouse.backend_fallback import load_llm_config_with_fallback
+from dourmouse.backend_fallback import load_llm_config_with_fallback, probe_ollama_fallback
 from dourmouse.governance import (
     BudgetTracker,
     DlpFilter,
@@ -624,7 +624,7 @@ def _call_with_retry_inner(
     call_log: list[dict[str, Any]] | None = None,
     on_delta: Callable[[str], None] | None = None,
     on_thinking: Callable[[str], None] | None = None,
-    client_factory: Callable[[], Any] | None = None,
+    client_factory: Callable[[], tuple[Any, str] | None] | None = None,
 ) -> Any:
     """LLM call with bounded retry + backoff, and optional model fallback.
 
@@ -642,6 +642,16 @@ def _call_with_retry_inner(
     already marked the current account's cooldown (see _build_client's
     multi-account wiring) so the factory naturally returns a DIFFERENT
     account's client when one is configured and available.
+
+    v_next (cross-backend fallback closes backend_fallback.py's mid-call
+    gap): the factory returns ``(client, model)`` rather than just a
+    client, because the account-pool-exhaustion case (see
+    ``_nvidia_rotation_factory``) may switch to a DIFFERENT backend
+    entirely (e.g. local Ollama), which also means a different model
+    string. Returning ``None`` means "nothing changed" — this call keeps
+    its current ``client``/``model`` and the existing retry/fallback_model
+    machinery below still runs, so a truly exhausted pool with no reachable
+    fallback still surfaces the real error instead of hanging or pretending.
     """
     retries = max(0, int(config.max_retries)) if config else 0
     backoff = float(config.retry_backoff) if config else 0.5
@@ -677,9 +687,11 @@ def _call_with_retry_inner(
             if attempt < retries:
                 if client_factory is not None and model_router.is_rate_limit_error(exc):
                     try:
-                        client = client_factory()
+                        switched = client_factory()
                     except Exception:  # noqa: BLE001 - a bad factory must not break the retry itself
-                        pass
+                        switched = None
+                    if switched is not None:
+                        client, model = switched
                 time.sleep(backoff * (2**attempt))
     if fallback and fallback != model:
         if call_log is not None:
@@ -1867,8 +1879,10 @@ def _reset_account_pools_for_testing() -> None:
 
 
 def _nvidia_rotation_factory(
-    initial_client: Any, config: NvidiaConfig | OllamaConfig | OmniRouteConfig | None
-) -> Callable[[], Any] | None:
+    initial_client: Any,
+    config: NvidiaConfig | OllamaConfig | OmniRouteConfig | None,
+    model: str = "",
+) -> Callable[[], tuple[Any, str] | None] | None:
     """None (no rotation) unless 2+ NVIDIA accounts are actually
     configured — a single-account setup (the overwhelmingly common case)
     is completely untouched by this: _call_with_retry_inner's
@@ -1878,7 +1892,18 @@ def _nvidia_rotation_factory(
     When 2+ accounts ARE configured: returns a closure that, each time
     _call_with_retry_inner calls it after a rate-limit error, marks the
     account that just failed into cooldown and builds a fresh OpenAI
-    client against the next available one.
+    client against the next available one — same provider, same ``model``,
+    just a different NVIDIA account.
+
+    v_next: when the pool is EXHAUSTED (model_router.pool_exhausted —
+    every account cooling down mid-conversation), this closes the gap
+    backend_fallback.py always had: that module's own fallback only ever
+    probes at config-load, never reacts to a mid-call rate-limit signal.
+    Here, exhaustion instead probes local Ollama
+    (backend_fallback.probe_ollama_fallback) and, if it answers, switches
+    the turn to a DIFFERENT CONFIGURED BACKEND — which is why the factory
+    returns ``(client, model)`` rather than just a client: a backend switch
+    changes the model string too, not only the client.
     """
     if not isinstance(config, NvidiaConfig):
         return None
@@ -1887,19 +1912,36 @@ def _nvidia_rotation_factory(
         return None
     state: dict[str, model_router.Account | None] = {"current": None}
 
-    def factory() -> Any:
+    def factory() -> tuple[Any, str] | None:
         previous = state["current"]
         if previous is not None:
             pool.mark_rate_limited(previous.name)
         account = pool.select(exclude=previous.name if previous else None)
-        if account is None:
-            # every account is cooling down — keep serving on the one we
+        if account is not None:
+            state["current"] = account
+            return (
+                OpenAI(api_key=account.api_key or "local-keyless", base_url=config.base_url),
+                model,
+            )
+        if not model_router.pool_exhausted(pool):
+            # Transient: select() couldn't honor `exclude` but the pool
+            # isn't actually empty (shouldn't happen given select()'s own
+            # relaxation, but never invent a fallback when one isn't real).
+            return None
+        fallback_cfg = probe_ollama_fallback()
+        if fallback_cfg is None:
+            # Every NVIDIA account is cooling down AND no other configured
+            # backend answered either — keep serving on the client we
             # already have rather than raising here; the caller's own
             # retry/fallback machinery still runs against it and surfaces
-            # the real error if it genuinely can't succeed.
-            return initial_client
-        state["current"] = account
-        return OpenAI(api_key=account.api_key or "local-keyless", base_url=config.base_url)
+            # the real error if it genuinely can't succeed (Rule 2.2).
+            return None
+        print(
+            "[BACKEND] NVIDIA account pool exhausted (all accounts "
+            f"cooling down) mid-conversation; switching to local Ollama "
+            f"({fallback_cfg.model}) for the rest of this turn."
+        )
+        return OllamaNativeClient(fallback_cfg), fallback_cfg.model
 
     return factory
 
@@ -3643,7 +3685,7 @@ def _run_dispatch_loop(
         # actually configured — see _nvidia_rotation_factory's own
         # docstring for why a single-account setup is completely
         # unaffected by this existing at all.
-        client_factory = _nvidia_rotation_factory(client, ctx.config)
+        client_factory = _nvidia_rotation_factory(client, ctx.config, model)
 
         # v4.2 speed: the LLM sees a bounded rolling window (system +
         # in-flight exchange + recent history), never the unbounded

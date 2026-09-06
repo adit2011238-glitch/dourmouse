@@ -121,6 +121,46 @@ class TestAccountPool:
         assert selected.name == "only"
 
 
+class TestPoolExhausted:
+    """mr.pool_exhausted -- the mid-conversation signal dispatch.py's
+    _nvidia_rotation_factory uses to decide whether to fall through to a
+    different CONFIGURED backend (dourmouse/backend_fallback.py) instead of
+    continuing to hammer a provider that has nothing left to offer."""
+
+    def _pool(self):
+        return mr.AccountPool([
+            mr.Account("a", "nvidia", "k1"),
+            mr.Account("b", "nvidia", "k2"),
+        ])
+
+    def test_false_when_at_least_one_account_available(self):
+        pool = self._pool()
+        pool.mark_rate_limited("a", now=1000.0)
+        assert mr.pool_exhausted(pool, now=1000.0) is False
+
+    def test_true_when_every_account_cooling_down(self):
+        pool = self._pool()
+        for acc in pool.accounts():
+            pool.mark_rate_limited(acc.name, now=1000.0)
+        assert mr.pool_exhausted(pool, now=1000.0) is True
+
+    def test_false_once_a_cooldown_expires(self):
+        pool = self._pool()
+        pool.mark_rate_limited("a", cooldown_seconds=10.0, now=1000.0)
+        pool.mark_rate_limited("b", cooldown_seconds=10.0, now=1000.0)
+        assert mr.pool_exhausted(pool, now=1000.0) is True
+        assert mr.pool_exhausted(pool, now=1011.0) is False
+
+    def test_empty_pool_is_exhausted(self):
+        assert mr.pool_exhausted(mr.AccountPool([])) is True
+
+    def test_single_account_pool_exhausted_only_once_it_cools(self):
+        pool = mr.AccountPool([mr.Account("only", "nvidia", "k")])
+        assert mr.pool_exhausted(pool, now=1000.0) is False
+        pool.mark_rate_limited("only", now=1000.0)
+        assert mr.pool_exhausted(pool, now=1000.0) is True
+
+
 class TestAccountExtraFields:
     def test_extra_carries_provider_specific_data_untouched(self):
         acc = mr.Account("a", "nvidia", "k", extra={"base_url": "https://x", "model": "m"})

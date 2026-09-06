@@ -46,6 +46,19 @@ def is_rate_limit_error(exc: BaseException) -> bool:
     return any(marker in text for marker in _RATE_LIMIT_MARKERS)
 
 
+def pool_exhausted(pool: "AccountPool", *, now: float | None = None) -> bool:
+    """True when EVERY account in ``pool`` is currently cooling down (or the
+    pool is empty) -- i.e. ``pool.select()`` has nothing left to give out,
+    including its own "fall back to the excluded account" relaxation.
+
+    This is the mid-conversation exhaustion signal: a caller (dispatch.py's
+    retry loop) uses it to decide whether to fall through to a different
+    CONFIGURED backend (dourmouse/backend_fallback.py) instead of continuing
+    to retry a provider that has nothing left to offer.
+    """
+    return len(pool.available(now=now)) == 0
+
+
 @dataclass(frozen=True)
 class Account:
     """One provider account. ``extra`` carries provider-specific fields

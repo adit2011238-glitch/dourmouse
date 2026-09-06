@@ -2788,7 +2788,7 @@ class TestClientFactoryRotation:
 
         def factory():
             factory_calls.append(1)
-            return succeeding
+            return succeeding, "m"
 
         config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1)
         response = dispatch_module._call_with_retry(
@@ -2870,7 +2870,7 @@ class TestNvidiaAccountPoolWiring:
         monkeypatch.setenv("NVIDIA_API_KEY", "only-key")
         monkeypatch.delenv("NVIDIA_API_KEY_2", raising=False)
         config = NvidiaConfig(api_key="only-key", base_url="https://x", model="m")
-        factory = dispatch_module._nvidia_rotation_factory(object(), config)
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
         assert factory is None
 
     def test_two_accounts_yields_a_working_rotation_factory(self, monkeypatch):
@@ -2880,18 +2880,19 @@ class TestNvidiaAccountPoolWiring:
         monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
         config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
         initial_client = object()
-        factory = dispatch_module._nvidia_rotation_factory(initial_client, config)
+        factory = dispatch_module._nvidia_rotation_factory(initial_client, config, "m")
         assert factory is not None
-        rotated = factory()
-        assert rotated is not initial_client
-        assert isinstance(rotated, dispatch_module.OpenAI)
+        rotated_client, rotated_model = factory()
+        assert rotated_client is not initial_client
+        assert isinstance(rotated_client, dispatch_module.OpenAI)
+        assert rotated_model == "m"
 
     def test_non_nvidia_config_yields_no_factory(self, monkeypatch):
         from dourmouse.config import OllamaConfig
 
         monkeypatch.setenv("NVIDIA_API_KEY", "key1")
         monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
-        factory = dispatch_module._nvidia_rotation_factory(object(), OllamaConfig())
+        factory = dispatch_module._nvidia_rotation_factory(object(), OllamaConfig(), "m")
         assert factory is None
 
     def test_pool_state_persists_across_factory_calls(self, monkeypatch):
@@ -2903,10 +2904,49 @@ class TestNvidiaAccountPoolWiring:
         monkeypatch.setenv("NVIDIA_API_KEY", "key1")
         monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
         config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
-        factory = dispatch_module._nvidia_rotation_factory(object(), config)
-        first = factory()
-        second = factory()
-        assert first.api_key != second.api_key
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
+        first_client, first_model = factory()
+        second_client, second_model = factory()
+        assert first_client.api_key != second_client.api_key
+        assert first_model == second_model == "m"
+
+    def test_pool_exhaustion_falls_back_to_ollama_when_reachable(self, monkeypatch):
+        """Both NVIDIA accounts cooling down mid-conversation -> the closure
+        must probe backend_fallback.probe_ollama_fallback() and switch to
+        it, instead of silently re-serving the exhausted client."""
+        from dourmouse.config import NvidiaConfig, OllamaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "key1")
+        monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
+        config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
+        fallback_cfg = OllamaConfig(base_url="http://127.0.0.1:11434", model="phi:2b")
+        monkeypatch.setattr(
+            dispatch_module, "probe_ollama_fallback", lambda: fallback_cfg
+        )
+        initial_client = object()
+        factory = dispatch_module._nvidia_rotation_factory(initial_client, config, "m")
+        pool = dispatch_module._get_nvidia_account_pool()
+        for account in pool.accounts():
+            pool.mark_rate_limited(account.name)
+        client, model = factory()
+        assert isinstance(client, dispatch_module.OllamaNativeClient)
+        assert model == "phi:2b"
+
+    def test_pool_exhaustion_with_no_fallback_returns_none(self, monkeypatch):
+        """Both accounts cooling down AND Ollama unreachable -> None, so
+        the caller keeps its current (exhausted) client/model and its own
+        retry/fallback_model machinery still surfaces the real error."""
+        from dourmouse.config import NvidiaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "key1")
+        monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
+        config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
+        monkeypatch.setattr(dispatch_module, "probe_ollama_fallback", lambda: None)
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
+        pool = dispatch_module._get_nvidia_account_pool()
+        for account in pool.accounts():
+            pool.mark_rate_limited(account.name)
+        assert factory() is None
 
 
 # --------------------------------------------------------------------------- #
