@@ -99,12 +99,25 @@ def contrast_ratio(
 
 
 _DECL = re.compile(r"(--[A-Za-z0-9-]+)\s*:\s*([^;}]+)[;}]")
+_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
 def extract_tokens(css_or_html: str) -> dict[str, str]:
-    """Collect `--name: value` declarations, last definition winning."""
+    """Collect `--name: value` declarations, last definition winning.
+
+    Comments are stripped first. Without this, a documentation comment
+    written as `- --sans: this file's identity was ...` (a real style in
+    this codebase's revert notes) reads as a token declaration whose
+    "value" is the entire greedy `[^;}]+` run up to the next semicolon —
+    which can be lines away, swallowing a real declaration (`--v0:#...;`)
+    in between so it never gets its own match. That dropped token then
+    silently fails to appear in the result rather than raising, which is
+    the dangerous failure mode: a ground or text token goes missing and
+    `audit_tokens` just skips it instead of reporting the gap.
+    """
+    stripped = _COMMENT.sub("", css_or_html)
     out: dict[str, str] = {}
-    for name, value in _DECL.findall(css_or_html):
+    for name, value in _DECL.findall(stripped):
         out[name] = value.strip()
     return out
 
@@ -120,16 +133,28 @@ TEXT_TOKENS: dict[str, float] = {
 GROUND_TOKENS = ("--ground", "--surface")
 
 
-def audit_tokens(source: str) -> list[dict[str, object]]:
-    """Check each text token against each ground. Returns one row per pair."""
+def audit_tokens(
+    source: str,
+    text_tokens: dict[str, float] | None = None,
+    ground_tokens: tuple[str, ...] | None = None,
+) -> list[dict[str, object]]:
+    """Check each text token against each ground. Returns one row per pair.
+
+    `text_tokens` / `ground_tokens` default to index.html's own vocabulary
+    (`--text`/`--text-dim` on `--ground`/`--surface`). console.html and
+    os.html name the same four roles differently (`--blue`/`--blue-dim` on
+    `--bg`/`--panel`; `--t0`/`--t1`/`--t2` on `--v0`/`--v1`) — pass the
+    file's own names rather than teaching this function every screen's
+    palette.
+    """
     tokens = extract_tokens(source)
     grounds: list[tuple[str, tuple[float, float, float]]] = []
-    for g in GROUND_TOKENS:
+    for g in (ground_tokens if ground_tokens is not None else GROUND_TOKENS):
         parsed = parse_color(tokens.get(g, ""))
         if parsed:
             grounds.append((g, parsed[:3]))
     rows: list[dict[str, object]] = []
-    for token, threshold in TEXT_TOKENS.items():
+    for token, threshold in (text_tokens if text_tokens is not None else TEXT_TOKENS).items():
         fg = parse_color(tokens.get(token, ""))
         if not fg:
             continue
@@ -149,3 +174,32 @@ def audit_tokens(source: str) -> list[dict[str, object]]:
 
 def ui_index_path() -> Path:
     return Path(__file__).resolve().parent.parent / "ui" / "index.html"
+
+
+def ui_console_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "console.html"
+
+
+def ui_os_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "ui" / "os.html"
+
+
+_ROOT_BLOCK = re.compile(r":root\s*\{([^{}]*)\}")
+
+
+def default_root_block(source: str) -> str:
+    """Return the file's base, unconditional `:root { ... }` block.
+
+    console.html and os.html both carry alternate themes as sibling
+    `[data-theme="x"]` rules (and, in os.html, an
+    `@media (prefers-color-scheme: light)` block) that redeclare the same
+    token names. `extract_tokens`'s "last definition wins" rule is a
+    faithful reading of a plain cascade, but it knows nothing about
+    selectors — fed the whole stylesheet, "last" is just whichever theme
+    block happens to sit at the bottom of the file (alphabetically or
+    otherwise), not the one that actually renders with no `data-theme`
+    attribute set and no OS light-mode preference. Scoping to the first
+    bare `:root { ... }` gets the real default back.
+    """
+    m = _ROOT_BLOCK.search(source)
+    return m.group(0) if m else source

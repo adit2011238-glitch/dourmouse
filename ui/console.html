@@ -78,7 +78,14 @@
 :root{
   --bg:#09090B; --panel:#18181B; --panel2:#27272A;
   --amber:#F59E0B; --amber-hi:#FAFAFA; --amber-ink:#09090B;
-  --blue:#A1A1AA; --blue-dim:#71717A; --blue-hi:#FAFAFA; --blue-deep:#52525B;
+  /* --blue-dim was #71717A (zinc-500): 3.08:1 on --panel2, 3.67:1 on
+     --panel, 4.12:1 on --bg -- fails WCAG AA (4.5:1) on all three grounds
+     it's actually painted on (labels, hints, tab captions, footer values,
+     ~24 call sites, mostly 8-11px text). Raised to zinc-400 (#A1A1AA),
+     the same step index.html's own --text-dim took for the identical
+     reason -- reusing an existing token value already in this file
+     (--blue), not a new color. */
+  --blue:#A1A1AA; --blue-dim:#A1A1AA; --blue-hi:#FAFAFA; --blue-deep:#52525B;
   --line:#27272A; --line-2:#3F3F46;
   --amber-line:#3F3F46; --amber-soft:#27272A;
   --ok:#10B981; --warn:#F59E0B; --bad:#EF4444;
@@ -545,7 +552,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .copybtn{position:absolute;top:7px;right:7px;border:1px solid var(--line-2);background:var(--panel);
   color:var(--blue-dim);border-radius:5px;padding:4px 9px;font-size:8.5px;letter-spacing:.08em;
   cursor:pointer;opacity:0;transition:opacity .12s;min-height:26px}
-pre:hover .copybtn,.copybtn:focus{opacity:1}
+pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .copybtn:hover{color:var(--amber);border-color:var(--amber-line)}
 /* v8.30: the tool-call steps disclosure — closed by default, one line,
    never in the user's way. The individual act() chips inside .acts are
@@ -639,6 +646,13 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
   color:var(--blue-hi);
   font-size:12.5px;line-height:1.6;padding:8px 2px;max-height:130px;min-height:36px}
 #ta::placeholder{color:var(--blue-deep)}
+/* #ta's own outline:none (needed so it doesn't draw a box mid-toolbar)
+   silently defeated the file's one global `:focus-visible` rule (an ID
+   selector always beats a bare pseudo-class on specificity) -- the
+   primary input of the whole console had NO visible keyboard-focus state
+   at all. Inset so it can never be clipped by a flex/overflow ancestor,
+   regardless of layout. */
+#ta:focus-visible{outline:1px solid var(--amber);outline-offset:-3px;border-radius:2px}
 #go{padding:9px 18px;background:var(--amber);color:var(--amber-ink);border:none;border-radius:8px;
   font-size:10px;font-weight:700;letter-spacing:.08em;cursor:pointer;min-height:38px;flex:none}
 #go:hover{background:var(--amber-hi)}
@@ -915,7 +929,7 @@ pre:hover .copybtn,.copybtn:focus{opacity:1}
 .d3dXYZ{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
 .d3dNum{width:100%;background:var(--panel2);border:1px solid var(--line-2);color:var(--blue-hi);
   font-family:var(--mono);font-size:10.5px;padding:6px 7px;border-radius:4px;box-sizing:border-box}
-.d3dNum:focus{outline:none;border-color:var(--amber-line)}
+.d3dNum:focus-visible{outline:none;border-color:var(--amber)}
 .d3dSwatch{display:flex;gap:6px;align-items:center}
 .d3dSwatch input[type=color]{width:30px;height:26px;padding:0;border:1px solid var(--line-2);
   border-radius:4px;background:none;cursor:pointer}

@@ -148,3 +148,119 @@ def test_text_dim_stays_distinguishable_from_text(ui_source):
     dim = uc.parse_color(tokens["--text-dim"])
     assert text and dim
     assert uc.relative_luminance(text[:3]) > uc.relative_luminance(dim[:3])
+
+
+# --------------------------------------------------------------------------- #
+# console.html and os.html — the two other primary live screens.
+#
+# Neither names its tokens --text/--ground: console.html paints with
+# --blue/--blue-hi/--blue-dim on --bg/--panel/--panel2, os.html with
+# --t0/--t1/--t2 on --v0..--v4. audit_tokens() takes those names directly
+# rather than teaching it every screen's vocabulary.
+#
+# Both files also carry alternate themes as sibling selectors
+# ([data-theme="x"], and in os.html a prefers-color-scheme block) that
+# redeclare the same token names. extract_tokens' "last wins" doesn't know
+# about selectors, so run on the whole file it would silently score
+# whichever theme happens to sit last in the stylesheet (aurora, in
+# console.html) instead of the one that actually renders by default.
+# default_root_block() scopes each source to its base `:root { ... }`
+# first so the regression guard checks what ships with no data-theme
+# attribute set and no OS light-mode preference.
+# --------------------------------------------------------------------------- #
+
+CONSOLE_TEXT_TOKENS = {"--blue": uc.AA_NORMAL, "--blue-hi": uc.AA_NORMAL, "--blue-dim": uc.AA_NORMAL}
+CONSOLE_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
+
+OS_TEXT_TOKENS = {"--t0": uc.AA_NORMAL, "--t1": uc.AA_NORMAL, "--t2": uc.AA_NORMAL}
+OS_GROUND_TOKENS = ("--v0", "--v1", "--v2", "--v3", "--v4")
+
+_SCREENS = {
+    "console": (uc.ui_console_path, CONSOLE_TEXT_TOKENS, CONSOLE_GROUND_TOKENS),
+    "os": (uc.ui_os_path, OS_TEXT_TOKENS, OS_GROUND_TOKENS),
+}
+
+
+def _screen_root_block(name: str) -> str:
+    path_fn, _, _ = _SCREENS[name]
+    path = path_fn()
+    if not path.exists():
+        pytest.skip(f"UI not present at {path}")
+    return uc.default_root_block(path.read_text(encoding="utf-8", errors="replace"))
+
+
+@pytest.mark.parametrize("screen", ["console", "os"])
+def test_screen_shipping_text_tokens_meet_AA(screen):
+    _, text_tokens, ground_tokens = _SCREENS[screen]
+    rows = uc.audit_tokens(_screen_root_block(screen), text_tokens, ground_tokens)
+    assert rows, f"no text tokens found for {screen}.html — has the token block moved?"
+    failures = [r for r in rows if not r["passes"]]
+    assert not failures, f"{screen}.html text tokens below WCAG AA: " + "; ".join(
+        f"{r['token']} on {r['ground']} = {r['ratio']}:1 (needs {r['threshold']})"
+        for r in failures
+    )
+
+
+@pytest.mark.parametrize("screen", ["console", "os"])
+def test_screen_primary_text_stays_brightest(screen):
+    """Whichever fix clears AA must not invert the hierarchy: the primary
+    ('--blue-hi' / '--t0') token must stay the brightest of its file's
+    audited text tokens."""
+    _, text_tokens, _ = _SCREENS[screen]
+    tokens = uc.extract_tokens(_screen_root_block(screen))
+    primary = "--blue-hi" if screen == "console" else "--t0"
+    primary_lum = uc.relative_luminance(uc.parse_color(tokens[primary])[:3])
+    for name in text_tokens:
+        if name == primary:
+            continue
+        other_lum = uc.relative_luminance(uc.parse_color(tokens[name])[:3])
+        assert primary_lum >= other_lum, f"{primary} is no longer the brightest text token in {screen}.html"
+
+
+def test_default_root_block_scopes_past_alternate_theme_selectors():
+    """console.html's ARC CORE default (--blue-hi:#FAFAFA) must not be
+    shadowed by a later [data-theme="..."] block's own --blue-hi."""
+    source = uc.ui_console_path().read_text(encoding="utf-8", errors="replace")
+    root = uc.default_root_block(source)
+    tokens = uc.extract_tokens(root)
+    assert tokens["--blue-hi"] == "#FAFAFA"
+    # The full, unscoped file DOES contain other themes' conflicting
+    # values for the same name (aurora, the theme block that happens to
+    # sit last in the file) — this documents why scoping matters, not
+    # just that it happens to work.
+    assert "--blue-hi:#eef1f5" in source.replace(" ", "").lower()
+    unscoped = uc.extract_tokens(source)
+    assert unscoped["--blue-hi"] != tokens["--blue-hi"]
+
+
+def test_extract_tokens_survives_a_colon_bearing_bullet_comment():
+    """Regression for the real bug this cycle found: a revert-note comment
+    written as `- --name: prose, no semicolon nearby` (this is os.html's
+    actual documentation style) makes the naive `[^;}]+` value capture
+    swallow every real declaration up to the next semicolon -- which can
+    be a real, different token's whole declaration."""
+    css = """
+    :root {
+      /* - --sans: this file's identity was "mono chrome", no semicolon
+         for several lines, so a naive parser keeps reading right through
+         the next real declaration. */
+      --v0: #010101;
+      --t0: #fefefe;
+    }
+    """
+    tokens = uc.extract_tokens(css)
+    assert tokens["--v0"] == "#010101"
+    assert tokens["--t0"] == "#fefefe"
+
+
+def test_os_default_root_block_excludes_light_theme_override():
+    """os.html's dark default is the real regression surface; its
+    prefers-color-scheme/[data-theme="light"] blocks re-declare --t2 with
+    a different, already-passing value that must not mask the dark one."""
+    source = uc.ui_os_path().read_text(encoding="utf-8", errors="replace")
+    root = uc.default_root_block(source)
+    tokens = uc.extract_tokens(root)
+    # The light override sets --t0 to a near-black value; the dark
+    # default's --t0 stays near-white. If the light block leaked in here,
+    # this would flip.
+    assert uc.relative_luminance(uc.parse_color(tokens["--t0"])[:3]) > 0.5
