@@ -65,7 +65,14 @@
     --font-wordmark: 'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
     /* ---- semantic aliases ---- */
     --text: #FAFAFA;
-    --text-dim: #71717A;
+    /* --text-dim was #71717A (zinc-500): 3.08-4.12:1 across --raised/
+       --surface/--ground -- below the 4.5:1 WCAG 2.1 SC 1.4.3 needs for the
+       real 9-12px labels/hints it paints (p.sub, .g-note, label, .who span,
+       account-card a.enter), none of them decorative. Raised to zinc-400
+       (#A1A1AA), the same step console.html/os.html took for the identical
+       value in 506c078, and the value this file's own --text-body already
+       uses. */
+    --text-dim: #A1A1AA;
     --text-body: #A1A1AA;
     --line: #27272A;
     --line-strong: #3F3F46;
@@ -193,7 +200,20 @@
     color: var(--text); font-family: var(--font-mono); font-size: 14px; font-weight: 400;
     padding: 12px 14px; letter-spacing: 0.08em; outline: none; border-radius: 2px;
   }
-  input[type="password"]:focus { border-color: var(--line-strong); }
+  /* input[type="password"] sets outline:none above; the only compensating
+     style used to be a border-color change to --line-strong (#3F3F46) on a
+     var(--ground) (#09090B) field -- 1.34:1 -> 1.91:1, nowhere near the 3:1
+     WCAG 2.1 SC 1.4.11 a focus indicator needs, so a keyboard user got no
+     real visible cue on the token field. :focus-visible (not :focus, for
+     consistency with the rest of this cycle's fixes) now also draws a
+     2px-offset ring in --amber, this file's own "active state" accent
+     (9.26:1 on --ground); nothing here clips overflow, so an outset ring
+     is safe (no need for console.html's #ta-style inset workaround). */
+  input[type="password"]:focus-visible {
+    border-color: var(--line-strong);
+    outline: 1px solid var(--amber);
+    outline-offset: 2px;
+  }
   .tok-btn {
     width: 100%; margin-top: 14px; padding: 12px; cursor: pointer;
     background: var(--surface);

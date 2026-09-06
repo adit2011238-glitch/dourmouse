@@ -175,10 +175,35 @@ CONSOLE_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
 OS_TEXT_TOKENS = {"--t0": uc.AA_NORMAL, "--t1": uc.AA_NORMAL, "--t2": uc.AA_NORMAL}
 OS_GROUND_TOKENS = ("--v0", "--v1", "--v2", "--v3", "--v4")
 
+# login.html and setup.html -- the sign-in and onboarding screens, the two
+# still furthest from the rest of the app's polish. Neither uses index.html's
+# --text/--ground names either: login.html has its own --text/--text-dim/
+# --text-body on --ground/--surface/--raised; setup.html reuses console.html's
+# naming exactly (--blue/--blue-dim/--blue-hi/--blue-deep on --bg/--panel/
+# --panel2) since its own header comment says it deliberately shares
+# console's tokens. Both carry a single, unconditional `:root { ... }` with
+# no sibling [data-theme] or prefers-color-scheme block, so default_root_block
+# is a no-op safety net here rather than the load-bearing fix it is for
+# console/os -- kept for consistency should a theme variant land later.
+LOGIN_TEXT_TOKENS = {"--text": uc.AA_NORMAL, "--text-dim": uc.AA_NORMAL, "--text-body": uc.AA_NORMAL}
+LOGIN_GROUND_TOKENS = ("--ground", "--surface", "--raised")
+
+SETUP_TEXT_TOKENS = {
+    "--blue": uc.AA_NORMAL,
+    "--blue-dim": uc.AA_NORMAL,
+    "--blue-hi": uc.AA_NORMAL,
+    "--blue-deep": uc.AA_NORMAL,
+}
+SETUP_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
+
 _SCREENS = {
     "console": (uc.ui_console_path, CONSOLE_TEXT_TOKENS, CONSOLE_GROUND_TOKENS),
     "os": (uc.ui_os_path, OS_TEXT_TOKENS, OS_GROUND_TOKENS),
+    "login": (uc.ui_login_path, LOGIN_TEXT_TOKENS, LOGIN_GROUND_TOKENS),
+    "setup": (uc.ui_setup_path, SETUP_TEXT_TOKENS, SETUP_GROUND_TOKENS),
 }
+
+_PRIMARY_TOKEN = {"console": "--blue-hi", "os": "--t0", "login": "--text", "setup": "--blue-hi"}
 
 
 def _screen_root_block(name: str) -> str:
@@ -189,7 +214,7 @@ def _screen_root_block(name: str) -> str:
     return uc.default_root_block(path.read_text(encoding="utf-8", errors="replace"))
 
 
-@pytest.mark.parametrize("screen", ["console", "os"])
+@pytest.mark.parametrize("screen", ["console", "os", "login", "setup"])
 def test_screen_shipping_text_tokens_meet_AA(screen):
     _, text_tokens, ground_tokens = _SCREENS[screen]
     rows = uc.audit_tokens(_screen_root_block(screen), text_tokens, ground_tokens)
@@ -201,14 +226,14 @@ def test_screen_shipping_text_tokens_meet_AA(screen):
     )
 
 
-@pytest.mark.parametrize("screen", ["console", "os"])
+@pytest.mark.parametrize("screen", ["console", "os", "login", "setup"])
 def test_screen_primary_text_stays_brightest(screen):
     """Whichever fix clears AA must not invert the hierarchy: the primary
-    ('--blue-hi' / '--t0') token must stay the brightest of its file's
-    audited text tokens."""
+    ('--blue-hi' / '--t0' / '--text') token must stay the brightest of its
+    file's audited text tokens."""
     _, text_tokens, _ = _SCREENS[screen]
     tokens = uc.extract_tokens(_screen_root_block(screen))
-    primary = "--blue-hi" if screen == "console" else "--t0"
+    primary = _PRIMARY_TOKEN[screen]
     primary_lum = uc.relative_luminance(uc.parse_color(tokens[primary])[:3])
     for name in text_tokens:
         if name == primary:
@@ -264,3 +289,43 @@ def test_os_default_root_block_excludes_light_theme_override():
     # default's --t0 stays near-white. If the light block leaked in here,
     # this would flip.
     assert uc.relative_luminance(uc.parse_color(tokens["--t0"])[:3]) > 0.5
+
+
+# --------------------------------------------------------------------------- #
+# login.html and setup.html -- the sign-in and onboarding screens.
+#
+# Both had a real WCAG 2.1 SC 1.4.3 failure: login.html's --text-dim and
+# setup.html's --blue-deep were each #71717A (zinc-500) -- the identical
+# value 506c078 already found failing in console.html/os.html, on real
+# 9-13px labels/captions, not decorative glyphs. Both raised to #A1A1AA
+# (zinc-400), the value each file's own token set already used elsewhere.
+# --------------------------------------------------------------------------- #
+
+def test_login_text_dim_was_the_known_failing_zinc_500_value():
+    """Pins the regression this cycle fixed: --text-dim must no longer be
+    the #71717A value that measured 3.08-4.12:1 against login.html's own
+    grounds, below the 4.5:1 its real label/caption text needs."""
+    tokens = uc.extract_tokens(uc.default_root_block(uc.ui_login_path().read_text(encoding="utf-8", errors="replace")))
+    assert tokens["--text-dim"].upper() != "#71717A"
+
+
+def test_setup_blue_deep_was_the_known_failing_zinc_500_value():
+    """Same regression, setup.html's name for the same role: --blue-deep
+    paints .sec/.note captions and must no longer be the failing #71717A."""
+    tokens = uc.extract_tokens(uc.default_root_block(uc.ui_setup_path().read_text(encoding="utf-8", errors="replace")))
+    assert tokens["--blue-deep"].upper() != "#71717A"
+
+
+@pytest.mark.parametrize(
+    "screen,dim_token",
+    [("login", "--text-dim"), ("setup", "--blue-deep")],
+)
+def test_dim_token_stays_no_brighter_than_primary(screen, dim_token):
+    """The AA fix must not invert the hierarchy: a secondary/tertiary token
+    must not end up brighter than its screen's primary text token (it may
+    now tie it, as login's --text-dim ties --text-body -- that collapses a
+    visual distinction, not a contrast defect)."""
+    tokens = uc.extract_tokens(_screen_root_block(screen))
+    primary_lum = uc.relative_luminance(uc.parse_color(tokens[_PRIMARY_TOKEN[screen]])[:3])
+    dim_lum = uc.relative_luminance(uc.parse_color(tokens[dim_token])[:3])
+    assert dim_lum <= primary_lum

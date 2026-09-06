@@ -1,4 +1,5 @@
-"""Keyboard-focus visibility regression guard for console.html and os.html.
+"""Keyboard-focus visibility regression guard for console.html, os.html,
+login.html and setup.html.
 
 Before this cycle: console.html had 2 real `:focus-visible` rules across
 ~500KB and 59 `<button>` elements; os.html had 2 across ~74KB and 16
@@ -21,6 +22,23 @@ concrete gap where a keyboard user got NO visible indicator at all:
     `.palbox input` (the command-palette search field) set `outline:none`
     with no compensating style, inside a `.palbox{overflow:hidden}`
     ancestor that would clip a real outline ring anyway.
+
+A later cycle (the sign-in/onboarding audit) found the same class of bug on
+both screens login.html/setup.html had never been checked before:
+
+  - login.html: `#tok` (the access-token field) sets `outline:none`; its
+    only compensating style was a `:focus` border-color change from
+    `--line` to `--line-strong`, both close, low-contrast dark greys
+    (1.34:1 / 1.91:1 against the field's own background) -- functionally
+    invisible, same failure mode as `.d3dNum`'s identical-colour bug above,
+    just non-identical this time instead of byte-identical.
+  - setup.html: `input[type=text],input[type=password]` (the NVIDIA-key
+    and node-URL fields) had the identical bug -- `outline:none` plus a
+    plain `:focus` border shift from `--line` to `--line-2`, same two low
+    hex values, same non-indicator.
+
+Both now carry a real `:focus-visible` outline in `--amber` (each file's
+own "active state" accent, >=3:1 against its background) instead.
 
 This file checks the counts don't regress below the fixed baseline. It
 intentionally does not try to re-verify browser layout (clipping,
@@ -47,11 +65,15 @@ _COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 BASELINE_FOCUS_VISIBLE_COUNT = {
     "console": 5,
     "os": 4,
+    "login": 1,
+    "setup": 2,
 }
 
 _PATHS = {
     "console": uc.ui_console_path,
     "os": uc.ui_os_path,
+    "login": uc.ui_login_path,
+    "setup": uc.ui_setup_path,
 }
 
 
@@ -74,7 +96,7 @@ def _focus_visible_rule_count(source: str) -> int:
     return _COMMENT.sub("", source).count(":focus-visible")
 
 
-@pytest.mark.parametrize("screen", ["console", "os"])
+@pytest.mark.parametrize("screen", ["console", "os", "login", "setup"])
 def test_focus_visible_count_does_not_regress(screen):
     count = _focus_visible_rule_count(_source(screen))
     baseline = BASELINE_FOCUS_VISIBLE_COUNT[screen]
@@ -143,3 +165,50 @@ def test_os_command_palette_input_has_a_working_focus_indicator():
         ".palbox input removes the default outline but has no compensating "
         ":focus-visible rule of its own"
     )
+
+
+def test_login_token_input_has_a_working_focus_indicator():
+    """#tok (the access-token password field) sets outline:none. The only
+    compensating style used to be a border-color change (--line ->
+    --line-strong) that measured 1.34:1 -> 1.91:1 against the field's own
+    background -- both nowhere near the 3:1 WCAG 2.1 SC 1.4.11 a focus
+    indicator needs, so it was functionally invisible. It must now carry
+    its own real (>=3:1) compensating :focus-visible outline."""
+    source = _source("login")
+    assert re.search(r'input\[type="password"\]\s*\{[^}]*outline:\s*none', source), (
+        'expected input[type="password"] to still suppress the default outline'
+    )
+    m = re.search(r'input\[type="password"\]:focus-visible\s*\{([^}]*)\}', source)
+    assert m and re.search(r"outline:\s*1px solid var\(--amber\)", m.group(1)), (
+        'input[type="password"] removes the default outline but has no real '
+        "compensating :focus-visible outline of its own"
+    )
+    tokens = uc.extract_tokens(uc.default_root_block(source))
+    ground = uc.parse_color(tokens["--ground"])[:3]
+    amber = uc.parse_color(tokens["--amber"])
+    assert uc.contrast_ratio(amber, ground) >= 3.0
+
+
+def test_setup_key_and_node_inputs_have_a_working_focus_indicator():
+    """input[type=text]/[type=password] (the NVIDIA key and node-URL
+    fields) set outline:none. The only compensating style used to be a
+    plain :focus border-color change (--line -> --line-2) that measured
+    1.34:1 -> 1.91:1 against the field's own background -- below the 3:1
+    WCAG 2.1 SC 1.4.11 a focus indicator needs. It must now be
+    :focus-visible (matching .opt's own convention) with a real (>=3:1)
+    compensating outline."""
+    source = _source("setup")
+    assert re.search(r"input\[type=text\],input\[type=password\]\{[^}]*outline:none", source), (
+        "expected input[type=text],input[type=password] to still suppress the default outline"
+    )
+    assert not re.search(r"(?<!:focus-visible)\binput:focus\{", source), (
+        "input:focus should have been modernized to input:focus-visible"
+    )
+    m = re.search(r"input:focus-visible\{([^}]*)\}", source)
+    assert m and re.search(r"outline:1px solid var\(--amber\)", m.group(1)), (
+        "input:focus-visible has no real compensating outline of its own"
+    )
+    tokens = uc.extract_tokens(uc.default_root_block(source))
+    bg = uc.parse_color(tokens["--bg"])[:3]
+    amber = uc.parse_color(tokens["--amber"])
+    assert uc.contrast_ratio(amber, bg) >= 3.0
