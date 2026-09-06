@@ -389,6 +389,74 @@ class TestHttpEndpoints:
         conn.close()
 
 
+class TestSpotifyWidgetInjection:
+    """v13.x backlog item 8: the floating widget is injected at serve time
+    (dourmouse/webui.py::_serve_static) onto every screen EXCEPT the
+    pre-auth login/setup pages, which the designer lane owns this cycle.
+
+    The widget files (ui/spotify_widget.css/.js) are the designer lane's
+    deliverable, not this test's — created here only to exercise the
+    file-exists-guarded injection, and removed afterwards so a real
+    worktree state without them is unaffected.
+    """
+
+    _WIDGET_TAGS = (
+        b'<link rel="stylesheet" href="/ui/spotify_widget.css">'
+        b'<script defer src="/ui/spotify_widget.js"></script>'
+    )
+
+    @pytest.fixture
+    def with_widget_files(self):
+        css = webui_module._UI_DIR / "spotify_widget.css"
+        js = webui_module._UI_DIR / "spotify_widget.js"
+        pre_existing = css.exists() or js.exists()
+        if not pre_existing:
+            css.write_text("/* test widget */", encoding="utf-8")
+            js.write_text("// test widget", encoding="utf-8")
+        yield
+        if not pre_existing:
+            css.unlink(missing_ok=True)
+            js.unlink(missing_ok=True)
+
+    def test_injected_into_a_non_login_setup_page(self, server, monkeypatch, with_widget_files):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._WIDGET_TAGS in body
+
+    def test_absent_from_login_and_setup_pages(self, server, with_widget_files):
+        srv, port = server
+        for path in ("/login", "/setup"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            assert resp.status == 200, path
+            body = resp.read()
+            conn.close()
+            assert self._WIDGET_TAGS not in body, path
+
+    def test_injection_silently_skipped_when_widget_files_absent(self, server, monkeypatch):
+        """No pre-existing designer-lane files in this worktree state —
+        injection must no-op, not error."""
+        css = webui_module._UI_DIR / "spotify_widget.css"
+        js = webui_module._UI_DIR / "spotify_widget.js"
+        assert not css.exists() and not js.exists()
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._WIDGET_TAGS not in body
+
+
 class TestSessionTranscriptEndpoint:
     """GET /api/session/current and /api/session/<id> — reload-survival
     groundwork: the live ChatSession already writes one hash-chained JSONL

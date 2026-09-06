@@ -3273,6 +3273,24 @@ class _Handler(BaseHTTPRequestHandler):
             )
             if marker in body:
                 body = body.replace(marker, inject, 1)
+        # v13.x — backlog item 8: the floating Spotify widget appears on
+        # every screen EXCEPT the pre-auth login/setup pages (the designer
+        # lane's retheme). One injection point here instead of hand-adding
+        # <link>/<script> tags to 12+ HTML files. Guarded by a file-exists
+        # check so this commit lands safely even in a worktree state where
+        # the designer lane hasn't shipped ui/spotify_widget.css/.js yet —
+        # injection is silently skipped, never an error.
+        if ctype == "text/html" and rel not in ("login.html", "setup.html"):
+            widget_css = _UI_DIR / "spotify_widget.css"
+            widget_js = _UI_DIR / "spotify_widget.js"
+            if widget_css.exists() and widget_js.exists():
+                widget_tags = (
+                    b'<link rel="stylesheet" href="/ui/spotify_widget.css">'
+                    b'<script defer src="/ui/spotify_widget.js"></script>'
+                )
+                idx = body.rfind(b"</body>")
+                if idx != -1:
+                    body = body[:idx] + widget_tags + body[idx:]
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
