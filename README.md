@@ -284,6 +284,37 @@ workspace/           sandbox + session audit logs
 docs/tailscale.md    v4.0 multi-device guide (free, private, end-to-end encrypted)
 ```
 
+## 6a. Binary assets & Git LFS
+
+Two large binaries live in this repo and were plain git blobs with no
+`.gitattributes`/LFS config until the `dourmouse-commercial-hardening`
+hardening pass:
+
+| File | Size | Distribution path |
+|---|---|---|
+| `lora-dourmouse-claude.gguf` | ~22MB | Loaded locally by the backend at runtime — never served to the web. **Now tracked under Git LFS** (`.gitattributes`). |
+| `site/downloads/DourmouseSetup-8.9.0.exe` | ~28MB | Linked directly from `site/index.html` (`/downloads/DourmouseSetup-8.9.0.exe`) and shipped with `site/_headers` — a Netlify custom-headers file setting `Content-Disposition: attachment` on `/downloads/*`. This is strong evidence a static-site host (Netlify or similar) deploys `site/` straight from this git checkout and serves the `.exe` byte-for-byte. **Deliberately left as a plain git blob, not LFS.** No `netlify.toml`/`vercel.json` enabling LFS smudge on the build was found anywhere in this repo or its history, so converting this file to an LFS pointer would risk visitors downloading a ~130-byte pointer text file instead of the installer, with no easy way to verify from inside the repo whether the live deploy would resolve it correctly. |
+
+To actually move the `.gguf` history over to LFS storage (rewriting existing
+commits, not just future ones) run, on a machine with the `git-lfs` CLI
+installed (`brew install git-lfs && git lfs install`):
+
+```
+git lfs migrate import --include="*.gguf" --everything
+```
+
+This has **not** been run yet — `git-lfs` was unavailable in the environment
+that authored `.gitattributes`, so today the `.gguf` blob is still plain in
+history; only new commits touching `*.gguf` will be written through the LFS
+filter once a contributor with `git-lfs` installed touches the file.
+
+If the team later wants the installer off plain-blob storage too, the safe
+path is: confirm with whoever owns the static-site deploy that it resolves
+Git LFS (or move to hosting the `.exe` on GitHub Releases / an object store),
+update `site/index.html`'s download link accordingly, *then* add
+`site/downloads/*.exe` to `.gitattributes` and run the same `migrate import`
+— do not flip it on speculatively.
+
 ## 7. Troubleshooting
 
 | Symptom | Fix |
