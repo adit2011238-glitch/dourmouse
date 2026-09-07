@@ -34,6 +34,7 @@ import smtplib
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr, parsedate_to_datetime
 from pathlib import Path
@@ -317,8 +318,20 @@ def _gmail_send_oauth(token: str, to: str, subject: str, body: str) -> str:
 
 
 def _calendar_events_oauth(token: str, max_results: int) -> str:
+    # Real bug found live-testing this session: without timeMin/orderBy,
+    # Calendar's events.list returns whatever order the API defaults to
+    # -- which can and did include a PAST event first (live-reproduced:
+    # a real "Exam week" months in the past came back as item 0 while
+    # this function's own label called the list "upcoming"). timeMin
+    # pinned to right now + orderBy=startTime is what actually makes
+    # "upcoming, soonest first" true instead of just claimed.
     params = urllib.parse.urlencode(
-        {"maxResults": max(1, min(int(max_results), 25)), "singleEvents": "true"}
+        {
+            "maxResults": max(1, min(int(max_results), 25)),
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "timeMin": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
     )
     data = _http_json(
         "GET", f"{_CALENDAR_API}/calendars/primary/events?{params}", token

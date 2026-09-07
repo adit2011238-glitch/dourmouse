@@ -751,6 +751,48 @@ class TestGoogleServices:
 
         assert "NOT CONFIGURED" in gs.calendar_events()
 
+    def test_calendar_events_query_asks_for_upcoming_only(self, monkeypatch):
+        """Real bug found live-testing this session: without timeMin/
+        orderBy, Calendar's events.list returns whatever order the API
+        defaults to -- a real past event ("Exam week" months prior) came
+        back as item 0 while the function's own label called it
+        "upcoming". timeMin pinned to now + orderBy=startTime is what
+        actually makes that true."""
+        from dourmouse import google_services as gs
+
+        seen = {}
+
+        def fake_http_json(method, url, token, body=None):
+            seen["url"] = url
+            return {"items": []}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        gs._calendar_events_oauth("tok", 5)
+        assert "orderBy=startTime" in seen["url"]
+        assert "timeMin=" in seen["url"]
+
+    def test_calendar_events_timemin_is_a_real_current_timestamp(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+
+        from dourmouse import google_services as gs
+
+        seen = {}
+
+        def fake_http_json(method, url, token, body=None):
+            seen["url"] = url
+            return {"items": []}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        before = datetime.now(timezone.utc)
+        gs._calendar_events_oauth("tok", 5)
+        after = datetime.now(timezone.utc)
+
+        import urllib.parse
+
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse("?" + seen["url"].split("?", 1)[1]).query)
+        time_min = datetime.strptime(qs["timeMin"][0], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        assert before - timedelta(seconds=5) <= time_min <= after + timedelta(seconds=5)
+
 
 # --------------------------------------------------------------------------- #
 # A4 — fast dispatch model
