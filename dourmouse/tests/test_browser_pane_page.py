@@ -33,6 +33,18 @@ class TestBrowserPaneMarkup:
         assert 'id="bpFallback"' in html
         assert 'id="bpFallbackLink"' in html
 
+    def test_hidden_attribute_actually_hides_the_pane(self):
+        """Real bug found in live-preview testing: `.bp-pane{display:flex}`
+        alone lets the `hidden` attribute get overridden by the class's own
+        `display`, since an author stylesheet always beats the UA default
+        `[hidden]{display:none}` rule regardless of selector specificity.
+        The other overlays in this file (#picker, #boot) already carry an
+        explicit `[hidden]{display:none}` override — the pane needs the
+        same, or it renders on load and blocks the tab strip underneath it.
+        """
+        html = _console_html()
+        assert ".bp-pane[hidden]{display:none}" in html
+
 
 class TestBrowserPaneJs:
     def test_open_closes_reuse_one_shared_iframe(self):
