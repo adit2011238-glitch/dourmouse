@@ -108,3 +108,27 @@ class TestBrowserPaneClose:
         pane (or opens a different URL) must not resurrect it later."""
         html = _console_html()
         assert "_bpOpenSeq++" in html
+
+
+class TestBrowserPaneProxy:
+    """Real fix for 'most sites refuse to be framed' (backlog item found
+    compiling this session's own bug list): a blocked site is loaded
+    through /api/browser-pane/proxy, not just given an honest fallback
+    link. See test_browser_pane.py/test_browser_pane_wiring.py for the
+    backend half."""
+
+    def test_blocked_site_is_loaded_through_the_proxy_endpoint(self):
+        html = _console_html()
+        assert "/api/browser-pane/proxy" in html
+
+    def test_has_a_visible_proxy_disclosure_note(self):
+        html = _console_html()
+        assert 'id="bpProxyNote"' in html
+        # Real, honest disclosure of what's lost — not a vague "proxied".
+        # Whitespace-tolerant: the source text wraps across lines.
+        normalized = " ".join(html.lower().split())
+        assert "not logged in" in normalized
+
+    def test_proxy_note_still_offers_the_real_unproxied_link(self):
+        html = _console_html()
+        assert 'id="bpProxyDirectLink"' in html

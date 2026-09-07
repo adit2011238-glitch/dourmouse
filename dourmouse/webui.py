@@ -1991,6 +1991,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"frameable": False, "reason": "not an http(s) URL", "checked": True})
                 return
             self._send_json(check_frameable(url))
+        elif path == "/api/browser-pane/proxy":
+            self._handle_browser_pane_proxy()
         elif path == "/api/vision/status":
             # world-monitor-expansion: honest status roll-up for the Vision
             # family (overlay/tray/wakeword/vision_bridge/proactive) — see
@@ -3385,6 +3387,46 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_browser_pane_proxy(self) -> None:
+        """GET /api/browser-pane/proxy?url=<target> — the real fix for
+        "most sites refuse to be framed" (not just check_frameable()'s
+        honest detection of it): fetches the page server-side and injects
+        a <base> tag so its own relative links/assets still resolve, then
+        serves it from OUR origin with none of the original blocking
+        headers. See browser_pane.fetch_and_rewrite_for_proxy() for the
+        real mechanics and the limitations this is honest about (no
+        cookies, only the exact requested URL, HTML only).
+
+        Deliberately always 200s with a real HTML body, even on failure
+        (an honest in-page error message + working direct link) — the
+        iframe's `load` event is trustworthy here because this endpoint
+        controls the whole response, unlike the direct-embed path this
+        exists to work around.
+        """
+        from dourmouse.browser_pane import fetch_and_rewrite_for_proxy
+
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        url = (qs.get("url") or [""])[0]
+        if not url.lower().startswith(("http://", "https://")):
+            body = f'<!doctype html><body>Refused: not an http(s) URL: {url!r}</body>'.encode("utf-8")
+        else:
+            result = fetch_and_rewrite_for_proxy(url)
+            body = result["body"]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        # The whole point of this endpoint: no X-Frame-Options/CSP header
+        # of ours goes out here at all. Absence is the correct way to
+        # allow framing (there is no valid "allow everyone" value for
+        # X-Frame-Options -- ALLOW-FROM is deprecated/unsupported and an
+        # unrecognized value risks the opposite of what's intended), and
+        # this handler never adds either header, unlike _serve_static's
+        # static-file responses elsewhere in this class.
         self.end_headers()
         self.wfile.write(body)
 

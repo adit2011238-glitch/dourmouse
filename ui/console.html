@@ -966,6 +966,9 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .bp-fallback{padding:20px;font-family:var(--font-prose);font-size:13px;color:var(--blue-dim);
   text-align:center}
 .bp-fallback a{color:var(--amber)}
+.bp-proxynote{padding:6px 10px;font-family:var(--font-prose);font-size:11px;color:var(--blue-dim);
+  background:var(--panel2);border-bottom:1px solid var(--line);text-align:center}
+.bp-proxynote a{color:var(--amber)}
 </style>
 <!-- world-monitor-expansion: 3D WORKSPACE dependency. This app has no
      existing JS-library CDN pattern (fonts are the only external asset
@@ -1033,6 +1036,19 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
   <div id="bpFallback" class="bp-fallback" hidden>
     This site refuses to be embedded here.
     <a id="bpFallbackLink" href="#" target="_blank" rel="noopener">Open it directly</a> instead.
+  </div>
+  <!-- Real fix for "most sites refuse to be framed" (not just an honest
+       fallback for it): a site that blocks direct embedding is loaded
+       through /api/browser-pane/proxy instead. This note is the honest
+       disclosure that goes with it — no live cookies/login, and only
+       this exact URL is proxied (a link clicked inside it navigates the
+       iframe straight to the real site, bypassing the proxy). See
+       browser_pane.py's own comment for the full reasoning. -->
+  <div id="bpProxyNote" class="bp-proxynote" hidden>
+    Proxied view — this site refused direct embedding. You are not
+    logged in here even if you are on the real site, and links you click
+    inside it leave the proxy.
+    <a id="bpProxyDirectLink" href="#" target="_blank" rel="noopener">Open the real page</a> instead.
   </div>
   <!-- Real bug found compiling this session's own bug list: allow-scripts
        + allow-same-origin together is the documented Chrome sandbox-escape
@@ -5443,32 +5459,31 @@ function startNewsStream(){
    sets iframe.src="" to actually unload the page (real RAM back, not just
    a hidden div holding a live page in memory).
 
-   Honest limitation: most real sites refuse to be framed at all
-   (X-Frame-Options / CSP frame-ancestors) — there is no fully reliable
-   cross-origin way to detect that from the parent page (a blocked frame
-   often never fires a real error event). This uses a bounded timeout as
-   a best-effort signal: no load event within BP_LOAD_TIMEOUT_MS shows the
-   honest fallback with a real "open it directly" escape hatch instead of
-   silently displaying nothing. */
+   Real fix, not just an honest fallback, for "most real sites refuse to
+   be framed at all" (X-Frame-Options / CSP frame-ancestors): a site
+   check_frameable() reports as blocked is loaded through
+   /api/browser-pane/proxy instead — see browser_pane.py's own comment
+   for the real <base>-injection mechanics and what's honestly lost
+   (no live cookies, only the exact requested URL, HTML only). The
+   timeout below stays as the last-resort safety net for a genuine
+   network hang on the DIRECT path only — the proxy path always 200s
+   with a real document (even its own failures are a real HTML error
+   page), so it never needs the timeout heuristic at all. */
 const BP_LOAD_TIMEOUT_MS = 6000;
 let _bpLoadTimer = null;
 let _bpOpenSeq = 0;
 async function openBrowserPane(url){
-  const pane = $("browserPane"), frame = $("bpFrame"), addr = $("bpAddr"), fb = $("bpFallback");
+  const pane = $("browserPane"), frame = $("bpFrame"), addr = $("bpAddr"), fb = $("bpFallback"),
+        note = $("bpProxyNote");
   if(!pane || !frame) return;
-  // Real bug found live-testing this pane: the iframe's `load` event
-  // fires even when X-Frame-Options/CSP blocks the site from actually
-  // rendering (the request still succeeds — only the display is
-  // refused), so the old load-event-clears-timeout logic left the pane
-  // permanently blank with the fallback never shown. Ask the backend to
-  // check the real response headers BEFORE committing to the iframe —
-  // see /api/browser-pane/check + browser_pane.check_frameable(). A
-  // stale check racing a newer open() (the user navigates again before
-  // the first check returns) is guarded by _bpOpenSeq.
+  // A stale check_frameable() reply racing a newer open()/close() (the
+  // user navigates again, or closes the pane, before this one returns)
+  // is guarded by _bpOpenSeq.
   const seq = ++_bpOpenSeq;
   pane.hidden = false;
   addr.value = url;
   fb.hidden = true;
+  if(note) note.hidden = true;
   frame.hidden = false;
   clearTimeout(_bpLoadTimer);
   let frameable = true;
@@ -5477,11 +5492,13 @@ async function openBrowserPane(url){
     const data = await r.json();
     frameable = data.frameable !== false;
   } catch { /* couldn't check — fall through, let the timeout below be the safety net */ }
-  if(seq !== _bpOpenSeq) return; // superseded by a newer open() while this check was in flight
+  if(seq !== _bpOpenSeq) return; // superseded by a newer open()/close() while this check was in flight
   if(!frameable){
-    frame.hidden = true;
-    fb.hidden = false;
-    $("bpFallbackLink").href = url;
+    frame.src = `/api/browser-pane/proxy?url=${encodeURIComponent(url)}`;
+    if(note){ note.hidden = false; }
+    const directLink = $("bpProxyDirectLink");
+    if(directLink) directLink.href = url;
+    requestAnimationFrame(() => { try{ frame.focus(); }catch{} });
     return;
   }
   _bpLoadTimer = setTimeout(() => {

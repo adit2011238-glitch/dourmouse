@@ -29,8 +29,12 @@ class _FakeHeaders(dict):
 
 
 class _FakeResponse:
-    def __init__(self, headers):
+    def __init__(self, headers, body: bytes = b""):
         self.headers = _FakeHeaders(headers)
+        self._body = body
+
+    def read(self, n: int = -1) -> bytes:
+        return self._body if n < 0 else self._body[:n]
 
     def __enter__(self):
         return self
@@ -170,3 +174,91 @@ class TestSingleton:
             assert get_browser_pane_requests() is fresh
         finally:
             set_browser_pane_requests(None)
+
+
+class TestInjectBaseTag:
+    """The real mechanism behind the rewriting proxy: one <base> tag
+    makes every relative URL a page already uses resolve against the
+    REAL site, without touching any of those URLs individually."""
+
+    def test_inserts_right_after_head_tag(self):
+        html = b"<html><head><title>x</title></head><body>hi</body></html>"
+        out = browser_pane._inject_base_tag(html, "https://example.com/page")
+        assert out == (
+            b'<html><head><base href="https://example.com/page">'
+            b"<title>x</title></head><body>hi</body></html>"
+        )
+
+    def test_head_tag_with_attributes_still_matches(self):
+        html = b'<html><head lang="en"><title>x</title></head></html>'
+        out = browser_pane._inject_base_tag(html, "https://example.com/")
+        assert b'<head lang="en"><base href="https://example.com/">' in out
+
+    def test_falls_back_to_after_html_tag_when_no_head(self):
+        html = b"<html><body>no head here</body></html>"
+        out = browser_pane._inject_base_tag(html, "https://example.com/")
+        assert out == b'<html><base href="https://example.com/"><body>no head here</body></html>'
+
+    def test_prepends_outright_for_malformed_markup(self):
+        html = b"just text, no tags at all"
+        out = browser_pane._inject_base_tag(html, "https://example.com/")
+        assert out == b'<base href="https://example.com/">just text, no tags at all'
+
+    def test_injected_base_wins_over_an_existing_one(self):
+        """Only the FIRST <base> in document order takes effect per spec
+        -- this must land before any <base> the page already has."""
+        html = b'<html><head><base href="/wrong"><title>x</title></head></html>'
+        out = browser_pane._inject_base_tag(html, "https://example.com/right")
+        first_base = out.index(b"<base")
+        second_base = out.index(b"<base", first_base + 1)
+        assert b'href="https://example.com/right"' in out[first_base:second_base]
+
+
+class TestFetchAndRewriteForProxy:
+    def test_real_html_page_gets_base_tag_injected(self, monkeypatch):
+        monkeypatch.setattr(
+            browser_pane.urllib.request,
+            "urlopen",
+            lambda *a, **k: _FakeResponse(
+                {"Content-Type": "text/html; charset=utf-8"},
+                body=b"<html><head></head><body>hi</body></html>",
+            ),
+        )
+        result = browser_pane.fetch_and_rewrite_for_proxy("https://example.com/page")
+        assert result["ok"] is True
+        assert b'<base href="https://example.com/page">' in result["body"]
+
+    def test_non_html_content_type_is_an_honest_failure(self, monkeypatch):
+        monkeypatch.setattr(
+            browser_pane.urllib.request,
+            "urlopen",
+            lambda *a, **k: _FakeResponse({"Content-Type": "application/pdf"}, body=b"%PDF-1.4"),
+        )
+        result = browser_pane.fetch_and_rewrite_for_proxy("https://example.com/file.pdf")
+        assert result["ok"] is False
+        assert b"not an HTML page" in result["body"]
+        assert b"example.com/file.pdf" in result["body"]
+
+    def test_oversized_page_is_an_honest_failure(self, monkeypatch):
+        monkeypatch.setattr(browser_pane, "PROXY_MAX_BYTES", 10)
+        monkeypatch.setattr(
+            browser_pane.urllib.request,
+            "urlopen",
+            lambda *a, **k: _FakeResponse(
+                {"Content-Type": "text/html"}, body=b"x" * 1000
+            ),
+        )
+        result = browser_pane.fetch_and_rewrite_for_proxy("https://example.com/")
+        assert result["ok"] is False
+        assert b"proxy limit" in result["body"]
+
+    def test_network_failure_is_a_real_html_error_page_not_a_crash(self, monkeypatch):
+        def raise_url_error(*a, **k):
+            raise urllib.error.URLError("no route to host")
+
+        monkeypatch.setattr(browser_pane.urllib.request, "urlopen", raise_url_error)
+        result = browser_pane.fetch_and_rewrite_for_proxy("https://unreachable.example/")
+        assert result["ok"] is False
+        assert b"<html>" in result["body"]
+        assert b"no route to host" in result["body"]
+        assert b"unreachable.example" in result["body"]  # the real "open it directly" link

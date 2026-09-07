@@ -138,3 +138,47 @@ class TestCheckEndpoint:
         assert resp.status == 200
         assert data == {"frameable": False, "reason": "X-Frame-Options: DENY", "checked": True}
         assert seen["url"] == "https://www.google.com"
+
+
+class TestProxyEndpoint:
+    """GET /api/browser-pane/proxy — the real fix for sites that block
+    framing (not just check_frameable()'s honest detection of it)."""
+
+    def test_rejects_non_http_url_without_a_network_call(self, server, monkeypatch):
+        srv, port, _bpr = server
+
+        def fail_if_called(url):
+            raise AssertionError("must not attempt to fetch a non-http(s) URL")
+
+        monkeypatch.setattr("dourmouse.browser_pane.fetch_and_rewrite_for_proxy", fail_if_called)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/browser-pane/proxy?url=javascript:alert(1)")
+        resp = conn.getresponse()
+        body = resp.read().decode()
+        conn.close()
+        assert resp.status == 200
+        assert "Refused" in body
+
+    def test_real_call_reaches_fetch_and_rewrite_and_serves_its_body(self, server, monkeypatch):
+        srv, port, _bpr = server
+        seen = {}
+
+        def fake_fetch(url):
+            seen["url"] = url
+            return {"ok": True, "body": b"<html><head><base href='x'></head></html>"}
+
+        monkeypatch.setattr("dourmouse.browser_pane.fetch_and_rewrite_for_proxy", fake_fetch)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/browser-pane/proxy?url=https://www.google.com")
+        resp = conn.getresponse()
+        body = resp.read()
+        headers = dict(resp.getheaders())
+        conn.close()
+        assert resp.status == 200
+        assert seen["url"] == "https://www.google.com"
+        assert body == b"<html><head><base href='x'></head></html>"
+        assert "text/html" in headers["Content-Type"]
+        # The whole point: this response must carry no framing-blocking
+        # header of its own, however the real upstream site was blocking it.
+        assert "X-Frame-Options" not in headers
+        assert "Content-Security-Policy" not in headers
