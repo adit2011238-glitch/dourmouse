@@ -313,6 +313,26 @@ def find_agents_for_query(
             "friday", "saturday", "sunday", "busy",
         }
     )
+    # Live-reproduced real bug (feature sweep, 2026-09-07): "send a message
+    # to the research agent", "check if there are any messages waiting for
+    # me from other agents" and similar all scored 0 for `messenger` and
+    # got an honest-but-wrong "I don't have a tool for that" 4 times out of
+    # 5 attempts, despite send_message/read_agent_inbox being real, working
+    # tools. Root cause: "message" is NOT a substring of "messenger" (they
+    # differ at one letter -- messAge vs messeNger), so the plain name-
+    # overlap check that quietly saves most agents (mail overlaps "email",
+    # scheduling overlaps "schedule") gives this one nothing, and no
+    # _DOMAIN_ROUTE entry existed either. A bare "message"/"messages" ->
+    # messenger domain word was rejected: comms/mail/google_workspace all
+    # legitimately use "message" for real human correspondence ("send a
+    # message to my landlord" must stay comms/mail, not the inter-agent
+    # bus) -- same ambiguity class as "free" above, so it gets the same
+    # compound-phrase treatment: only boost messenger when a message word
+    # appears together with a word that actually names the inter-agent
+    # bus/other agents, which real human-correspondence phrasing never does.
+    compound_agent_message = bool(tokens & {"message", "messages"}) and bool(
+        tokens & {"agent", "agents", "bus"}
+    )
     # Learned evidence (v5.6), computed ONCE per query (not per agent): the
     # neural orchestrator's routing head adds positive evidence only —
     # 0.5 * max(0, logit). Its max boost (~2) sits BELOW the deterministic
@@ -392,6 +412,10 @@ def find_agents_for_query(
             score += 3
         if compound_free_when and any(
             t.name in ("list_calendar_events", "propose_time_slots") for t in sub.tools
+        ):
+            score += 3
+        if compound_agent_message and any(
+            t.name in ("send_message", "read_agent_inbox") for t in sub.tools
         ):
             score += 3
         if nn is not None and sub.name in nn:

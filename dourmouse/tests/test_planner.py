@@ -481,3 +481,45 @@ class TestFindAgentsForQueryRegression:
         registry = build_general_registry()
         m = find_agents_for_query(registry, "show me my playlists", limit=1)
         assert m and m[0]["name"] == "music", f"got {m}"
+
+
+class TestMessengerRouting:
+    """Live-reproduced real bug (feature sweep, 2026-09-07): natural
+    requests to use the inter-agent messenger scored 0 for it 4 times out
+    of 5 attempts and got an honest-but-wrong "I don't have a tool for
+    that" — despite send_message/read_agent_inbox being real, working
+    tools. Root cause: "message" is not a substring of "messenger" (they
+    differ at one letter), so plain name overlap gives nothing, and no
+    domain word existed either."""
+
+    def test_send_message_to_an_agent_routes_to_messenger(self):
+        registry = build_general_registry()
+        m = find_agents_for_query(
+            registry,
+            "Send a message to the research agent asking for a status update.",
+            limit=3,
+        )
+        names = [r["name"] for r in m]
+        assert "messenger" in names, f"got {m}"
+        assert m[0]["name"] == "messenger", f"messenger should win outright; got {m}"
+
+    def test_check_messages_from_other_agents_routes_to_messenger(self):
+        registry = build_general_registry()
+        m = find_agents_for_query(
+            registry,
+            "Check if there are any messages waiting for me from other agents.",
+            limit=3,
+        )
+        assert m and m[0]["name"] == "messenger", f"got {m}"
+
+    def test_plain_human_message_does_not_steal_toward_messenger(self):
+        """The compound gate (message word + agent/bus word) must not fire
+        for ordinary human correspondence, which never pairs the two."""
+        registry = build_general_registry()
+        m = find_agents_for_query(
+            registry,
+            "Send a quick message to my landlord about a maintenance request.",
+            limit=3,
+        )
+        names = [r["name"] for r in m]
+        assert "messenger" not in names, f"got {m}"

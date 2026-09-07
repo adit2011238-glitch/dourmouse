@@ -2342,7 +2342,7 @@ async function run(text){
   const tick = setInterval(()=>{
     node.tm.textContent = Math.round((performance.now()-startedAt)/1000) + "s";
   }, 1000);
-  let buf="", stopped=false, dirty=false, painting=false;
+  let buf="", stopped=false, dirty=false, painting=false, lastError="";
   let thinkBuf="", thinkDirty=false, thinkPainting=false, thinkFolded=false, thinkStarted=false;
   const paint=()=>{ dirty=true; if(painting)return; painting=true;
     setTimeout(()=>{ painting=false; if(!dirty)return; dirty=false;
@@ -2510,7 +2510,18 @@ async function run(text){
             break; }
           case "assistant_delta": foldThink(); contentRevealer.enqueue(e.text||""); break;
           case "assistant_text": foldThink(); contentRevealer.setTotal(e.text||""); break;
-          case "error": act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||""); break;
+          case "error":
+            // Real bug found live-testing this session: this error WAS
+            // already recorded (the steps disclosure below, and liveAdd's
+            // side panel) but never reached the main visible reply — a
+            // real, specific, often-actionable error (a 429 rate limit, a
+            // timeout) rendered to the user as a bare "No reply.", making
+            // it indistinguishable from the model genuinely saying
+            // nothing. lastError makes the real reason the visible
+            // fallback text once the turn ends with an empty buf (below).
+            lastError = e.message || "";
+            act(node.acts,"ERROR",e.message||"",true); node.noteStep(); liveAdd("err","Error",e.message||"");
+            break;
           // v13.6: the passthrough persists this turn's real usage and emits
           // it live (webui.py::_on_claude_usage). Re-read the totals now so
           // the footer shows the just-spent cost immediately instead of
@@ -2550,7 +2561,15 @@ async function run(text){
     node.tm.textContent = ((performance.now()-startedAt)/1000).toFixed(1) + "s";
     ctrlByScreen[targetScreen]=null;
     stopHandlerByScreen[targetScreen]=null;
-    node.body.innerHTML = md(buf) || "<p><em>No reply.</em></p>";
+    // Real bug fixed here: an empty buf used to always render the same
+    // generic "No reply." regardless of WHY it was empty -- a real,
+    // specific server-side error (rate limited, timed out) was already
+    // sitting in lastError, just never shown here. Show it when it's the
+    // actual reason; keep "No reply." only for the genuine case (the
+    // model produced literally nothing, no error at all).
+    node.body.innerHTML = md(buf) || (lastError
+      ? `<p><em>No reply — ${esc(lastError)}</em></p>`
+      : "<p><em>No reply.</em></p>");
     wireCopies(node.body);
     node.st.textContent = stopped?"STOPPED":"DONE";
     node.acts.querySelectorAll(".spin").forEach(x=>x.remove());
