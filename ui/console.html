@@ -1034,8 +1034,20 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
     This site refuses to be embedded here.
     <a id="bpFallbackLink" href="#" target="_blank" rel="noopener">Open it directly</a> instead.
   </div>
+  <!-- Real bug found compiling this session's own bug list: allow-scripts
+       + allow-same-origin together is the documented Chrome sandbox-escape
+       combo -- a framed page can use script execution plus its own origin
+       to spin up a fresh, unsandboxed frame of itself and shed every
+       other restriction here entirely. This pane loads arbitrary
+       real-world URLs the user or the model names, so that combo is a
+       genuine risk, not a theoretical one. Fixed by dropping
+       allow-same-origin: the real, accepted, DOCUMENTED cost is that a
+       framed site's own cookies/localStorage are inaccessible to it here
+       (an opaque origin), so a site you're logged into elsewhere shows
+       logged-out inside the pane -- that's the deliberate trade for
+       closing the escape, not an oversight. -->
   <iframe id="bpFrame" class="bp-frame" title="Embedded browser pane"
-    sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
+    sandbox="allow-scripts allow-forms allow-popups"></iframe>
 </div>
 
 <div class="wrap">

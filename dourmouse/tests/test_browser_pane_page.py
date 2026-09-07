@@ -6,6 +6,7 @@ frontend piece actually shipped alongside it.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -27,6 +28,25 @@ class TestBrowserPaneMarkup:
         html = _console_html()
         assert 'id="bpFrame"' in html
         assert "sandbox=" in html
+
+    def test_sandbox_never_combines_scripts_with_same_origin(self):
+        """Real bug found compiling this session's own bug list:
+        allow-scripts + allow-same-origin together is the documented
+        Chrome sandbox-escape combo (a framed page can use script
+        execution plus its own origin to spin up an unsandboxed copy of
+        itself). This pane loads arbitrary real-world URLs, so the combo
+        is a genuine risk here, not theoretical. Fixed by dropping
+        allow-same-origin -- the accepted cost is a framed site's own
+        cookies/localStorage aren't available to it (opaque origin), so
+        logged-in sites show logged-out inside the pane."""
+        html = _console_html()
+        m = re.search(r'id="bpFrame"[^>]*\bsandbox="([^"]*)"', html)
+        assert m, "bpFrame's sandbox attribute not found"
+        tokens = set(m.group(1).split())
+        assert not ({"allow-scripts", "allow-same-origin"} <= tokens), (
+            f"sandbox={tokens} combines allow-scripts with allow-same-origin -- "
+            "the documented Chrome sandbox-escape combo"
+        )
 
     def test_has_a_real_fallback_for_frames_that_refuse_embedding(self):
         html = _console_html()
