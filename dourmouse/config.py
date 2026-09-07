@@ -681,12 +681,25 @@ def omniroute_available(timeout: float = 1.0) -> bool:
 def backend_identity(config: Any) -> tuple[str, bool]:
     """(backend_name, is_local) for a loaded LLM backend config object.
 
-    ``is_local`` is True ONLY for Ollama — self-hosted, keyless, nothing
-    leaves this machine (Rule 2.6). Every other backend, including
-    OmniRoute (its gateway process happens to listen on 127.0.0.1, but it
-    exists to forward requests to REMOTE free-tier providers — see
-    ``OmniRouteConfig``'s own docstring — so it is honestly cloud, not
-    local), reports False.
+    ``is_local`` is True ONLY for a genuinely local Ollama daemon — self-
+    hosted, keyless, nothing leaves this machine (Rule 2.6). Every other
+    backend, including OmniRoute (its gateway process happens to listen
+    on 127.0.0.1, but it exists to forward requests to REMOTE free-tier
+    providers — see ``OmniRouteConfig``'s own docstring — so it is
+    honestly cloud, not local), reports False.
+
+    Real bug found live-testing this session (feature sweep, 2026-09-07):
+    this used to return True for EVERY ``OllamaConfig``, unconditionally
+    — including one built by ``load_ollama_config()`` for real Ollama
+    Cloud (``OLLAMA_API_KEY`` set, ``base_url`` = ollama.com,
+    ``is_cloud=True``, a field that already existed specifically to
+    answer this question and was simply never checked here). Confirmed
+    live via the server's own ``/api/backend`` endpoint reporting
+    ``base_url: "https://ollama.com/v1"`` while every "brain" event for
+    that same session claimed ``local: true`` — privacy-relevant, since
+    every agent this labeled local-only NEVER meant "route to whatever
+    OllamaConfig happens to be configured", it meant "never leave this
+    machine".
 
     Classification is the config object's real TYPE — exactly the object
     ``_build_client`` (dispatch.py) already switches on to decide whether
@@ -701,7 +714,7 @@ def backend_identity(config: Any) -> tuple[str, bool]:
     ``("unknown", False)`` rather than guessed.
     """
     if isinstance(config, OllamaConfig):
-        return "ollama", True
+        return "ollama", not config.is_cloud
     if isinstance(config, NvidiaConfig):
         return "nvidia", False
     if isinstance(config, OmniRouteConfig):

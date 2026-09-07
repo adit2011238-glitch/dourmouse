@@ -520,6 +520,21 @@ class TestBackendIdentity:
     def test_ollama_is_local(self):
         assert backend_identity(OllamaConfig()) == ("ollama", True)
 
+    def test_ollama_cloud_is_not_local(self):
+        """Real bug found live-testing this session: every OllamaConfig
+        used to report local=True unconditionally, including a real
+        Ollama Cloud config (OLLAMA_API_KEY set, base_url=ollama.com,
+        is_cloud=True) — confirmed live via the server's own /api/backend
+        endpoint reporting base_url="https://ollama.com/v1" while the
+        brain event claimed local:true for the same request. is_cloud
+        already existed on OllamaConfig specifically to answer this; it
+        was simply never checked."""
+        cfg = OllamaConfig(
+            api_key="real-key", base_url="https://ollama.com/v1",
+            model="gpt-oss:20b", is_cloud=True,
+        )
+        assert backend_identity(cfg) == ("ollama", False)
+
     def test_nvidia_is_cloud(self):
         cfg = NvidiaConfig(api_key="k", base_url="https://integrate.api.nvidia.com/v1", model="m")
         assert backend_identity(cfg) == ("nvidia", False)
