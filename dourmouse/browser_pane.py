@@ -24,7 +24,75 @@ the real bridge, not a guess.
 from __future__ import annotations
 
 import threading
+import urllib.error
+import urllib.request
 from typing import Any, Callable
+
+_CHECK_TIMEOUT = 5.0
+
+
+def check_frameable(url: str) -> dict[str, Any]:
+    """Real bug found live-testing the pane: the frontend's only signal
+    was the iframe's `load` event, and `load` fires even when a site's
+    X-Frame-Options/CSP frame-ancestors headers block it from actually
+    rendering (the request still succeeds — it's a *display* refusal,
+    not a network failure) — so a blocked site left the pane showing a
+    permanently blank iframe with the fallback/escape-hatch never
+    shown. There is no reliable way to detect that from inside the
+    iframe itself (cross-origin), so this checks it the one place it
+    IS visible: the real HTTP response headers, fetched server-side
+    before the frontend ever commits to the iframe.
+
+    Honest on every branch: a header that blocks embedding -> not
+    frameable, with the real reason quoted back. Anything else
+    (the header allows it, or this check itself couldn't complete —
+    network error, timeout, non-2xx) -> frameable stays True, so a
+    site this check can't be sure about still gets a real chance
+    to load, with the existing client-side timeout as the last-resort
+    safety net for genuine network hangs it was already built for.
+    """
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "Dourmouse/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=_CHECK_TIMEOUT) as resp:
+            headers = resp.headers
+    except urllib.error.HTTPError as exc:
+        # A real response with headers, just a non-2xx status (some sites
+        # 405 a bare HEAD) — the headers are still real signal.
+        headers = exc.headers
+    except Exception as exc:  # noqa: BLE001 - honest: couldn't check, don't block on a guess
+        return {"frameable": True, "reason": f"could not check: {exc}", "checked": False}
+
+    xfo = (headers.get("X-Frame-Options") or "").strip().upper()
+    if xfo in ("DENY", "SAMEORIGIN"):
+        return {
+            "frameable": False,
+            "reason": f"X-Frame-Options: {xfo}",
+            "checked": True,
+        }
+
+    csp = headers.get("Content-Security-Policy") or ""
+    for directive in csp.split(";"):
+        directive = directive.strip()
+        if directive.lower().startswith("frame-ancestors"):
+            sources = directive.split()[1:]
+            # 'none' or anything that isn't a wildcard/'self' means this
+            # origin (an arbitrary localhost dev port) is not allowed —
+            # the common real-world case is an explicit allowlist of the
+            # site's own domains, which never includes ours.
+            if sources and not any(s in ("*", "'self'") for s in sources):
+                return {
+                    "frameable": False,
+                    "reason": f"Content-Security-Policy: {directive}",
+                    "checked": True,
+                }
+            if sources == ["'none'"]:
+                return {
+                    "frameable": False,
+                    "reason": "Content-Security-Policy: frame-ancestors 'none'",
+                    "checked": True,
+                }
+
+    return {"frameable": True, "reason": "no blocking header found", "checked": True}
 
 
 class BrowserPaneRequests:

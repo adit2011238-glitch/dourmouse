@@ -70,3 +70,21 @@ class TestBrowserPaneJs:
     def test_has_a_bounded_fallback_timeout(self):
         html = _console_html()
         assert "BP_LOAD_TIMEOUT_MS" in html
+
+    def test_checks_frameability_before_committing_to_the_iframe(self):
+        """Real bug found live-testing this pane: the iframe's own `load`
+        event fires even when X-Frame-Options/CSP blocks the site from
+        rendering, so the timeout-only fallback never triggered and the
+        pane went permanently blank. openBrowserPane must ask the backend
+        first."""
+        html = _console_html()
+        assert "/api/browser-pane/check" in html
+        assert "_bpOpenSeq" in html  # guards a stale check racing a newer open()
+
+
+class TestBrowserPaneClose:
+    def test_close_invalidates_any_in_flight_frameability_check(self):
+        """A check_frameable() call in flight when the user closes the
+        pane (or opens a different URL) must not resurrect it later."""
+        html = _console_html()
+        assert "_bpOpenSeq++" in html

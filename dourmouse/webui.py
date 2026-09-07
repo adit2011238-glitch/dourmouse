@@ -1972,6 +1972,25 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.browser_agent import browser_status
 
             self._send_json(browser_status())
+        elif path == "/api/browser-pane/check":
+            # Real bug found live-testing the embedded browser pane
+            # (backlog #8): the frontend's only signal that a site
+            # refuses to be framed was the iframe's own `load` event,
+            # which fires regardless of X-Frame-Options/CSP blocking the
+            # actual render -- the pane just went permanently blank with
+            # no fallback ever shown. openBrowserPane() now calls this
+            # BEFORE committing to the iframe; see browser_pane.py's
+            # check_frameable() for the real header check and why every
+            # branch stays honest rather than guessing.
+            from dourmouse.browser_pane import check_frameable
+
+            parsed = urllib.parse.urlparse(self.path)
+            qs = urllib.parse.parse_qs(parsed.query)
+            url = (qs.get("url") or [""])[0]
+            if not url.lower().startswith(("http://", "https://")):
+                self._send_json({"frameable": False, "reason": "not an http(s) URL", "checked": True})
+                return
+            self._send_json(check_frameable(url))
         elif path == "/api/vision/status":
             # world-monitor-expansion: honest status roll-up for the Vision
             # family (overlay/tray/wakeword/vision_bridge/proactive) — see

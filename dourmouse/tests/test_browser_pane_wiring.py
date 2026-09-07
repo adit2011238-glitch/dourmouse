@@ -98,3 +98,43 @@ class TestRealSseDelivery:
             assert pane_events[0]["url"] == "https://example.com"
         finally:
             set_browser_pane_requests(None)
+
+
+class TestCheckEndpoint:
+    """GET /api/browser-pane/check — the real fix for the live-testing
+    bug where an X-Frame-Options-blocked site left the pane blank
+    forever (see test_browser_pane.py's TestCheckFrameable for the
+    header-parsing logic this endpoint wraps)."""
+
+    def test_rejects_non_http_urls_without_making_any_request(self, server, monkeypatch):
+        srv, port, _bpr = server
+
+        def fail_if_called(*a, **k):
+            raise AssertionError("must not attempt a network check for a non-http(s) URL")
+
+        monkeypatch.setattr("dourmouse.browser_pane.urllib.request.urlopen", fail_if_called)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/browser-pane/check?url=javascript:alert(1)")
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode())
+        conn.close()
+        assert resp.status == 200
+        assert data["frameable"] is False
+
+    def test_real_call_reaches_check_frameable(self, server, monkeypatch):
+        srv, port, _bpr = server
+        seen = {}
+
+        def fake_check(url):
+            seen["url"] = url
+            return {"frameable": False, "reason": "X-Frame-Options: DENY", "checked": True}
+
+        monkeypatch.setattr("dourmouse.browser_pane.check_frameable", fake_check)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/browser-pane/check?url=https://www.google.com")
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode())
+        conn.close()
+        assert resp.status == 200
+        assert data == {"frameable": False, "reason": "X-Frame-Options: DENY", "checked": True}
+        assert seen["url"] == "https://www.google.com"

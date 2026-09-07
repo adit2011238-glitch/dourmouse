@@ -5440,20 +5440,44 @@ function startNewsStream(){
    silently displaying nothing. */
 const BP_LOAD_TIMEOUT_MS = 6000;
 let _bpLoadTimer = null;
-function openBrowserPane(url){
+let _bpOpenSeq = 0;
+async function openBrowserPane(url){
   const pane = $("browserPane"), frame = $("bpFrame"), addr = $("bpAddr"), fb = $("bpFallback");
   if(!pane || !frame) return;
+  // Real bug found live-testing this pane: the iframe's `load` event
+  // fires even when X-Frame-Options/CSP blocks the site from actually
+  // rendering (the request still succeeds — only the display is
+  // refused), so the old load-event-clears-timeout logic left the pane
+  // permanently blank with the fallback never shown. Ask the backend to
+  // check the real response headers BEFORE committing to the iframe —
+  // see /api/browser-pane/check + browser_pane.check_frameable(). A
+  // stale check racing a newer open() (the user navigates again before
+  // the first check returns) is guarded by _bpOpenSeq.
+  const seq = ++_bpOpenSeq;
+  pane.hidden = false;
+  addr.value = url;
   fb.hidden = true;
   frame.hidden = false;
-  addr.value = url;
   clearTimeout(_bpLoadTimer);
+  let frameable = true;
+  try {
+    const r = await fetch(`/api/browser-pane/check?url=${encodeURIComponent(url)}`);
+    const data = await r.json();
+    frameable = data.frameable !== false;
+  } catch { /* couldn't check — fall through, let the timeout below be the safety net */ }
+  if(seq !== _bpOpenSeq) return; // superseded by a newer open() while this check was in flight
+  if(!frameable){
+    frame.hidden = true;
+    fb.hidden = false;
+    $("bpFallbackLink").href = url;
+    return;
+  }
   _bpLoadTimer = setTimeout(() => {
     fb.hidden = false;
     frame.hidden = true;
     $("bpFallbackLink").href = url;
   }, BP_LOAD_TIMEOUT_MS);
   frame.src = url;
-  pane.hidden = false;
   // Immediate focus (Phase 3 of the user's own spec) — the millisecond it
   // opens, not after the user clicks inside it first.
   requestAnimationFrame(() => { try{ frame.focus(); }catch{} });
@@ -5461,6 +5485,7 @@ function openBrowserPane(url){
 function closeBrowserPane(){
   const pane = $("browserPane"), frame = $("bpFrame");
   if(!pane || !frame) return;
+  _bpOpenSeq++;  // invalidate any in-flight check_frameable() from a pending openBrowserPane()
   clearTimeout(_bpLoadTimer);
   frame.src = "";  // real unload, not just hiding a live page
   pane.hidden = true;
