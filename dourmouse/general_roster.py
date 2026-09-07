@@ -758,6 +758,113 @@ def _study_read_tool(arguments: dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Apps — real background/UI control of other running applications (Claude
+# Desktop, etc). list_running_apps/list_windows are read-only; every
+# action that actually touches another app's UI is confirmation-gated —
+# see app_control.py for the real macOS AppleScript/System Events backend,
+# its blocklist, and why it reports NOT CONFIGURED honestly on non-macOS
+# or without Accessibility permission.
+# --------------------------------------------------------------------------- #
+
+def _apps_list_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.app_control import AppControlError, list_running_apps
+
+    try:
+        apps = list_running_apps()
+    except AppControlError as exc:
+        return f"ERROR: {exc}"
+    if not apps:
+        return "RUNNING APPS: none (honest — System Events reported nothing)."
+    lines = [f"{'* ' if a['frontmost'] else '  '}{a['name']}" for a in apps]
+    return f"RUNNING APPS ({len(apps)}, '*' = frontmost):\n" + "\n".join(lines)
+
+
+def _apps_windows_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.app_control import AppControlError, list_windows
+
+    app_name = (arguments.get("app_name") or "").strip()
+    if not app_name:
+        return "ERROR: list_app_windows requires a non-empty 'app_name'."
+    try:
+        windows = list_windows(app_name)
+    except AppControlError as exc:
+        return f"ERROR: {exc}"
+    if not windows:
+        return f"{app_name}: no open windows (honest — could mean 0 windows or a menu-bar-only app)."
+    return f"{app_name} windows ({len(windows)}):\n" + "\n".join(windows)
+
+
+def _apps_activate_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.app_control import AppControlError, activate_app
+
+    app_name = (arguments.get("app_name") or "").strip()
+    if not app_name:
+        return "ERROR: activate_app requires a non-empty 'app_name'."
+    try:
+        return activate_app(app_name)
+    except AppControlError as exc:
+        return f"ERROR: {exc}"
+
+
+def _apps_quit_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.app_control import AppControlError, quit_app
+
+    app_name = (arguments.get("app_name") or "").strip()
+    if not app_name:
+        return "ERROR: quit_app requires a non-empty 'app_name'."
+    try:
+        return quit_app(app_name)
+    except AppControlError as exc:
+        return f"ERROR: {exc}"
+
+
+def _apps_keystrokes_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.app_control import AppControlError, send_keystrokes
+
+    app_name = (arguments.get("app_name") or "").strip()
+    text = arguments.get("text") or ""
+    if not app_name:
+        return "ERROR: send_app_keystrokes requires a non-empty 'app_name'."
+    if not text:
+        return "ERROR: send_app_keystrokes requires non-empty 'text'."
+    try:
+        return send_keystrokes(app_name, text)
+    except AppControlError as exc:
+        return f"ERROR: {exc}"
+
+
+def _apps_press_key_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.app_control import AppControlError, press_key
+
+    app_name = (arguments.get("app_name") or "").strip()
+    key = (arguments.get("key") or "").strip()
+    modifiers = arguments.get("modifiers") or []
+    if not app_name:
+        return "ERROR: press_app_key requires a non-empty 'app_name'."
+    if not key:
+        return "ERROR: press_app_key requires a non-empty 'key'."
+    try:
+        return press_key(app_name, key, modifiers)
+    except AppControlError as exc:
+        return f"ERROR: {exc}"
+
+
+def _apps_click_menu_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.app_control import AppControlError, click_menu_item
+
+    app_name = (arguments.get("app_name") or "").strip()
+    menu_path = arguments.get("menu_path") or []
+    if not app_name:
+        return "ERROR: click_app_menu_item requires a non-empty 'app_name'."
+    if not isinstance(menu_path, list) or len(menu_path) < 2:
+        return 'ERROR: menu_path needs at least [top-level menu, item], e.g. ["File", "New Window"].'
+    try:
+        return click_menu_item(app_name, [str(m) for m in menu_path])
+    except AppControlError as exc:
+        return f"ERROR: {exc}"
+
+
+# --------------------------------------------------------------------------- #
 # Comms — draft is real; sending is confirmation-gated + NOT CONFIGURED
 # --------------------------------------------------------------------------- #
 
@@ -2663,6 +2770,141 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["path"],
                     },
                     handler=_study_read_tool,
+                ),
+            ],
+        )
+    )
+
+    registry.register_subagent(
+        _subagent(
+            "apps",
+            "General",
+            "Controls other running applications on this Mac in the "
+            "background (Claude Desktop, etc): list what's running, bring "
+            "one forward, list its windows, send it keystrokes/key presses, "
+            "click a menu item, quit it. Listing is read-only; every action "
+            "that touches another app's UI requires confirmation. macOS "
+            "only — see app_control.py.",
+            [
+                ToolSpec(
+                    name="list_running_apps",
+                    description=(
+                        "List every foreground app currently running, and which "
+                        "one (if any) is frontmost. Use this BEFORE activating/"
+                        "controlling an app to confirm it's actually running and "
+                        "get its exact name."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_apps_list_tool,
+                ),
+                ToolSpec(
+                    name="list_app_windows",
+                    description="List the open window titles for one running app, by its exact name.",
+                    parameters={
+                        "type": "object",
+                        "properties": {"app_name": {"type": "string"}},
+                        "required": ["app_name"],
+                    },
+                    handler=_apps_windows_tool,
+                ),
+                ToolSpec(
+                    name="activate_app",
+                    description="Bring a running app to the foreground.",
+                    parameters={
+                        "type": "object",
+                        "properties": {"app_name": {"type": "string"}},
+                        "required": ["app_name"],
+                    },
+                    handler=_apps_activate_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: f"Bring {a.get('app_name', '?')} to the foreground?",
+                ),
+                ToolSpec(
+                    name="quit_app",
+                    description="Quit a running app.",
+                    parameters={
+                        "type": "object",
+                        "properties": {"app_name": {"type": "string"}},
+                        "required": ["app_name"],
+                    },
+                    handler=_apps_quit_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: f"Quit {a.get('app_name', '?')}?",
+                ),
+                ToolSpec(
+                    name="send_app_keystrokes",
+                    description=(
+                        "Bring an app forward and type literal text into whatever "
+                        "has focus inside it. Real risk if the app is slow to "
+                        "focus a text field — verify with list_app_windows or a "
+                        "screenshot-equivalent check afterward, don't assume it landed."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "app_name": {"type": "string"},
+                            "text": {"type": "string"},
+                        },
+                        "required": ["app_name", "text"],
+                    },
+                    handler=_apps_keystrokes_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Type into {a.get('app_name', '?')}: "
+                        f"{str(a.get('text', ''))[:80]!r}?"
+                    ),
+                ),
+                ToolSpec(
+                    name="press_app_key",
+                    description=(
+                        "Bring an app forward and press one named key: "
+                        "return, enter, tab, escape, delete, space, up, down, "
+                        "left, right — with optional modifiers (command, "
+                        "option, shift, control)."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "app_name": {"type": "string"},
+                            "key": {"type": "string"},
+                            "modifiers": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "default": [],
+                            },
+                        },
+                        "required": ["app_name", "key"],
+                    },
+                    handler=_apps_press_key_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Press {'+'.join((a.get('modifiers') or []) + [str(a.get('key', '?'))])} "
+                        f"in {a.get('app_name', '?')}?"
+                    ),
+                ),
+                ToolSpec(
+                    name="click_app_menu_item",
+                    description=(
+                        'Click a menu item by its full path, e.g. ["File", "New '
+                        'Window"] or ["File", "Export", "PDF..."].'
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "app_name": {"type": "string"},
+                            "menu_path": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["app_name", "menu_path"],
+                    },
+                    handler=_apps_click_menu_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Click {' > '.join(a.get('menu_path') or [])} in "
+                        f"{a.get('app_name', '?')}?"
+                    ),
                 ),
             ],
         )

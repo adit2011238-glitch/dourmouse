@@ -63,6 +63,10 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # The user's machine, files, schedule and running processes.
     "admin_ops", "system", "tasks", "scheduling", "compute",
     "browser", "panel_control", "freebuff", "design_3d",
+    # Controls other apps running on the user's own machine (window
+    # contents, keystrokes typed into them) -- same privacy class as
+    # system/admin_ops, not public-web material.
+    "apps",
     # Money. Positions, balances and brokerage credentials.
     "markets", "forex", "mt5", "t212",
     # The user's own private repositories and research pipeline.

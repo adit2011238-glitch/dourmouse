@@ -1753,6 +1753,7 @@ class TestEndToEndThroughGeneralRoster:
             "orchestrator",
             "research_info",
             "study",  # backlog #9: Study tab, sandboxed access to the MYP folder
+            "apps",  # backlog: control other running apps in the background
             "comms",
             "scheduling",
             "dev_coding",

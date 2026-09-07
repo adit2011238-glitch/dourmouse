@@ -71,6 +71,7 @@ class TestRosterShape:
             "orchestrator",
             "research_info",
             "study",  # backlog #9: Study tab, sandboxed access to the MYP folder
+            "apps",  # backlog: control other running apps in the background
             "comms",
             "scheduling",
             "dev_coding",
@@ -203,6 +204,14 @@ class TestRosterShape:
             # v13.9: real write to an existing Google Doc, same
             # confirmation bar as drive_create_doc right above it.
             "docs_append",
+            # backlog: app control — every action that actually touches
+            # another running app's UI is gated; listing (list_running_apps/
+            # list_app_windows) is read-only and stays ungated.
+            "activate_app",
+            "quit_app",
+            "send_app_keystrokes",
+            "press_app_key",
+            "click_app_menu_item",
         }
 
     def test_internet_tools_registered(self):
