@@ -3367,8 +3367,15 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="deploy",
                     description=(
-                        "Deploy or publish code. REQUIRES confirmation; "
-                        "currently NOT CONFIGURED."
+                        "Deploy or publish code to a real environment. ONLY "
+                        "call this when the user explicitly asks to deploy, "
+                        "publish, ship, or push to production/staging — "
+                        "never as a follow-up to simply writing, fixing, or "
+                        "explaining a standalone snippet or function (live-"
+                        "reproduced real bug: 'write a debounce function' "
+                        "and 'fix this code' both triggered a spurious "
+                        "deploy confirmation with no deploy request at all). "
+                        "REQUIRES confirmation; currently NOT CONFIGURED."
                     ),
                     parameters={
                         "type": "object",

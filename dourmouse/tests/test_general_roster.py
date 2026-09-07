@@ -218,6 +218,18 @@ class TestRosterShape:
         registry = build_general_registry()
         assert {"web_search", "fetch_url", "open_url"} <= registry.tool_names
 
+    def test_deploy_description_scopes_when_to_call_it(self):
+        """Real bug found live-testing this session: plain coding requests
+        with zero deploy intent ("write a debounce function", "fix this
+        code") repeatedly triggered a spurious deploy confirmation. The
+        tool's own description now explicitly scopes it to an explicit
+        deploy/publish/ship request, matching dispatch.py's own rule 17
+        (tool-call scoping) in spirit."""
+        registry = build_general_registry()
+        spec = registry.lookup("deploy")
+        assert spec is not None
+        assert "ONLY call this when the user explicitly asks" in spec.description
+
 
 class TestResearchInfo:
     def test_web_search_network_error_reported_honestly(self, monkeypatch):
