@@ -4589,22 +4589,34 @@ class _Handler(BaseHTTPRequestHandler):
         store = self.server.memory
         active = store is not None and learn_enabled()
         count = 0
+        count_error: str | None = None
         if active:
             try:
                 count = store.count()
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - honest, see count_error below
+                # Real bug found live-testing decision 5's remote-memory
+                # setup: a RemoteMemoryStore that can't reach its machine
+                # used to fall through to count=0 here, indistinguishable
+                # from "checked, genuinely zero facts" -- exactly the kind
+                # of silent-lie /api/memory/search was already fixed to
+                # avoid (see its own comment above). count stays 0 for
+                # existing callers that only read it as a number; count_error
+                # tells anyone who checks that 0 here means "couldn't ask",
+                # not "asked, got zero".
                 count = 0
-        self._send_json(
-            {
-                "active": active,
-                "count": count,
-                "gate": (
-                    "DOURMOUSE_LEARN=0 disables the learning loop"
-                    if not active
-                    else "learning loop on"
-                ),
-            }
-        )
+                count_error = str(exc)
+        payload = {
+            "active": active,
+            "count": count,
+            "gate": (
+                "DOURMOUSE_LEARN=0 disables the learning loop"
+                if not active
+                else "learning loop on"
+            ),
+        }
+        if count_error is not None:
+            payload["count_error"] = count_error
+        self._send_json(payload)
 
     def _handle_memory_remote_search(self) -> None:
         """GET /api/memory/search?q=<query>&limit=<n>&source=<optional> —

@@ -423,6 +423,36 @@ class TestMemoryApi:
             srv.server_close()
             thread.join(timeout=2)
 
+    def test_memory_stats_distinguishes_unreachable_from_genuinely_zero(self, tmp_path, monkeypatch):
+        """Real bug caught live-testing decision 5's remote-memory setup:
+        when the configured DOURMOUSE_MEMORY_REMOTE_URL machine is down,
+        store.count() raises -- the handler used to swallow that into
+        count=0, indistinguishable from "asked, got zero facts". A
+        count_error field says which one actually happened."""
+        store = MemoryStore(tmp_path / "mem" / "unreachable.db")
+        monkeypatch.setattr(
+            store, "count", lambda source=None: (_ for _ in ()).throw(RuntimeError("unreachable at http://x"))
+        )
+        srv = run_server(_echo_registry(), port=0, client=None, config=None, memory=store)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            import http.client
+
+            conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+            conn.request("GET", "/api/memory")
+            resp = conn.getresponse()
+            data = json.loads(resp.read().decode())
+            conn.close()
+            assert resp.status == 200
+            assert data["count"] == 0
+            assert "unreachable" in data["count_error"]
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+            store.close()
+
     def test_feedback_ok_stores_fact(self, tmp_path):
         store = MemoryStore(tmp_path / "mem" / "fb.db")
         srv = run_server(_echo_registry(), port=0, client=None, config=None, memory=store)
