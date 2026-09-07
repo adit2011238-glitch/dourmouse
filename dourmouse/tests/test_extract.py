@@ -66,6 +66,21 @@ class TestExtractPdfText:
         out = extract.extract_pdf_text("/nonexistent/nope.pdf")
         assert "ERROR" in out and "no such file" in out
 
+    def test_scanned_image_pdf_reports_honestly_not_a_fake_success(self, tmp_path):
+        """Real bug found live-testing this session against a real 51MB
+        scanned textbook with zero text layer: the honest "no extractable
+        text" fallback checked the FORMATTED per-page string ("--- page 1
+        ---\\n" + extracted), which is never empty even when the actual
+        extracted text is -- the page marker alone survives .strip(). A
+        100%-scanned PDF used to silently "succeed" with blank pages
+        instead of ever hitting this fallback."""
+        pdf_bytes = make_pdf([])  # a real page with no text-drawing operators at all
+        p = tmp_path / "scanned.pdf"
+        p.write_bytes(pdf_bytes)
+        out = extract.extract_pdf_text(str(p))
+        assert "no extractable text" in out
+        assert "--- page" not in out, "must not silently return blank paginated output"
+
     def test_missing_pypdf_reports_not_configured(self, tmp_path, monkeypatch):
         p = tmp_path / "x.pdf"
         p.write_bytes(make_pdf(["hi"]))

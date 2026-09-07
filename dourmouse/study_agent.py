@@ -91,10 +91,29 @@ def list_study_files(rel_path: str = "") -> dict[str, object]:
 def read_study_file(rel_path: str, max_chars: int = _MAX_READ_CHARS) -> dict[str, object]:
     """Read a real text file from the study folder. Refuses non-text
     (binary) content honestly rather than dumping garbage — a UnicodeDecodeError
-    is a real, specific signal, not silently swallowed into empty text."""
+    is a real, specific signal, not silently swallowed into empty text.
+
+    Real gap found live-testing this session: this folder's own real
+    content (~/Documents/MYP data folder) is mostly PDFs (textbooks,
+    past assessments), and a plain UTF-8 read always refused them as
+    "binary content" — the feature's most obvious real use ("read my
+    textbook") never worked. Reuses extract.extract_pdf_text (the same
+    real PDF extraction system_access.py's extract_pdf tool already
+    uses) for anything ending in .pdf; every other extension keeps the
+    original plain-text path unchanged.
+    """
     target = _resolve_within_root(rel_path)
     if not target.is_file():
         raise StudyPathError(f"not a file: {rel_path!r}")
+    if target.suffix.lower() == ".pdf":
+        from dourmouse.extract import extract_pdf_text
+
+        try:
+            text = extract_pdf_text(target)
+        except RuntimeError as exc:
+            raise StudyPathError(f"can't read {rel_path!r}: {exc}") from None
+        truncated = len(text) > max_chars
+        return {"path": rel_path, "content": text[:max_chars], "truncated": truncated}
     try:
         text = target.read_text(encoding="utf-8")
     except UnicodeDecodeError:

@@ -89,6 +89,31 @@ class TestReadStudyFile:
         with pytest.raises(StudyPathError):
             read_study_file("Textbooks")
 
+    def test_reads_a_real_pdf(self, study_dir):
+        """Real gap found live-testing this session: this folder's own
+        real content is mostly PDFs (textbooks, past assessments), and a
+        plain UTF-8 read always refused them as binary — the feature's
+        most obvious real use never worked."""
+        from dourmouse.tests.test_extract import make_pdf
+
+        pdf_bytes = make_pdf(["Chapter 1: Real study content."])
+        (study_dir / "textbook.pdf").write_bytes(pdf_bytes)
+        result = read_study_file("textbook.pdf")
+        assert "Chapter 1" in result["content"]
+        assert "real study content" in result["content"].lower()
+
+    def test_pdf_without_pypdf_is_an_honest_studypatherror(self, study_dir, monkeypatch):
+        (study_dir / "textbook.pdf").write_bytes(b"%PDF-1.4\nnot a real pdf reader target")
+
+        def fake_extract_pdf_text(path):
+            raise RuntimeError("pypdf is not installed")
+
+        import dourmouse.extract as extract_mod
+
+        monkeypatch.setattr(extract_mod, "extract_pdf_text", fake_extract_pdf_text)
+        with pytest.raises(StudyPathError, match="pypdf"):
+            read_study_file("textbook.pdf")
+
     def test_truncates_long_content_and_says_so(self, study_dir):
         big = study_dir / "big.txt"
         big.write_text("x" * 50, encoding="utf-8")

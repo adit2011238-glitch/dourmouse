@@ -42,12 +42,23 @@ def extract_pdf_text(path: str | Path) -> str:
     except Exception as exc:  # noqa: BLE001 - encrypted/corrupt PDFs, honest
         return f"PDF READ FAILED: {type(exc).__name__}: {exc}"
     pages = []
+    # Real bug found live-testing this session, against a real 51MB scanned
+    # textbook with zero text layer: the "no extractable text" check below
+    # used to test the FORMATTED per-page string (page marker + text), which
+    # is never empty even when the actual extracted text is -- "--- page 1
+    # ---" alone survives .strip(). A 100%-scanned PDF silently "succeeded"
+    # with blank pages instead of honestly saying so. real_text tracks just
+    # the extracted content, separately from the markers used for display.
+    real_text: list[str] = []
     for i, page in enumerate(reader.pages, 1):
         try:
-            pages.append(f"--- page {i} ---\n" + (page.extract_text() or ""))
+            extracted = page.extract_text() or ""
         except Exception as exc:  # noqa: BLE001
-            pages.append(f"--- page {i} ---\n[page text unavailable: {exc}]")
-    if not any(p.strip() for p in pages):
+            extracted = f"[page text unavailable: {exc}]"
+        else:
+            real_text.append(extracted)
+        pages.append(f"--- page {i} ---\n" + extracted)
+    if not any(t.strip() for t in real_text):
         return "PDF READ: no extractable text (scanned image PDFs need OCR, which is not included)."
     return "\n".join(pages)
 
