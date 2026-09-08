@@ -368,15 +368,25 @@ def _bounded_context(
 ) -> list[dict[str, Any]]:
     """Bounded copy of ``messages`` for the LLM API boundary.
 
-    Always keeps the system prompt (messages[0]) and the ENTIRE in-flight
-    exchange — everything from the most recent ``user`` message onward — so
-    the current directive and its tool trail are never truncated. Older
-    complete exchanges are added most-recent-first while the token budget
-    allows; anything beyond the budget is dropped at a clean ``user``
-    boundary (never mid-exchange, which some backends reject). Tool-result
-    messages OLDER than the in-flight exchange are truncated to
-    ``max_tool_chars`` in the copy: they were already seen in full when
-    produced, so later turns only need the gist.
+    Always keeps the LEADING BLOCK of system messages (messages[0], and any
+    further ``role: system`` entries stacked right after it — e.g. the
+    project-chat seed webui.py appends at session start) and the ENTIRE
+    in-flight exchange — everything from the most recent ``user`` message
+    onward — so the current directive and its tool trail are never
+    truncated. Older complete exchanges are added most-recent-first while
+    the token budget allows; anything beyond the budget is dropped at a
+    clean ``user`` boundary (never mid-exchange, which some backends
+    reject). Tool-result messages OLDER than the in-flight exchange are
+    truncated to ``max_tool_chars`` in the copy: they were already seen in
+    full when produced, so later turns only need the gist.
+
+    v13.9: generalized the old "keep messages[0]" special case to a whole
+    leading run of system messages. The single-index version silently
+    dropped any seed appended right after the real system prompt: the
+    "roll forward to a clean user boundary" step below walked past it
+    looking for the next ``user`` message, since a second system message
+    doesn't look like one either — a real bug, live-caught by a project
+    chat never seeing the project it was told about.
 
     v13.7: both limits default to ``None`` and resolve through their
     accessors at CALL time rather than binding the module constant as a
@@ -392,9 +402,14 @@ def _bounded_context(
         max_tokens = _max_llm_tokens()
     if max_tool_chars is None:
         max_tool_chars = _max_tool_result_chars()
-    system = messages[0] if messages[0].get("role") == "system" else None
+    leading_system = 0
+    while (
+        leading_system < len(messages)
+        and messages[leading_system].get("role") == "system"
+    ):
+        leading_system += 1
     user_idx = [i for i, m in enumerate(messages) if m.get("role") == "user"]
-    tail_start = user_idx[-1] if user_idx else (0 if system is None else 1)
+    tail_start = user_idx[-1] if user_idx else leading_system
     # Walk backward from the in-flight tail while the budget allows.
     keep_from = tail_start
     budget = max_tokens
@@ -409,17 +424,22 @@ def _bounded_context(
             break
     # Roll forward to a clean user boundary so the window never starts
     # mid-exchange (a dangling tool/assistant-tool_calls message would be
-    # rejected by OpenAI-compatible backends).
-    j = keep_from
+    # rejected by OpenAI-compatible backends). Never search INSIDE the
+    # leading system block itself — those are unconditionally kept below,
+    # and a second/third system entry there (project-chat seed) is not a
+    # "user" message either, so an unclamped search would walk straight
+    # past it.
+    j = max(keep_from, leading_system)
     while j < len(messages) and messages[j].get("role") != "user":
         j += 1
     keep_from = j
     out: list[dict[str, Any]] = []
     for i, m in enumerate(messages):
-        # The system prompt is ALWAYS kept, even when the boundary roll
-        # below lands past it (a bounded window without the system prompt is
-        # a different conversation to the model).
-        if i == 0 and m.get("role") == "system":
+        # The leading system block is ALWAYS kept, even when the boundary
+        # roll above lands past it (a bounded window missing the system
+        # prompt, or missing a seed like the project-chat context, is a
+        # different conversation to the model).
+        if i < leading_system and m.get("role") == "system":
             out.append(m)
             continue
         if i < keep_from:
@@ -1173,7 +1193,19 @@ _SYSTEM_PROMPT = (
     "unsure, make the smallest tool call that could answer the question, "
     "look at its real result, and only call again if that result "
     "actually shows more is needed — never chain speculative calls "
-    "before seeing what the first one returned."
+    "before seeing what the first one returned.\n"
+    "18. LATENCY — every second of internal deliberation is real wall-"
+    "clock time the user is waiting, worse on the local backend than on "
+    "Claude (live-measured this session: a plain factual question "
+    "produced over 500 separate internal reasoning chunks before the "
+    "real answer even started). For a simple, well-scoped request — a "
+    "direct question, a short code snippet, a single obvious tool call — "
+    "decide fast: do not enumerate multiple approaches, second-guess an "
+    "already-correct plan, or restate the request back to yourself "
+    "before acting. Reserve genuinely longer deliberation for requests "
+    "that are actually ambiguous, multi-step, or high-stakes (money, "
+    "sending something, deleting something) — those are worth the extra "
+    "time; 'write a function that reverses a string' is not."
 )
 
 

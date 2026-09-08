@@ -68,6 +68,7 @@ missing feature dressed up as one.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -540,6 +541,40 @@ def create_project(
     return record
 
 
+def project_tab_id(path: str) -> str:
+    """The deterministic per-tab session id a project's chat lives under
+    (world-monitor-expansion, "make projects open their own chat like
+    Claude Desktop's Projects"). Pure function of the real resolved path
+    — the SAME project always gets the SAME id across restarts, so
+    re-opening it resumes the same conversation instead of starting a
+    fresh one every time. Not a secret (this is a routing key, not
+    access control) — hashed only so a raw filesystem path never has to
+    round-trip through a URL/JS identifier.
+    """
+    resolved = str(Path(path).expanduser())
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+    return f"project-{digest}"
+
+
+def find_project_by_tab_id(tab_id: str, store_path: Path | str | None = None) -> dict[str, Any] | None:
+    """Reverse lookup for project_tab_id() — webui.py's session-seeding
+    code has only the tab_id (from the request body), never the raw path
+    it was derived from. project_tab_id is a one-way hash on purpose (see
+    its own docstring), so this re-derives it for every tracked project
+    and compares — real I/O (one JSON file read), but only runs once, at
+    the moment a NEW per-tab session is lazily created, never per turn.
+    Returns None honestly for a tab_id that isn't (or is no longer) a
+    real project's — a stale/forged id gets a plain, un-seeded session,
+    never a crash or a guessed project.
+    """
+    sp = Path(store_path) if store_path is not None else _store_path()
+    store = _load_store(sp)
+    for path, record in {**store.get("projects", {}), **store.get("manual_projects", {})}.items():
+        if project_tab_id(path) == tab_id:
+            return dict(record, path=path)
+    return None
+
+
 def open_project(path: str, store_path: Path | str | None = None) -> dict[str, Any]:
     """Open a tracked project — real user request (backlog #10: "the
     projects can't be opened"). Validates the project is actually on the
@@ -548,13 +583,13 @@ def open_project(path: str, store_path: Path | str | None = None) -> dict[str, A
     "opened" anyway), bumps ``last_active`` so it sorts to the top like
     genuine session activity would, and returns the record.
 
-    Scope note (explicit, not silently dropped): this does not yet route
-    the client into a dedicated project-workspace VIEW the way Claude
-    Desktop's Projects do — that needs either a new UI surface or
-    extending code_backends.py's cwd resolution to accept a client-chosen
-    directory, both bigger than this fix. What's real here: the API call
-    that a UI "Open" button needs actually exists and works, instead of
-    there being nothing to call at all.
+    world-monitor-expansion: now also returns ``tab_id`` (see
+    project_tab_id above) — the per-tab session key webui.py's
+    _session_gate_lock_for_tab already supports for any tab, generalized
+    here to a project. The client adopts it as the active chat session,
+    routing the EXISTING chat UI into a real, dedicated, project-scoped
+    conversation — Claude Desktop's Projects behavior, no new UI surface
+    needed since the chat screen this reuses already exists.
     """
     resolved = str(Path(path).expanduser())
     sp = Path(store_path) if store_path is not None else _store_path()
@@ -576,6 +611,7 @@ def open_project(path: str, store_path: Path | str | None = None) -> dict[str, A
     else:
         store["manual_projects"][resolved] = record
     _save_store(store, sp)
+    record["tab_id"] = project_tab_id(resolved)
     return record
 
 

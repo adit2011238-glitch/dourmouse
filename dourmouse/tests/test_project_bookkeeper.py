@@ -23,8 +23,10 @@ import pytest
 from dourmouse.project_bookkeeper import (
     create_project,
     delete_project,
+    find_project_by_tab_id,
     get_bookkeeper,
     open_project,
+    project_tab_id,
     refresh,
 )
 
@@ -564,3 +566,52 @@ class TestOpenProject:
         create_project("Second Life", path, store_path=sp)
         assert any(p["path"] == path and p["name"] == "Second Life"
                    for p in get_bookkeeper(store_path=sp)["projects"])
+
+
+class TestProjectTabId:
+    """world-monitor-expansion ("make projects open their own chat like
+    Claude Desktop's Projects"): project_tab_id/find_project_by_tab_id are
+    the plumbing that lets webui.py route an opened project's chat into a
+    real, dedicated, project-scoped session — see webui.py's
+    _session_gate_lock_for_tab for the seeding side of this."""
+
+    def test_same_path_always_gets_the_same_tab_id(self):
+        a = project_tab_id("/Users/me/code/thing")
+        b = project_tab_id("/Users/me/code/thing")
+        assert a == b, "re-opening a project must resume the same conversation, not start a new one"
+
+    def test_different_paths_get_different_tab_ids(self):
+        assert project_tab_id("/a") != project_tab_id("/b")
+
+    def test_tab_id_is_a_stable_deterministic_shape(self):
+        tid = project_tab_id("/Users/me/code/thing")
+        assert tid.startswith("project-")
+        assert len(tid) == len("project-") + 16
+
+    def test_open_project_returns_the_real_tab_id(self, tmp_path):
+        sp = tmp_path / "store.json"
+        path = str(tmp_path / "proj")
+        Path(path).mkdir()
+        create_project("Real Project", path, store_path=sp)
+        record = open_project(path, store_path=sp)
+        assert record["tab_id"] == project_tab_id(path)
+
+    def test_find_project_by_tab_id_resolves_a_real_project(self, tmp_path):
+        sp = tmp_path / "store.json"
+        path = str(tmp_path / "proj")
+        Path(path).mkdir()
+        create_project("Findable", path, store_path=sp)
+        tid = project_tab_id(path)
+        found = find_project_by_tab_id(tid, store_path=sp)
+        assert found is not None
+        assert found["name"] == "Findable"
+        assert found["path"] == path
+
+    def test_find_project_by_tab_id_is_honest_for_an_unknown_id(self, tmp_path):
+        """A stale or forged tab_id must never be guessed into a random
+        project — an ordinary browser tab's own id must never
+        accidentally collide with this and get seeded with someone else's
+        project context."""
+        sp = tmp_path / "store.json"
+        assert find_project_by_tab_id("project-notreal00000000", store_path=sp) is None
+        assert find_project_by_tab_id("some-ordinary-browser-tab-uuid", store_path=sp) is None

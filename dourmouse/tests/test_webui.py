@@ -1529,6 +1529,78 @@ class TestPerTabSessions:
         connA.close()
 
 
+class TestProjectScopedSessions:
+    """world-monitor-expansion ("make projects open their own chat like
+    Claude Desktop's Projects"): opening a project's real tab_id (see
+    project_bookkeeper.project_tab_id/open_project) must seed that tab's
+    session with the project's real path + context BEFORE its first turn
+    — the actual mechanism that makes "the model knows exactly what to
+    do" true for project-scoped work, not just a routing detail."""
+
+    def _stream_until_done(self, resp):
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                event = json.loads(line[6:])
+                if event["type"] == "done":
+                    return
+
+    def test_opening_a_project_seeds_its_session_with_real_path_and_context(self, server, tmp_path):
+        from dourmouse.project_bookkeeper import create_project, project_tab_id
+
+        srv, port = server
+        srv.client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        project_dir = tmp_path / "my-real-project"
+        project_dir.mkdir()
+        create_project("My Real Project", str(project_dir), description="building the widget API")
+        tab_id = project_tab_id(str(project_dir))
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat",
+            body=json.dumps({"prompt": "hi", "tab_id": tab_id}),
+            headers={"Content-Type": "application/json"},
+        )
+        self._stream_until_done(conn.getresponse())
+        conn.close()
+
+        session = srv.sessions_by_tab[tab_id]
+        seeded = [m for m in session.messages if m["role"] == "system"]
+        assert len(seeded) == 2, "the base system prompt plus exactly one project-seed message"
+        seed_text = seeded[-1]["content"]
+        assert str(project_dir) in seed_text
+        assert "My Real Project" in seed_text
+        assert "building the widget API" in seed_text
+        # Live-caught regression (2026-09-08): asking "what project am I
+        # in?" got routed to the freebuff_projects/freebuff_status tools
+        # instead of answered from this seed directly — freebuff_bridge's
+        # own tool descriptions are saturated with the word "project",
+        # which out-scores everything else in planner.py's routing for a
+        # bare "project" query. The seed now heads that off explicitly.
+        assert "freebuff" in seed_text.lower()
+        assert "no tool call needed" in seed_text
+
+    def test_an_ordinary_tab_id_gets_no_project_seeding(self, server):
+        """The honest negative: a ROOT ordinary browser tab_id (not
+        derived from any real project) must never accidentally match a
+        project and get seeded with the wrong context."""
+        srv, port = server
+        srv.client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat",
+            body=json.dumps({"prompt": "hi", "tab_id": "ordinary-browser-tab-uuid"}),
+            headers={"Content-Type": "application/json"},
+        )
+        self._stream_until_done(conn.getresponse())
+        conn.close()
+        session = srv.sessions_by_tab["ordinary-browser-tab-uuid"]
+        seeded = [m for m in session.messages if m["role"] == "system"]
+        assert len(seeded) == 1, "only the base system prompt — no project was ever opened for this tab"
+
+
 class TestSpotifyPlayEndpoints:
     """v5.21 HUD music section: the play-anything POST endpoints. The
     spotify_services functions are stubbed at the module level (the handlers

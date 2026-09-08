@@ -3465,6 +3465,52 @@ class _Handler(BaseHTTPRequestHandler):
                     rbac=self.server.session.rbac,  # shared — see docstring above
                     memory=self.server.memory,
                 )
+                # world-monitor-expansion ("make projects open their own
+                # chat like Claude Desktop's Projects"): a tab_id that IS a
+                # real project's (see project_bookkeeper.project_tab_id)
+                # gets a real system message seeded before its first turn —
+                # the project's real absolute path and captured context,
+                # with an explicit instruction to treat that path as the
+                # working directory for file/coding operations this
+                # conversation. Reusing the plain-English system-prompt
+                # channel (rather than threading a new cwd parameter through
+                # every coding tool) is deliberate: it is what actually
+                # makes "the model knows exactly what to do" true for this,
+                # same mechanism as every other agent-scoping instruction in
+                # system_message() (dourmouse/agent_prompts.py) — one real
+                # channel, not two competing ones. A tab_id that ISN'T a
+                # real project's (stale, forged, or just an ordinary browser
+                # tab) is left alone — find_project_by_tab_id returns None,
+                # honestly, never a guess.
+                from dourmouse.project_bookkeeper import find_project_by_tab_id
+
+                try:
+                    project = find_project_by_tab_id(tab_id)
+                except Exception:  # noqa: BLE001 - a bookkeeper read must never break chat
+                    project = None
+                if project is not None:
+                    name = project.get("name") or project.get("path")
+                    context = (project.get("context") or "").strip()
+                    seed = (
+                        f"You are working inside the project \"{name}\" at the real "
+                        f"absolute path {project['path']}. Use this exact path as the "
+                        f"working directory for every file read/write, run_command, or "
+                        f"coding-tool call in this conversation — never the Dourmouse "
+                        f"app's own source directory. This is real work in the user's "
+                        f"actual project, the same as opening it in an IDE.\n\n"
+                        f"If asked what project this is (or anything answerable from "
+                        f"the name/path/context right here), answer directly from "
+                        f"THIS message — no tool call needed, and none of your "
+                        f"tools can tell you anything truer than what you already "
+                        f"know from this message. In particular: this project is "
+                        f"UNRELATED to Freebuff (a separate app with its own, "
+                        f"different projects) — never call freebuff_projects, "
+                        f"freebuff_status, or any other freebuff_* tool for a "
+                        f"question about the project you are already in."
+                    )
+                    if context:
+                        seed += f"\n\nWhat's known about this project so far: {context}"
+                    session.messages.append({"role": "system", "content": seed})
                 gate = WebConfirmationGate(lambda _e: None)
                 lock = threading.Lock()
                 self.server.sessions_by_tab[tab_id] = session

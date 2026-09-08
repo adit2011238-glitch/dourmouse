@@ -2213,6 +2213,46 @@ class TestBoundedContext:
         assert len(old_tool["content"]) < len(msgs[3]["content"])
         assert out[-1]["content"] == msgs[-1]["content"]  # in-flight kept full
 
+    def test_a_second_leading_system_message_survives_bounding(self):
+        """Live-caught regression: webui.py's project-chat seed (see
+        TestProjectScopedSessions in test_webui.py) is appended as a
+        SECOND ``role: system`` message right after the real system
+        prompt, at index 1 — not index 0. The old code only ever
+        special-cased ``messages[0]``, so the "roll forward to a clean
+        user boundary" step walked straight past the seed (a system
+        message doesn't look like a user message either) and it never
+        reached the model. Live symptom: asking a freshly-opened project
+        chat "what project am I working in?" got an answer with zero
+        awareness of the seeded project name/path, because the seed was
+        silently dropped at exactly this boundary.
+        """
+        msgs = [
+            {"role": "system", "content": "SYSTEM PROMPT" * 20},
+            {"role": "system", "content": "PROJECT SEED: you are working in X"},
+            {"role": "user", "content": "What project am I working in?"},
+        ]
+        out = dispatch_module._bounded_context(msgs)
+        systems = [m for m in out if m.get("role") == "system"]
+        assert len(systems) == 2
+        assert systems[1]["content"] == "PROJECT SEED: you are working in X"
+        assert out[-1]["content"] == "What project am I working in?"
+
+    def test_second_leading_system_message_survives_even_under_a_long_history(self):
+        """Same as above, but with enough history to actually exercise the
+        backward-walk + forward-roll machinery, not just the trivial
+        3-message case."""
+        msgs = [{"role": "system", "content": "SYSTEM" * 20}]
+        msgs.append({"role": "system", "content": "PROJECT SEED: real path here"})
+        for i in range(120):
+            msgs.append({"role": "user", "content": f"turn {i}: " + "x" * 250})
+            msgs.append({"role": "assistant", "content": "y" * 150})
+        msgs.append({"role": "user", "content": "final question"})
+        out = dispatch_module._bounded_context(msgs)
+        systems = [m for m in out if m.get("role") == "system"]
+        assert len(systems) == 2
+        assert systems[1]["content"] == "PROJECT SEED: real path here"
+        assert out[-1]["content"] == "final question"
+
 
 class TestLoopBounding:
     """The dispatch loop sends a bounded copy to the LLM, never the whole
@@ -3478,3 +3518,21 @@ class TestSystemPromptScopesToolCallsToTheRequest:
         assert "17." in text
         assert "needs ONE call" in text
         assert "speculative calls" in text
+
+
+class TestSystemPromptLatencyRule:
+    """Real, live-measured problem (feature sweep, 2026-09-07): a plain
+    factual question produced over 500 separate internal reasoning
+    chunks on the local backend before the real answer even started —
+    every one of those is real wall-clock latency the user is waiting
+    through. Rule 18: decide fast on simple, well-scoped requests;
+    reserve real deliberation for genuinely ambiguous/high-stakes ones."""
+
+    def test_system_prompt_has_the_latency_rule(self):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+
+        text = system_message(build_general_registry())
+        assert "18." in text
+        assert "LATENCY" in text
+        assert "decide fast" in text

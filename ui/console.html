@@ -1412,6 +1412,17 @@ document.addEventListener("click", e => {
   }
 });
 function show(name){
+  // world-monitor-expansion: clicking the tab you're ALREADY on is the
+  // one gesture this screen strip has never meant anything before — real
+  // estate reused, not a new control, for "step out of this project"
+  // (the same idea as clicking an IDE's own logo/home icon while already
+  // on its start screen). Checked with the PRE-reassignment `screen`
+  // below, so openProjectChat's own show("HOME") call (made FROM a
+  // different screen, right after opening) never immediately un-opens
+  // what it just opened.
+  if(name === "HOME" && screen === "HOME" && activeProject()){
+    leaveActiveProject();
+  }
   // v8.28: switching screens used to leave the composer's stale text
   // sitting in the shared textarea. A user who clicked in mid-string and
   // typed a fresh, unrelated question got the two interleaved character-by-
@@ -1522,7 +1533,62 @@ const THEMES = {
 // shared across every tab of the same origin. Generated once, reused for
 // every /api/chat and /api/confirm call this tab makes.
 const TAB_ID_KEY = "dm_tab_id_v1";
+// world-monitor-expansion ("make projects open their own chat like Claude
+// Desktop's Projects"): every real /api/chat + /api/confirm call site
+// already reads tabId() for its session key (backlog #7's own per-tab
+// isolation) — an active project OVERRIDES that same key, so opening a
+// project routes the EXISTING chat screen into a real, dedicated,
+// project-scoped ChatSession (webui.py seeds it with the project's real
+// path + context — see _session_gate_lock_for_tab) with zero new UI
+// surface: same textbox, same send button, same message bubbles. Persisted
+// in sessionStorage (not localStorage) for the same reason the plain tab
+// id itself is — genuinely per-BROWSER-TAB, so opening the same project in
+// two tabs never collides. Clearing it (leaveActiveProject) returns this
+// tab to its own ordinary session, exactly as if no project were opened.
+const ACTIVE_PROJECT_KEY = "dm_active_project_v1";
+function activeProject(){
+  try{ const raw = sessionStorage.getItem(ACTIVE_PROJECT_KEY); return raw ? JSON.parse(raw) : null; }
+  catch{ return null; }
+}
+function setActiveProject(project){
+  try{ sessionStorage.setItem(ACTIVE_PROJECT_KEY, JSON.stringify(project)); }catch{ /* private mode: project scoping is session-only, chat still works via the plain tab id */ }
+}
+function syncProjectChrome(){
+  // The composer's placeholder is the one honest, always-visible "where
+  // am I" signal for this — same existing textbox, no new UI element,
+  // same idea as an IDE's own tab/title reflecting the open project.
+  const project = activeProject();
+  const ta = $("ta");
+  if(ta) ta.placeholder = project
+    ? `Ask anything in "${project.name}"…`
+    : "Ask anything — or /all <goal> to put every resource on it";
+  document.title = project ? `DOURMOUSE // ${project.name}` : "DOURMOUSE // CONSOLE";
+}
+function leaveActiveProject(){
+  try{ sessionStorage.removeItem(ACTIVE_PROJECT_KEY); }catch{}
+  syncProjectChrome();
+}
+async function openProjectChat(project){
+  // world-monitor-expansion: the real "Open" action project cards never
+  // had (project_bookkeeper.open_project's own docstring used to say so
+  // explicitly). Routes THIS tab's existing chat screen into a real,
+  // dedicated, project-scoped session instead of building a second chat
+  // surface — see the ACTIVE_PROJECT_KEY block above for why tabId()
+  // already picks this up everywhere it's used.
+  try{
+    const res = await fetch("/api/projects/open", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({path: project.path})});
+    const r = await res.json();
+    if(!res.ok || r.ok===false){ alert("Couldn't open this project — "+(r.error||("HTTP "+res.status))); return; }
+    setActiveProject({tab_id: r.project.tab_id, name: r.project.name || project.path, path: r.project.path});
+    syncProjectChrome();
+    show("HOME");
+    const ta = $("ta"); if(ta) ta.focus();
+  }catch(e){ alert("Couldn't open this project — "+String(e.message||e)); }
+}
 function tabId(){
+  const project = activeProject();
+  if(project && project.tab_id) return project.tab_id;
   try{
     let id = sessionStorage.getItem(TAB_ID_KEY);
     if(!id){
@@ -3439,7 +3505,6 @@ function bookkeeperCard(p){
   const gone = p.exists===false;
   const card=document.createElement("div");
   card.className = "book imported" + (gone ? " gone" : "");
-  card.title = p.path;
   card.innerHTML = `<div class="bookscreen"></div><div class="bookq"></div>
     <div class="bookctx"></div><div class="ipath"></div><div class="istat"></div>
     <div class="bookfoot"><span class="bookwhen"></span><span class="goneflag" hidden>PATH GONE</span>
@@ -3447,6 +3512,11 @@ function bookkeeperCard(p){
   card.querySelector(".bookscreen").textContent = importedSourceLabel(p.sources);
   card.querySelector(".bookq").textContent = p.name || p.path;
   card.querySelector(".bookx").onclick=(e)=>{ e.stopPropagation(); deleteBookkeeperProject(p.path, p.name||p.path); };
+  // world-monitor-expansion: the card itself IS the real "Open" action now
+  // (there was none before this — the whole card was purely informational).
+  card.style.cursor = "pointer";
+  card.title = `${p.path}\n\nClick to open this project's chat.`;
+  card.onclick = () => openProjectChat(p);
   // real per-project context (project_bookkeeper.py's own extractive
   // summary) — the whole reason this shelf moved off the raw scan. Honest
   // empty state when nothing has been captured yet, never a blank card.
@@ -5762,6 +5832,7 @@ else document.documentElement.setAttribute("data-theme","arc");
   // waits on or interferes with it.
   restoreSession();
 })();
+syncProjectChrome();  // a project opened before a reload (same tab) stays visibly active
 ta.focus();
 
 /* v8.7: register the service worker, matching the HUD. The console is the
