@@ -465,6 +465,7 @@ class AttentionQueue:
         self._lock = threading.Lock()
         self._items: list[dict[str, Any]] = []
         self._next_id = 1
+        self._acknowledged_screens: set[str] = set()
 
     def _add(self, kind: str, summary: str, screen: str, detail: str = "") -> None:
         with self._lock:
@@ -529,13 +530,50 @@ class AttentionQueue:
             items = [i for i in items if not i["dismissed"]]
         return list(reversed(items))  # newest first
 
-    def dismiss(self, item_id: int) -> bool:
+    def dismiss(self, item_id: int, acknowledge: bool = False) -> bool:
+        """Mark one item dismissed. ``acknowledge=True`` (v14, user-
+        directed, 2026-09-11 — the still-open half of the Grounded Mode
+        noise problem: the project-seed fix only ever covered ONE
+        specific false-positive pattern) additionally teaches the
+        system, for an ``ungrounded_answer`` item specifically, that
+        THIS screen's zero-tool answers are fine — see
+        acknowledge_grounded_noise's own docstring for the real
+        mechanism this drives. A plain dismiss (acknowledge=False, the
+        default, unchanged from before) only ever clears this one UI
+        card; the exact same pattern fires again next turn."""
         with self._lock:
             for item in self._items:
                 if item["id"] == item_id:
                     item["dismissed"] = True
+                    if acknowledge and item["kind"] == "ungrounded_answer":
+                        self._acknowledge_locked(item["screen"])
                     return True
         return False
+
+    # v14 (user-directed, 2026-09-11): real, live-observed gap — the
+    # project-chat seed's own [GROUNDED MODE EXEMPT] marker fixes ONE
+    # specific pattern (a project meta-question answered from its own
+    # seed), but Grounded Mode has no general way to learn "this screen
+    # genuinely doesn't need a tool for this kind of question" — every
+    # OTHER correct zero-tool answer gets re-flagged every single turn,
+    # forever, with DISMISS only ever clearing that one card. In-memory,
+    # process-lifetime (same tradeoff this whole class already accepts
+    # for its own item list) — a real acknowledgment, not a fabricated
+    # "smart" heuristic guessing when a tool was actually needed.
+    def _acknowledge_locked(self, screen: str) -> None:
+        self._acknowledged_screens.add(screen or "HOME")
+
+    def acknowledge_grounded_noise(self, screen: str) -> None:
+        """Directly teach the system a screen's zero-tool answers are
+        fine, independent of dismissing any specific item — used by
+        /api/attention/acknowledge-screen for a screen with no current
+        attention card to dismiss (e.g. acknowledging ahead of time)."""
+        with self._lock:
+            self._acknowledge_locked(screen)
+
+    def is_grounded_noise_acknowledged(self, screen: str) -> bool:
+        with self._lock:
+            return (screen or "HOME") in self._acknowledged_screens
 
     def clear(self) -> None:
         with self._lock:
@@ -1001,7 +1039,7 @@ def build_link_topology(registry: DispatchRegistry) -> dict[str, Any]:
 
 _SETUP_STATUS_CACHE_ENV = "DOURMOUSE_SETUP_CACHE_TTL"
 _SETUP_STATUS_DEFAULT_TTL = 20.0  # seconds
-_setup_status_cache: dict[str, Any] = {"server_id": None, "at": 0.0, "result": None}
+_setup_status_cache: dict[str, Any] = {"server": None, "at": 0.0, "result": None}
 _setup_status_cache_lock = threading.Lock()
 
 
@@ -1029,25 +1067,40 @@ def build_setup_status(server) -> dict[str, Any]:
     every poll paid the full cold cost again regardless.
 
     Cached here by (server identity, time) — NOT a bare time-only cache:
-    keying on id(server) too means two DIFFERENT server objects (as every
-    test in this suite constructs, e.g. test_atlas_cli.py's own direct
-    call) never share a stale result, while the ONE real long-lived
-    server this endpoint actually serves in production gets real caching
-    across repeated polls. Default TTL 20s (DOURMOUSE_SETUP_CACHE_TTL to
-    override) — the checklist doesn't change meaningfully faster than
-    that in practice.
+    keying on server identity too means two DIFFERENT server objects (as
+    every test in this suite constructs, e.g. test_atlas_cli.py's own
+    direct call) never share a stale result, while the ONE real
+    long-lived server this endpoint actually serves in production gets
+    real caching across repeated polls. Default TTL 20s
+    (DOURMOUSE_SETUP_CACHE_TTL to override) — the checklist doesn't
+    change meaningfully faster than that in practice.
+
+    v14 (found live via this session's own test suite, real bug): keyed
+    on the raw ``id(server)`` integer, this cache slot is vulnerable to
+    CPython's own id-reuse guarantee — id() is only unique among objects
+    ALIVE at the same time, and once a short-lived server (e.g. a test's
+    own throwaway fixture) is garbage collected, a later, completely
+    different server object can be allocated at that exact same address
+    and get served the first one's STALE result, the cache having no way
+    to tell them apart. Reproduced directly: two back-to-back tests each
+    building their own tiny server namespace, the second silently
+    inheriting the first's cached value once the first went out of scope.
+    Fixed by holding a real reference to the server object itself (``is``
+    identity, not a raw address) — the cache slot keeping the OLD server
+    alive is exactly what prevents Python from ever reusing its address
+    for a new one while a cache entry for it could still be live.
     """
     ttl = _setup_status_cache_ttl()
     now = time.monotonic()
     with _setup_status_cache_lock:
         if (
-            _setup_status_cache["server_id"] == id(server)
+            _setup_status_cache["server"] is server
             and (now - _setup_status_cache["at"]) < ttl
         ):
             return _setup_status_cache["result"]
     result = _build_setup_status_uncached(server)
     with _setup_status_cache_lock:
-        _setup_status_cache.update(server_id=id(server), at=now, result=result)
+        _setup_status_cache.update(server=server, at=now, result=result)
     return result
 
 
@@ -2644,7 +2697,11 @@ class _Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 self._send_json({"ok": False, "detail": "id must be an integer"})
             else:
-                ok = self.server.attention.dismiss(item_id)
+                # v14 (user-directed, 2026-09-11): acknowledge=true also
+                # teaches the system this screen's zero-tool answers are
+                # fine — see AttentionQueue.dismiss's own docstring.
+                acknowledge = bool(body.get("acknowledge"))
+                ok = self.server.attention.dismiss(item_id, acknowledge=acknowledge)
                 self._send_json({"ok": ok})
         elif parsed.path == "/api/role":
             self._handle_role()
@@ -3772,6 +3829,27 @@ class _Handler(BaseHTTPRequestHandler):
                 self.server.confirm_resolvers_by_tab[tab_id] = gate.resolve
             else:
                 self.server.confirm_resolver = gate.resolve
+            # v14 (user-directed, 2026-09-11): the still-open half of the
+            # Grounded Mode noise problem — the project-seed's own
+            # [GROUNDED MODE EXEMPT] marker only ever covered ONE
+            # specific pattern; every OTHER correct zero-tool answer on
+            # a screen re-flagged forever with no way to teach the
+            # system otherwise. If the user has explicitly acknowledged
+            # THIS screen (see AttentionQueue.dismiss's own
+            # acknowledge=True path), inject the same real marker fresh
+            # for this turn — same mechanism dispatch.py already trusts
+            # deterministically (Rule 2.8, never an LLM judgment of its
+            # own groundedness), just driven by an explicit human
+            # decision instead of a hardcoded seed. Appended HERE
+            # (before session.ask() runs its own self.messages.append
+            # of the new user turn, as ITS first step) so this lands
+            # right before that new turn once it's added — the same net
+            # position recall_block's own insert(-1, ...) achieves from
+            # inside ask() itself, just reached from the other side of
+            # the call.
+            attention = getattr(self.server, "attention", None)
+            if attention is not None and attention.is_grounded_noise_acknowledged(screen):
+                session.messages.append({"role": "system", "content": "[GROUNDED MODE EXEMPT]"})
             try:
                 report = session.ask(
                     prompt,

@@ -1891,12 +1891,23 @@ function paintAttention(){
   if(!items.length){ box.innerHTML = ""; return; }
   const rows = items.map(it => {
     const label = ATTENTION_LABELS[it.kind] || it.kind.toUpperCase();
+    // v14 (user-directed, 2026-09-11): the still-open half of the
+    // Grounded Mode noise problem — plain DISMISS only ever clears
+    // this one card; the exact same pattern fires again next turn on
+    // this screen. ACKNOWLEDGE (ungrounded_answer items only — never
+    // meaningful for a real tool error or timeout) also teaches the
+    // system this screen's zero-tool answers are fine going forward —
+    // see AttentionQueue.dismiss's own acknowledge=True docstring.
+    const ackBtn = it.kind === "ungrounded_answer"
+      ? `<button class="mini attnack" type="button" data-id="${it.id}" title="Stop flagging zero-tool answers on this screen">ACKNOWLEDGE</button>`
+      : "";
     return `<div class="attnrow" data-id="${it.id}">
       <span class="attnkind">${esc(label)}</span>
       <span class="attnscreen">${esc(it.screen)}</span>
       <span class="attnsum"></span>
       <span class="attnat">${esc((it.at||"").slice(11,19))}</span>
       <button class="mini attndismiss" type="button" data-id="${it.id}">DISMISS</button>
+      ${ackBtn}
       <button class="mini attngo" type="button" data-screen="${esc(it.screen)}">GO</button>
     </div>`;
   }).join("");
@@ -1918,6 +1929,21 @@ function paintAttention(){
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({id}),
+        });
+      } catch {}
+      sys.attention = {items: items.filter(it => it.id !== id), count: items.length - 1};
+      paintAttention();
+    };
+  });
+  box.querySelectorAll(".attnack").forEach(btn => {
+    btn.onclick = async () => {
+      const id = parseInt(btn.dataset.id, 10);
+      btn.disabled = true; btn.textContent = "…";
+      try {
+        await fetch("/api/attention/dismiss", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({id, acknowledge: true}),
         });
       } catch {}
       sys.attention = {items: items.filter(it => it.id !== id), count: items.length - 1};

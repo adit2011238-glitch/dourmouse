@@ -141,6 +141,55 @@ class TestAttentionQueueUnit:
         q = AttentionQueue()
         assert q.dismiss(999) is False
 
+    def test_plain_dismiss_never_acknowledges(self):
+        """v14 (user-directed, 2026-09-11): the default, unchanged
+        behavior — dismiss(acknowledge=False, the default) only ever
+        clears the one UI card, never teaches the system anything."""
+        q = AttentionQueue()
+        q.on_event(
+            {"type": "done", "final_text": "[DOURMOUSE: Grounded Mode was on ...]"},
+            screen="RESEARCH",
+        )
+        item_id = q.snapshot()[0]["id"]
+        assert q.dismiss(item_id) is True
+        assert q.is_grounded_noise_acknowledged("RESEARCH") is False
+
+    def test_acknowledge_true_on_an_ungrounded_answer_teaches_the_screen(self):
+        q = AttentionQueue()
+        q.on_event(
+            {"type": "done", "final_text": "[DOURMOUSE: Grounded Mode was on ...]"},
+            screen="RESEARCH",
+        )
+        item_id = q.snapshot()[0]["id"]
+        assert q.is_grounded_noise_acknowledged("RESEARCH") is False
+        assert q.dismiss(item_id, acknowledge=True) is True
+        assert q.is_grounded_noise_acknowledged("RESEARCH") is True
+        # A DIFFERENT screen must never inherit this — it's per-screen,
+        # never a global switch.
+        assert q.is_grounded_noise_acknowledged("CODE") is False
+
+    def test_acknowledge_true_on_a_non_ungrounded_item_is_a_noop(self):
+        """acknowledge=True must only ever teach the system something
+        for an ungrounded_answer item — dismissing, say, a tool_error
+        with acknowledge=True must never silently start suppressing
+        Grounded Mode on that screen too."""
+        q = AttentionQueue()
+        q.on_event({"type": "error", "message": "boom"}, screen="RESEARCH")
+        item_id = q.snapshot()[0]["id"]
+        assert q.dismiss(item_id, acknowledge=True) is True
+        assert q.is_grounded_noise_acknowledged("RESEARCH") is False
+
+    def test_acknowledge_grounded_noise_directly(self):
+        q = AttentionQueue()
+        assert q.is_grounded_noise_acknowledged("VOICE") is False
+        q.acknowledge_grounded_noise("VOICE")
+        assert q.is_grounded_noise_acknowledged("VOICE") is True
+
+    def test_empty_screen_normalizes_to_home(self):
+        q = AttentionQueue()
+        q.acknowledge_grounded_noise("")
+        assert q.is_grounded_noise_acknowledged("HOME") is True
+
     def test_none_text_field_handled_without_raising(self):
         q = AttentionQueue()
         q.on_event({"type": "tool_result", "name": "x", "text": None}, screen="HOME")
@@ -264,3 +313,62 @@ class TestAttentionEndpointsOverRealHttp:
         assert status == 200
         assert data["ok"] is False
         assert "integer" in data["detail"]
+
+    def test_acknowledging_an_ungrounded_answer_stops_the_next_turn_from_reflagging(
+        self, server, monkeypatch
+    ):
+        """v14 (user-directed, 2026-09-11): the real end-to-end proof —
+        the still-open half of the Grounded Mode noise problem. Turn 1
+        (zero tools, Grounded Mode on) gets flagged as usual. Dismissing
+        that card with acknowledge=true, THEN a second, otherwise
+        identical zero-tool turn on the SAME screen must come back
+        clean — the exact scenario DISMISS alone could never fix."""
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        srv, port = server
+
+        def _ask_and_wait(prompt: str) -> None:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            conn.request(
+                "POST", "/api/chat",
+                body=json.dumps({"prompt": prompt, "focus_agent": "broken_agent", "screen": "RESEARCH"}),
+                headers={"Content-Type": "application/json"},
+            )
+            resp = conn.getresponse()
+            while resp.readline():
+                pass
+            conn.close()
+
+        # Turn 1: zero-tool answer, real tools were offered -> nudged
+        # once, then flagged on the budget-spent follow-up.
+        srv.session.client = FakeClient(
+            [
+                _FakeResponse(_FakeMessage(content="first try, no tool")),
+                _FakeResponse(_FakeMessage(content="second try, still no tool")),
+            ]
+        )
+        _ask_and_wait("what's the capital of France?")
+
+        status, data = _get(port, "/api/attention")
+        ungrounded = [i for i in data["items"] if i["kind"] == "ungrounded_answer"]
+        assert len(ungrounded) == 1, "turn 1 must be flagged, same as before this feature"
+
+        status, dismiss_result = _post(
+            port, "/api/attention/dismiss", {"id": ungrounded[0]["id"], "acknowledge": True}
+        )
+        assert dismiss_result["ok"] is True
+
+        # Turn 2: SAME real shape (zero tools, tools were offered) on
+        # the SAME screen — must come back clean this time.
+        srv.session.client = FakeClient(
+            [
+                _FakeResponse(_FakeMessage(content="a plain, correct, zero-tool answer")),
+            ]
+        )
+        _ask_and_wait("what's the capital of Germany?")
+
+        status, data = _get(port, "/api/attention")
+        new_ungrounded = [
+            i for i in data["items"]
+            if i["kind"] == "ungrounded_answer" and i["id"] not in {ungrounded[0]["id"]}
+        ]
+        assert new_ungrounded == [], "the acknowledged screen must not be re-flagged"

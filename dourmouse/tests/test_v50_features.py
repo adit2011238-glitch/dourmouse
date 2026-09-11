@@ -629,6 +629,51 @@ class TestSetupStatusCache:
         monkeypatch.setenv("DOURMOUSE_SETUP_CACHE_TTL", "not-a-number")
         assert webui_module._setup_status_cache_ttl() == webui_module._SETUP_STATUS_DEFAULT_TTL
 
+    def test_a_garbage_collected_server_never_leaks_its_cache_to_a_reused_address(
+        self, monkeypatch
+    ):
+        """v14, real bug found live via this exact test suite (see
+        build_setup_status's own docstring): the cache used to key on
+        the raw id(server) integer, which CPython is free to reuse for a
+        brand-new object the instant the old one is garbage collected —
+        a short-lived server going out of scope could hand its stale
+        cached result to a completely unrelated LATER server that
+        happens to land at the same address. Forces the exact scenario
+        deterministically (del + gc.collect(), rather than hoping
+        allocation timing reproduces it) so this can never silently
+        regress back to an id()-keyed cache."""
+        import gc
+
+        from dourmouse import webui as webui_module
+
+        calls = []
+        monkeypatch.setattr(
+            webui_module, "_build_setup_status_uncached",
+            lambda server: calls.append(server) or {"items": {"n": len(calls)}},
+        )
+
+        first = self._fake_server()
+        first_result = webui_module.build_setup_status(first)
+        assert first_result == {"items": {"n": 1}}
+        first_id = id(first)
+        del first
+        gc.collect()
+
+        second = self._fake_server()
+        if id(second) != first_id:
+            # This platform/run's allocator didn't reuse the address —
+            # the real property under test (identity, not address, is
+            # what the cache keys on) still holds regardless; nothing
+            # further to force.
+            second_result = webui_module.build_setup_status(second)
+            assert second_result == {"items": {"n": 2}}
+            return
+        second_result = webui_module.build_setup_status(second)
+        assert second_result == {"items": {"n": 2}}, (
+            "the reused-address object got the FIRST server's stale "
+            "cached result instead of a real, fresh one"
+        )
+
 
 # --------------------------------------------------------------------------- #
 # A5 — Codex backend
