@@ -192,8 +192,12 @@ class TestTool:
         assert "kind" in text
 
     def test_tool_registered_on_report_agents(self):
+        # v14 (user-directed, 2026-09-08): "atlas" removed — unplugged
+        # from the live roster (see general_roster.py's own comment on
+        # the same date). The extension loop there was already updated
+        # to skip it; this list must agree.
         reg = build_general_registry()
-        for name in ("research_info", "dev_coding", "rnd", "atlas"):
+        for name in ("research_info", "dev_coding", "rnd"):
             sub = reg.get_subagent(name)
             assert sub is not None
             names = {t.name for t in sub.tools}

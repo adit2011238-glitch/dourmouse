@@ -168,15 +168,20 @@ class TestAppBoot:
         md_values = "\n".join(str(m.value) for m in app.markdown)
         assert "PIPELINE ONLINE" in md_values or "NOT CONFIGURED" in md_values
 
-    def test_ui_agent_registered(self):
+    def test_ui_tool_specs_still_build_standalone(self):
+        """v14 (user-directed, 2026-09-08): "atlas_ui" was unplugged from
+        the live roster (see general_roster.py's own comment on the same
+        date) — this proves the module code itself is untouched: calling
+        build_atlas_ui_tool_specs() directly (never through the live
+        registry) still produces its own real tool."""
+        from dourmouse.atlas.atlas_ui_ops import build_atlas_ui_tool_specs
+
+        assert {t.name for t in build_atlas_ui_tool_specs()} == {"atlas_terminal_status"}
+
+    def test_atlas_ui_is_not_in_the_live_registry(self):
+        """The other half of the same fix: "atlas_ui" must NOT be
+        reachable from the live roster any more, proving the unplugging
+        worked."""
         registry = build_general_registry()
-        assert "atlas_ui" in registry.subagent_names
-        sub = registry.get_subagent("atlas_ui")
-        # query_shared_memory (shared_rag.py) rides every non-orchestrator
-        # subagent — see build_general_registry's own comment. v13.7:
-        # query_desktop_vault (desktop_rag.py) rides alongside it now too,
-        # extended onto every real agent so a "check the RAG database"
-        # request never mis-routes to an agent that can't answer it.
-        assert {t.name for t in sub.tools} == {
-            "atlas_terminal_status", "query_shared_memory", "query_desktop_vault",
-        }
+        assert "atlas_ui" not in registry.subagent_names
+        assert registry.get_subagent("atlas_ui") is None

@@ -47,6 +47,7 @@ acceptable trade against "the whole server dies."
 
 from __future__ import annotations
 
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -118,22 +119,122 @@ def page_text(path: str | Path, page_index: int) -> str:
         return f"PDF READ FAILED: {type(exc).__name__}: {exc}"
 
 
-def all_text(path: str | Path) -> str:
+# v14 (user-directed, 2026-09-08): real fix for backlog #9's actual most
+# common real use case ("read my textbook") -- the study folder
+# (~/Documents/MYP data folder) is mostly scanned-image PDFs with no
+# embedded text layer, which PDFium's own text extraction (page_text
+# above) correctly and honestly returns empty for. Bounded to this many
+# pages so a real 300-page scanned book doesn't turn one read request
+# into minutes of rendering + OCR -- a real, deliberate trade-off
+# (partial-but-real beats a timeout), never silently hidden: see
+# ocr_page_text's own real page count in the [REAL OCR applied to N
+# page(s)...] marker all_text() emits below.
+_OCR_MAX_PAGES_DEFAULT = 20
+
+
+def _run_tesseract(png_bytes: bytes) -> str:
+    """Real OCR over one rendered page PNG, via the tesseract CLI
+    (stdin/stdout pipe, zero new Python dependencies -- tesseract itself
+    is a real system binary, honestly NOT CONFIGURED if it's missing).
+    """
+    try:
+        proc = subprocess.run(
+            ["tesseract", "stdin", "stdout"],
+            input=png_bytes,
+            capture_output=True,
+            timeout=60,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "NOT CONFIGURED: OCR needs the 'tesseract' command-line tool "
+            "(macOS: brew install tesseract)."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("tesseract timed out after 60s") from exc
+    if proc.returncode != 0:
+        err = (proc.stderr or b"").decode(errors="replace").strip()
+        raise RuntimeError(f"tesseract error: {err or 'unknown failure'}")
+    return proc.stdout.decode(errors="replace")
+
+
+def ocr_page_text(path: str | Path, page_index: int, scale: float = 2.0) -> str:
+    """Real OCR text for ONE page: render it to PNG (render_page_png,
+    already real and PDFium-lock-safe), then pipe that through tesseract.
+    Honest error string on failure, never a crash or a fabricated
+    result -- same discipline as page_text above."""
+    try:
+        png_bytes = render_page_png(path, page_index, scale=scale)
+    except RuntimeError as exc:
+        return f"OCR FAILED: {exc}"
+    try:
+        return _run_tesseract(png_bytes)
+    except RuntimeError as exc:
+        return f"OCR FAILED: {exc}"
+
+
+def all_text(
+    path: str | Path,
+    ocr_fallback: bool = False,
+    ocr_max_pages: int = _OCR_MAX_PAGES_DEFAULT,
+) -> str:
     """Real text of every page, joined with page markers. Mirrors
     dourmouse/extract.py's extract_pdf_text output shape (page markers,
     honest failure strings) so callers already handling that format work
-    unchanged against this one too."""
+    unchanged against this one too.
+
+    Real bug fixed here (2026-09-08): the per-page marker
+    ("--- page N ---") was unconditionally appended even for a page with
+    NO real extracted text, so the joined result was always non-empty --
+    the "no extractable text" honest message below could never actually
+    fire, no matter how blank the real content was. real_text now tracks
+    the genuine extracted text separately from the display markers.
+
+    ocr_fallback=True: when NO page has any real text (a scanned-image
+    PDF with no embedded text layer), retries up to ocr_max_pages pages
+    through real tesseract OCR (ocr_page_text) instead of giving up --
+    see that function's own docstring and _OCR_MAX_PAGES_DEFAULT's
+    comment on the page-count trade-off. Off by default: OCR is real
+    work (rendering + tesseract per page), not something every caller
+    should silently pay for.
+    """
     info = pdf_info(path)
     if not info.get("ok"):
         return f"PDF READ FAILED: {info.get('error', 'unknown error')}"
+    page_count = info["page_count"]
     pages = []
-    for i in range(info["page_count"]):
+    real_text = []
+    for i in range(page_count):
         text = page_text(path, i)
         if text.startswith("PDF READ FAILED"):
             return text
         pages.append(f"--- page {i + 1} ---\n{text}")
-    joined = "\n\n".join(pages)
-    return joined if joined.strip() else "PDF READ: no extractable text (scanned image PDFs need OCR, which is not included)."
+        if text.strip():
+            real_text.append(text)
+    if real_text:
+        return "\n\n".join(pages)
+    if not ocr_fallback:
+        return "PDF READ: no extractable text (scanned image PDFs need OCR, which is not included)."
+    ocr_pages = []
+    ocr_real_text = []
+    ocr_errors = []
+    limit = min(page_count, max(1, ocr_max_pages))
+    for i in range(limit):
+        text = ocr_page_text(path, i)
+        if text.startswith("OCR FAILED"):
+            ocr_errors.append(text)
+            ocr_pages.append(f"--- page {i + 1} ---\n{text}")
+            continue
+        ocr_pages.append(f"--- page {i + 1} ---\n{text}")
+        if text.strip():
+            ocr_real_text.append(text)
+    if not ocr_real_text:
+        # Surface the REAL error (e.g. tesseract not installed) rather
+        # than a generic "blank or corrupted scan" guess -- Rule 2.2.
+        if ocr_errors:
+            return f"PDF READ FAILED: OCR fallback found no real text. {ocr_errors[0]}"
+        return "PDF READ: no extractable text even after OCR (scanned pages may be blank or badly corrupted)."
+    header = f"[REAL OCR applied to {limit} page(s) with no embedded text layer]"
+    return header + "\n\n" + "\n\n".join(ocr_pages)
 
 
 def render_page_png(path: str | Path, page_index: int, scale: float = 2.0) -> bytes:

@@ -159,6 +159,103 @@ print("ALL_OK")
         assert "ALL_OK" in result.stdout
 
 
+class TestOcrPageText:
+    """v14 (user-directed, 2026-09-08): real, unmocked tesseract — this
+    machine has it installed (see pdf_reader._run_tesseract's own NOT
+    CONFIGURED path for what happens when it isn't). Uses the same
+    real_pdf fixture: it has a real embedded text layer, but OCR reads
+    the RENDERED PIXELS regardless of that layer's presence, so this
+    proves the real render -> tesseract pipeline actually recognizes
+    real text, not just that it runs without crashing."""
+
+    def test_real_ocr_recognizes_real_text(self, real_pdf):
+        pytest.importorskip("shutil").which("tesseract") or pytest.skip("tesseract not installed")
+        text = pdf_reader.ocr_page_text(real_pdf, 0)
+        assert not text.startswith("OCR FAILED")
+        assert "Hello PDF" in text or "Hello" in text
+
+    def test_missing_file_is_honest(self, tmp_path):
+        text = pdf_reader.ocr_page_text(tmp_path / "nope.pdf", 0)
+        assert text.startswith("OCR FAILED")
+
+    def test_out_of_range_page_is_honest(self, real_pdf):
+        text = pdf_reader.ocr_page_text(real_pdf, 99)
+        assert text.startswith("OCR FAILED")
+        assert "out of range" in text
+
+    def test_missing_tesseract_reports_not_configured(self, real_pdf, monkeypatch):
+        def fake_run(*a, **k):
+            raise FileNotFoundError("no such file: tesseract")
+
+        monkeypatch.setattr(pdf_reader.subprocess, "run", fake_run)
+        text = pdf_reader.ocr_page_text(real_pdf, 0)
+        assert text.startswith("OCR FAILED")
+        assert "NOT CONFIGURED" in text
+
+    def test_tesseract_timeout_is_honest(self, real_pdf, monkeypatch):
+        import subprocess as _subprocess
+
+        def fake_run(*a, **k):
+            raise _subprocess.TimeoutExpired(cmd="tesseract", timeout=60)
+
+        monkeypatch.setattr(pdf_reader.subprocess, "run", fake_run)
+        text = pdf_reader.ocr_page_text(real_pdf, 0)
+        assert text.startswith("OCR FAILED")
+        assert "timed out" in text
+
+
+class TestAllTextOcrFallback:
+    """v14 (user-directed, 2026-09-08): real gap found this session —
+    the study folder's own real content (~/Documents/MYP data folder)
+    is mostly scanned-image textbooks with no embedded text layer, so
+    "read my textbook" always hit the honest-but-useless "needs OCR,
+    which is not included" message. Monkeypatches ocr_page_text
+    directly (never touches real tesseract here) to exercise the
+    all_text() branching deterministically."""
+
+    def _blank_pdf(self, tmp_path) -> Path:
+        # A real, valid PDF with an EMPTY content stream — a genuinely
+        # blank page, exactly what a scanned-image PDF with no text
+        # layer looks like to PDFium's own text extraction.
+        p = tmp_path / "blank.pdf"
+        _write_minimal_pdf(p, "")
+        return p
+
+    def test_ocr_fallback_off_by_default_reports_the_old_honest_message(self, tmp_path):
+        blank = self._blank_pdf(tmp_path)
+        text = pdf_reader.all_text(blank)
+        assert "need OCR" in text
+
+    def test_ocr_fallback_on_uses_real_ocr_when_no_text_layer_exists(self, tmp_path, monkeypatch):
+        blank = self._blank_pdf(tmp_path)
+        monkeypatch.setattr(pdf_reader, "ocr_page_text", lambda path, i, scale=2.0: "OCR recovered text")
+        text = pdf_reader.all_text(blank, ocr_fallback=True)
+        assert "REAL OCR applied" in text
+        assert "OCR recovered text" in text
+
+    def test_ocr_fallback_never_runs_when_a_real_text_layer_exists(self, real_pdf, monkeypatch):
+        """A page WITH real extractable text must never even attempt
+        OCR — real_pdf's own text ("Hello PDF") should short-circuit
+        before ocr_page_text is ever called."""
+        called = []
+        monkeypatch.setattr(
+            pdf_reader, "ocr_page_text", lambda path, i, scale=2.0: called.append(i) or "x"
+        )
+        text = pdf_reader.all_text(real_pdf, ocr_fallback=True)
+        assert called == []
+        assert "Hello PDF" in text
+
+    def test_ocr_fallback_surfaces_the_real_error_when_ocr_itself_fails(self, tmp_path, monkeypatch):
+        blank = self._blank_pdf(tmp_path)
+        monkeypatch.setattr(
+            pdf_reader, "ocr_page_text",
+            lambda path, i, scale=2.0: "OCR FAILED: NOT CONFIGURED: tesseract missing",
+        )
+        text = pdf_reader.all_text(blank, ocr_fallback=True)
+        assert text.startswith("PDF READ FAILED")
+        assert "NOT CONFIGURED" in text
+
+
 class TestRenderPagePng:
     def test_real_png_bytes_are_produced(self, real_pdf):
         png = pdf_reader.render_page_png(real_pdf, 0)

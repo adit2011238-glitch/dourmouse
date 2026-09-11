@@ -1776,6 +1776,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"enabled": grounded_mode_enabled()})
             except Exception as exc:  # noqa: BLE001 - a settings read must never 500
                 self._send_json({"enabled": False, "error": str(exc)[:200]})
+        elif path == "/api/settings/app-control-dry-run":
+            # v14 (user-directed, 2026-09-08): backend half of the App
+            # Control Dry Run toggle — off by default, same real
+            # confirmation-still-required-either-way pattern as Grounded
+            # Mode above. See config.app_control_dry_run_enabled's own
+            # docstring.
+            try:
+                from dourmouse.config import app_control_dry_run_enabled
+
+                self._send_json({"enabled": app_control_dry_run_enabled()})
+            except Exception as exc:  # noqa: BLE001 - a settings read must never 500
+                self._send_json({"enabled": False, "error": str(exc)[:200]})
         elif path == "/api/settings/claude-front-mode":
             # backend half of the Claude-front-mode toggle — ON by
             # default (the user's own explicit ask), see
@@ -2647,6 +2659,10 @@ class _Handler(BaseHTTPRequestHandler):
             # config.save_grounded_mode_setting). Same post-first-run
             # settings-change auth posture as the orchestrator-model POST.
             self._handle_grounded_mode_post()
+        elif parsed.path == "/api/settings/app-control-dry-run":
+            # v14 (user-directed, 2026-09-08): persists the App Control
+            # Dry Run toggle (see config.save_app_control_dry_run_setting).
+            self._handle_app_control_dry_run_post()
         elif parsed.path == "/api/settings/claude-front-mode":
             # persists the Claude-front-mode toggle (see
             # config.save_claude_front_mode_setting). Same post-first-run
@@ -4714,6 +4730,15 @@ class _Handler(BaseHTTPRequestHandler):
         result = cfg_mod.save_grounded_mode_setting(enabled)
         self._send_json(result)
 
+    def _handle_app_control_dry_run_post(self) -> None:
+        """POST /api/settings/app-control-dry-run. Body: {"enabled": bool}."""
+        from dourmouse import config as cfg_mod
+
+        body = self._read_json_body()
+        enabled = bool(body.get("enabled"))
+        result = cfg_mod.save_app_control_dry_run_setting(enabled)
+        self._send_json(result)
+
     def _handle_claude_front_mode_post(self) -> None:
         """POST /api/settings/claude-front-mode. Body: {"enabled": bool}."""
         from dourmouse import config as cfg_mod
@@ -4760,6 +4785,20 @@ class _Handler(BaseHTTPRequestHandler):
         }
         if count_error is not None:
             payload["count_error"] = count_error
+        # v14 (user-directed, 2026-09-08): when the store is a
+        # LocalFallbackMemoryStore, count() above just genuinely
+        # exercised the remote (or fell back), so its own honest
+        # last_used_local_fallback/last_remote_error are accurate for
+        # THIS request -- never presenting local-fallback results as if
+        # they came from the shared remote store (see that class's own
+        # docstring for why this signal exists at all).
+        from dourmouse.memory_store import LocalFallbackMemoryStore
+
+        if isinstance(store, LocalFallbackMemoryStore):
+            payload["store_kind"] = "local_fallback" if store.last_used_local_fallback else "remote"
+            payload["remote_reachable"] = not store.last_used_local_fallback
+            if store.last_remote_error:
+                payload["remote_error"] = store.last_remote_error
         self._send_json(payload)
 
     def _handle_memory_remote_search(self) -> None:

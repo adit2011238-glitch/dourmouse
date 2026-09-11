@@ -70,7 +70,15 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # Money. Positions, balances and brokerage credentials.
     "markets", "forex", "mt5", "t212",
     # The user's own private repositories and research pipeline.
-    "dev_coding", "atlas", "atlas_cmd", "atlas_ui",
+    # v14 (user-directed, 2026-09-08): "atlas", "atlas_cmd", "atlas_ui"
+    # removed -- the ATLAS subagent was unplugged from the live roster
+    # entirely (see general_roster.py's own comment on the same date),
+    # so pinning a name that no longer resolves to anything is dead
+    # weight. Any name NOT listed here defaults to LOCAL routing anyway
+    # (see this module's own default-safe fallback below), so removing
+    # a name only ever widens what MAY be routed to cloud for agents
+    # that still exist -- it never silently exposes a real one.
+    "dev_coding",
     # Delegating to a coding CLI from inside a delegated turn is a recursion
     # risk, so these never route anywhere but local, and in practice the tool
     # below refuses them outright.

@@ -404,6 +404,67 @@ class TestGroundedModeSetting:
         assert grounded_mode_enabled() is False
 
 
+class TestAppControlDryRunSetting:
+    """v14 (user-directed, 2026-09-08): "Consider adding a 'dry run'
+    mode where it shows what would be clicked without actually
+    clicking." Persisted (not just env), OFF-by-default toggle — same
+    exact shape as TestGroundedModeSetting above. See
+    config.app_control_dry_run_enabled / save_app_control_dry_run_setting."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_off_by_default(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import app_control_dry_run_enabled
+
+        assert app_control_dry_run_enabled() is False
+
+    def test_save_true_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import app_control_dry_run_enabled, save_app_control_dry_run_setting
+
+        result = save_app_control_dry_run_setting(True)
+        assert result["ok"] is True
+        assert app_control_dry_run_enabled() is True
+
+    def test_save_false_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import app_control_dry_run_enabled, save_app_control_dry_run_setting
+
+        save_app_control_dry_run_setting(True)
+        save_app_control_dry_run_setting(False)
+        assert app_control_dry_run_enabled() is False
+
+    def test_save_merges_with_existing_file(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_app_control_dry_run_setting, user_env_path
+
+        path = user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("NVIDIA_API_KEY=nvapi-existing\n", encoding="utf-8")
+        save_app_control_dry_run_setting(True)
+        contents = path.read_text(encoding="utf-8")
+        assert "NVIDIA_API_KEY=nvapi-existing" in contents
+        assert "DOURMOUSE_APP_CONTROL_DRY_RUN=1" in contents
+
+    def test_key_is_distinct_from_grounded_mode(self):
+        """Real, easy mistake this guards against: copy-pasting
+        GROUNDED_MODE_SETTING_KEY's pattern without changing the env var
+        name would silently make the two toggles control each other."""
+        from dourmouse.config import (
+            APP_CONTROL_DRY_RUN_SETTING_KEY,
+            GROUNDED_MODE_SETTING_KEY,
+        )
+
+        assert APP_CONTROL_DRY_RUN_SETTING_KEY != GROUNDED_MODE_SETTING_KEY
+
+
 # --------------------------------------------------------------------------- #
 # v5.10 — OmniRoute free-tier gateway backend
 # --------------------------------------------------------------------------- #

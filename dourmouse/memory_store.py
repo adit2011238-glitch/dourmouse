@@ -30,7 +30,7 @@ import sqlite3
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from dourmouse.rag_common import content_hash as _content_hash
 
@@ -661,3 +661,118 @@ class RemoteMemoryStore:
 
     def close(self) -> None:
         pass  # stateless HTTP client — nothing to close
+
+
+class LocalFallbackMemoryStore:
+    """A RemoteMemoryStore that keeps working when the remote is down.
+
+    v14 (user-directed, 2026-09-08): RemoteMemoryStore's own design is
+    correct for the common case (2026-08-31's "move the actual rag to
+    [the desktop]") but has a real, live-observed gap: DOURMOUSE_MEMORY_
+    REMOTE_URL being set says "the shared store is on that other
+    machine" -- it says nothing about whether that machine is actually
+    reachable RIGHT NOW. When it isn't (asleep, off the LAN, network
+    down), every memory operation on THIS machine raised
+    RemoteMemoryStoreUnavailable and the whole memory subagent went
+    NOT CONFIGURED, even though this machine has a perfectly good local
+    MemoryStore it could fall back to -- exactly the local behavior it
+    already had before DOURMOUSE_MEMORY_REMOTE_URL was ever set.
+
+    Real design choices, not incidental:
+    - The local store is opened LAZILY (via ``local_factory``, not an
+      already-open MemoryStore) -- a healthy remote never touches disk
+      here at all, so a single-machine setup with the remote reachable
+      pays zero extra cost.
+    - A write made during a fallback is tagged with a "[PENDING SYNC] "
+      title prefix -- an honest, visible signal (not a silent success)
+      that this fact lives ONLY on this machine until something
+      reconciles it with the remote; nothing here invents a real sync
+      mechanism that does not exist.
+    - ``last_used_local_fallback`` / ``last_remote_error`` are read by
+      webui.py's memory API payload so the UI can say "LOCAL FALLBACK"
+      truthfully instead of silently presenting local results as if
+      they were the shared remote store's own.
+    """
+
+    def __init__(
+        self,
+        remote: "RemoteMemoryStore",
+        local_factory: Callable[[], "MemoryStore"],
+    ) -> None:
+        self._remote = remote
+        self._local_factory = local_factory
+        self._local: MemoryStore | None = None
+        self.last_used_local_fallback = False
+        self.last_remote_error: str | None = None
+
+    def _local_store(self) -> "MemoryStore":
+        if self._local is None:
+            self._local = self._local_factory()
+        return self._local
+
+    def _note_fallback(self, exc: Exception) -> None:
+        self.last_used_local_fallback = True
+        self.last_remote_error = str(exc)
+
+    def _note_remote_ok(self) -> None:
+        self.last_used_local_fallback = False
+        self.last_remote_error = None
+
+    def remember(self, source: str, title: str, body: str) -> str:
+        try:
+            result = self._remote.remember(source, title, body)
+            self._note_remote_ok()
+            return result
+        except RemoteMemoryStoreUnavailable as exc:
+            self._note_fallback(exc)
+            fallback_title = title if title.startswith("[PENDING SYNC] ") else f"[PENDING SYNC] {title}"
+            return self._local_store().remember(source, fallback_title, body)
+
+    def search(
+        self, query: str, limit: int = 10, source: str | None = None
+    ) -> list[dict[str, Any]]:
+        try:
+            result = self._remote.search(query, limit=limit, source=source)
+            self._note_remote_ok()
+            return result
+        except RemoteMemoryStoreUnavailable as exc:
+            self._note_fallback(exc)
+            return self._local_store().search(query, limit=limit, source=source)
+
+    def count(self, source: str | None = None) -> int:
+        try:
+            result = self._remote.count(source=source)
+            self._note_remote_ok()
+            return result
+        except (RemoteMemoryStoreUnavailable, NotImplementedError) as exc:
+            self._note_fallback(exc)
+            return self._local_store().count(source=source)
+
+    def get(self, source: str, title: str) -> dict[str, Any] | None:
+        try:
+            result = self._remote.get(source, title)
+            self._note_remote_ok()
+            return result
+        except RemoteMemoryStoreUnavailable as exc:
+            self._note_fallback(exc)
+            return self._local_store().get(source, title)
+
+    def all_facts(self) -> list[dict[str, Any]]:
+        # RemoteMemoryStore.all_facts() always raises unsupported (a full
+        # table dump is deliberately not exposed over the remote HTTP
+        # API — see that method's own comment) — so this is always a
+        # fallback in practice, not conditionally one. Matches
+        # MemoryStore.all_facts()'s own real signature (no `source`
+        # param), not RemoteMemoryStore's.
+        try:
+            self._remote.all_facts()
+            self._note_remote_ok()
+            return []  # unreachable: the line above always raises
+        except RemoteMemoryStoreUnavailable as exc:
+            self._note_fallback(exc)
+            return self._local_store().all_facts()
+
+    def close(self) -> None:
+        self._remote.close()
+        if self._local is not None:
+            self._local.close()

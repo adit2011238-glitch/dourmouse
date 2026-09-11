@@ -360,12 +360,22 @@ class TestBuildSpecs:
             "atlas_literature_cycle",
         } <= names
 
-    def test_atlas_subagent_carries_cli_tools(self):
-        registry = build_general_registry()
-        sub = registry.get_subagent("atlas")
-        assert sub is not None
-        names = {t.name for t in sub.tools}
+    def test_atlas_tool_specs_still_carry_cli_tools_standalone(self):
+        """v14 (user-directed, 2026-09-08): "atlas" was unplugged from
+        the live roster (see general_roster.py's own comment on the same
+        date) — this proves the module code itself is untouched: calling
+        build_atlas_tool_specs() directly (never through the live
+        registry) still produces every CLI-bridge tool it always did."""
+        from dourmouse.atlas.atlas_ops import build_atlas_tool_specs
+
+        names = {t.name for t in build_atlas_tool_specs()}
         assert {"atlas_fx_research", "atlas_fx_daily", "atlas_read_report", "atlas_health"} <= names
+
+    def test_atlas_is_not_in_the_live_registry(self):
+        """The other half of the same fix: "atlas" must NOT be reachable
+        from the live roster any more, proving the unplugging worked."""
+        registry = build_general_registry()
+        assert registry.get_subagent("atlas") is None
 
 
 class TestRunManager:

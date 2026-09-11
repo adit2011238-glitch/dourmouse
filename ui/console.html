@@ -1811,6 +1811,25 @@ function paintAgents(){
     box.appendChild(el);
   });
 }
+// v14 (user-directed, 2026-09-08): an honest RAG-store indicator for the
+// dashboard. Before this, LocalFallbackMemoryStore's real
+// store_kind/remote_reachable/remote_error fields (webui.py's own
+// /api/memory payload) were computed but never SHOWN anywhere — a user
+// on the local-fallback path had no way to tell their facts were being
+// written with a "[PENDING SYNC]" tag rather than reaching the real
+// shared remote store. Renders nothing (not even the tile) when no
+// remote is configured at all — a single-machine setup has nothing
+// meaningful to report here, matching the rest of this dashboard's own
+// "don't grow a permanent empty panel" convention.
+function memoryStoreMetric(m){
+  if (m.store_kind == null) return "";
+  const live = m.store_kind === "remote";
+  const label = live ? "REMOTE · LIVE" : "LOCAL FALLBACK";
+  const color = live ? "" : ' style="color:var(--yellow,#e0a030)"';
+  const title = m.remote_error ? ` title="${esc(m.remote_error)}"` : "";
+  return `<div class="metric"${title}><span class="k">RAG STORE</span><span class="v"${color}>${label}</span></div>`;
+}
+
 function paintHome(){
   const s = sys.server||{}, m = sys.memory||{}, rost=(sys.roster&&sys.roster.subagents)||[];
   const c = sys.conns||{}; const okN = Object.values(c).filter(x=>x&&x.ok).length;
@@ -1819,6 +1838,7 @@ function paintHome(){
       ${s.online?`COMPUTE NODE ${esc(s.node)} ONLINE AT ${s.latency_ms}MS.`:"COMPUTE NODE OFFLINE — RUNNING ON THE CONFIGURED BACKEND."}</p>
     <div class="metrics">
       <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"—"} FACTS</span></div>
+      ${memoryStoreMetric(m)}
       <div class="metric"><span class="k">LEARNING</span><span class="v">${m.active?"ON":"OFF"}</span></div>
       <div class="metric"><span class="k">CONNECTIONS</span><span class="v">${okN}/${Object.keys(c).length}</span></div>
       <div class="metric"><span class="k">AVG TURN TIME</span><span class="v">${esc(avgTurnLatencyLabel())}</span></div>
@@ -2163,7 +2183,7 @@ function addReply(threadEl){
   // default. Nothing about act()'s own real-detail expansion changed —
   // this just gates the whole chip LIST behind one more collapse.
   d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span><span class="tm"></span></div>
-    <button type="button" class="thinkToggle" style="display:none"><span class="tcar">▾</span> THINKING</button>
+    <button type="button" class="thinkToggle" style="display:none"><span class="tcar">▸</span> THINKING</button>
     <div class="think" style="display:none"></div>
     <button type="button" class="stepsToggle" style="display:none"><span class="car">▸</span><span class="stepsCount">0</span> steps</button>
     <div class="acts" style="display:none"></div><div class="body"></div><div class="rowacts"></div>`;
@@ -2178,11 +2198,13 @@ function addReply(threadEl){
   };
   // v13.1: visible chain-of-thought. Reasoning tokens stream into their own
   // block (never into .body — that's the exact leak the old think:False
-  // existed to prevent). Open by default WHILE reasoning is arriving (the
-  // user explicitly asked to be able to watch it think); auto-collapses
-  // the instant real answer content starts (run()'s "first content" hook
-  // below), same UX as Claude Code folding its thinking once it answers —
-  // still reachable via the toggle afterward, never thrown away.
+  // existed to prevent).
+  // v14 (user-directed, 2026-09-08): collapsed by default, no latency
+  // impact — this used to force itself OPEN the instant reasoning
+  // started arriving, which the user found intrusive on every single
+  // turn. The toggle appears the moment there's real content, but the
+  // panel stays closed until the user actually clicks it — never
+  // thrown away, always one click away, just not forced on anyone.
   thinkToggle.onclick=()=>{
     const open = think.style.display!=="none";
     think.style.display = open?"none":"block";
@@ -2518,12 +2540,16 @@ async function run(text){
             // (see makeRevealer) instead of landing in thinkBuf straight
             // away — open the box on the first token SEEN, not the first
             // one actually revealed, so it doesn't lag its own trigger.
+            // v14 (user-directed, 2026-09-08): collapsed by default, no
+            // latency impact — see thinkToggle's own comment above for
+            // why this used to force the panel open the instant
+            // reasoning arrived. The toggle still appears the moment
+            // there's something real to show; it just no longer forces
+            // itself open on the user's behalf.
             const first = !thinkStarted; thinkStarted = true;
             thinkRevealer.enqueue(e.text||"");
-            if(first && node.think.style.display==="none" && !thinkFolded){
-              node.think.style.display="block";
+            if(first){
               node.thinkToggle.style.display="inline-flex";
-              node.thinkToggle.querySelector(".tcar").textContent="▾";
             }
             node.st.textContent="THINKING";
             break; }
@@ -4326,6 +4352,11 @@ function paintSettings(){
       <div id="claudeFrontRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
     <div class="note" id="claudeFrontNote">Loading…</div>
+    <div class="toolbar">
+      <span class="lbl">APP CONTROL DRY RUN</span>
+      <div id="appDryRunRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+    <div class="note" id="appDryRunNote">Loading…</div>
     <div class="sec">MEMORY</div>
     <div class="row"><div class="g"><div class="n">${m.count!=null?`${m.count} facts stored`:"—"}</div>
       <div class="d">${m.active?"learning loop on":esc(m.gate||"")}</div></div></div>
@@ -4545,6 +4576,56 @@ function paintSettings(){
       }
     } catch (err) {
       note.textContent = "Could not load Claude Front Mode: " + (err.message || err);
+    }
+  })();
+
+  /* v14 (user-directed, 2026-09-08): "Consider adding a 'dry run' mode
+     where it shows what would be clicked without actually clicking."
+     Same chip-pair pattern as GROUNDED MODE above (OFF by default,
+     opt-in) — app-control actions already require per-action human
+     confirmation regardless of this setting; dry run is an extra
+     preview layer on top, not a replacement for that gate. */
+  (async () => {
+    const row = $("appDryRunRow"), note = $("appDryRunNote");
+    if (!row) return;
+    try {
+      const r = await fetch("/api/settings/app-control-dry-run");
+      const j = await r.json();
+      row.innerHTML = "";
+      [[true, "ON"], [false, "OFF"]].forEach(([val, label]) => {
+        const btn = document.createElement("button");
+        const on = j.enabled === val;
+        btn.className = "chip" + (on ? " on" : "");
+        btn.type = "button"; btn.textContent = label;
+        btn.setAttribute("aria-pressed", String(on));
+        btn.onclick = async () => {
+          note.textContent = "Saving…";
+          try {
+            const rr = await fetch("/api/settings/app-control-dry-run", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({enabled: val}),
+            });
+            const jj = await rr.json();
+            note.textContent = jj.ok
+              ? (val
+                  ? "On — every app-control action is previewed (validated, blocklist-checked, described) but not executed."
+                  : "Off — app-control actions run for real (still confirmation-gated per action).")
+              : "Could not save: " + (jj.detail || "unknown error");
+          } catch (err) {
+            note.textContent = "Save failed: " + (err.message || err);
+          }
+          paintSettings();
+        };
+        row.appendChild(btn);
+      });
+      if (!note.textContent || note.textContent === "Loading…") {
+        note.textContent = j.enabled
+          ? "On — every app-control action is previewed (validated, blocklist-checked, described) but not executed."
+          : "Off — app-control actions run for real (still confirmation-gated per action).";
+      }
+    } catch (err) {
+      note.textContent = "Could not load App Control Dry Run: " + (err.message || err);
     }
   })();
 

@@ -19,6 +19,7 @@ from dourmouse.atlas.atlas_ops import (
     atlas_bootstrap_status,
     atlas_deliverables,
     atlas_status,
+    build_atlas_tool_specs,
     get_atlas_repo_path,
 )
 from dourmouse.general_roster import build_general_registry
@@ -181,18 +182,25 @@ class TestHandlers:
 
 
 class TestRosterWiring:
-    def test_atlas_agent_registered(self):
-        registry = build_general_registry()
-        assert "atlas" in registry.subagent_names
-        sub = registry.get_subagent("atlas")
-        assert sub is not None
-        tool_names = {t.name for t in sub.tools}
+    def test_tool_specs_still_carry_the_full_tool_set_standalone(self):
+        """v14 (user-directed, 2026-09-08): "atlas" was unplugged from
+        the live roster (see general_roster.py's own comment on the same
+        date) — this proves the module code itself is untouched: calling
+        build_atlas_tool_specs() directly (never through the live
+        registry) still produces every tool it always did, each with a
+        real, callable handler."""
+        specs = build_atlas_tool_specs()
+        tool_names = {t.name for t in specs}
         assert {"atlas_status", "atlas_bootstrap", "atlas_deliverables", "atlas_report"} <= tool_names
-
-    def test_atlas_tool_handler_runs(self):
-        """The registered handler is the real atlas_ops handler."""
-        registry = build_general_registry()
+        by_name = {t.name: t for t in specs}
         for name in ("atlas_status", "atlas_bootstrap", "atlas_deliverables"):
-            spec = registry.lookup(name)
-            assert spec is not None
-            assert callable(spec.handler)
+            assert callable(by_name[name].handler)
+
+    def test_atlas_is_not_in_the_live_registry(self):
+        """The other half of the same fix: "atlas" must NOT be reachable
+        from the live roster any more, proving the unplugging worked."""
+        registry = build_general_registry()
+        assert "atlas" not in registry.subagent_names
+        assert registry.get_subagent("atlas") is None
+        for name in ("atlas_status", "atlas_bootstrap", "atlas_deliverables"):
+            assert registry.lookup(name) is None

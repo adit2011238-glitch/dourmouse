@@ -129,6 +129,16 @@ def _run_osascript(script: str) -> str:
     return (proc.stdout or "").strip()
 
 
+def _dry_run_result(action: str, script: str) -> str:
+    """v14 (user-directed, 2026-09-08): "Consider adding a 'dry run'
+    mode where it shows what would be clicked without actually
+    clicking." Real validation (macOS check, blocklist, argument
+    checks) still runs for real in every caller below BEFORE this is
+    reached — dry_run only ever skips the actual osascript execution,
+    never the safety checks that would have refused the action anyway."""
+    return f"DRY RUN — {action} (not executed). Would run:\n{script}"
+
+
 def list_running_apps() -> list[dict[str, object]]:
     """Every foreground (non-background-only) process System Events can
     see, with which one (if any) is frontmost. Read-only, no
@@ -164,7 +174,7 @@ def list_windows(app_name: str) -> list[str]:
     return [w.strip() for w in out.split(",") if w.strip()]
 
 
-def activate_app(app_name: str) -> str:
+def activate_app(app_name: str, dry_run: bool = False) -> str:
     """Bring an app to the foreground. Part of every app's generic
     scripting suite — works even for apps with no custom AppleScript
     dictionary (Claude Desktop included)."""
@@ -173,22 +183,28 @@ def activate_app(app_name: str) -> str:
     if not app_name:
         raise AppControlError("app_name is required")
     _check_not_blocked(app_name)
-    _run_osascript(f'tell application "{_escape(app_name)}" to activate')
+    script = f'tell application "{_escape(app_name)}" to activate'
+    if dry_run:
+        return _dry_run_result(f"activate {app_name}", script)
+    _run_osascript(script)
     return f"ACTIVATED: {app_name}"
 
 
-def quit_app(app_name: str) -> str:
+def quit_app(app_name: str, dry_run: bool = False) -> str:
     """Quit a running app via its generic scripting suite."""
     _require_macos()
     app_name = app_name.strip()
     if not app_name:
         raise AppControlError("app_name is required")
     _check_not_blocked(app_name)
-    _run_osascript(f'tell application "{_escape(app_name)}" to quit')
+    script = f'tell application "{_escape(app_name)}" to quit'
+    if dry_run:
+        return _dry_run_result(f"quit {app_name}", script)
+    _run_osascript(script)
     return f"QUIT: {app_name}"
 
 
-def send_keystrokes(app_name: str, text: str) -> str:
+def send_keystrokes(app_name: str, text: str, dry_run: bool = False) -> str:
     """Activate an app, then type literal text into whatever has focus
     inside it. Real risk if the app takes noticeably longer than the
     fixed delay to actually focus a text field — this reports what it
@@ -207,11 +223,15 @@ def send_keystrokes(app_name: str, text: str) -> str:
         f'  keystroke "{_escape(text)}"\n'
         "end tell"
     )
+    if dry_run:
+        return _dry_run_result(f"type {len(text)} character(s) into {app_name}", script)
     _run_osascript(script)
     return f"TYPED into {app_name}: {len(text)} character(s)"
 
 
-def press_key(app_name: str, key: str, modifiers: list[str] | None = None) -> str:
+def press_key(
+    app_name: str, key: str, modifiers: list[str] | None = None, dry_run: bool = False
+) -> str:
     """Activate an app, then send one named key (return/tab/escape/
     delete/space/arrows) with optional modifiers (command/option/shift/
     control)."""
@@ -241,11 +261,15 @@ def press_key(app_name: str, key: str, modifiers: list[str] | None = None) -> st
         f"  key code {_KEY_CODES[key]}{using_clause}\n"
         "end tell"
     )
+    if dry_run:
+        return _dry_run_result(
+            f"press {'+'.join((modifiers or []) + [key])} in {app_name}", script
+        )
     _run_osascript(script)
     return f"PRESSED {'+'.join((modifiers or []) + [key])} in {app_name}"
 
 
-def click_menu_item(app_name: str, menu_path: list[str]) -> str:
+def click_menu_item(app_name: str, menu_path: list[str], dry_run: bool = False) -> str:
     """Click a menu item by its full path, e.g. ["File", "New Window"]
     or ["File", "Export", "PDF..."]. Built as nested AppleScript
     `menu item ... of menu ... of menu bar item ... of menu bar 1`."""
@@ -276,6 +300,8 @@ def click_menu_item(app_name: str, menu_path: list[str]) -> str:
         "  end tell\n"
         "end tell"
     )
+    if dry_run:
+        return _dry_run_result(f"click {' > '.join(menu_path)} in {app_name}", script)
     _run_osascript(script)
     return f"CLICKED {' > '.join(menu_path)} in {app_name}"
 

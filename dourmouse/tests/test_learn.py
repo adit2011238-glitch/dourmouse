@@ -112,16 +112,21 @@ class TestDefaultStore:
         (the Store & Learn loop + /api/memory's dashboard count) silently
         opened a brand new, empty local file instead. Caught immediately
         after a real restart reported "1 fact(s)" instead of the real
-        remote count. Both paths must agree."""
-        from dourmouse.memory_store import RemoteMemoryStore
+        remote count. Both paths must agree.
+
+        v14: now wrapped in LocalFallbackMemoryStore (see that class's
+        own docstring) -- DOURMOUSE_MEMORY_REMOTE_URL being set says
+        where the store lives, not that it's reachable right now."""
+        from dourmouse.memory_store import LocalFallbackMemoryStore, RemoteMemoryStore
 
         monkeypatch.setenv("DOURMOUSE_LEARN", "1")
         monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_URL", "http://100.98.97.23:8765")
         monkeypatch.setenv("DOURMOUSE_MEMORY_REMOTE_TOKEN", "real-token")
         s = learn.open_default_store()
-        assert isinstance(s, RemoteMemoryStore)
-        assert s.base_url == "http://100.98.97.23:8765"
-        assert s.token == "real-token"
+        assert isinstance(s, LocalFallbackMemoryStore)
+        assert isinstance(s._remote, RemoteMemoryStore)
+        assert s._remote.base_url == "http://100.98.97.23:8765"
+        assert s._remote.token == "real-token"
 
     def test_open_default_store_remote_still_respects_learn_gate(self, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LEARN", "0")

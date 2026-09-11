@@ -1015,6 +1015,61 @@ def save_grounded_mode_setting(enabled: bool) -> dict[str, Any]:
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
 
 
+# v14 (user-directed, 2026-09-08): "Consider adding a 'dry run' mode
+# where it shows what would be clicked without actually clicking" — a
+# real safety feature for app_control.py's real AppleScript actions
+# (activate_app, quit_app, send_keystrokes, press_key, click_menu_item).
+# Same settings pattern as GROUNDED_MODE above. Opt-IN, off by default:
+# app-control actions already require per-action human confirmation
+# (Permission.REQUIRES_CONFIRMATION), so dry-run is an extra safety net
+# for someone who wants to preview a whole sequence before any of it
+# runs for real, not a replacement for that existing gate.
+APP_CONTROL_DRY_RUN_SETTING_KEY = "DOURMOUSE_APP_CONTROL_DRY_RUN"
+
+
+def app_control_dry_run_setting() -> bool:
+    """Whether App Control Dry Run is currently on, read fresh from disk.
+    Off by default — an explicit "1"/"true"/"yes"/"on" (case-insensitive)
+    is the only way to enable it; anything else, including unset, is
+    honestly off."""
+    raw = _read_user_config_file().get(APP_CONTROL_DRY_RUN_SETTING_KEY, "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def app_control_dry_run_enabled() -> bool:
+    """Public name used by the actual dry-run check site (general_roster.py's
+    _app_control_dry_run) — a thin alias over app_control_dry_run_setting()
+    so the call site reads as "is dry run enabled" rather than "what does
+    the raw setting say", matching grounded_mode_enabled()'s own naming."""
+    return app_control_dry_run_setting()
+
+
+def save_app_control_dry_run_setting(enabled: bool) -> dict[str, Any]:
+    """Persist the App Control Dry Run toggle. Same merge-on-write .env
+    file as save_grounded_mode_setting() — never clobbers other saved
+    settings. Never raises; a write failure is reported honestly."""
+    path = user_env_path()
+    try:
+        user_config_dir().mkdir(parents=True, exist_ok=True)
+        existing = _read_user_config_file()
+        existing[APP_CONTROL_DRY_RUN_SETTING_KEY] = "1" if enabled else "0"
+        body = [
+            "# Dourmouse configuration — written by first-run setup / settings.",
+            "# This file holds credentials. Keep it to yourself; it is never",
+            "# bundled into a build or uploaded anywhere.",
+            "",
+        ]
+        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        return {"ok": False, "detail": f"could not write config: {exc}"}
+    return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
+
+
 # --------------------------------------------------------------------------- #
 # v4.0 — Multi-device access (spec Phase 9)
 # --------------------------------------------------------------------------- #

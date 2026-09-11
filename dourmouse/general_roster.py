@@ -794,6 +794,36 @@ def _apps_windows_tool(arguments: dict[str, Any]) -> str:
     return f"{app_name} windows ({len(windows)}):\n" + "\n".join(windows)
 
 
+#: v14 (user-directed, 2026-09-08): the dry_run parameter every
+#: mutating app-control ToolSpec below exposes to the model, so it can
+#: preview a real action without executing it on its own initiative
+#: (independent of the global Settings toggle, which forces this on
+#: for every call regardless of what the model passes).
+_DRY_RUN_PROP = {
+    "type": "boolean",
+    "default": False,
+    "description": (
+        "If true, validate and describe the action (including the exact "
+        "AppleScript that would run) WITHOUT executing it. Use to preview "
+        "a risky or unfamiliar action before committing to it."
+    ),
+}
+
+
+def _app_control_dry_run(arguments: dict[str, Any]) -> bool:
+    """v14 (user-directed, 2026-09-08): "Consider adding a 'dry run'
+    mode where it shows what would be clicked without actually
+    clicking." Real per-call OR of two sources: the model's own
+    explicit `dry_run: true` argument for THIS one call, and the
+    global Settings toggle (config.app_control_dry_run_enabled(),
+    opt-in, off by default) that forces every app-control action into
+    dry-run regardless of what the model passes — the human-controlled
+    safety net, not just a per-call courtesy the model could omit."""
+    from dourmouse.config import app_control_dry_run_enabled
+
+    return bool(arguments.get("dry_run")) or app_control_dry_run_enabled()
+
+
 def _apps_activate_tool(arguments: dict[str, Any]) -> str:
     from dourmouse.app_control import AppControlError, activate_app
 
@@ -801,7 +831,7 @@ def _apps_activate_tool(arguments: dict[str, Any]) -> str:
     if not app_name:
         return "ERROR: activate_app requires a non-empty 'app_name'."
     try:
-        return activate_app(app_name)
+        return activate_app(app_name, dry_run=_app_control_dry_run(arguments))
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -813,7 +843,7 @@ def _apps_quit_tool(arguments: dict[str, Any]) -> str:
     if not app_name:
         return "ERROR: quit_app requires a non-empty 'app_name'."
     try:
-        return quit_app(app_name)
+        return quit_app(app_name, dry_run=_app_control_dry_run(arguments))
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -828,7 +858,7 @@ def _apps_keystrokes_tool(arguments: dict[str, Any]) -> str:
     if not text:
         return "ERROR: send_app_keystrokes requires non-empty 'text'."
     try:
-        return send_keystrokes(app_name, text)
+        return send_keystrokes(app_name, text, dry_run=_app_control_dry_run(arguments))
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -844,7 +874,7 @@ def _apps_press_key_tool(arguments: dict[str, Any]) -> str:
     if not key:
         return "ERROR: press_app_key requires a non-empty 'key'."
     try:
-        return press_key(app_name, key, modifiers)
+        return press_key(app_name, key, modifiers, dry_run=_app_control_dry_run(arguments))
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -859,7 +889,9 @@ def _apps_click_menu_tool(arguments: dict[str, Any]) -> str:
     if not isinstance(menu_path, list) or len(menu_path) < 2:
         return 'ERROR: menu_path needs at least [top-level menu, item], e.g. ["File", "New Window"].'
     try:
-        return click_menu_item(app_name, [str(m) for m in menu_path])
+        return click_menu_item(
+            app_name, [str(m) for m in menu_path], dry_run=_app_control_dry_run(arguments)
+        )
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -2812,7 +2844,7 @@ def build_general_registry() -> DispatchRegistry:
                     description="Bring a running app to the foreground.",
                     parameters={
                         "type": "object",
-                        "properties": {"app_name": {"type": "string"}},
+                        "properties": {"app_name": {"type": "string"}, "dry_run": _DRY_RUN_PROP},
                         "required": ["app_name"],
                     },
                     handler=_apps_activate_tool,
@@ -2824,7 +2856,7 @@ def build_general_registry() -> DispatchRegistry:
                     description="Quit a running app.",
                     parameters={
                         "type": "object",
-                        "properties": {"app_name": {"type": "string"}},
+                        "properties": {"app_name": {"type": "string"}, "dry_run": _DRY_RUN_PROP},
                         "required": ["app_name"],
                     },
                     handler=_apps_quit_tool,
@@ -2844,6 +2876,7 @@ def build_general_registry() -> DispatchRegistry:
                         "properties": {
                             "app_name": {"type": "string"},
                             "text": {"type": "string"},
+                            "dry_run": _DRY_RUN_PROP,
                         },
                         "required": ["app_name", "text"],
                     },
@@ -2872,6 +2905,7 @@ def build_general_registry() -> DispatchRegistry:
                                 "items": {"type": "string"},
                                 "default": [],
                             },
+                            "dry_run": _DRY_RUN_PROP,
                         },
                         "required": ["app_name", "key"],
                     },
@@ -2896,6 +2930,7 @@ def build_general_registry() -> DispatchRegistry:
                                 "type": "array",
                                 "items": {"type": "string"},
                             },
+                            "dry_run": _DRY_RUN_PROP,
                         },
                         "required": ["app_name", "menu_path"],
                     },
@@ -3498,19 +3533,26 @@ def build_general_registry() -> DispatchRegistry:
     )
 
     # -- v4.0 ATLAS command-centre agent ------------------------------- #
-    # Real telemetry about the ATLAS quant repo: status, FX-archive
-    # bootstrap progress, deliverables. Deterministic (Rule 2.8), honest
-    # NOT CONFIGURED when ATLAS_REPO_PATH is unset (Rule 2.2).
-    from dourmouse.atlas.atlas_ops import build_atlas_tool_specs
-
-    registry.register_subagent(
-        _subagent(
-            "atlas",
-            "Projects",
-            "ATLAS quant repo telemetry — status, FX bootstrap progress, deliverables.",
-            build_atlas_tool_specs(),
-        )
-    )
+    # v14 (user-directed, 2026-09-08): unplugged from the live chat
+    # roster per explicit user request ("remove atlas from dourmouse").
+    # Real, live-caught router bug this fixes: the deterministic keyword
+    # scorer in planner.py matched "atlas" and mis-routed unrelated
+    # queries to this agent. Module code (atlas_ops.py, its tool specs)
+    # is left completely intact and importable — see
+    # test_atlas_*.py's own TestRosterWiring for tests proving the specs
+    # still build standalone while asserting absence from the live
+    # registry. Re-enable by uncommenting this block (and its
+    # counterpart in the extend_subagent tuple below).
+    # from dourmouse.atlas.atlas_ops import build_atlas_tool_specs
+    #
+    # registry.register_subagent(
+    #     _subagent(
+    #         "atlas",
+    #         "Projects",
+    #         "ATLAS quant repo telemetry — status, FX bootstrap progress, deliverables.",
+    #         build_atlas_tool_specs(),
+    #     )
+    # )
 
     # -- v5.5 Freebuff read agent -------------------------------------- #
     # Real access to the user's Freebuff Desktop app (loopback API):
@@ -3795,32 +3837,32 @@ def build_general_registry() -> DispatchRegistry:
     )
 
     # -- v8.0 ATLAS Terminal agent ------------------------------------ #
-    # What the ATLAS Terminal (streamlit, atlas_terminal/) shows right now.
-    from dourmouse.atlas.atlas_ui_ops import build_atlas_ui_tool_specs
-
-    registry.register_subagent(
-        _subagent(
-            "atlas_ui",
-            "Projects",
-            "ATLAS Terminal status — what the streamlit terminal would show now (validation, next trade, events, paper, IBKR).",
-            build_atlas_ui_tool_specs(),
-        )
-    )
+    # v14 (user-directed, 2026-09-08): unplugged, same as the "atlas"
+    # block above — see that block's own comment for why and how to
+    # re-enable. Module code untouched.
+    # from dourmouse.atlas.atlas_ui_ops import build_atlas_ui_tool_specs
+    #
+    # registry.register_subagent(
+    #     _subagent(
+    #         "atlas_ui",
+    #         "Projects",
+    #         "ATLAS Terminal status — what the streamlit terminal would show now (validation, next trade, events, paper, IBKR).",
+    #         build_atlas_ui_tool_specs(),
+    #     )
+    # )
 
     # -- v8.1 ATLAS Command Center ------------------------------------- #
-    # RUN the real research pipeline from here: validation suite, walk-
-    # forward, backtest, paper log, calendar, events refresh. Also owns
-    # the locked STANDARD (reports/validation_standard.json).
-    from dourmouse.atlas.atlas_command import build_atlas_cmd_tool_specs
-
-    registry.register_subagent(
-        _subagent(
-            "atlas_cmd",
-            "Projects",
-            "ATLAS Command Center — run the research pipeline (validation suite, backtest, paper log, calendar) and read the locked standard.",
-            build_atlas_cmd_tool_specs(),
-        )
-    )
+    # v14 (user-directed, 2026-09-08): unplugged, same as above.
+    # from dourmouse.atlas.atlas_command import build_atlas_cmd_tool_specs
+    #
+    # registry.register_subagent(
+    #     _subagent(
+    #         "atlas_cmd",
+    #         "Projects",
+    #         "ATLAS Command Center — run the research pipeline (validation suite, backtest, paper log, calendar) and read the locked standard.",
+    #         build_atlas_cmd_tool_specs(),
+    #     )
+    # )
 
     # -- v2.3 preloaded live-intelligence agents ----------------------- #
     registry.register_subagent(
@@ -5211,7 +5253,15 @@ def build_general_registry() -> DispatchRegistry:
     from dourmouse.artifacts import build_artifact_tool_spec
 
     _artifact_spec = build_artifact_tool_spec()
-    for _name in ("research_info", "dev_coding", "rnd", "atlas"):
+    # v14: "atlas" removed from this list — the subagent was unplugged
+    # from the roster (see the v4.0 ATLAS block above), so extending a
+    # now-nonexistent subagent raised ValueError here and, since this
+    # runs mid-registration, silently killed EVERY subsequent
+    # registration in this function too (globe control, shared memory,
+    # delegate_models, ...) — the real cause behind a wide, seemingly
+    # unrelated cascade of test failures the first time atlas was
+    # unplugged. Re-add "atlas" here too if the roster block is restored.
+    for _name in ("research_info", "dev_coding", "rnd"):
         registry.extend_subagent(_name, _artifact_spec)
 
     # -- shared RAG tool (query_shared_memory) -------------------------- #

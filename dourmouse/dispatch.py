@@ -348,6 +348,51 @@ def _max_llm_tokens() -> int:
     return _MAX_LLM_TOKENS
 
 
+# v14 (user-directed, 2026-09-08): a genuinely local Ollama daemon
+# reprocesses the ENTIRE history from scratch every turn (no server-side
+# KV cache across requests the way a cloud API keeps one) at roughly
+# 46 tok/s on this machine's hardware -- so latency scales directly with
+# how much history _bounded_context lets through, in a way a cloud
+# backend's own per-turn cost simply does not. Capping local specifically
+# (never touching the existing cloud budget above -- "keep cloud maxed"
+# was the explicit, deliberate choice here, not an oversight) trims that
+# reprocessing cost without the local-history-truncation regression risk
+# a flat, uniform cut for every backend would have carried. 12,000 sits
+# well above the old v13.2 failure ceiling (4,600 tokens against an 8,192
+# num_ctx that caused a real live hallucination bug) -- chosen to be
+# clearly safe against a repeat of that regression, not by shaving the
+# margin.
+_LOCAL_MAX_LLM_TOKENS = 12000
+
+
+def _context_budget(config: Any) -> int:
+    """The real per-backend context-token budget for THIS run.
+
+    Honors DOURMOUSE_MAX_CONTEXT_TOKENS (an explicit human override)
+    ahead of the local/cloud split either way -- an operator who set that
+    env var gets exactly what they asked for, on any backend. Otherwise:
+    a genuinely local Ollama daemon (backend_identity's own is_local,
+    never a name guess) gets the smaller local-latency budget above;
+    every other backend keeps the existing, unchanged _max_llm_tokens()
+    ceiling.
+    """
+    raw = os.environ.get("DOURMOUSE_MAX_CONTEXT_TOKENS", "").strip()
+    if raw:
+        try:
+            return max(500, int(raw))
+        except ValueError:
+            pass
+    try:
+        from dourmouse.config import backend_identity
+
+        _backend_name, is_local = backend_identity(config)
+    except Exception:  # noqa: BLE001 - a broken/unset config must never crash dispatch
+        is_local = False
+    if is_local:
+        return _LOCAL_MAX_LLM_TOKENS
+    return _MAX_LLM_TOKENS
+
+
 def _est_tokens(message: dict[str, Any]) -> int:
     """Rough per-message token estimate (repo convention ~4 chars/token)."""
     content = message.get("content") or ""
@@ -3899,7 +3944,7 @@ def _run_dispatch_loop(
         # v4.2 speed: the LLM sees a bounded rolling window (system +
         # in-flight exchange + recent history), never the unbounded
         # conversation. The full list stays authoritative for persistence.
-        bounded = _bounded_context(messages, _max_llm_tokens())
+        bounded = _bounded_context(messages, _context_budget(ctx.config))
         # Fast lane (v5.x): pure-chat turns swap the 2.2k-token orchestrator
         # roster for the compact style-only prompt AT THE API BOUNDARY only.
         # The authoritative messages are untouched, so a later agentic turn
@@ -4366,7 +4411,7 @@ def _run_dispatch_loop(
         forced_response = _call_with_retry(
             client,
             model=model,
-            messages=_bounded_context(forced_messages, _max_llm_tokens()),
+            messages=_bounded_context(forced_messages, _context_budget(ctx.config)),
             tools=[],  # no tools offered: the model cannot keep stalling on search
             config=ctx.config,
             event_sink=event_sink,

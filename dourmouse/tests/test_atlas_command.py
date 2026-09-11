@@ -120,12 +120,22 @@ class TestRunTools:
 
 
 class TestRosterWiring:
-    def test_atlas_cmd_registered(self):
-        registry = build_general_registry()
-        assert "atlas_cmd" in registry.subagent_names
-        sub = registry.get_subagent("atlas_cmd")
-        names = {t.name for t in sub.tools}
+    def test_specs_still_carry_the_full_tool_set_standalone(self):
+        """v14 (user-directed, 2026-09-08): "atlas_cmd" was unplugged
+        from the live roster (see general_roster.py's own comment on the
+        same date) — this proves the module code itself is untouched:
+        calling build_atlas_cmd_tool_specs() directly (never through the
+        live registry) still produces the full tool set it always did."""
+        names = {t.name for t in ac.build_atlas_cmd_tool_specs()}
         assert {"atlas_standard", "atlas_run_validation", "atlas_run_walkforward",
                 "atlas_run_backtest", "atlas_calendar", "atlas_refresh_events",
                 "atlas_paper_status", "atlas_paper_open", "atlas_paper_close",
                 "atlas_full_status"} <= names
+
+    def test_atlas_cmd_is_not_in_the_live_registry(self):
+        """The other half of the same fix: "atlas_cmd" must NOT be
+        reachable from the live roster any more, proving the unplugging
+        worked."""
+        registry = build_general_registry()
+        assert "atlas_cmd" not in registry.subagent_names
+        assert registry.get_subagent("atlas_cmd") is None

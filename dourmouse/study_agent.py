@@ -112,6 +112,26 @@ def read_study_file(rel_path: str, max_chars: int = _MAX_READ_CHARS) -> dict[str
             text = extract_pdf_text(target)
         except RuntimeError as exc:
             raise StudyPathError(f"can't read {rel_path!r}: {exc}") from None
+        # v14 (user-directed, 2026-09-08): the study folder's own real
+        # content (~/Documents/MYP data folder) is mostly scanned-image
+        # textbooks with no embedded text layer -- extract_pdf_text
+        # above honestly returns this EXACT message rather than raising
+        # (it's a real, successful read that just found nothing), which
+        # used to be silently handed back as if it were the file's real
+        # content. Detecting that exact honest message and retrying via
+        # pdf_reader.all_text's real OCR fallback (tesseract, see that
+        # module's own docstring) turns "I can't help with this
+        # textbook" into a genuine read for the feature's single most
+        # obvious real use case.
+        if text == (
+            "PDF READ: no extractable text (scanned image PDFs need OCR, "
+            "which is not included)."
+        ):
+            from dourmouse import pdf_reader
+
+            ocr_text = pdf_reader.all_text(target, ocr_fallback=True)
+            if not ocr_text.startswith(("PDF READ FAILED", "PDF READ: no extractable")):
+                text = ocr_text
         truncated = len(text) > max_chars
         return {"path": rel_path, "content": text[:max_chars], "truncated": truncated}
     try:

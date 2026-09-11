@@ -1822,13 +1822,16 @@ class TestEndToEndThroughGeneralRoster:
             "code_codex",  # v5.0: OpenAI Codex API backend
             "code_claude",
             "messenger",  # v3.0: inter-agent messaging
-            "atlas",  # v4.0: ATLAS command-centre telemetry
+            # v14 (user-directed, 2026-09-08): "atlas", "atlas_ui",
+            # "atlas_cmd" removed — unplugged from the live roster (see
+            # general_roster.py's own comment on the same date). Module
+            # code is untouched; see test_atlas_*.py's own
+            # TestRosterWiring for coverage that the tool specs still
+            # build standalone.
             "freebuff",  # v5.5: Freebuff Desktop reads
             "music",  # v5.7: Spotify playback + discovery
             "worldmonitor",  # v5.12: global intelligence
             "forex",  # v6.0: forex-data pipeline telemetry
-            "atlas_ui",  # v8.0: ATLAS Terminal status
-            "atlas_cmd",  # v8.1: ATLAS Command Center
             "t212",  # v8.2: Trading 212 broker (demo/live, paper-first)
             "mt5",  # v8.3: MetaTrader 5 paper broker (demo, no subscriptions)
             "docs",  # v5.x: Google Sheets/Drive link-shared access

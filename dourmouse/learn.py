@@ -91,10 +91,25 @@ def open_default_store() -> "MemoryStore | RemoteMemoryStore | None":
         return None
     remote_url = os.environ.get(_MEMORY_REMOTE_URL_ENV, "").strip()
     if remote_url:
-        from dourmouse.memory_store import RemoteMemoryStore
+        from dourmouse.memory_store import LocalFallbackMemoryStore, RemoteMemoryStore
 
         token = os.environ.get(_MEMORY_REMOTE_TOKEN_ENV, "").strip() or None
-        return RemoteMemoryStore(remote_url, token=token)
+        remote = RemoteMemoryStore(remote_url, token=token)
+        # v14 (user-directed, 2026-09-08): DOURMOUSE_MEMORY_REMOTE_URL
+        # being set says the shared store LIVES on that other machine —
+        # it says nothing about whether that machine is reachable RIGHT
+        # NOW (asleep, off the LAN, network down). Before this, any of
+        # those turned the whole memory subagent NOT CONFIGURED on this
+        # machine, even though a perfectly good local MemoryStore was
+        # available — see LocalFallbackMemoryStore's own docstring for
+        # the full real design (lazy local open, "[PENDING SYNC]"
+        # tagging, honest last_used_local_fallback/last_remote_error for
+        # the UI). A single-machine setup with the remote reachable pays
+        # zero extra cost — the local factory below never runs.
+        def _local_factory() -> "MemoryStore":
+            return MemoryStore(default_store_path())
+
+        return LocalFallbackMemoryStore(remote, _local_factory)
     try:
         return MemoryStore(default_store_path())
     except MemoryStoreUnavailable:

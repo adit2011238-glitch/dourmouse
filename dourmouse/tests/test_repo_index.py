@@ -200,12 +200,21 @@ class TestRosterWiring:
         names = {t.name for t in mem.tools}
         assert "memory_search_semantic" in names
 
-    def test_atlas_agent_has_repo_tools(self):
-        registry = build_general_registry()
-        atlas = registry.get_subagent("atlas")
-        assert atlas is not None
-        names = {t.name for t in atlas.tools}
+    def test_atlas_tool_specs_still_have_repo_tools_standalone(self):
+        """v14 (user-directed, 2026-09-08): "atlas" was unplugged from
+        the live roster (see general_roster.py's own comment on the same
+        date) — this proves the module code itself is untouched: calling
+        build_atlas_tool_specs() directly (never through the live
+        registry) still produces the repo-knowledge index tools it
+        always did."""
+        from dourmouse.atlas.atlas_ops import build_atlas_tool_specs
+
+        names = {t.name for t in build_atlas_tool_specs()}
         assert {"atlas_repo_scan", "atlas_repo_search", "atlas_repo_status"} <= names
+
+    def test_atlas_is_not_in_the_live_registry(self):
+        registry = build_general_registry()
+        assert registry.get_subagent("atlas") is None
 
 
 # --------------------------------------------------------------------------- #

@@ -114,6 +114,66 @@ class TestReadStudyFile:
         with pytest.raises(StudyPathError, match="pypdf"):
             read_study_file("textbook.pdf")
 
+    def test_scanned_pdf_falls_through_to_real_ocr(self, study_dir, monkeypatch):
+        """v14 (user-directed, 2026-09-08): real gap found this session —
+        the study folder's own real content is mostly SCANNED-image
+        textbooks with no embedded text layer, so extract_pdf_text's own
+        honest "needs OCR, which is not included" message was silently
+        handed back as if it were the real file content. This proves
+        the fallback wiring: that exact message triggers a retry via
+        pdf_reader.all_text(ocr_fallback=True), never touching real
+        tesseract here (that's pdf_reader's own TestOcrPageText's job)."""
+        (study_dir / "scanned.pdf").write_bytes(b"%PDF-1.4\nnot a real reader target")
+
+        import dourmouse.extract as extract_mod
+        from dourmouse import pdf_reader
+
+        monkeypatch.setattr(
+            extract_mod,
+            "extract_pdf_text",
+            lambda path: (
+                "PDF READ: no extractable text (scanned image PDFs need "
+                "OCR, which is not included)."
+            ),
+        )
+        calls = []
+
+        def fake_all_text(path, ocr_fallback=False, ocr_max_pages=20):
+            calls.append((path, ocr_fallback))
+            return "[REAL OCR applied to 3 page(s) with no embedded text layer]\n\nreal OCR text"
+
+        monkeypatch.setattr(pdf_reader, "all_text", fake_all_text)
+        result = read_study_file("scanned.pdf")
+        assert calls and calls[0][1] is True  # ocr_fallback=True was actually passed
+        assert "real OCR text" in result["content"]
+
+    def test_ocr_fallback_that_also_finds_nothing_keeps_the_honest_message(self, study_dir, monkeypatch):
+        """When OCR is genuinely tried and STILL finds nothing (blank or
+        badly corrupted scan), read_study_file keeps the original honest
+        "needs OCR" message rather than silently swapping in the retry's
+        own equally-empty result — never worse than before, never
+        pretending the retry changed anything when it didn't."""
+        (study_dir / "scanned.pdf").write_bytes(b"%PDF-1.4\nnot a real reader target")
+
+        import dourmouse.extract as extract_mod
+        from dourmouse import pdf_reader
+
+        original_message = (
+            "PDF READ: no extractable text (scanned image PDFs need OCR, "
+            "which is not included)."
+        )
+        monkeypatch.setattr(extract_mod, "extract_pdf_text", lambda path: original_message)
+        monkeypatch.setattr(
+            pdf_reader,
+            "all_text",
+            lambda path, ocr_fallback=False, ocr_max_pages=20: (
+                "PDF READ: no extractable text even after OCR (scanned pages "
+                "may be blank or badly corrupted)."
+            ),
+        )
+        result = read_study_file("scanned.pdf")
+        assert result["content"] == original_message
+
     def test_truncates_long_content_and_says_so(self, study_dir):
         big = study_dir / "big.txt"
         big.write_text("x" * 50, encoding="utf-8")

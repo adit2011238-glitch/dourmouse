@@ -89,13 +89,16 @@ class TestRosterShape:
             "code_codex",  # v5.0: OpenAI Codex API backend
             "code_claude",
             "messenger",  # v3.0: inter-agent messaging
-            "atlas",  # v4.0: ATLAS command-centre telemetry
+            # v14 (user-directed, 2026-09-08): "atlas", "atlas_cmd",
+            # "atlas_ui" removed — unplugged from the live roster (see
+            # general_roster.py's own comment on the same date). Module
+            # code is untouched; see test_atlas_*.py's own
+            # TestRosterWiring for coverage that the tool specs still
+            # build standalone.
             "freebuff",  # v5.5: Freebuff Desktop reads
             "music",  # v5.7: Spotify playback + discovery
             "worldmonitor",  # v5.12: global intelligence (markets/risk/conflict)
             "forex",  # v5.x: FX research/archive agents
-            "atlas_cmd",  # v5.x: ATLAS CLI command runner
-            "atlas_ui",  # v5.x: ATLAS UI bridge
             "mt5",  # v5.x: MetaTrader 5 broker ops
             "t212",  # v5.x: Trading 212 broker ops
             "docs",  # v5.x: Google Sheets/Drive link-shared access

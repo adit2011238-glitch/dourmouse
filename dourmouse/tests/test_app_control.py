@@ -206,3 +206,69 @@ class TestHonestErrorSurfacing:
         monkeypatch.setattr(app_control.subprocess, "run", raise_timeout)
         with pytest.raises(app_control.AppControlError, match="timed out"):
             app_control.activate_app("Claude")
+
+
+class TestDryRun:
+    """v14 (user-directed, 2026-09-08): "Consider adding a 'dry run'
+    mode where it shows what would be clicked without actually
+    clicking." Real contract: validation and the blocklist still run
+    for real in dry-run mode — only the actual osascript execution is
+    skipped."""
+
+    def test_activate_app_dry_run_never_calls_osascript(self, capture_osascript):
+        calls, _ = capture_osascript
+        out = app_control.activate_app("Claude", dry_run=True)
+        assert calls == []
+        assert out.startswith("DRY RUN")
+        assert "activate" in out
+
+    def test_quit_app_dry_run_never_calls_osascript(self, capture_osascript):
+        calls, _ = capture_osascript
+        out = app_control.quit_app("Claude", dry_run=True)
+        assert calls == []
+        assert out.startswith("DRY RUN")
+
+    def test_send_keystrokes_dry_run_never_calls_osascript(self, capture_osascript):
+        calls, _ = capture_osascript
+        out = app_control.send_keystrokes("Claude", "hello", dry_run=True)
+        assert calls == []
+        assert out.startswith("DRY RUN")
+        assert "keystroke" in out
+
+    def test_press_key_dry_run_never_calls_osascript(self, capture_osascript):
+        calls, _ = capture_osascript
+        out = app_control.press_key("Claude", "return", dry_run=True)
+        assert calls == []
+        assert out.startswith("DRY RUN")
+
+    def test_click_menu_item_dry_run_never_calls_osascript(self, capture_osascript):
+        calls, _ = capture_osascript
+        out = app_control.click_menu_item("Claude", ["File", "New Window"], dry_run=True)
+        assert calls == []
+        assert out.startswith("DRY RUN")
+        assert "click" in out
+
+    def test_dry_run_still_shows_the_real_script_that_would_run(self, capture_osascript):
+        calls, _ = capture_osascript
+        out = app_control.activate_app("Claude", dry_run=True)
+        assert 'tell application "Claude" to activate' in out
+
+    def test_blocklist_still_refuses_in_dry_run(self, fake_darwin, monkeypatch):
+        """Dry run must never become a way to preview an action against
+        a blocked app — the blocklist is a real refusal, not a
+        confirmation-avoidable one."""
+        calls = []
+        monkeypatch.setattr(app_control.subprocess, "run", lambda *a, **k: calls.append(1))
+        with pytest.raises(app_control.AppControlError, match="REFUSED"):
+            app_control.activate_app("Finder", dry_run=True)
+        assert calls == []
+
+    def test_validation_still_enforced_in_dry_run(self, fake_darwin):
+        """An empty app_name is still refused in dry-run mode — dry_run
+        only ever skips execution, never the real argument checks."""
+        with pytest.raises(app_control.AppControlError, match="required"):
+            app_control.activate_app("", dry_run=True)
+
+    def test_unknown_key_still_refused_in_dry_run(self, fake_darwin):
+        with pytest.raises(app_control.AppControlError, match="unknown key"):
+            app_control.press_key("Claude", "not-a-real-key", dry_run=True)

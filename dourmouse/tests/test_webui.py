@@ -685,6 +685,53 @@ class TestClaudeFrontModeEndpoint:
         assert get_data["enabled"] is False
 
 
+class TestAppControlDryRunEndpoint:
+    """v14 (user-directed, 2026-09-08): "Consider adding a 'dry run'
+    mode where it shows what would be clicked without actually
+    clicking." The Settings UI's backend half — OFF by default
+    (opt-in), mirroring TestClaudeFrontModeEndpoint's real-HTTP
+    pattern."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_get_reports_off_by_default(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/app-control-dry-run")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["enabled"] is False
+
+    def test_post_true_then_get_reflects_it(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/settings/app-control-dry-run",
+            body=json.dumps({"enabled": True}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        post_data = json.loads(resp.read())
+        conn.close()
+        assert post_data["ok"] is True
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/app-control-dry-run")
+        resp = conn.getresponse()
+        get_data = json.loads(resp.read())
+        conn.close()
+        assert get_data["enabled"] is True
+
+
 class TestSessionTranscriptEndpoint:
     """GET /api/session/current and /api/session/<id> — reload-survival
     groundwork: the live ChatSession already writes one hash-chained JSONL
