@@ -1967,6 +1967,33 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.study_agent import study_folder_status
 
             self._send_json(study_folder_status())
+        elif path == "/api/study/files":
+            # v14 (user-directed, 2026-09-08): backlog #9's Study tab
+            # NEVER actually got a UI screen — study_agent.py's real
+            # list/read functions existed and were chat-tool-reachable
+            # only, with just this one status check ever wired to HTTP.
+            # Real, direct calls (no LLM round trip) for a fast file
+            # browser, same as any other data panel in this app.
+            qs = urllib.parse.parse_qs(parsed.query)
+            rel_path = (qs.get("path") or [""])[0]
+            from dourmouse.study_agent import StudyPathError, list_study_files
+
+            try:
+                self._send_json({"ok": True, **list_study_files(rel_path)})
+            except StudyPathError as exc:
+                self._send_json({"ok": False, "error": str(exc)})
+        elif path == "/api/study/read":
+            qs = urllib.parse.parse_qs(parsed.query)
+            rel_path = (qs.get("path") or [""])[0]
+            from dourmouse.study_agent import StudyPathError, read_study_file
+
+            if not rel_path:
+                self._send_json({"ok": False, "error": "path is required"})
+            else:
+                try:
+                    self._send_json({"ok": True, **read_study_file(rel_path)})
+                except StudyPathError as exc:
+                    self._send_json({"ok": False, "error": str(exc)})
         elif path == "/api/browser/status":
             # v5.25: browser-agent engine/state (never launches Chrome here).
             from dourmouse.browser_agent import browser_status
@@ -3506,7 +3533,17 @@ class _Handler(BaseHTTPRequestHandler):
                         f"UNRELATED to Freebuff (a separate app with its own, "
                         f"different projects) — never call freebuff_projects, "
                         f"freebuff_status, or any other freebuff_* tool for a "
-                        f"question about the project you are already in."
+                        f"question about the project you are already in.\n\n"
+                        # v14: a real, live-caught Grounded Mode false positive —
+                        # answering the exact meta-question above (correctly,
+                        # zero tool calls, straight from this seed) got flagged
+                        # "unverified" for the user. This literal marker is
+                        # dispatch.py's own deterministic, non-inferred signal
+                        # that a zero-tool answer HERE is legitimately grounded
+                        # in real context already in this conversation, not a
+                        # skipped-grounding mistake — see _run_dispatch_loop's
+                        # own comment on grounded_exempt.
+                        f"[GROUNDED MODE EXEMPT]"
                     )
                     if context:
                         seed += f"\n\nWhat's known about this project so far: {context}"

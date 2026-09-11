@@ -3281,6 +3281,14 @@ _MAX_PLAN_REMINDERS = 1
 # unresponsive model shouldn't burn multiple round-trips on it.
 _MAX_GROUNDED_NUDGES = 1
 
+#: v14: the literal marker a system message carries to deterministically
+#: exempt a conversation from Grounded Mode's zero-tool-call check — see
+#: _run_dispatch_loop's own comment on grounded_exempt for the real,
+#: live-caught false positive this fixes (a project-chat seed answer
+#: flagged "unverified" despite being correctly grounded in real context
+#: already in the conversation, just not via a live tool call).
+_GROUNDED_EXEMPT_MARKER = "[GROUNDED MODE EXEMPT]"
+
 
 # Knowledge questions the local model can answer directly from its weights.
 # The fast lane takes them EVEN when a research/info agent matches, because
@@ -3568,6 +3576,26 @@ def _run_dispatch_loop(
     nudges = 0
     plan_reminders = 0
     grounded_nudges = 0
+    # v14 (user-directed, 2026-09-08): a real, live-caught Grounded Mode
+    # false positive. A project-chat seed (webui.py's own
+    # _session_gate_lock_for_tab) explicitly tells the model certain
+    # questions (e.g. "what project is this") are answerable directly
+    # from the seed itself, no tool call needed — but grounded_violation
+    # below fired anyway, appending "treat it as unverified" to an
+    # answer that was, in fact, fully and correctly grounded in real
+    # context already in the conversation, just not via a LIVE tool
+    # call. Deterministic exemption (Rule 2.8, never an LLM judgment of
+    # its own groundedness): a system message may carry this EXACT
+    # literal marker to assert "this conversation already has enough
+    # context that a real zero-tool answer here is legitimate, not a
+    # skipped-grounding mistake" — checked once here (a property of the
+    # conversation, not of any one completion), never inferred from the
+    # model's own prose, which would be exactly the kind of unreliable
+    # self-report Grounded Mode exists to NOT trust.
+    grounded_exempt = any(
+        m.get("role") == "system" and _GROUNDED_EXEMPT_MARKER in (m.get("content") or "")
+        for m in messages
+    )
     # v13: repeat-call guard for expensive, session-stateful CLI delegates.
     # Live bug this fixes: a weak local orchestrator model (e.g. qwen2.5:7b,
     # the fallback once NVIDIA broke) regularly can't tell a completed
@@ -4021,7 +4049,7 @@ def _run_dispatch_loop(
             # indication it wasn't grounded. Off by default; only engages
             # when the user has explicitly turned Grounded Mode on.
             grounded_violation = (
-                ctx.grounded and tools_used == 0 and bool(scoped_tools)
+                ctx.grounded and tools_used == 0 and bool(scoped_tools) and not grounded_exempt
             )
             if grounded_violation and grounded_nudges < _MAX_GROUNDED_NUDGES:
                 grounded_nudges += 1
@@ -4076,7 +4104,7 @@ def _run_dispatch_loop(
             # append the same kind of honest caveat the plan-based check
             # above uses, so the user can see this specific answer wasn't
             # grounded rather than trusting it at face value.
-            if ctx.grounded and tools_used == 0 and bool(scoped_tools):
+            if ctx.grounded and tools_used == 0 and bool(scoped_tools) and not grounded_exempt:
                 # v13.2 (live-caught, real bug): when the grounded-mode nudge
                 # above forced a SECOND completion call and that follow-up
                 # answers with nothing new (common — the model already gave

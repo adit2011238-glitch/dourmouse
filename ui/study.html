@@ -18,15 +18,47 @@
   html, body { height: 100%; }
   body {
     background: var(--ground); color: var(--text-body); font-family: var(--font-prose);
-    display: flex; flex-direction: column; max-width: 760px; margin: 0 auto; padding: 24px 20px;
+    display: flex; flex-direction: column; max-width: 1040px; margin: 0 auto; padding: 24px 20px;
   }
   h1 { font-size: 18px; font-weight: 600; color: var(--text-dim); margin-bottom: 4px; }
   .sub { font-size: 13px; color: var(--dead); margin-bottom: 6px; }
   .folder-status { font-size: 12px; color: var(--dead); margin-bottom: 16px; }
   .folder-status.missing { color: var(--amber); }
+  /* v14 (user-directed, 2026-09-08): a real file browser alongside the
+     existing chat — before this, the only way to see what's in the
+     folder at all was to ask the model and hope it called
+     study_list_files, then read informally through chat. */
+  .layout { display: flex; gap: 16px; flex: 1; min-height: 0; }
+  #browser {
+    width: 240px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--panel); overflow-y: auto; padding: 8px;
+  }
+  .crumb { font-size: 11px; color: var(--dead); padding: 4px 6px 8px; word-break: break-all; }
+  .crumb button { background: none; border: none; color: var(--amber); font-size: 11px; font-weight: 600;
+    cursor: pointer; padding: 0; margin-right: 4px; }
+  .entry {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;
+    cursor: pointer; font-size: 13px; color: var(--text-body);
+  }
+  .entry:hover { background: var(--raised); }
+  .entry.active { background: var(--raised); font-weight: 600; }
+  .entry .ic { color: var(--dead); font-size: 11px; width: 14px; text-align: center; }
+  .browser-empty { color: var(--dead); font-size: 12px; padding: 10px 8px; }
+  .browser-error { color: var(--amber); font-size: 12px; padding: 10px 8px; }
+  .right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #preview {
+    display: none; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+    padding: 14px 16px; margin-bottom: 12px; max-height: 260px; overflow-y: auto;
+  }
+  #preview.on { display: block; }
+  #preview .pv-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  #preview .pv-name { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+  #preview .pv-close { background: none; border: none; color: var(--dead); cursor: pointer; font-size: 12px; }
+  #preview .pv-body { font-size: 13px; white-space: pre-wrap; line-height: 1.5; color: var(--text-body); }
+  #preview .pv-truncated { font-size: 11px; color: var(--dead); margin-top: 8px; }
   #feed {
     flex: 1; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px;
-    background: var(--panel); padding: 16px; min-height: 360px;
+    background: var(--panel); padding: 16px; min-height: 300px;
     box-shadow: 0 1px 2px rgba(30,24,12,0.04), 0 12px 32px -8px rgba(30,24,12,0.10);
   }
   .turn { margin-bottom: 16px; }
@@ -52,11 +84,21 @@
   <h1>Study</h1>
   <div class="sub">Ask about anything — this uses its own knowledge first, and can pull from your real study folder when it matters.</div>
   <div class="folder-status" id="folder-status">Checking study folder…</div>
-  <div id="feed"><div class="empty">Ask a question to get started.</div></div>
-  <form id="ask-form">
-    <input type="text" id="ask-input" placeholder="Ask a study question…" autocomplete="off">
-    <button type="submit" id="ask-btn">Ask</button>
-  </form>
+  <div class="layout">
+    <div id="browser"><div class="browser-empty">Loading…</div></div>
+    <div class="right">
+      <div id="preview">
+        <div class="pv-head"><span class="pv-name" id="pv-name"></span><button class="pv-close" id="pv-close" type="button">close ✕</button></div>
+        <div class="pv-body" id="pv-body"></div>
+        <div class="pv-truncated" id="pv-truncated" hidden>Truncated — ask a question about this file for the rest, or a specific section.</div>
+      </div>
+      <div id="feed"><div class="empty">Ask a question to get started.</div></div>
+      <form id="ask-form">
+        <input type="text" id="ask-input" placeholder="Ask a study question…" autocomplete="off">
+        <button type="submit" id="ask-btn">Ask</button>
+      </form>
+    </div>
+  </div>
 
 <script>
 (function () {
@@ -143,6 +185,81 @@
       statusEl.classList.add('missing');
     }
   }).catch(function () { statusEl.textContent = ''; });
+
+  // v14 (user-directed, 2026-09-08): a real file browser. Direct HTTP
+  // (no LLM round trip) against /api/study/files and /api/study/read —
+  // the same real study_agent.py functions the chat box's own tool
+  // calls already use, just reachable without going through a model
+  // turn first. Folder-navigation state is just the current rel path;
+  // no history stack needed beyond the breadcrumb "up" links this
+  // builds fresh every render.
+  var browserEl = document.getElementById('browser');
+  var currentPath = '';
+
+  function icon(entry) { return entry.is_dir ? '▸' : '·'; }
+
+  function loadFolder(relPath) {
+    currentPath = relPath;
+    browserEl.innerHTML = '<div class="browser-empty">Loading…</div>';
+    fetch('/api/study/files?path=' + encodeURIComponent(relPath))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) {
+          browserEl.innerHTML = '<div class="browser-error">' + esc(data.error || 'could not read this folder') + '</div>';
+          return;
+        }
+        var html = '';
+        if (relPath) {
+          var parent = relPath.split('/').slice(0, -1).join('/');
+          html += '<div class="crumb"><button type="button" data-up="' + esc(parent) + '">↑ up</button>' + esc(relPath) + '</div>';
+        }
+        if (!data.entries || !data.entries.length) {
+          html += '<div class="browser-empty">Empty folder.</div>';
+        } else {
+          html += data.entries.map(function (e) {
+            var full = relPath ? relPath + '/' + e.name : e.name;
+            return '<div class="entry" data-path="' + esc(full) + '" data-dir="' + (e.is_dir ? '1' : '0') + '">'
+              + '<span class="ic">' + icon(e) + '</span>' + esc(e.name) + '</div>';
+          }).join('');
+        }
+        browserEl.innerHTML = html;
+        var up = browserEl.querySelector('[data-up]');
+        if (up) up.onclick = function () { loadFolder(up.dataset.up); };
+        Array.prototype.forEach.call(browserEl.querySelectorAll('.entry'), function (row) {
+          row.onclick = function () {
+            if (row.dataset.dir === '1') { loadFolder(row.dataset.path); }
+            else { openFile(row.dataset.path); }
+          };
+        });
+      })
+      .catch(function () {
+        browserEl.innerHTML = '<div class="browser-error">could not reach the study folder</div>';
+      });
+  }
+
+  var previewEl = document.getElementById('preview');
+  var pvName = document.getElementById('pv-name');
+  var pvBody = document.getElementById('pv-body');
+  var pvTruncated = document.getElementById('pv-truncated');
+
+  function openFile(relPath) {
+    pvName.textContent = relPath;
+    pvBody.textContent = 'Loading…';
+    pvTruncated.hidden = true;
+    previewEl.classList.add('on');
+    fetch('/api/study/read?' + new URLSearchParams({ path: relPath }))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) { pvBody.textContent = 'Could not read this file: ' + (data.error || 'unknown error'); return; }
+        pvBody.textContent = data.content || '(empty file)';
+        pvTruncated.hidden = !data.truncated;
+      })
+      .catch(function () { pvBody.textContent = 'Could not reach the study folder.'; });
+  }
+
+  document.getElementById('pv-close').onclick = function () { previewEl.classList.remove('on'); };
+
+  loadFolder('');
 })();
 </script>
 </body>

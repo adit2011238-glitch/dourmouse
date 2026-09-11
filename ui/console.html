@@ -1401,6 +1401,22 @@ OVERFLOW_SCREENS.forEach(name => {
   };
   tabsMoreMenu.appendChild(b);
 });
+// v14 (user-directed, 2026-09-08): STUDY is a real, complete, working
+// page (ui/study.html, backlog #9) — it was never a SPA screen in
+// SCREENS/show() at all, just never linked from anywhere either, so it
+// sat completely unreachable from the app's own navigation. Not another
+// show(name) screen (it has its own layout/theme/streaming, same as
+// GLOBE's own "open in new tab" God's Eye View link right below this)
+// — opens in a new tab, same pattern.
+const studyBtn = document.createElement("button");
+studyBtn.className = "tabopt"; studyBtn.type = "button"; studyBtn.setAttribute("role", "option");
+studyBtn.innerHTML = `<span class="dia">◆</span>STUDY`;
+studyBtn.onclick = () => {
+  window.open("/study", "_blank", "noopener");
+  tabsMoreMenu.classList.remove("on");
+  tabsMoreBtn.setAttribute("aria-expanded", "false");
+};
+tabsMoreMenu.appendChild(studyBtn);
 tabsMoreBtn.onclick = () => {
   const on = tabsMoreMenu.classList.toggle("on");
   tabsMoreBtn.setAttribute("aria-expanded", String(on));

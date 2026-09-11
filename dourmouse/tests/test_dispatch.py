@@ -1708,6 +1708,57 @@ class TestGroundedMode:
         assert report["final_text"] == "a plain reply"
         assert len(client.chat.completions.calls) == 1
 
+    def test_grounded_exempt_marker_skips_the_nudge_and_the_caveat(self, monkeypatch):
+        """v14, live-caught real bug: webui.py's own project-chat seed
+        (a SECOND system message, appended after the base system prompt —
+        see _bounded_context's own v13.9 fix for that exact shape)
+        explicitly tells the model certain questions are answerable
+        directly from the seed, no tool call needed. Grounded Mode used to
+        flag that answer "unverified" anyway, contradicting the seed's own
+        explicit assurance. This literal marker exempts it."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = _test_registry()
+        client = FakeClient(
+            [_FakeResponse(_FakeMessage(content="You're working in the Test project."))]
+        )
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "system", "content": "PROJECT SEED: ... [GROUNDED MODE EXEMPT]"},
+            {"role": "user", "content": "what project is this?"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent",
+        )
+        assert len(client.chat.completions.calls) == 1  # no nudge round-trip
+        assert report["final_text"] == "You're working in the Test project."
+        assert "Grounded Mode" not in report["final_text"]
+
+    def test_grounded_exempt_marker_does_not_leak_to_a_different_conversation(self, monkeypatch):
+        """The exemption must be a real property of THIS conversation's own
+        messages, never a global switch — an ordinary conversation with no
+        such seed must still get the normal Grounded Mode treatment."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = _test_registry()
+        client = FakeClient(
+            [
+                _FakeResponse(_FakeMessage(content="first try, no tool")),
+                _FakeResponse(_FakeMessage(content="second try, still no tool")),
+            ]
+        )
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "x"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent",
+        )
+        assert len(client.chat.completions.calls) == 2  # nudge still fires
+        assert "Grounded Mode was on" in report["final_text"]
+
 
 class TestRealClientConstruction:
     def test_builds_client_from_env_config_when_none_injected(self, monkeypatch):

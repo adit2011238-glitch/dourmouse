@@ -569,6 +569,78 @@ class TestStudyTab:
         assert data["path"] == str(real_dir)
 
 
+class TestStudyFilesAndReadEndpoints:
+    """v14 (user-directed, 2026-09-08): backlog #9's real /study.html page
+    existed and worked, but was never linked from console.html's nav — an
+    orphaned page (see the Study nav-link fix in console.html itself). Its
+    bare chat box had no real way to browse the folder without asking the
+    model and hoping it called study_list_files; these two direct HTTP
+    endpoints (no LLM round trip) give it a real file browser."""
+
+    def test_files_lists_the_real_study_folder(self, server, monkeypatch, tmp_path):
+        real_dir = tmp_path / "study"
+        real_dir.mkdir()
+        (real_dir / "notes.txt").write_text("hello")
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(real_dir))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/study/files")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["ok"] is True
+        names = {e["name"] for e in data["entries"]}
+        assert "notes.txt" in names
+
+    def test_files_honestly_reports_a_missing_folder(self, server, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(tmp_path / "not-there"))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/study/files")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["ok"] is False
+        assert "error" in data
+
+    def test_read_returns_real_file_content(self, server, monkeypatch, tmp_path):
+        real_dir = tmp_path / "study"
+        real_dir.mkdir()
+        (real_dir / "notes.txt").write_text("real study content here")
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(real_dir))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/study/read?" + urllib.parse.urlencode({"path": "notes.txt"}))
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["ok"] is True
+        assert "real study content here" in data["content"]
+
+    def test_read_requires_a_path(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/study/read")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["ok"] is False
+
+    def test_read_refuses_a_path_traversal_attempt(self, server, monkeypatch, tmp_path):
+        real_dir = tmp_path / "study"
+        real_dir.mkdir()
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(real_dir))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "GET", "/api/study/read?" + urllib.parse.urlencode({"path": "../../../etc/passwd"})
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["ok"] is False
+
+
 class TestClaudeFrontModeEndpoint:
     """The Settings UI's backend half for the Claude-front-mode toggle —
     ON by default, changeable, mirroring TestStudyTab's real-HTTP pattern."""
@@ -1581,6 +1653,11 @@ class TestProjectScopedSessions:
         # bare "project" query. The seed now heads that off explicitly.
         assert "freebuff" in seed_text.lower()
         assert "no tool call needed" in seed_text
+        # v14, live-caught: a real, correct zero-tool answer to "what
+        # project is this" (answered straight from this exact seed) still
+        # got flagged "unverified" by Grounded Mode — see dispatch.py's
+        # own grounded_exempt for the deterministic fix this marker drives.
+        assert "[GROUNDED MODE EXEMPT]" in seed_text
 
     def test_an_ordinary_tab_id_gets_no_project_seeding(self, server):
         """The honest negative: a ROOT ordinary browser tab_id (not
