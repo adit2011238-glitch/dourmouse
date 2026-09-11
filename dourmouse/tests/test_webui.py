@@ -732,6 +732,111 @@ class TestAppControlDryRunEndpoint:
         assert get_data["enabled"] is True
 
 
+class TestByokApiKeysEndpoint:
+    """v14 (user-directed, 2026-09-12): "commercial, for other people to
+    use" — the real Settings-UI backend for BYOK (bring your own key).
+    GET never echoes the key VALUE back (Rule 2.6) — only whether one is
+    configured, matching this app's own NOT CONFIGURED honesty pattern."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_get_reports_both_keys_unconfigured_by_default(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/api-keys")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data == {"OLLAMA_API_KEY": False, "GEMINI_API_KEY": False}
+
+    def test_post_a_real_key_then_get_reflects_configured_true(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/settings/api-keys",
+            body=json.dumps({"name": "OLLAMA_API_KEY", "value": "a-real-test-key"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        post_data = json.loads(resp.read())
+        conn.close()
+        assert post_data["ok"] is True
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/api-keys")
+        resp = conn.getresponse()
+        get_data = json.loads(resp.read())
+        conn.close()
+        assert get_data["OLLAMA_API_KEY"] is True
+        assert get_data["GEMINI_API_KEY"] is False  # untouched, still unconfigured
+
+    def test_the_get_response_never_contains_the_real_key_value(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        secret = "super-secret-value-must-never-leak-back-out"
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/settings/api-keys",
+            body=json.dumps({"name": "GEMINI_API_KEY", "value": secret}),
+            headers={"Content-Type": "application/json"},
+        )
+        conn.getresponse().read()
+        conn.close()
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/api-keys")
+        resp = conn.getresponse()
+        raw_body = resp.read()
+        conn.close()
+        assert secret.encode() not in raw_body
+
+    def test_posting_an_empty_value_clears_a_previously_set_key(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/settings/api-keys",
+            body=json.dumps({"name": "OLLAMA_API_KEY", "value": "will-be-cleared"}),
+            headers={"Content-Type": "application/json"},
+        )
+        conn.getresponse().read()
+        conn.close()
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/settings/api-keys",
+            body=json.dumps({"name": "OLLAMA_API_KEY", "value": ""}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["ok"] is True
+        assert data["configured"] is False
+
+    def test_a_name_outside_the_allowlist_is_refused_over_http(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/settings/api-keys",
+            body=json.dumps({"name": "NVIDIA_API_KEY", "value": "sneaky"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["ok"] is False
+
+
 class TestSessionTranscriptEndpoint:
     """GET /api/session/current and /api/session/<id> — reload-survival
     groundwork: the live ChatSession already writes one hash-chained JSONL

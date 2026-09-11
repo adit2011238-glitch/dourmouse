@@ -1,0 +1,28 @@
+"""Template for dourmouse/_builtin_oauth.py — the product's ONE shared
+Google OAuth client, for a commercially distributed build where end
+users should need zero Google Cloud Console setup of their own.
+
+This file itself IS committed (a template, no real values). The real
+dourmouse/_builtin_oauth.py is gitignored — see google_auth.py's own
+comment on _builtin_oauth() for why a real, working credential never
+belongs in this repo's public history, even though Google's OAuth docs
+say a "Desktop app" client secret is not meant to be treated as truly
+confidential.
+
+To wire the real shared client:
+  1. Google Cloud Console -> APIs & Services -> Credentials ->
+     Create Credentials -> OAuth client ID -> "Desktop app" (NOT "Web
+     application" — Desktop app auto-permits localhost/127.0.0.1 on
+     any port, so this dynamically-resolved redirect_uri never hits a
+     redirect_uri_mismatch as ports vary across installs).
+  2. Copy this file to dourmouse/_builtin_oauth.py (same directory,
+     drop the .example suffix).
+  3. Fill in the two real values below.
+  4. Every install of this app now offers "Sign in with Google" with
+     no per-user Google Cloud project required — an env var
+     (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET) still overrides this for
+     a power user who wants their own client instead.
+"""
+
+GOOGLE_CLIENT_ID = ""
+GOOGLE_CLIENT_SECRET = ""

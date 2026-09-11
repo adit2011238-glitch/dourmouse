@@ -113,12 +113,44 @@ urlopen = urllib.request.urlopen
 
 # -- configuration -------------------------------------------------------- #
 
+# v14 (user-directed, 2026-09-12): "commercial, for other people to
+# use" — the ONE shared "Dourmouse" OAuth client. Every install uses
+# THIS by default, so an end user needs ZERO Google Cloud Console setup
+# of their own to sign in. Per Google's own OAuth docs for installed/
+# native apps, a "Desktop app" client's secret is not meant to be
+# treated as confidential (it cannot stay secret in distributed code
+# either way) — PKCE (already implemented above) is the real security
+# boundary, not this value's secrecy.
+#
+# NOT committed here anyway: this repo is public on GitHub, and there is
+# no reason to expose a real, working client_id/secret in git history
+# forever just because Google's threat model tolerates it — needless
+# exposure is still needless. Read the same way dourmouse/local_secrets.py
+# already is (see that module's own docstring: "single-user source-tree
+# secrets", gitignored, never committed) — a sibling module for the
+# product's OWN shared identity rather than a personal credential, same
+# gitignore line covers both. Falls through to the plain env vars first
+# (a power user's own client always wins), then this builtin module,
+# then honestly empty — never a fabricated value.
+def _builtin_oauth() -> tuple[str, str]:
+    try:
+        from dourmouse import _builtin_oauth as mod  # type: ignore[import-not-found]
+    except ImportError:
+        return "", ""
+    return (
+        str(getattr(mod, "GOOGLE_CLIENT_ID", "") or "").strip(),
+        str(getattr(mod, "GOOGLE_CLIENT_SECRET", "") or "").strip(),
+    )
+
+
 def client_id() -> str:
-    return os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    env = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    return env or _builtin_oauth()[0]
 
 
 def client_secret() -> str:
-    return os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+    env = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+    return env or _builtin_oauth()[1]
 
 
 def google_configured() -> bool:

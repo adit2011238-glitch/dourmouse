@@ -73,6 +73,50 @@ class TestConfiguration:
         assert "redirect_uri=http%3A%2F%2F127.0.0.1%3A8765%2Fapi%2Fauth%2Fgoogle%2Fcallback" in url
 
 
+class TestBuiltinOauthFallback:
+    """v14 (user-directed, 2026-09-12): "commercial, for other people to
+    use" — the ONE shared Dourmouse OAuth client, read from a gitignored
+    sibling module (dourmouse/_builtin_oauth.py, see google_auth.py's
+    own comment on _builtin_oauth() for why it's never committed) so an
+    end user needs zero Google Cloud Console setup. A plain env var
+    still wins when set — a power user's own client always overrides
+    the shared one."""
+
+    def _install_fake_builtin_module(self, monkeypatch, client_id: str, client_secret: str):
+        import sys
+        import types
+
+        fake = types.ModuleType("dourmouse._builtin_oauth")
+        fake.GOOGLE_CLIENT_ID = client_id
+        fake.GOOGLE_CLIENT_SECRET = client_secret
+        monkeypatch.setitem(sys.modules, "dourmouse._builtin_oauth", fake)
+
+    def test_falls_back_to_the_builtin_module_when_no_env_is_set(self, monkeypatch):
+        monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+        monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+        self._install_fake_builtin_module(monkeypatch, "builtin-id", "builtin-secret")
+        assert google_auth.client_id() == "builtin-id"
+        assert google_auth.client_secret() == "builtin-secret"
+        assert google_auth.google_configured() is True
+
+    def test_env_var_wins_over_the_builtin_module(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "power-user-id")
+        monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "power-user-secret")
+        self._install_fake_builtin_module(monkeypatch, "builtin-id", "builtin-secret")
+        assert google_auth.client_id() == "power-user-id"
+        assert google_auth.client_secret() == "power-user-secret"
+
+    def test_missing_builtin_module_is_honestly_empty_not_a_crash(self, monkeypatch):
+        """No real dourmouse/_builtin_oauth.py exists in this checkout
+        (it's gitignored, template-only) — importing it must fail
+        cleanly, not raise up into a real request."""
+        monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+        monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+        assert google_auth.client_id() == ""
+        assert google_auth.client_secret() == ""
+        assert google_auth.google_configured() is False
+
+
 # -- token exchange + verification ----------------------------------------- #
 
 def _fake_urlopen(payload, status_error: str | None = None):

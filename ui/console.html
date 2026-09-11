@@ -707,6 +707,16 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
   border-radius:6px;padding:5px 11px;font-size:9px;letter-spacing:.06em;cursor:pointer;min-height:28px}
 .mini:hover{color:var(--amber);border-color:var(--amber-line)}
 
+/* v14 (user-directed, 2026-09-12): the first real text-entry field in
+   Settings — every prior toggle was a chip pair (ON/OFF), never a value
+   a user types in. BYOK (bring your own key) needed a real input, so
+   this exists now rather than leaving that gap unstyled. */
+.byokInput{flex:1;min-width:0;border:1px solid var(--line-2);background:var(--panel2);
+  color:var(--blue-hi);border-radius:6px;padding:6px 9px;font-family:var(--mono);
+  font-size:11px;min-height:28px}
+.byokInput:focus-visible{outline:none;border-color:var(--amber-line)}
+.byokInput::placeholder{color:var(--blue-deep)}
+
 /* ---------- approval ---------- */
 .approve{border:1px solid var(--amber);border-left:2px solid var(--amber);border-radius:2px;
   padding:11px 13px;margin:0 0 12px;background:rgba(242,183,61,.06)}
@@ -4504,6 +4514,17 @@ function paintSettings(){
       <div class="d">${esc(b.backend||"")} · ${esc(b.base_url||"")}</div></div></div>
     <div class="row"><div class="g"><div class="n">Compute node</div>
       <div class="d">${s.online?`${esc(s.node)} · ${esc(s.model)} · ${s.latency_ms}ms`:"offline"}</div></div></div>
+    <!-- v14 (user-directed, 2026-09-12): "commercial, for other people
+         to use" — BYOK (bring your own key). Each install is a
+         stranger's own machine now, not this developer's; sharing one
+         API key across every install would bill/rate-limit them all
+         against the same account. A real form, not "open .env in a
+         text editor" — see config.save_api_key_setting's own docstring. -->
+    <div class="toolbar">
+      <span class="lbl">API KEYS</span>
+    </div>
+    <div class="note">Your own keys, stored only on this machine — never sent anywhere but the provider itself.</div>
+    <div id="byokRows"></div>
     <div class="toolbar">
       <span class="lbl">ORCHESTRATOR MODEL</span>
       <div id="orchModelRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
@@ -4579,6 +4600,73 @@ function paintSettings(){
     btn.onclick = () => { detailsSet(val); paintSettings(); };
     detRow.appendChild(btn);
   });
+
+  /* v14 (user-directed, 2026-09-12): BYOK (bring your own key) rows —
+     real save/clear, never pre-filling the input with the actual saved
+     value (GET /api/settings/api-keys only ever reports configured:
+     true/false, by design — see that endpoint's own comment). Two
+     fixed, real keys today (OLLAMA_API_KEY, GEMINI_API_KEY); a third
+     provider is one more entry in this list, not new plumbing. */
+  (async () => {
+    const box = $("byokRows");
+    if (!box) return;
+    const KEYS = [
+      {name: "OLLAMA_API_KEY", label: "OLLAMA CLOUD", hint: "ollama.com/settings/keys"},
+      {name: "GEMINI_API_KEY", label: "GEMINI", hint: "aistudio.google.com/apikey"},
+    ];
+    let state = {};
+    try {
+      const r = await fetch("/api/settings/api-keys");
+      state = await r.json();
+    } catch {}
+    box.innerHTML = KEYS.map(k => {
+      const on = !!state[k.name];
+      return `<div class="row" data-key="${esc(k.name)}">
+        <span class="dot ${on ? "ok" : "no"}"></span>
+        <div class="g">
+          <div class="n">${esc(k.label)}</div>
+          <div class="d byokStatus">${on ? "Configured" : `Not configured — get a key at ${esc(k.hint)}`}</div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <input type="password" class="byokInput" autocomplete="off" spellcheck="false"
+              placeholder="${on ? "Paste a new key to replace it…" : "Paste your API key…"}">
+            <button class="mini byokSave" type="button">SAVE</button>
+            ${on ? '<button class="mini byokClear" type="button">CLEAR</button>' : ""}
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".row").forEach(row => {
+      const name = row.dataset.key;
+      const input = row.querySelector(".byokInput");
+      const status = row.querySelector(".byokStatus");
+      const saveBtn = row.querySelector(".byokSave");
+      const clearBtn = row.querySelector(".byokClear");
+      const post = async (value) => {
+        status.textContent = "Saving…";
+        try {
+          const rr = await fetch("/api/settings/api-keys", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name, value}),
+          });
+          const jj = await rr.json();
+          if (!jj.ok) { status.textContent = "Could not save: " + (jj.detail || "unknown error"); return; }
+        } catch (err) {
+          status.textContent = "Save failed: " + (err.message || err);
+          return;
+        }
+        input.value = "";
+      };
+      saveBtn.onclick = async () => {
+        const v = input.value.trim();
+        if (!v) { status.textContent = "Paste a real key first."; return; }
+        await post(v);
+        paintSettings();
+      };
+      if (clearBtn) clearBtn.onclick = async () => { await post(""); paintSettings(); };
+      input.addEventListener("keydown", e => { if (e.key === "Enter") saveBtn.click(); });
+    });
+  })();
 
   /* Orchestrator model picker (round-2 fix): GET/POST
      /api/settings/orchestrator-model already existed with no UI wired to

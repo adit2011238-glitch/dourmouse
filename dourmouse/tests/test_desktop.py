@@ -511,7 +511,10 @@ class TestGeneralizedTaskWindows:
 class TestLauncherScriptSyntax:
     @pytest.mark.parametrize(
         "rel",
-        ["start.command", "stop.command", "build_app.command"],
+        # v14: build_dist.sh and start.sh added — real gap, neither was
+        # covered before despite being real, executed launcher/build
+        # scripts exactly like the three already here.
+        ["start.command", "stop.command", "build_app.command", "build_dist.sh", "start.sh"],
     )
     def test_bash_n_passes(self, rel):
         script = _PROJECT_ROOT / rel

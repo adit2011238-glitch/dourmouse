@@ -465,6 +465,85 @@ class TestAppControlDryRunSetting:
         assert APP_CONTROL_DRY_RUN_SETTING_KEY != GROUNDED_MODE_SETTING_KEY
 
 
+class TestByokApiKeySetting:
+    """v14 (user-directed, 2026-09-12): "commercial, for other people to
+    use" — BYOK (bring your own key) Settings backend, replacing "open
+    .env in a text editor" with a real save/clear path. One generic
+    pair of functions over an explicit allowlist (BYOK_API_KEY_NAMES),
+    not one hand-copied function per key name."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_unset_key_reads_as_empty(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import api_key_setting
+
+        assert api_key_setting("OLLAMA_API_KEY") == ""
+
+    def test_save_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import api_key_setting, save_api_key_setting
+
+        result = save_api_key_setting("OLLAMA_API_KEY", "real-test-key-123")
+        assert result["ok"] is True
+        assert result["configured"] is True
+        assert api_key_setting("OLLAMA_API_KEY") == "real-test-key-123"
+
+    def test_saving_an_empty_value_clears_the_key(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import api_key_setting, save_api_key_setting
+
+        save_api_key_setting("GEMINI_API_KEY", "some-key")
+        result = save_api_key_setting("GEMINI_API_KEY", "")
+        assert result["ok"] is True
+        assert result["configured"] is False
+        assert api_key_setting("GEMINI_API_KEY") == ""
+
+    def test_the_two_keys_are_independent(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import api_key_setting, save_api_key_setting
+
+        save_api_key_setting("OLLAMA_API_KEY", "ollama-value")
+        save_api_key_setting("GEMINI_API_KEY", "gemini-value")
+        assert api_key_setting("OLLAMA_API_KEY") == "ollama-value"
+        assert api_key_setting("GEMINI_API_KEY") == "gemini-value"
+
+    def test_save_merges_with_existing_file(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_api_key_setting, user_env_path
+
+        path = user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("DOURMOUSE_GROUNDED_MODE=1\n", encoding="utf-8")
+        save_api_key_setting("OLLAMA_API_KEY", "real-key")
+        contents = path.read_text(encoding="utf-8")
+        assert "DOURMOUSE_GROUNDED_MODE=1" in contents
+        assert "OLLAMA_API_KEY=real-key" in contents
+
+    def test_a_name_outside_the_allowlist_is_refused(self, monkeypatch, tmp_path):
+        """Rule 2.8: never write an arbitrary env-var name a request
+        happens to name — real, deliberate scoping, not an oversight."""
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_api_key_setting, user_env_path
+
+        result = save_api_key_setting("NVIDIA_API_KEY", "sneaky")
+        assert result["ok"] is False
+        path = user_env_path()
+        assert not path.exists() or "NVIDIA_API_KEY" not in path.read_text(encoding="utf-8")
+
+    def test_an_unknown_name_reads_as_empty_not_an_error(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import api_key_setting
+
+        assert api_key_setting("SOME_RANDOM_ENV_VAR") == ""
+
+
 # --------------------------------------------------------------------------- #
 # v5.10 — OmniRoute free-tier gateway backend
 # --------------------------------------------------------------------------- #

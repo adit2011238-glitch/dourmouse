@@ -1841,6 +1841,23 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"enabled": app_control_dry_run_enabled()})
             except Exception as exc:  # noqa: BLE001 - a settings read must never 500
                 self._send_json({"enabled": False, "error": str(exc)[:200]})
+        elif path == "/api/settings/api-keys":
+            # v14 (user-directed, 2026-09-12): "commercial, for other
+            # people to use" — BYOK (bring your own key) Settings UI
+            # backend. Real Rule-2.6 discipline: the key VALUE never
+            # comes back out over this GET — only whether one is set —
+            # matching this app's own established NOT CONFIGURED honesty
+            # pattern rather than echoing a secret back to whatever
+            # rendered the page. See config.BYOK_API_KEY_NAMES's own
+            # docstring for why this is one generic path, not two.
+            try:
+                from dourmouse.config import BYOK_API_KEY_NAMES, api_key_setting
+
+                self._send_json(
+                    {name: bool(api_key_setting(name)) for name in BYOK_API_KEY_NAMES}
+                )
+            except Exception as exc:  # noqa: BLE001 - a settings read must never 500
+                self._send_json({"error": str(exc)[:200]})
         elif path == "/api/settings/claude-front-mode":
             # backend half of the Claude-front-mode toggle — ON by
             # default (the user's own explicit ask), see
@@ -2720,6 +2737,10 @@ class _Handler(BaseHTTPRequestHandler):
             # v14 (user-directed, 2026-09-08): persists the App Control
             # Dry Run toggle (see config.save_app_control_dry_run_setting).
             self._handle_app_control_dry_run_post()
+        elif parsed.path == "/api/settings/api-keys":
+            # v14 (user-directed, 2026-09-12): persists one BYOK API key
+            # (see config.save_api_key_setting).
+            self._handle_api_keys_post()
         elif parsed.path == "/api/settings/claude-front-mode":
             # persists the Claude-front-mode toggle (see
             # config.save_claude_front_mode_setting). Same post-first-run
@@ -4815,6 +4836,18 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         enabled = bool(body.get("enabled"))
         result = cfg_mod.save_app_control_dry_run_setting(enabled)
+        self._send_json(result)
+
+    def _handle_api_keys_post(self) -> None:
+        """POST /api/settings/api-keys. Body: {"name": "OLLAMA_API_KEY"|
+        "GEMINI_API_KEY", "value": "..."}. An empty value clears the key —
+        see config.save_api_key_setting's own docstring."""
+        from dourmouse import config as cfg_mod
+
+        body = self._read_json_body()
+        name = str(body.get("name") or "").strip()
+        value = str(body.get("value") or "")
+        result = cfg_mod.save_api_key_setting(name, value)
         self._send_json(result)
 
     def _handle_claude_front_mode_post(self) -> None:

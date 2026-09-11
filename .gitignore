@@ -5,6 +5,11 @@
 !.env.example
 # Single-user source-tree secrets (see dourmouse/local_secrets.py).
 dourmouse/local_secrets.py
+# v14: the product's OWN shared OAuth client (see google_auth.py's own
+# comment on _builtin_oauth) — real, working credentials never belong in
+# a public repo's history, even though Google's threat model tolerates
+# a Desktop-app client secret being non-confidential.
+dourmouse/_builtin_oauth.py
 
 # ── Python ───────────────────────────────────────────────────────────────
 __pycache__/

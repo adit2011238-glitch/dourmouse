@@ -172,11 +172,66 @@ if [ "$(uname -s)" = "Darwin" ] && [ -d "$ROOT/dourmouse.app" ]; then
   echo "==> bundling dourmouse.app (macOS)"
   cp -R "$ROOT/dourmouse.app" "$STAGE/dourmouse.app"
   rm -rf "$STAGE/dourmouse.app/Contents/_CodeSignature" 2>/dev/null || true
-  # Re-sign ad-hoc (the copy's signature is stale after cp; an ad-hoc
-  # signature keeps the bundle consistent). Best-effort: an unsigned bundle
-  # also launches fine locally.
   xattr -cr "$STAGE/dourmouse.app" 2>/dev/null || true
-  codesign --force -s - "$STAGE/dourmouse.app" 2>/dev/null || true
+
+  # v14 (user-directed, 2026-09-12): "commercial, for other people to
+  # use" — an ad-hoc signature (the old unconditional codesign below)
+  # only ever satisfies Gatekeeper on THIS SAME machine. Downloaded onto
+  # a DIFFERENT person's Mac, Gatekeeper's quarantine check refuses to
+  # even open it ("Apple cannot check it for malicious software") —
+  # real distribution needs a genuine Developer ID Application signature
+  # PLUS Apple notarization, not just any signature.
+  #
+  # Real, not a stub: this DOES the actual codesign + notarytool submit
+  # + stapler calls — but only when the two real prerequisites are
+  # present (Rule 2.2, honest NOT CONFIGURED rather than a fabricated
+  # "signed" claim): an Apple Developer Program membership ($99/yr,
+  # developer.apple.com) for the identity, and a notarytool credential
+  # profile (one-time: `xcrun notarytool store-credentials
+  # "dourmouse-notary" --apple-id you@... --team-id TEAMID --password
+  # <app-specific password from appleid.apple.com>`) for submission.
+  # Neither is something this script — or Claude — can create; both
+  # need the account holder's own login. Falls through to the existing
+  # ad-hoc signature (fine for local use, refused by Gatekeeper on
+  # anyone else's Mac) when either is unset, exactly the prior behavior.
+  SIGN_IDENTITY="${DOURMOUSE_SIGN_IDENTITY:-}"
+  NOTARY_PROFILE="${DOURMOUSE_NOTARY_PROFILE:-}"
+  if [ -n "$SIGN_IDENTITY" ]; then
+    echo "==> code-signing dourmouse.app with Developer ID: $SIGN_IDENTITY"
+    if codesign --force --deep --options runtime --timestamp \
+        -s "$SIGN_IDENTITY" "$STAGE/dourmouse.app"; then
+      codesign --verify --deep --strict "$STAGE/dourmouse.app" \
+        && echo "    signature verified"
+      if [ -n "$NOTARY_PROFILE" ]; then
+        echo "==> notarizing (this uploads to Apple and waits — a few minutes)"
+        ZIP_FOR_NOTARY="$OUT/dourmouse-app-for-notary.zip"
+        /usr/bin/ditto -c -k --keepParent "$STAGE/dourmouse.app" "$ZIP_FOR_NOTARY"
+        if xcrun notarytool submit "$ZIP_FOR_NOTARY" \
+            --keychain-profile "$NOTARY_PROFILE" --wait; then
+          echo "==> stapling the notarization ticket"
+          xcrun stapler staple "$STAGE/dourmouse.app" \
+            && echo "    stapled — this .app now opens cleanly on ANY Mac"
+        else
+          echo "    ⚠ notarization submission failed — see the log above." >&2
+          echo "      The app is still Developer-ID signed but NOT notarized;" >&2
+          echo "      Gatekeeper will still warn on other Macs until it is." >&2
+        fi
+        rm -f "$ZIP_FOR_NOTARY"
+      else
+        echo "    DOURMOUSE_NOTARY_PROFILE not set — signed but NOT notarized."
+        echo "    Gatekeeper still warns on other Macs. See this block's own"
+        echo "    comment for the one-time notarytool store-credentials setup."
+      fi
+    else
+      echo "    ⚠ codesign with $SIGN_IDENTITY failed — falling back to ad-hoc." >&2
+      codesign --force -s - "$STAGE/dourmouse.app" 2>/dev/null || true
+    fi
+  else
+    # Unchanged prior behavior: ad-hoc, local-use-only signature.
+    codesign --force -s - "$STAGE/dourmouse.app" 2>/dev/null || true
+    echo "    ad-hoc signature only (DOURMOUSE_SIGN_IDENTITY unset) —"
+    echo "    fine for THIS machine; Gatekeeper refuses this on anyone else's."
+  fi
 fi
 
 # Pick a Python >= 3.10: requirements.txt pins openai>=2.52.0 which needs it,
@@ -286,34 +341,37 @@ Never zip/upload/share it. If you move it, the whole folder must move as one.
 DOC
 else
   cat > "$STAGE/INSTALL.md" <<'DOC'
-# DOURMOUSE — install on a new device (5 minutes)
+# DOURMOUSE — install (2 minutes)
 
-## 1. Prerequisite: Ollama (free, local LLM)
-- Install from https://ollama.com (or `curl -fsSL https://ollama.com/install.sh | sh` on Linux)
-- Pull the models (one-time, a few GB):
-  - `ollama pull qwen3:8b`   (main brain)
-  - `ollama pull qwen3:4b`   (fast dispatch; skip to save space — see .env)
-- Keep Ollama running (the app talks to http://127.0.0.1:11434).
-
-## 2. Configure
-- `cp .env.example .env` then edit:
-  - `DOURMOUSE_LLM_BACKEND=ollama` (default, free) — or set NVIDIA/DEEPSEEK/CODEX keys
-  - Optional: `DOURMOUSE_VOICE=1` + whisper/piper settings for local voice
-  - Optional: `GOOGLE_GMAIL_USER` + `GOOGLE_GMAIL_APP_PASSWORD` for Gmail tools
-  - **Google sign-in (optional):** `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` from a
-    Google Cloud Console OAuth *Web client* — the login page then shows
-    SIGN IN WITH GOOGLE and each account gets its own watchlist/alerts/prefs.
-    Register the callback URL `http://127.0.0.1:8765/api/auth/google/callback`.
-  - **ATLAS (optional):** `ATLAS_REPO_PATH` + `ATLAS_VENV_PATH` to the real
-    ATLAS engine — or build a `--personal` dist, which embeds it.
-
-## 3. Run
-- **macOS:** double-click `start.command` (or `dourmouse.app`), or `./start.sh`
+## 1. Run it
+- **macOS:** double-click `dourmouse.app` (or `start.command`), or `./start.sh`
 - **Linux:** `./start.sh` (binds 127.0.0.1:8765)
-- Open http://127.0.0.1:8765 — done.
+- The app opens its own window and walks you through first-run setup.
 - **Deep links:** the app registers the `dourmouse://` scheme, so links like
   `dourmouse://world` or `dourmouse://atlas/research` open the right screen
   (or start the app on a cold launch).
+
+## 2. Sign in with Google — zero setup
+- Settings → Sign in. This app ships with its own shared Google OAuth
+  client (v14) — there is nothing to register in Google Cloud Console,
+  no client ID to find. Approve the consent screen with your own Google
+  account and Gmail/Calendar/Drive/Sheets/Slides are live.
+- (Advanced: setting your own `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`
+  in Settings overrides the shared client with your own — never required.)
+
+## 3. Bring your own AI model key
+- This app talks to real cloud model providers, not a local install you
+  have to manage — no Ollama daemon, no multi-GB model download.
+- Settings → API KEYS. Paste your own key for whichever you use:
+  - **Ollama Cloud** — ollama.com/settings/keys (free tier available)
+  - **Gemini** — aistudio.google.com/apikey (free tier available)
+- Each key is yours — stored only on this machine, billed only to your
+  own account. Nothing is shared across installs (a shared key would
+  mean every install's usage bills the same account — not how this
+  works).
+- Prefer NVIDIA/DeepSeek/Codex or a genuinely local Ollama instead?
+  `cp .env.example .env` and set those directly — the Settings keys
+  above are the common path, not the only one.
 
 ## 4. Any device?
 - The folder is self-contained: zip it (`zip -r dourmouse-dist.zip dourmouse-dist`),
@@ -322,8 +380,9 @@ else
   same network (set `DOURMOUSE_HOST=0.0.0.0` + `DOURMOUSE_ACCESS_TOKEN`).
 
 ## What's NOT shipped (on purpose)
-- Ollama models (multi-GB) — pulled on first run.
-- Secrets — only `.env.example` ships; `.env` is yours.
+- Any API key — yours lives only in your own Settings, never in this dist.
+- The shared OAuth client's real secret — read from a gitignored source
+  file at build time, not something that ships as plain text either.
 - The ATLAS engine — point ATLAS_REPO_PATH at your own copy, or build --personal.
 DOC
 fi

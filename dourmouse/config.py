@@ -1070,6 +1070,68 @@ def save_app_control_dry_run_setting(enabled: bool) -> dict[str, Any]:
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
 
 
+# v14 (user-directed, 2026-09-12): "commercial, for other people to use" —
+# a real, distributable desktop app means each install is a stranger's
+# own machine, not this developer's. Sharing ONE Ollama Cloud / Gemini
+# API key across every installer would mean every stranger's usage bills
+# and rate-limits against the SAME account — a real abuse and billing
+# problem, not a hypothetical one. BYOK (bring your own key) is the
+# correct, standard shape for a distributed AI app (same model as any
+# "paste your OpenAI key" tool) — this is the real Settings-UI backend
+# for it, replacing "open .env in a text editor" with an actual form.
+# Deliberately ONE generic pair of functions rather than one hand-copied
+# pair per key name — every current and future BYOK key (Ollama, Gemini,
+# whatever comes next) reads/writes through the exact same real path,
+# so the two can never quietly drift in behavior.
+#: Keys this app currently lets a user BYOK through Settings. A real
+#: allowlist (Rule 2.8 — never write an arbitrary env-var name a request
+#: happens to name) rather than accepting any key name a POST body sends.
+BYOK_API_KEY_NAMES = ("OLLAMA_API_KEY", "GEMINI_API_KEY")
+
+
+def api_key_setting(env_name: str) -> str:
+    """The current value of one BYOK key, read fresh from disk — same
+    live-without-restart contract every other setting in this module
+    already has. Empty string, never None, when unset."""
+    if env_name not in BYOK_API_KEY_NAMES:
+        return ""
+    return _read_user_config_file().get(env_name, "").strip()
+
+
+def save_api_key_setting(env_name: str, value: str) -> dict[str, Any]:
+    """Persist one BYOK key. Same merge-on-write .env file as every other
+    save_*_setting above — never clobbers other saved settings. An empty
+    ``value`` clears the key (the honest way to "remove my key" — never
+    a special sentinel string). Never raises; a write failure is
+    reported honestly."""
+    if env_name not in BYOK_API_KEY_NAMES:
+        return {"ok": False, "detail": f"{env_name!r} is not a BYOK key this app accepts"}
+    path = user_env_path()
+    try:
+        user_config_dir().mkdir(parents=True, exist_ok=True)
+        existing = _read_user_config_file()
+        value = value.strip()
+        if value:
+            existing[env_name] = value
+        else:
+            existing.pop(env_name, None)
+        body = [
+            "# Dourmouse configuration — written by first-run setup / settings.",
+            "# This file holds credentials. Keep it to yourself; it is never",
+            "# bundled into a build or uploaded anywhere.",
+            "",
+        ]
+        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        return {"ok": False, "detail": f"could not write config: {exc}"}
+    return {"ok": True, "detail": "saved" if value else "cleared", "configured": bool(value), "path": str(path)}
+
+
 # --------------------------------------------------------------------------- #
 # v4.0 — Multi-device access (spec Phase 9)
 # --------------------------------------------------------------------------- #
