@@ -61,13 +61,13 @@ global_memory.sqlite3
 # migration, see ~/.claude/plans/sorted-wiggling-pearl.md) ────────────────
 electron/node_modules/
 electron/verify-result.json
-# Stage E rebuildable build output: the packaged .app/.dmg AND the
-# venv-stage prepare-venv.sh builds fresh each time (real credentials/keys
-# are never baked into it — see requirements*.txt instead) — same
-# "rebuildable artifacts never committed" rule as dourmouse.app/ and dist/
-# above, just under electron/'s own build/ output directory.
-electron/build/dist/
-electron/build/venv-stage/
+# electron/build/ (the packaged .app/.dmg AND prepare-venv.sh's fresh
+# ~500MB venv, neither ever containing real credentials — see
+# requirements*.txt instead) is already caught by the bare "build/" rule
+# in the Rebuildable artifacts section below; real TRACKED source
+# (icon.icns, entitlements.mac.plist) deliberately lives in
+# electron/resources/ instead of electron/build/ to avoid colliding with
+# that same blanket rule.
 
 # ── Large binaries ───────────────────────────────────────────────────────
 # lora-dourmouse-claude.gguf and site/downloads/*.exe are intentionally NOT

@@ -1,0 +1,61 @@
+{
+  "name": "dourmouse-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dourmouse native shell (Electron), replacing the pywebview shell in dourmouse/desktop.py. See ~/.claude/plans/sorted-wiggling-pearl.md for the staged migration plan this implements. Stages A-D done (shell/windowing, IPC bridge, tray/notifications/vision helpers, embedded CDP browser pane); Stage E (this file's build/build:mac scripts) packages it as a real macOS .app via electron-builder, replacing build_dist.sh's macOS path.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "prepare-venv": "bash scripts/prepare-venv.sh",
+    "build:mac": "npm run prepare-venv && CSC_NAME=\"${DOURMOUSE_SIGN_IDENTITY:-$CSC_NAME}\" electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "@electron/notarize": "^2.5.0"
+  },
+  "build": {
+    "appId": "com.dourmouse.app",
+    "productName": "DourMouse",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "build/dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dourmouse",
+        "to": "dourmouse",
+        "filter": ["**/*", "!tests/**", "!__pycache__/**", "!**/__pycache__/**", "!**/*.pyc"]
+      },
+      {
+        "from": "../ui",
+        "to": "ui",
+        "filter": ["**/*", "!*.orig"]
+      },
+      {
+        "from": "build/venv-stage/.venv",
+        "to": ".venv"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "resources/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "DourMouse's wake-word listener (optional, off by default — DOURMOUSE_WAKEWORD=1) listens locally for its wake word.",
+        "NSCameraUsageDescription": "DourMouse's optional in-browser hand-tracking feature (started explicitly by you, per session) uses the camera."
+      }
+    },
+    "afterSign": "scripts/notarize.js"
+  }
+}

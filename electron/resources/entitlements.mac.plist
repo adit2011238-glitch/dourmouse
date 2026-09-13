@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the packaged DourMouse.app (Stage E,
+  see ~/.claude/plans/sorted-wiggling-pearl.md). Hardened runtime is
+  required for Apple notarization; App Sandbox is deliberately NOT enabled
+  here (a much bigger, separate opt-in that would block the arbitrary
+  workspace/filesystem access this app's own tools already need) — these
+  entries only relax hardened runtime's code-integrity checks for the
+  bundled Python interpreter and its native extensions, and declare the
+  automation this app genuinely performs.
+
+  Real, disclosed limitation: this set is reasoned from what this app's
+  own code actually does (below, each tied to a specific reason), not
+  verified against an actual signed+notarized run — that needs the
+  account holder's own Apple Developer credentials, the same limitation
+  build_dist.sh's own codesign section already discloses. Revisit if a
+  real notarized build surfaces a missing entitlement.
+-->
+<plist version="1.0">
+<dict>
+  <!-- The bundled CPython interpreter + native extensions (numpy, pandas,
+       pyobjc's compiled bridge, cryptography, ...) are not all signed by
+       the same Team ID as this app, and some use JIT-adjacent or
+       unsigned-executable-memory techniques hardened runtime blocks by
+       default. Standard requirement for bundling any interpreted
+       language runtime under hardened runtime. -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+
+  <!-- dourmouse/app_control.py's AppleScript/System Events fallback path
+       and dourmouse/desktop.py's split_with_app both send real Apple
+       Events to control other applications (via a spawned `osascript`,
+       which macOS's automation permission model attributes back to this
+       app as the real initiator). Needed for AX-fallback app control to
+       keep working in the packaged build, not just in a dev checkout. -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>
