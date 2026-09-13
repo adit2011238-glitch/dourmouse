@@ -766,10 +766,15 @@ def browser_screenshot(arguments: dict[str, Any]) -> str:
         _SHOTS_DIR.mkdir(parents=True, exist_ok=True)
         path = _SHOTS_DIR / f"{safe}.png"
         await page.screenshot(path=str(path), full_page=False)
-        return (
-            f"SCREENSHOT saved: {path} — view it in the app at "
-            f"/api/browser/screenshot?name={safe}"
-        )
+        # 2026-09-14 (user-directed: "ability to display... screenshots
+        # and images"): the endpoint below already worked (this session
+        # already fixed a real crash in it); the real gap was that
+        # nothing in this tool's own return text ever told the chat
+        # renderer to show it. console.html's md() now understands real
+        # markdown image syntax scoped to this app's own /api/... paths,
+        # so this one line is the whole fix on this side.
+        url = f"/api/browser/screenshot?name={safe}"
+        return f"SCREENSHOT saved: {path}\n\n![screenshot]({url})"
 
     _log("screenshot", name)
     return _call(_shot)

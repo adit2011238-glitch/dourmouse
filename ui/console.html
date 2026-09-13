@@ -669,6 +669,11 @@ button,input,textarea,select{font:inherit;color:inherit}
 .turn .gut .tm{color:var(--blue-deep);opacity:.7;font-variant-numeric:tabular-nums}
 .turn .gut .mdl.local{color:var(--ok)}
 .turn .body{font-size:15px;line-height:1.6;color:var(--blue-hi);word-break:break-word;font-family:var(--font-prose)}
+/* 2026-09-14: real image rendering (see md()'s own comment) — capped to
+   the bubble's own width, never the full unbounded screenshot size, with
+   a hairline border so a light screenshot still reads as a distinct
+   object against a light theme's own near-white background. */
+.turn .body img{max-width:100%;height:auto;border-radius:6px;border:1px solid var(--line);display:block;margin:8px 0}
 .turn.you .body{color:var(--blue);white-space:pre-wrap}
 .turn .body p{margin:0 0 9px}.turn .body p:last-child{margin:0}
 .turn .body ul,.turn .body ol{margin:8px 0;padding-left:19px}
@@ -2222,6 +2227,19 @@ function md(src){
     if(i%2){ out += `<pre><code>${chunk.replace(/^[\w-]*\n/,"")}</code></pre>`; return; }
     let t = chunk.replace(/`([^`\n]+)`/g,"<code>$1</code>")
                  .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
+                 // 2026-09-14 (user-directed: "ability to display... screenshots
+                 // and images"): the one real gap was the render side —
+                 // browser_screenshot (browser_agent.py) already writes a
+                 // real file served at /api/browser/screenshot?name=..., a
+                 // real, working endpoint this session already fixed a
+                 // crash in. Matched BEFORE the plain link regex below,
+                 // since image syntax is a "!" immediately in front of the
+                 // same [text](url) shape — otherwise the link regex would
+                 // strip the brackets first and leave a stray "!". Scoped
+                 // the same way the existing link regex already is: a real
+                 // http(s) URL, or this app's own /api/... path — never a
+                 // bare data:/javascript: URL.
+                 .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+|\/api\/[^\s)]+)\)/g,'<img src="$2" alt="$1" loading="lazy">')
                  .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
     let html="",list=null;
     t.split("\n").forEach(line=>{

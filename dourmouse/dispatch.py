@@ -41,7 +41,7 @@ import sys
 import threading
 import time
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as _dataclass_replace
 from enum import Enum
 from typing import Any, Callable
 
@@ -2048,6 +2048,13 @@ class OllamaNativeClient:
 #: for it, and reset()-able for tests that need a fresh one per case.
 _nvidia_account_pool: model_router.AccountPool | None = None
 
+#: 2026-09-14 (user-directed: "multiple api keys for multiple models and
+#: accounts at the same time as fallbacks"): the exact same real,
+#: already-battle-tested mechanism above, extended to Ollama Cloud
+#: instead of a second parallel system. One pool per provider, same
+#: lazy-build-and-cache shape as _nvidia_account_pool.
+_account_pools: dict[str, model_router.AccountPool] = {}
+
 
 def _get_nvidia_account_pool() -> model_router.AccountPool:
     global _nvidia_account_pool
@@ -2058,11 +2065,20 @@ def _get_nvidia_account_pool() -> model_router.AccountPool:
     return _nvidia_account_pool
 
 
+def _get_ollama_account_pool() -> model_router.AccountPool:
+    if "ollama" not in _account_pools:
+        _account_pools["ollama"] = model_router.AccountPool(
+            model_router.accounts_from_env("ollama", "OLLAMA_API_KEY")
+        )
+    return _account_pools["ollama"]
+
+
 def _reset_account_pools_for_testing() -> None:
-    """Test-only: forces the next _get_nvidia_account_pool() call to
-    rebuild from the CURRENT environment instead of a stale cached one."""
+    """Test-only: forces the next _get_*_account_pool() call to rebuild
+    from the CURRENT environment instead of a stale cached one."""
     global _nvidia_account_pool
     _nvidia_account_pool = None
+    _account_pools.clear()
 
 
 def _nvidia_rotation_factory(
@@ -2070,17 +2086,17 @@ def _nvidia_rotation_factory(
     config: NvidiaConfig | OllamaConfig | OmniRouteConfig | None,
     model: str = "",
 ) -> Callable[[], tuple[Any, str] | None] | None:
-    """None (no rotation) unless 2+ NVIDIA accounts are actually
-    configured — a single-account setup (the overwhelmingly common case)
-    is completely untouched by this: _call_with_retry_inner's
+    """None (no rotation) unless 2+ accounts are actually configured for
+    this call's OWN provider — a single-account setup (the overwhelmingly
+    common case) is completely untouched by this: _call_with_retry_inner's
     client_factory stays unused and behavior is byte-for-byte what it was
     before multi-account routing existed.
 
     When 2+ accounts ARE configured: returns a closure that, each time
     _call_with_retry_inner calls it after a rate-limit error, marks the
-    account that just failed into cooldown and builds a fresh OpenAI
-    client against the next available one — same provider, same ``model``,
-    just a different NVIDIA account.
+    account that just failed into cooldown and builds a fresh client
+    against the next available one — same provider, same ``model``, just
+    a different account.
 
     v_next: when the pool is EXHAUSTED (model_router.pool_exhausted —
     every account cooling down mid-conversation), this closes the gap
@@ -2091,10 +2107,35 @@ def _nvidia_rotation_factory(
     the turn to a DIFFERENT CONFIGURED BACKEND — which is why the factory
     returns ``(client, model)`` rather than just a client: a backend switch
     changes the model string too, not only the client.
+
+    2026-09-14 (user-directed: "multiple api keys for multiple models and
+    accounts at the same time as fallbacks"): extended from NVIDIA-only to
+    also cover Ollama Cloud (OLLAMA_API_KEY/OLLAMA_API_KEY_2/...), the
+    exact same real, already-battle-tested mechanism rather than a second
+    parallel system. Deliberately gated on ``config.is_cloud`` — a plain
+    local OllamaConfig (is_cloud=False, e.g. the force_local=True privacy
+    pin _build_client's own docstring documents) must NEVER be rotated
+    into a cloud account regardless of how many OLLAMA_API_KEY_* entries
+    happen to be configured elsewhere in the environment; that would be
+    the exact same privacy leak class this codebase already found and
+    fixed once this session, reintroduced here instead.
     """
-    if not isinstance(config, NvidiaConfig):
+    if isinstance(config, NvidiaConfig):
+        pool = _get_nvidia_account_pool()
+        provider_label = "NVIDIA"
+
+        def _client_for(account: model_router.Account) -> Any:
+            return OpenAI(api_key=account.api_key or "local-keyless", base_url=config.base_url)
+
+    elif isinstance(config, OllamaConfig) and config.is_cloud:
+        pool = _get_ollama_account_pool()
+        provider_label = "Ollama Cloud"
+
+        def _client_for(account: model_router.Account) -> Any:
+            return OllamaNativeClient(_dataclass_replace(config, api_key=account.api_key or ""))
+
+    else:
         return None
-    pool = _get_nvidia_account_pool()
     if len(pool) < 2:
         return None
     state: dict[str, model_router.Account | None] = {"current": None}
@@ -2106,10 +2147,7 @@ def _nvidia_rotation_factory(
         account = pool.select(exclude=previous.name if previous else None)
         if account is not None:
             state["current"] = account
-            return (
-                OpenAI(api_key=account.api_key or "local-keyless", base_url=config.base_url),
-                model,
-            )
+            return (_client_for(account), model)
         if not model_router.pool_exhausted(pool):
             # Transient: select() couldn't honor `exclude` but the pool
             # isn't actually empty (shouldn't happen given select()'s own
@@ -2117,14 +2155,14 @@ def _nvidia_rotation_factory(
             return None
         fallback_cfg = probe_ollama_fallback()
         if fallback_cfg is None:
-            # Every NVIDIA account is cooling down AND no other configured
+            # Every account is cooling down AND no other configured
             # backend answered either — keep serving on the client we
             # already have rather than raising here; the caller's own
             # retry/fallback machinery still runs against it and surfaces
             # the real error if it genuinely can't succeed (Rule 2.2).
             return None
         print(
-            "[BACKEND] NVIDIA account pool exhausted (all accounts "
+            f"[BACKEND] {provider_label} account pool exhausted (all accounts "
             f"cooling down) mid-conversation; switching to local Ollama "
             f"({fallback_cfg.model}) for the rest of this turn."
         )

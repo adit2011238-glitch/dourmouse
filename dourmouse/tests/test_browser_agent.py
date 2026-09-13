@@ -13,6 +13,7 @@ import socket
 import threading
 import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -363,3 +364,45 @@ class TestBrowserPaneShowHide:
         monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", str(_free_local_port()))
         with pytest.raises(RuntimeError, match="BROWSER PANE HIDE FAILED"):
             ba.browser_pane_hide({})
+
+
+class TestBrowserScreenshotMarkdown:
+    """2026-09-14 (user-directed: "ability to display... screenshots and
+    images"): the endpoint this returns a URL for already worked (this
+    session already fixed a real crash in it) — the real gap was that
+    nothing in this tool's own return text ever told console.html's
+    chat renderer to show it. This is the one line that changed;
+    _ensure_browser/_call's own real Playwright/thread-loop machinery is
+    intentionally not re-exercised here (see this file's own module
+    docstring on what's covered hermetically vs. by the live smoke
+    test) — this asserts the actual new behavior: the returned text now
+    carries a real markdown image link at the real URL."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(ba, "_SHOTS_DIR", tmp_path)
+
+        class _FakePage:
+            async def screenshot(self, path, full_page=False):
+                Path(path).write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        async def _fake_ensure_browser():
+            return _FakePage()
+
+        monkeypatch.setattr(ba, "_ensure_browser", _fake_ensure_browser)
+
+        def _fake_call(factory, timeout=60.0):
+            import asyncio as _asyncio
+
+            return _asyncio.run(factory())
+
+        monkeypatch.setattr(ba, "_call", _fake_call)
+
+    def test_return_text_carries_a_real_markdown_image_link(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        out = ba.browser_screenshot({"name": "test-shot"})
+        assert "![screenshot](/api/browser/screenshot?name=test-shot)" in out
+
+    def test_name_is_still_sanitized_in_the_image_url(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        out = ba.browser_screenshot({"name": "../../etc/passwd"})
+        assert "![screenshot](/api/browser/screenshot?name=etcpasswd)" in out

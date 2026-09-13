@@ -3045,6 +3045,111 @@ class TestNvidiaAccountPoolWiring:
         assert factory() is None
 
 
+class TestOllamaCloudAccountPoolWiring:
+    """2026-09-14 (user-directed: "multiple api keys for multiple models
+    and accounts at the same time as fallbacks"): the exact same real
+    mechanism TestNvidiaAccountPoolWiring above already covers,
+    extended to Ollama Cloud instead of duplicated for it. Same
+    OLLAMA_API_KEY/OLLAMA_API_KEY_2/... numbered-suffix convention
+    model_router.accounts_from_env already established."""
+
+    def setup_method(self):
+        dispatch_module._reset_account_pools_for_testing()
+
+    def teardown_method(self):
+        dispatch_module._reset_account_pools_for_testing()
+
+    def test_single_account_yields_no_rotation_factory(self, monkeypatch):
+        from dourmouse.config import OllamaConfig
+
+        monkeypatch.setenv("OLLAMA_API_KEY", "only-key")
+        monkeypatch.delenv("OLLAMA_API_KEY_2", raising=False)
+        config = OllamaConfig(api_key="only-key", base_url="https://ollama.com", model="m", is_cloud=True)
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
+        assert factory is None
+
+    def test_two_accounts_yields_a_working_rotation_factory(self, monkeypatch):
+        from dourmouse.config import OllamaConfig
+
+        monkeypatch.setenv("OLLAMA_API_KEY", "key1")
+        monkeypatch.setenv("OLLAMA_API_KEY_2", "key2")
+        config = OllamaConfig(api_key="key1", base_url="https://ollama.com", model="m", is_cloud=True)
+        initial_client = object()
+        factory = dispatch_module._nvidia_rotation_factory(initial_client, config, "m")
+        assert factory is not None
+        rotated_client, rotated_model = factory()
+        assert rotated_client is not initial_client
+        assert isinstance(rotated_client, dispatch_module.OllamaNativeClient)
+        assert rotated_model == "m"
+
+    def test_a_local_not_cloud_config_never_rotates_even_with_keys_configured(self, monkeypatch):
+        """The real safety guard this whole extension exists to preserve:
+        a privacy-pinned, force_local=True OllamaConfig (is_cloud=False)
+        must never be rotated into a cloud account, no matter how many
+        OLLAMA_API_KEY_* entries happen to be configured elsewhere in the
+        environment — the same privacy leak class this codebase already
+        found and fixed once this session (see load_ollama_config's own
+        force_local docstring), not reintroduced here."""
+        from dourmouse.config import OllamaConfig
+
+        monkeypatch.setenv("OLLAMA_API_KEY", "key1")
+        monkeypatch.setenv("OLLAMA_API_KEY_2", "key2")
+        local_config = OllamaConfig(api_key="", base_url="http://127.0.0.1:11434", model="m", is_cloud=False)
+        factory = dispatch_module._nvidia_rotation_factory(object(), local_config, "m")
+        assert factory is None
+
+    def test_rotated_client_keeps_the_same_base_url_and_model(self, monkeypatch):
+        """Only the api_key changes on rotation — same provider, same
+        endpoint, same model, just a different account."""
+        from dourmouse.config import OllamaConfig
+
+        monkeypatch.setenv("OLLAMA_API_KEY", "key1")
+        monkeypatch.setenv("OLLAMA_API_KEY_2", "key2")
+        config = OllamaConfig(
+            api_key="key1", base_url="https://ollama.com", model="gpt-oss:20b", is_cloud=True,
+        )
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "gpt-oss:20b")
+        client, _model = factory()
+        assert client._root == "https://ollama.com"
+        assert client._model == "gpt-oss:20b"
+        assert client._headers["Authorization"] in ("Bearer key1", "Bearer key2")
+
+    def test_pool_exhaustion_falls_back_to_local_ollama_when_reachable(self, monkeypatch):
+        from dourmouse.config import OllamaConfig
+
+        monkeypatch.setenv("OLLAMA_API_KEY", "key1")
+        monkeypatch.setenv("OLLAMA_API_KEY_2", "key2")
+        config = OllamaConfig(api_key="key1", base_url="https://ollama.com", model="m", is_cloud=True)
+        fallback_cfg = OllamaConfig(base_url="http://127.0.0.1:11434", model="phi:2b")
+        monkeypatch.setattr(dispatch_module, "probe_ollama_fallback", lambda: fallback_cfg)
+        factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
+        pool = dispatch_module._get_ollama_account_pool()
+        for account in pool.accounts():
+            pool.mark_rate_limited(account.name)
+        client, model = factory()
+        assert isinstance(client, dispatch_module.OllamaNativeClient)
+        assert model == "phi:2b"
+
+    def test_nvidia_and_ollama_pools_never_cross_contaminate(self, monkeypatch):
+        """Two 2+-account pools configured at once (a real, plausible
+        setup) must each rotate their OWN accounts only."""
+        from dourmouse.config import NvidiaConfig, OllamaConfig
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv1")
+        monkeypatch.setenv("NVIDIA_API_KEY_2", "nv2")
+        monkeypatch.setenv("OLLAMA_API_KEY", "ol1")
+        monkeypatch.setenv("OLLAMA_API_KEY_2", "ol2")
+        nv_config = NvidiaConfig(api_key="nv1", base_url="https://x", model="m")
+        ol_config = OllamaConfig(api_key="ol1", base_url="https://ollama.com", model="m", is_cloud=True)
+        nv_factory = dispatch_module._nvidia_rotation_factory(object(), nv_config, "m")
+        ol_factory = dispatch_module._nvidia_rotation_factory(object(), ol_config, "m")
+        nv_client, _ = nv_factory()
+        ol_client, _ = ol_factory()
+        assert isinstance(nv_client, dispatch_module.OpenAI)
+        assert isinstance(ol_client, dispatch_module.OllamaNativeClient)
+        assert ol_client._headers["Authorization"] in ("Bearer ol1", "Bearer ol2")
+
+
 # --------------------------------------------------------------------------- #
 # Claude/Ollama-Cloud orchestrator backend (v13, opt-in experiment) — the
 # user's own explicit ask: route every feature through a real strong
