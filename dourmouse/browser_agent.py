@@ -58,6 +58,114 @@ _UA_NOTE = (
     "headless Chrome driven by Dourmouse, never hidden."
 )
 
+# --------------------------------------------------------------------------- #
+# Electron embedded pane (Stage D of the desktop-shell migration — see
+# ~/.claude/plans/sorted-wiggling-pearl.md). electron/main.js sets these TWO
+# env vars only when IT spawned this server process; absent entirely under
+# the older pywebview shell (dourmouse/desktop.py) or a plain headless
+# server with no shell at all — _electron_pane_configured() treats that as
+# "no pane available" and _ensure_browser() falls straight through to its
+# existing launch()-its-own-Chrome behavior below, unchanged.
+#
+# The load-bearing fact this whole path depends on was proven LIVE in the
+# migration spike, not assumed: Playwright's chromium.connect_over_cdp()
+# against Electron's own --remote-debugging-port enumerated every real open
+# page (the app's own windows AND the embedded pane) and successfully drove
+# a real page.goto() navigation on the pane's page — the exact same API
+# every tool below already calls. So NONE of those tools change for this
+# path; only _ensure_browser() gains a second way to obtain the one _PAGE/
+# _CONTEXT pair they all already share.
+# --------------------------------------------------------------------------- #
+
+_ELECTRON_CDP_PORT_ENV = "DOURMOUSE_ELECTRON_CDP_PORT"
+_ELECTRON_PANE_PORT_ENV = "DOURMOUSE_ELECTRON_PANE_PORT"
+_PANE_BRIDGE_TIMEOUT = 5.0
+_PANE_DISCOVERY_TIMEOUT = 5.0
+
+
+def _electron_pane_configured() -> tuple[int, int] | None:
+    """(cdp_port, pane_bridge_port) if this process was spawned by the
+    Electron shell, else None. Both-or-nothing: a partially-set pair (one
+    var present, not the other) is treated as absent rather than guessed
+    at — this only ever happens if something hand-sets one env var without
+    the other, which is not a real, supported configuration."""
+    cdp_raw = os.environ.get(_ELECTRON_CDP_PORT_ENV, "").strip()
+    pane_raw = os.environ.get(_ELECTRON_PANE_PORT_ENV, "").strip()
+    if not cdp_raw or not pane_raw:
+        return None
+    try:
+        return int(cdp_raw), int(pane_raw)
+    except ValueError:
+        return None
+
+
+def _pane_bridge_request(pane_port: int, method: str, path: str) -> dict[str, Any]:
+    """One real HTTP call to electron/main.js's tiny local pane-bridge
+    server — the same "a tiny second local server for cross-process
+    signaling" pattern dourmouse/vision_bridge.py's own docstring already
+    establishes and justifies in this codebase, just the Python-calling-
+    Node-instead-of-Node-calling-Python direction of it."""
+    import urllib.request
+
+    url = f"http://127.0.0.1:{pane_port}{path}"
+    req = urllib.request.Request(url, method=method)
+    with urllib.request.urlopen(req, timeout=_PANE_BRIDGE_TIMEOUT) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+async def _ensure_browser_via_electron_pane(cdp_port: int, pane_port: int) -> Any:
+    """Connect to the SAME Chromium session the Electron shell's embedded
+    pane renders (see electron/main.js's showPane/ensurePaneView), instead
+    of launching a second, separate Chrome the human never sees. Ensures
+    the pane actually exists first (POST /show is idempotent — a no-op if
+    it's already showing), then finds its page: electron/main.js always
+    creates the pane fresh at "about:blank" and never navigates it away
+    from there itself, and none of this app's own windows ever load
+    about:blank — so the one still-blank tab found within
+    _PANE_DISCOVERY_TIMEOUT seconds of asking is the pane's.
+
+    Real, disclosed limitation: this is a ONE-TIME match at discovery,
+    not an ongoing identity check — if some other about:blank tab somehow
+    existed in this exact Chromium instance at this exact moment, this
+    could attach to the wrong one. Once found, though, the Page OBJECT
+    reference stays correct for the rest of this process's life regardless
+    of where it's navigated afterward (Playwright's Page identity survives
+    navigation; only opening a genuinely new tab creates a new one) — the
+    same reason this needs no ongoing re-matching once caught.
+    """
+    from playwright.async_api import async_playwright
+
+    try:
+        _pane_bridge_request(pane_port, "POST", "/show")
+    except Exception as exc:  # noqa: BLE001 - bridge unreachable, readable
+        raise RuntimeError(
+            f"could not reach the Electron pane bridge on 127.0.0.1:{pane_port}: {exc}"
+        ) from exc
+
+    cdp_endpoint = f"http://127.0.0.1:{cdp_port}"
+    pw = await async_playwright().start()
+    browser = await pw.chromium.connect_over_cdp(cdp_endpoint)
+    page = None
+    deadline = time.monotonic() + _PANE_DISCOVERY_TIMEOUT
+    while page is None and time.monotonic() < deadline:
+        for ctx in browser.contexts:
+            for candidate in ctx.pages:
+                if candidate.url == "about:blank":
+                    page = candidate
+                    break
+            if page is not None:
+                break
+        if page is None:
+            await asyncio.sleep(0.2)
+    if page is None:
+        raise RuntimeError(
+            f"the Electron pane did not present a fresh about:blank page "
+            f"within {_PANE_DISCOVERY_TIMEOUT:.0f}s — it may already be "
+            "mid-navigation from a prior session; try browser_pane_hide "
+            "then browser_pane_show again."
+        )
+    return page
+
 #: backlog #8, Phase 4 of the user's own spec ("Ad & Media Blocking...
 #: speeds up page loads by up to 5x"). Conservative on purpose: only
 #: video/audio streams (a real, large, page-load-blocking cost with zero
@@ -145,8 +253,16 @@ async def _ensure_browser() -> Any:
     global _CONTEXT, _PAGE, _LAUNCH_ERROR
     if _PAGE is not None and not _PAGE.is_closed():
         return _PAGE
-    if _LAUNCH_ERROR:
-        raise RuntimeError(_LAUNCH_ERROR)
+    # Real bug (2026-09-11): _LAUNCH_ERROR used to short-circuit every call
+    # for the rest of the process's life once ANY launch failed once —
+    # including a transient failure (Chrome mid-update, a momentary
+    # resource hiccup) with nothing actually permanent about it. The only
+    # way back was restarting the whole app. Retrying costs one failed
+    # launch attempt (Playwright fails fast when Chrome is genuinely
+    # missing), which is far cheaper than a browser capability staying
+    # dead for a session after one bad moment. _LAUNCH_ERROR itself is
+    # still recorded below (real, current-value error reporting, e.g. via
+    # /api/browser/status), just no longer a permanent latch.
     try:
         from playwright.async_api import async_playwright
     except ImportError as exc:  # pragma: no cover - env-dependent
@@ -157,6 +273,36 @@ async def _ensure_browser() -> Any:
             "browser download). Nothing was opened."
         )
         raise RuntimeError(_LAUNCH_ERROR) from exc
+
+    electron_pane = _electron_pane_configured()
+    if electron_pane is not None:
+        try:
+            page = await _ensure_browser_via_electron_pane(*electron_pane)
+        except Exception as exc:  # noqa: BLE001 - never let a broken pane bridge
+            # kill the whole browser feature — same "degrade, don't die"
+            # discipline as _LAUNCH_ERROR's own 2026-09-11 fix already
+            # established in this file. Falls through to launch() below.
+            _log("engine", f"Electron pane connect failed, falling back to launch(): {exc}")
+        else:
+            context = page.context
+
+            async def _route_handler(route: Any) -> None:
+                req = route.request
+                if _should_block_request(req.url, req.resource_type):
+                    await route.abort()
+                else:
+                    await route.continue_()
+
+            try:
+                await context.route("**/*", _route_handler)
+            except Exception as exc:  # noqa: BLE001 - best-effort, matches the launch() path below
+                _log("engine", f"ad/media blocking not installed on the Electron pane context: {exc}")
+            _CONTEXT = context
+            _PAGE = page
+            _LAUNCH_ERROR = None
+            _log("engine", f"Chrome ready (Electron embedded pane, CDP port {electron_pane[0]})")
+            return page
+
     headless = os.environ.get("DOURMOUSE_BROWSER_HEADLESS", "1").strip() != "0"
     try:
         pw = await async_playwright().start()
@@ -192,6 +338,7 @@ async def _ensure_browser() -> Any:
         raise RuntimeError(_LAUNCH_ERROR) from exc
     _CONTEXT = context
     _PAGE = page
+    _LAUNCH_ERROR = None  # a fresh launch just succeeded — don't keep reporting the old one
     _log("engine", "Chrome ready (headless)" if headless else "Chrome ready (visible)")
     return page
 
@@ -553,6 +700,61 @@ def browser_extract(arguments: dict[str, Any]) -> str:
 
     _log("extract", target)
     return _call(_extract)
+
+
+def browser_pane_show(arguments: dict[str, Any]) -> str:
+    """Show the real, embedded browser pane (Electron shell only) — the
+    SAME Chromium session browser_open/browser_click/browser_fill/... are
+    already driving, now visible to the human, not a second/mirrored
+    browser. Honest NOT CONFIGURED under the older pywebview shell or a
+    plain headless server, neither of which has a pane to show."""
+    configured = _electron_pane_configured()
+    if configured is None:
+        return (
+            "NOT CONFIGURED: the embedded browser pane needs the Electron "
+            "shell (electron/main.js), which sets DOURMOUSE_ELECTRON_CDP_PORT "
+            "and DOURMOUSE_ELECTRON_PANE_PORT when it starts this server — "
+            "not available under the older pywebview shell or a plain "
+            "headless server."
+        )
+    _cdp_port, pane_port = configured
+    try:
+        result = _pane_bridge_request(pane_port, "POST", "/show")
+    except Exception as exc:  # noqa: BLE001 - bridge failures, readable
+        raise RuntimeError(
+            f"BROWSER PANE SHOW FAILED: {type(exc).__name__}: {exc}"
+        ) from exc
+    if not result.get("ok"):
+        raise RuntimeError(f"BROWSER PANE SHOW FAILED: {result}")
+    _log("pane", "shown")
+    return (
+        "BROWSER PANE now visible — this is the agent's real, live browsing "
+        "session, not a copy. Use browser_open next to navigate it."
+    )
+
+
+def browser_pane_hide(arguments: dict[str, Any]) -> str:
+    """Hide the embedded browser pane. The underlying browsing session and
+    its page state are unaffected — browser_open/click/fill/... keep
+    working exactly as before; only the human-visible pane is hidden."""
+    configured = _electron_pane_configured()
+    if configured is None:
+        return (
+            "NOT CONFIGURED: the embedded browser pane needs the Electron "
+            "shell — not available under the older pywebview shell or a "
+            "plain headless server."
+        )
+    _cdp_port, pane_port = configured
+    try:
+        result = _pane_bridge_request(pane_port, "POST", "/hide")
+    except Exception as exc:  # noqa: BLE001 - bridge failures, readable
+        raise RuntimeError(
+            f"BROWSER PANE HIDE FAILED: {type(exc).__name__}: {exc}"
+        ) from exc
+    if not result.get("ok"):
+        raise RuntimeError(f"BROWSER PANE HIDE FAILED: {result}")
+    _log("pane", "hidden")
+    return "BROWSER PANE hidden."
 
 
 def browser_screenshot(arguments: dict[str, Any]) -> str:

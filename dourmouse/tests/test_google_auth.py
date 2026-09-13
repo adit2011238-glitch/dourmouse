@@ -41,15 +41,39 @@ class TestPkce:
 # -- configuration honesty (Rule 2.2) -------------------------------------- #
 
 class TestConfiguration:
+    @staticmethod
+    def _remove_builtin_module(monkeypatch):
+        # These tests predate the builtin-shared-OAuth-client fallback
+        # (client_id()/client_secret() = env or _builtin_oauth()[0/1]) and
+        # mean to test the ENV-only path in isolation. Real bug this
+        # closes: on a checkout where dourmouse/_builtin_oauth.py
+        # genuinely exists (true here since Phase G), these two tests
+        # started intermittently failing depending on test ORDER —
+        # whichever test ran first and legitimately imported the real
+        # builtin module left it cached as an attribute on the `dourmouse`
+        # package object for the rest of the process, so "no env" no
+        # longer meant "unconfigured" the way these tests assumed. See
+        # TestBuiltinOauthFallback._install_fake_builtin_module's own
+        # comment for the exact `from package import submodule` lookup
+        # path responsible.
+        import sys
+
+        import dourmouse
+
+        monkeypatch.setitem(sys.modules, "dourmouse._builtin_oauth", None)
+        monkeypatch.delattr(dourmouse, "_builtin_oauth", raising=False)
+
     def test_not_configured_without_env(self, monkeypatch):
         monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
         monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+        self._remove_builtin_module(monkeypatch)
         assert google_auth.google_configured() is False
         payload = google_auth.status()
         assert payload["configured"] is False
         assert "GOOGLE_CLIENT_ID" in payload["hint"]
 
     def test_configured_only_with_both(self, monkeypatch):
+        self._remove_builtin_module(monkeypatch)
         monkeypatch.setenv("GOOGLE_CLIENT_ID", "id-123")
         monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
         assert google_auth.google_configured() is False
@@ -86,10 +110,40 @@ class TestBuiltinOauthFallback:
         import sys
         import types
 
+        import dourmouse
+
         fake = types.ModuleType("dourmouse._builtin_oauth")
         fake.GOOGLE_CLIENT_ID = client_id
         fake.GOOGLE_CLIENT_SECRET = client_secret
         monkeypatch.setitem(sys.modules, "dourmouse._builtin_oauth", fake)
+        # Real bug this closes (live-caught running the FULL suite, not
+        # this file alone — it passed in isolation and only failed as
+        # part of the whole run): `from dourmouse import _builtin_oauth
+        # as mod` resolves via getattr(sys.modules["dourmouse"],
+        # "_builtin_oauth") FIRST — Python sets that attribute as a side
+        # effect the first time the submodule is ever really imported,
+        # and a plain `monkeypatch.setitem(sys.modules, ...)` never
+        # touches it. Once a REAL dourmouse/_builtin_oauth.py exists on
+        # disk (true for this checkout since Phase G), some earlier test
+        # in the full run legitimately imports it for real, caches the
+        # REAL module as this attribute, and every later test in the
+        # same process silently keeps seeing the REAL credentials no
+        # matter what this method installs into sys.modules. Patching
+        # the attribute directly closes the actual lookup path.
+        monkeypatch.setattr(dourmouse, "_builtin_oauth", fake, raising=False)
+
+    def _remove_builtin_module(self, monkeypatch):
+        """Simulate NO dourmouse/_builtin_oauth.py existing at all,
+        regardless of whether the real one has already been imported
+        earlier in this same test process (see the comment on
+        _install_fake_builtin_module above for why both halves matter).
+        """
+        import sys
+
+        import dourmouse
+
+        monkeypatch.setitem(sys.modules, "dourmouse._builtin_oauth", None)
+        monkeypatch.delattr(dourmouse, "_builtin_oauth", raising=False)
 
     def test_falls_back_to_the_builtin_module_when_no_env_is_set(self, monkeypatch):
         monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
@@ -107,11 +161,14 @@ class TestBuiltinOauthFallback:
         assert google_auth.client_secret() == "power-user-secret"
 
     def test_missing_builtin_module_is_honestly_empty_not_a_crash(self, monkeypatch):
-        """No real dourmouse/_builtin_oauth.py exists in this checkout
-        (it's gitignored, template-only) — importing it must fail
-        cleanly, not raise up into a real request."""
+        """A checkout with no dourmouse/_builtin_oauth.py at all (it's
+        gitignored, template-only) must import-fail cleanly, not raise up
+        into a real request. Explicitly simulated (this checkout may or
+        may not actually have the real, gitignored file on disk) so the
+        test is deterministic either way — see _remove_builtin_module."""
         monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
         monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+        self._remove_builtin_module(monkeypatch)
         assert google_auth.client_id() == ""
         assert google_auth.client_secret() == ""
         assert google_auth.google_configured() is False

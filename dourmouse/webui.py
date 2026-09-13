@@ -1868,6 +1868,17 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"enabled": claude_front_mode_enabled()})
             except Exception as exc:  # noqa: BLE001 - a settings read must never 500
                 self._send_json({"enabled": True, "error": str(exc)[:200]})
+        elif path == "/api/settings/google-full-scopes":
+            # backend half of the Google full-scopes toggle — OFF by
+            # default (Google's restricted scopes 500 on an unverified
+            # app), see config.google_oauth_full_scopes_enabled's own
+            # docstring.
+            try:
+                from dourmouse.config import google_oauth_full_scopes_enabled
+
+                self._send_json({"enabled": google_oauth_full_scopes_enabled()})
+            except Exception as exc:  # noqa: BLE001 - a settings read must never 500
+                self._send_json({"enabled": False, "error": str(exc)[:200]})
         elif path == "/api/setup/status":
             # v8.9 first-run setup. Every field is a REAL probe (is Ollama
             # actually answering, is a key actually present) — setup must
@@ -2125,7 +2136,17 @@ class _Handler(BaseHTTPRequestHandler):
             name = (qs.get("name") or ["latest"])[0]
             shot = latest_screenshot(name)
             if shot is None:
-                self.send_error(404, "no browser screenshot yet — ask the agent to take one")
+                # Real, live-reproduced bug (Electron migration Stage E
+                # testing, 2026-09-13): BaseHTTPRequestHandler.send_error's
+                # message becomes the HTTP status line's reason phrase,
+                # which the stdlib encodes as latin-1 (RFC 7230's
+                # historical ISO-8859-1 status-line convention) — the
+                # em-dash here is outside that range and raised a real
+                # UnicodeEncodeError, crashing this one request's handler
+                # thread (non-fatal to the server overall, but a broken
+                # response every time this honest 404 fires). Plain ASCII
+                # only in any send_error message from here on.
+                self.send_error(404, "no browser screenshot yet - ask the agent to take one")
                 return
             try:
                 body = shot.read_bytes()
@@ -2746,6 +2767,12 @@ class _Handler(BaseHTTPRequestHandler):
             # config.save_claude_front_mode_setting). Same post-first-run
             # settings-change auth posture as the orchestrator-model POST.
             self._handle_claude_front_mode_post()
+        elif parsed.path == "/api/settings/google-full-scopes":
+            # persists the Google full-scopes toggle (see
+            # config.save_google_oauth_full_scopes_setting) — real,
+            # discoverable Settings-panel replacement for what used to be
+            # a silent .env edit + restart.
+            self._handle_google_full_scopes_post()
         elif parsed.path == "/api/vision/kill-switch":
             # world-monitor-expansion: a REAL toggle for dourmouse/tray.py's
             # privacy kill switch, reachable from the browser console even
@@ -3915,6 +3942,34 @@ class _Handler(BaseHTTPRequestHandler):
         # (v2.8), instead of showing "computing" indefinitely on the map.
         if error_msg is not None:
             sink({"type": "error", "message": error_msg})
+            # Real, live-reproduced bug (full-day feature sweep,
+            # 2026-09-12): an unhandled exception this deep (observed: a
+            # raw urllib.error.HTTPError — "429 Too Many Requests" —
+            # escaping all the way up from a cloud backend call under
+            # concurrent load) used to end the turn with ONLY this "error"
+            # event and no "done" at all. console.html's own lastError
+            # fallback (see its "error" case comment) exists PRECISELY to
+            # turn a raw error like this into a real, visible reply instead
+            # of a bare "No reply." — but it only runs when a turn actually
+            # ends, i.e. on "done", which never arrived here. The result
+            # was worse than the bug that fallback was built to fix: not a
+            # misleading "No reply.", but nothing shown at all — a
+            # permanently blank/stuck-looking bubble. The Claude-streaming
+            # sibling path a few lines below this one already gets this
+            # right (`final_text = f"ERROR: {exc}"`, both events sent);
+            # this makes the main dispatch path do the same.
+            sink({"type": "assistant_text", "text": f"ERROR: {error_msg}"})
+            sink({"type": "done", "final_text": f"ERROR: {error_msg}", "transcript": []})
+            # ChatSession.ask() appends the user's turn to self.messages as
+            # its very first step, before any network call — an exception
+            # this deep leaves it dangling with no reply, so the NEXT turn
+            # would send the model two consecutive user messages in a row.
+            # Keep history well-formed the same way the forced-synthesis
+            # and Claude-streaming paths already do.
+            try:
+                session.messages.append({"role": "assistant", "content": f"ERROR: {error_msg}"})
+            except Exception:  # noqa: BLE001 - history bookkeeping must never break the response
+                pass
         elif report is not None:
             sink(
                 {
@@ -4291,7 +4346,22 @@ class _Handler(BaseHTTPRequestHandler):
                 "claim": claim,
                 "created": datetime.now().isoformat(),
             }
-        url = google_auth.authorization_url(redirect_uri, state, challenge)
+        # Real friction, live-caught (2026-09-13): authorization_url's own
+        # default forces Google's FULL permission-grant screen on every
+        # single login, even the hundredth, for an account that already
+        # granted everything -- most "Sign in with X" buttons only do
+        # that once. Can't check "does THIS identity already have a
+        # refresh token" before Google even tells us who's signing in,
+        # but CAN check "has this install ever completed a real Google
+        # connection before" -- on a fresh install, force the full
+        # consent screen (guarantees the refresh_token this app's own
+        # long-lived-session feature depends on); once at least one real
+        # connection exists, ask Google for account-picker only, letting
+        # Google itself decide whether re-consent is actually needed —
+        # its normal behavior for a return visit with unchanged scopes.
+        _store = google_auth.auth_store()
+        prompt = "select_account" if (_store is not None and _store.all_user_emails()) else "consent"
+        url = google_auth.authorization_url(redirect_uri, state, challenge, prompt=prompt)
         self.send_response(302)
         self.send_header("Location", url)
         self.send_header("Cache-Control", "no-store")
@@ -4857,6 +4927,15 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         enabled = bool(body.get("enabled"))
         result = cfg_mod.save_claude_front_mode_setting(enabled)
+        self._send_json(result)
+
+    def _handle_google_full_scopes_post(self) -> None:
+        """POST /api/settings/google-full-scopes. Body: {"enabled": bool}."""
+        from dourmouse import config as cfg_mod
+
+        body = self._read_json_body()
+        enabled = bool(body.get("enabled"))
+        result = cfg_mod.save_google_oauth_full_scopes_setting(enabled)
         self._send_json(result)
 
     def _handle_memory_api(self) -> None:

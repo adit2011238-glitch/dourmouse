@@ -76,6 +76,18 @@
      --amber-line:rgba(242,183,61,.35); --amber-soft:rgba(242,183,61,.14);
      --ok:#5fbf8a; --warn:#f2b73d; --bad:#e0685c; --map-land:#12283a;      */
 :root{
+  /* Real bug, live-reproduced (2026-09-13): .turn .body pre / .actdetail /
+     .bookreadera pre all hardcode a fixed dark #050c15 background (a
+     deliberate "always-dark terminal block" look, same in every theme by
+     design), but paired it with var(--blue-hi) for the text color --
+     --blue-hi FLIPS to a near-black value on the light theme family
+     (#1a1c1c / #14160f, see the per-theme blocks below) since it's also
+     the general high-contrast text color for THOSE themes' own light
+     page background. Dark text on the always-dark #050c15 box is exactly
+     as unreadable as it sounds -- live-reproduced in the CODE screen's
+     own code-template reply. Never theme-dependent, on purpose: paired
+     with a background that also never changes per theme.  */
+  --on-dark-code:#cfe3f2;
   --bg:#09090B; --panel:#18181B; --panel2:#27272A;
   --amber:#F59E0B; --amber-hi:#FAFAFA; --amber-ink:#09090B;
   /* --blue-dim was #71717A (zinc-500): 3.08:1 on --panel2, 3.67:1 on
@@ -461,7 +473,23 @@ button,input,textarea,select{font:inherit;color:inherit}
    being clipped by it (``.tabbar`` no longer sets overflow:hidden itself
    — see the two explicit corner-radius rules below for how the rounded-
    corner look is kept without it). */
-.tabbar{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:3px}
+/* Real bug, live-reproduced (2026-09-11): the Aurora theme family gives
+   .tabbar its own backdrop-filter (see the shared aurora structural
+   block below) for the frosted-glass look. backdrop-filter creates a NEW
+   STACKING CONTEXT on the element that has it — so .tabsMoreMenu's own
+   z-index:40 (a descendant, position:absolute) was only ever competing
+   INSIDE .tabbar's stacking context, and could never rise above a later,
+   equally-unpositioned sibling like .body/.pane, which painted on top of
+   the whole .tabbar box by DOM order regardless of the dropdown's own
+   z-index. Reproduced: MORE opened fully visible on Terminal Core
+   (.tabbar has no backdrop-filter there) but rendered behind the active
+   pane on Aurora Blue. position:relative + a real z-index makes .tabbar
+   itself a POSITIONED box, which always paints above a non-positioned
+   sibling (.body/.pane are position:static) regardless of DOM order —
+   fixed at the base rule, not just for Aurora, since any future theme
+   that adds a filter/transform/backdrop-filter to .tabbar would trap the
+   dropdown the exact same way.  */
+.tabbar{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:3px;position:relative;z-index:45}
 .tabbar .tab:first-child{border-top-left-radius:3px;border-bottom-left-radius:3px}
 #tabsMoreBtn{border-top-right-radius:3px;border-bottom-right-radius:3px}
 .tabs{display:flex;gap:0;flex:1 1 auto;min-width:0}
@@ -476,7 +504,21 @@ button,input,textarea,select{font:inherit;color:inherit}
 .tab .dia{color:var(--amber);font-size:8px}
 .tabsMoreWrap{position:relative;flex:none}
 #tabsMoreBtn{border-left:1px solid var(--line);min-width:74px}
-.tabsMoreMenu{position:absolute;top:calc(100% + 4px);right:0;z-index:40;
+/* Real bug, live-reproduced AGAIN (2026-09-13) despite the fix above:
+   position:absolute anchored to .tabbar is only ever safe as long as NO
+   ancestor between .tabbar and <body> ever gets a filter/backdrop-filter/
+   transform of its own (each one creates a fresh containing block that
+   silently re-traps this dropdown, engine-dependent on exactly which
+   properties qualify -- verified this recurrence renders fine in a
+   Chromium-based test at the real app's own 1440x900 width, yet still
+   failed in the packaged app's real WKWebView, i.e. a live engine
+   divergence over that same containing-block question, not something a
+   given theme's CSS can reliably promise to avoid forever). Fixed at the
+   root instead of chasing the next ancestor: position:fixed, reparented
+   to <body> at open time (see the JS below) so this menu is never a
+   descendant of ANY themed/filtered ancestor while open -- there is no
+   containing block left to trap it in, on any engine. */
+.tabsMoreMenu{position:fixed;z-index:99999;
   min-width:170px;border:1px solid var(--line-2);background:var(--panel);border-radius:3px;
   box-shadow:0 12px 34px -14px #000;display:none;flex-direction:column;overflow:hidden}
 .tabsMoreMenu.on{display:flex}
@@ -656,7 +698,7 @@ button,input,textarea,select{font:inherit;color:inherit}
   padding:1px 5px;border-radius:4px;font-size:11px;font-family:var(--mono)}
 .turn .body pre{background:#050c15;border:1px solid var(--line);border-radius:8px;
   padding:12px 14px;overflow-x:auto;margin:10px 0;position:relative;font-size:11.5px;line-height:1.65;
-  font-family:var(--mono)}
+  font-family:var(--mono);color:var(--on-dark-code)}
 .turn .body pre code{background:none;border:none;padding:0}
 .copybtn{position:absolute;top:7px;right:7px;border:1px solid var(--line-2);background:var(--panel);
   color:var(--blue-dim);border-radius:5px;padding:4px 9px;font-size:8.5px;letter-spacing:.08em;
@@ -697,7 +739,7 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .act .car{color:var(--blue-deep);font-size:8px;transition:transform .1s}
 .actdetail{background:#050c15;border:1px solid var(--line);border-top:none;
   border-radius:0 0 6px 6px;padding:9px 11px;margin:0 0 4px;max-width:100%;
-  overflow-x:auto;font-size:10.5px;line-height:1.6;color:var(--blue-hi);
+  overflow-x:auto;font-size:10.5px;line-height:1.6;color:var(--on-dark-code);
   white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto}
 .spin{width:7px;height:7px;border:1px solid var(--line-2);border-top-color:var(--amber);
   border-radius:50%;animation:sp .7s linear infinite;flex:none}
@@ -799,7 +841,12 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .backendsel .lbl{white-space:nowrap}
 #backendPick{font-family:var(--mono);font-size:9px;letter-spacing:.08em;
   color:var(--blue-dim);background:var(--panel2);border:1px solid var(--line-2);
-  border-radius:6px;padding:0 7px;min-height:30px;max-width:200px;cursor:pointer}
+  border-radius:6px;padding:0 7px;min-height:30px;max-width:230px;cursor:pointer}
+  /* Real bug, live-reproduced: "AUTO — OLLAMA / LOCAL AGENT" clipped to
+     "...LOCAL AGEN" at the old 200px cap — a native <select> has no
+     ellipsis, it just hides the overflow, so the closed control silently
+     lost its last word/letter. 230px gives it real room instead of
+     shortening the copy. */
 #backendPick:hover{border-color:var(--amber-line);color:var(--amber)}
 #backendPick.on{color:var(--amber);border-color:var(--amber-line);background:var(--amber-soft)}
 #backendPick option{background:var(--panel2);color:var(--blue-hi)}
@@ -979,7 +1026,7 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .bookreaderq{font-size:13px;color:var(--amber);font-weight:500;margin-bottom:12px;line-height:1.5}
 .bookreadera{font-size:12.5px;line-height:1.7;color:var(--blue-hi)}
 .bookreadera pre{background:#050c15;border:1px solid var(--line);border-radius:8px;
-  padding:12px 14px;overflow-x:auto;margin:10px 0;font-size:11.5px}
+  padding:12px 14px;overflow-x:auto;margin:10px 0;font-size:11.5px;color:var(--on-dark-code)}
 @media (max-width:600px){ .book{width:160px} }
 
 /* world-monitor-expansion: PROJECTS bookshelf, IMPORTED source (Claude
@@ -1071,6 +1118,16 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
   display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line-2);
   box-shadow:-8px 0 24px rgba(0,0,0,.35)}
 .bp-pane[hidden]{display:none}
+/* Real bug, live-reproduced (2026-09-11): the pane is a fixed overlay with
+   no reflow of its own -- .dock (the composer bar, including #ta) and
+   .body both still ran full-width UNDERNEATH it. Their real DOM position
+   put the textarea's own click target directly under the pane's
+   z-index:9000 box, so the instant the pane opened, clicking into the
+   message box hit the pane instead (document.elementFromPoint on the
+   textarea's own center returned #bpFrame, not the textarea) -- typing a
+   follow-up message while the pane was open silently went nowhere. Same
+   width formula as .bp-pane itself so the clear is exact, not a guess. */
+body.bp-open .dock,body.bp-open .body{margin-right:min(48vw,720px)}
 .bp-toolbar{display:flex;align-items:center;gap:6px;padding:8px;border-bottom:1px solid var(--line);
   background:var(--panel2)}
 .bp-nav{background:none;border:1px solid var(--line-2);color:var(--blue-hi);border-radius:4px;
@@ -1508,7 +1565,7 @@ function directiveFocusAgent(){
 const PRIMARY_SCREENS = ["HOME","COMMS","RESEARCH","CODE","ATLAS","GLOBE"];
 const OVERFLOW_SCREENS = SCREENS.filter(s => !PRIMARY_SCREENS.includes(s));
 const tabsEl = $("tabs");
-const tabsMoreBtn = $("tabsMoreBtn"), tabsMoreMenu = $("tabsMoreMenu");
+const tabsMoreBtn = $("tabsMoreBtn"), tabsMoreMenu = $("tabsMoreMenu"), tabsMoreWrap = $("tabsMoreWrap");
 function buildTabButton(name, className, role){
   const b = document.createElement("button");
   b.className = className; b.type = "button"; b.setAttribute("role", role);
@@ -1547,12 +1604,42 @@ studyBtn.onclick = () => {
   tabsMoreBtn.setAttribute("aria-expanded", "false");
 };
 tabsMoreMenu.appendChild(studyBtn);
+// Reparented to <body> + position:fixed (see the CSS comment on
+// .tabsMoreMenu) so no ancestor's filter/backdrop-filter/transform can
+// ever trap it in a containing block again, on any rendering engine --
+// but ONLY above the same 560px breakpoint the CSS itself uses. Below
+// it, .tabsMoreMenu's own @media rule turns it position:static so it
+// grows .tabbar's box in normal flow (the working mobile layout) --
+// reparenting it to <body> there would drop it at the very end of the
+// page instead, a real regression this guards against by moving it
+// back to its original spot (#tabsMoreWrap, the HTML source position)
+// whenever the desktop/reparented path isn't the active one.
+const MORE_MENU_DESKTOP_BREAKPOINT = 560;
+function isDesktopMoreMenuLayout(){
+  return window.innerWidth > MORE_MENU_DESKTOP_BREAKPOINT;
+}
+function positionTabsMoreMenu(){
+  if(!isDesktopMoreMenuLayout()){
+    if(tabsMoreMenu.parentElement !== tabsMoreWrap) tabsMoreWrap.appendChild(tabsMoreMenu);
+    tabsMoreMenu.style.top = tabsMoreMenu.style.left = tabsMoreMenu.style.right = "";
+    return;
+  }
+  if(tabsMoreMenu.parentElement !== document.body) document.body.appendChild(tabsMoreMenu);
+  const r = tabsMoreBtn.getBoundingClientRect();
+  tabsMoreMenu.style.top = (r.bottom + 4) + "px";
+  tabsMoreMenu.style.left = "";
+  tabsMoreMenu.style.right = (window.innerWidth - r.right) + "px";
+}
 tabsMoreBtn.onclick = () => {
   const on = tabsMoreMenu.classList.toggle("on");
+  if(on) positionTabsMoreMenu();
   tabsMoreBtn.setAttribute("aria-expanded", String(on));
 };
+window.addEventListener("resize", () => {
+  if(tabsMoreMenu.classList.contains("on")) positionTabsMoreMenu();
+});
 document.addEventListener("click", e => {
-  if(!e.target.closest("#tabsMoreWrap")){
+  if(!e.target.closest("#tabsMoreWrap") && !e.target.closest("#tabsMoreMenu")){
     tabsMoreMenu.classList.remove("on");
     tabsMoreBtn.setAttribute("aria-expanded", "false");
   }
@@ -4541,6 +4628,11 @@ function paintSettings(){
     </div>
     <div class="note" id="claudeFrontNote">Loading…</div>
     <div class="toolbar">
+      <span class="lbl">GOOGLE FULL ACCESS</span>
+      <div id="googleFullScopesRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+    <div class="note" id="googleFullScopesNote">Loading…</div>
+    <div class="toolbar">
       <span class="lbl">APP CONTROL DRY RUN</span>
       <div id="appDryRunRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
@@ -4831,6 +4923,57 @@ function paintSettings(){
       }
     } catch (err) {
       note.textContent = "Could not load Claude Front Mode: " + (err.message || err);
+    }
+  })();
+
+  /* Google full access: OFF by default (Google's restricted Gmail/
+     Calendar/Drive-via-OAuth scopes 500 on an unverified OAuth app --
+     see google_auth.py's requested_scopes docstring). Real, discoverable
+     Settings toggle replacing what used to be a silent GOOGLE_OAUTH_
+     FULL_SCOPES=1 .env edit + restart. Same chip-pair pattern as the
+     toggles above, opt-in (OFF highlighted first) since turning it on
+     needs the caveat below, not a casual click. */
+  (async () => {
+    const row = $("googleFullScopesRow"), note = $("googleFullScopesNote");
+    if (!row) return;
+    try {
+      const r = await fetch("/api/settings/google-full-scopes");
+      const j = await r.json();
+      row.innerHTML = "";
+      [[false, "OFF"], [true, "ON"]].forEach(([val, label]) => {
+        const btn = document.createElement("button");
+        const on = j.enabled === val;
+        btn.className = "chip" + (on ? " on" : "");
+        btn.type = "button"; btn.textContent = label;
+        btn.setAttribute("aria-pressed", String(on));
+        btn.onclick = async () => {
+          note.textContent = "Saving…";
+          try {
+            const rr = await fetch("/api/settings/google-full-scopes", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({enabled: val}),
+            });
+            const jj = await rr.json();
+            note.textContent = jj.ok
+              ? (val
+                  ? "On — Gmail, Calendar and Drive will be requested via Google sign-in. Only works if your Google Cloud OAuth app is verified, OR is in Testing mode with your account added as a test user — otherwise Google's own consent screen will fail. Sign out and sign in again for this to take effect."
+                  : "Off — Google sign-in only proves your identity. Gmail still works via an app password; Calendar and Drive are unavailable.")
+              : "Could not save: " + (jj.detail || "unknown error");
+          } catch (err) {
+            note.textContent = "Save failed: " + (err.message || err);
+          }
+          paintSettings();
+        };
+        row.appendChild(btn);
+      });
+      if (!note.textContent || note.textContent === "Loading…") {
+        note.textContent = j.enabled
+          ? "On — Gmail, Calendar and Drive are requested via Google sign-in."
+          : "Off — Google sign-in only proves your identity. Gmail still works via an app password; Calendar and Drive are unavailable.";
+      }
+    } catch (err) {
+      note.textContent = "Could not load Google Full Access: " + (err.message || err);
     }
   })();
 
@@ -5923,6 +6066,7 @@ async function openBrowserPane(url){
   // is guarded by _bpOpenSeq.
   const seq = ++_bpOpenSeq;
   pane.hidden = false;
+  document.body.classList.add("bp-open");
   addr.value = url;
   fb.hidden = true;
   if(note) note.hidden = true;
@@ -5960,6 +6104,7 @@ function closeBrowserPane(){
   clearTimeout(_bpLoadTimer);
   frame.src = "";  // real unload, not just hiding a live page
   pane.hidden = true;
+  document.body.classList.remove("bp-open");
 }
 (function initBrowserPane(){
   const frame = $("bpFrame"), addr = $("bpAddr");

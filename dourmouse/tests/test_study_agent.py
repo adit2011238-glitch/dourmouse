@@ -9,6 +9,7 @@ from dourmouse.study_agent import (
     StudyPathError,
     list_study_files,
     read_study_file,
+    search_study_files,
     study_folder_status,
     study_root,
 )
@@ -65,6 +66,52 @@ class TestListStudyFiles:
         monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(tmp_path / "gone"))
         with pytest.raises(StudyPathError):
             list_study_files()
+
+
+class TestSearchStudyFiles:
+    """Real, live-reproduced gap (full-day feature sweep, 2026-09-12):
+    the study agent had list/read only, no search — asked to find material
+    on a topic, the model manually crawled several subfolders then GUESSED
+    three plausible-sounding filenames it had never actually seen (all
+    three came back "not a file"), burning its whole tool budget. This
+    recursive filename search is the fix."""
+
+    def test_finds_a_real_file_by_substring_anywhere_in_the_tree(self, study_dir):
+        result = search_study_files("chapter")
+        paths = {m["path"] for m in result["matches"]}
+        assert any("chapter1.txt" in p for p in paths)
+
+    def test_finds_a_real_folder_by_name(self, study_dir):
+        result = search_study_files("textbook")
+        matches = {m["path"]: m["is_dir"] for m in result["matches"]}
+        assert matches.get("Textbooks") is True
+
+    def test_case_insensitive(self, study_dir):
+        result = search_study_files("TEXTBOOK")
+        assert any(m["path"] == "Textbooks" for m in result["matches"])
+
+    def test_no_match_is_honest_empty_not_an_error(self, study_dir):
+        result = search_study_files("nonexistent-topic-xyz")
+        assert result["matches"] == []
+
+    def test_never_descends_into_dotfiles_or_reports_them(self, study_dir):
+        result = search_study_files("DS_Store")
+        assert result["matches"] == []
+
+    def test_empty_query_is_refused(self, study_dir):
+        with pytest.raises(StudyPathError):
+            search_study_files("")
+
+    def test_never_reports_anything_outside_the_sandbox(self, study_dir):
+        # "outside" matches the real outside.txt fixture file by name if
+        # the walk ever escaped the sandbox root — it must not find it.
+        result = search_study_files("outside")
+        assert result["matches"] == []
+
+    def test_refuses_missing_folder(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(tmp_path / "gone"))
+        with pytest.raises(StudyPathError):
+            search_study_files("anything")
 
 
 class TestReadStudyFile:

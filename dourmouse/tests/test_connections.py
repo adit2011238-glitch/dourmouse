@@ -109,6 +109,30 @@ class TestClaudeCodexDiscovery:
         assert report["claude"]["ok"] is True
         assert "signed in" in report["claude"]["detail"]
 
+    def test_unverified_signin_hint_is_platform_aware(self, monkeypatch):
+        """Real bug found live (full-day feature sweep, 2026-09-12): this
+        hint blamed "Windows keeps it in the Credential Manager"
+        unconditionally — shown verbatim on a real Mac where the macOS
+        Keychain check had already run and still come back inconclusive,
+        so citing Windows-specific plumbing was simply wrong there."""
+        monkeypatch.setattr(conn, "_cli_version", lambda name: "2.1.220" if name == "claude" else None)
+        monkeypatch.setattr(conn, "_claude_signin", lambda: "unknown")
+
+        monkeypatch.setattr(conn.sys, "platform", "darwin")
+        hint = conn.check_connections()["claude"]["hint"]
+        assert "Keychain" in hint
+        assert "Credential Manager" not in hint
+
+        monkeypatch.setattr(conn.sys, "platform", "win32")
+        hint = conn.check_connections()["claude"]["hint"]
+        assert "Credential Manager" in hint
+        assert "Keychain" not in hint
+
+        monkeypatch.setattr(conn.sys, "platform", "linux")
+        hint = conn.check_connections()["claude"]["hint"]
+        assert "credentials file" in hint
+        assert "Credential Manager" not in hint and "Keychain" not in hint
+
     def test_claude_missing_cli_says_so(self, monkeypatch):
         monkeypatch.setattr(conn, "_cli_version", lambda name: None)
         report = conn.check_connections()

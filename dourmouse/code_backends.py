@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import threading
 import uuid
@@ -107,6 +108,16 @@ _CLAUDE_SESSIONS_LOCK = threading.Lock()
 # tracked session id no longer resolves to a real conversation — e.g. the
 # user pruned their local Claude Code session history out from under us.
 _CLAUDE_NO_SESSION_ERR = "No conversation found with session ID"
+# Real wording, live-caught in Claude's own successful (exit 0) stdout, of
+# ITS OWN MCP client failing to connect to the dourmouse bridge for that
+# turn — see the retry site's own comment for the full diagnosis. Matches
+# both "MCP server failed to connect" and the literal "CONNECTION_CLOSED"
+# code Claude reports, case-insensitively — real wording could vary
+# slightly between CLI versions, this is deliberately not pinned to one
+# exact sentence.
+_CLAUDE_MCP_CONNECTION_FAILED_RE = re.compile(
+    r"MCP server (failed to connect|.*disconnect)|CONNECTION_CLOSED", re.IGNORECASE
+)
 
 # -- MCP bridge wiring (v13) ------------------------------------------------ #
 # Gives every `claude` invocation from this module (code_claude, and any
@@ -504,7 +515,7 @@ def _cli_env(cli: str | None = None) -> dict[str, str]:
     return env
 
 
-def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
+def _run_claude(task: str, *, cwd: str | None, timeout: int, tab: str | None = None) -> str:
     # Lazy import: code_backends must not import general_roster at module
     # load time (general_roster imports code_backends for the new tools).
     from dourmouse.general_roster import _find_claude_cli
@@ -517,7 +528,41 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
             "CLAUDE_CODE_CLI=/absolute/path/to/claude in .env. Nothing was run."
         )
     timeout = max(1, min(int(timeout), 600))
-    session_key = _claude_session_key(cwd)
+    # Real, live-reproduced bug (2026-09-12 production-testing sweep): this
+    # function backs ClaudeCliClient — the TOP-LEVEL orchestrator brain used
+    # whenever Claude Front Mode is on — and until now it called
+    # _claude_session_key(cwd) with NO tab, exactly the "old single-session
+    # behaviour" _claude_session_key's own docstring says is meant ONLY for
+    # non-UI callers (tools, scheduled jobs). Every tab's top-level
+    # Claude-front conversation therefore shared ONE real Claude CLI session
+    # for the whole process's lifetime — the identical cross-tab bleeding
+    # bug commit 24d6a7c fixed for the explicit code_claude TOOL path, just
+    # never carried over to this newer sibling. Live-caught: a brand-new
+    # tab's first-ever turn came back with bizarre, contextually-impossible
+    # text ("told you five times", "Dourmouse down") lifted straight out of
+    # a totally unrelated concurrent conversation sharing the same session.
+    # This also means the capability preamble below (same fix the streaming
+    # code_claude path already had) never fired for the orchestrator path
+    # either, since _CLAUDE_SESSIONS already had an entry from whichever
+    # unrelated conversation got there first — separately confirmed live: a
+    # plain "bring Chrome to the front" answered "No tool here for that (no
+    # dourmouse, no OS control tool available)" even though that tool is
+    # real and working.
+    session_key = _claude_session_key(cwd, tab)
+
+    # Tell the model what it is and what it has, once per session — same
+    # fix, same rationale, as the streaming code_claude path (see its own
+    # comment on this exact block for the full "the models don't know what
+    # tools they can use" history).
+    with _CLAUDE_SESSIONS_LOCK:
+        _first_turn = session_key not in _CLAUDE_SESSIONS
+    if _first_turn:
+        try:
+            from dourmouse.model_context import claude_orchestrator_preamble
+
+            task = f"{claude_orchestrator_preamble()}\n\n---\n\n{task}"
+        except Exception:  # noqa: BLE001 - a briefing must never break a turn
+            pass
     session_args = _claude_session_args(session_key)
     proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
     err = (proc.stderr or "").strip()
@@ -532,6 +577,28 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
         proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
         err = (proc.stderr or "").strip()
     out = (proc.stdout or "").strip()
+    # Real, live-reproduced issue (production-testing sweep, 2026-09-12):
+    # `claude -p` can exit 0 with real stdout, but that text is CLAUDE
+    # ITSELF reporting its own MCP client failed to connect to the
+    # dourmouse bridge this turn ("Dourmouse MCP server failed to connect
+    # (CONNECTION_CLOSED). Can't access the `activate_app` tool...") —
+    # gracefully degrading instead of crashing, but with zero Dourmouse
+    # tool access for the whole answer. Directly isolated the bridge
+    # itself as healthy (manually driven with real MCP JSON-RPC — 160
+    # real tools listed, a real tools/call answered cleanly, every time)
+    # so this reads as the real Claude CLI's OWN MCP subprocess connection
+    # occasionally flaking on startup, not a dead session and not a
+    # dourmouse-side bug — a different failure SHAPE than the dead-session
+    # case above (process exit vs. successful exit with degraded content),
+    # so it needs its own check, but the same "one honest retry before
+    # giving up" answer: the bridge reliably works, so trying the exact
+    # same call again gives the CLI's MCP client a fresh chance to
+    # connect. Capped at one retry — this must never become a silent
+    # infinite loop over a genuinely persistent problem.
+    if proc.returncode == 0 and _CLAUDE_MCP_CONNECTION_FAILED_RE.search(out):
+        proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
+        err = (proc.stderr or "").strip()
+        out = (proc.stdout or "").strip()
     if proc.returncode != 0:
         # v8.7: `claude -p` exits 1 with an EMPTY stderr when the CLI is
         # installed but not signed in — the single most likely failure here,
@@ -594,6 +661,40 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int) -> str:
 # exists to stop Claude recursively re-invoking itself/Dourmouse's own
 # orchestration loop through the MCP bridge, a real infinite-loop/cost risk
 # unrelated to file-edit approval, and stays in place.
+def _tool_result_content_to_text(content: Any) -> str:
+    """A tool_result 'content' field from Claude Code's own stream-json is
+    a string OR a list of content blocks (real shapes seen live: {"type":
+    "text", "text": ...} and {"type": "tool_reference", "tool_name": ...}
+    -- an internal bookkeeping block, not documented Anthropic API output).
+
+    Real, live-reproduced bug (2026-09-13): anything not a plain string
+    fell straight to json.dumps(content) -- the CODE screen's own
+    transcript showed raw ``[{"type": "text", "text": "WEB SEARCH
+    RESULTS..."}]`` blobs and bare ``[{"type": "tool_reference", ...}]``
+    dumps as if they were the model's own words. Extracts just the
+    human-readable text a person actually asked for; anything genuinely
+    unrecognized degrades to a short honest placeholder instead of a raw
+    JSON dump, so a future block type this function doesn't know about
+    yet still can't leak engine internals onto a user-facing screen.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return "" if content is None else f"[{type(content).__name__} tool result content]"
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text" and isinstance(block.get("text"), str):
+            parts.append(block["text"])
+        elif btype == "tool_reference":
+            parts.append(f"[used tool: {block.get('tool_name', '?')}]")
+        elif btype:
+            parts.append(f"[{btype} content]")
+    return "\n".join(parts)
+
+
 def stream_claude(
     task: str,
     *,
@@ -746,8 +847,7 @@ def stream_claude(
                     for block in (ev.get("message") or {}).get("content") or []:
                         if block.get("type") != "tool_result":
                             continue
-                        content = block.get("content")
-                        text = content if isinstance(content, str) else json.dumps(content)
+                        text = _tool_result_content_to_text(block.get("content"))
                         on_tool_result((text or "")[:2000])
                 elif etype == "result":
                     final_result = ev.get("result") or ""
@@ -879,11 +979,17 @@ def run_code_task(
     *,
     cwd: str | None = None,
     timeout: int = 120,
+    tab: str | None = None,
 ) -> str:
     """Run a coding task through the chosen backend; returns REAL output.
 
     Raises RuntimeError on any configuration or execution failure — the
     caller surfaces it honestly, never as fabricated code.
+
+    ``tab`` (optional) identifies the calling conversation for the "claude"
+    backend's own per-tab session isolation (see _claude_session_key) —
+    omit it only for a genuine non-UI caller (a tool, a scheduled job) that
+    really does want the single shared legacy session.
     """
     task = (task or "").strip()
     if not task:
@@ -893,7 +999,7 @@ def run_code_task(
         # v8.31: inject real shared-memory context before the CLI ever
         # sees the task — see _inject_shared_context's own docstring for
         # why this is scoped to the CLI-shelled-out backends only.
-        return _run_claude(_inject_shared_context(task), cwd=cwd, timeout=timeout)
+        return _run_claude(_inject_shared_context(task), cwd=cwd, timeout=timeout, tab=tab)
     if name in ("codex", "openai_codex"):
         # v8.7: CLI first (what the CODEX status light measures), API key
         # only as a fallback — see _run_codex. v8.31: same shared-memory

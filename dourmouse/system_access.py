@@ -440,7 +440,45 @@ def _run_command_tool(arguments: dict[str, Any]) -> str:
     # sandbox.py). The classifier above is now only a fast-path pre-filter.
     # run_sandboxed NEVER silently falls back to unsandboxed execution — on
     # a system without sandbox-exec it returns NOT CONFIGURED (Rule 2.2).
-    return run_sandboxed(command, cwd, timeout)
+    result = run_sandboxed(command, cwd, timeout)
+    hint = _command_not_found_hint(command, result)
+    return result + hint if hint else result
+
+
+#: Real, live-reproduced bug (production-testing sweep, 2026-09-12): this
+#: Mac (and most modern installs) has no bare `python` on PATH, only
+#: `python3` — the single most common first guess for "run this script"
+#: hits `command not found`, and a coding turn was observed giving up on
+#: tool use ENTIRELY after that one failure rather than retrying the
+#: obvious fix, fabricating "output" it never produced instead. Teaching
+#: the exact fix directly in the error text (the same "did you mean"
+#: mentoring pattern already used for an unknown tool name elsewhere in
+#: this codebase) is cheap and gives a real, immediate path forward — far
+#: more reliable than hoping a model always remembers to try the
+#: versioned name, or that it reaches for the purpose-built run_python
+#: tool instead of a raw shell command in the first place.
+_MISSING_PY_RE = re.compile(r"(?<![\w.])python(?![\w.\-])")
+#: The shell's own "command not found" wording for the MISSING COMMAND
+#: itself (sh: "python: not found", bash/zsh: "python: command not
+#: found") — deliberately specific, not a bare "not found" anywhere in
+#: output, which could just as easily be the script's OWN stdout/stderr
+#: talking about a missing FILE and have nothing to do with the
+#: interpreter being found or not.
+_SHELL_CMD_NOT_FOUND_RE = re.compile(r"python:\s*(command\s+)?not\s+found", re.IGNORECASE)
+
+
+def _command_not_found_hint(command: str, result: str) -> str:
+    if "EXIT CODE: 127" not in result or not _SHELL_CMD_NOT_FOUND_RE.search(result):
+        return ""
+    if not _MISSING_PY_RE.search(command):
+        return ""
+    return (
+        "\n\nHINT: this machine has no bare 'python' on PATH, only "
+        "'python3' (confirm with run_command \"which python3\" if unsure). "
+        "Retry this exact command with 'python3' instead of 'python', or "
+        "use the dedicated run_python tool to run code directly without "
+        "shelling out at all."
+    )
 
 
 def _run_privileged_command_tool(arguments: dict[str, Any]) -> str:

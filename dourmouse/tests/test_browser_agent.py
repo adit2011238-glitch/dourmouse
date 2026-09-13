@@ -9,12 +9,26 @@ smoke test in the commit note (example.com open/snapshot/screenshot).
 from __future__ import annotations
 
 import json
+import socket
+import threading
+import urllib.error
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
 from dourmouse import browser_agent as ba
 from dourmouse.dispatch import Permission
 from dourmouse.general_roster import build_general_registry
+
+
+def _free_local_port() -> int:
+    """A real, currently-unbound port — bind-then-close, the standard way
+    to get one nothing else can grab in the meantime for this test's
+    purposes (matches this project's own preference for real sockets over
+    guessed/hardcoded port numbers in tests)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 _BROWSER_TOOLS = {
     "open_browser_pane",
@@ -34,6 +48,8 @@ _BROWSER_TOOLS = {
     "browser_creds_list",
     "browser_creds_forget",
     "browser_signin",
+    "browser_pane_show",
+    "browser_pane_hide",
     # query_shared_memory (shared_rag.py) rides every non-orchestrator
     # subagent — see build_general_registry's own comment.
     "query_shared_memory",
@@ -191,3 +207,159 @@ class TestAdMediaBlocking:
         monkeypatch.setenv("DOURMOUSE_BROWSER_BLOCK_MEDIA", "0")
         assert ba._should_block_request("https://example.com/video.mp4", "media") is False
         assert ba._should_block_request("https://doubleclick.net/pixel", "image") is False
+
+
+class _FakePaneBridgeHandler(BaseHTTPRequestHandler):
+    """Stands in for electron/main.js's real pane-bridge server (see that
+    file's startPaneBridge) — real HTTP, real sockets, just a fake
+    responder instead of a real Electron process, same spirit as this
+    whole test suite's other real-local-server fixtures (e.g.
+    test_webui.py's `server`)."""
+
+    calls: list[tuple[str, str]] = []
+    responses: dict[str, dict] = {}
+
+    def _handle(self) -> None:
+        type(self).calls.append((self.command, self.path))
+        body = json.dumps(
+            type(self).responses.get(self.path, {"ok": False, "error": "not found"})
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib handler naming
+        self._handle()
+
+    def do_POST(self) -> None:  # noqa: N802 - stdlib handler naming
+        self._handle()
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A002 - stdlib signature
+        pass  # silence per-request access logging in test output
+
+
+@pytest.fixture
+def fake_pane_bridge():
+    _FakePaneBridgeHandler.calls = []
+    _FakePaneBridgeHandler.responses = {"/show": {"ok": True}, "/hide": {"ok": True}}
+    server = HTTPServer(("127.0.0.1", 0), _FakePaneBridgeHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield port, _FakePaneBridgeHandler
+    server.shutdown()
+    thread.join(timeout=2)
+    server.server_close()
+
+
+class TestElectronPaneConfigured:
+    """_electron_pane_configured() — pure env-var parsing, the same
+    both-or-nothing discovery electron/main.js's spawnServer() sets when
+    (and only when) IT started this process."""
+
+    def test_both_vars_set_returns_the_real_pair(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_CDP_PORT", "9333")
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", "9334")
+        assert ba._electron_pane_configured() == (9333, 9334)
+
+    def test_neither_set_returns_none(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_ELECTRON_CDP_PORT", raising=False)
+        monkeypatch.delenv("DOURMOUSE_ELECTRON_PANE_PORT", raising=False)
+        assert ba._electron_pane_configured() is None
+
+    def test_only_cdp_port_set_returns_none(self, monkeypatch):
+        """Both-or-nothing, deliberately — a half-set pair is not a real,
+        supported configuration (see the function's own docstring)."""
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_CDP_PORT", "9333")
+        monkeypatch.delenv("DOURMOUSE_ELECTRON_PANE_PORT", raising=False)
+        assert ba._electron_pane_configured() is None
+
+    def test_only_pane_port_set_returns_none(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_ELECTRON_CDP_PORT", raising=False)
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", "9334")
+        assert ba._electron_pane_configured() is None
+
+    def test_non_integer_value_returns_none_not_a_crash(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_CDP_PORT", "not-a-port")
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", "9334")
+        assert ba._electron_pane_configured() is None
+
+
+class TestPaneBridgeRequest:
+    """_pane_bridge_request() — the real HTTP call to electron/main.js's
+    tiny local server, exercised here against a real (fake-responder)
+    local HTTP server, not a mock."""
+
+    def test_real_round_trip_against_a_real_local_server(self, fake_pane_bridge):
+        port, handler = fake_pane_bridge
+        result = ba._pane_bridge_request(port, "POST", "/show")
+        assert result == {"ok": True}
+        assert handler.calls == [("POST", "/show")]
+
+    def test_unreachable_bridge_raises_a_real_connection_error(self):
+        free_port = _free_local_port()  # bound-then-closed -- genuinely nothing listening
+        with pytest.raises(urllib.error.URLError):
+            ba._pane_bridge_request(free_port, "GET", "/status")
+
+
+class TestBrowserPaneShowHide:
+    """browser_pane_show/browser_pane_hide — the tool-level handlers.
+    Honest NOT CONFIGURED without the Electron shell; real success/failure
+    against a real (fake-responder) local bridge server otherwise."""
+
+    def _isolate(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_ELECTRON_CDP_PORT", raising=False)
+        monkeypatch.delenv("DOURMOUSE_ELECTRON_PANE_PORT", raising=False)
+
+    def test_show_not_configured_without_electron(self, monkeypatch):
+        self._isolate(monkeypatch)
+        result = ba.browser_pane_show({})
+        assert "NOT CONFIGURED" in result
+        assert "Electron" in result
+
+    def test_hide_not_configured_without_electron(self, monkeypatch):
+        self._isolate(monkeypatch)
+        result = ba.browser_pane_hide({})
+        assert "NOT CONFIGURED" in result
+
+    def test_show_real_success_against_a_real_local_bridge(self, monkeypatch, fake_pane_bridge):
+        self._isolate(monkeypatch)
+        port, handler = fake_pane_bridge
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_CDP_PORT", "9333")
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", str(port))
+        result = ba.browser_pane_show({})
+        assert "visible" in result.lower()
+        assert ("POST", "/show") in handler.calls
+
+    def test_hide_real_success_against_a_real_local_bridge(self, monkeypatch, fake_pane_bridge):
+        self._isolate(monkeypatch)
+        port, handler = fake_pane_bridge
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_CDP_PORT", "9333")
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", str(port))
+        result = ba.browser_pane_hide({})
+        assert "hidden" in result.lower()
+        assert ("POST", "/hide") in handler.calls
+
+    def test_show_raises_when_bridge_reports_not_ok(self, monkeypatch, fake_pane_bridge):
+        self._isolate(monkeypatch)
+        port, handler = fake_pane_bridge
+        handler.responses["/show"] = {"ok": False, "error": "no main window yet"}
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_CDP_PORT", "9333")
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", str(port))
+        with pytest.raises(RuntimeError, match="BROWSER PANE SHOW FAILED"):
+            ba.browser_pane_show({})
+
+    def test_show_raises_a_readable_error_when_bridge_is_unreachable(self, monkeypatch):
+        self._isolate(monkeypatch)
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_CDP_PORT", "9333")
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", str(_free_local_port()))
+        with pytest.raises(RuntimeError, match="BROWSER PANE SHOW FAILED"):
+            ba.browser_pane_show({})
+
+    def test_hide_raises_a_readable_error_when_bridge_is_unreachable(self, monkeypatch):
+        self._isolate(monkeypatch)
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_CDP_PORT", "9333")
+        monkeypatch.setenv("DOURMOUSE_ELECTRON_PANE_PORT", str(_free_local_port()))
+        with pytest.raises(RuntimeError, match="BROWSER PANE HIDE FAILED"):
+            ba.browser_pane_hide({})

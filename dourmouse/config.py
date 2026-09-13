@@ -464,6 +464,23 @@ class OllamaConfig:
     # pinned name ("qwen2.5:7b") is a local-only model unlikely to even
     # exist in Ollama Cloud's real hosted catalog.
     is_cloud: bool = False
+    # Real, live-caught bug (2026-09-13), the same class _persisted_model_
+    # for_backend's own docstring already names for the NVIDIA/Ollama
+    # cross-backend case ("a model id from one backend silently applied
+    # to a different backend's config... a real 404, the orchestrator
+    # going dead with no visible error"), one layer deeper: a model id
+    # the user persisted while running Ollama CLOUD (this exact machine
+    # has "gpt-oss:20b" persisted as its chosen orchestrator model) is
+    # NOT the same thing as a model that exists on the LOCAL daemon --
+    # live-verified, this config's own force_local=True path (built
+    # specifically so mail/docs/google_workspace/etc. never leave the
+    # machine even with a real cloud key present) still had
+    # model_for_agent("orchestrator") return that persisted CLOUD model
+    # name, which the local Ollama server then 404'd on (it was never
+    # pulled there — confirmed via a real GET /api/tags). True only on
+    # the config load_ollama_config(force_local=True) builds; never set
+    # by anything else, so no other caller's behavior changes.
+    skip_persisted_orchestrator_choice: bool = False
 
     def model_for_agent(self, agent: str | None) -> str:
         """The Ollama model a specific subagent runs on (deterministic).
@@ -476,7 +493,7 @@ class OllamaConfig:
         key = (agent or "").strip().upper()
         if key and key in self.agent_models:
             return self.agent_models[key]
-        if key == "ORCHESTRATOR":
+        if key == "ORCHESTRATOR" and not self.skip_persisted_orchestrator_choice:
             persisted = _persisted_model_for_backend("ollama")
             if persisted:
                 return persisted
@@ -485,8 +502,24 @@ class OllamaConfig:
         return self.model
 
 
-def load_ollama_config() -> OllamaConfig:
+def load_ollama_config(force_local: bool = False) -> OllamaConfig:
     """Build the Ollama backend config from env (defaults when unset).
+
+    ``force_local=True`` (2026-09-13, real live-caught privacy bug): a
+    plain ``OLLAMA_API_KEY`` in the environment makes this function
+    return ``is_cloud=True`` for EVERY caller, with no per-agent
+    exception — dispatch.py's own privacy-pinned-agent fallthrough
+    (``_build_client``'s "mode == local" branch, used for mail/docs/
+    google_workspace/etc.) reused that SAME global config, so setting a
+    real Ollama Cloud key silently sent private Gmail/Drive/Calendar
+    content to Ollama's cloud API the very next real request — verified
+    live: ``_build_client(load_ollama_config(), forced_agent="mail")``
+    returned an ``OllamaNativeClient`` with ``_is_cloud=True`` the moment
+    a real key was stored, with no code change needed to trigger it.
+    ``force_local=True`` is the fix's other half: same model/retry/
+    fallback/agent-model resolution as the normal path, but the
+    cloud-routing decision is skipped entirely — always local, always
+    keyless, regardless of what's in the environment.
 
     v13.5 (live-diagnosed, explicit user request — "why is routing requests
     to qwen local instead of the Ollama api key"): OLLAMA_API_KEY was being
@@ -515,7 +548,11 @@ def load_ollama_config() -> OllamaConfig:
     """
     api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
     explicit_base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
-    if explicit_base_url:
+    if force_local:
+        base_url = explicit_base_url or _OLLAMA_DEFAULT_BASE_URL
+        is_cloud = False
+        api_key = ""
+    elif explicit_base_url:
         base_url = explicit_base_url
         is_cloud = False
     elif api_key:
@@ -547,6 +584,7 @@ def load_ollama_config() -> OllamaConfig:
         fallback_model=fallback_model,
         agent_models=agent_models,
         is_cloud=is_cloud,
+        skip_persisted_orchestrator_choice=force_local,
     )
 
 
@@ -926,6 +964,63 @@ def save_claude_front_mode_setting(enabled: bool) -> dict[str, Any]:
         user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         existing[CLAUDE_FRONT_MODE_SETTING_KEY] = "on" if enabled else "off"
+        body = [
+            "# Dourmouse configuration — written by first-run setup / settings.",
+            "# This file holds credentials. Keep it to yourself; it is never",
+            "# bundled into a build or uploaded anywhere.",
+            "",
+        ]
+        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        return {"ok": False, "detail": f"could not write config: {exc}"}
+    return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
+
+
+# --------------------------------------------------------------------------- #
+# Google OAuth full scopes (Gmail/Calendar/Drive via OAuth, not just identity)
+# --------------------------------------------------------------------------- #
+#
+# Real friction, live-caught (2026-09-13): turning this on required manually
+# editing .env and restarting the server -- undiscoverable unless you already
+# knew the env var existed, since nothing in the UI ever mentioned it. Same
+# three-function shape as Claude-front-mode above (setting/enabled/save), so
+# it's a real toggle read fresh from disk on every request, no restart.
+
+GOOGLE_OAUTH_FULL_SCOPES_SETTING_KEY = "GOOGLE_OAUTH_FULL_SCOPES"
+
+
+def google_oauth_full_scopes_setting() -> str:
+    """The persisted choice, read fresh from disk. An explicit env var
+    (an operator who set it directly in their own real .env) always
+    wins over this setting -- see google_oauth_full_scopes_enabled."""
+    return _read_user_config_file().get(GOOGLE_OAUTH_FULL_SCOPES_SETTING_KEY, "").strip().lower()
+
+
+def google_oauth_full_scopes_enabled() -> bool:
+    """True if EITHER a real environment variable OR the persisted
+    Settings toggle turns this on. Off by default (Google's restricted
+    scopes 500 on an unverified OAuth app -- see google_auth.py's own
+    requested_scopes docstring), so this is opt-in, unlike Claude-front-
+    mode above."""
+    env_val = os.environ.get("GOOGLE_OAUTH_FULL_SCOPES", "").strip().lower()
+    if env_val in ("1", "true", "yes", "on"):
+        return True
+    return google_oauth_full_scopes_setting() in ("1", "true", "yes", "on")
+
+
+def save_google_oauth_full_scopes_setting(enabled: bool) -> dict[str, Any]:
+    """Persist the full-scopes on/off choice. Same merge-with-existing-
+    file discipline as every other save_*_setting here."""
+    path = user_env_path()
+    try:
+        user_config_dir().mkdir(parents=True, exist_ok=True)
+        existing = _read_user_config_file()
+        existing[GOOGLE_OAUTH_FULL_SCOPES_SETTING_KEY] = "on" if enabled else "off"
         body = [
             "# Dourmouse configuration — written by first-run setup / settings.",
             "# This file holds credentials. Keep it to yourself; it is never",

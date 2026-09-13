@@ -64,6 +64,285 @@ class TestDriveCreateDoc:
         assert "Nothing was created" in out
 
 
+class TestCreateCalendarEvent:
+    """Real, confirmed feature gap closed (production-testing sweep,
+    2026-09-12): scheduling had list_calendar_events + propose_time_slots
+    and NOTHING that actually writes a real event — checked directly, no
+    calendar-create function existed anywhere in this module, exposed or
+    not. Rule 10's own text said "booking confirmed", which was false:
+    there was nothing to confirm. Same real write pattern as
+    drive_create_doc/docs_append (hermetic: fake token + fake REST)."""
+
+    def test_not_configured_without_signed_in_user(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: None)
+        monkeypatch.setattr(gs, "_oauth_user_needs_reauth", lambda a: None)
+        out = gs.create_calendar_event("Team sync", "2026-09-15T14:00:00", "2026-09-15T14:30:00")
+        assert out.startswith("NOT CONFIGURED")
+        assert "Nothing was created" in out
+
+    def test_missing_summary_is_a_clear_error(self):
+        out = gs.create_calendar_event("", "2026-09-15T14:00:00", "2026-09-15T14:30:00")
+        assert "ERROR" in out
+        assert "summary" in out
+
+    def test_missing_times_is_a_clear_error(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        out = gs.create_calendar_event("Team sync", "", "")
+        assert "ERROR" in out
+        assert "start_iso" in out and "end_iso" in out
+
+    def test_happy_path_creates_a_real_event(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        seen = {}
+
+        def fake_http_json(method, url, token, body=None):
+            if method == "POST" and url.endswith("/calendars/primary/events"):
+                seen.update(body)
+                return {"id": "evt123", "htmlLink": "https://calendar.google.com/event?eid=evt123"}
+            raise AssertionError(f"unexpected call {method} {url}")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.create_calendar_event(
+            "Team sync", "2026-09-15T14:00:00", "2026-09-15T14:30:00",
+            description="Weekly check-in", timezone_name="Asia/Dubai",
+        )
+        assert "CALENDAR EVENT CREATED" in out
+        assert "evt123" in out
+        assert seen["summary"] == "Team sync"
+        assert seen["start"] == {"dateTime": "2026-09-15T14:00:00", "timeZone": "Asia/Dubai"}
+        assert seen["end"] == {"dateTime": "2026-09-15T14:30:00", "timeZone": "Asia/Dubai"}
+        assert seen["description"] == "Weekly check-in"
+
+    def test_no_description_is_omitted_not_sent_blank(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        seen = {}
+
+        def fake_http_json(method, url, token, body=None):
+            seen.update(body)
+            return {"id": "evt123"}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        gs.create_calendar_event("Team sync", "2026-09-15T14:00:00", "2026-09-15T14:30:00")
+        assert "description" not in seen
+
+    def test_403_surfaces_scope_fix(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 403 on .../events: insufficient permissions")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.create_calendar_event("Team sync", "2026-09-15T14:00:00", "2026-09-15T14:30:00")
+        assert "403" in out
+        assert "GOOGLE_OAUTH_FULL_SCOPES" in out
+        assert "Nothing was created" in out
+
+    def test_registered_on_scheduling_and_google_workspace_gated(self):
+        registry = build_general_registry()
+        for agent in ("scheduling", "google_workspace"):
+            sub = registry.get_subagent(agent)
+            spec = next((t for t in sub.tools if t.name == "create_calendar_event"), None)
+            assert spec is not None, agent
+            assert spec.permission is Permission.REQUIRES_CONFIRMATION
+
+
+class TestSheetsCreate:
+    """Real, confirmed feature gap closed (production-testing sweep,
+    2026-09-12): sheets_read is the ONLY Sheets tool that existed, and is
+    deliberately keyless/link-shared (the public gviz endpoint) — genuinely
+    read-only by design. No write/create path existed at all. Same real
+    per-user OAuth write pattern as drive_create_doc/create_calendar_event
+    (hermetic: fake token + fake REST), but against a genuinely different
+    real Google API (sheets.googleapis.com, not the gviz endpoint)."""
+
+    def test_not_configured_without_signed_in_user(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: None)
+        monkeypatch.setattr(gs, "_oauth_user_needs_reauth", lambda a: None)
+        out = gs.sheets_create("Budget")
+        assert out.startswith("NOT CONFIGURED")
+        assert "Nothing was created" in out
+
+    def test_missing_title_is_a_clear_error(self):
+        assert "ERROR" in gs.sheets_create("")
+
+    def test_happy_path_creates_with_no_rows(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        calls = []
+
+        def fake_http_json(method, url, token, body=None):
+            calls.append((method, url, body))
+            assert url == gs._SHEETS_API
+            return {"spreadsheetId": "sheet123", "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/sheet123"}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.sheets_create("Budget")
+        assert "SHEETS CREATED" in out
+        assert "sheet123" in out
+        assert len(calls) == 1  # no rows -> no follow-up values.update call
+
+    def test_happy_path_writes_initial_rows(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        calls = []
+
+        def fake_http_json(method, url, token, body=None):
+            calls.append((method, url, body))
+            if method == "POST":
+                return {"spreadsheetId": "sheet123", "spreadsheetUrl": "https://x/sheet123"}
+            return {}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        rows = [["Name", "Score"], ["Alice", 90]]
+        out = gs.sheets_create("Budget", rows)
+        assert "SHEETS CREATED" in out
+        assert "2 row(s) written" in out
+        assert len(calls) == 2
+        put_method, put_url, put_body = calls[1]
+        assert put_method == "PUT"
+        assert "sheet123/values/Sheet1!A1" in put_url
+        assert put_body == {"values": rows}
+
+    def test_403_surfaces_scope_fix(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 403 on .../spreadsheets: insufficient permissions")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.sheets_create("Budget")
+        assert "403" in out
+        assert "GOOGLE_OAUTH_FULL_SCOPES" in out
+        assert "Nothing was created" in out
+
+    def test_registered_on_docs_and_google_workspace_gated(self):
+        registry = build_general_registry()
+        for agent in ("docs", "google_workspace"):
+            sub = registry.get_subagent(agent)
+            spec = next((t for t in sub.tools if t.name == "sheets_create"), None)
+            assert spec is not None, agent
+            assert spec.permission is Permission.REQUIRES_CONFIRMATION
+
+
+class TestDriveShare:
+    """Real, confirmed feature gap closed (2026-09-12, user-requested while
+    asking to share a file with an alt Google account): the function itself
+    (drive_share/_drive_share_oauth) already existed, fully implemented
+    against the real Drive permissions API, with zero test coverage and zero
+    ToolSpec wiring anywhere in general_roster.py — completely unreachable
+    by the model despite being real, working code. Same hermetic pattern as
+    every other write tool here (fake token + fake REST, no network)."""
+
+    def test_not_configured_without_signed_in_user(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: None)
+        monkeypatch.setattr(gs, "_oauth_user_needs_reauth", lambda a: None)
+        out = gs.drive_share("doc123", "someone@example.com")
+        assert out.startswith("NOT CONFIGURED")
+        assert "Nothing was shared" in out
+
+    def test_missing_file_id_is_a_clear_error(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        out = gs.drive_share("", "someone@example.com")
+        assert out.startswith("ERROR")
+        assert "file_id" in out
+
+    def test_malformed_email_is_refused_before_any_network_call(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fail_if_called(*a, **kw):
+            raise AssertionError("must not call the network on a malformed email")
+
+        monkeypatch.setattr(gs, "_http_json", fail_if_called)
+        out = gs.drive_share("doc123", "not-an-email")
+        assert out.startswith("ERROR")
+        assert "not a valid email" in out
+        assert "Nothing was shared" in out
+
+    def test_invalid_role_is_refused_before_any_network_call(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fail_if_called(*a, **kw):
+            raise AssertionError("must not call the network on an invalid role")
+
+        monkeypatch.setattr(gs, "_http_json", fail_if_called)
+        out = gs.drive_share("doc123", "someone@example.com", role="owner")
+        assert out.startswith("ERROR")
+        assert "role" in out
+        assert "Nothing was shared" in out
+
+    def test_happy_path_shares_with_default_reader_role(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        calls = []
+
+        def fake_http_json(method, url, token, body=None):
+            calls.append((method, url, body))
+            assert method == "POST"
+            assert "doc123/permissions" in url
+            assert "sendNotificationEmail=true" in url
+            return {}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.drive_share("doc123", "someone@example.com")
+        assert "DRIVE SHARED" in out
+        assert "someone@example.com" in out
+        assert "reader" in out
+        assert len(calls) == 1
+        assert calls[0][2] == {"type": "user", "role": "reader", "emailAddress": "someone@example.com"}
+
+    def test_notify_false_is_passed_through_to_the_real_api_call(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        seen_url = {}
+
+        def fake_http_json(method, url, token, body=None):
+            seen_url["url"] = url
+            return {}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.drive_share("doc123", "someone@example.com", role="writer", notify=False)
+        assert "DRIVE SHARED" in out
+        assert "writer" in out
+        assert "no notification sent" in out
+        assert "sendNotificationEmail=false" in seen_url["url"]
+
+    def test_404_surfaces_the_drive_file_scope_explanation(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 404 on .../permissions: not found")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.drive_share("doc123", "someone@example.com")
+        assert "404" in out
+        assert "drive.file scope" in out
+        assert "Nothing was shared" in out
+
+    def test_403_surfaces_scope_fix(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 403 on .../permissions: insufficient permissions")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.drive_share("doc123", "someone@example.com")
+        assert "403" in out
+        assert "GOOGLE_OAUTH_FULL_SCOPES" in out
+        assert "Nothing was shared" in out
+
+    def test_registered_on_docs_and_google_workspace_gated(self):
+        registry = build_general_registry()
+        for agent in ("docs", "google_workspace"):
+            sub = registry.get_subagent(agent)
+            spec = next((t for t in sub.tools if t.name == "drive_share"), None)
+            assert spec is not None, agent
+            assert spec.permission is Permission.REQUIRES_CONFIRMATION
+
+    def test_confirm_prompt_names_the_recipient_and_role(self):
+        registry = build_general_registry()
+        spec = next(t for t in registry.get_subagent("docs").tools if t.name == "drive_share")
+        prompt = spec.confirm_prompt({"file_id": "doc123", "email": "someone@example.com", "role": "writer"})
+        assert "doc123" in prompt
+        assert "someone@example.com" in prompt
+        assert "writer" in prompt
+
+
 class TestDocsAppend:
     """v13.9 — real capability gap fix, live-caught this session:
     drive_create_doc's content write is a full media-upload PATCH (it

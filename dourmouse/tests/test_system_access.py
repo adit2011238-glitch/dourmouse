@@ -513,6 +513,57 @@ class TestPrivilegedGate:
         assert "CONFIRMATION REQUIRED" in result["text"]
 
 
+class TestCommandNotFoundHint:
+    """Real, live-reproduced bug (full-day feature sweep, 2026-09-12): this
+    Mac has no bare 'python' on PATH, only 'python3' — a coding turn hit
+    'command not found' on the single most common first guess and gave up
+    on tool use entirely instead of retrying the obvious fix. See
+    _command_not_found_hint's own docstring for the full reasoning."""
+
+    def test_bare_python_not_found_gets_the_hint(self):
+        from dourmouse.system_access import _command_not_found_hint
+
+        result = "EXIT CODE: 127\nSTDERR:\n/bin/sh: python: command not found\n"
+        hint = _command_not_found_hint("python script.py", result)
+        assert "python3" in hint
+        assert "run_python" in hint
+
+    def test_python3_missing_is_a_real_different_problem_not_this_hint(self):
+        """python3 itself missing is a genuinely different, real problem —
+        this hint must never claim "use python3 instead" when python3 is
+        the very thing that just failed."""
+        from dourmouse.system_access import _command_not_found_hint
+
+        result = "EXIT CODE: 127\nSTDERR:\n/bin/sh: python3: command not found\n"
+        assert _command_not_found_hint("python3 script.py", result) == ""
+
+    def test_an_unrelated_not_found_in_script_output_is_not_mistaken_for_this(self):
+        """A script's OWN stdout/stderr talking about a missing FILE must
+        never be mistaken for the interpreter itself being missing."""
+        from dourmouse.system_access import _command_not_found_hint
+
+        result = "EXIT CODE: 1\nSTDOUT:\nerror: config.json not found\n"
+        assert _command_not_found_hint("python script.py", result) == ""
+
+    def test_a_successful_run_gets_no_hint(self):
+        from dourmouse.system_access import _command_not_found_hint
+
+        result = "EXIT CODE: 0\nSTDOUT:\nhello\n"
+        assert _command_not_found_hint("python script.py", result) == ""
+
+    def test_real_run_command_tool_appends_the_hint_live(self):
+        """End to end through the real tool, not just the helper."""
+        spec = next(t for t in build_system_subagent().tools if t.name == "run_command")
+        result = spec.handler({"command": "python --version"})
+        if "NOT CONFIGURED" in result:
+            assert "sandbox-exec" in result
+            return
+        if "EXIT CODE: 127" in result and "python: command not found" in result.lower():
+            assert "python3" in result
+            assert "run_python" in result
+        # else: this machine genuinely has a bare 'python' — nothing to assert.
+
+
 class TestRunCommandGuard:
     """run_command executes safe commands and refuses dangerous ones."""
 

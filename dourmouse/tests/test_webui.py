@@ -685,6 +685,52 @@ class TestClaudeFrontModeEndpoint:
         assert get_data["enabled"] is False
 
 
+class TestGoogleFullScopesEndpoint:
+    """The Settings UI's backend half for the Google full-scopes toggle —
+    OFF by default (opt-in), changeable, mirroring
+    TestClaudeFrontModeEndpoint's real-HTTP pattern."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+        monkeypatch.delenv("GOOGLE_OAUTH_FULL_SCOPES", raising=False)
+
+    def test_get_reports_off_by_default(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/google-full-scopes")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data["enabled"] is False
+
+    def test_post_true_then_get_reflects_it(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/settings/google-full-scopes",
+            body=json.dumps({"enabled": True}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        post_data = json.loads(resp.read())
+        conn.close()
+        assert post_data["ok"] is True
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/settings/google-full-scopes")
+        resp = conn.getresponse()
+        get_data = json.loads(resp.read())
+        conn.close()
+        assert get_data["enabled"] is True
+
+
 class TestAppControlDryRunEndpoint:
     """v14 (user-directed, 2026-09-08): "Consider adding a 'dry run'
     mode where it shows what would be clicked without actually
@@ -1247,6 +1293,35 @@ class TestSseChat:
                 events.append(json.loads(line[6:]))
         conn.close()
         return events
+
+    def test_an_unhandled_backend_exception_still_ends_with_a_real_done_event(self, server):
+        """Real, live-reproduced bug (full-day feature sweep, 2026-09-12):
+        an exception escaping run_dispatch_messages (observed live: a raw
+        urllib.error.HTTPError, "429 Too Many Requests", from a cloud
+        backend under concurrent load) used to end the SSE stream with
+        ONLY an "error" event — no "done", no "assistant_text" at all.
+        console.html's own lastError fallback (see its "error" case
+        comment) exists precisely to turn a raw error into a real visible
+        reply instead of a bare "No reply." — but it only runs on "done",
+        which never arrived, so the result was a permanently blank/stuck
+        bubble instead. Every real client (this test included) must see a
+        real, honest, non-empty final answer regardless of which layer the
+        failure came from."""
+        srv, port = server
+        srv.session.client = FakeClient([])  # first call raises immediately
+        events = self._stream_events(port, "hello")
+        error_events = [e for e in events if e["type"] == "error"]
+        done_events = [e for e in events if e["type"] == "done"]
+        text_events = [e for e in events if e["type"] == "assistant_text"]
+        assert error_events, f"expected a real error event, got {events}"
+        assert done_events, f"a real backend failure must still end with done, got {events}"
+        assert done_events[0]["final_text"].strip(), "done event must carry real text, not blank"
+        assert text_events and text_events[0]["text"].strip()
+        # History stays well-formed: the dangling user turn ChatSession.ask()
+        # appends before the network call gets a real assistant reply too,
+        # so the NEXT turn never sends two consecutive user messages.
+        assert srv.session.messages[-1]["role"] == "assistant"
+        assert srv.session.messages[-1]["content"].strip()
 
     def test_focus_agent_uses_that_agents_model(self, server):
         """v3.1: a focus_agent chat route runs on THAT agent's configured
@@ -2261,6 +2336,70 @@ class TestSystemBrowserClaimFlow:
         assert "IN_WEBVIEW" in html
 
 
+class TestGoogleStartPromptChoice:
+    """Real UX friction, live-caught (2026-09-13): authorization_url's own
+    default (prompt='consent') forces Google's full permission-grant
+    screen on EVERY login, even the hundredth, for an account that
+    already granted everything -- most "Sign in with X" flows only do
+    that once. Can't know which identity is signing in before Google
+    says so, but CAN check whether this install has ever completed a
+    real Google connection before: fresh install -> force full consent
+    (guarantees the refresh_token the "stay signed in" feature depends
+    on); at least one real connection already exists -> ask for
+    account-picker only and let Google's own normal behavior decide
+    whether re-consent is actually needed."""
+
+    def _capture_prompt(self, monkeypatch):
+        from dourmouse import google_auth
+
+        seen = {}
+
+        def fake_authorization_url(redirect_uri, state, challenge, **kwargs):
+            seen["prompt"] = kwargs.get("prompt")
+            return "https://accounts.google.com/o/oauth2/v2/auth?fake=1"
+
+        monkeypatch.setattr(google_auth, "google_configured", lambda: True)
+        monkeypatch.setattr(google_auth, "authorization_url", fake_authorization_url)
+        return seen
+
+    def _get(self, server, path: str):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+
+    def test_fresh_install_forces_full_consent(self, server, monkeypatch):
+        from dourmouse import google_auth
+
+        seen = self._capture_prompt(monkeypatch)
+        store = google_auth.auth_store()
+        assert store is not None and store.all_user_emails() == []
+        self._get(server, "/api/auth/google/start")
+        assert seen["prompt"] == "consent"
+
+    def test_returning_install_only_asks_for_account_picker(self, server, monkeypatch):
+        from dourmouse import google_auth
+
+        seen = self._capture_prompt(monkeypatch)
+        store = google_auth.auth_store()
+        assert store is not None
+        store.upsert_user("someone@example.com", {"access_token": "a", "refresh_token": "r"})
+        self._get(server, "/api/auth/google/start")
+        assert seen["prompt"] == "select_account"
+
+    def test_no_mounted_store_falls_back_to_the_safer_full_consent(self, server, monkeypatch):
+        """If the store can't be read for any reason, default to the
+        option that guarantees a refresh_token rather than guessing."""
+        from dourmouse import google_auth
+
+        seen = self._capture_prompt(monkeypatch)
+        monkeypatch.setattr(google_auth, "auth_store", lambda: None)
+        self._get(server, "/api/auth/google/start")
+        assert seen["prompt"] == "consent"
+
+
 class TestDeeplinkTargetsHashRouter:
     """v8.7: the deeplink 302 must land on the UI that has a hash router.
 
@@ -2808,3 +2947,39 @@ class TestSSEStreamShouldStop:
         stream = _SSEStream(_ResetWfile())
         stream.emit({"type": "done", "final_text": "x"})
         assert stream.should_stop() is True
+
+
+class TestBrowserScreenshotEndpoint:
+    """GET /api/browser/screenshot — real, live-reproduced bug (Electron
+    migration Stage E testing, 2026-09-13): the honest 404's reason phrase
+    contained an em-dash, which BaseHTTPRequestHandler.send_error's
+    stdlib implementation encodes as latin-1 (RFC 7230's status-line
+    convention) — raising a real UnicodeEncodeError that crashed the
+    request's own handler thread every time this 404 fired, instead of
+    the client ever seeing a real 404 response at all."""
+
+    def test_missing_screenshot_returns_a_real_404_not_a_crash(self, server, monkeypatch):
+        srv, port = server
+        # No screenshot has ever been taken in this test's fresh workspace
+        # — latest_screenshot() honestly returns None, the real path this
+        # bug lived on.
+        monkeypatch.setattr("dourmouse.browser_agent.latest_screenshot", lambda name="latest": None)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/browser/screenshot")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.status == 404
+
+    def test_reason_phrase_is_real_ascii_not_a_repeat_of_the_encoding_bug(self, server, monkeypatch):
+        """The actual bug: send_error's message must stay within latin-1
+        (ideally plain ASCII) — any future edit to this string must not
+        reintroduce a curly quote, em/en-dash, or other char outside it."""
+        monkeypatch.setattr("dourmouse.browser_agent.latest_screenshot", lambda name="latest": None)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/browser/screenshot")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.reason.isascii(), f"non-ASCII reason phrase would crash send_error: {resp.reason!r}"

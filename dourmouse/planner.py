@@ -41,6 +41,21 @@ _STOP_WORDS = {
 #: that have nothing to do with what it actually exists for.
 _ROLLUP_AGENT_NAMES = frozenset({"google_workspace"})
 
+#: Real, live-reproduced ambient-noise bug (production-testing sweep,
+#: 2026-09-12): these two tools are attached to nearly every agent
+#: (extend_subagent, see general_roster.py) as a genuinely shared,
+#: cross-cutting capability — not a per-agent distinguishing one — so
+#: their own name+description text was identical noise scored into almost
+#: every agent equally, occasionally enough on its own to lift a SECOND,
+#: otherwise-irrelevant agent over the routing threshold alongside a real,
+#: dominant match, turning a should-be-unambiguous single match into an
+#: ambiguous pair (which defeats the heavy-workflow escalation in
+#: dispatch.py — it only fires on a genuinely single match). Excluded from
+#: the scoring haystack/capability-stem checks below only — both tools
+#: still work exactly as before when an agent's roster is actually used;
+#: this only stops them from being a routing SIGNAL.
+_AMBIENT_SHARED_TOOLS = frozenset({"query_shared_memory", "query_desktop_vault"})
+
 # Cheap multi-step markers: explicit sequencing language ("then", "after
 # that") or 2+ distinct outcome verbs. Deliberately conservative — a false
 # negative just means the model improvises as before; a false positive adds
@@ -333,6 +348,24 @@ def find_agents_for_query(
     compound_agent_message = bool(tokens & {"message", "messages"}) and bool(
         tokens & {"agent", "agents", "bus"}
     )
+    # Live-reproduced real bug (production-testing sweep, 2026-09-12):
+    # "bring Google Chrome to the front" / "bring it to the front" scored 0
+    # for `apps` — no name-stem overlap ("front"/"chrome"/"bring" don't
+    # overlap "apps"), no domain word (a per-app-name dictionary can't
+    # scale to every possible app someone might name), so plan_agents came
+    # back empty and the model got zero tools for the turn, honestly (from
+    # its own zero-tools perspective) claiming "I can't control your
+    # computer's windows" — even under a forced local backend, ruling out
+    # this being a Claude-CLI-only issue. Same compound-phrase treatment as
+    # compound_free_when/compound_agent_message above: neither half is
+    # unambiguous alone ("bring" appears in countless everyday requests;
+    # "front"/"forward" appear in "front page", "look forward to", ...) but
+    # together, naming a specific window/app, they unambiguously mean
+    # window activation. Gated on the OWNING tool (activate_app), not a
+    # vague description match, same as the other compounds.
+    compound_bring_app_forward = bool(
+        tokens & {"bring", "switch", "activate", "focus", "raise", "show"}
+    ) and bool(tokens & {"front", "forward", "foreground"})
     # Learned evidence (v5.6), computed ONCE per query (not per agent): the
     # neural orchestrator's routing head adds positive evidence only —
     # 0.5 * max(0, logit). Its max boost (~2) sits BELOW the deterministic
@@ -368,9 +401,30 @@ def find_agents_for_query(
             # (model_context.py) — reached by NAME, which is how it is
             # actually meant to be used, never by this heuristic guessing.
             continue
+        # Real, live-reproduced bug (production-testing sweep, 2026-09-12):
+        # query_shared_memory/query_desktop_vault are attached to nearly
+        # EVERY agent (extend_subagent, see general_roster.py), so their
+        # own name+description text was ambient noise identical across
+        # almost the whole roster, not a real per-agent signal. That noise
+        # alone was enough to lift a SECOND, unrelated agent (e.g. "system"
+        # at 4.0, riding entirely on this) over the >=3 routing threshold
+        # ALONGSIDE the one real, clearly-dominant match (e.g. "worldmonitor"
+        # at 5.0, or "browser" at 9.0) — turning a should-be-unambiguous
+        # single match into an ambiguous pair, which is exactly what
+        # defeats the heavy-workflow escalation those two agents were
+        # deliberately added to (see _HEAVY_WORKFLOW_AGENT_MARKERS in
+        # dispatch.py): it only fires on a genuinely single, unambiguous
+        # plan_agents match. Excluding these two tools from the haystack/
+        # capability scoring (not from the registry — they still work
+        # exactly as before when actually called) removes the shared noise
+        # floor without touching any agent's REAL, distinguishing tools.
         haystack = " ".join(
             [sub.name, sub.description]
-            + [t.name + " " + t.description for t in sub.tools]
+            + [
+                t.name + " " + t.description
+                for t in sub.tools
+                if t.name not in _AMBIENT_SHARED_TOOLS
+            ]
         ).lower()
         # v8.11: WORD match, not substring. `t in sub.name` let "free" (from
         # "free disk space") false-positive-match "freebuff" — a raw
@@ -394,6 +448,7 @@ def find_agents_for_query(
         tool_stems = {
             stem
             for _tool in sub.tools
+            if _tool.name not in _AMBIENT_SHARED_TOOLS
             for stem in re.split(r"[^a-z0-9]+", _tool.name.lower())
         }
         cap_hits = sum(
@@ -417,6 +472,8 @@ def find_agents_for_query(
         if compound_agent_message and any(
             t.name in ("send_message", "read_agent_inbox") for t in sub.tools
         ):
+            score += 3
+        if compound_bring_app_forward and any(t.name == "activate_app" for t in sub.tools):
             score += 3
         if nn is not None and sub.name in nn:
             score += _ROUTE_LAMBDA * max(0.0, nn[sub.name])

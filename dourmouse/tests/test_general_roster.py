@@ -58,6 +58,155 @@ def vault(tmp_path, monkeypatch):
     return v
 
 
+class TestAdditionalPropertiesEnforcement:
+    """Real, live-reproduced bug (full-day feature sweep, 2026-09-12): a
+    model call supplied fabricated extra fields (price/day_range/timestamp)
+    alongside stock_quote's real 'symbol' argument. Harmless there only
+    because that handler happens to read just 'symbol' — nothing actually
+    enforced it. additionalProperties:false in a schema is advisory to the
+    model only unless _execute_tool itself holds the line."""
+
+    def test_undeclared_keys_are_stripped_before_the_handler_ever_sees_them(self):
+        seen = {}
+        spec = ToolSpec(
+            name="_test_strict_tool",
+            description="test",
+            parameters={
+                "type": "object",
+                "properties": {"symbol": {"type": "string"}},
+                "required": ["symbol"],
+                "additionalProperties": False,
+            },
+            handler=lambda a: seen.update(a) or "ok",
+        )
+        _execute_tool(
+            spec,
+            {"symbol": "AAPL", "price": 39874.12, "timestamp": "fake"},
+            confirmation_gate=None,
+        )
+        assert seen == {"symbol": "AAPL"}
+
+    def test_a_tool_without_the_flag_is_unaffected(self):
+        """Every OTHER tool (no additionalProperties:false) keeps getting
+        its arguments exactly as called — this is opt-in, not a global
+        strict-schema change."""
+        seen = {}
+        spec = ToolSpec(
+            name="_test_loose_tool",
+            description="test",
+            parameters={"type": "object", "properties": {"a": {"type": "string"}}},
+            handler=lambda a: seen.update(a) or "ok",
+        )
+        _execute_tool(spec, {"a": "1", "b": "2"}, confirmation_gate=None)
+        assert seen == {"a": "1", "b": "2"}
+
+    def test_stock_quote_itself_declares_the_flag_and_enforces_it(self):
+        registry = build_general_registry()
+        spec = registry.lookup("stock_quote")
+        assert spec is not None
+        assert spec.parameters.get("additionalProperties") is False
+
+
+class TestRequiredArgumentEnforcement:
+    """Real, live-found gap (commercial-grade reliability pass, 2026-09-12):
+    delete_path({}) — a required arg missing entirely — built its
+    confirm_prompt from a hole in its own data and surfaced "Permanently
+    delete None?" to the human for a real destructive action, instead of a
+    clean, honest error. Required fields (from the schema's own
+    'required' list) are now checked before confirm_prompt or the handler
+    ever sees the call, for every permission level."""
+
+    def test_missing_required_key_is_refused_before_the_handler_runs(self):
+        handler_calls = []
+        spec = ToolSpec(
+            name="_test_required_tool",
+            description="test",
+            parameters={
+                "type": "object",
+                "properties": {"symbol": {"type": "string"}},
+                "required": ["symbol"],
+            },
+            handler=lambda a: handler_calls.append(a) or "ok",
+        )
+        result = _execute_tool(spec, {}, confirmation_gate=None)
+        assert "ERROR" in result
+        assert "symbol" in result
+        assert handler_calls == []
+
+    def test_explicit_none_is_treated_the_same_as_missing(self):
+        handler_calls = []
+        spec = ToolSpec(
+            name="_test_required_tool",
+            description="test",
+            parameters={
+                "type": "object",
+                "properties": {"symbol": {"type": "string"}},
+                "required": ["symbol"],
+            },
+            handler=lambda a: handler_calls.append(a) or "ok",
+        )
+        result = _execute_tool(spec, {"symbol": None}, confirmation_gate=None)
+        assert "ERROR" in result
+        assert handler_calls == []
+
+    def test_a_real_value_reaches_the_handler_normally(self):
+        handler_calls = []
+        spec = ToolSpec(
+            name="_test_required_tool",
+            description="test",
+            parameters={
+                "type": "object",
+                "properties": {"symbol": {"type": "string"}},
+                "required": ["symbol"],
+            },
+            handler=lambda a: handler_calls.append(a) or "ok",
+        )
+        result = _execute_tool(spec, {"symbol": "AAPL"}, confirmation_gate=None)
+        assert result == "ok"
+        assert handler_calls == [{"symbol": "AAPL"}]
+
+    def test_gated_tool_never_reaches_confirm_prompt_with_a_missing_arg(self):
+        """The exact shape of the live bug: confirm_prompt building a
+        human-facing sentence out of a hole in its own arguments."""
+        prompt_calls = []
+
+        def confirm_prompt(args):
+            prompt_calls.append(args)
+            return f"Permanently delete {args.get('path')!r}?"
+
+        spec = ToolSpec(
+            name="_test_gated_required_tool",
+            description="test",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+            permission=Permission.REQUIRES_CONFIRMATION,
+            confirm_prompt=confirm_prompt,
+            handler=lambda a: "deleted",
+        )
+        result = _execute_tool(spec, {}, confirmation_gate=None)
+        assert "ERROR" in result
+        assert "CONFIRMATION REQUIRED" not in result
+        assert prompt_calls == []
+
+    def test_a_tool_without_a_required_list_is_unaffected(self):
+        """Opt-in via the schema's own 'required' key — a tool that
+        declares none keeps accepting whatever it's called with, exactly
+        as before this fix."""
+        handler_calls = []
+        spec = ToolSpec(
+            name="_test_optional_tool",
+            description="test",
+            parameters={"type": "object", "properties": {"a": {"type": "string"}}},
+            handler=lambda a: handler_calls.append(a) or "ok",
+        )
+        result = _execute_tool(spec, {}, confirmation_gate=None)
+        assert result == "ok"
+        assert handler_calls == [{}]
+
+
 class TestRosterShape:
     def test_all_subagents_registered(self):
         """The general roster: the original eight (incl. orchestrator + self-
@@ -207,6 +356,22 @@ class TestRosterShape:
             # v13.9: real write to an existing Google Doc, same
             # confirmation bar as drive_create_doc right above it.
             "docs_append",
+            # production-testing sweep, 2026-09-12: real write to the
+            # user's Google Calendar — same confirmation bar as
+            # drive_create_doc/docs_append (see google_services.py's own
+            # comment on the real feature gap this closes).
+            "create_calendar_event",
+            # production-testing sweep, 2026-09-12: real Sheets creation —
+            # Sheets previously had read-only (sheets_read, itself keyless/
+            # link-shared) and nothing that could write at all. Same
+            # confirmation bar as every other real Drive-family write.
+            "sheets_create",
+            # 2026-09-12: drive_share newly wired up -- the function already
+            # existed against the real Drive permissions API but had zero
+            # ToolSpec anywhere, so it was unreachable. Sharing puts the
+            # user's file in someone else's Drive and can email them about
+            # it -- same confirmation bar as every other real Drive write.
+            "drive_share",
             # backlog: app control — every action that actually touches
             # another running app's UI is gated; listing (list_running_apps/
             # list_app_windows) is read-only and stays ungated.
@@ -232,6 +397,178 @@ class TestRosterShape:
         spec = registry.lookup("deploy")
         assert spec is not None
         assert "ONLY call this when the user explicitly asks" in spec.description
+
+
+class TestTargetAgentNameAliasing:
+    """Real, live-reproduced bug (2026-09-11): delegate_parallel's schema
+    names its per-branch targeting field 'agent_or_task'; delegate_task's
+    own schema calls the identical concept 'subagent'. Two independent
+    live transcripts (a manual repro AND a real, unprompted user-shaped
+    turn) both had the model call delegate_parallel with the much more
+    natural {"agent": "mail", ...} instead — the old strict
+    `item.get("agent_or_task")` silently read that as "", so the branch
+    ran UNTARGETED (no [ROUTING DIRECTIVE] wrapper, forced_agent=None)
+    and the orchestration activity feed's own event reported
+    agent="any" for a branch that was very much not "any" — the model's
+    real routing intent was silently thrown away with no error at all.
+    """
+
+    def test_first_matching_alias_wins(self):
+        from dourmouse.general_roster import _target_agent_name
+
+        assert _target_agent_name({"agent_or_task": "mail"}, "agent_or_task", "agent") == "mail"
+
+    def test_falls_through_to_the_next_alias(self):
+        # The exact live-reproduced shape: delegate_parallel's real schema
+        # key is absent, but the model's natural "agent" is present.
+        from dourmouse.general_roster import _target_agent_name
+
+        assert _target_agent_name({"agent": "mail"}, "agent_or_task", "agent", "subagent") == "mail"
+
+    def test_delegate_tasks_own_natural_alias(self):
+        # delegate_task's real schema key is "subagent"; the same natural
+        # "agent" habit must resolve there too.
+        from dourmouse.general_roster import _target_agent_name
+
+        assert _target_agent_name({"agent": "mail"}, "subagent", "agent", "agent_or_task") == "mail"
+
+    def test_first_key_takes_precedence_when_several_are_present(self):
+        from dourmouse.general_roster import _target_agent_name
+
+        assert (
+            _target_agent_name(
+                {"agent_or_task": "mail", "agent": "research_info"},
+                "agent_or_task",
+                "agent",
+            )
+            == "mail"
+        )
+
+    def test_blank_and_missing_both_fall_through_honestly(self):
+        from dourmouse.general_roster import _target_agent_name
+
+        assert _target_agent_name({"agent_or_task": "  "}, "agent_or_task", "agent") == ""
+        assert _target_agent_name({}, "agent_or_task", "agent", "subagent") == ""
+
+    def test_delegate_parallel_branch_parsing_accepts_the_natural_key(self):
+        # End-to-end through the real registered tool's own branch-parsing
+        # loop (not just the helper in isolation) — a genuine dispatch
+        # context is required (the handler refuses without one), so this
+        # pushes one directly onto the registry's own thread-local stack,
+        # the same mechanism run_dispatch_messages uses internally.
+        from dourmouse.dispatch import DispatchContext, _registry_ctx_stack
+
+        registry = build_general_registry()
+        tool = registry.lookup("delegate_parallel")
+        assert tool is not None
+        ctx = DispatchContext(
+            registry=registry, client=None, config=None,
+            confirmation_gate=None, event_sink=None,
+        )
+        stack = _registry_ctx_stack(registry)
+        stack.append(ctx)
+        try:
+            result = tool.handler(
+                {"branches": [{"agent": "mail", "instructions": "count unread"}]}
+            )
+        finally:
+            stack.pop()
+        # Before the fix: "mail" silently became "" -> target stayed
+        # untargeted and the branch ran as a free sub-orchestration
+        # instead of being pinned to the named agent — this would still
+        # run (no ERROR), so the REAL regression signal is that it no
+        # longer reports the branch as unresolvable, not a crash.
+        assert "unknown subagent" not in result.lower()
+
+    def test_delegate_parallel_accepts_prompt_as_an_alias_for_instructions(self):
+        """Real, live-reproduced bug (production-testing sweep,
+        2026-09-12): delegate_to_models (a sibling tool) calls this same
+        concept 'prompt'. A model used 'prompt' here, got "missing a
+        non-empty 'instructions'", retried with an EMPTY call, and lost
+        the whole branch's task."""
+        from dourmouse.dispatch import DispatchContext, _registry_ctx_stack
+
+        registry = build_general_registry()
+        tool = registry.lookup("delegate_parallel")
+        ctx = DispatchContext(
+            registry=registry, client=None, config=None,
+            confirmation_gate=None, event_sink=None,
+        )
+        stack = _registry_ctx_stack(registry)
+        stack.append(ctx)
+        try:
+            result = tool.handler(
+                {"branches": [{"agent": "mail", "prompt": "count unread"}]}
+            )
+        finally:
+            stack.pop()
+        assert "missing a non-empty" not in result.lower()
+
+    def test_delegate_task_accepts_instructions_and_prompt_as_aliases_for_task(self):
+        from dourmouse.dispatch import DispatchContext, _registry_ctx_stack
+
+        registry = build_general_registry()
+        tool = registry.lookup("delegate_task")
+        ctx = DispatchContext(
+            registry=registry, client=None, config=None,
+            confirmation_gate=None, event_sink=None,
+        )
+        stack = _registry_ctx_stack(registry)
+        stack.append(ctx)
+        try:
+            for key in ("instructions", "prompt"):
+                result = tool.handler({"subagent": "mail", key: "count unread"})
+                assert "requires a non-empty" not in result.lower(), (key, result)
+        finally:
+            stack.pop()
+
+
+class TestCodeToolTabIsolation:
+    """Real gap found (production-testing sweep, 2026-09-12) while fixing
+    the identical bug for ClaudeCliClient (the top-level orchestrator
+    client — see its own comment for the full diagnosis: no tab meant
+    every conversation shared one real Claude CLI session). code_claude,
+    the plain TOOL a model can call mid-conversation, is a different call
+    site reached via the active dispatch context rather than a direct
+    parameter, and deserves the same per-tab isolation."""
+
+    def test_no_active_dispatch_context_falls_back_to_no_tab(self, monkeypatch):
+        """A direct, standalone tool.handler() call (this file's other
+        code-tool tests, or a genuine non-UI caller) has no active
+        dispatch context — must resolve tab=None, the same "old shared
+        session" behavior every other tab-less caller gets."""
+        seen = {}
+        monkeypatch.setattr(
+            "dourmouse.code_backends.run_code_task",
+            lambda backend, task, cwd, timeout, tab=None: seen.setdefault("tab", tab) or "ok",
+        )
+        registry = build_general_registry()
+        tool = registry.lookup("code_claude")
+        tool.handler({"task": "write add"})
+        assert seen["tab"] is None
+
+    def test_active_dispatch_context_threads_its_session_stem_as_the_tab(self, monkeypatch):
+        from dourmouse.dispatch import DispatchContext, _registry_ctx_stack
+
+        seen = {}
+        monkeypatch.setattr(
+            "dourmouse.code_backends.run_code_task",
+            lambda backend, task, cwd, timeout, tab=None: seen.setdefault("tab", tab) or "ok",
+        )
+        registry = build_general_registry()
+        tool = registry.lookup("code_claude")
+        ctx = DispatchContext(
+            registry=registry, client=None, config=None,
+            confirmation_gate=None, event_sink=None,
+            session_stem="session_20260912_120000",
+        )
+        stack = _registry_ctx_stack(registry)
+        stack.append(ctx)
+        try:
+            tool.handler({"task": "write add"})
+        finally:
+            stack.pop()
+        assert seen["tab"] == "session_20260912_120000"
 
 
 class TestResearchInfo:
@@ -345,6 +682,36 @@ class TestResearchInfo:
         monkeypatch.setattr("webbrowser.open", lambda *a, **k: False)
         result = _open_url_tool({"url": "https://example.com"})
         assert "OPEN FAILED" in result
+
+
+class TestStudySearchTool:
+    """Real gap found live (full-day feature sweep, 2026-09-12): study had
+    list/read only, no search — see study_agent.py's own search_study_files
+    docstring for the live-reproduced failure this closes."""
+
+    def test_registered_on_the_study_subagent(self):
+        registry = build_general_registry()
+        sub = registry.get_subagent("study")
+        assert sub is not None
+        assert "study_search_files" in {t.name for t in sub.tools}
+
+    def test_empty_query_is_refused_honestly(self):
+        registry = build_general_registry()
+        spec = registry.lookup("study_search_files")
+        assert spec is not None
+        assert spec.handler({"query": ""}) == "ERROR: study_search_files requires a non-empty 'query'."
+
+    def test_real_search_against_the_real_configured_folder(self, tmp_path, monkeypatch):
+        root = tmp_path / "MYP data folder"
+        root.mkdir()
+        (root / "Economics").mkdir()
+        (root / "Economics" / "notes.txt").write_text("real notes", encoding="utf-8")
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(root))
+        registry = build_general_registry()
+        spec = registry.lookup("study_search_files")
+        result = spec.handler({"query": "economics"})
+        assert "Economics" in result
+        assert "no matching" not in result.lower()
 
 
 class TestOpenBrowserPane:
@@ -575,6 +942,27 @@ class TestAdminOps:
         assert not f.exists()
 
 
+class TestDailyDigestScope:
+    """Real, live-reproduced scoping gap (full-day feature sweep,
+    2026-09-12): asked for "an honest recap of everything we did today",
+    daily_digest's near-zero numbers (it measures INTER-AGENT BUS traffic
+    only) read as "we did almost nothing" despite a day of substantial
+    real, direct tool use that never touches that bus at all."""
+
+    def test_output_states_its_own_scope_explicitly(self):
+        registry = build_general_registry()
+        spec = registry.lookup("daily_digest")
+        assert spec is not None
+        result = spec.handler({})
+        assert "inter-agent bus" in result.lower()
+        assert "not necessarily a quiet day" in result.lower() or "not evidence of a quiet day" in result.lower()
+
+    def test_description_warns_against_presenting_it_as_the_whole_day(self):
+        registry = build_general_registry()
+        spec = registry.lookup("daily_digest")
+        assert "does not cover" in spec.description.lower()
+
+
 class TestMemory:
     def test_search_vault_finds_and_limits(self, vault):
         result = _search_vault_tool({"query": "atlas"})
@@ -717,3 +1105,206 @@ class TestGlobeControlTool:
         assert "zoom_to_globe" in enum
         assert "track_entity" in enum
         assert "set_layer_visibility" in enum
+
+
+class TestAppsToolsPreferTheRealAxPathWithAppleScriptFallback:
+    """Phase 2 (2026-09-13): the "apps" subagent's tool handlers now try
+    the real Accessibility-API path (app_control_ax.py) first, falling
+    back to the existing AppleScript path (app_control.py) only when the
+    AX path genuinely can't run right now (no Accessibility trust) —
+    never for a real, app-specific failure (wrong app name, missing menu
+    item), which the AppleScript path would just fail identically for."""
+
+    def _tool(self, name: str):
+        registry = build_general_registry()
+        sub = registry.get_subagent("apps")
+        return next(t for t in sub.tools if t.name == name)
+
+    # -- activate/quit: the fast, permission-free path, always tried first --
+
+    def test_activate_uses_the_fast_ax_path_when_it_works(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.activate_app_fast",
+            lambda name, dry_run=False: calls.append((name, dry_run)) or "ACTIVATED: Claude",
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.activate_app",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("AppleScript path must not run when AX succeeded")),
+        )
+        tool = self._tool("activate_app")
+        result = tool.handler({"app_name": "Claude"})
+        assert result == "ACTIVATED: Claude"
+        assert calls == [("Claude", False)]
+
+    def test_activate_falls_back_to_applescript_when_ax_is_not_configured(self, monkeypatch):
+        from dourmouse.app_control_ax import AXControlError
+
+        def _ax_boom(name, dry_run=False):
+            raise AXControlError("NOT CONFIGURED: this process does not have Accessibility permission.")
+
+        monkeypatch.setattr("dourmouse.app_control_ax.activate_app_fast", _ax_boom)
+        monkeypatch.setattr(
+            "dourmouse.app_control.activate_app",
+            lambda name, dry_run=False: f"ACTIVATED: {name}",
+        )
+        tool = self._tool("activate_app")
+        result = tool.handler({"app_name": "Claude"})
+        assert result == "ACTIVATED: Claude"
+
+    def test_activate_does_not_fall_back_on_a_real_app_specific_ax_error(self, monkeypatch):
+        """A real "not running" verdict from AX is authoritative -- both
+        backends would fail the same way, so re-trying via AppleScript
+        would just waste a round trip and (worse) could report a
+        DIFFERENT, confusing error than the real one already found."""
+        from dourmouse.app_control_ax import AXControlError
+
+        def _ax_boom(name, dry_run=False):
+            raise AXControlError("NOT RUNNING: no running app named 'Claude'.")
+
+        monkeypatch.setattr("dourmouse.app_control_ax.activate_app_fast", _ax_boom)
+        monkeypatch.setattr(
+            "dourmouse.app_control.activate_app",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fall back on a real, non-environmental AX error")),
+        )
+        tool = self._tool("activate_app")
+        result = tool.handler({"app_name": "Claude"})
+        assert "NOT RUNNING" in result
+
+    def test_quit_uses_the_fast_ax_path_when_it_works(self, monkeypatch):
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.quit_app_fast",
+            lambda name, dry_run=False: f"QUIT: {name}",
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.quit_app",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("AppleScript path must not run when AX succeeded")),
+        )
+        tool = self._tool("quit_app")
+        assert tool.handler({"app_name": "Claude"}) == "QUIT: Claude"
+
+    def test_quit_falls_back_to_applescript_when_ax_is_not_configured(self, monkeypatch):
+        from dourmouse.app_control_ax import AXControlError
+
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.quit_app_fast",
+            lambda name, dry_run=False: (_ for _ in ()).throw(AXControlError("NOT CONFIGURED: no trust")),
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.quit_app",
+            lambda name, dry_run=False: f"QUIT: {name}",
+        )
+        tool = self._tool("quit_app")
+        assert tool.handler({"app_name": "Claude"}) == "QUIT: Claude"
+
+    # -- keystrokes/press_key/click_menu: both backends need real trust,
+    # so these only ATTEMPT the AX path once trust is confirmed --
+
+    def test_keystrokes_goes_straight_to_applescript_when_untrusted(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.app_control_ax.ax_trusted", lambda: False)
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.send_keystrokes_ax",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not even attempt AX when untrusted")),
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.send_keystrokes",
+            lambda name, text, dry_run=False: f"TYPED into {name}: {len(text)} character(s)",
+        )
+        tool = self._tool("send_app_keystrokes")
+        result = tool.handler({"app_name": "Claude", "text": "hello"})
+        assert result == "TYPED into Claude: 5 character(s)"
+
+    def test_keystrokes_uses_ax_once_trusted(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.app_control_ax.ax_trusted", lambda: True)
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.send_keystrokes_ax",
+            lambda name, text, dry_run=False: f"TYPED into {name}: {len(text)} character(s)",
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.send_keystrokes",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("AppleScript path must not run once AX is trusted")),
+        )
+        tool = self._tool("send_app_keystrokes")
+        result = tool.handler({"app_name": "Claude", "text": "hello"})
+        assert result == "TYPED into Claude: 5 character(s)"
+
+    def test_press_key_goes_straight_to_applescript_when_untrusted(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.app_control_ax.ax_trusted", lambda: False)
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.press_key_ax",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not even attempt AX when untrusted")),
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.press_key",
+            lambda name, key, modifiers, dry_run=False: f"PRESSED {key} in {name}",
+        )
+        tool = self._tool("press_app_key")
+        result = tool.handler({"app_name": "Claude", "key": "escape"})
+        assert result == "PRESSED escape in Claude"
+
+    def test_click_menu_goes_straight_to_applescript_when_untrusted(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.app_control_ax.ax_trusted", lambda: False)
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.click_menu_item_ax",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not even attempt AX when untrusted")),
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.click_menu_item",
+            lambda name, menu_path, dry_run=False: f"CLICKED {' > '.join(menu_path)} in {name}",
+        )
+        tool = self._tool("click_app_menu_item")
+        result = tool.handler({"app_name": "Claude", "menu_path": ["File", "New"]})
+        assert result == "CLICKED File > New in Claude"
+
+    def test_click_menu_uses_ax_once_trusted_and_reports_the_real_missing_item(self, monkeypatch):
+        """The real, biggest win of this phase: a wrong menu path gets
+        the AX path's own specific "not found" answer, not a generic
+        AppleScript failure or a silent fallback that masks it."""
+        from dourmouse.app_control_ax import AXControlError
+
+        monkeypatch.setattr("dourmouse.app_control_ax.ax_trusted", lambda: True)
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.click_menu_item_ax",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AXControlError("MENU ITEM NOT FOUND: Claude has no 'Nope' under File — available there: New, Open, Close")
+            ),
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.click_menu_item",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fall back once AX is trusted and gave a real answer")),
+        )
+        tool = self._tool("click_app_menu_item")
+        result = tool.handler({"app_name": "Claude", "menu_path": ["File", "Nope"]})
+        assert "MENU ITEM NOT FOUND" in result
+        assert "available there: New, Open, Close" in result
+
+    # -- list tools: read-only, real permission-free win for the app list --
+
+    def test_list_running_apps_uses_the_fast_nsworkspace_path(self, monkeypatch):
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.list_running_apps_fast",
+            lambda: [{"name": "Finder", "frontmost": True}, {"name": "Claude", "frontmost": False}],
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.list_running_apps",
+            lambda: (_ for _ in ()).throw(AssertionError("AppleScript path must not run when the fast path succeeded")),
+        )
+        tool = self._tool("list_running_apps")
+        result = tool.handler({})
+        assert "* Finder" in result
+        assert "  Claude" in result
+
+    def test_list_windows_uses_ax_once_trusted(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.app_control_ax.ax_trusted", lambda: True)
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.list_windows_ax",
+            lambda name: ["Downloads", "Documents"],
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control.list_windows",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("AppleScript path must not run once AX is trusted")),
+        )
+        tool = self._tool("list_app_windows")
+        result = tool.handler({"app_name": "Finder"})
+        assert "Downloads" in result
+        assert "Documents" in result

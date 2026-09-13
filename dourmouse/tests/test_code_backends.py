@@ -474,7 +474,11 @@ class TestClaudeSessionContinuity:
         # really does error "Input must be provided either through stdin
         # or as a prompt argument" — it ate "say hello" as another tool
         # name).
-        assert argv[argv.index("--session-id") + 2] == "write add"
+        # v13.9 (production-testing fix): a genuine first-ever turn for
+        # this session key now also carries the one-time capability
+        # preamble (see _run_claude's own comment) — the real task text
+        # is appended after it, not the whole positional argument.
+        assert argv[argv.index("--session-id") + 2].endswith("write add")
         assert code_backends._CLAUDE_SESSIONS["/tmp/proj"] == sid
 
     def test_second_call_same_cwd_resumes_the_same_session(self, monkeypatch):
@@ -594,6 +598,73 @@ class TestClaudeSessionContinuity:
         # --session-id attempt — never a third call.
         assert len(seen) == 2
 
+    def test_mcp_connection_failure_gets_one_honest_retry(self, monkeypatch):
+        """Real, live-reproduced issue (production-testing sweep,
+        2026-09-12): `claude -p` can exit 0 with real stdout that is
+        CLAUDE ITSELF reporting its own MCP client failed to connect to
+        the dourmouse bridge — "Dourmouse MCP server failed to connect
+        (CONNECTION_CLOSED)." A different failure SHAPE than a dead
+        session (exit 0, not a process failure), so it needs its own
+        check: directly isolating the real bridge as healthy (a manual
+        MCP JSON-RPC session — 160 real tools, a clean tools/call — every
+        time) points at the CLI's own MCP subprocess occasionally flaking
+        on startup, not a dourmouse-side bug, so one honest retry of the
+        exact same call is the real fix."""
+        seen: list = []
+
+        class _McpFailProc:
+            returncode = 0
+            stdout = (
+                "Dourmouse MCP server failed to connect (`CONNECTION_CLOSED`). "
+                "Can't access the `activate_app` tool needed to bring Chrome forward."
+            )
+            stderr = ""
+
+        class _OkProc:
+            returncode = 0
+            stdout = "Chrome is now in front."
+            stderr = ""
+
+        calls = {"n": 0}
+
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            calls["n"] += 1
+            return _McpFailProc() if calls["n"] == 1 else _OkProc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        out = code_backends.run_code_task("claude", "bring chrome forward", cwd="/tmp/proj")
+        assert out == "Chrome is now in front."
+        assert len(seen) == 2
+        # Same session both times — the session itself was never the
+        # problem, only the MCP subprocess connection for that one call.
+        assert seen[0] == seen[1]
+
+    def test_mcp_connection_failure_retries_exactly_once_not_forever(self, monkeypatch):
+        seen: list = []
+
+        class _McpFailProc:
+            returncode = 0
+            stdout = "MCP server failed to connect (CONNECTION_CLOSED)."
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            return _McpFailProc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        out = code_backends.run_code_task("claude", "task", cwd="/tmp/proj")
+        # A persistent failure surfaces the CLI's own honest text — never
+        # fabricated as a success — after exactly one retry (two calls).
+        assert "CONNECTION_CLOSED" in out
+        assert len(seen) == 2
+
     def test_no_cwd_uses_a_stable_default_key(self, monkeypatch):
         """cwd=None (the run_code_task default) must still get real
         continuity across calls, not silently skip session threading."""
@@ -654,13 +725,13 @@ class TestCodingSubagents:
                 owners[tool.name] = key
 
     def test_make_code_tool_empty_task_errors(self):
-        tool = _make_code_tool("nvidia")
+        tool = _make_code_tool("nvidia", build_general_registry())
         out = tool.handler({"task": "  "})
         assert "ERROR" in out
 
     def test_make_code_tool_reports_backend_not_configured(self, monkeypatch):
         monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
-        tool = _make_code_tool("nvidia")
+        tool = _make_code_tool("nvidia", build_general_registry())
         out = tool.handler({"task": "write code"})
         assert "NOT CONFIGURED" in out
         assert "CODE NVIDIA" in out
@@ -826,9 +897,10 @@ class TestSharedContextInjection:
         # right after the session args, not necessarily last (v13: real
         # --mcp-config/--allowedTools flags ride after it — see
         # TestClaudeSessionContinuity below for why they can't ride
-        # before).
+        # before). A genuine first turn also carries the one-time
+        # capability preamble (v13.9) ahead of the real task text.
         argv = seen["argv"]
-        assert argv[argv.index("--session-id") + 2] == "write a fib function"
+        assert argv[argv.index("--session-id") + 2].endswith("write a fib function")
 
     def test_hits_get_prepended_to_the_claude_task(self, monkeypatch):
         from dourmouse import shared_rag
@@ -917,7 +989,7 @@ class TestSharedContextInjection:
         out = code_backends.run_code_task("claude", "write a fib function")
         assert out == "ok"
         argv = seen["argv"]
-        assert argv[argv.index("--session-id") + 2] == "write a fib function"
+        assert argv[argv.index("--session-id") + 2].endswith("write a fib function")
 
     def test_empty_hits_injects_nothing(self, monkeypatch):
         from dourmouse import shared_rag
@@ -941,7 +1013,7 @@ class TestSharedContextInjection:
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
         argv = seen["argv"]
-        assert argv[argv.index("--session-id") + 2] == "write a fib function"
+        assert argv[argv.index("--session-id") + 2].endswith("write a fib function")
 
 
 # --------------------------------------------------------------------------- #
@@ -1071,6 +1143,88 @@ class TestStreamClaude:
             on_delta=lambda t: None, on_tool_result=results.append,
         )
         assert results == ["file1.py\nfile2.py"]
+
+    def test_tool_result_content_block_list_extracts_readable_text(self, monkeypatch):
+        """Real, live-reproduced bug (2026-09-13): a real MCP tool call's
+        result content is a LIST of content blocks (this exact shape,
+        transcribed from a real CODE-screen web_search turn), not a plain
+        string -- the old code fell to json.dumps(content) for anything
+        that wasn't already a str, dumping the raw block structure onto
+        the screen as if it were readable text."""
+        lines = [
+            _sse_line({"type": "user", "message": {"content": [
+                {"type": "tool_result", "content": [
+                    {"type": "text", "text": "WEB SEARCH RESULTS: real content here"},
+                ]},
+            ]}}),
+            _sse_line({"type": "result", "result": "Found it."}),
+        ]
+        self._patch(monkeypatch, lines)
+        results = []
+        code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_tool_result=results.append,
+        )
+        assert results == ["WEB SEARCH RESULTS: real content here"]
+        assert "{" not in results[0]  # no raw JSON leaked through
+
+    def test_tool_reference_block_gets_a_readable_placeholder_not_raw_json(self, monkeypatch):
+        """The other real shape seen live: Claude Code's own internal
+        {"type": "tool_reference", "tool_name": "..."} bookkeeping block
+        (not a documented Anthropic content-block type) -- previously
+        dumped verbatim as ``[{"type": "tool_reference", "tool_name":
+        "mcp__dourmouse__web_search"}]`` in the transcript."""
+        lines = [
+            _sse_line({"type": "user", "message": {"content": [
+                {"type": "tool_result", "content": [
+                    {"type": "tool_reference", "tool_name": "mcp__dourmouse__web_search"},
+                ]},
+            ]}}),
+            _sse_line({"type": "result", "result": "Done."}),
+        ]
+        self._patch(monkeypatch, lines)
+        results = []
+        code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_tool_result=results.append,
+        )
+        assert results == ["[used tool: mcp__dourmouse__web_search]"]
+
+    def test_multiple_text_blocks_join_with_newlines(self, monkeypatch):
+        lines = [
+            _sse_line({"type": "user", "message": {"content": [
+                {"type": "tool_result", "content": [
+                    {"type": "text", "text": "first part"},
+                    {"type": "text", "text": "second part"},
+                ]},
+            ]}}),
+            _sse_line({"type": "result", "result": "Done."}),
+        ]
+        self._patch(monkeypatch, lines)
+        results = []
+        code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_tool_result=results.append,
+        )
+        assert results == ["first part\nsecond part"]
+
+    def test_an_unrecognized_block_type_degrades_to_a_placeholder_not_json(self, monkeypatch):
+        lines = [
+            _sse_line({"type": "user", "message": {"content": [
+                {"type": "tool_result", "content": [
+                    {"type": "some_future_block_type", "weird_field": {"nested": True}},
+                ]},
+            ]}}),
+            _sse_line({"type": "result", "result": "Done."}),
+        ]
+        self._patch(monkeypatch, lines)
+        results = []
+        code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30,
+            on_delta=lambda t: None, on_tool_result=results.append,
+        )
+        assert results == ["[some_future_block_type content]"]
+        assert "nested" not in results[0]
 
     def test_on_usage_receives_real_result_event_fields(self, monkeypatch):
         """v13.6, real usage bar: field names/shape here are transcribed

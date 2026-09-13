@@ -2,3 +2,10 @@
 # Install with the base requirements: pip install -r requirements.txt -r requirements-desktop.txt
 pywebview==6.2.1
 pystray==0.19.5  # Vision stage 3 — system tray + camera/mic kill-switch (dourmouse/tray.py); pulls in Pillow for the tray icon bitmap
+# Phase 2 app control (2026-09-13) — real macOS Accessibility API for
+# dourmouse/app_control_ax.py (menu clicks, window listing, keyboard
+# events), replacing/supplementing app_control.py's osascript-only path.
+# Was genuinely missing from this venv before this pass (pyobjc-core and
+# pyobjc-framework-Cocoa/Quartz came in transitively via pywebview, but
+# ApplicationServices — the actual AXUIElement bindings — never did).
+pyobjc-framework-ApplicationServices==12.2.2

@@ -312,16 +312,34 @@ Full suite after both segments: 3446 passed, 3 skipped, 0 failed (pre-GDELT); GD
   (e.g. `skia-safe` Rust bindings, or a custom WebGPU canvas) is real,
   separate follow-on work.
 - **Item 4** — Excalidraw multimodal scratchpad panel.
-- **Item 8 — mostly done, native desktop accessibility automation
-  NOT built.** `dourmouse/browser_agent.py`'s Playwright engine already
-  covers the WEB-automation half (DOM injection, form fill, login,
-  confirmation-gated), and the LIVE BROWSER panel above now shows it
-  live. Native accessibility-tree automation for OTHER desktop apps
-  (macOS Accessibility APIs / Windows UI Automation) is a real, separate,
-  safety-sensitive undertaking — genuinely "an agent driving other apps
-  on the user's behalf" beyond the browser sandbox, and deserves the
-  same deliberate confirmation-gate design as everything else, not a
-  rushed build.
+- **Item 8 — macOS half DONE, 2026-09-13.** `dourmouse/app_control_ax.py`
+  (new) talks to the real macOS Accessibility API (`pyobjc-framework-
+  ApplicationServices`, newly added to `requirements-desktop.txt` — it
+  was genuinely missing from the venv before this pass) instead of
+  `app_control.py`'s osascript/AppleScript-only path: real `AXUIElement`
+  tree walking for menu clicks (a wrong menu path gets a real "here's
+  what IS there" answer, not a blind string built and hoped for) and
+  window listing, real `CGEventPost` keyboard events, and — live-
+  verified this session to need NO Accessibility permission at all,
+  unlike everything else here — `NSRunningApplication`-based activate/
+  quit/list-running-apps, always preferred first since it works on a
+  completely fresh install with zero setup. Kept confirmation-gated
+  exactly as before (general_roster.py's "apps" subagent tools, unaltered
+  permission levels); the existing AppleScript path stays as the
+  automatic fallback for whenever Accessibility trust isn't granted, or
+  pyobjc isn't importable, or the platform isn't macOS — never a silent
+  regression, and a genuine app-specific AX failure (wrong app name,
+  missing menu item) is never masked by a pointless retry through a
+  backend that would fail identically. A REAL, empirically-caught
+  correctness bug along the way: `CGEventPost` has no error return
+  at all — a live test (a genuine empty TextEdit document, a real
+  keystroke posted while this process was untrusted, confirmed via
+  `get text of front document` that nothing landed) proved macOS
+  silently drops synthetic keyboard/mouse events without Accessibility
+  trust, so `press_key_ax`/`send_keystrokes_ax` check `ax_trusted()`
+  explicitly rather than trusting an API that cannot itself say whether
+  it worked. Windows UI Automation is unaffected by this pass — still a
+  separate, real backend for later, exactly as this doc always said.
 - **Item 9 — the general auto-versioning + instant-revert system the
   checklist actually describes.** What's built (above) is real,
   read-only history browsing of THIS repo only. Auto-versioning

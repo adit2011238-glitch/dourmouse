@@ -24,6 +24,14 @@ class TestGoogleWorkspaceAgentExists:
         assert registry.get_subagent("google_workspace") is not None
 
     def test_it_owns_the_full_real_google_toolset(self):
+        """create_calendar_event/sheets_create added (production-testing
+        sweep, 2026-09-12): real, confirmed feature gaps closed — Calendar
+        had no write/booking tool at all, and Sheets was read-only (the
+        keyless link-shared gviz endpoint), with no way to create one.
+        drive_share added same day (user asked to share a file with a
+        second Google account): the function already existed, fully
+        implemented against the real Drive permissions API, but had zero
+        ToolSpec wiring anywhere — completely unreachable by the model."""
         registry = build_general_registry()
         sub = registry.get_subagent("google_workspace")
         names = {t.name for t in sub.tools}
@@ -32,9 +40,9 @@ class TestGoogleWorkspaceAgentExists:
             "gmail_trash", "gmail_bulk_trash", "gmail_untrash",
             "email_identity_status", "email_own_send",
             "drive_search", "drive_read", "drive_download", "drive_create_doc",
-            "docs_append",
-            "sheets_read", "slides_create",
-            "list_calendar_events", "propose_time_slots",
+            "docs_append", "drive_share",
+            "sheets_read", "sheets_create", "slides_create",
+            "list_calendar_events", "propose_time_slots", "create_calendar_event",
             "query_shared_memory",
             # v13.7: extended onto every real agent, google_workspace
             # included -- see general_roster.py's own comment on the
@@ -77,7 +85,7 @@ class TestToolsAreSharedByReferenceNotDuplicated:
         sub = registry.get_subagent("google_workspace")
         gated = {
             "gmail_send", "gmail_archive", "gmail_trash", "gmail_bulk_trash",
-            "gmail_untrash", "email_own_send", "drive_create_doc",
+            "gmail_untrash", "email_own_send", "drive_create_doc", "drive_share",
         }
         for tool in sub.tools:
             if tool.name in gated:

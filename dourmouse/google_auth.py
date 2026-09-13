@@ -76,10 +76,15 @@ def requested_scopes() -> str:
 
     Identity-only by default (works on an unverified app); the restricted
     Gmail/Calendar/Drive scopes are appended only when the deploy opts in via
-    GOOGLE_OAUTH_FULL_SCOPES=1 (app verified, or Testing mode + test user).
+    GOOGLE_OAUTH_FULL_SCOPES=1 (app verified, or Testing mode + test user) --
+    or, since 2026-09-13, the same real Settings toggle console.html now
+    exposes (config.google_oauth_full_scopes_enabled(), which itself still
+    honors a real env var first). Delegated there instead of re-reading
+    os.environ directly so both entry points can never drift apart.
     """
-    extra = os.environ.get("GOOGLE_OAUTH_FULL_SCOPES", "").strip().lower()
-    if extra in ("1", "true", "yes", "on"):
+    from dourmouse.config import google_oauth_full_scopes_enabled
+
+    if google_oauth_full_scopes_enabled():
         return _IDENTITY_SCOPES + _FULL_SCOPES
     return _IDENTITY_SCOPES
 

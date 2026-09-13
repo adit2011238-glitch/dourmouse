@@ -57,6 +57,18 @@ sync_log.txt
 # v8.30: runtime artifact of dourmouse/global_memory.py's default store
 global_memory.sqlite3
 
+# ── Electron shell (dourmouse-recon/electron/ — the desktop-shell
+# migration, see ~/.claude/plans/sorted-wiggling-pearl.md) ────────────────
+electron/node_modules/
+electron/verify-result.json
+# Stage E rebuildable build output: the packaged .app/.dmg AND the
+# venv-stage prepare-venv.sh builds fresh each time (real credentials/keys
+# are never baked into it — see requirements*.txt instead) — same
+# "rebuildable artifacts never committed" rule as dourmouse.app/ and dist/
+# above, just under electron/'s own build/ output directory.
+electron/build/dist/
+electron/build/venv-stage/
+
 # ── Large binaries ───────────────────────────────────────────────────────
 # lora-dourmouse-claude.gguf and site/downloads/*.exe are intentionally NOT
 # listed here — they stay git-tracked (see .gitattributes: the .gguf is

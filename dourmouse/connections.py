@@ -218,12 +218,25 @@ def check_connections() -> dict[str, dict[str, Any]]:
         claude_detail = f"Claude Code CLI {claude} · sign-in not verified"
     else:
         claude_detail = "claude CLI not on PATH"
+    # Real bug found live (full-day feature sweep, 2026-09-12): this hint
+    # blamed "Windows keeps it in the Credential Manager" unconditionally —
+    # shown verbatim on a real Mac where _claude_signin() had ALREADY tried
+    # the actual macOS Keychain check above and still come back
+    # inconclusive, so citing Windows-specific plumbing as the reason was
+    # simply wrong on this platform. Same honest "no cheap portable signal"
+    # conclusion, worded for whichever platform this actually is.
+    if sys.platform == "darwin":
+        _no_signal_reason = "the macOS Keychain entry could not be confirmed"
+    elif sys.platform == "win32":
+        _no_signal_reason = "Windows keeps it in the Credential Manager"
+    else:
+        _no_signal_reason = "no credentials file was found"
     out["claude"] = {
         "ok": bool(claude) and signin == "yes",
         "detail": claude_detail,
         "hint": (
-            "installed; sign-in could not be confirmed (Windows keeps it in the "
-            "Credential Manager). Run 'claude' once on the host and complete "
+            f"installed; sign-in could not be confirmed ({_no_signal_reason}). "
+            "Run 'claude' once on the host and complete "
             "/login — it will work here once signed in."
             if claude
             else "npm i -g @anthropic-ai/claude-code"

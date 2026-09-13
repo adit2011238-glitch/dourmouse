@@ -523,3 +523,51 @@ class TestMessengerRouting:
         )
         names = [r["name"] for r in m]
         assert "messenger" not in names, f"got {m}"
+
+
+class TestBringAppToFrontRouting:
+    """Live-reproduced real bug (production-testing sweep, 2026-09-12):
+    "Bring Google Chrome to the front" scored 0 for `apps` — no name-stem
+    overlap, and a per-app-name domain-word dictionary can't scale to every
+    app someone might name — so plan_agents came back empty and the model,
+    honestly given zero tools, claimed it "can't control your computer's
+    windows" even though activate_app is real and working. Reproduced under
+    a forced local backend too, ruling out a Claude-CLI-only cause."""
+
+    def test_bring_app_to_the_front_routes_to_apps(self):
+        registry = build_general_registry()
+        m = find_agents_for_query(
+            registry, "Bring Google Chrome to the front.", limit=3
+        )
+        names = [r["name"] for r in m]
+        assert "apps" in names, f"got {m}"
+        assert m[0]["name"] == "apps", f"apps should win outright; got {m}"
+
+    def test_switch_app_to_the_foreground_routes_to_apps(self):
+        registry = build_general_registry()
+        m = find_agents_for_query(
+            registry, "Switch Notes to the foreground for me.", limit=3
+        )
+        assert m and m[0]["name"] == "apps", f"got {m}"
+
+    def test_bring_alone_does_not_steal_toward_apps(self):
+        """The compound gate (bring/switch/activate + front/forward/
+        foreground) must not fire for ordinary requests that only use one
+        half of the pair. `apps` can still appear in a 3-result shortlist
+        from ambient noise (every agent carries query_shared_memory/
+        query_desktop_vault, a pre-existing, unrelated baseline this test
+        must not assume away) — what matters is it stays below the real
+        >=3 threshold run_dispatch_messages actually gates tool access on,
+        i.e. the compound's own +3 never fired."""
+        registry = build_general_registry()
+        m = find_agents_for_query(registry, "Please bring the meeting notes.", limit=5)
+        apps = next((r for r in m if r["name"] == "apps"), None)
+        assert apps is None or apps["score"] < 3, f"got {m}"
+
+    def test_front_alone_does_not_steal_toward_apps(self):
+        registry = build_general_registry()
+        m = find_agents_for_query(
+            registry, "I want to move forward with this plan.", limit=5
+        )
+        apps = next((r for r in m if r["name"] == "apps"), None)
+        assert apps is None or apps["score"] < 3, f"got {m}"

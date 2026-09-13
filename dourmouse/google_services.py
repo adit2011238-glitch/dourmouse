@@ -51,6 +51,7 @@ _GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 _CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 _DRIVE_API = "https://www.googleapis.com/drive/v3"
 _DOCS_API = "https://docs.googleapis.com/v1/documents"
+_SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
 
 #: Google-native mime types read via the export endpoint (text/plain) — a
 #: binary ``alt=media`` download of a Docs file would return export blobs.
@@ -346,6 +347,107 @@ def _calendar_events_oauth(token: str, max_results: int) -> str:
         )
         rows.append(f"- {start[:16]} | {str(event.get('summary') or '(no title)')[:80]}")
     return "CALENDAR EVENTS (upcoming):\n" + "\n".join(rows)
+
+
+# -- Real Calendar event creation (write, per-user OAuth) ------------------ #
+#
+# Real, confirmed feature gap (production-testing sweep, 2026-09-12):
+# scheduling had list_calendar_events + propose_time_slots (a local
+# free/busy computation over the real read) and NOTHING that actually
+# writes a real event — checked directly, there was no calendar-create
+# function anywhere in this module, exposed or not. The system prompt's
+# own rule 10 said "calendar → scheduling (...  booking confirmed)", which
+# was simply false: there was nothing to confirm, because there was
+# nothing that could book anything. Same real write pattern as
+# drive_create_doc right above (a real POST + the same 403-scope-specific
+# error enrichment, a confirmation-gated public wrapper) — Calendar's own
+# events.insert.
+
+
+def _calendar_create_event_oauth(
+    token: str,
+    summary: str,
+    start_iso: str,
+    end_iso: str,
+    description: str,
+    timezone_name: str,
+) -> str:
+    body: dict[str, Any] = {
+        "summary": summary,
+        "start": {"dateTime": start_iso, "timeZone": timezone_name},
+        "end": {"dateTime": end_iso, "timeZone": timezone_name},
+    }
+    if description:
+        body["description"] = description
+    try:
+        event = _http_json(
+            "POST", f"{_CALENDAR_API}/calendars/primary/events", token, body
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg:
+            raise RuntimeError(
+                msg
+                + " — Calendar WRITE needs the full scopes "
+                "(GOOGLE_OAUTH_FULL_SCOPES=1 in .env + a verified/testing-mode "
+                "OAuth app). Nothing was created."
+            ) from exc
+        raise
+    eid = str(event.get("id") or "").strip()
+    link = str(event.get("htmlLink") or "")
+    if not eid:
+        return "ERROR: Calendar did not return an event id — nothing was created."
+    return (
+        f"CALENDAR EVENT CREATED: {summary!r} from {start_iso} to {end_iso} "
+        f"(id {eid})" + (f" — {link}" if link else "")
+    )
+
+
+def create_calendar_event(
+    summary: str,
+    start_iso: str,
+    end_iso: str,
+    description: str = "",
+    timezone_name: str = "UTC",
+) -> str:
+    """Create a REAL event on the signed-in user's primary Google Calendar
+    (write). ``start_iso``/``end_iso`` are RFC3339 datetimes (e.g.
+    "2026-09-15T14:00:00"); ``timezone_name`` is an IANA name (e.g.
+    "Asia/Dubai") applied to both. Deliberately does not accept attendees
+    in this first real pass — inviting another real person is a further,
+    separate escalation beyond writing to the user's own calendar, and is
+    not part of what "book confirmed" ever meant for this tool. Should be
+    confirmation-gated upstream: it creates a real, visible event.
+
+    Real per-user OAuth guarantee, same honest NOT CONFIGURED / re-auth
+    contract as every other write tool in this module (Rule 2.2) — never a
+    fabricated "created" when nothing actually was.
+    """
+    summary = (summary or "").strip()
+    start_iso = (start_iso or "").strip()
+    end_iso = (end_iso or "").strip()
+    if not summary:
+        return "ERROR: create_calendar_event requires a non-empty 'summary'."
+    if not start_iso or not end_iso:
+        return "ERROR: create_calendar_event requires both 'start_iso' and 'end_iso'."
+    token = _oauth_access_token()
+    if token:
+        try:
+            return _calendar_create_event_oauth(
+                token, summary, start_iso, end_iso, (description or "").strip(),
+                (timezone_name or "UTC").strip(),
+            )
+        except RuntimeError as exc:
+            return f"CALENDAR CREATE (reported honestly): {exc}"
+    reauth = _oauth_user_needs_reauth("CALENDAR WRITE")
+    if reauth:
+        return reauth
+    return (
+        "NOT CONFIGURED: creating a calendar event needs the signed-in Google "
+        "user's OAuth session with Calendar WRITE scope. No user is signed "
+        "in — sign in at /login (with GOOGLE_OAUTH_FULL_SCOPES=1 in .env so "
+        "the session grants Calendar), then retry. Nothing was created."
+    )
 
 
 # -- v5.18: Google Drive (read-only, per-user OAuth) ---------------------- #
@@ -1578,6 +1680,84 @@ def sheets_read(
     out.append("")
     out.append(f"({len(rows)} rows x {len(cols)} cols shown)")
     return "\n".join(out)
+
+
+# -- Real Sheets creation (write, per-user OAuth) -------------------------- #
+#
+# Real, confirmed feature gap (production-testing sweep, 2026-09-12):
+# sheets_read (above) is the ONLY Sheets tool that existed, and it is
+# deliberately keyless/link-shared (the public gviz endpoint) — genuinely
+# read-only by design, not just by omission. There was no write/create
+# path at all. Same real per-user OAuth write pattern as
+# drive_create_doc/create_calendar_event: a real POST to the Sheets API
+# (a different real Google API — sheets.googleapis.com — from the gviz
+# endpoint sheets_read uses), the same 403-scope-specific error
+# enrichment, a confirmation-gated public wrapper.
+
+
+def _sheets_create_oauth(token: str, title: str, rows: list[list[Any]] | None) -> str:
+    try:
+        meta = _http_json(
+            "POST", _SHEETS_API, token, {"properties": {"title": title}}
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg:
+            raise RuntimeError(
+                msg
+                + " — Sheets WRITE needs the full scopes "
+                "(GOOGLE_OAUTH_FULL_SCOPES=1 in .env + a verified/testing-mode "
+                "OAuth app). Nothing was created."
+            ) from exc
+        raise
+    sid = str(meta.get("spreadsheetId") or "").strip()
+    if not sid:
+        return "ERROR: Sheets did not return a spreadsheet id — nothing was created."
+    url = str(meta.get("spreadsheetUrl") or f"https://docs.google.com/spreadsheets/d/{sid}")
+    if rows:
+        try:
+            _http_json(
+                "PUT",
+                f"{_SHEETS_API}/{sid}/values/Sheet1!A1?valueInputOption=RAW",
+                token,
+                {"values": rows},
+            )
+        except RuntimeError as exc:
+            return (
+                f"SHEETS CREATED: {title!r} (id {sid}) — {url} · but writing "
+                f"the initial rows failed: {exc}"
+            )
+    row_note = f" · {len(rows)} row(s) written" if rows else ""
+    return f"SHEETS CREATED: {title!r} (id {sid}) — {url}{row_note}."
+
+
+def sheets_create(title: str, rows: list[list[Any]] | None = None) -> str:
+    """Create a REAL Google Sheet in the signed-in user's Drive (write).
+    ``rows`` (optional) is a list of rows, each a list of cell values,
+    written starting at Sheet1!A1 in one call. Real per-user OAuth write —
+    the SAME account/session as drive_create_doc, a genuinely different
+    Google API (sheets.googleapis.com) from sheets_read's keyless
+    link-shared gviz endpoint above. Should be confirmation-gated
+    upstream: it creates a real, visible file.
+    """
+    title = (title or "").strip()
+    if not title:
+        return "ERROR: sheets_create requires a non-empty 'title'."
+    token = _oauth_access_token()
+    if token:
+        try:
+            return _sheets_create_oauth(token, title, rows)
+        except RuntimeError as exc:
+            return f"SHEETS CREATE (reported honestly): {exc}"
+    reauth = _oauth_user_needs_reauth("SHEETS WRITE")
+    if reauth:
+        return reauth
+    return (
+        "NOT CONFIGURED: creating a Google Sheet needs the signed-in Google "
+        "user's OAuth session with Sheets WRITE scope. No user is signed in "
+        "— sign in at /login (with GOOGLE_OAUTH_FULL_SCOPES=1 in .env so the "
+        "session grants Sheets), then retry. Nothing was created."
+    )
 
 
 def drive_download(file_id: str, dest: str = "") -> str:

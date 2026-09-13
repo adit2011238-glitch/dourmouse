@@ -22,6 +22,8 @@ from pathlib import Path
 _STUDY_DIRNAME = "MYP data folder"
 _MAX_READ_CHARS = 20_000
 _MAX_LIST_ENTRIES = 500
+_MAX_SEARCH_RESULTS = 200
+_MAX_SEARCH_SCANNED = 20_000  # bound the walk itself, not just the results
 
 
 class StudyPathError(ValueError):
@@ -86,6 +88,67 @@ def list_study_files(rel_path: str = "") -> dict[str, object]:
         if len(entries) >= _MAX_LIST_ENTRIES:
             break
     return {"path": rel_path, "entries": entries}
+
+
+def search_study_files(query: str, max_results: int = _MAX_SEARCH_RESULTS) -> dict[str, object]:
+    """Recursively search FILE AND FOLDER NAMES under the study folder for
+    ``query`` (case-insensitive substring) — the search tool this agent
+    never had, unlike every other agent with real files (search_files) or
+    real memory (search_vault).
+
+    Real, live-reproduced gap (full-day feature sweep, 2026-09-12): asked
+    to "search my study materials for anything related to economics", the
+    model had only list_study_files/read_study_file — no way to search at
+    all. It manually crawled several subfolders one level at a time, then
+    GUESSED three plausible-sounding filenames it had never actually seen
+    in any real listing (all three came back "not a file"), and burned its
+    whole 8-call tool budget before ever finding anything, on a folder
+    structure this function walks in one call. A real user with a topic in
+    mind (a subject, an assessment name) needs to search by name, not
+    manually enumerate a deep, multi-hundred-file tree by hand.
+
+    Filename-only (not file content) deliberately: this folder's real
+    content is mostly large scanned-image PDFs (OCR is real but slow, see
+    read_study_file's own docstring) — a recursive full-text search over
+    the whole tree would be a genuinely expensive operation to trigger from
+    one tool call. Filename search is what actually would have resolved
+    the live-reproduced case above (folder/file names here are topic-named:
+    subject folders, assessment titles) and is honest about its own scope
+    rather than silently only doing a fraction of what "search" implies.
+    """
+    query = (query or "").strip().lower()
+    if not query:
+        raise StudyPathError("search_study_files requires a non-empty 'query'.")
+    root = study_root()
+    if not root.is_dir():
+        raise StudyPathError(f"study folder not found on disk: {root}")
+    real_root = root.resolve()
+    matches: list[dict[str, object]] = []
+    scanned = 0
+    truncated = False
+    for dirpath, dirnames, filenames in os.walk(real_root):
+        # Same hidden-entry exclusion as list_study_files, applied to
+        # directory traversal too so it never descends into .git/.venv/etc.
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        for name in sorted(dirnames) + sorted(f for f in filenames if not f.startswith(".")):
+            scanned += 1
+            if scanned > _MAX_SEARCH_SCANNED:
+                truncated = True
+                break
+            if query not in name.lower():
+                continue
+            full = Path(dirpath) / name
+            try:
+                rel = full.resolve().relative_to(real_root)
+            except ValueError:
+                continue  # a symlink resolving outside the sandbox — skip, never report it
+            matches.append({"path": str(rel), "is_dir": full.is_dir()})
+            if len(matches) >= max_results:
+                truncated = True
+                break
+        if truncated:
+            break
+    return {"query": query, "matches": matches, "truncated": truncated}
 
 
 def read_study_file(rel_path: str, max_chars: int = _MAX_READ_CHARS) -> dict[str, object]:

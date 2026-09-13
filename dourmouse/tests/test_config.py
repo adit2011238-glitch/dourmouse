@@ -285,6 +285,89 @@ class TestOrchestratorModelSetting:
         assert load_ollama_config().model_for_agent("orchestrator") != "ollama/persisted-choice"
 
 
+class TestSkipPersistedOrchestratorChoice:
+    """Real bug, found live this session: force_local=True was built to
+    make a config fully local (is_cloud=False, api_key="", no cloud base
+    URL) — but model_for_agent("orchestrator") still unconditionally
+    honored a persisted orchestrator-model choice regardless of that
+    flag. On this machine the persisted choice was "gpt-oss:20b" (a
+    cloud-only model, saved back when Ollama Cloud was the active
+    backend) — so a force_local config still resolved to a model that
+    does not exist on the local daemon, and every "apps"/"mail"/etc.
+    call (privacy-pinned to force_local per _LOCAL_ONLY_AGENTS) 404'd.
+    Confirmed live via a real GET to http://127.0.0.1:11434/api/tags:
+    "gpt-oss:20b" is not among the locally-pulled models.
+
+    skip_persisted_orchestrator_choice (set by load_ollama_config's
+    force_local=True) closes this: a force_local config skips the
+    persisted-choice lookup entirely and falls through to
+    _OLLAMA_FAST_DISPATCH's local pin ("qwen2.5:7b", confirmed present
+    locally) instead."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_force_local_skips_persisted_choice_and_uses_fast_dispatch_pin(
+        self, monkeypatch, tmp_path
+    ):
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
+        from dourmouse.config import load_ollama_config, save_orchestrator_model_setting
+
+        # Simulate this machine's real persisted state: a cloud-only
+        # model saved while Ollama Cloud was active.
+        save_orchestrator_model_setting("gpt-oss:20b", backend="ollama")
+
+        cfg = load_ollama_config(force_local=True)
+        assert cfg.skip_persisted_orchestrator_choice is True
+        assert cfg.model_for_agent("orchestrator") == "qwen2.5:7b"
+        assert cfg.model_for_agent("orchestrator") != "gpt-oss:20b"
+
+    def test_non_force_local_still_honors_persisted_choice_unaffected(
+        self, monkeypatch, tmp_path
+    ):
+        """The fix must be scoped to force_local only — normal (cloud)
+        configs keep today's existing, working behavior exactly."""
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
+        from dourmouse.config import load_ollama_config, save_orchestrator_model_setting
+
+        save_orchestrator_model_setting("gpt-oss:20b", backend="ollama")
+
+        cfg = load_ollama_config(force_local=False)
+        assert cfg.skip_persisted_orchestrator_choice is False
+        assert cfg.model_for_agent("orchestrator") == "gpt-oss:20b"
+
+    def test_plain_construction_defaults_flag_to_false(self):
+        """A bare OllamaConfig() (no force_local involved at all) must
+        default to the old, unconditional-honor behavior — this flag is
+        opt-in, never a silent behavior change for existing callers."""
+        assert OllamaConfig().skip_persisted_orchestrator_choice is False
+
+    def test_flag_does_not_affect_non_orchestrator_agents(self, monkeypatch, tmp_path):
+        """skip_persisted_orchestrator_choice only ever gates the
+        persisted-setting lookup, which only ever applies to the
+        "orchestrator" key — a non-orchestrator agent's resolution path
+        (agent_models override, then the fast-dispatch pin, then the
+        plain default) must be identical either way."""
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
+        from dourmouse.config import load_ollama_config, save_orchestrator_model_setting
+
+        save_orchestrator_model_setting("gpt-oss:20b", backend="ollama")
+
+        local_cfg = load_ollama_config(force_local=True)
+        cloud_cfg = load_ollama_config(force_local=False)
+        # "apps" has no dedicated fast-dispatch entry, so both fall
+        # through to the plain per-config default model either way.
+        assert local_cfg.model_for_agent("apps") == cloud_cfg.model_for_agent("apps")
+
+
 class TestClaudeFrontModeSetting:
     """Persisted, ON-by-default Claude-front-mode toggle (the mirror image
     of Grounded Mode below — opt-OUT, not opt-in, per the user's explicit
@@ -342,6 +425,91 @@ class TestClaudeFrontModeSetting:
         from dourmouse.config import CLAUDE_FRONT_MODE_SETTING_KEY, ORCHESTRATOR_BACKEND_SETTING_KEY
 
         assert CLAUDE_FRONT_MODE_SETTING_KEY != ORCHESTRATOR_BACKEND_SETTING_KEY
+
+
+class TestGoogleOAuthFullScopesSetting:
+    """Real friction, live-caught (2026-09-13): turning on Gmail/Calendar/
+    Drive via real Google OAuth scopes required manually editing .env
+    (GOOGLE_OAUTH_FULL_SCOPES=1) and restarting the server — undiscoverable
+    unless you already knew the env var existed. Same real, persisted,
+    no-restart-needed toggle shape as Claude-front-mode above, but OFF by
+    default (opt-in — Google's restricted scopes 500 on an unverified
+    OAuth app). See config.google_oauth_full_scopes_enabled /
+    save_google_oauth_full_scopes_setting."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+        monkeypatch.delenv("GOOGLE_OAUTH_FULL_SCOPES", raising=False)
+
+    def test_off_by_default(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import google_oauth_full_scopes_enabled
+
+        assert google_oauth_full_scopes_enabled() is False
+
+    def test_save_true_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import google_oauth_full_scopes_enabled, save_google_oauth_full_scopes_setting
+
+        result = save_google_oauth_full_scopes_setting(True)
+        assert result["ok"] is True
+        assert google_oauth_full_scopes_enabled() is True
+
+    def test_save_false_after_true_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import google_oauth_full_scopes_enabled, save_google_oauth_full_scopes_setting
+
+        save_google_oauth_full_scopes_setting(True)
+        save_google_oauth_full_scopes_setting(False)
+        assert google_oauth_full_scopes_enabled() is False
+
+    def test_a_real_env_var_wins_even_when_the_persisted_setting_is_off(self, monkeypatch, tmp_path):
+        """An operator who already set the raw env var directly in their
+        own real .env must keep working exactly as before this toggle
+        existed — the new Settings switch is additive, never a
+        regression for the existing manual path."""
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import google_oauth_full_scopes_enabled, save_google_oauth_full_scopes_setting
+
+        save_google_oauth_full_scopes_setting(False)
+        monkeypatch.setenv("GOOGLE_OAUTH_FULL_SCOPES", "1")
+        assert google_oauth_full_scopes_enabled() is True
+
+    def test_save_merges_with_existing_file(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_google_oauth_full_scopes_setting, user_env_path
+
+        path = user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("NVIDIA_API_KEY=nvapi-existing\n", encoding="utf-8")
+        save_google_oauth_full_scopes_setting(True)
+        contents = path.read_text(encoding="utf-8")
+        assert "NVIDIA_API_KEY=nvapi-existing" in contents
+        assert "GOOGLE_OAUTH_FULL_SCOPES=on" in contents
+
+    def test_key_is_distinct_from_claude_front_mode_setting_key(self):
+        from dourmouse.config import CLAUDE_FRONT_MODE_SETTING_KEY, GOOGLE_OAUTH_FULL_SCOPES_SETTING_KEY
+
+        assert GOOGLE_OAUTH_FULL_SCOPES_SETTING_KEY != CLAUDE_FRONT_MODE_SETTING_KEY
+
+    def test_google_auth_requested_scopes_reflects_the_toggle(self, monkeypatch, tmp_path):
+        """The real point of this setting: google_auth.requested_scopes()
+        must actually change when it's flipped, not just report a status
+        nobody reads."""
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import save_google_oauth_full_scopes_setting
+        from dourmouse.google_auth import requested_scopes
+
+        assert "gmail" not in requested_scopes()
+        save_google_oauth_full_scopes_setting(True)
+        assert "gmail" in requested_scopes()
+        assert "calendar" in requested_scopes()
+        assert "drive" in requested_scopes()
 
 
 class TestGroundedModeSetting:

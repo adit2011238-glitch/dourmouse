@@ -743,6 +743,25 @@ def _study_list_tool(arguments: dict[str, Any]) -> str:
     return f"STUDY FOLDER {rel_path or '.'!r} ({len(lines)} items):\n" + "\n".join(lines)
 
 
+def _study_search_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.study_agent import StudyPathError, search_study_files
+
+    query = (arguments.get("query") or "").strip()
+    if not query:
+        return "ERROR: study_search_files requires a non-empty 'query'."
+    try:
+        result = search_study_files(query)
+    except StudyPathError as exc:
+        return f"ERROR: {exc}"
+    if not result["matches"]:
+        return f"STUDY SEARCH {query!r}: no matching file/folder names found (honest)."
+    lines = [
+        f"{'[dir] ' if m['is_dir'] else ''}{m['path']}" for m in result["matches"]
+    ]
+    suffix = "\n[...more matches truncated]" if result["truncated"] else ""
+    return f"STUDY SEARCH {query!r} ({len(lines)} match(es)):\n" + "\n".join(lines) + suffix
+
+
 def _study_read_tool(arguments: dict[str, Any]) -> str:
     from dourmouse.study_agent import StudyPathError, read_study_file
 
@@ -769,12 +788,21 @@ def _study_read_tool(arguments: dict[str, Any]) -> str:
 def _apps_list_tool(arguments: dict[str, Any]) -> str:
     from dourmouse.app_control import AppControlError, list_running_apps
 
+    # Real win, needs no permission at all (same NSWorkspace primitive as
+    # activate/quit_app_fast) — always tried first; AppleScript is a
+    # real fallback only for the platform/import case, since a working
+    # NSWorkspace call can't meaningfully disagree with itself on retry.
+    from dourmouse import app_control_ax
+
     try:
-        apps = list_running_apps()
-    except AppControlError as exc:
-        return f"ERROR: {exc}"
+        apps = app_control_ax.list_running_apps_fast()
+    except app_control_ax.AXControlError:
+        try:
+            apps = list_running_apps()
+        except AppControlError as exc:
+            return f"ERROR: {exc}"
     if not apps:
-        return "RUNNING APPS: none (honest — System Events reported nothing)."
+        return "RUNNING APPS: none (honest — nothing reported)."
     lines = [f"{'* ' if a['frontmost'] else '  '}{a['name']}" for a in apps]
     return f"RUNNING APPS ({len(apps)}, '*' = frontmost):\n" + "\n".join(lines)
 
@@ -785,10 +813,24 @@ def _apps_windows_tool(arguments: dict[str, Any]) -> str:
     app_name = (arguments.get("app_name") or "").strip()
     if not app_name:
         return "ERROR: list_app_windows requires a non-empty 'app_name'."
+    # Window titles need the real AX tree either way (AppleScript's own
+    # System Events path needs Accessibility permission too) — only
+    # worth attempting the faster direct-AX read once trust is real.
+    if _ax_ready():
+        from dourmouse import app_control_ax
+
+        try:
+            return _format_windows(app_name, app_control_ax.list_windows_ax(app_name))
+        except app_control_ax.AXControlError as exc:
+            return f"ERROR: {exc}"
     try:
         windows = list_windows(app_name)
     except AppControlError as exc:
         return f"ERROR: {exc}"
+    return _format_windows(app_name, windows)
+
+
+def _format_windows(app_name: str, windows: list[str]) -> str:
     if not windows:
         return f"{app_name}: no open windows (honest — could mean 0 windows or a menu-bar-only app)."
     return f"{app_name} windows ({len(windows)}):\n" + "\n".join(windows)
@@ -824,14 +866,42 @@ def _app_control_dry_run(arguments: dict[str, Any]) -> bool:
     return bool(arguments.get("dry_run")) or app_control_dry_run_enabled()
 
 
+def _ax_ready() -> bool:
+    """True when the real Accessibility-API path (app_control_ax.py,
+    Phase 2, 2026-09-13) is genuinely usable right now — macOS, pyobjc
+    importable, AND this process actually holds Accessibility trust.
+    Checked once per call rather than try/except-around-everything: a
+    genuine app-specific AX failure (menu item doesn't exist, app not
+    running) should surface as exactly that, never get masked by a
+    silent re-attempt through the slower AppleScript path that would
+    just fail the same way for the same reason."""
+    from dourmouse import app_control_ax
+
+    return app_control_ax.ax_trusted()
+
+
 def _apps_activate_tool(arguments: dict[str, Any]) -> str:
     from dourmouse.app_control import AppControlError, activate_app
 
     app_name = (arguments.get("app_name") or "").strip()
     if not app_name:
         return "ERROR: activate_app requires a non-empty 'app_name'."
+    dry_run = _app_control_dry_run(arguments)
+    # Real, live-verified win (Phase 2, 2026-09-13): activating an app via
+    # NSRunningApplication needs NO Accessibility permission at all,
+    # unlike everything else in this file — always prefer it, no
+    # trust-gate needed, no fallback needed once the app is confirmed
+    # running (the two backends fail identically on a genuinely-not-
+    # running app, so there's nothing a fallback would recover here).
+    from dourmouse import app_control_ax
+
     try:
-        return activate_app(app_name, dry_run=_app_control_dry_run(arguments))
+        return app_control_ax.activate_app_fast(app_name, dry_run=dry_run)
+    except app_control_ax.AXControlError as exc:
+        if "NOT CONFIGURED" not in str(exc):
+            return f"ERROR: {exc}"  # a real, specific failure (e.g. not running) -- not an AppleScript problem either
+    try:
+        return activate_app(app_name, dry_run=dry_run)
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -842,8 +912,16 @@ def _apps_quit_tool(arguments: dict[str, Any]) -> str:
     app_name = (arguments.get("app_name") or "").strip()
     if not app_name:
         return "ERROR: quit_app requires a non-empty 'app_name'."
+    dry_run = _app_control_dry_run(arguments)
+    from dourmouse import app_control_ax
+
     try:
-        return quit_app(app_name, dry_run=_app_control_dry_run(arguments))
+        return app_control_ax.quit_app_fast(app_name, dry_run=dry_run)
+    except app_control_ax.AXControlError as exc:
+        if "NOT CONFIGURED" not in str(exc):
+            return f"ERROR: {exc}"
+    try:
+        return quit_app(app_name, dry_run=dry_run)
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -857,8 +935,23 @@ def _apps_keystrokes_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: send_app_keystrokes requires a non-empty 'app_name'."
     if not text:
         return "ERROR: send_app_keystrokes requires non-empty 'text'."
+    dry_run = _app_control_dry_run(arguments)
+    # Unlike activate/quit above, BOTH backends need real Accessibility
+    # permission for this action (live-verified this session: a
+    # synthetic CGEventPost keystroke is silently dropped without it,
+    # exactly like AppleScript's System Events "keystroke" command would
+    # be) — so this only even attempts the faster AX path once trust is
+    # confirmed; otherwise it goes straight to AppleScript rather than
+    # paying for a call already known to fail the same way either path.
+    if _ax_ready():
+        from dourmouse import app_control_ax
+
+        try:
+            return app_control_ax.send_keystrokes_ax(app_name, text, dry_run=dry_run)
+        except app_control_ax.AXControlError as exc:
+            return f"ERROR: {exc}"
     try:
-        return send_keystrokes(app_name, text, dry_run=_app_control_dry_run(arguments))
+        return send_keystrokes(app_name, text, dry_run=dry_run)
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -873,8 +966,16 @@ def _apps_press_key_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: press_app_key requires a non-empty 'app_name'."
     if not key:
         return "ERROR: press_app_key requires a non-empty 'key'."
+    dry_run = _app_control_dry_run(arguments)
+    if _ax_ready():
+        from dourmouse import app_control_ax
+
+        try:
+            return app_control_ax.press_key_ax(app_name, key, modifiers, dry_run=dry_run)
+        except app_control_ax.AXControlError as exc:
+            return f"ERROR: {exc}"
     try:
-        return press_key(app_name, key, modifiers, dry_run=_app_control_dry_run(arguments))
+        return press_key(app_name, key, modifiers, dry_run=dry_run)
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -888,10 +989,21 @@ def _apps_click_menu_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: click_app_menu_item requires a non-empty 'app_name'."
     if not isinstance(menu_path, list) or len(menu_path) < 2:
         return 'ERROR: menu_path needs at least [top-level menu, item], e.g. ["File", "New Window"].'
+    dry_run = _app_control_dry_run(arguments)
+    menu_path = [str(m) for m in menu_path]
+    # The real, biggest AX win of this whole phase: a real tree walk
+    # that KNOWS whether each level of the path actually exists, instead
+    # of AppleScript's blind string-built reference — a wrong path here
+    # gets a real "here's what IS there" answer, not a generic failure.
+    if _ax_ready():
+        from dourmouse import app_control_ax
+
+        try:
+            return app_control_ax.click_menu_item_ax(app_name, menu_path, dry_run=dry_run)
+        except app_control_ax.AXControlError as exc:
+            return f"ERROR: {exc}"
     try:
-        return click_menu_item(
-            app_name, [str(m) for m in menu_path], dry_run=_app_control_dry_run(arguments)
-        )
+        return click_menu_item(app_name, menu_path, dry_run=dry_run)
     except AppControlError as exc:
         return f"ERROR: {exc}"
 
@@ -1563,12 +1675,28 @@ def _build_memory_subagent(registry: DispatchRegistry) -> Subagent:
     """The memory subagent (v2.x): vault + SQLite FTS5 store + self-review."""
 
     def _daily_digest_tool(arguments: dict[str, Any]) -> str:
-        """v4.0 Phase 13: honest self-review over the real bus traffic."""
+        """v4.0 Phase 13: honest self-review over the real bus traffic.
+
+        Real, live-reproduced scoping gap (full-day feature sweep,
+        2026-09-12): asked for "an honest recap of everything we did
+        today", this tool's numbers stayed near-zero across a day of
+        substantial REAL activity — because it measures INTER-AGENT BUS
+        traffic specifically, and most real work here is a single agent's
+        own direct tool calls, which never touch that bus at all. The
+        answer was technically honest (Rule 2.2: it never fabricated
+        activity that didn't happen on the bus) but easy to misread as "we
+        did almost nothing today". The explicit scope line below is the
+        fix — say plainly what this measures, so a caller (model or
+        human) never mistakes a quiet bus for a quiet day.
+        """
         from dourmouse.self_improve import build_daily_digest
 
         digest = build_daily_digest(registry)
         lines = [
             f"SELF-REVIEW // {digest['generated_at']} // {digest['message_count']} bus msgs",
+            "(scope: INTER-AGENT BUS MESSAGES only — most direct, single-agent "
+            "tool use never touches this bus and will not show up here; a low "
+            "count is not evidence of a quiet day)",
             "",
         ]
         for name, s in digest["agents"].items():
@@ -1700,10 +1828,14 @@ def _build_memory_subagent(registry: DispatchRegistry) -> Subagent:
                 name="daily_digest",
                 description=(
                     "Run the daily SELF-REVIEW (Phase 13): honest per-agent "
-                    "stats from the inter-agent bus (messages sent/received, "
+                    "stats from the INTER-AGENT BUS ONLY (messages sent/received, "
                     "top activity, last activity) plus conservative improvement "
                     "suggestions. Zero fabrication — a silent agent is reported "
-                    "as silent."
+                    "as silent. This does NOT cover general single-agent tool "
+                    "use (most real work never touches the bus) — a low count "
+                    "here means a quiet BUS, not necessarily a quiet day; say "
+                    "so plainly rather than presenting it as the whole day's "
+                    "activity."
                 ),
                 parameters={"type": "object", "properties": {}},
                 handler=_daily_digest_tool,
@@ -1754,7 +1886,7 @@ _BACKEND_LABELS = {
 }
 
 
-def _make_code_tool(backend: str) -> ToolSpec:
+def _make_code_tool(backend: str, registry: DispatchRegistry) -> ToolSpec:
     """Build a ToolSpec that routes a coding task through ONE LLM backend.
 
     Tool names are globally unique per backend (code_nvidia / code_deepseek /
@@ -1766,6 +1898,7 @@ def _make_code_tool(backend: str) -> ToolSpec:
 
     def handler(arguments: dict[str, Any]) -> str:
         from dourmouse import code_backends
+        from dourmouse.dispatch import current_dispatch_context
 
         task = (arguments.get("task") or "").strip()
         if not task:
@@ -1775,9 +1908,21 @@ def _make_code_tool(backend: str) -> ToolSpec:
         except (TypeError, ValueError):
             return "ERROR: timeout_seconds must be an integer."
         cwd = (arguments.get("cwd") or "").strip() or str(_PROJECT_ROOT)
+        # Real gap found (production-testing sweep, 2026-09-12) while
+        # fixing the SAME bug for ClaudeCliClient (the top-level
+        # orchestrator client — see its own comment for the full
+        # diagnosis: no tab meant every conversation shared one real
+        # Claude CLI session). This is a DIFFERENT call site — the plain
+        # code_claude TOOL a model can call mid-conversation — reached via
+        # the active dispatch context rather than a direct parameter, but
+        # deserves the identical per-tab isolation: two tabs both calling
+        # code_claude as a tool should no more share a Claude CLI session
+        # than two tabs both using Claude Front Mode should.
+        ctx = current_dispatch_context(registry)
+        tab = ctx.session_stem if ctx is not None else None
         try:
             result = code_backends.run_code_task(
-                backend, task, cwd=cwd, timeout=timeout
+                backend, task, cwd=cwd, timeout=timeout, tab=tab
             )
         except RuntimeError as exc:
             return f"CODE {backend.upper()} (reported honestly): {exc}"
@@ -2135,6 +2280,40 @@ def _subagent(name: str, domain: str, description: str, tools: list[ToolSpec]) -
     return Subagent(name=name, domain=domain, description=description, tools=tuple(tools))
 
 
+def _target_agent_name(d: dict[str, Any], *keys: str) -> str:
+    """First non-empty string found under any of `keys` in `d`.
+
+    Real, live-reproduced bug (2026-09-11): delegate_task's schema names
+    its targeting argument 'subagent'; delegate_parallel's own schema
+    names the SAME concept 'agent_or_task' — two different names for one
+    idea, on two sibling tools, neither of them the name a model
+    naturally reaches for. Live-caught twice independently (a manual
+    repro AND a real user-shaped turn) calling delegate_parallel with the
+    much more natural {"agent": "mail"} — which the old strict
+    `arguments.get("agent_or_task")` silently read as "" (a model's call
+    is JSON the schema merely SUGGESTS, not a contract it is force-parsed
+    against), discarding the model's actual routing intent without any
+    error: the branch ran UNTARGETED (forced_agent=None) instead of
+    pinned to "mail", and the orchestration activity feed could never
+    attribute it to any real roster row either (its own event's "agent"
+    field silently fell back to "any" the exact same way). Accepting
+    every reasonable alias here, on both tools, is cheap and closes the
+    whole failure class rather than one call site.
+
+    Module-level (not nested in either tool-builder function) because
+    _build_delegate_tool and _build_delegate_parallel_tool are two
+    separate top-level functions with no shared closure — a first version
+    of this lived inside _build_delegate_tool only and raised a real
+    NameError the moment _delegate_parallel (a different function
+    entirely) tried to call it.
+    """
+    for key in keys:
+        value = str(d.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
     """The orchestrator's own tool: spawn a NESTED dispatch run (self-dispatch).
 
@@ -2154,10 +2333,14 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
                 "ERROR: delegate_task requires an active dispatch context "
                 "(it can only be called from inside a dispatch run)."
             )
-        task = (arguments.get("task") or "").strip()
+        # Same alias treatment as delegate_parallel's own 'instructions'
+        # field, applied preemptively here too — 'task'/'instructions'/
+        # 'prompt' are the same idea across this tool's own siblings, and
+        # nothing stops a model reaching for whichever one it used last.
+        task = _target_agent_name(arguments, "task", "instructions", "prompt")
         if not task:
             return "ERROR: delegate_task requires a non-empty 'task'."
-        target = (arguments.get("subagent") or "").strip()
+        target = _target_agent_name(arguments, "subagent", "agent", "agent_or_task")
         if target and target not in registry.subagent_names:
             return (
                 f"ERROR: unknown subagent {target!r} — cannot delegate. "
@@ -2391,10 +2574,19 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                     f"ERROR: branch {i} must be an object with "
                     "'agent_or_task' and 'instructions'."
                 )
-            instructions = str(item.get("instructions") or "").strip()
+            # Real, live-reproduced bug (production-testing sweep,
+            # 2026-09-12): the exact same alias problem as the agent-name
+            # field, one field over — delegate_parallel's real schema key
+            # is 'instructions'; delegate_to_models (the sibling tool)
+            # calls the identical concept 'prompt'. A model that used
+            # 'prompt' here got "missing a non-empty 'instructions'",
+            # retried with an EMPTY call, and lost the whole branch's
+            # task. Same fix, same helper, same reasoning as the agent
+            # alias right below.
+            instructions = _target_agent_name(item, "instructions", "prompt", "task")
             if not instructions:
                 return f"ERROR: branch {i} is missing a non-empty 'instructions'."
-            target = str(item.get("agent_or_task") or "").strip()
+            target = _target_agent_name(item, "agent_or_task", "agent", "subagent")
             if target and target not in registry.subagent_names:
                 return (
                     f"ERROR: branch {i} names unknown subagent {target!r} — "
@@ -2782,6 +2974,30 @@ def build_general_registry() -> DispatchRegistry:
                     handler=_study_list_tool,
                 ),
                 ToolSpec(
+                    name="study_search_files",
+                    description=(
+                        "Search FILE AND FOLDER NAMES (not contents) anywhere in "
+                        "the user's study resource folder for a topic/keyword "
+                        "(case-insensitive substring), recursively. Use this "
+                        "FIRST for any topic-based question ('anything about "
+                        "economics?') instead of manually listing folder after "
+                        "folder — this folder can be deep and wide, and guessing "
+                        "at file names study_read_file might accept is a waste "
+                        "of a call; search for the real name first."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "keyword to search file/folder names for",
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                    handler=_study_search_tool,
+                ),
+                ToolSpec(
                     name="study_read_file",
                     description=(
                         "Read a real text file from the user's study resource "
@@ -2997,11 +3213,29 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    def _create_calendar_event_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import create_calendar_event
+
+        try:
+            return create_calendar_event(
+                arguments.get("summary", ""),
+                arguments.get("start_iso", ""),
+                arguments.get("end_iso", ""),
+                arguments.get("description", ""),
+                arguments.get("timezone_name", "UTC"),
+            )
+        except RuntimeError as exc:
+            return f"CALENDAR CREATE (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"CALENDAR CREATE FAILED: {type(exc).__name__}: {exc}"
+
     registry.register_subagent(
         _subagent(
             "scheduling",
             "General",
-            "Reads calendar, proposes times. Read only — booking requires confirmation.",
+            "Reads the real signed-in user's Google Calendar, proposes free "
+            "times, and creates real events. Read + propose are unrestricted; "
+            "creating an event requires human confirmation.",
             [
                 ToolSpec(
                     name="propose_time_slots",
@@ -3023,11 +3257,49 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="list_calendar_events",
                     description=(
-                        "List calendar events (read-only). Currently NOT "
-                        "CONFIGURED until a calendar backend is wired."
+                        "List real upcoming events on the signed-in user's "
+                        "Google Calendar (read-only, soonest first). Honest "
+                        "NOT CONFIGURED without a signed-in Google user — real "
+                        "and working once signed in, not a stub."
                     ),
                     parameters={"type": "object", "properties": {}},
                     handler=_list_calendar_events_tool,
+                ),
+                ToolSpec(
+                    name="create_calendar_event",
+                    description=(
+                        "Create a REAL event on the signed-in user's primary "
+                        "Google Calendar. This is the actual 'booking' rule 10 "
+                        "refers to for scheduling — previously there was no real "
+                        "way to do this at all, only read events and propose "
+                        "times. REAL write — REQUIRES human confirmation. Does "
+                        "NOT invite attendees (this creates an event on the "
+                        "user's own calendar only). start_iso/end_iso are "
+                        "RFC3339 datetimes without a timezone suffix (e.g. "
+                        "'2026-09-15T14:00:00'); timezone_name is a real IANA "
+                        "name (e.g. 'Asia/Dubai') applied to both. Needs the "
+                        "Google sign-in with Calendar write scope "
+                        "(GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT CONFIGURED "
+                        "honestly without a signed-in user."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "summary": {"type": "string", "description": "event title"},
+                            "start_iso": {"type": "string"},
+                            "end_iso": {"type": "string"},
+                            "description": {"type": "string", "default": ""},
+                            "timezone_name": {"type": "string", "default": "UTC"},
+                        },
+                        "required": ["summary", "start_iso", "end_iso"],
+                    },
+                    handler=_create_calendar_event_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Create the calendar event {a.get('summary', '?')!r} "
+                        f"from {a.get('start_iso', '?')} to {a.get('end_iso', '?')} "
+                        f"({a.get('timezone_name', 'UTC')})?"
+                    ),
                 ),
             ],
         )
@@ -3047,6 +3319,19 @@ def build_general_registry() -> DispatchRegistry:
             return f"SHEETS READ (reported honestly): {exc}"
         except Exception as exc:  # noqa: BLE001 - network/parse failures, readable
             return f"SHEETS READ FAILED: {type(exc).__name__}: {exc}"
+
+    def _sheets_create_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import sheets_create
+
+        try:
+            return sheets_create(
+                arguments.get("title", ""),
+                arguments.get("rows"),
+            )
+        except RuntimeError as exc:
+            return f"SHEETS CREATE (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"SHEETS CREATE FAILED: {type(exc).__name__}: {exc}"
 
     def _drive_download_h(arguments: dict[str, Any]) -> str:
         from dourmouse.google_services import drive_download
@@ -3097,6 +3382,21 @@ def build_general_registry() -> DispatchRegistry:
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"SLIDES CREATE FAILED: {type(exc).__name__}: {exc}"
 
+    def _drive_share_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import drive_share
+
+        try:
+            return drive_share(
+                arguments.get("file_id", ""),
+                arguments.get("email", ""),
+                arguments.get("role", "reader"),
+                arguments.get("notify", True),
+            )
+        except RuntimeError as exc:
+            return f"DRIVE SHARE (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DRIVE SHARE FAILED: {type(exc).__name__}: {exc}"
+
     registry.register_subagent(
         _subagent(
             "docs",
@@ -3129,6 +3429,42 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["spreadsheet_id"],
                     },
                     handler=_sheets_read_h,
+                ),
+                ToolSpec(
+                    name="sheets_create",
+                    description=(
+                        "Create a REAL new Google Sheet in the SIGNED-IN "
+                        "user's Drive, with optional initial rows written to "
+                        "Sheet1 starting at A1, and return its open link. "
+                        "REAL write — REQUIRES human confirmation. Different "
+                        "from sheets_read: this is per-user OAuth (the "
+                        "signed-in account's own Drive), not the keyless "
+                        "link-shared path sheets_read uses — there was "
+                        "previously NO way to create or write a Sheet at "
+                        "all. Needs the Google sign-in with Sheets write "
+                        "scope (GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT "
+                        "CONFIGURED honestly without a signed-in user."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "rows": {
+                                "type": "array",
+                                "description": "optional initial rows, each a list of cell values (e.g. [[\"Name\",\"Score\"],[\"Alice\",90]])",
+                                "items": {"type": "array"},
+                            },
+                        },
+                        "required": ["title"],
+                    },
+                    handler=_sheets_create_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Create a Google Sheet titled {a.get('title', '?')!r} "
+                        f"in your Drive"
+                        + (f" with {len(a['rows'])} row(s) of data" if a.get("rows") else "")
+                        + "?"
+                    ),
                 ),
                 ToolSpec(
                     name="drive_download",
@@ -3241,6 +3577,55 @@ def build_general_registry() -> DispatchRegistry:
                     confirm_prompt=lambda a: (
                         f"Create a Slides deck titled {a.get('title', '?')!r} "
                         f"({len(a.get('slides') or [])} slides) in your Drive?"
+                    ),
+                ),
+                ToolSpec(
+                    name="drive_share",
+                    description=(
+                        "Share a Dourmouse-created Google Drive file (Doc, "
+                        "Sheet, or Slides deck) with another Google account "
+                        "by email — grants real reader/commenter/writer "
+                        "access via the Drive permissions API, with an "
+                        "optional notification email. REAL, outward-facing "
+                        "write — REQUIRES human confirmation: it puts the "
+                        "user's file in someone else's Drive, which is not "
+                        "reversible by this tool. Only works on files "
+                        "DOURMOUSE itself created (the drive.file OAuth "
+                        "scope) — a file made by hand in the browser 404s "
+                        "here with an honest explanation, never a fabricated "
+                        "result. Needs a real file_id from drive_create_doc/"
+                        "sheets_create/slides_create's own result (or the "
+                        "file's URL) and the Google sign-in with Drive write "
+                        "scope (GOOGLE_OAUTH_FULL_SCOPES=1)."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "file_id": {
+                                "type": "string",
+                                "description": "the Drive file id, from drive_create_doc/sheets_create/slides_create's own result, or the token in the file's URL between /d/ and /edit",
+                            },
+                            "email": {"type": "string", "description": "the Google account to share with"},
+                            "role": {
+                                "type": "string",
+                                "enum": ["reader", "commenter", "writer"],
+                                "default": "reader",
+                            },
+                            "notify": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "send the recipient a Google notification email about the share",
+                            },
+                        },
+                        "required": ["file_id", "email"],
+                    },
+                    handler=_drive_share_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Share Drive file {a.get('file_id', '?')!r} with "
+                        f"{a.get('email', '?')!r} as {a.get('role') or 'reader'}"
+                        + ("" if a.get("notify", True) is False else " (sends them a notification email)")
+                        + "?"
                     ),
                 ),
             ],
@@ -3478,7 +3863,7 @@ def build_general_registry() -> DispatchRegistry:
             "code_ollama",
             "Coding",
             "Coding via the local Ollama LLM backend (keyless, zero API spend).",
-            [_make_code_tool("ollama")],
+            [_make_code_tool("ollama", registry)],
         )
     )
     registry.register_subagent(
@@ -3486,7 +3871,7 @@ def build_general_registry() -> DispatchRegistry:
             "code_nvidia",
             "Coding",
             "Coding via the NVIDIA NIM LLM backend (OpenAI-compatible).",
-            [_make_code_tool("nvidia")],
+            [_make_code_tool("nvidia", registry)],
         )
     )
     registry.register_subagent(
@@ -3494,7 +3879,7 @@ def build_general_registry() -> DispatchRegistry:
             "code_deepseek",
             "Coding",
             "Coding via the Freebuff free DeepSeek backend (OpenAI-compatible).",
-            [_make_code_tool("deepseek")],
+            [_make_code_tool("deepseek", registry)],
         )
     )
     registry.register_subagent(
@@ -3502,7 +3887,7 @@ def build_general_registry() -> DispatchRegistry:
             "code_codex",
             "Coding",
             "Coding via the OpenAI Codex API (OpenAI-compatible).",
-            [_make_code_tool("codex")],
+            [_make_code_tool("codex", registry)],
         )
     )
     registry.register_subagent(
@@ -3510,7 +3895,7 @@ def build_general_registry() -> DispatchRegistry:
             "code_claude",
             "Coding",
             "Coding via your real Claude Code CLI (claude -p).",
-            [_make_code_tool("claude")],
+            [_make_code_tool("claude", registry)],
         )
     )
 
@@ -3935,6 +4320,17 @@ def build_general_registry() -> DispatchRegistry:
                             "symbol": {"type": "string", "description": "e.g. AAPL"},
                         },
                         "required": ["symbol"],
+                        # Real, live-reproduced bug (full-day feature sweep,
+                        # 2026-09-12): a model call supplied its OWN fabricated
+                        # price/day_range/52_week_range/timestamp fields
+                        # ALONGSIDE the real 'symbol' -- harmless in practice
+                        # (the handler only ever reads 'symbol', the rest was
+                        # silently ignored) but the schema itself invited it by
+                        # never saying no. additionalProperties:false is the
+                        # real fix: a tool whose entire point is "tell me the
+                        # real number" must never make it look valid to also
+                        # hand it the number you want back.
+                        "additionalProperties": False,
                     },
                     handler=_stock_quote_tool,
                 ),
@@ -4343,6 +4739,8 @@ def build_general_registry() -> DispatchRegistry:
                 browser_fill,
                 browser_fill_form,
                 browser_open,
+                browser_pane_hide,
+                browser_pane_show,
                 browser_press,
                 browser_screenshot,
                 browser_select,
@@ -4369,6 +4767,8 @@ def build_general_registry() -> DispatchRegistry:
                 "creds_list": browser_creds_list,
                 "creds_forget": browser_creds_forget,
                 "signin": browser_signin,
+                "pane_show": browser_pane_show,
+                "pane_hide": browser_pane_hide,
             }
             try:
                 return _FN[tool](arguments)
@@ -4635,6 +5035,30 @@ def build_general_registry() -> DispatchRegistry:
                     handler=_browser_h("signin"),
                     permission=Permission.REQUIRES_CONFIRMATION,
                     confirm_prompt=_b_confirm,
+                ),
+                ToolSpec(
+                    name="browser_pane_show",
+                    description=(
+                        "Show the real embedded browser pane (Electron shell "
+                        "only) — the SAME live browsing session browser_open/"
+                        "browser_click/... already drive, made visible to the "
+                        "human, not a copy or a second browser. Use this "
+                        "whenever the user should watch the agent browse live. "
+                        "Honest NOT CONFIGURED under the older desktop shell "
+                        "or a plain headless server."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_browser_h("pane_show"),
+                ),
+                ToolSpec(
+                    name="browser_pane_hide",
+                    description=(
+                        "Hide the embedded browser pane. The browsing session "
+                        "itself is unaffected — browser_open/click/fill/... "
+                        "keep working; only the visible pane is hidden."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_browser_h("pane_hide"),
                 ),
             ],
         )
@@ -5503,11 +5927,11 @@ def build_general_registry() -> DispatchRegistry:
         "email_identity_status", "email_own_send",
         # Drive
         "drive_search", "drive_read", "drive_download", "drive_create_doc",
-        "docs_append",
+        "docs_append", "drive_share",
         # Sheets / Slides
-        "sheets_read", "slides_create",
+        "sheets_read", "sheets_create", "slides_create",
         # Calendar
-        "list_calendar_events", "propose_time_slots",
+        "list_calendar_events", "propose_time_slots", "create_calendar_event",
     )
     _by_name: dict[str, ToolSpec] = {}
     for _sub in registry.all_subagents():
@@ -5534,8 +5958,10 @@ def build_general_registry() -> DispatchRegistry:
             "(read, search, send, archive, trash, restore), Drive (search, "
             "read, download, create Docs, and APPEND more text to an "
             "existing Doc for building a long document across multiple "
-            "calls), Sheets (read), Slides (create), and Calendar (list "
-            "events, propose meeting times). One "
+            "calls), Sheets (read link-shared sheets, and CREATE a real new "
+            "one with initial data), Slides (create), and Calendar (list "
+            "events, propose meeting times, and CREATE a real event — real "
+            "booking, not just proposing). One "
             "coherent identity for the full real toolset that also lives, "
             "unchanged, on mail/docs/scheduling — route here for any "
             "general Google Workspace request rather than guessing which "

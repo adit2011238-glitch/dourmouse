@@ -368,6 +368,27 @@
   const claiming = new URLSearchParams(location.search).get('claiming');
   if (claiming) startClaimPoll(claiming);
 
+  // Real, live-caught UX gap (2026-09-13): the system-browser tab this
+  // desktop flow opens for consent lands here on
+  // /login?claimed=1 when it's genuinely done — but nothing ever read
+  // that param, so this tab just showed the ordinary signed-OUT login
+  // card (it never gets a session cookie itself, by design — the real
+  // app window adopts the session via polling /api/auth/claim). A user
+  // watching this exact tab had no way to tell it actually worked.
+  // Fixed directly from the URL param, not from /api/auth/status (which
+  // would honestly, correctly say "not signed in" for THIS cookie-less
+  // tab even on success) -- the redirect to ?claimed=1 only ever
+  // happens after a real successful claim, so the param alone is
+  // trustworthy here.
+  const claimed = new URLSearchParams(location.search).get('claimed');
+  if (claimed === '1') {
+    document.body.innerHTML = '<div style="max-width:420px;margin:18vh auto;text-align:center;' +
+      'font-family:-apple-system,system-ui,sans-serif;color:#1a1a1a">' +
+      '<div style="font-size:15px;font-weight:600;margin-bottom:6px">You’re signed in</div>' +
+      '<div style="font-size:13px;color:#666">Dourmouse picked this up automatically — ' +
+      'you can close this tab and go back to the app.</div></div>';
+  } else {
+
   // A cancelled consent (Google → /login?reason=denied) deserves a
   // friendly line, not silence.
   const reason = new URLSearchParams(location.search).get('reason');
@@ -406,6 +427,8 @@
       gmsg.textContent = 'Server unreachable — the access token below still works.';
     }
   })();
+
+  }
 
   async function showSignedIn(email) {
     document.getElementById('signedOut').style.display = 'none';

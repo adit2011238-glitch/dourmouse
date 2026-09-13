@@ -125,3 +125,26 @@ class TestPreambleDisambiguatesSendMessageFromRealTools:
         to know that so it doesn't avoid the real tool out of caution."""
         text = claude_orchestrator_preamble()
         assert "gated tool call is always" in text.lower() or "a gated tool call is always safe" in text
+
+    def test_it_tells_the_model_no_dialog_exists_in_this_session(self):
+        """Real, live-reproduced bug (2026-09-13): with no guidance here,
+        the model told the user 'a confirmation dialog should show, tap
+        confirm there' for a session that structurally can never show one
+        (the direct Claude CLI session has no session_lock/confirmation_gate
+        at all). The preamble now says this up front instead of leaving the
+        model to guess from the raw tool-result text alone."""
+        text = claude_orchestrator_preamble()
+        assert "normal chat tab" in text.lower()
+        assert "do not invent a dialog" in text.lower()
+
+    def test_it_tells_the_model_it_is_claude_code_itself(self):
+        """Real, live-reproduced bug (2026-09-13): asked whether it used
+        Claude Code or Dourmouse's own web_search tool, the model answered
+        'Claude Code wasn't involved' -- directly contradicting the
+        'claude-code-cli' backend label the same UI already shows for that
+        turn. The model IS the Claude Code session; using an
+        mcp__dourmouse__ tool instead of its own built-in one is still
+        itself acting, not some other program taking over."""
+        text = claude_orchestrator_preamble()
+        assert "You ARE Claude Code" in text
+        assert "wasn't involved" in text  # quotes the bad phrasing to explicitly rule it out
