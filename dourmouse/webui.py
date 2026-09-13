@@ -284,6 +284,14 @@ class ActivityTracker:
         self._feed: dict[str, list[dict[str, Any]]] = {
             sub.name: [] for sub in registry.all_subagents()
         }
+        # Phase 4 (live orchestration view): delegate_parallel's own
+        # per-branch progress, keyed by run_id (general_roster.py's
+        # _build_delegate_parallel_tool generates one per top-level call).
+        # A genuinely different kind of state than _status/_last/_feed
+        # above (per-RUN, not per-agent) — see _record_fanout's own
+        # docstring for why it's tracked separately rather than folded
+        # into _record.
+        self._fanouts: dict[str, dict[str, Any]] = {}
         self._broadcast: Any = None
 
     def set_broadcast(self, fn: Any) -> None:
@@ -300,9 +308,82 @@ class ActivityTracker:
     def on_event(self, entry: dict[str, Any]) -> None:
         """Observer hook — swallow everything so dispatch never breaks."""
         try:
+            if entry.get("type") == "delegate_parallel_branch":
+                # A branch's own target agent's status is ALREADY updated
+                # correctly by the ordinary tool_use/tool_result case in
+                # _record below (that nested run's own tool calls flow
+                # through this SAME event_sink) — this event carries the
+                # fan-out's OWN shape on top (which branch, index/total,
+                # per-branch model), tracked and broadcast separately.
+                run_id = self._record_fanout(entry)
+                if run_id is not None and self._broadcast is not None:
+                    self._broadcast_fanout(run_id)
+                return
             changed = self._record(entry)
             if changed and self._broadcast is not None:
                 self._broadcast_changed(changed)
+        except Exception:
+            pass
+
+    def _record_fanout(self, entry: dict[str, Any]) -> str | None:
+        """Phase 4: applies one delegate_parallel_branch event to
+        self._fanouts. Returns the run_id touched (for the caller to
+        broadcast), or None for an event with no run_id (an older-shaped
+        event, or a non-delegate_parallel emitter reusing this event type
+        — nothing to track without one)."""
+        run_id = entry.get("run_id")
+        index = entry.get("index")
+        if not run_id or index is None:
+            return None
+        with self._lock:
+            run = self._fanouts.setdefault(run_id, {"total": 0, "branches": {}})
+            if entry.get("total"):
+                run["total"] = entry["total"]
+            run["branches"][index] = {
+                "agent": entry.get("agent"),
+                "model": entry.get("model"),
+                "backend": entry.get("backend"),
+                "local": entry.get("local"),
+                "phase": entry.get("phase"),
+                "task": entry.get("task"),
+                "ok": entry.get("ok"),
+                "error": entry.get("error"),
+                "elapsed_s": entry.get("elapsed_s"),
+            }
+        return run_id
+
+    def _broadcast_fanout(self, run_id: str) -> None:
+        """Push the run's current branch state over the existing SSE hub
+        as a new delegate_fanout event type (same hub all_hands.py's own
+        "allhands" event type already shares, see set_broadcast's own
+        docstring) — a genuinely new small event type, not overloading
+        agent_activity's shape. Once every branch has reported a "result"
+        phase, this run is over: the final broadcast still carries the
+        full branch state plus finished:true (so the frontend can render
+        the completed fan-out once), and the run is cleared from
+        self._fanouts right after so the board never shows a stale
+        finished fan-out."""
+        with self._lock:
+            run = self._fanouts.get(run_id)
+            if run is None:
+                return
+            total = run["total"]
+            branches = dict(run["branches"])
+            finished = bool(total) and len(branches) >= total and all(
+                b.get("phase") == "result" for b in branches.values()
+            )
+            if finished:
+                del self._fanouts[run_id]
+        try:
+            self._broadcast(
+                {
+                    "type": "delegate_fanout",
+                    "run_id": run_id,
+                    "total": total,
+                    "finished": finished,
+                    "branches": branches,
+                }
+            )
         except Exception:
             pass
 
@@ -440,7 +521,17 @@ class ActivityTracker:
                         "feed": list(self._feed[name]),
                     }
                     for name in self._status
-                }
+                },
+                # Phase 4: any fan-out still in flight when a client loads
+                # the initial snapshot (e.g. opening ORCHESTRATION mid-run)
+                # — finished runs are already gone from self._fanouts (see
+                # _broadcast_fanout), so this is exactly "what's active
+                # right now", the same real-state contract "agents" above
+                # already has.
+                "fanouts": {
+                    run_id: {"total": run["total"], "branches": dict(run["branches"])}
+                    for run_id, run in self._fanouts.items()
+                },
             }
 
 

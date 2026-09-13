@@ -2609,6 +2609,16 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                 "branches ran."
             )
 
+        # Phase 4 (live orchestration view): one real id per top-level
+        # delegate_parallel call, same generation convention
+        # dourmouse.all_hands already uses for its own runs
+        # (uuid.uuid4().hex[:12]) — lets ActivityTracker
+        # (dourmouse/webui.py) group this run's branch events together and
+        # tell them apart from a second, concurrently-running
+        # delegate_parallel call (e.g. from a different tab) instead of
+        # conflating both into one board.
+        run_id = uuid.uuid4().hex[:12]
+
         def _run_one(index: int, target: str, instructions: str) -> dict[str, Any]:
             job_id = None
             if ctx.jobs is not None:
@@ -2659,6 +2669,7 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
             _safe_emit(ctx.event_sink, {
                 "type": "delegate_parallel_branch",
                 "phase": "start",
+                "run_id": run_id,
                 "index": index,
                 "total": len(granted),
                 "agent": target or "any",
@@ -2699,7 +2710,8 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                     "elapsed_s": round(time.perf_counter() - started, 2),
                 }
                 _safe_emit(ctx.event_sink, {
-                    "type": "delegate_parallel_branch", "phase": "result", **result,
+                    "type": "delegate_parallel_branch", "phase": "result",
+                    "run_id": run_id, "total": len(granted), **result,
                 })
                 return result
 
@@ -2714,7 +2726,8 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                 "elapsed_s": round(time.perf_counter() - started, 2),
             }
             _safe_emit(ctx.event_sink, {
-                "type": "delegate_parallel_branch", "phase": "result", **result,
+                "type": "delegate_parallel_branch", "phase": "result",
+                "run_id": run_id, "total": len(granted), **result,
             })
             return result
 

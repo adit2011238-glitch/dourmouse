@@ -6026,6 +6026,7 @@ function startNewsStream(){
       let data; try{ data = JSON.parse(ev.data); }catch{ return; }
       if(data.type === "browser_pane_open"){ openBrowserPane(data.url); return; }
       if(data.type === "agent_activity"){ orchApplyDelta(data.agents); return; }
+      if(data.type === "delegate_fanout"){ orchApplyFanout(data); return; }
       if(data.type !== "news_item") return;  // the hub carries other event kinds too
       const item = data.item;
       newsFeed.unshift(item);
@@ -6242,9 +6243,11 @@ function paintOrchestration(){
       </div>
     </div>`;
   };
+  const fanoutIds = Object.keys(_orchFanouts);
   box.innerHTML = `
     <p class="lede">${names.length} AGENTS WIRED. ${active.length} ACTIVE RIGHT NOW.</p>
-    ${active.length ? `<div class="sec">ACTIVE</div>${active.map(rowHtml).join("")}` : `<p class="note" style="padding:8px 0">Nothing running right now — this fills in live the moment any agent is delegated a task, on any screen.</p>`}
+    ${fanoutIds.length ? `<div class="sec">ACTIVE FAN-OUT</div>${fanoutIds.map(id => orchFanoutRowHtml(id, _orchFanouts[id])).join("")}` : ""}
+    ${active.length ? `<div class="sec" style="margin-top:${fanoutIds.length ? "14px" : "0"}">ACTIVE</div>${active.map(rowHtml).join("")}` : (fanoutIds.length ? "" : `<p class="note" style="padding:8px 0">Nothing running right now — this fills in live the moment any agent is delegated a task, on any screen.</p>`)}
     <div class="sec" style="margin-top:14px">IDLE (${idle.length})</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px">
       ${idle.map(n => `<span class="chip" style="cursor:default" data-agent="${esc(n)}">${esc(n)}</span>`).join("")}
@@ -6264,11 +6267,43 @@ function orchApplyDelta(agents){
   }
   if(screen === "ORCHESTRATION") paintOrchestration();
 }
+// Phase 4: delegate_parallel's own per-branch detail (which branch,
+// which agent, which model) — a genuinely different event than
+// agent_activity above (ActivityTracker tracks it separately, see
+// _record_fanout/_broadcast_fanout in webui.py), rendered as its own
+// ACTIVE FAN-OUT section in paintOrchestration() below.
+let _orchFanouts = {};
+function orchApplyFanout(payload){
+  if(!payload || !payload.run_id) return;
+  if(payload.finished) delete _orchFanouts[payload.run_id];
+  else _orchFanouts[payload.run_id] = {total: payload.total, branches: payload.branches || {}};
+  if(screen === "ORCHESTRATION") paintOrchestration();
+}
+function orchFanoutRowHtml(runId, run){
+  const indices = Object.keys(run.branches).map(Number).sort((a,b) => a - b);
+  const branchRows = indices.map(i => {
+    const b = run.branches[i] || {};
+    const modelShown = (b.model || "").split("/").pop() || b.model || "—";
+    const label = `branch ${i + 1}/${run.total || indices.length} · ${esc(b.agent || "any")} · ${esc(modelShown)}${localCloudSuffix(b)}`;
+    const phaseNote = b.phase === "result"
+      ? (b.ok === false ? `failed — ${esc((b.error || "").slice(0, 140))}` : `done in ${b.elapsed_s ?? "?"}s`)
+      : "working…";
+    return `<div class="d" style="margin-top:1px">${label} — ${phaseNote}</div>`;
+  }).join("");
+  return `<div class="row" data-run="${esc(runId)}">
+    <span class="dot" style="background:var(--ok);animation:pulse 1.2s ease-in-out infinite"></span>
+    <div class="g">
+      <div class="n">FAN-OUT <span style="color:var(--blue-deep);font-weight:normal">— ${indices.length}/${run.total || indices.length} REPORTING</span></div>
+      ${branchRows}
+    </div>
+  </div>`;
+}
 async function loadOrchestrationSnapshot(){
   try{
     const r = await fetch("/api/activity");
     const j = await r.json();
     _orchAgents = j.agents || {};
+    _orchFanouts = j.fanouts || {};
   }catch{}
 }
 loadOrchestrationSnapshot();

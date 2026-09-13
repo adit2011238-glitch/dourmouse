@@ -110,6 +110,91 @@ class TestSetBroadcastWiring:
         assert received == []
 
 
+class TestDelegateFanoutTracking:
+    """Phase 4 (live orchestration view): delegate_parallel_branch events
+    (general_roster.py's _build_delegate_parallel_tool) are a genuinely
+    different kind of state than the per-agent status TestSetBroadcastWiring
+    covers above — tracked per run_id, broadcast as a new delegate_fanout
+    event type on the SAME hub, never touching _status/_last/_feed."""
+
+    def _branch(self, run_id, index, total, phase, **extra):
+        return {
+            "type": "delegate_parallel_branch", "run_id": run_id,
+            "index": index, "total": total, "phase": phase,
+            "agent": extra.pop("agent", "echo_agent"),
+            "model": extra.pop("model", "qwen2.5:7b"),
+            "backend": extra.pop("backend", "ollama"),
+            "local": extra.pop("local", True),
+            **extra,
+        }
+
+    def test_start_event_is_tracked_and_broadcast(self):
+        tracker = ActivityTracker(_registry())
+        received = []
+        tracker.set_broadcast(received.append)
+        tracker.on_event(self._branch("run1", 0, 2, "start", task="say hi"))
+        assert len(received) == 1
+        payload = received[0]
+        assert payload["type"] == "delegate_fanout"
+        assert payload["run_id"] == "run1"
+        assert payload["total"] == 2
+        assert payload["finished"] is False
+        assert payload["branches"][0]["agent"] == "echo_agent"
+        assert payload["branches"][0]["phase"] == "start"
+        # A branch's own target agent's REAL status is untouched by this
+        # event type — that's the ordinary tool_use/tool_result case's job.
+        assert tracker.snapshot()["agents"]["echo_agent"]["status"] == "idle"
+
+    def test_run_is_not_finished_until_every_branch_reports_a_result(self):
+        tracker = ActivityTracker(_registry())
+        received = []
+        tracker.set_broadcast(received.append)
+        tracker.on_event(self._branch("run1", 0, 2, "start"))
+        tracker.on_event(self._branch("run1", 1, 2, "start"))
+        tracker.on_event(self._branch("run1", 0, 2, "result", ok=True))
+        assert all(p["finished"] is False for p in received)
+        assert "run1" in tracker.snapshot()["fanouts"]
+
+    def test_run_is_cleared_once_every_branch_reports_a_result(self):
+        tracker = ActivityTracker(_registry())
+        received = []
+        tracker.set_broadcast(received.append)
+        tracker.on_event(self._branch("run1", 0, 2, "start"))
+        tracker.on_event(self._branch("run1", 1, 2, "start"))
+        tracker.on_event(self._branch("run1", 0, 2, "result", ok=True))
+        tracker.on_event(self._branch("run1", 1, 2, "result", ok=True))
+        assert received[-1]["finished"] is True
+        assert received[-1]["branches"][0]["ok"] is True
+        assert received[-1]["branches"][1]["ok"] is True
+        # Cleared from live state so the board never shows a stale,
+        # already-finished fan-out on a later snapshot/reconnect.
+        assert "run1" not in tracker.snapshot()["fanouts"]
+
+    def test_two_concurrent_runs_never_conflate_branches(self):
+        """The real reason run_id exists: two different delegate_parallel
+        calls (e.g. from two different tabs) must never merge into one
+        board entry."""
+        tracker = ActivityTracker(_registry())
+        received = []
+        tracker.set_broadcast(received.append)
+        tracker.on_event(self._branch("run1", 0, 1, "start", agent="echo_agent"))
+        tracker.on_event(self._branch("run2", 0, 1, "start", agent="other_agent"))
+        snap = tracker.snapshot()["fanouts"]
+        assert set(snap.keys()) == {"run1", "run2"}
+        assert snap["run1"]["branches"][0]["agent"] == "echo_agent"
+        assert snap["run2"]["branches"][0]["agent"] == "other_agent"
+
+    def test_event_with_no_run_id_is_ignored_not_a_crash(self):
+        """Defensive: an older-shaped event (no run_id) must never raise
+        or silently corrupt tracking — just nothing to track."""
+        tracker = ActivityTracker(_registry())
+        received = []
+        tracker.set_broadcast(received.append)
+        tracker.on_event({"type": "delegate_parallel_branch", "index": 0, "phase": "start"})
+        assert received == []
+        assert tracker.snapshot()["fanouts"] == {}
+
+
 @pytest.fixture
 def server(monkeypatch, tmp_path):
     monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))

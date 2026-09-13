@@ -79,7 +79,12 @@ class TestOrchestrationRendering:
     def test_active_agents_render_before_idle_ones(self):
         script = _extract_inline_script()
         idx = script.index("function paintOrchestration")
-        block = script[idx: idx + 1600]
+        # Phase 4 (live orchestration view) widened paintOrchestration's
+        # body (the new ACTIVE FAN-OUT section) enough to push "IDLE ("
+        # just past the old 1600-char window — bumped with real headroom
+        # rather than the exact new distance, so the next small addition
+        # here doesn't retrigger this same window-too-small failure.
+        block = script[idx: idx + 2400]
         active_idx = block.index("ACTIVE")
         idle_idx = block.index("IDLE (")
         assert active_idx < idle_idx
@@ -90,3 +95,47 @@ class TestOrchestrationRendering:
         block = script[idx: idx + 400]
         assert '"computing"' in block
         assert "animation:pulse" in block
+
+
+class TestDelegateFanoutRendering:
+    """Phase 4: delegate_parallel's own per-branch detail (which branch,
+    which agent, which model), a genuinely different event type than
+    agent_activity above — see ActivityTracker._record_fanout/
+    _broadcast_fanout in dourmouse/webui.py for the backend half."""
+
+    def test_delegate_fanout_events_are_routed_to_orchApplyFanout(self):
+        script = _extract_inline_script()
+        assert 'if(data.type === "delegate_fanout"){ orchApplyFanout(data); return; }' in script
+
+    def test_initial_snapshot_also_loads_fanouts(self):
+        """A client opening ORCHESTRATION mid-fan-out must see it
+        immediately, not only once the NEXT branch event happens to
+        arrive — same real-state contract the per-agent snapshot has."""
+        script = _extract_inline_script()
+        idx = script.index("function loadOrchestrationSnapshot")
+        block = script[idx: idx + 400]
+        assert "j.fanouts" in block
+
+    def test_finished_run_is_removed_from_local_state(self):
+        script = _extract_inline_script()
+        idx = script.index("function orchApplyFanout")
+        block = script[idx: idx + 400]
+        assert "delete _orchFanouts" in block
+
+    def test_fanout_section_renders_before_the_active_section(self):
+        """The whole point of a live fan-out board: it should be the
+        first thing you see, not buried below the per-agent list."""
+        script = _extract_inline_script()
+        idx = script.index("function paintOrchestration")
+        block = script[idx: idx + 2400]
+        fanout_idx = block.index("ACTIVE FAN-OUT")
+        active_idx = block.index('class="sec" style="margin-top:${fanoutIds.length')
+        assert fanout_idx < active_idx
+
+    def test_branch_row_shows_index_agent_and_model(self):
+        script = _extract_inline_script()
+        idx = script.index("function orchFanoutRowHtml")
+        block = script[idx: idx + 800]
+        assert "b.agent" in block
+        assert "modelShown" in block
+        assert "localCloudSuffix(b)" in block
