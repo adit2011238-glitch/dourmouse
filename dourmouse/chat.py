@@ -147,6 +147,7 @@ class ChatSession:
         screen: str = "HOME",
         forced_agent: str | None = None,
         should_stop: Callable[[], bool] | None = None,
+        force_plain_dispatch: bool = False,
     ) -> dict[str, Any]:
         """Send one user turn; returns the dispatch report.
 
@@ -197,6 +198,12 @@ class ChatSession:
         'worldmonitor', and 'docs' instead of running as one directive on
         'docs'. forced_agent now makes the routing decision authoritative
         at the dispatch level, not just a hopeful sentence in the prompt.
+
+        ``force_plain_dispatch`` (Phase 5, bounded autonomous multi-step
+        execution): passed straight through to dispatch.py's own
+        run_dispatch_messages parameter of the same name — see its
+        docstring for the full reasoning. Default False, zero behavior
+        change for every existing caller.
         """
         prompt = prompt.strip()
         if not prompt:
@@ -245,6 +252,7 @@ class ChatSession:
                 voice=voice,
                 forced_agent=forced_agent,
                 should_stop=should_stop,
+                force_plain_dispatch=force_plain_dispatch,
                 # v5.6 neural orchestration: every top-level turn feeds the
                 # neural orchestrator (delayed import — a disabled gate is a
                 # no-op, and the sink can never break the turn).

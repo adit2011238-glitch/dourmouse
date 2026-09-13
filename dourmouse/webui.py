@@ -132,6 +132,16 @@ def _sandboxed_upload_path(rel: str) -> Path | None:
 # Time a human has to approve/decline a gated action before it auto-declines.
 _CONFIRM_TIMEOUT_SECONDS = 300.0
 
+# Phase 5 (bounded autonomous multi-step execution): the real ceiling for an
+# opt-in "Autonomous Project" turn (body.autonomous=true), vs. the ordinary
+# max_turns=8 every other chat turn is still capped at. Deliberately layered
+# UNDER the existing governance.BudgetLimits ceiling (max_calls=40) rather
+# than instead of it — that real, already-enforced cost/wall-time governor
+# stays the actual outer bound regardless of this number, so this only needs
+# to be "enough real steps for a genuine multi-step project", not itself a
+# safety limit.
+_AUTONOMOUS_MAX_TURNS = 24
+
 
 class _PendingConfirmation:
     __slots__ = ("confirm_id", "prompt_text", "_event", "_approved")
@@ -169,6 +179,14 @@ class WebConfirmationGate:
         self._pending: dict[str, _PendingConfirmation] = {}
         self._lock = threading.Lock()
         self._next_id = 0
+        # Phase 5: set per-turn by _handle_chat_authed right alongside
+        # set_emit, so a gate fired during an autonomous-mode turn can tell
+        # the UI that approving it lets the run continue automatically
+        # (copy only — the pause/resume mechanism itself is unchanged and
+        # already real). False is the correct default for every other
+        # caller of this one shared gate instance (e.g. hands_free's own
+        # session.ask call never sets this).
+        self.autonomous = False
 
     def set_emit(self, emit: Callable[[dict[str, Any]], None]) -> None:
         self._emit = emit
@@ -184,6 +202,7 @@ class WebConfirmationGate:
                 "type": "confirmation_requested",
                 "id": confirm_id,
                 "prompt": prompt_text,
+                "autonomous": self.autonomous,
             }
         )
         approved = pending.wait()
@@ -3796,6 +3815,12 @@ class _Handler(BaseHTTPRequestHandler):
         # exactly the old single shared session; see
         # _session_gate_lock_for_tab's own docstring.
         tab_id = (body.get("tab_id") or "").strip()
+        # Phase 5 (bounded autonomous multi-step execution): a real, explicit,
+        # off-by-default opt-in — console.html's composer toggle sends this
+        # only when the user turned it on for this specific turn. Missing/
+        # falsy (every existing caller: index.html, voice.html, sendMail's
+        # own focus_agent="mail" fetch, etc.) is the unchanged default.
+        autonomous = bool(body.get("autonomous"))
         # v8.18: voice/text response split. The speak-and-listen UI
         # (ui/voice.html) marks its /api/chat calls with voice: true because
         # it transcribes the request and speaks the reply back with zero
@@ -3963,6 +3988,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         with session_lock:
             gate.set_emit(stream.emit)
+            gate.autonomous = autonomous
             session.confirmation_gate = gate
             if tab_id:
                 self.server.confirm_resolvers_by_tab[tab_id] = gate.resolve
@@ -3992,7 +4018,15 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 report = session.ask(
                     prompt,
-                    max_turns=8,
+                    # Phase 5: an autonomous-mode turn gets a real, larger
+                    # turn ceiling (still layered under the existing
+                    # governance.BudgetLimits max_calls=40 outer bound —
+                    # see _AUTONOMOUS_MAX_TURNS's own comment) and
+                    # force_plain_dispatch=True so a REQUIRES_CONFIRMATION
+                    # tool stays reachable/pausable for the whole run
+                    # instead of being silently refused by Claude Front
+                    # Mode's own confirmation_gate=None (mcp_bridge.py).
+                    max_turns=_AUTONOMOUS_MAX_TURNS if autonomous else 8,
                     event_sink=sink,
                     model=model_override,
                     voice=voice_channel,
@@ -4012,11 +4046,18 @@ class _Handler(BaseHTTPRequestHandler):
                     # straight through is safe.
                     forced_agent=focus_agent or None,
                     should_stop=stream.should_stop,
+                    force_plain_dispatch=autonomous,
                 )
             except Exception as exc:  # surface real failures to the UI
                 error_msg = str(exc)
             finally:
                 session.confirmation_gate = previous_gate
+                # Defensive: this gate instance is shared across every
+                # caller (including hands_free's own session.ask, which
+                # never touches .autonomous at all) — never leave a stale
+                # True sitting on it for the NEXT unrelated call to
+                # silently inherit.
+                gate.autonomous = False
                 if tab_id:
                     self.server.confirm_resolvers_by_tab.pop(tab_id, None)
                 else:

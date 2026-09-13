@@ -1399,6 +1399,10 @@ body.bp-open .dock,body.bp-open .body{margin-right:min(48vw,720px)}
       </div>
       <button class="chip" id="micChip" title="Switch to voice-only mode">(MIC)</button>
       <textarea id="ta" rows="1" placeholder="Ask anything — or /all &lt;goal&gt; to put every resource on it"></textarea>
+      <!-- Phase 5 (bounded autonomous multi-step execution): off by default,
+           real honest tooltip — see the onclick wiring below for why this
+           is truthful and not oversold. -->
+      <button class="chip" id="autoProjectChip" title="Off by default. When on: runs up to 24 steps in one go instead of 8, pausing for your approval on any real action and resuming automatically once approved. Stays open only in this tab — closing or reloading loses an in-progress pause.">(PROJECT)</button>
       <button class="chip" id="spkChip" title="Speak replies aloud">(SPK)</button>
       <button id="stop" type="button"><span class="sq"></span>STOP</button>
       <button id="go">SEND_DIRECTIVE</button>
@@ -1542,6 +1546,12 @@ function backendModeGet(){
 }
 function backendModeSet(v){ try{ localStorage.setItem(BACKEND_MODE_KEY, v); }catch{ /* private mode: session-only */ } }
 let backendMode = backendModeGet();
+/* Phase 5: plain in-memory, NOT persisted (unlike backendMode) — a fresh
+   load always starts off, matching the toggle's own tooltip ("stays open
+   only in this tab"); silently carrying autonomous mode across a reload
+   the user doesn't remember turning on would be the opposite of the
+   honest, explicit opt-in this feature is supposed to be. */
+let autonomousMode = false;
 /* The single place the wire value is decided, so every /api/chat caller
    that honours the picker agrees on what it means. */
 function directiveFocusAgent(){
@@ -2540,6 +2550,7 @@ function addApproval(node, evt, declineMap, screenKey){
        <div class="hint">Type <b>send it</b> in the box below to send — or click CANCEL.</div>
        <div class="r"><button class="btn">CANCEL</button></div>`
     : `<div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
+       ${evt.autonomous ? '<div class="hint">Approving this lets the project keep going automatically.</div>' : ''}
        <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div>`;
   box.querySelector(".p").textContent = evt.prompt||"This action needs your approval.";
   node.body.parentNode.insertBefore(box, node.body);
@@ -2763,7 +2774,7 @@ async function run(text){
   };
   try{
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:text, focus_agent:directiveFocusAgent(), screen:targetScreen, tab_id:tabId()}), signal:myCtrl.signal});
+      body:JSON.stringify({prompt:text, focus_agent:directiveFocusAgent(), screen:targetScreen, tab_id:tabId(), autonomous:autonomousMode}), signal:myCtrl.signal});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -6404,6 +6415,8 @@ function initVoice(){
 $("micChip").onclick=()=>show("VOICE");
 $("spkChip").onclick=()=>{ speak=!speak; $("spkChip").classList.toggle("on",speak);
   $("spkChip").title = speak?"Replies will be spoken":"Speak replies aloud"; };
+$("autoProjectChip").onclick=()=>{ autonomousMode=!autonomousMode;
+  $("autoProjectChip").classList.toggle("on",autonomousMode); };
 
 /* ---------------- boot ---------------- */
 setInterval(()=>{ $("mClock").textContent=new Date().toTimeString().slice(0,8); },1000);

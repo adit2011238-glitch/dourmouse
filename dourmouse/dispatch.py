@@ -2137,13 +2137,27 @@ def _build_client(
     config: NvidiaConfig | OllamaConfig | OmniRouteConfig,
     forced_agent: str | None = None,
     session_stem: str | None = None,
+    force_plain_dispatch: bool = False,
 ) -> Any:
     # v13 (opt-in experiment, the user's own explicit ask): route through
     # a real strong backend — Claude Code CLI, or a real Ollama Cloud
     # account — INSTEAD of the local model, for every feature. See
     # _orchestrator_backend_mode()'s own docstring for the accepted
     # values and why "split" exists.
-    mode = _orchestrator_backend_mode()
+    #
+    # Phase 5 (bounded autonomous multi-step execution): force_plain_dispatch
+    # skips this mode resolution entirely (as if nothing were configured),
+    # regardless of the global DOURMOUSE_ORCHESTRATOR_MODE/Settings toggle.
+    # Real reason this exists: mcp_bridge.py's _handle_tools_call (the ONLY
+    # place a ClaudeCliClient turn's own tool calls actually execute)
+    # hardcodes confirmation_gate=None, so a REQUIRES_CONFIRMATION tool
+    # called through Claude Front Mode is refused outright, never paused —
+    # structurally incompatible with a run that needs to pause for approval
+    # and resume automatically. Forcing plain mode guarantees the client
+    # this call resolves to is one whose tool calls run through dispatch.py's
+    # OWN loop below (OllamaNativeClient/GeminiClient/OpenAI), where the real
+    # confirmation_gate is already correctly honored.
+    mode = "" if force_plain_dispatch else _orchestrator_backend_mode()
     if mode == "split":
         mode = _agent_split_backend(forced_agent)
     if mode in ("claude", "claude_cli"):
@@ -3126,6 +3140,16 @@ class DispatchContext:
     # its own Claude CLI session the identical per-tab isolation, instead
     # of only the top-level orchestrator path having it.
     session_stem: str | None = None
+    # Phase 5 (bounded autonomous multi-step execution): threaded alongside
+    # should_stop/session_stem so _run_dispatch_loop (which reads everything
+    # off ctx, not run_dispatch_messages' own parameters) can re-check it for
+    # the SECOND, cosmetic "brain" event re-label (the per-agent-routing
+    # refinement below) — see _build_client's own docstring paragraph on
+    # force_plain_dispatch for the full reasoning. Not itself read by any
+    # tool handler; this is purely so that second event can't un-say what
+    # the first "brain" event (emitted directly inside run_dispatch_messages,
+    # which DOES see the real parameter) already correctly reported.
+    force_plain_dispatch: bool = False
 
     def delegates_used(self) -> int:
         return self.budget[0]
@@ -3262,6 +3286,7 @@ def run_dispatch_messages(
     forced_agent: str | None = None,
     voice: bool = False,
     should_stop: Callable[[], bool] | None = None,
+    force_plain_dispatch: bool = False,
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -3315,6 +3340,17 @@ def run_dispatch_messages(
     limit, not silently assumed away): those already don't stream events at
     depth>0 and are separately bounded by ``max_delegates``/``max_depth``.
 
+    Phase 5 (bounded autonomous multi-step execution): ``force_plain_dispatch``
+    forces THIS top-level call's own client resolution (see _build_client's
+    own docstring paragraph on it) to skip Claude Front Mode / Ollama Cloud /
+    Gemini entirely, regardless of the global toggle, so a REQUIRES_CONFIRMATION
+    tool stays reachable and pausable for the whole run. Only matters when
+    ``client`` is None (the normal top-level-call case) — a nested
+    delegate_task/delegate_parallel run always passes the parent's own
+    already-resolved ``client`` object explicitly, so it inherits this
+    automatically without needing the flag threaded down separately. Default
+    False: zero behavior change for every existing caller.
+
     v5.6 neural orchestration: ``experience_sink`` (optional, called ONCE per
     TOP-LEVEL run with a self-supervised experience record — the prompt, the
     agents whose tools were actually used, and how cleanly the run ended) is
@@ -3365,6 +3401,7 @@ def run_dispatch_messages(
             config,
             forced_agent=_effective_split_agent(forced_agent, last_user, registry),
             session_stem=session_stem,
+            force_plain_dispatch=force_plain_dispatch,
         )
         # v5.0 fast dispatch: the orchestrator (looping dispatch brain)
         # defaults to its per-agent model (qwen3:4b on the local backend) so
@@ -3440,7 +3477,7 @@ def run_dispatch_messages(
     # answer arrived in ~7s — far faster than qwen2.5:7b's real ~20-70s
     # floor for the same prompt). Report the REAL answering backend
     # honestly instead of the stale config-derived guess.
-    _orch_mode = _orchestrator_backend_mode()
+    _orch_mode = "" if force_plain_dispatch else _orchestrator_backend_mode()
     if _orch_mode == "split":
         # Same effective-agent peek _build_client() used above to pick
         # the REAL client — must agree, or this event would report a
@@ -3501,6 +3538,7 @@ def run_dispatch_messages(
         parent_context=_build_parent_context(messages),
         forced_agent=forced_agent,
         session_stem=session_stem,
+        force_plain_dispatch=force_plain_dispatch,
         # v8.30: pinned whenever anything more specific than the plain
         # generic default already claimed this model — an explicit caller
         # override, brain escalation, or the fast lane's own deliberate
@@ -4148,7 +4186,7 @@ def _run_dispatch_loop(
                 # dishonest about what's actually happening. Re-apply the
                 # SAME orchestrator-mode override so this second event
                 # can't un-say what the first one correctly reported.
-                _orch_mode2 = _orchestrator_backend_mode()
+                _orch_mode2 = "" if ctx.force_plain_dispatch else _orchestrator_backend_mode()
                 if _orch_mode2 == "split":
                     # ctx.forced_agent stays None for an ordinary
                     # planner-routed query (see _effective_split_agent's

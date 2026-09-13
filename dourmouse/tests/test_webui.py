@@ -1272,6 +1272,136 @@ class TestVoiceCommandEndpoint:
         assert data["recognized"] is False
 
 
+class TestAutonomousMode:
+    """Phase 5 (bounded autonomous multi-step execution): body.autonomous
+    controls two real things at once — the turn ceiling (_handle_chat_authed
+    passes max_turns=_AUTONOMOUS_MAX_TURNS instead of 8) and
+    force_plain_dispatch (skips Claude Front Mode's client resolution for
+    this one call so a REQUIRES_CONFIRMATION tool stays pausable). Both
+    checked here independently, hermetically — no real Claude CLI/Ollama
+    Cloud process is ever invoked."""
+
+    def _post_and_drain(self, port, body):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat", body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+        conn.close()
+
+    def test_default_still_caps_at_eight_turns(self, server):
+        srv, port = server
+        tool_call = _FakeToolCall("c", "echo", json.dumps({"text": "x"}))
+        looping = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))
+        srv.session.client = FakeClient([looping] * 20)
+        self._post_and_drain(port, {"prompt": "loop forever"})
+        # 8 turns to exhaust the ordinary ceiling, +1 forced tools=[]
+        # synthesis call — same accounting as test_dispatch.py's own
+        # test_max_turns_bounds_looping_model.
+        assert len(srv.session.client.chat.completions.calls) == 9
+
+    def test_autonomous_flag_raises_the_real_turn_ceiling(self, server):
+        srv, port = server
+        tool_call = _FakeToolCall("c", "echo", json.dumps({"text": "x"}))
+        looping = _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))
+        srv.session.client = FakeClient([looping] * 40)
+        self._post_and_drain(port, {"prompt": "loop forever", "autonomous": True})
+        assert len(srv.session.client.chat.completions.calls) == webui_module._AUTONOMOUS_MAX_TURNS + 1
+
+    def test_autonomous_flag_forces_plain_dispatch_through_to_build_client(self, server, monkeypatch):
+        """The other real half: force_plain_dispatch=True must actually
+        reach dispatch._build_client for this top-level turn (client=None
+        so run_dispatch_messages really calls _build_client instead of
+        skipping straight to whatever client is already sitting there).
+
+        config is set explicitly to a real OllamaConfig() (still no fake
+        network client — _build_client itself is patched below) rather
+        than left at the session's own None default: the root conftest.py
+        deliberately sets DOURMOUSE_LLM_BACKEND=none for every test as a
+        real-network-call safety net, and `config is None` is exactly the
+        one condition that makes run_dispatch_messages call
+        load_llm_config_with_fallback(), which honors that env var and
+        raises. A real, valid config sidesteps that fallback entirely
+        without weakening the safety net itself."""
+        import dourmouse.dispatch as dispatch_module
+        from dourmouse.config import OllamaConfig
+
+        srv, port = server
+        srv.session.config = OllamaConfig()
+        seen_force_flags = []
+
+        def spy_build_client(config, forced_agent=None, session_stem=None, force_plain_dispatch=False):
+            seen_force_flags.append(force_plain_dispatch)
+            return FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+
+        monkeypatch.setattr(dispatch_module, "_build_client", spy_build_client)
+        assert srv.session.client is None  # the real default this test relies on
+        self._post_and_drain(port, {"prompt": "hello", "autonomous": True})
+        assert seen_force_flags == [True]
+
+    def test_non_autonomous_turn_does_not_force_plain_dispatch(self, server, monkeypatch):
+        import dourmouse.dispatch as dispatch_module
+        from dourmouse.config import OllamaConfig
+
+        srv, port = server
+        srv.session.config = OllamaConfig()
+        seen_force_flags = []
+
+        def spy_build_client(config, forced_agent=None, session_stem=None, force_plain_dispatch=False):
+            seen_force_flags.append(force_plain_dispatch)
+            return FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+
+        monkeypatch.setattr(dispatch_module, "_build_client", spy_build_client)
+        assert srv.session.client is None
+        self._post_and_drain(port, {"prompt": "hello"})
+        assert seen_force_flags == [False]
+
+    def test_gate_carries_the_autonomous_flag_for_the_ui_copy_change(self, server):
+        """console.html's addApproval reads evt.autonomous to show the
+        extra "keeps going automatically" line — proves the real gated tool
+        call during an autonomous turn actually emits it, not just that the
+        gate object has the attribute."""
+        srv, port = server
+        tool_call = _FakeToolCall("c", "gated_echo", json.dumps({"text": "x"}))
+        srv.session.client = FakeClient(
+            [_FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call]))]
+        )
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST", "/api/chat",
+            body=json.dumps({"prompt": "echo x", "autonomous": True}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        events = []
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            if line.startswith(b"data: "):
+                e = json.loads(line[6:])
+                events.append(e)
+                if e.get("type") == "confirmation_requested":
+                    # Decline immediately so the request can finish and this
+                    # test doesn't block on the real 300s auto-decline path.
+                    fetch_conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                    fetch_conn.request(
+                        "POST", "/api/confirm",
+                        body=json.dumps({"id": e["id"], "approved": False}),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    fetch_conn.getresponse().read()
+                    fetch_conn.close()
+        conn.close()
+        gate_events = [e for e in events if e.get("type") == "confirmation_requested"]
+        assert gate_events and gate_events[0]["autonomous"] is True
+
+
 class TestSseChat:
     def _stream_events(self, port, prompt):
         """POST /api/chat and read the SSE stream into a list of events."""

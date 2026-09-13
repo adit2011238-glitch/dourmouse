@@ -3442,6 +3442,37 @@ class TestBuildClientOrchestratorRouting:
         client = dispatch_module._build_client(OllamaConfig(), forced_agent="mail")
         assert isinstance(client, dispatch_module.ClaudeCliClient)
 
+    def test_force_plain_dispatch_bypasses_claude_mode_even_when_env_forces_it(self, monkeypatch):
+        """Phase 5 (bounded autonomous multi-step execution): the whole
+        reason this flag exists — mcp_bridge.py's _handle_tools_call
+        hardcodes confirmation_gate=None for a ClaudeCliClient turn's own
+        tool calls, so an autonomous run must never land on 'claude' no
+        matter what the global env/Settings toggle says."""
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "claude")
+        from dourmouse.config import OllamaConfig
+
+        client = dispatch_module._build_client(
+            OllamaConfig(), forced_agent="mail", force_plain_dispatch=True
+        )
+        assert isinstance(client, dispatch_module.OllamaNativeClient)
+        assert not isinstance(client, dispatch_module.ClaudeCliClient)
+
+    def test_force_plain_dispatch_also_bypasses_split_mode(self, monkeypatch):
+        """'split' (the default, Claude-front-by-default mode) escalates
+        heavy-workflow agents straight to Claude — force_plain_dispatch
+        must override that escalation too, not just plain 'claude' mode."""
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "split")
+        monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
+        from dourmouse.config import OllamaConfig
+
+        # "code_claude" is one of _HEAVY_WORKFLOW_AGENT_MARKERS ("code_"),
+        # so ordinary split mode would escalate it straight to Claude.
+        assert dispatch_module._agent_split_backend("code_claude") == "claude"
+        client = dispatch_module._build_client(
+            OllamaConfig(), forced_agent="code_claude", force_plain_dispatch=True
+        )
+        assert isinstance(client, dispatch_module.OllamaNativeClient)
+
     def test_ollama_cloud_mode_routes_everything_to_the_cloud(self, monkeypatch):
         monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "ollama_cloud")
         monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
