@@ -40,10 +40,15 @@ class TestAutonomousToggleExists:
         """Real, checkable claims only — matches this app's own established
         honesty convention (Rule 2.1): no "AI will handle everything"
         marketing copy, a plain statement of the real turn cap, the real
-        pause/resume behavior, and the real per-tab-only scope."""
+        pause/resume behavior, and the real per-tab-only scope.
+
+        Phase 6: this chip's tooltip moved from the plain OS title
+        attribute to the new custom data-tip bubble (see [data-tip] in
+        console.html's own <style> block) — same content, different
+        delivery, so this checks the new attribute."""
         html = _CONSOLE_HTML.read_text(encoding="utf-8")
-        m = re.search(r'id="autoProjectChip"[^>]*title="([^"]+)"', html)
-        assert m, "autoProjectChip has no title tooltip"
+        m = re.search(r'id="autoProjectChip"[^>]*data-tip="([^"]+)"', html)
+        assert m, "autoProjectChip has no data-tip tooltip"
         tooltip = m.group(1)
         assert "off by default" in tooltip.lower()
         assert "pausing for your approval" in tooltip.lower()

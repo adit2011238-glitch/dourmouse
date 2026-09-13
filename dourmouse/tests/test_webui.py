@@ -2459,7 +2459,10 @@ class TestSystemBrowserClaimFlow:
         assert status == 200
         html = raw.decode("utf-8", errors="replace")
         assert "open_external" in html
-        assert "OPEN IN CHROME" in html
+        # Phase 6: button copy sentence-cased and its decorative arrow
+        # glyph dropped, same pass that fixed showManualLink's colors and
+        # its dead claimNote element id below.
+        assert "Open in Chrome" in html
         assert "showManualLink" in html
         assert "startClaimPoll" in html
         # The plain-browser path (no webview) must still redirect directly.

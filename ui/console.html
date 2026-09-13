@@ -9,7 +9,7 @@
        the console default would silently kill "Add to Home Screen", the
        Android install banner, the standalone window and the app icon. -->
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#04080e">
+  <meta name="theme-color" content="#09090B">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -103,8 +103,14 @@
   --ok:#10B981; --warn:#F59E0B; --bad:#EF4444;
   --mono:'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --display:'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
-  --font-prose:'Berkeley Mono','Monaspace Neon','JetBrains Mono',ui-monospace,monospace;
-  --font-prose-alt:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  /* Phase 6: this file already ships a real, locally hosted Fira Sans so
+     long form assistant prose reads well regardless of theme, but the
+     face landed on font-prose-alt, a variable nothing ever read. The
+     actual prose element (.turn .body below) reads font-prose, which was
+     still a mono stack in every theme. Fira Sans now sits directly on
+     the token every real call site already uses. font-prose-alt is
+     retired. */
+  --font-prose:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
   --map-land:#27272A;
 }
 
@@ -337,6 +343,92 @@
    with the raw lime rather than using it as a line/glow. */
 [data-theme="aurora-citrus"] .dot.ok{background:#5fae3d}
 
+/* --- STUDIO: a restrained fifth family, closer to Claude Desktop and
+   Codex than a HUD. Where Aurora changes shape toward glass (blur,
+   glow, generous radius, system type), Studio changes shape toward a
+   plain modern app: solid surfaces, hairline borders, a small shadow
+   only where something genuinely lifts off the page, one sans face for
+   both interface chrome and prose. Built to the no-slop-ui reference
+   rules the user asked this pass to follow: 1px borders, 6 to 10px
+   radius, shadow capped at 0 2px 8px rgba(0,0,0,.08), no backdrop blur,
+   no glow. Same structural discipline Aurora already proved: one shared
+   rule block below applies to all four studio-* ids identically, and
+   only each theme's own token block further down differs.
+
+   font-prose already carries Fira Sans for every theme (see the fix
+   above), so mono/display point at it too here rather than adding a
+   second face: this file's own fonts are bundled locally with no CDN
+   fallback, and no-slop-ui's own guidance is a single sans face across
+   the interface, not a mono chrome over a sans body. */
+[data-theme^="studio-"] .card,[data-theme^="studio-"] .pane,
+[data-theme^="studio-"] .dock,[data-theme^="studio-"] .rail,
+[data-theme^="studio-"] .tabbar{
+  border-radius:8px;
+  box-shadow:none;
+}
+[data-theme^="studio-"] .tabbar .tab{border-radius:6px}
+[data-theme^="studio-"] .chip,[data-theme^="studio-"] button.chip,
+[data-theme^="studio-"] .glassbtn{border-radius:6px}
+[data-theme^="studio-"] .paneh,[data-theme^="studio-"] h1,[data-theme^="studio-"] .title{
+  font-family:var(--display);letter-spacing:0;text-transform:none;font-weight:600}
+/* The one new call site: a second accent for emphasis inside prose,
+   shown in the approved mockup. Scoped to studio-* only, the same way
+   aurora-citrus's own dot.ok override above is scoped to one family. */
+[data-theme^="studio-"] .turn .body b,[data-theme^="studio-"] .turn .body strong{
+  color:var(--accent2);font-weight:600}
+
+[data-theme="studio-void"]{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2229;
+  --amber:#58a6ff; --amber-hi:#79b8ff; --amber-ink:#0d1117;
+  --blue:#9198a1; --blue-dim:#6e7681; --blue-hi:#e6edf3; --blue-deep:#b1bac4;
+  --line:#30363d; --line-2:#3d444d;
+  --amber-line:rgba(88,166,255,.40); --amber-soft:rgba(88,166,255,.15);
+  --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+  --mono:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --display:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --map-land:#1c2733;
+  --accent2:#f78166;
+}
+
+[data-theme="studio-ink"]{
+  --bg:#0f0f0f; --panel:#1a1a1a; --panel2:#232323;
+  --amber:#00d4aa; --amber-hi:#33ffcc; --amber-ink:#0a0a0a;
+  --blue:#b0b0b0; --blue-dim:#7a7a7a; --blue-hi:#ededed; --blue-deep:#cfcfcf;
+  --line:#2e2e2e; --line-2:#3a3a3a;
+  --amber-line:rgba(0,212,170,.40); --amber-soft:rgba(0,212,170,.15);
+  --ok:#00d4aa; --warn:#e6c260; --bad:#ff5c7a;
+  --mono:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --display:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --map-land:#202020;
+  --accent2:#ff6b9d;
+}
+
+[data-theme="studio-paper"]{
+  --bg:#fcfcfc; --panel:#ffffff; --panel2:#f4f5f7;
+  --amber:#1d4ed8; --amber-hi:#2563eb; --amber-ink:#ffffff;
+  --blue:#4b5563; --blue-dim:#7b8794; --blue-hi:#1d2126; --blue-deep:#374151;
+  --line:#e2e2e0; --line-2:#d1d1cd;
+  --amber-line:rgba(29,78,216,.40); --amber-soft:rgba(29,78,216,.10);
+  --ok:#16a34a; --warn:#b45309; --bad:#dc2626;
+  --mono:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --display:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --map-land:#e5e7eb;
+  --accent2:#dc2626;
+}
+
+[data-theme="studio-frost"]{
+  --bg:#f1f5f9; --panel:#f8fafc; --panel2:#e2e8f0;
+  --amber:#0f766e; --amber-hi:#14b8a6; --amber-ink:#ffffff;
+  --blue:#475569; --blue-dim:#7f8ea3; --blue-hi:#1e2939; --blue-deep:#334155;
+  --line:#dbe3ea; --line-2:#c7d2dc;
+  --amber-line:rgba(15,118,110,.40); --amber-soft:rgba(15,118,110,.10);
+  --ok:#16a34a; --warn:#b45309; --bad:#e11d48;
+  --mono:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --display:'Fira Sans',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  --map-land:#dde7ee;
+  --accent2:#e11d48;
+}
+
 /* --- Ambient texture layer (rain + grain), theme-driven -------------- */
 @keyframes dmRainA{0%{mask-position:0 0;-webkit-mask-position:0 0}
   100%{mask-position:0 96px;-webkit-mask-position:0 96px}}
@@ -451,6 +543,48 @@ body{margin:0;background:var(--bg);color:var(--blue);
 button,input,textarea,select{font:inherit;color:inherit}
 :focus-visible{outline:1px solid var(--amber);outline-offset:2px}
 ::selection{background:var(--amber);color:var(--amber-ink)}
+
+/* Phase 6: a plain OS scrollbar was the one remaining unstyled surface
+   in an otherwise fully themed app. Thin, token-driven, applies
+   everywhere rather than only inside Studio, since a stock scrollbar
+   reads as unfinished in any theme, not just the new restrained ones. */
+*{scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:var(--blue-dim);border:2px solid transparent;background-clip:padding-box}
+
+/* A real custom tooltip, replacing the plain OS one on the composer's
+   own controls. data-tip carries the text; the bubble is theme-token-
+   driven so it reads correctly on every theme including the new studio-*
+   family, and the fade-in has the same small delay a considered app
+   uses so a passing cursor never flashes a wall of bubbles. Positioned
+   above the element: safe here because every current use sits in the
+   composer at the bottom of the screen, with real room above it. Not
+   applied file-wide, since a control near the top of the screen would
+   need the opposite position to avoid clipping. */
+[data-tip]{position:relative}
+[data-tip]::after{
+  content:attr(data-tip);
+  position:absolute;left:50%;bottom:calc(100% + 9px);
+  transform:translateX(-50%) translateY(4px);
+  width:max-content;max-width:240px;
+  background:var(--panel2);color:var(--blue-hi);
+  border:1px solid var(--line-2);border-radius:6px;
+  padding:7px 10px;font-size:10.5px;line-height:1.4;
+  font-family:var(--mono);letter-spacing:.01em;font-weight:400;
+  text-transform:none;
+  box-shadow:0 2px 8px rgba(0,0,0,.08);
+  opacity:0;pointer-events:none;
+  transition:opacity .15s ease .4s,transform .15s ease .4s;
+  z-index:200;
+}
+[data-tip]:hover::after,[data-tip]:focus-visible::after{
+  opacity:1;transform:translateX(-50%) translateY(0);
+}
+@media (prefers-reduced-motion:reduce){
+  [data-tip]::after{transition:none}
+}
 
 .wrap{display:flex;flex-direction:column;height:100dvh;padding:10px 14px 8px;gap:9px}
 
@@ -621,29 +755,36 @@ button,input,textarea,select{font:inherit;color:inherit}
   background:radial-gradient(circle at 30% 20%, rgba(80,140,220,.12), transparent 60%),
              radial-gradient(circle at 80% 80%, rgba(60,200,180,.08), transparent 55%),
              var(--panel)}
-.glasscard{max-width:460px;width:100%;padding:28px 30px;border-radius:20px;
-  background:rgba(255,255,255,.045);
-  -webkit-backdrop-filter:blur(24px) saturate(140%);backdrop-filter:blur(24px) saturate(140%);
-  border:1px solid rgba(255,255,255,.09);
-  box-shadow:0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
-  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,sans-serif;
+/* Phase 6: this was the one real hardcoded-CSS straggler in the theme
+   system. gradient fill, a colored glow filter, and backdrop blur, none
+   of it theme-token-driven, all three flagged by the no-slop-ui ruleset
+   this pass follows. Rewritten to a solid theme-token-driven fill, a 1px
+   border, and no glow or blur. It also broke on every light theme: a
+   white overlay on a white ground made the secondary button invisible.
+   The deliberate always-dark code blocks elsewhere in this file (.turn
+   .body pre, .actdetail, .bookreadera pre) are a different, correctly
+   documented case and are left alone. */
+.glasscard{max-width:460px;width:100%;padding:28px 30px;border-radius:10px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  box-shadow:0 2px 8px rgba(0,0,0,.08);
+  font-family:var(--mono);
   color:var(--blue-hi)}
 .glasscard h2{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px;
   display:flex;align-items:center;gap:9px}
-.glasscard h2 .eye{font-size:22px;line-height:1;filter:drop-shadow(0 0 6px rgba(100,200,255,.5))}
+.glasscard h2 .eye{font-size:22px;line-height:1}
 .glasscard p{font-size:13.5px;line-height:1.55;color:var(--blue-deep);margin:0 0 16px}
-.glasscard .steps{font-size:12.5px;line-height:1.7;background:rgba(0,0,0,.18);border-radius:12px;
+.glasscard .steps{font-size:12.5px;line-height:1.7;background:var(--panel2);border-radius:8px;
   padding:12px 14px;margin:0 0 16px;font-family:var(--mono);color:var(--blue-hi)}
-.glasscard .steps code{color:#8fd3ff}
+.glasscard .steps code{color:var(--amber)}
 .glassbtnrow{display:flex;gap:10px}
-.glassbtn{flex:1;border:none;border-radius:12px;padding:11px 16px;font-size:13px;font-weight:600;
-  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,sans-serif;
-  cursor:pointer;transition:transform .12s ease, opacity .12s ease}
-.glassbtn:active{transform:scale(.97)}
-.glassbtn.primary{background:linear-gradient(180deg,#4aa3ff,#2f7ee0);color:#fff}
-.glassbtn.primary:hover{opacity:.92}
-.glassbtn.secondary{background:rgba(255,255,255,.08);color:var(--blue-hi)}
-.glassbtn.secondary:hover{background:rgba(255,255,255,.13)}
+.glassbtn{flex:1;border:1px solid transparent;border-radius:8px;padding:11px 16px;font-size:13px;font-weight:600;
+  font-family:var(--mono);
+  cursor:pointer;transition:background .12s ease,border-color .12s ease}
+.glassbtn.primary{background:var(--amber);color:var(--amber-ink)}
+.glassbtn.primary:hover{background:var(--amber-hi)}
+.glassbtn.secondary{background:none;color:var(--blue-hi);border-color:var(--line-2)}
+.glassbtn.secondary:hover{background:var(--panel2);border-color:var(--amber-line)}
 .globeframe{width:100%;height:100%;min-height:520px;border:0;display:block;background:#000}
 .globetoolbar{display:flex;align-items:center;gap:10px;padding:8px 12px;
   background:rgba(255,255,255,.04);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
@@ -687,7 +828,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .turn.you .gut .who{color:var(--blue-hi)}
 .turn .gut .tm{color:var(--blue-deep);opacity:.7;font-variant-numeric:tabular-nums}
 .turn .gut .mdl.local{color:var(--ok)}
-.turn .body{font-size:13.5px;line-height:1.7;color:var(--blue-hi);word-break:break-word;font-family:var(--font-prose)}
+.turn .body{font-size:15px;line-height:1.6;color:var(--blue-hi);word-break:break-word;font-family:var(--font-prose)}
 .turn.you .body{color:var(--blue);white-space:pre-wrap}
 .turn .body p{margin:0 0 9px}.turn .body p:last-child{margin:0}
 .turn .body ul,.turn .body ol{margin:8px 0;padding-left:19px}
@@ -835,13 +976,21 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
    dictation all end at ta.value=…; submit()). A per-pane copy would be
    several controls sharing one piece of state — the same picker drawn
    more than once, not more choice. */
-.backendsel{display:inline-flex;align-items:center;gap:7px;flex:none}
+.backendsel{display:inline-flex;align-items:center;gap:7px;flex:none;position:relative}
 /* Reuses the file's existing .lbl (see the code-tool-picker section) rather
    than a second class that would say the same thing. */
 .backendsel .lbl{white-space:nowrap}
 #backendPick{font-family:var(--mono);font-size:9px;letter-spacing:.08em;
   color:var(--blue-dim);background:var(--panel2);border:1px solid var(--line-2);
-  border-radius:6px;padding:0 7px;min-height:30px;max-width:230px;cursor:pointer}
+  border-radius:6px;padding:0 20px 0 7px;min-height:30px;max-width:230px;cursor:pointer;
+  /* Phase 6: a real custom widget rather than a raw OS control — the
+     native chevron/arrow is dropped (appearance:none) and replaced by
+     the small triangle below, drawn from a plain CSS border rather than
+     an SVG so it needs no asset and takes currentColor for free via
+     border-top-color. Keeps every bit of native <select> behavior
+     (keyboard nav, the open dropdown itself, screen readers) — only the
+     closed control's own look changes. */
+  appearance:none;-webkit-appearance:none;-moz-appearance:none}
   /* Real bug, live-reproduced: "AUTO — OLLAMA / LOCAL AGENT" clipped to
      "...LOCAL AGEN" at the old 200px cap — a native <select> has no
      ellipsis, it just hides the overflow, so the closed control silently
@@ -850,6 +999,15 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 #backendPick:hover{border-color:var(--amber-line);color:var(--amber)}
 #backendPick.on{color:var(--amber);border-color:var(--amber-line);background:var(--amber-soft)}
 #backendPick option{background:var(--panel2);color:var(--blue-hi)}
+.backendsel::after{
+  content:"";position:absolute;right:9px;top:50%;transform:translateY(-25%);
+  width:0;height:0;pointer-events:none;
+  border-left:4px solid transparent;border-right:4px solid transparent;
+  border-top:5px solid var(--blue-dim);
+}
+.backendsel:has(#backendPick:hover)::after,.backendsel:has(#backendPick.on)::after{
+  border-top-color:var(--amber);
+}
 
 /* ---------- footer ---------- */
 /* v8.7-style wrap, for the same reason: the footer now carries a third
@@ -1397,13 +1555,13 @@ body.bp-open .dock,body.bp-open .body{margin-right:min(48vw,720px)}
           <option value="claude">CLAUDE (DIRECT CLI)</option>
         </select>
       </div>
-      <button class="chip" id="micChip" title="Switch to voice-only mode">(MIC)</button>
+      <button class="chip" id="micChip" data-tip="Switch to voice-only mode">(MIC)</button>
       <textarea id="ta" rows="1" placeholder="Ask anything — or /all &lt;goal&gt; to put every resource on it"></textarea>
       <!-- Phase 5 (bounded autonomous multi-step execution): off by default,
            real honest tooltip — see the onclick wiring below for why this
            is truthful and not oversold. -->
-      <button class="chip" id="autoProjectChip" title="Off by default. When on: runs up to 24 steps in one go instead of 8, pausing for your approval on any real action and resuming automatically once approved. Stays open only in this tab — closing or reloading loses an in-progress pause.">(PROJECT)</button>
-      <button class="chip" id="spkChip" title="Speak replies aloud">(SPK)</button>
+      <button class="chip" id="autoProjectChip" data-tip="Off by default. When on, runs up to 24 steps in one go instead of 8, pausing for your approval on any real action and resuming automatically once approved. Stays open only in this tab. Closing or reloading loses an in-progress pause.">(PROJECT)</button>
+      <button class="chip" id="spkChip" data-tip="Speak replies aloud">(SPK)</button>
       <button id="stop" type="button"><span class="sq"></span>STOP</button>
       <button id="go">SEND_DIRECTIVE</button>
     </div>
@@ -1789,6 +1947,26 @@ const THEMES = {
     name:"AURORA CITRUS",
     desc:"The only light member of the family — warm paper ground, chartreuse accent, soft glass cards.",
     sw:{bg:"#F6F7F1",dot:"#111311",bars:["#111311","#C4E538","#e8ead9"]}
+  },
+  "studio-void": {
+    name:"STUDIO VOID",
+    desc:"Solid dark surfaces, hairline borders, a blue accent. Restrained, closer to a modern editor than a HUD.",
+    sw:{bg:"#0d1117",dot:"#58a6ff",bars:["#58a6ff","#f78166","#30363d"]}
+  },
+  "studio-ink": {
+    name:"STUDIO INK",
+    desc:"The darkest member of the family. Near black surfaces, a teal accent, pink for emphasis.",
+    sw:{bg:"#0f0f0f",dot:"#00d4aa",bars:["#00d4aa","#ff6b9d","#2e2e2e"]}
+  },
+  "studio-paper": {
+    name:"STUDIO PAPER",
+    desc:"The light counterpart to Void. Bright neutral ground, a blue accent, red for emphasis.",
+    sw:{bg:"#fcfcfc",dot:"#1d4ed8",bars:["#1d4ed8","#dc2626","#e2e2e0"]}
+  },
+  "studio-frost": {
+    name:"STUDIO FROST",
+    desc:"A cool light variant. Slate ground, a teal accent, rose for emphasis.",
+    sw:{bg:"#f1f5f9",dot:"#0f766e",bars:["#0f766e","#e11d48","#dbe3ea"]}
   }
 };
 // backlog #7: each browser TAB gets its own real ChatSession server-side
@@ -1868,6 +2046,15 @@ function themeSet(t){
   if(!THEMES[t]) return;
   document.documentElement.setAttribute("data-theme", t);
   try{ localStorage.setItem(THEME_KEY, t); }catch{ /* private mode: theme is session-only */ }
+  // Phase 6: the static theme-color meta tag only ever matched whichever
+  // theme happened to be the default when it was written. Reading the
+  // real active --bg after the attribute above is set keeps the browser
+  // chrome (mobile address bar, PWA title bar) honest on every switch.
+  // manifest.json's own theme_color is a separate, install-time-only
+  // value the OS reads before this script ever runs, so a fully theme
+  // reactive PWA manifest stays out of scope, not silently attempted.
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if(metaTheme) metaTheme.setAttribute("content", cssVar("--bg"));
 }
 
 /* --- The picker (first run only) -------------------------------------- */
@@ -4324,7 +4511,14 @@ let d2dShapes = [];       // {id,name,category,description,x,y,width,height,colo
 let d2dSelected = null;
 let d2dNextId = 1;
 const D2D_CATEGORIES = ["panel","button","toolbar","hud","icon","modal"];
-const D2D_DEFAULT_COLOR = {panel:"#7ea9c9",button:"#f2b73d",toolbar:"#8fa6b8",hud:"#5fbf8a",icon:"#c6d8e6",modal:"#e0685c"};
+// Phase 6: this used to be a frozen object snapshotting the pre-retheme
+// palette (#7ea9c9 was the old --blue, #f2b73d the old --amber, and so
+// on down the list). It never updated after the retheme, so every new
+// 2D design shape defaulted to a color from a palette this app no
+// longer ships. cssVar (below) reads the real active theme, so this now
+// resolves live, including across a theme switch.
+const D2D_CATEGORY_TOKEN = {panel:"--blue",button:"--amber",toolbar:"--blue-dim",hud:"--ok",icon:"--blue-hi",modal:"--bad"};
+function d2dDefaultColor(category){ return cssVar(D2D_CATEGORY_TOKEN[category] || "--blue"); }
 
 function paintDesign3dWorkspace2D(){
   $("d3dViewBody").innerHTML = `
@@ -4391,7 +4585,7 @@ function paintDesign3dWorkspace2D(){
       d2dShapes.push({
         id, category: placingCategory, name: placingCategory+"_"+id, description: "",
         x: Math.max(0,pt.x-60), y: Math.max(0,pt.y-36), width: 120, height: 72,
-        color: D2D_DEFAULT_COLOR[placingCategory]||"#7ea9c9", opacity: 1,
+        color: d2dDefaultColor(placingCategory), opacity: 1,
       });
       d2dSelected = id; placingCategory = null;
       palette.querySelectorAll("button").forEach(x=>x.classList.remove("on"));

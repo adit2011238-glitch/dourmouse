@@ -1,13 +1,13 @@
 {
   "name": "DourMouse",
   "short_name": "DourMouse",
-  "description": "DOURMOUSE — central agent dispatch: ATLAS quant engine, portfolio, world monitor, alerts and research.",
+  "description": "DOURMOUSE. Central agent dispatch: ATLAS quant engine, portfolio, world monitor, alerts and research.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0a0f1e",
-  "theme_color": "#0a0f1e",
+  "background_color": "#09090B",
+  "theme_color": "#09090B",
   "categories": ["finance", "productivity", "utilities"],
   "icons": [
     {

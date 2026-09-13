@@ -301,20 +301,27 @@
   // a copyable link + a retry button instead of silently navigating the
   // webview (Google blocks embedded WebKit; a silent nav would 500 again).
   function showManualLink(googleUrl, claim) {
-    const w = document.getElementById('claimNote');
+    // Real bug found while fixing this function's own colors below:
+    // getElementById('claimNote') targets an id that does not exist
+    // anywhere in this page's markup, so the whole manual-link fallback
+    // silently returned via the guard just below and never rendered at
+    // all, not just unstyled. ggoogleMsg is the real, already-present,
+    // already-styled status element the click handler below uses for
+    // every other status message on this page.
+    const w = document.getElementById('ggoogleMsg');
     if (!w) return;
     w.style.display = 'block';
     const safeUrl = String(googleUrl).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-    w.innerHTML = '<span class="warn">Could not open Chrome automatically — ' +
-      '<b>click the button</b> below, or copy the link and paste it into ' +
-      'your Chrome browser:</span>' +
+    w.innerHTML = '<span class="warn">Could not open Chrome automatically. ' +
+      '<b>Click the button</b> below, or copy the link and paste it into ' +
+      'your Chrome browser.</span>' +
       '<br><input id="manualUrl" type="text" readonly value="' + safeUrl + '" ' +
-      'style="width:100%;margin:8px 0;padding:6px;font:12px monospace;' +
-      'background:#0b0f14;color:#7fd8ff;border:1px solid #233;border-radius:2px;">' +
-      '<button id="retryOpen" class="gg-btn" style="margin-top:4px">' +
-      'OPEN IN CHROME ▸</button>' +
-      '<p style="margin:8px 0 0;font-size:12px;color:#6a7a8a">Approve it there — ' +
-      'this window signs you in automatically when done.</p>';
+      'style="width:100%;margin:8px 0;padding:6px;font:12px var(--font-mono);' +
+      'background:var(--surface);color:var(--text);border:1px solid var(--line-strong);border-radius:4px;">' +
+      '<button id="retryOpen" class="gbtn ghost" style="margin-top:4px">' +
+      'Open in Chrome</button>' +
+      '<p style="margin:8px 0 0;font-size:12px;color:var(--text-dim)">Approve it there. ' +
+      'This window signs you in automatically when done.</p>';
     document.getElementById('manualUrl').addEventListener('click', e => e.target.select());
     document.getElementById('retryOpen').addEventListener('click', () => {
       window.pywebview?.api?.open_external(googleUrl)
@@ -340,11 +347,11 @@
         // session once the browser tab finishes and redirects to /login?claimed=1.
         history.replaceState(null, '', '/login?claiming=' + claim);
         startClaimPoll(claim);
-        const w = document.getElementById('claimNote');
+        const w = document.getElementById('ggoogleMsg');
         if (w) {
           w.style.display = 'block';
-          w.innerHTML = '<span class="warn">Google opened in your browser — ' +
-            'approve it there. This window signs you in automatically when done.</span>';
+          w.innerHTML = '<span class="warn">Google opened in your browser. ' +
+            'Approve it there. This window signs you in automatically when done.</span>';
         }
       })
       .catch(() => { window.location.href = '/api/auth/google/start?claim=' + claim; });
@@ -383,10 +390,10 @@
   const claimed = new URLSearchParams(location.search).get('claimed');
   if (claimed === '1') {
     document.body.innerHTML = '<div style="max-width:420px;margin:18vh auto;text-align:center;' +
-      'font-family:-apple-system,system-ui,sans-serif;color:#1a1a1a">' +
+      'font-family:var(--font-display);color:var(--text)">' +
       '<div style="font-size:15px;font-weight:600;margin-bottom:6px">You’re signed in</div>' +
-      '<div style="font-size:13px;color:#666">Dourmouse picked this up automatically — ' +
-      'you can close this tab and go back to the app.</div></div>';
+      '<div style="font-size:13px;color:var(--text-dim)">Dourmouse picked this up automatically. ' +
+      'You can close this tab and go back to the app.</div></div>';
   } else {
 
   // A cancelled consent (Google → /login?reason=denied) deserves a
