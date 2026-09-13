@@ -11,6 +11,14 @@ Eye View link already uses) that opens /study directly — not a new
 show(name) screen, since the page has its own separate layout/theme/
 streaming logic that was never meant to live inside the SPA.
 
+2026-09-14 (live-caught, user-directed): "study tab doesnt work nor
+open" — the plain window.open() above silently no-ops inside pywebview's
+WKWebView, the real desktop app this ships in (it only ever worked from
+an ordinary browser tab, which is why this wasn't caught before). Now
+feature-detects the same window.pywebview.api.* bridge every other
+cross-window open in this file already uses, falling back to the
+original window.open for a plain browser tab.
+
 No headless browser here (none available in this suite, matching every
 other test_console_*.py file's own stated convention) — source-level
 coverage that the real wiring is present and correct.
@@ -38,14 +46,26 @@ class TestStudyNavLink:
         assert "studyBtn" in script
         assert "tabsMoreMenu.appendChild(studyBtn)" in script
 
-    def test_it_opens_the_real_study_page_in_a_new_tab(self):
+    def test_it_opens_the_real_study_page_in_a_new_tab_from_a_browser(self):
+        """The fallback path — still real, still there, for a plain
+        browser tab where window.pywebview does not exist at all."""
         script = _extract_inline_script()
         idx = script.index("const studyBtn")
-        block = script[idx: idx + 600]
+        block = script[idx: idx + 1100]
         assert 'window.open("/study", "_blank", "noopener")' in block
+
+    def test_it_prefers_the_real_native_window_bridge_when_present(self):
+        """The actual live bug fix: pywebview's WKWebView (the real
+        desktop app) silently ignores window.open, so this must reach for
+        the same bridge open_agent/open_all_hands already use before
+        ever falling back to window.open."""
+        script = _extract_inline_script()
+        idx = script.index("const studyBtn")
+        block = script[idx: idx + 1100]
+        assert "window.pywebview.api.open_study()" in block
 
     def test_it_closes_the_overflow_menu_after_opening(self):
         script = _extract_inline_script()
         idx = script.index("const studyBtn")
-        block = script[idx: idx + 600]
+        block = script[idx: idx + 1100]
         assert 'tabsMoreMenu.classList.remove("on")' in block

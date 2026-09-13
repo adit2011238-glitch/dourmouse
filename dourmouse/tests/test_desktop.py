@@ -481,6 +481,20 @@ class TestGeneralizedTaskWindows:
         bridge.open_agent("researcher")
         assert len([w for w in fake.windows if w.url.endswith("/agent/researcher")]) == 1
 
+    def test_open_study_delegates_to_open_task_window(self):
+        """2026-09-14, live-caught: "study tab doesnt work nor open" —
+        console.html's STUDY button called plain window.open, which
+        pywebview's WKWebView silently ignores. This is the real native
+        bridge method it now calls instead."""
+        bridge, fake = self._bridge()
+        ok = bridge.open_study()
+        assert ok is True
+        win = next(w for w in fake.windows if w.url.endswith("/study"))
+        assert win.title == "STUDY"
+        # reuse semantics preserved through the delegation
+        bridge.open_study()
+        assert len([w for w in fake.windows if w.url.endswith("/study")]) == 1
+
     def test_open_all_hands_delegates_to_open_task_window(self):
         bridge, fake = self._bridge()
         ok = bridge.open_all_hands("run-42", goal="ship the thing")

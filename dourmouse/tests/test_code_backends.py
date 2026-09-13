@@ -336,6 +336,24 @@ class TestClaudeMcpWiring:
         assert str(tmp_path / "mcp-config.json") in out
         assert "--allowedTools mcp__dourmouse__*" in out
 
+    def test_claude_invocation_disables_the_caveman_plugin_for_this_call(self, tmp_path, monkeypatch):
+        """Real, live-caught bug (2026-09-14): this machine has the
+        "caveman" Claude Code plugin enabled GLOBALLY in the user-level
+        ~/.claude/settings.json, not scoped to any one project — every
+        claude -p subprocess this module spawns inherited it, producing
+        garbled, telegraphic replies for real user-facing turns
+        (forwarding an email, summarizing news). --settings overrides
+        just this one key for just this one subprocess, without touching
+        the user's own global settings or disabling MCP/hooks/keychain
+        auth (--bare would have disabled keychain auth entirely, which is
+        exactly how this CLI authenticates — ruled out on purpose)."""
+        monkeypatch.setattr(code_backends, "user_config_dir", lambda: tmp_path)
+        fake = _write_fake_cli(tmp_path, 'echo "ARGV: $*"')
+        monkeypatch.setattr("dourmouse.general_roster._find_claude_cli", lambda: fake)
+        out = code_backends.run_code_task("claude", "write code", cwd=str(tmp_path), timeout=30)
+        assert "--settings" in out
+        assert '"caveman@caveman":false' in out
+
     def test_a_broken_mcp_config_never_blocks_the_coding_task(self, tmp_path, monkeypatch):
         """Best-effort by design (see _run_claude_once's own comment): if
         building the MCP config raises for any reason, claude still runs —
@@ -1078,6 +1096,24 @@ class TestStreamClaude:
         )
         assert deltas == ["Hel", "lo."]
         assert out == "Hello."
+
+    def test_disables_the_caveman_plugin_for_this_subprocess(self, monkeypatch):
+        """Real, live-caught bug (2026-09-14) — same fix as
+        TestClaudeMcpWiring's own test for _run_claude_once, but this is
+        the actual code path a real CODE-screen/CLAUDE-toolchain directive
+        goes through (_handle_code_claude_passthrough -> stream_claude),
+        which is where the garbled telegraphic replies were really seen
+        live. See _SETTINGS_OVERRIDE_ARGS's own module-level comment for
+        the full diagnosis."""
+        lines = [_sse_line({"type": "result", "result": "ok"})]
+        seen = []
+        self._patch(monkeypatch, lines, seen=seen)
+        code_backends.stream_claude("task", cwd="/tmp/proj", timeout=30, on_delta=lambda t: None)
+        assert len(seen) == 1
+        argv = seen[0]
+        assert "--settings" in argv
+        idx = argv.index("--settings")
+        assert argv[idx + 1] == '{"enabledPlugins":{"caveman@caveman":false}}'
 
     def test_thinking_deltas_go_to_their_own_callback_not_on_delta(self, monkeypatch):
         lines = [

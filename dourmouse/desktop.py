@@ -546,6 +546,17 @@ class DesktopBridge:
         self._agent_windows[task_id] = win
         return True
 
+    def open_study(self) -> bool:
+        """2026-09-14 (live-caught, user-directed: "study tab doesnt work
+        nor open"). Root cause: console.html's STUDY button called plain
+        window.open("/study", "_blank", "noopener") — a browser-only API
+        pywebview's WKWebView does not implement, so it silently no-ops in
+        the real desktop app (it would work fine from an ordinary Chrome
+        tab, which is why this was never caught before). Reuses the same
+        open_task_window() every other native window already goes
+        through, exactly like open_agent() right below."""
+        return self.open_task_window("study", "/study", title="STUDY")
+
     def open_agent(self, name: str) -> None:
         name = (name or "").strip()
         if not name:

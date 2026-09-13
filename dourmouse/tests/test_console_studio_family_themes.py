@@ -80,7 +80,7 @@ class TestSharedShapeAppliesToTheWholeFamily:
 
     def test_no_backdrop_blur_anywhere_in_the_family_block(self):
         html = _html()
-        start = html.index('STUDIO: a restrained fifth family')
+        start = html.index('STUDIO: a restrained family')
         end = html.index('studio-frost"]{', start)
         end = html.index('}', html.index('--accent2', end)) + 1
         block = html[start:end]
@@ -88,7 +88,7 @@ class TestSharedShapeAppliesToTheWholeFamily:
 
     def test_no_glow_shadow_anywhere_in_the_family_block(self):
         html = _html()
-        start = html.index('STUDIO: a restrained fifth family')
+        start = html.index('STUDIO: a restrained family')
         end = html.index('studio-frost"]{', start)
         end = html.index('}', html.index('--accent2', end)) + 1
         block = html[start:end]

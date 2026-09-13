@@ -572,6 +572,53 @@ class TestGroundedModeSetting:
         assert grounded_mode_enabled() is False
 
 
+class TestAutoApproveSetting:
+    """Persisted, off-by-default "skip confirmations" toggle (2026-09-14,
+    live-caught: "approval keeps failing, remove the need for approval,
+    make this a toggle in settings"). Same shape as TestGroundedModeSetting
+    above, byte for byte — see config.auto_approve_enabled /
+    save_auto_approve_setting."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "dourmouse.config.user_env_path", lambda: tmp_path / "dourmouse" / ".env"
+        )
+        monkeypatch.setattr(
+            "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
+        )
+
+    def test_off_by_default(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import auto_approve_enabled
+
+        assert auto_approve_enabled() is False
+
+    def test_save_true_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import auto_approve_enabled, save_auto_approve_setting
+
+        result = save_auto_approve_setting(True)
+        assert result["ok"] is True
+        assert auto_approve_enabled() is True
+
+    def test_save_false_then_read_round_trips(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import auto_approve_enabled, save_auto_approve_setting
+
+        save_auto_approve_setting(True)
+        save_auto_approve_setting(False)
+        assert auto_approve_enabled() is False
+
+    def test_garbage_value_in_file_reads_as_off(self, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.config import auto_approve_enabled, user_env_path
+
+        path = user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("DOURMOUSE_AUTO_APPROVE=maybe\n", encoding="utf-8")
+        assert auto_approve_enabled() is False
+
+
 class TestAppControlDryRunSetting:
     """v14 (user-directed, 2026-09-08): "Consider adding a 'dry run'
     mode where it shows what would be clicked without actually

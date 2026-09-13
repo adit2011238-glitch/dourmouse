@@ -164,6 +164,24 @@ class TestConfirmationGate:
         gate = WebConfirmationGate(lambda e: None)
         assert gate("anything?") is False  # never resolved -> auto-decline
 
+    def test_auto_approve_setting_bypasses_the_gate_entirely(self, monkeypatch):
+        """2026-09-14, live-caught: "approval keeps failing, remove the
+        need for approval, make this a toggle in settings". When on, the
+        gate returns True immediately and never emits confirmation_
+        requested at all — a real bypass, not a fake auto-click on an
+        event nothing ever renders."""
+        monkeypatch.setattr("dourmouse.config.auto_approve_enabled", lambda: True)
+        events = []
+        gate = WebConfirmationGate(events.append)
+        assert gate("delete everything?") is True
+        assert events == []
+
+    def test_auto_approve_off_still_blocks_as_before(self, monkeypatch):
+        monkeypatch.setattr("dourmouse.config.auto_approve_enabled", lambda: False)
+        monkeypatch.setattr(webui_module, "_CONFIRM_TIMEOUT_SECONDS", 0.05)
+        gate = WebConfirmationGate(lambda e: None)
+        assert gate("anything?") is False
+
     def test_pending_items_empty_when_nothing_pending(self):
         gate = WebConfirmationGate(lambda e: None)
         assert gate.pending_items() == []

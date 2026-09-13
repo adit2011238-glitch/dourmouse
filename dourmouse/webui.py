@@ -192,6 +192,18 @@ class WebConfirmationGate:
         self._emit = emit
 
     def __call__(self, prompt_text: str) -> bool:
+        # 2026-09-14 (live-caught, user-directed): a real, explicit,
+        # off-by-default Settings toggle to skip every confirmation
+        # gate outright — checked first, before the pending-confirmation
+        # machinery below even runs, so an auto-approved call never
+        # emits a confirmation_requested event at all (an honest bypass,
+        # not a fake auto-click on a box the UI never shows). Read fresh
+        # from disk every call, same live-without-restart contract every
+        # other setting in config.py already has.
+        from dourmouse.config import auto_approve_enabled
+
+        if auto_approve_enabled():
+            return True
         with self._lock:
             self._next_id += 1
             confirm_id = f"confirm-{self._next_id}"
@@ -1939,6 +1951,16 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"enabled": grounded_mode_enabled()})
             except Exception as exc:  # noqa: BLE001 - a settings read must never 500
                 self._send_json({"enabled": False, "error": str(exc)[:200]})
+        elif path == "/api/settings/auto-approve":
+            # 2026-09-14: backend half of the "skip confirmations" toggle
+            # — off by default, see config.auto_approve_enabled's own
+            # docstring for the real gap this exists to work around.
+            try:
+                from dourmouse.config import auto_approve_enabled
+
+                self._send_json({"enabled": auto_approve_enabled()})
+            except Exception as exc:  # noqa: BLE001 - a settings read must never 500
+                self._send_json({"enabled": False, "error": str(exc)[:200]})
         elif path == "/api/settings/app-control-dry-run":
             # v14 (user-directed, 2026-09-08): backend half of the App
             # Control Dry Run toggle — off by default, same real
@@ -2864,6 +2886,11 @@ class _Handler(BaseHTTPRequestHandler):
             # config.save_grounded_mode_setting). Same post-first-run
             # settings-change auth posture as the orchestrator-model POST.
             self._handle_grounded_mode_post()
+        elif parsed.path == "/api/settings/auto-approve":
+            # 2026-09-14: persists the "skip confirmations" toggle (see
+            # config.save_auto_approve_setting). Same post-first-run
+            # settings-change auth posture as the orchestrator-model POST.
+            self._handle_auto_approve_post()
         elif parsed.path == "/api/settings/app-control-dry-run":
             # v14 (user-directed, 2026-09-08): persists the App Control
             # Dry Run toggle (see config.save_app_control_dry_run_setting).
@@ -5029,6 +5056,15 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         enabled = bool(body.get("enabled"))
         result = cfg_mod.save_grounded_mode_setting(enabled)
+        self._send_json(result)
+
+    def _handle_auto_approve_post(self) -> None:
+        """POST /api/settings/auto-approve. Body: {"enabled": bool}."""
+        from dourmouse import config as cfg_mod
+
+        body = self._read_json_body()
+        enabled = bool(body.get("enabled"))
+        result = cfg_mod.save_auto_approve_setting(enabled)
         self._send_json(result)
 
     def _handle_app_control_dry_run_post(self) -> None:

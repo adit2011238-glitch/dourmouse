@@ -146,6 +146,24 @@ _CLAUDE_MCP_CONNECTION_FAILED_RE = re.compile(
 # rather than through a claude.ai connector the user would have to
 # re-authorise separately.
 _MCP_ALLOWED_TOOLS = "mcp__dourmouse__*"
+
+# Real, live-caught bug (2026-09-14): this machine has the "caveman"
+# Claude Code plugin enabled GLOBALLY in the user-level
+# ~/.claude/settings.json ("enabledPlugins": {"caveman@caveman": true}),
+# not scoped to any one project. Every claude -p subprocess Dourmouse
+# spawns inherits that same global config, so a real user-facing reply
+# (forwarding an email, summarizing news) came back in caveman's own
+# dropped-article, dropped-conjugation telegraphic style ("Trump reject
+# tech boss call for AI slowdown") -- not truncation, not a Dourmouse
+# prompt, a leaked plugin. --settings accepts additional JSON that
+# overrides just this one key for just this one subprocess, without
+# touching the user's own global settings and without disabling hooks,
+# MCP, or the keychain-based auth _cli_env's own docstring says this CLI
+# depends on (ruled out --bare for exactly that reason: its own --help
+# text says OAuth/keychain are never read in bare mode).
+_SETTINGS_OVERRIDE_ARGS = (
+    "--settings", '{"enabledPlugins":{"caveman@caveman":false}}',
+)
 _mcp_config_path_cache: str | None = None
 _mcp_config_lock = threading.Lock()
 
@@ -436,6 +454,7 @@ def _run_claude_once(
             "--mcp-config", _ensure_mcp_config_path(),
             "--strict-mcp-config",
             "--allowedTools", _MCP_ALLOWED_TOOLS,
+            *_SETTINGS_OVERRIDE_ARGS,
         ]
     except Exception:  # noqa: BLE001 - best-effort: a broken MCP config must
         # never stop coding from working at all; Claude just runs without
@@ -766,6 +785,7 @@ def stream_claude(
             "--mcp-config", _ensure_mcp_config_path(),
             "--strict-mcp-config",
             "--allowedTools", _MCP_ALLOWED_TOOLS,
+            *_SETTINGS_OVERRIDE_ARGS,
         ]
     except Exception:  # noqa: BLE001 - best-effort, see _run_claude_once's own comment
         mcp_args = []

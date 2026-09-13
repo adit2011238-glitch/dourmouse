@@ -390,10 +390,11 @@ def test_default_root_block_scopes_past_alternate_theme_selectors():
     tokens = uc.extract_tokens(root)
     assert tokens["--blue-hi"] == "#FAFAFA"
     # The full, unscoped file DOES contain other themes' conflicting
-    # values for the same name (aurora, the theme block that happens to
-    # sit last in the file) — this documents why scoping matters, not
-    # just that it happens to work.
-    assert "--blue-hi:#eef1f5" in source.replace(" ", "").lower()
+    # values for the same name (studio-frost, the theme block that
+    # happens to sit last in the file since Aurora was removed
+    # 2026-09-14) — this documents why scoping matters, not just that it
+    # happens to work.
+    assert "--blue-hi:#1e2939" in source.replace(" ", "").lower()
     unscoped = uc.extract_tokens(source)
     assert unscoped["--blue-hi"] != tokens["--blue-hi"]
 

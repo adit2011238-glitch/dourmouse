@@ -1110,6 +1110,54 @@ def save_grounded_mode_setting(enabled: bool) -> dict[str, Any]:
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
 
 
+# 2026-09-14 (live-caught, user-directed): "approval keeps failing, remove
+# the need for approval, make this a toggle in settings" — a real, live
+# gap converges here with an explicit ask. Claude Front Mode turns
+# (mcp_bridge.py's _handle_tools_call) hardcode confirmation_gate=None, so
+# a REQUIRES_CONFIRMATION tool called that way is refused outright rather
+# than paused — a real architectural gap, but the user's own practical
+# fix is simpler than re-architecting that bridge: a real, explicit,
+# off-by-default toggle that skips confirmation entirely for every gated
+# tool everywhere, not just the Claude Front Mode case. Same settings
+# pattern as GROUNDED_MODE above, byte for byte.
+AUTO_APPROVE_SETTING_KEY = "DOURMOUSE_AUTO_APPROVE"
+
+
+def auto_approve_enabled() -> bool:
+    """Whether every confirmation gate should be skipped automatically,
+    read fresh from disk (same live-without-restart contract as
+    grounded_mode_enabled()). Off by default — an explicit "1"/"true"/
+    "yes"/"on" (case-insensitive) is the only way to enable it."""
+    raw = _read_user_config_file().get(AUTO_APPROVE_SETTING_KEY, "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def save_auto_approve_setting(enabled: bool) -> dict[str, Any]:
+    """Persist the auto-approve toggle. Same merge-on-write .env file as
+    save_grounded_mode_setting() — never clobbers other saved settings.
+    Never raises; a write failure is reported honestly."""
+    path = user_env_path()
+    try:
+        user_config_dir().mkdir(parents=True, exist_ok=True)
+        existing = _read_user_config_file()
+        existing[AUTO_APPROVE_SETTING_KEY] = "1" if enabled else "0"
+        body = [
+            "# Dourmouse configuration — written by first-run setup / settings.",
+            "# This file holds credentials. Keep it to yourself; it is never",
+            "# bundled into a build or uploaded anywhere.",
+            "",
+        ]
+        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        return {"ok": False, "detail": f"could not write config: {exc}"}
+    return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
+
+
 # v14 (user-directed, 2026-09-08): "Consider adding a 'dry run' mode
 # where it shows what would be clicked without actually clicking" — a
 # real safety feature for app_control.py's real AppleScript actions
