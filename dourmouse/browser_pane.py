@@ -132,17 +132,27 @@ def check_frameable(url: str) -> dict[str, Any]:
 #     site are sent — a page that requires the user's own login session
 #     will render logged-out, same honest tradeoff as the sandbox fix
 #     above.
-#   - Only the exact requested URL is proxied. A link the user clicks
-#     INSIDE the proxied page navigates the iframe directly to the real
-#     site (via the injected <base>), bypassing the proxy — if that next
-#     page also blocks framing, it fails again with no automatic re-proxy
-#     (fully covering in-page navigation would mean rewriting every link/
-#     form/JS-driven navigation recursively, real scope this stays
-#     honest about not attempting).
 #   - Only real text/html responses are rewritten. Anything else (a PDF,
 #     an image, JSON) is returned as an honest failure — proxying content
 #     that was never going to render as a framed *document* in the first
 #     place buys nothing.
+#   - External JS files (anything loaded via <script src="...">) are
+#     never fetched or rewritten — only the INLINE script text already
+#     present in the fetched document. A site whose frame-busting logic
+#     lives entirely in a bundled external script is not caught by
+#     _neutralize_frame_busting below; only inline busting checks are.
+#   - The navigation shim (_NAV_INTERCEPT_SCRIPT) only catches real
+#     top-level navigation it can actually see: <a href> clicks,
+#     window.open(...) calls, and GET form submits (rewritten as a
+#     proxied query string). A POST form submits natively, unproxied
+#     (forwarding a real request body through this proxy is real scope
+#     not attempted here) — it will re-hit the same framing wall the
+#     GET case exists to route around. A script-driven navigation via a
+#     raw `location.href = ...`/`location.assign(...)` assignment is
+#     also not caught (there is no reliable, side-effect-free way to
+#     intercept a plain property write on `window.location` in a real
+#     browser) — that link still navigates the iframe directly and can
+#     re-hit the same wall with no automatic re-proxy.
 # --------------------------------------------------------------------------- #
 
 PROXY_MAX_BYTES = 5_000_000
@@ -151,22 +161,162 @@ PROXY_TIMEOUT = 10.0
 _BASE_TAG_RE = re.compile(rb"<head\b[^>]*>", re.IGNORECASE)
 _HTML_TAG_RE = re.compile(rb"<html\b[^>]*>", re.IGNORECASE)
 
+# 2026-09-14 (feature 4, fix #1) — real, live-reported problem: "a lot of
+# pages refuse embedding or proxy". The <base> tag above only fixes
+# *resolution* of relative URLs; it does nothing about a page's own
+# inline script actively fighting being framed (`if (top !== self)
+# top.location = self.location;` and its many textual variants — very
+# common on real sites, completely separate from the X-Frame-Options/CSP
+# headers check_frameable() already detects). A real browser CANNOT
+# reliably override `window.top`'s getter here (Chrome/Safari/Firefox
+# all define it non-configurable — `Object.defineProperty(window, "top",
+# ...)` throws), so runtime property overriding is not an option. The
+# real, standard technique other HTML-rewriting proxies use instead:
+# textually neutralize the common busting expressions in the fetched
+# HTML BEFORE it is ever parsed/executed, so the busting script's own
+# condition can never observe `top !== self` as true. Best-effort and
+# honestly imperfect (only catches these literal, common phrasings, and
+# only in INLINE script — see the module-level limitations comment
+# above) — real sites vary this code arbitrarily, and a determined bust
+# script can still get around simple text substitution. Ordered
+# longest/most-specific first so an earlier substitution never partially
+# consumes text a later one needs to match.
+_FRAME_BUST_REPLACEMENTS: list[tuple[bytes, bytes]] = [
+    (rb"top\s*!==\s*self", b"false"),
+    (rb"self\s*!==\s*top", b"false"),
+    (rb"top\s*!=\s*self", b"false"),
+    (rb"self\s*!=\s*top", b"false"),
+    (rb"window\.top\s*!==\s*window\.self", b"false"),
+    (rb"window\.self\s*!==\s*window\.top", b"false"),
+    (rb"window\.top\s*!=\s*window\.self", b"false"),
+    (rb"window\.self\s*!=\s*window\.top", b"false"),
+    (rb"top\.location", b"self.location"),
+    (rb"parent\.location", b"self.location"),
+    (rb"window\.top\b", b"window.self"),
+    (rb"window\.parent\b", b"window.self"),
+]
+_FRAME_BUST_RES = [
+    (re.compile(pattern), replacement) for pattern, replacement in _FRAME_BUST_REPLACEMENTS
+]
+
+
+def _neutralize_frame_busting(html_bytes: bytes) -> bytes:
+    """Best-effort textual neutralization of common inline frame-busting
+    code — see the real, disclosed limitations right above
+    _FRAME_BUST_REPLACEMENTS for exactly what this does and does not
+    catch."""
+    for compiled, replacement in _FRAME_BUST_RES:
+        html_bytes = compiled.sub(replacement, html_bytes)
+    return html_bytes
+
+
+# 2026-09-14 (feature 4, fix #2) — real, live-reported problem: the
+# original proxy only ever handled the FIRST page load; the very next
+# click inside it navigated the iframe directly at the real site (via
+# the injected <base>), bypassing the proxy entirely and re-hitting the
+# same framing wall if that next page also refuses to be framed. This
+# script, injected right after <base>, intercepts the navigation paths
+# it actually CAN see (real <a href> clicks, window.open, GET form
+# submits) and routes them back through /api/browser-pane/proxy — see
+# the module-level limitations comment above for exactly what this
+# does NOT catch (POST forms, a raw `location.href = ...` assignment).
+# Written mostly as plain, old-style JS (var, no arrow functions/
+# template literals/optional chaining) so it runs unmodified on
+# whatever engine the target page's own <!doctype> happens to trigger,
+# including a real quirks-mode/legacy page — this script must never be
+# the reason a page breaks. FormData/for-of (both broadly supported in
+# every real engine this pane can realistically run in) are the one
+# exception, used for spec-correct form-value reading rather than a
+# hand-rolled field walk.
+_NAV_INTERCEPT_SCRIPT_TEMPLATE = """<script>(function(){
+  // Real, live-caught bug: a RELATIVE path here resolves against the
+  // base tag injected right before this script -- i.e. against the
+  // PROXIED SITE's own origin, not ours. A real click-through test
+  // proved it: window.location.href = "/api/browser-pane/proxy?..."
+  // actually navigated to "https://www.google.com/api/browser-pane/
+  // proxy?..." (a real 404 on Google's own domain), because that base
+  // tag repoints ALL relative resolution to the target site -- exactly
+  // what it's there to do for the PAGE's own links, but it breaks a
+  // same-document relative reference back to OUR server just the
+  // same. window.location.origin, read here before any navigation has
+  // happened, is still this real server's own origin (the base tag
+  // only affects resolution, not the document's actual current
+  // location) -- capturing it into an ABSOLUTE proxy URL is the fix.
+  var PROXY = window.location.origin + "/api/browser-pane/proxy?url=";
+  function toProxyUrl(href){
+    var abs;
+    try { abs = new URL(href, document.baseURI).href; }
+    catch (e) { return null; }
+    if (abs.slice(0, 5) !== "http:" && abs.slice(0, 6) !== "https:") { return null; }
+    return PROXY + encodeURIComponent(abs);
+  }
+  function closestAnchor(node){
+    while (node && node.tagName !== "A") { node = node.parentNode; }
+    return node;
+  }
+  document.addEventListener("click", function(e){
+    var a = closestAnchor(e.target);
+    if (!a) { return; }
+    var href = a.getAttribute("href");
+    if (!href || href.charAt(0) === "#") { return; }
+    var dest = toProxyUrl(a.href);
+    if (!dest) { return; }
+    e.preventDefault();
+    window.location.href = dest;
+  }, true);
+  document.addEventListener("submit", function(e){
+    var f = e.target;
+    if (!f || f.tagName !== "FORM") { return; }
+    var method = (f.getAttribute("method") || "get").toLowerCase();
+    if (method !== "get") { return; }
+    var action = f.getAttribute("action") || document.baseURI;
+    var abs;
+    try { abs = new URL(action, document.baseURI); }
+    catch (e2) { return; }
+    // FormData(form) is the real, spec-correct way to read a form's
+    // submitted values -- it respects disabled fields and
+    // unchecked checkboxes/radios automatically, unlike a plain
+    // querySelectorAll walk (which would submit every field
+    // regardless of whether the browser actually would).
+    var data = new FormData(f);
+    for (var pair of data.entries()) {
+      if (typeof pair[1] === "string") { abs.searchParams.set(pair[0], pair[1]); }
+    }
+    e.preventDefault();
+    window.location.href = PROXY + encodeURIComponent(abs.href);
+  }, true);
+  var realOpen = window.open;
+  window.open = function(url){
+    if (url) {
+      var dest = toProxyUrl(url);
+      if (dest) { window.location.href = dest; return null; }
+    }
+    return realOpen.apply(window, arguments);
+  };
+})();</script>"""
+
 
 def _inject_base_tag(html_bytes: bytes, url: str) -> bytes:
-    """Insert <base href="url"> as the very first thing inside <head>
-    (or right after <html> if there's no head, or right at the start for
-    genuinely malformed markup) so every relative URL the page already
-    uses resolves against the real site. Inserting first matters: if the
-    page already has its own <base>, only the FIRST <base> in document
-    order takes effect, and this must win."""
-    base_tag = f'<base href="{url}">'.encode("utf-8")
+    """Insert <base href="url"> plus the navigation-intercept shim
+    (_NAV_INTERCEPT_SCRIPT_TEMPLATE) as the very first thing inside
+    <head> (or right after <html> if there's no head, or right at the
+    start for genuinely malformed markup) so every relative URL the
+    page already uses resolves against the real site, and every real
+    navigation it can see routes back through the proxy. Inserting
+    first matters: if the page already has its own <base>, only the
+    FIRST <base> in document order takes effect, and this must win —
+    same reasoning for the shim running before any of the page's own
+    scripts get a chance to act on a click."""
+    injected = (f'<base href="{url}">'.encode("utf-8")) + _NAV_INTERCEPT_SCRIPT_TEMPLATE.encode(
+        "utf-8"
+    )
     m = _BASE_TAG_RE.search(html_bytes)
     if m:
-        return html_bytes[: m.end()] + base_tag + html_bytes[m.end() :]
+        return html_bytes[: m.end()] + injected + html_bytes[m.end() :]
     m = _HTML_TAG_RE.search(html_bytes)
     if m:
-        return html_bytes[: m.end()] + base_tag + html_bytes[m.end() :]
-    return base_tag + html_bytes
+        return html_bytes[: m.end()] + injected + html_bytes[m.end() :]
+    return injected + html_bytes
 
 
 def _honest_proxy_error_page(url: str, reason: str) -> bytes:
@@ -207,7 +357,7 @@ def fetch_and_rewrite_for_proxy(url: str) -> dict[str, Any]:
             "ok": False,
             "body": _honest_proxy_error_page(url, f"page exceeds {PROXY_MAX_BYTES:,} byte proxy limit"),
         }
-    return {"ok": True, "body": _inject_base_tag(body, url)}
+    return {"ok": True, "body": _inject_base_tag(_neutralize_frame_busting(body), url)}
 
 
 class BrowserPaneRequests:

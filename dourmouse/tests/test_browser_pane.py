@@ -179,30 +179,48 @@ class TestSingleton:
 class TestInjectBaseTag:
     """The real mechanism behind the rewriting proxy: one <base> tag
     makes every relative URL a page already uses resolve against the
-    REAL site, without touching any of those URLs individually."""
+    REAL site, without touching any of those URLs individually.
+    2026-09-14 (feature 4, fix #2): _inject_base_tag now ALSO injects
+    the navigation-intercept shim immediately after <base>, so every
+    assertion here checks for both landing together, in that order."""
+
+    def _shim_tag(self) -> bytes:
+        return browser_pane._NAV_INTERCEPT_SCRIPT_TEMPLATE.encode("utf-8")
 
     def test_inserts_right_after_head_tag(self):
         html = b"<html><head><title>x</title></head><body>hi</body></html>"
         out = browser_pane._inject_base_tag(html, "https://example.com/page")
         assert out == (
             b'<html><head><base href="https://example.com/page">'
-            b"<title>x</title></head><body>hi</body></html>"
+            + self._shim_tag()
+            + b"<title>x</title></head><body>hi</body></html>"
         )
 
     def test_head_tag_with_attributes_still_matches(self):
         html = b'<html><head lang="en"><title>x</title></head></html>'
         out = browser_pane._inject_base_tag(html, "https://example.com/")
         assert b'<head lang="en"><base href="https://example.com/">' in out
+        # The shim must land between <base> and whatever the page had next.
+        base_end = out.index(b'<base href="https://example.com/">') + len(
+            b'<base href="https://example.com/">'
+        )
+        assert out[base_end : base_end + len(self._shim_tag())] == self._shim_tag()
 
     def test_falls_back_to_after_html_tag_when_no_head(self):
         html = b"<html><body>no head here</body></html>"
         out = browser_pane._inject_base_tag(html, "https://example.com/")
-        assert out == b'<html><base href="https://example.com/"><body>no head here</body></html>'
+        assert out == (
+            b'<html><base href="https://example.com/">'
+            + self._shim_tag()
+            + b"<body>no head here</body></html>"
+        )
 
     def test_prepends_outright_for_malformed_markup(self):
         html = b"just text, no tags at all"
         out = browser_pane._inject_base_tag(html, "https://example.com/")
-        assert out == b'<base href="https://example.com/">just text, no tags at all'
+        assert out == (
+            b'<base href="https://example.com/">' + self._shim_tag() + b"just text, no tags at all"
+        )
 
     def test_injected_base_wins_over_an_existing_one(self):
         """Only the FIRST <base> in document order takes effect per spec
@@ -212,6 +230,103 @@ class TestInjectBaseTag:
         first_base = out.index(b"<base")
         second_base = out.index(b"<base", first_base + 1)
         assert b'href="https://example.com/right"' in out[first_base:second_base]
+        # The shim rides along with the WINNING (first) <base>, not the page's own.
+        assert self._shim_tag() in out[first_base:second_base]
+
+
+class TestNavInterceptScript:
+    """2026-09-14 (feature 4, fix #2), real live-reported problem: "a lot
+    of pages refuse embedding or proxy" -- the original proxy only ever
+    handled the FIRST page load; the very next click inside it navigated
+    the iframe straight at the real site, bypassing the proxy entirely.
+    This script (injected right after <base> — see TestInjectBaseTag)
+    intercepts clicks/window.open/GET-form-submit and routes them back
+    through the proxy. These tests check the injected script is well-
+    formed and contains the real behaviors it claims to (a live browser
+    engine isn't available in this hermetic suite -- see
+    test_browser_pane_wiring.py for the real end-to-end SSE coverage of
+    this whole feature)."""
+
+    def test_script_is_syntactically_parseable_javascript(self):
+        # A cheap but real syntax sanity check without a JS engine
+        # dependency: balanced braces/parens is enough to catch the
+        # class of mistake a hand-edited template is most likely to make.
+        text = browser_pane._NAV_INTERCEPT_SCRIPT_TEMPLATE
+        assert text.startswith("<script>") and text.endswith("</script>")
+        body = text[len("<script>") : -len("</script>")]
+        assert body.count("{") == body.count("}")
+        assert body.count("(") == body.count(")")
+
+    def test_routes_through_the_real_proxy_endpoint(self):
+        assert "/api/browser-pane/proxy?url=" in browser_pane._NAV_INTERCEPT_SCRIPT_TEMPLATE
+
+    def test_intercepts_clicks_window_open_and_get_form_submits(self):
+        text = browser_pane._NAV_INTERCEPT_SCRIPT_TEMPLATE
+        assert 'addEventListener("click"' in text
+        assert 'addEventListener("submit"' in text
+        assert "window.open = function" in text
+        # POST forms are an honest, disclosed non-goal (see the module's
+        # own limitations comment) -- the shim must actively skip them,
+        # not silently mishandle them.
+        assert 'method !== "get"' in text
+
+    def test_ignores_bare_hash_links(self):
+        """A same-page anchor (href="#section") must never be rewritten
+        into a real navigation -- it isn't one."""
+        text = browser_pane._NAV_INTERCEPT_SCRIPT_TEMPLATE
+        assert 'href.charAt(0) === "#"' in text
+
+
+class TestNeutralizeFrameBusting:
+    """2026-09-14 (feature 4, fix #1), real live-reported problem:
+    JS frame-busting (`if (top !== self) top.location = ...`) is
+    completely separate from the X-Frame-Options/CSP headers
+    check_frameable() detects, and very common on real sites. A real
+    browser will not let this proxy override `window.top`'s getter at
+    runtime (non-configurable in every real engine) -- the standard
+    technique other HTML-rewriting proxies use instead, and the one
+    this applies, is textual neutralization of the common busting
+    phrasings before the page is ever parsed. See
+    _FRAME_BUST_REPLACEMENTS' own docstring for the honest limitations
+    (inline script only, common phrasings only)."""
+
+    def test_neutralizes_the_classic_top_not_equal_self_check(self):
+        html = b"<script>if (top !== self) { top.location = self.location; }</script>"
+        out = browser_pane._neutralize_frame_busting(html)
+        assert b"top !== self" not in out
+        assert b"top.location" not in out
+        assert b"false" in out
+
+    def test_neutralizes_the_window_prefixed_variant(self):
+        html = b"<script>if (window.top != window.self) window.top.location.href = 'x';</script>"
+        out = browser_pane._neutralize_frame_busting(html)
+        assert b"window.top != window.self" not in out
+        assert b"window.top" not in out
+
+    def test_neutralizes_parent_location_variant(self):
+        html = b"<script>parent.location = window.parent.location.href;</script>"
+        out = browser_pane._neutralize_frame_busting(html)
+        assert b"parent.location" not in out
+        assert b"window.parent" not in out
+
+    def test_leaves_ordinary_unrelated_script_untouched(self):
+        html = b"<script>console.log('hello, world'); var x = 1 + 1;</script>"
+        out = browser_pane._neutralize_frame_busting(html)
+        assert out == html
+
+    def test_applied_by_the_real_proxy_fetch(self, monkeypatch):
+        monkeypatch.setattr(
+            browser_pane.urllib.request,
+            "urlopen",
+            lambda *a, **k: _FakeResponse(
+                {"Content-Type": "text/html"},
+                body=b"<html><head></head><body><script>if(top!==self){top.location='x';}</script></body></html>",
+            ),
+        )
+        result = browser_pane.fetch_and_rewrite_for_proxy("https://example.com/")
+        assert result["ok"] is True
+        assert b"top!==self" not in result["body"]
+        assert b"top.location" not in result["body"]
 
 
 class TestFetchAndRewriteForProxy:
