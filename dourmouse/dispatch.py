@@ -2239,7 +2239,17 @@ def _build_client(
 
             config = load_ollama_config(force_local=True)
         return OllamaNativeClient(config)
-    key = config.api_key or "local-keyless"
+    # 2026-09-14, user-directed: "a different api key for each agent since
+    # claude code is supposed to be orchestrating not doing the work" --
+    # per-agent MODEL assignment already existed (model_for_agent, used
+    # elsewhere); NvidiaConfig.key_for_agent is the same idea one level
+    # down. OmniRouteConfig is keyless by design (self-hosted, no
+    # per-agent key concept), so this only applies to NVIDIA.
+    key = (
+        config.key_for_agent(forced_agent)
+        if isinstance(config, NvidiaConfig)
+        else config.api_key
+    ) or "local-keyless"
     return OpenAI(api_key=key, base_url=config.base_url)
 
 

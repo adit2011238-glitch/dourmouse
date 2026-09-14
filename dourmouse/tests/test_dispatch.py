@@ -3608,6 +3608,57 @@ class TestBuildClientOrchestratorRouting:
                 assert isinstance(client, dispatch_module.OllamaNativeClient) and client._root != "https://ollama.com", agent
 
 
+class TestBuildClientPerAgentApiKeys:
+    """2026-09-14, user-directed: "a different api key for each agent
+    since claude code is supposed to be orchestrating not doing the
+    work." NvidiaConfig.key_for_agent already has its own unit tests
+    (test_config.py) -- this is the wiring at the real call site that
+    actually builds the client."""
+
+    def test_forced_agent_with_a_key_override_gets_its_own_key(self, monkeypatch):
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "off")
+        from dourmouse.config import NvidiaConfig
+
+        config = NvidiaConfig(
+            api_key="default-key", base_url="https://example.test/v1", model="nvidia/base",
+            agent_keys={"CODE_NVIDIA": "code-nvidia-key"},
+        )
+        client = dispatch_module._build_client(config, forced_agent="code_nvidia")
+        assert client.api_key == "code-nvidia-key"
+
+    def test_forced_agent_with_no_key_override_uses_the_default(self, monkeypatch):
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "off")
+        from dourmouse.config import NvidiaConfig
+
+        config = NvidiaConfig(
+            api_key="default-key", base_url="https://example.test/v1", model="nvidia/base",
+            agent_keys={"CODE_NVIDIA": "code-nvidia-key"},
+        )
+        client = dispatch_module._build_client(config, forced_agent="markets")
+        assert client.api_key == "default-key"
+
+    def test_no_forced_agent_uses_the_default_key(self, monkeypatch):
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "off")
+        from dourmouse.config import NvidiaConfig
+
+        config = NvidiaConfig(
+            api_key="default-key", base_url="https://example.test/v1", model="nvidia/base",
+            agent_keys={"CODE_NVIDIA": "code-nvidia-key"},
+        )
+        client = dispatch_module._build_client(config)
+        assert client.api_key == "default-key"
+
+    def test_omniroute_is_unaffected_it_has_no_per_agent_key_concept(self, monkeypatch):
+        """OmniRoute is keyless by design (self-hosted, no credentials) --
+        this must never try to call key_for_agent on it."""
+        monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "off")
+        from dourmouse.config import OmniRouteConfig
+
+        config = OmniRouteConfig()
+        client = dispatch_module._build_client(config, forced_agent="code_nvidia")
+        assert client.api_key == "local-keyless"
+
+
 class TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud:
     """Real, live-caught privacy bug (2026-09-13): the test right above
     this one LOOKS like it covers "a real Ollama Cloud key must not

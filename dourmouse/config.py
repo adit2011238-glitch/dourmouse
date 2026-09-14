@@ -218,6 +218,32 @@ class NvidiaConfig:
     # agent without an override runs on ``model``. Pure env resolution,
     # never an LLM judgment (Rule 2.8).
     agent_models: dict[str, str] = field(default_factory=dict)
+    # 2026-09-14, user-directed: "a different api key for each agent since
+    # claude code is supposed to be orchestrating not doing the work" --
+    # the same idea as agent_models, one level down: agent name
+    # (uppercased) -> its own NVIDIA API key, from DOURMOUSE_API_KEY_<AGENT>
+    # env vars. An agent without an override runs on ``api_key``. This is
+    # deliberately a SEPARATE concept from the multi-account FALLBACK pool
+    # (model_router.AccountPool / NVIDIA_API_KEY_2, _3, ...) generalized
+    # earlier this session -- that pool rotates between accounts on
+    # rate-limit for ANY agent; this assigns a SPECIFIC, fixed account to a
+    # SPECIFIC agent on purpose (e.g. billing/quota separation per team
+    # member), and the two compose: an agent's own assigned key still goes
+    # through the same retry/rotation machinery if IT hits a rate limit.
+    agent_keys: dict[str, str] = field(default_factory=dict)
+
+    def key_for_agent(self, agent: str | None) -> str:
+        """The NVIDIA API key a specific subagent runs on (deterministic).
+
+        An explicit ``DOURMOUSE_API_KEY_<AGENT>`` override wins; every
+        other agent (and any caller with no agent name at all -- tools,
+        scheduled jobs) uses the run's own default ``api_key``, exactly
+        the same shape as ``model_for_agent`` above, one level down.
+        """
+        key = (agent or "").strip().upper()
+        if key and key in self.agent_keys:
+            return self.agent_keys[key]
+        return self.api_key
 
     def model_for_agent(self, agent: str | None) -> str:
         """The NVIDIA model a specific subagent runs on (deterministic).
@@ -359,6 +385,21 @@ def load_nvidia_config() -> NvidiaConfig:
             agent_name = env_name[len(prefix):].strip().upper()
             if agent_name:
                 agent_models[agent_name] = value.strip()
+    # 2026-09-14: same shape, one level down -- every DOURMOUSE_API_KEY_
+    # <AGENT> env var maps that agent to its own NVIDIA account/key (e.g.
+    # DOURMOUSE_API_KEY_CODE_CLAUDE=nvapi-... to bill a specific team
+    # member's coding work to their own account). A DIFFERENT prefix than
+    # the fallback pool's NVIDIA_API_KEY_2/_3/... (a numbered ACCOUNT
+    # rotation, keyed by index, tried in order on rate-limit) -- this is a
+    # FIXED assignment keyed by AGENT NAME, and the two compose rather than
+    # conflict.
+    agent_keys = {}
+    key_prefix = "DOURMOUSE_API_KEY_"
+    for env_name, value in os.environ.items():
+        if env_name.startswith(key_prefix) and value.strip():
+            agent_name = env_name[len(key_prefix):].strip().upper()
+            if agent_name:
+                agent_keys[agent_name] = value.strip()
     return NvidiaConfig(
         api_key=api_key,
         base_url=base_url,
@@ -367,6 +408,7 @@ def load_nvidia_config() -> NvidiaConfig:
         retry_backoff=retry_backoff,
         fallback_model=fallback_model,
         agent_models=agent_models,
+        agent_keys=agent_keys,
     )
 
 

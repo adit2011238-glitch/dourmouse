@@ -112,6 +112,49 @@ class TestNvidiaConfigLoading:
         # a genuinely unmapped agent, unlike research_info/orchestrator/etc.
         assert cfg.model_for_agent("markets") == "nvidia/one-model"
 
+    def test_per_agent_key_env_is_scanned(self, monkeypatch):
+        """2026-09-14, user-directed: "a different api key for each agent
+        since claude code is supposed to be orchestrating not doing the
+        work." Same shape as per-agent models, one level down."""
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-default-key")
+        monkeypatch.setenv("DOURMOUSE_API_KEY_CODE_NVIDIA", "nvapi-code-key")
+        monkeypatch.setenv("DOURMOUSE_API_KEY_RESEARCH_INFO", "nvapi-research-key")
+        monkeypatch.delenv("DOURMOUSE_API_KEY_MARKETS", raising=False)
+        cfg = load_nvidia_config()
+        assert cfg.agent_keys == {
+            "CODE_NVIDIA": "nvapi-code-key",
+            "RESEARCH_INFO": "nvapi-research-key",
+        }
+        # Case-insensitive lookup, same as key_for_agent's sibling.
+        assert cfg.key_for_agent("code_nvidia") == "nvapi-code-key"
+        assert cfg.key_for_agent("CODE_NVIDIA") == "nvapi-code-key"
+        assert cfg.key_for_agent("research_info") == "nvapi-research-key"
+        # An agent with no override falls back to the run's default key.
+        assert cfg.key_for_agent("markets") == "nvapi-default-key"
+        assert cfg.key_for_agent("") == "nvapi-default-key"
+        assert cfg.key_for_agent(None) == "nvapi-default-key"
+
+    def test_no_per_agent_key_overrides_uses_default_for_all(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-only-key")
+        monkeypatch.delenv("DOURMOUSE_API_KEY_CODE_NVIDIA", raising=False)
+        cfg = load_nvidia_config()
+        assert cfg.agent_keys == {}
+        assert cfg.key_for_agent("code_nvidia") == "nvapi-only-key"
+
+    def test_per_agent_keys_never_leak_into_per_agent_models_or_vice_versa(self, monkeypatch):
+        """A real, live-relevant guard: DOURMOUSE_MODEL_<AGENT> and
+        DOURMOUSE_API_KEY_<AGENT> share the same agent-name suffix
+        convention but must never be confused with each other -- an agent
+        with a model override and no key override keeps the default key,
+        and vice versa."""
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-default-key")
+        monkeypatch.setenv("NVIDIA_MODEL", "nvidia/default-model")
+        monkeypatch.setenv("DOURMOUSE_MODEL_CODE_NVIDIA", "nvidia/special-model")
+        monkeypatch.delenv("DOURMOUSE_API_KEY_CODE_NVIDIA", raising=False)
+        cfg = load_nvidia_config()
+        assert cfg.model_for_agent("code_nvidia") == "nvidia/special-model"
+        assert cfg.key_for_agent("code_nvidia") == "nvapi-default-key"
+
 
 # --------------------------------------------------------------------------- #
 # world-monitor-expansion — real per-agent NVIDIA defaults +
