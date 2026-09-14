@@ -2862,8 +2862,23 @@ async function run(text){
     contentRevealer.flushAll(); thinkRevealer.flushAll();
   };
   try{
+    // 2026-09-14, real live-caught bug: "AUTO — OLLAMA / LOCAL AGENT" only
+    // ever meant "don't force Claude via focus_agent" -- it never actually
+    // forced Ollama. Whenever Claude Front Mode is on in Settings (the
+    // server's own default), a plain HOME turn with AUTO selected and no
+    // focus_agent still got routed straight to Claude by
+    // _agent_split_backend's own "claude by default" fallback, so a real,
+    // already-configured Ollama Cloud key sat unused despite the label and
+    // the user's own explicit choice. Fixed by sending a real
+    // force_backend:"ollama" flag whenever AUTO is picked with no
+    // focus_agent already forcing a specific route (a CODE toolchain pin
+    // keeps its own, separate routing untouched) -- webui.py now honours
+    // this by forcing plain dispatch, guaranteeing this machine's own
+    // configured Ollama backend (local or cloud key) actually runs.
+    const directiveFA = directiveFocusAgent();
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:text, focus_agent:directiveFocusAgent(), screen:targetScreen, tab_id:tabId(), autonomous:autonomousMode}), signal:myCtrl.signal});
+      body:JSON.stringify({prompt:text, focus_agent:directiveFA, screen:targetScreen, tab_id:tabId(), autonomous:autonomousMode,
+        force_backend:(backendMode!=="claude" && !directiveFA) ? "ollama" : undefined}), signal:myCtrl.signal});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){

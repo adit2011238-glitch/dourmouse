@@ -3917,6 +3917,20 @@ class _Handler(BaseHTTPRequestHandler):
         # falsy (every existing caller: index.html, voice.html, sendMail's
         # own focus_agent="mail" fetch, etc.) is the unchanged default.
         autonomous = bool(body.get("autonomous"))
+        # 2026-09-14, real live-caught bug: console.html's "AUTO — OLLAMA /
+        # LOCAL AGENT" picker used to only mean "don't force focus_agent
+        # to code_claude" -- it never actually forced Ollama. Whenever
+        # Claude Front Mode is on (the server default), a plain HOME turn
+        # with AUTO picked and no focus_agent still fell through
+        # _agent_split_backend's own "claude by default" case, so an
+        # already-configured, working Ollama Cloud key sat completely
+        # unused despite the label and the user's explicit choice. The
+        # frontend now sends force_backend:"ollama" precisely for that
+        # case (AUTO picked, no focus_agent already forcing a route);
+        # honoured here the same way `autonomous` already forces plain
+        # dispatch, so this machine's own configured Ollama backend
+        # (local daemon, or Ollama Cloud when a key is set) genuinely runs.
+        force_ollama = (body.get("force_backend") or "").strip().lower() == "ollama"
         # v8.18: voice/text response split. The speak-and-listen UI
         # (ui/voice.html) marks its /api/chat calls with voice: true because
         # it transcribes the request and speaks the reply back with zero
@@ -4142,7 +4156,7 @@ class _Handler(BaseHTTPRequestHandler):
                     # straight through is safe.
                     forced_agent=focus_agent or None,
                     should_stop=stream.should_stop,
-                    force_plain_dispatch=autonomous,
+                    force_plain_dispatch=autonomous or force_ollama,
                 )
             except Exception as exc:  # surface real failures to the UI
                 error_msg = str(exc)
