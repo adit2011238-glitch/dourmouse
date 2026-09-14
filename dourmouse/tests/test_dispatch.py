@@ -1836,6 +1836,7 @@ class TestEndToEndThroughGeneralRoster:
             "mt5",  # v8.3: MetaTrader 5 paper broker (demo, no subscriptions)
             "docs",  # v5.x: Google Sheets/Drive link-shared access
             "browser",  # v5.25: real headless-Chrome agent (signup/login)
+            "media",  # 2026-09-14: real image generation (Gemini)
             "compute",  # v5.26: the Dell compute node (LAN inference + failover)
             "design_3d",  # 3D & UI Design — spec generation + manifest cataloguing
             "companion",  # world-monitor-expansion: friendly-persona counterpart

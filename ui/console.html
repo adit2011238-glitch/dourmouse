@@ -791,8 +791,12 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
    forces it onto its own line instead of being crushed. */
 #ta{flex:1 1 190px;min-width:190px;background:none;border:none;outline:none;resize:none;
   color:var(--blue-hi);
-  font-size:12.5px;line-height:1.6;padding:8px 2px;max-height:130px;min-height:36px}
+  font-size:12.5px;line-height:1.6;padding:8px 2px;max-height:130px;min-height:36px;
+  box-shadow:inset 0 0 0 0 transparent;transition:box-shadow .12s}
 #ta::placeholder{color:var(--blue-deep)}
+/* 2026-09-14: real drop-target feedback for drag-and-drop file/image
+   upload — theme-token color, no new palette entry. */
+#ta.dragover{box-shadow:inset 0 0 0 1px var(--amber)}
 /* #ta's own outline:none (needed so it doesn't draw a box mid-toolbar)
    silently defeated the file's one global `:focus-visible` rule (an ID
    selector always beats a bare pseudo-class on specificity) -- the
@@ -1401,6 +1405,8 @@ body.bp-open .dock,body.bp-open .body{margin-right:min(48vw,720px)}
         </select>
       </div>
       <button class="chip" id="micChip" data-tip="Switch to voice-only mode">(MIC)</button>
+      <button class="chip" id="attachChip" data-tip="Attach a file or image — or just drag one onto this box">(ATTACH)</button>
+      <input type="file" id="attachInput" multiple hidden>
       <textarea id="ta" rows="1" placeholder="Ask anything — or /all &lt;goal&gt; to put every resource on it"></textarea>
       <!-- Phase 5 (bounded autonomous multi-step execution): off by default,
            real honest tooltip — see the onclick wiring below for why this
@@ -1843,16 +1849,26 @@ function leaveActiveProject(){
 async function openProjectChat(project){
   // world-monitor-expansion: the real "Open" action project cards never
   // had (project_bookkeeper.open_project's own docstring used to say so
-  // explicitly). Routes THIS tab's existing chat screen into a real,
-  // dedicated, project-scoped session instead of building a second chat
-  // surface — see the ACTIVE_PROJECT_KEY block above for why tabId()
-  // already picks this up everywhere it's used.
+  // explicitly). Routes a chat screen into a real, dedicated,
+  // project-scoped session instead of building a second chat surface —
+  // see the ACTIVE_PROJECT_KEY block above for why tabId() already picks
+  // this up everywhere it's used.
   try{
     const res = await fetch("/api/projects/open", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({path: project.path})});
     const r = await res.json();
     if(!res.ok || r.ok===false){ alert("Couldn't open this project — "+(r.error||("HTTP "+res.status))); return; }
-    setActiveProject({tab_id: r.project.tab_id, name: r.project.name || project.path, path: r.project.path});
+    const name = r.project.name || project.path;
+    // 2026-09-14 (live-caught, user-directed): give it a real separate,
+    // titled window when the native bridge can — same feature-detect
+    // pattern already used for STUDY (window.pywebview.api.open_study),
+    // falling back to the same-tab chrome swap this always did when
+    // running from a plain browser tab.
+    if(window.pywebview && window.pywebview.api && window.pywebview.api.open_project){
+      window.pywebview.api.open_project(r.project.tab_id, name);
+      return;
+    }
+    setActiveProject({tab_id: r.project.tab_id, name, path: r.project.path});
     syncProjectChrome();
     show("HOME");
     const ta = $("ta"); if(ta) ta.focus();
@@ -2237,9 +2253,13 @@ function md(src){
                  // same [text](url) shape — otherwise the link regex would
                  // strip the brackets first and leave a stray "!". Scoped
                  // the same way the existing link regex already is: a real
-                 // http(s) URL, or this app's own /api/... path — never a
-                 // bare data:/javascript: URL.
-                 .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+|\/api\/[^\s)]+)\)/g,'<img src="$2" alt="$1" loading="lazy">')
+                 // http(s) URL, or this app's own /api/... or /uploads/...
+                 // path — never a bare data:/javascript: URL. /uploads/
+                 // added 2026-09-14 for real drag-and-drop file/image
+                 // uploads (POST /api/upload, served back at
+                 // /uploads/<name> — webui.py's own existing route, not a
+                 // new one).
+                 .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+|\/api\/[^\s)]+|\/uploads\/[^\s)]+)\)/g,'<img src="$2" alt="$1" loading="lazy">')
                  .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
     let html="",list=null;
     t.split("\n").forEach(line=>{
@@ -2465,10 +2485,25 @@ function threadFor(screenName){
   return $("thread-" + key.toLowerCase());
 }
 function unhideThread(el){ if(!el.classList.contains("on")) el.classList.add("on"); }
+// 2026-09-14 (user-directed: "allow files and images to be dropped into
+// the chat"): a dropped/attached image inserted a real markdown image
+// link into the composer, but the user's OWN turn rendered it as raw
+// escaped text ("![name](url)"), not a picture — the drop worked, the
+// upload worked, but the user never actually saw what they just
+// attached. Scoped to images only (not full md()) on purpose: the rest
+// of a typed message should never have **bold**/`code`/links silently
+// reinterpreted out from under the user, only an attachment they just
+// added through the real attach/drop UI should show as a picture.
+function renderYouText(text){
+  return esc(text).replace(
+    /!\[([^\]]*)\]\((https?:\/\/[^\s)]+|\/api\/[^\s)]+|\/uploads\/[^\s)]+)\)/g,
+    '<img src="$2" alt="$1" loading="lazy">'
+  );
+}
 function addYou(threadEl, text){
   const d=document.createElement("div"); d.className="turn you";
   d.innerHTML=`<div class="gut"><span class="who">YOU</span><span>${new Date().toTimeString().slice(0,8)}</span></div><div class="body"></div>`;
-  d.querySelector(".body").textContent=text; threadEl.appendChild(d); threadEl.scrollTop=threadEl.scrollHeight;
+  d.querySelector(".body").innerHTML=renderYouText(text); threadEl.appendChild(d); threadEl.scrollTop=threadEl.scrollHeight;
 }
 function addReply(threadEl){
   const d=document.createElement("div"); d.className="turn";
@@ -3756,7 +3791,10 @@ function paintImportedShelf(box){
     <button class="mini" type="button" id="importedRefreshBtn">REFRESH</button></div>
     <div id="importedNewForm" class="shelfnewproject" hidden>
       <input type="text" class="mailfield" id="importedNewName" placeholder="Project name">
-      <input type="text" class="mailfield" id="importedNewPath" placeholder="Real path, e.g. /Users/you/code/thing">
+      <button class="mini" type="button" id="importedNewAdvancedToggle">+ set a real path (optional)</button>
+      <div id="importedNewAdvanced" hidden>
+        <input type="text" class="mailfield" id="importedNewPath" placeholder="Real path — leave blank to auto-create under Documents/Dourmouse Projects">
+      </div>
       <input type="text" class="mailfield" id="importedNewDesc" placeholder="Description (optional)">
       <button class="chip" type="button" id="importedNewSave">CREATE</button>
       <button class="mini" type="button" id="importedNewCancel">CANCEL</button>
@@ -3767,6 +3805,7 @@ function paintImportedShelf(box){
   $("importedRefreshBtn").onclick=refreshBookkeeperProjects;
   $("importedNewBtn").onclick=()=>{ $("importedNewForm").hidden=false; $("importedNewName").focus(); };
   $("importedNewCancel").onclick=()=>{ $("importedNewForm").hidden=true; $("importedNewStatus").textContent=""; };
+  $("importedNewAdvancedToggle").onclick=()=>{ $("importedNewAdvanced").hidden=false; $("importedNewAdvancedToggle").hidden=true; $("importedNewPath").focus(); };
   $("importedNewSave").onclick=createBookkeeperProject;
   loadImportedProjects();
 }
@@ -3777,9 +3816,18 @@ async function createBookkeeperProject(){
   // Codex bookshelf, deliberately separate from the manual client-only
   // "shelf" of saved chat answers above (dm_projects_v1) — that shelf
   // already had real create/delete; this one didn't, until now.
+  //
+  // Real, live-caught bug (2026-09-14): create_project() has allowed an
+  // empty path for a while now -- it auto-creates a real folder under
+  // ~/Documents/Dourmouse Projects/<name> (project_bookkeeper.py's own
+  // _default_project_path). This exact client-side guard never caught
+  // up: it demanded a path be typed even though the server never
+  // needed one, so "two clicks, no path" never actually worked. Path is
+  // now genuinely optional here too, matching what create_project()
+  // already does.
   const name=$("importedNewName").value.trim(), path=$("importedNewPath").value.trim(),
         description=$("importedNewDesc").value.trim(), status=$("importedNewStatus");
-  if(!name || !path){ status.textContent="Name and path are both required."; return; }
+  if(!name){ status.textContent="A project name is required."; return; }
   $("importedNewSave").disabled=true;
   try{
     const res=await fetch("/api/projects/create",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -3788,6 +3836,7 @@ async function createBookkeeperProject(){
     if(!res.ok || r.ok===false){ status.textContent="Failed — "+esc(r.error||("HTTP "+res.status)); return; }
     $("importedNewForm").hidden=true; status.textContent="";
     $("importedNewName").value=""; $("importedNewPath").value=""; $("importedNewDesc").value="";
+    $("importedNewAdvanced").hidden=true; $("importedNewAdvancedToggle").hidden=false;
     loadImportedProjects();
   }catch(e){ status.textContent="Failed — "+esc(String(e.message||e)); }
   finally{ $("importedNewSave").disabled=false; }
@@ -6534,6 +6583,53 @@ $("spkChip").onclick=()=>{ speak=!speak; $("spkChip").classList.toggle("on",spea
 $("autoProjectChip").onclick=()=>{ autonomousMode=!autonomousMode;
   $("autoProjectChip").classList.toggle("on",autonomousMode); };
 
+// 2026-09-14, user-directed: "allow files and images to be dropped into
+// the chat as well." Backend already existed and needed no changes —
+// POST /api/upload?name=<file> (webui.py's own real, sandboxed uploads
+// endpoint), served back at /uploads/<name>. This is the frontend half:
+// a real attach button (native file picker) plus real drag-and-drop onto
+// the composer, both funneling through the same uploadAndInsert() call.
+// Images insert as ![name](/uploads/name) — rendered inline for free by
+// md()'s own image regex (widened above to also accept /uploads/...);
+// anything else inserts as a plain [name](/uploads/name) link.
+const _IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
+function _sanitizedUploadName(rawName){
+  // Same character set webui.py's own _UPLOAD_NAME_RE requires
+  // (^[A-Za-z0-9._-]{1,120}$) — sanitized here too so a real-world
+  // filename (spaces, unicode, parentheses) does not just bounce off
+  // the server with an error the user has to decode.
+  const cleaned = (rawName||"upload").replace(/[^A-Za-z0-9._-]/g,"-").slice(0,120);
+  return cleaned || "upload";
+}
+async function uploadAndInsert(file){
+  const name = _sanitizedUploadName(file.name);
+  try{
+    const res = await fetch(`/api/upload?name=${encodeURIComponent(name)}`, {method:"POST", body:file});
+    const r = await res.json();
+    if(!res.ok || r.ok===false){ alert("Upload failed — "+(r.error||("HTTP "+res.status))); return; }
+    const url = `/uploads/${encodeURIComponent(r.name)}`;
+    const link = _IMAGE_EXT_RE.test(r.name) ? `![${r.name}](${url})` : `[${r.name}](${url})`;
+    const ta = $("ta");
+    const sep = ta.value && !ta.value.endsWith("\n") ? "\n" : "";
+    ta.value += sep + link + "\n";
+    ta.dispatchEvent(new Event("input"));
+    ta.focus();
+  }catch(e){ alert("Upload failed — "+String(e.message||e)); }
+}
+$("attachChip").onclick=()=>$("attachInput").click();
+$("attachInput").onchange=()=>{
+  Array.from($("attachInput").files||[]).forEach(uploadAndInsert);
+  $("attachInput").value = "";
+};
+["dragover","dragenter"].forEach(evt=>$("ta").addEventListener(evt, e=>{ e.preventDefault(); $("ta").classList.add("dragover"); }));
+["dragleave","drop"].forEach(evt=>$("ta").addEventListener(evt, e=>{ $("ta").classList.remove("dragover"); }));
+$("ta").addEventListener("drop", e=>{
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if(!files || !files.length) return;
+  e.preventDefault();
+  Array.from(files).forEach(uploadAndInsert);
+});
+
 /* ---------------- boot ---------------- */
 setInterval(()=>{ $("mClock").textContent=new Date().toTimeString().slice(0,8); },1000);
 $("mClock").textContent=new Date().toTimeString().slice(0,8);
@@ -6550,6 +6646,19 @@ initVoice(); paintQueue();
       kind of comfortable lie this console is not allowed to tell;
    3. then either the picker (first run) or the boot sequence.
    Boot runs once per tab session, not on every navigation. */
+// 2026-09-14 (live-caught, user-directed: PROJECTS should open "its own
+// chat tabs like in Claude Desktop or ChatGPT"). A native project window
+// (DesktopBridge.open_project) loads THIS SAME page at
+// /?project=<tab_id>&name=<name> instead of the plain root — read that
+// here, before anything below picks a tab id, so restoreSession() and
+// every other startup call already sees the right project-scoped
+// session on the very first paint, not one screen redraw late.
+try{
+  const qp = new URLSearchParams(location.search);
+  const qProject = qp.get("project");
+  if(qProject) setActiveProject({tab_id: qProject, name: qp.get("name") || qProject, path: null});
+}catch{}
+
 const storedTheme = themeGet();
 if(storedTheme) document.documentElement.setAttribute("data-theme", storedTheme);
 else document.documentElement.setAttribute("data-theme","arc");

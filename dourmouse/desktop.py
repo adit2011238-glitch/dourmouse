@@ -557,6 +557,24 @@ class DesktopBridge:
         through, exactly like open_agent() right below."""
         return self.open_task_window("study", "/study", title="STUDY")
 
+    def open_project(self, tab_id: str, name: str = "") -> bool:
+        """2026-09-14 (live-caught, user-directed: PROJECTS should "mirror
+        the way claude desktop makes projects... opens its own chat tabs").
+        Opening a project already scoped its chat to a real, isolated
+        server-side session (project_bookkeeper.open_project's own
+        tab_id) -- the gap was purely visual: the existing web flow just
+        changed the current tab's placeholder text and title in place, so
+        the isolation was real but invisible. Reuses open_task_window the
+        same way open_study/open_agent do, so an opened project gets a
+        real, separate, titled window that loads already scoped to that
+        project via the ?project= query param console.html reads on
+        load (see syncProjectChrome's own caller in the inline script)."""
+        tab_id = (tab_id or "").strip()
+        if not tab_id:
+            return False
+        title = f"PROJECT // {(name or tab_id).strip()[:28].upper()}"
+        return self.open_task_window(f"project:{tab_id}", f"/?project={tab_id}", title=title)
+
     def open_agent(self, name: str) -> None:
         name = (name or "").strip()
         if not name:

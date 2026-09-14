@@ -3134,3 +3134,71 @@ class TestBrowserScreenshotEndpoint:
         resp.read()
         conn.close()
         assert resp.reason.isascii(), f"non-ASCII reason phrase would crash send_error: {resp.reason!r}"
+
+
+class TestGeneratedImageEndpoint:
+    """GET /api/images/generated — 2026-09-14, user-directed: "give it
+    the ability to ... generate ... images." Same shape as the
+    screenshot endpoint right above, backed by image_gen.py's own
+    sandboxed resolve_generated_image() instead of a fixed-.png lookup
+    (a generated file's real extension varies with its mime type)."""
+
+    def test_serves_a_real_generated_image(self, server, monkeypatch, tmp_path):
+        from dourmouse import image_gen
+
+        images_dir = tmp_path / "generated"
+        images_dir.mkdir()
+        (images_dir / "a-red-circle.png").write_bytes(b"fake-png-bytes")
+        monkeypatch.setattr(image_gen, "IMAGES_DIR", images_dir)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/images/generated?name=a-red-circle.png")
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        assert resp.status == 200
+        assert resp.getheader("Content-Type") == "image/png"
+        assert body == b"fake-png-bytes"
+
+    def test_jpeg_extension_gets_the_real_jpeg_mime_type(self, server, monkeypatch, tmp_path):
+        from dourmouse import image_gen
+
+        images_dir = tmp_path / "generated"
+        images_dir.mkdir()
+        (images_dir / "a-photo.jpg").write_bytes(b"fake-jpeg-bytes")
+        monkeypatch.setattr(image_gen, "IMAGES_DIR", images_dir)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/images/generated?name=a-photo.jpg")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.getheader("Content-Type") == "image/jpeg"
+
+    def test_missing_image_returns_a_real_404_not_a_crash(self, server, monkeypatch, tmp_path):
+        from dourmouse import image_gen
+
+        monkeypatch.setattr(image_gen, "IMAGES_DIR", tmp_path / "empty")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/images/generated?name=nope.png")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.status == 404
+        assert resp.reason.isascii()
+
+    def test_path_traversal_is_rejected_not_served(self, server, monkeypatch, tmp_path):
+        from dourmouse import image_gen
+
+        images_dir = tmp_path / "generated"
+        images_dir.mkdir()
+        (tmp_path / "secret.png").write_bytes(b"not yours")
+        monkeypatch.setattr(image_gen, "IMAGES_DIR", images_dir)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/images/generated?name=../secret.png")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.status == 404

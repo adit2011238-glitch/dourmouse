@@ -2291,6 +2291,37 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+        elif path == "/api/images/generated":
+            # 2026-09-14, user-directed: "give it the ability to ...
+            # generate ... images." Serves a real generate_image() output
+            # (dourmouse/image_gen.py) — same shape as the screenshot
+            # route right above, sandboxed via resolve_generated_image
+            # rather than a bare character allowlist (a generated
+            # filename carries a real extension, unlike a screenshot's
+            # fixed .png).
+            from dourmouse.image_gen import resolve_generated_image
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            name = (qs.get("name") or [""])[0]
+            img = resolve_generated_image(name)
+            if img is None:
+                self.send_error(404, "no such generated image")
+                return
+            try:
+                body = img.read_bytes()
+            except OSError:
+                self.send_error(404, "generated image unreadable")
+                return
+            mime = {
+                "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "webp": "image/webp", "gif": "image/gif",
+            }.get(img.suffix.lstrip(".").lower(), "application/octet-stream")
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/api/email/identity":
             # v5.25: Dourmouse's own mail identity (name, own address, SMTP).
             from dourmouse.email_identity import identity_status

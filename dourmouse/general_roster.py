@@ -4739,6 +4739,16 @@ def build_general_registry() -> DispatchRegistry:
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"DRIVE READ FAILED: {type(exc).__name__}: {exc}"
 
+    def _generate_image_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.image_gen import generate_image
+
+        try:
+            return generate_image(arguments)
+        except RuntimeError as exc:
+            return f"GENERATE IMAGE (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network/decode failures, readable
+            return f"GENERATE IMAGE FAILED: {type(exc).__name__}: {exc}"
+
     # ---- Browser agent (v5.25): real headless Chrome via Playwright --------
     def _browser_h(tool: str) -> Callable[[dict[str, Any]], str]:
         def _handler(arguments: dict[str, Any]) -> str:
@@ -5072,6 +5082,40 @@ def build_general_registry() -> DispatchRegistry:
                     ),
                     parameters={"type": "object", "properties": {}},
                     handler=_browser_h("pane_hide"),
+                ),
+            ],
+        )
+    )
+
+    # ---- Media generation (2026-09-14, user-directed: "give it the
+    # ability to ... generate ... images") -----------------------------
+    registry.register_subagent(
+        _subagent(
+            "media",
+            "General",
+            "Generates real images from a text prompt (Gemini). Display "
+            "of an already-generated screenshot or image is handled "
+            "elsewhere (browser_screenshot, md()'s own markdown image "
+            "rendering) -- this is real generation, not just display.",
+            [
+                ToolSpec(
+                    name="generate_image",
+                    description=(
+                        "Generate a real image from a text prompt (Gemini) and "
+                        "save it to the app's data dir; view it at "
+                        "/api/images/generated. Use to show the user a picture, "
+                        "diagram, or illustration, not just describe one. "
+                        "NOT CONFIGURED when no Gemini key is set."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "prompt": {"type": "string"},
+                            "model": {"type": "string"},
+                        },
+                        "required": ["prompt"],
+                    },
+                    handler=_generate_image_h,
                 ),
             ],
         )

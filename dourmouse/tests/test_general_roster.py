@@ -252,6 +252,7 @@ class TestRosterShape:
             "t212",  # v5.x: Trading 212 broker ops
             "docs",  # v5.x: Google Sheets/Drive link-shared access
             "browser",  # v5.25: real headless-Chrome agent (signup/login)
+            "media",  # 2026-09-14: real image generation (Gemini)
             "compute",  # v5.26: the Dell compute node (LAN inference + failover)
             "design_3d",  # 3D & UI Design — spec generation + manifest cataloguing
             "companion",  # world-monitor-expansion: friendly-persona counterpart
@@ -385,6 +386,18 @@ class TestRosterShape:
     def test_internet_tools_registered(self):
         registry = build_general_registry()
         assert {"web_search", "fetch_url", "open_url"} <= registry.tool_names
+
+    def test_generate_image_tool_registered_regular_and_requires_a_prompt(self):
+        """2026-09-14, user-directed: "give it the ability to ...
+        generate ... screenshots and images." Display already worked
+        (browser_screenshot); this is the real generation tool."""
+        from dourmouse.dispatch import Permission
+
+        registry = build_general_registry()
+        spec = registry.lookup("generate_image")
+        assert spec is not None
+        assert spec.permission is Permission.REGULAR
+        assert spec.parameters["required"] == ["prompt"]
 
     def test_deploy_description_scopes_when_to_call_it(self):
         """Real bug found live-testing this session: plain coding requests

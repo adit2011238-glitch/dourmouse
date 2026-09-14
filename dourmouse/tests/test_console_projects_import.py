@@ -170,3 +170,75 @@ class TestImportedProjectsShelf:
         assert "function importedRelTime(" in script
         assert "p.stat" in script
         assert 'card.querySelector(".bookwhen").textContent = importedRelTime(p.last_active)' in script
+
+
+class TestCreateProjectAllowsABlankPath:
+    """Real, live-caught bug (2026-09-14): create_project() on the
+    backend has allowed an empty path for a while -- it auto-creates a
+    real folder under ~/Documents/Dourmouse Projects/<name>
+    (project_bookkeeper.py's own _default_project_path). This client-side
+    form never caught up: it demanded a path be typed even though the
+    server never needed one, so the user's own "two clicks, no path"
+    request never actually worked. Path is now genuinely optional here
+    too."""
+
+    def test_the_old_both_required_guard_is_gone(self):
+        script = _extract_inline_script()
+        assert "Name and path are both required" not in script
+        assert "A project name is required" in script
+
+    def test_create_only_still_requires_a_name(self):
+        script = _extract_inline_script()
+        m = re.search(
+            r"async function createBookkeeperProject\(\)\{(.*?)\n\}", script, re.S
+        )
+        assert m, "createBookkeeperProject not found"
+        body = m.group(1)
+        assert "if(!name)" in body
+        assert "!path" not in body
+
+    def test_path_field_is_optional_and_explained(self):
+        html = _CONSOLE_HTML.read_text(encoding="utf-8")
+        assert 'id="importedNewPath"' in html
+        assert "auto-create" in html.lower()
+
+    def test_functionally_creates_with_a_blank_path(self, tmp_path):
+        """Real execution: drive the actual extracted createBookkeeperProject
+        against a fake fetch and confirm a blank path is sent through
+        rather than blocked client-side."""
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node not on PATH in this environment")
+        script = _extract_inline_script()
+        m = re.search(
+            r"(async function createBookkeeperProject\(\)\{.*?\n\})", script, re.S
+        )
+        assert m, "createBookkeeperProject not found"
+        fn_src = m.group(1)
+        harness = """
+function esc(s){ return String(s); }
+const store = {};
+function $(id){
+  if(!store[id]) store[id] = {value:"", textContent:"", disabled:false, hidden:false};
+  return store[id];
+}
+let sentBody = null;
+async function fetch(url, opts){
+  sentBody = JSON.parse(opts.body);
+  return { ok: true, json: async () => ({ok: true, project: {}}) };
+}
+function loadImportedProjects(){}
+""" + fn_src + """
+$("importedNewName").value = "My New Project";
+$("importedNewPath").value = "";
+$("importedNewDesc").value = "";
+createBookkeeperProject().then(() => {
+  const ok = sentBody && sentBody.name === "My New Project" && sentBody.path === "";
+  console.log(JSON.stringify({ok, sentBody}));
+  process.exit(ok ? 0 : 1);
+});
+"""
+        js_file = tmp_path / "create_project_harness.js"
+        js_file.write_text(harness, encoding="utf-8")
+        result = subprocess.run([node, str(js_file)], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"blank-path create was blocked or malformed:\n{result.stdout}\n{result.stderr}"

@@ -495,6 +495,33 @@ class TestGeneralizedTaskWindows:
         bridge.open_study()
         assert len([w for w in fake.windows if w.url.endswith("/study")]) == 1
 
+    def test_open_project_delegates_to_open_task_window(self):
+        """2026-09-14, live-caught, user-directed: PROJECTS should "open
+        its own chat tabs like in Claude Desktop or ChatGPT". The chat
+        isolation was already real server-side (project_bookkeeper's own
+        tab_id) -- this is the real native window that makes it visible,
+        the same open_task_window every other agent/task window uses."""
+        bridge, fake = self._bridge()
+        ok = bridge.open_project("project-abc123", "My Real Project")
+        assert ok is True
+        win = next(w for w in fake.windows if w.url.endswith("/?project=project-abc123"))
+        assert win.title == "PROJECT // MY REAL PROJECT"
+        # reuse semantics preserved through the delegation
+        bridge.open_project("project-abc123", "My Real Project")
+        assert len([w for w in fake.windows if w.url.endswith("/?project=project-abc123")]) == 1
+
+    def test_open_project_requires_a_tab_id(self):
+        bridge, fake = self._bridge()
+        before = len(fake.windows)
+        assert bridge.open_project("") is False
+        assert len(fake.windows) == before
+
+    def test_open_project_falls_back_to_the_tab_id_when_name_is_blank(self):
+        bridge, fake = self._bridge()
+        bridge.open_project("project-abc123")
+        win = next(w for w in fake.windows if w.url.endswith("/?project=project-abc123"))
+        assert win.title == "PROJECT // PROJECT-ABC123"
+
     def test_open_all_hands_delegates_to_open_task_window(self):
         bridge, fake = self._bridge()
         ok = bridge.open_all_hands("run-42", goal="ship the thing")

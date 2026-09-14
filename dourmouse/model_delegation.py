@@ -103,6 +103,14 @@ _CLOUD_OK_AGENTS = frozenset({
     "globe",
     "rnd",
     "music",
+    # 2026-09-14: real image generation (generate_image, image_gen.py).
+    # The tool itself always calls Gemini's cloud API regardless of this
+    # setting (there is no local image-gen backend at all) -- this only
+    # controls whether the CONVERSATIONAL/routing layer around a request
+    # aimed at this agent may also use cloud Gemini, and an image prompt
+    # is not the personal/financial data class _LOCAL_ONLY_AGENTS exists
+    # to protect.
+    "media",
 })
 
 LOCAL = "ollama"
