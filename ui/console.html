@@ -1120,11 +1120,32 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .d2dHandleRect{fill:var(--amber);stroke:#000;stroke-width:1}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 /* backlog #8: the embedded browser pane. One shared instance, slide-in
-   from the right, same token set as every other overlay in this file. */
-.bp-pane{position:fixed;top:0;right:0;bottom:0;width:min(48vw,720px);z-index:9000;
+   from the right, same token set as every other overlay in this file.
+   v14 (user-directed, 2026-09-14, "make the pdf preview and browser
+   minimizable so its size can change etc like in claude desktop"):
+   width is a real CSS custom property instead of a fixed formula, set
+   by dragging .bp-resize and persisted (dm_bp_width_v1) the same
+   try/catch localStorage pattern every other persisted UI choice in
+   this file already uses -- so it's a real resizable/minimizable panel
+   like the ask names, not a fixed overlay. */
+.bp-pane{position:fixed;top:0;right:0;bottom:0;width:var(--bp-width,min(48vw,720px));z-index:9000;
   display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line-2);
   box-shadow:-8px 0 24px rgba(0,0,0,.35)}
 .bp-pane[hidden]{display:none}
+.bp-pane.bp-min{width:44px!important}
+.bp-pane.bp-min .bp-toolbar,.bp-pane.bp-min .bp-frame,.bp-pane.bp-min .bp-fallback,
+.bp-pane.bp-min .bp-proxynote,.bp-pane.bp-min .bp-resize{display:none}
+.bp-minbar{display:none;flex-direction:column;align-items:center;gap:10px;padding:10px 0;
+  height:100%;cursor:pointer;background:var(--panel2)}
+.bp-pane.bp-min .bp-minbar{display:flex}
+.bp-minbar .bp-minlabel{writing-mode:vertical-rl;font-family:var(--mono);font-size:10px;
+  letter-spacing:.08em;color:var(--blue-dim);opacity:.8}
+/* Same reflow fix as before (see the real bug this comment already
+   documented), now reading the same live custom property instead of a
+   duplicated width formula so a resize/minimize can never leave the
+   composer's own clear stale or out of sync. */
+body.bp-open .dock,body.bp-open .body{margin-right:var(--bp-width,min(48vw,720px))}
+body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
 /* Real bug, live-reproduced (2026-09-11): the pane is a fixed overlay with
    no reflow of its own -- .dock (the composer bar, including #ta) and
    .body both still ran full-width UNDERNEATH it. Their real DOM position
@@ -1132,9 +1153,9 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
    z-index:9000 box, so the instant the pane opened, clicking into the
    message box hit the pane instead (document.elementFromPoint on the
    textarea's own center returned #bpFrame, not the textarea) -- typing a
-   follow-up message while the pane was open silently went nowhere. Same
-   width formula as .bp-pane itself so the clear is exact, not a guess. */
-body.bp-open .dock,body.bp-open .body{margin-right:min(48vw,720px)}
+   follow-up message while the pane was open silently went nowhere. */
+.bp-resize{position:absolute;left:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:9001}
+.bp-resize:hover,.bp-resize.on{background:var(--amber-soft)}
 .bp-toolbar{display:flex;align-items:center;gap:6px;padding:8px;border-bottom:1px solid var(--line);
   background:var(--panel2)}
 .bp-nav{background:none;border:1px solid var(--line-2);color:var(--blue-hi);border-radius:4px;
@@ -1208,12 +1229,23 @@ body.bp-open .dock,body.bp-open .body{margin-right:min(48vw,720px)}
      one per tab. Opened via openBrowserPane(url), triggered either by the
      model (open_browser_pane tool -> SSE) or the user's own address bar. -->
 <div id="browserPane" class="bp-pane" hidden>
+  <!-- v14: drag to resize (persisted), same idea as Claude Desktop's own
+       side panel -- see the CSS block above for the --bp-width custom
+       property this writes to and the reflow rule that reads it. -->
+  <div id="bpResize" class="bp-resize" title="Drag to resize"></div>
+  <!-- v14: the collapsed strip shown when minimized -- click anywhere on
+       it to restore. The pane's real state (URL, scroll position, load)
+       is untouched by minimizing; only its width changes. -->
+  <div id="bpMinbar" class="bp-minbar" title="Restore">
+    <span class="bp-minlabel" id="bpMinLabel">PANE</span>
+  </div>
   <div class="bp-toolbar">
     <button id="bpBack" class="bp-nav" type="button" title="Back" aria-label="Back">&#8592;</button>
     <button id="bpFwd" class="bp-nav" type="button" title="Forward" aria-label="Forward">&#8594;</button>
     <button id="bpReload" class="bp-nav" type="button" title="Reload" aria-label="Reload">&#8635;</button>
     <input id="bpAddr" class="bp-addr" type="text" placeholder="Address or search…" autocomplete="off" spellcheck="false">
     <button id="bpGo" class="bp-nav" type="button" title="Go" aria-label="Go">GO</button>
+    <button id="bpMin" class="bp-nav" type="button" title="Minimize" aria-label="Minimize">&#8211;</button>
     <button id="bpClose" class="bp-nav bp-close" type="button" title="Close" aria-label="Close">&times;</button>
   </div>
   <div id="bpFallback" class="bp-fallback" hidden>
@@ -6279,7 +6311,9 @@ async function openBrowserPane(url){
   // is guarded by _bpOpenSeq.
   const seq = ++_bpOpenSeq;
   pane.hidden = false;
+  pane.classList.remove("bp-min");  // v14: opening a (new) URL always restores from minimized
   document.body.classList.add("bp-open");
+  document.body.classList.remove("bp-pane-min");
   addr.value = url;
   fb.hidden = true;
   if(note) note.hidden = true;
@@ -6317,7 +6351,8 @@ function closeBrowserPane(){
   clearTimeout(_bpLoadTimer);
   frame.src = "";  // real unload, not just hiding a live page
   pane.hidden = true;
-  document.body.classList.remove("bp-open");
+  pane.classList.remove("bp-min");  // v14: closing always clears a minimized state
+  document.body.classList.remove("bp-open", "bp-pane-min");
 }
 (function initBrowserPane(){
   const frame = $("bpFrame"), addr = $("bpAddr");
@@ -6334,6 +6369,71 @@ function closeBrowserPane(){
   $("bpFwd")?.addEventListener("click", () => { try{ frame.contentWindow.history.forward(); }catch{} });
   $("bpGo")?.addEventListener("click", () => { const v = addr.value.trim(); if(v) openBrowserPane(/^https?:\/\//i.test(v) ? v : "https://" + v); });
   addr?.addEventListener("keydown", (ev) => { if(ev.key === "Enter") $("bpGo").click(); });
+
+  /* v14 (user-directed, "make the pdf previw and browser minizable so
+     its size can change etc like in claude desktop"): drag-to-resize +
+     minimize/restore, applied to the ONE shared pane every
+     open_browser_pane / file preview call already reuses — covers both
+     by construction, not two separate implementations. Width is a real
+     CSS custom property (--bp-width) on :root so the composer's own
+     reflow margin (see the CSS rule right above .bp-resize) always
+     reads the SAME live value, never a second, driftable copy. */
+  const BP_WIDTH_KEY = "dm_bp_width_v1";
+  const BP_MIN_W = 320, BP_MAX_W = 1400;
+  function bpWidthGet(){
+    try{
+      const v = parseInt(localStorage.getItem(BP_WIDTH_KEY) || "", 10);
+      return Number.isFinite(v) ? Math.min(BP_MAX_W, Math.max(BP_MIN_W, v)) : null;
+    }catch{ return null; }
+  }
+  function bpWidthSet(px){ try{ localStorage.setItem(BP_WIDTH_KEY, String(px)); }catch{} }
+  const storedWidth = bpWidthGet();
+  if(storedWidth) document.documentElement.style.setProperty("--bp-width", storedWidth + "px");
+
+  const pane = $("browserPane"), handle = $("bpResize");
+  let dragging = false, dragStartX = 0, dragStartW = 0;
+  handle?.addEventListener("mousedown", (ev) => {
+    dragging = true;
+    dragStartX = ev.clientX;
+    dragStartW = pane.getBoundingClientRect().width;
+    handle.classList.add("on");
+    document.body.style.userSelect = "none";
+    // A live iframe swallows mousemove while the cursor is over it —
+    // block pointer events on the frame for the drag's duration so the
+    // resize keeps tracking even when the mouse crosses into the pane.
+    frame.style.pointerEvents = "none";
+    ev.preventDefault();
+  });
+  document.addEventListener("mousemove", (ev) => {
+    if(!dragging) return;
+    // Dragging the LEFT edge left (negative clientX delta) widens a
+    // pane anchored to the right — width grows as the handle moves away
+    // from the right edge, hence the sign flip here.
+    const next = Math.min(BP_MAX_W, Math.max(BP_MIN_W, dragStartW - (ev.clientX - dragStartX)));
+    document.documentElement.style.setProperty("--bp-width", next + "px");
+  });
+  document.addEventListener("mouseup", () => {
+    if(!dragging) return;
+    dragging = false;
+    handle.classList.remove("on");
+    document.body.style.userSelect = "";
+    frame.style.pointerEvents = "";
+    const current = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--bp-width"), 10);
+    if(Number.isFinite(current)) bpWidthSet(current);
+  });
+
+  // Minimize/restore — real state (URL, scroll, load) is on the iframe,
+  // untouched by this; only the pane's own width toggles. NOT persisted
+  // across reload (same "don't silently surprise the next session"
+  // reasoning autonomousMode already uses) — a pane that vanished on its
+  // own would look broken, not intentionally minimized.
+  function setMinimized(min){
+    pane.classList.toggle("bp-min", min);
+    document.body.classList.toggle("bp-pane-min", min);
+    $("bpMin").setAttribute("aria-pressed", String(min));
+  }
+  $("bpMin")?.addEventListener("click", () => setMinimized(true));
+  $("bpMinbar")?.addEventListener("click", () => setMinimized(false));
 })();
 function newsToast(item){
   let box = $("newsToastBox");

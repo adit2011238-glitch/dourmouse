@@ -578,6 +578,67 @@ def _open_path_tool(arguments: dict[str, Any]) -> str:
         return f"ERROR: could not open {target}: {exc}"
 
 
+# 2026-09-14, real live-caught gap: "There's no 'Dourmouse preview' pane
+# that can display a PDF inline — that's not a real surface in this
+# app. The two real options are: open_path (opens the file in macOS
+# Preview.app, a real visible window) or open_url" -- a second, separate
+# OS window was the ONLY option. dourmouse/pdf_reader.py's real PDFium
+# page-to-PNG renderer already existed (wired into ui/workspace.html's
+# Vision OS PDF READER panel) -- this reuses that SAME real backend
+# through a new sandboxed route (webui.py's /api/files/*,
+# _sandboxed_preview_path — same open_path trust boundary: any absolute
+# path this tool could already open outright via the real OS `open`),
+# opened into the SAME embedded browser pane every open_browser_pane
+# result already uses, via the same real HTTP-callback mechanism
+# open_browser_pane's own tool uses (see general_roster.py's
+# _open_browser_pane_tool for why that matters across a Claude CLI
+# subprocess).
+_PREVIEWABLE_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+
+
+def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
+    raw = arguments.get("path", "")
+    target = _resolve_abs(raw)
+    if target is None:
+        return "ERROR: open_file_preview requires an ABSOLUTE path."
+    if not target.is_file():
+        return f"ERROR: no such file: {target}"
+    ext = target.suffix.lower()
+    if ext not in _PREVIEWABLE_EXTS:
+        return (
+            f"REFUSED: open_file_preview only handles PDFs and images "
+            f"({', '.join(sorted(_PREVIEWABLE_EXTS))}), got {ext!r}. Use "
+            f"open_path instead for this file — it opens in the real "
+            f"default app (Preview.app, etc)."
+        )
+    import json as _json
+    import os as _os
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    port = _os.environ.get("DOURMOUSE_UI_PORT", "8765").strip() or "8765"
+    preview_url = (
+        f"http://127.0.0.1:{port}/file_preview.html?src=files&path="
+        + urllib.parse.quote(str(target))
+    )
+    api_url = f"http://127.0.0.1:{port}/api/browser-pane/open"
+    body = _json.dumps({"url": preview_url}).encode("utf-8")
+    req = urllib.request.Request(
+        api_url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 - fixed localhost host
+            resp.read()
+    except (urllib.error.URLError, OSError) as exc:
+        return f"ERROR: open_file_preview failed to reach the running app's own server: {exc}"
+    return (
+        f"OPENED FILE PREVIEW: {target} (visible to the user now, "
+        f"embedded in the app's own pane — real, resizable/minimizable, "
+        f"not a second OS window)."
+    )
+
+
 def _clipboard_get_tool(arguments: dict[str, Any]) -> str:
     if sys.platform != "darwin":
         return "NOT CONFIGURED: clipboard read uses macOS pbpaste (this is not macOS)."
@@ -969,6 +1030,27 @@ def build_system_subagent() -> Subagent:
                     "required": ["path"],
                 },
                 handler=_open_path_tool,
+            ),
+            ToolSpec(
+                name="open_file_preview",
+                description=(
+                    "Open a real PDF or image (path, png, jpg, jpeg, gif, "
+                    "webp, svg, bmp) INLINE in the app's own embedded "
+                    "preview pane — a real, resizable/minimizable panel, "
+                    "NOT a second OS window like open_path's Preview.app. "
+                    "A PDF gets a real rendered page-by-page view (prev/"
+                    "next), not just extracted text. Prefer this over "
+                    "open_path whenever the user wants to actually LOOK "
+                    "at a PDF or image without leaving the app; use "
+                    "open_path instead for any other file type, or when "
+                    "the user explicitly wants the real default app."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string", "description": "absolute path to the PDF or image"}},
+                    "required": ["path"],
+                },
+                handler=_open_file_preview_tool,
             ),
             ToolSpec(
                 name="clipboard_get",

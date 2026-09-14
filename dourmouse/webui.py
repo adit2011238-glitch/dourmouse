@@ -38,6 +38,7 @@ Binds to 127.0.0.1 only. Secrets stay in .env; nothing is logged in full.
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import re
 import sys
@@ -128,6 +129,50 @@ def _sandboxed_upload_path(rel: str) -> Path | None:
     except ValueError:
         return None
     return target if target.is_file() else None
+
+
+# 2026-09-14, real live-caught gap: "There's no 'Dourmouse preview' pane
+# that can display a PDF inline" (a real user complaint, mid-session) --
+# open_path's own only real option was shelling out to macOS `open`
+# (Preview.app, a second, separate window), and study.html's own
+# preview pane could only ever show extracted TEXT (read_study_file),
+# losing every image/diagram/annotation in what this folder's real
+# content mostly is: scanned-image textbook PDFs (see study_agent.py's
+# own read_study_file docstring). dourmouse/pdf_reader.py's real
+# PDFium-backed page-to-PNG renderer already existed and already worked
+# (wired into ui/workspace.html's Vision OS PDF READER panel) --
+# nothing new needed there, just two more sandboxing paths onto the
+# SAME real functions: one for an arbitrary already-open_path-trusted
+# absolute path (_sandboxed_preview_path, below), one for the study
+# folder (study_agent._resolve_within_root, already real and tested).
+_PREVIEWABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+_PREVIEWABLE_EXTS = _PREVIEWABLE_IMAGE_EXTS | {".pdf"}
+
+
+def _sandboxed_preview_path(raw: str) -> Path | None:
+    """An absolute path, real and previewable (image or PDF) -- the SAME
+    trust boundary open_path already has (any absolute path the user or
+    the LLM already named in a real tool call), not a wider one: this
+    only ever returns READ-ONLY bytes of a file that tool could already
+    open outright via the real OS `open` command. No root restriction
+    (there is none to apply -- unlike the uploads/study sandboxes, this
+    path is deliberately allowed to point anywhere on disk, exactly like
+    open_path itself), but a real extension allowlist and existence
+    check, same honesty convention as every other sandboxed reader here:
+    returns None (never raises) for anything outside that -- the caller
+    reports it plainly."""
+    if not raw:
+        return None
+    try:
+        target = Path(raw).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return None
+    if not target.is_absolute() or not target.is_file():
+        return None
+    if target.suffix.lower() not in _PREVIEWABLE_EXTS:
+        return None
+    return target
+
 
 # Time a human has to approve/decline a gated action before it auto-declines.
 _CONFIRM_TIMEOUT_SECONDS = 300.0
@@ -1763,6 +1808,12 @@ class _Handler(BaseHTTPRequestHandler):
             # backlog #9: the Study tab — chat scoped to the "study"
             # subagent (real, read-only access to the user's study folder).
             self._serve_static("study.html")
+        elif path in ("/file_preview", "/file_preview.html"):
+            # 2026-09-14: the missing in-app preview surface for PDFs/
+            # images (open_file_preview tool, study.html's own preview
+            # pane) — see /api/files/* and /api/study/* routes above for
+            # the real backend this renders.
+            self._serve_static("file_preview.html")
         elif path in ("/map", "/map.html"):
             self._serve_static("map.html")
         elif path in ("/workspace", "/workspace.html"):
@@ -2739,6 +2790,133 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(png_bytes)
+        elif path == "/api/files/pdf-info":
+            # 2026-09-14 (real file-preview panel): the general,
+            # arbitrary-absolute-path counterpart to /api/pdf/info above
+            # -- same real pdf_reader.pdf_info(), a real
+            # open_path-trust-level sandbox (_sandboxed_preview_path)
+            # instead of the uploads-only one.
+            from dourmouse.pdf_reader import pdf_info
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            target = _sandboxed_preview_path((qs.get("path") or [""])[0])
+            if target is None or target.suffix.lower() != ".pdf":
+                self._send_json({"ok": False, "error": "bad or missing pdf path"}, status=400)
+                return
+            self._send_json({"ok": True, **pdf_info(target)})
+        elif path == "/api/files/pdf-page.png":
+            from dourmouse.pdf_reader import render_page_png
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            target = _sandboxed_preview_path((qs.get("path") or [""])[0])
+            if target is None or target.suffix.lower() != ".pdf":
+                self.send_error(400, "bad or missing pdf path")
+                return
+            try:
+                page = int((qs.get("page") or ["0"])[0])
+            except ValueError:
+                self.send_error(400, "bad page number")
+                return
+            try:
+                png_bytes = render_page_png(target, page)
+            except RuntimeError as exc:
+                self.send_error(404, str(exc))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png_bytes)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(png_bytes)
+        elif path == "/api/files/image":
+            # Raw image bytes for an arbitrary already-open_path-trusted
+            # path -- no page rendering needed, just serve the file.
+            qs = urllib.parse.parse_qs(parsed.query)
+            target = _sandboxed_preview_path((qs.get("path") or [""])[0])
+            if target is None or target.suffix.lower() not in _PREVIEWABLE_IMAGE_EXTS:
+                self.send_error(400, "bad or missing image path")
+                return
+            content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+            body = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/api/study/pdf-info":
+            # Same real preview mechanism, sandboxed to the study folder
+            # (study_agent._resolve_within_root, already real and
+            # tested) instead of an arbitrary absolute path -- for
+            # study.html's own preview pane, whose real content is
+            # mostly scanned-image PDFs (see study_agent.py's own
+            # read_study_file docstring for why text extraction alone
+            # was never enough here).
+            from dourmouse.pdf_reader import pdf_info
+            from dourmouse.study_agent import StudyPathError, _resolve_within_root
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            rel_path = (qs.get("path") or [""])[0]
+            try:
+                target = _resolve_within_root(rel_path)
+            except StudyPathError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            if not target.is_file() or target.suffix.lower() != ".pdf":
+                self._send_json({"ok": False, "error": f"not a PDF file: {rel_path!r}"}, status=400)
+                return
+            self._send_json({"ok": True, **pdf_info(target)})
+        elif path == "/api/study/pdf-page.png":
+            from dourmouse.pdf_reader import render_page_png
+            from dourmouse.study_agent import StudyPathError, _resolve_within_root
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            rel_path = (qs.get("path") or [""])[0]
+            try:
+                target = _resolve_within_root(rel_path)
+            except StudyPathError as exc:
+                self.send_error(400, str(exc))
+                return
+            if not target.is_file() or target.suffix.lower() != ".pdf":
+                self.send_error(400, f"not a PDF file: {rel_path!r}")
+                return
+            try:
+                page = int((qs.get("page") or ["0"])[0])
+            except ValueError:
+                self.send_error(400, "bad page number")
+                return
+            try:
+                png_bytes = render_page_png(target, page)
+            except RuntimeError as exc:
+                self.send_error(404, str(exc))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png_bytes)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(png_bytes)
+        elif path == "/api/study/image":
+            from dourmouse.study_agent import StudyPathError, _resolve_within_root
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            rel_path = (qs.get("path") or [""])[0]
+            try:
+                target = _resolve_within_root(rel_path)
+            except StudyPathError as exc:
+                self.send_error(400, str(exc))
+                return
+            if not target.is_file() or target.suffix.lower() not in _PREVIEWABLE_IMAGE_EXTS:
+                self.send_error(400, f"not an image file: {rel_path!r}")
+                return
+            content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+            body = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/api/gdelt/graph":
             # v13.6, Vision OS "real-time global event ingestion + kinetic
             # knowledge graph" (dourmouse/gdelt_graph.py — real GDELT GKG

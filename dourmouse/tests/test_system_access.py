@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.error
 
 import pytest
 
@@ -22,6 +23,7 @@ from dourmouse.general_roster import build_general_registry
 from dourmouse.system_access import (
     _delete_path_tool,
     _list_path_tool,
+    _open_file_preview_tool,
     _read_path_tool,
     _undo_last_change_tool,
     _write_path_tool,
@@ -621,3 +623,81 @@ class TestSystemInfoAndHelpers:
         payload = build_roster_payload(build_general_registry())
         names = [s["name"] for s in payload["subagents"]]
         assert "system" in names
+
+
+class TestOpenFilePreview:
+    """2026-09-14, real live-caught gap: "There's no 'Dourmouse preview'
+    pane that can display a PDF inline" -- open_path's only real option
+    was a second OS window (Preview.app). open_file_preview opens a real
+    PDF/image INLINE in the app's own embedded pane instead, via the
+    same real HTTP-callback mechanism open_browser_pane's own tool uses
+    (a real POST back to this running server, not a direct singleton
+    touch -- see general_roster.py's _open_browser_pane_tool for the
+    real cross-process bug that pattern exists to avoid)."""
+
+    def test_refuses_relative_path(self):
+        out = _open_file_preview_tool({"path": "relative/file.pdf"})
+        assert out.startswith("ERROR")
+        assert "ABSOLUTE" in out
+
+    def test_refuses_missing_file(self, tmp_path):
+        out = _open_file_preview_tool({"path": str(tmp_path / "nope.pdf")})
+        assert out.startswith("ERROR")
+        assert "no such file" in out
+
+    def test_refuses_unsupported_extension(self, tmp_path):
+        p = tmp_path / "notes.txt"
+        p.write_text("hi")
+        out = _open_file_preview_tool({"path": str(p)})
+        assert out.startswith("REFUSED")
+        assert "open_path" in out
+
+    def test_real_post_reaches_the_browser_pane_open_endpoint(self, tmp_path, monkeypatch):
+        p = tmp_path / "doc.pdf"
+        p.write_bytes(b"%PDF-1.4\n%%EOF")
+        seen = {}
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(req, timeout=10):
+            seen["url"] = req.full_url
+            seen["method"] = req.get_method()
+            seen["body"] = json.loads(req.data.decode())
+            return _FakeResponse()
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        out = _open_file_preview_tool({"path": str(p)})
+        assert "OPENED FILE PREVIEW" in out
+        assert seen["url"] == "http://127.0.0.1:8765/api/browser-pane/open"
+        assert seen["method"] == "POST"
+        preview_url = seen["body"]["url"]
+        assert preview_url.startswith("http://127.0.0.1:8765/file_preview.html?src=files&path=")
+        assert str(p) in preview_url
+
+    def test_honest_error_when_the_running_server_is_unreachable(self, tmp_path, monkeypatch):
+        p = tmp_path / "pic.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        def fake_urlopen(req, timeout=10):
+            raise urllib.error.URLError("connection refused")
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        out = _open_file_preview_tool({"path": str(p)})
+        assert out.startswith("ERROR")
+
+    def test_wired_onto_the_system_subagent_ungated(self):
+        """Same trust/permission level as open_path -- read-only viewing,
+        no confirmation gate, since it can only ever open a file the
+        caller already named directly (no wider access than open_path
+        already has)."""
+        sub = build_system_subagent()
+        spec = next(t for t in sub.tools if t.name == "open_file_preview")
+        assert spec.permission == Permission.REGULAR

@@ -51,6 +51,12 @@
     padding: 14px 16px; margin-bottom: 12px; max-height: 260px; overflow-y: auto;
   }
   #preview.on { display: block; }
+  /* 2026-09-14: real PDF/image preview (this folder's own content is
+     mostly scanned-image PDFs — see study_agent.py's read_study_file
+     docstring), not just extracted text. A media preview needs real
+     room, unlike a text excerpt. */
+  #preview.pv-media { max-height: 70vh; }
+  #preview .pv-frame { width: 100%; height: 60vh; border: none; border-radius: 8px; background: #fff; }
   #preview .pv-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
   #preview .pv-name { font-size: 13px; font-weight: 600; color: var(--text-dim); }
   #preview .pv-close { background: none; border: none; color: var(--dead); cursor: pointer; font-size: 12px; }
@@ -242,11 +248,34 @@
   var pvBody = document.getElementById('pv-body');
   var pvTruncated = document.getElementById('pv-truncated');
 
+  // 2026-09-14, real live-caught gap ("you didn't include the images
+  // and annotations"): this folder's own real content is mostly
+  // scanned-image PDFs — read_study_file's text extraction (even with
+  // its own OCR fallback) throws away every diagram/annotation/exact
+  // layout. A real PDF/image gets the actual rendered preview
+  // (/api/study/pdf-info + pdf-page.png, or /api/study/image — same
+  // real PDFium backend ui/workspace.html's Vision OS PDF READER panel
+  // already proved, sandboxed to the study folder via the same
+  // study_agent._resolve_within_root() every other study route uses)
+  // instead of a text-only fetch.
+  var PREVIEWABLE_EXTS = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
   function openFile(relPath) {
     pvName.textContent = relPath;
-    pvBody.textContent = 'Loading…';
     pvTruncated.hidden = true;
     previewEl.classList.add('on');
+    var ext = (relPath.split('.').pop() || '').toLowerCase();
+    if (PREVIEWABLE_EXTS.indexOf(ext) !== -1) {
+      previewEl.classList.add('pv-media');
+      pvBody.innerHTML = '';
+      var frame = document.createElement('iframe');
+      frame.className = 'pv-frame';
+      frame.title = relPath;
+      frame.src = '/file_preview.html?src=study&path=' + encodeURIComponent(relPath);
+      pvBody.appendChild(frame);
+      return;
+    }
+    previewEl.classList.remove('pv-media');
+    pvBody.textContent = 'Loading…';
     fetch('/api/study/read?' + new URLSearchParams({ path: relPath }))
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -257,7 +286,10 @@
       .catch(function () { pvBody.textContent = 'Could not reach the study folder.'; });
   }
 
-  document.getElementById('pv-close').onclick = function () { previewEl.classList.remove('on'); };
+  document.getElementById('pv-close').onclick = function () {
+    previewEl.classList.remove('on', 'pv-media');
+    pvBody.innerHTML = '';  // real unload of any live iframe, not just hiding it
+  };
 
   loadFolder('');
 })();

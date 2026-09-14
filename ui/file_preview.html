@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Preview</title>
+<style>
+  /* 2026-09-14, real live-caught gap: "There's no 'Dourmouse preview'
+     pane that can display a PDF inline" -- open_path's only real
+     option was shelling out to macOS `open` (Preview.app, a second,
+     separate window). This page is that missing surface: a small,
+     standalone preview embedded in the SAME browser pane every other
+     open_browser_pane result already uses, for either an arbitrary
+     absolute path (?src=files) or a real file inside the study folder
+     (?src=study). PDF paging reuses the exact same real PDFium
+     rendering (dourmouse/pdf_reader.py) already proven in
+     ui/workspace.html's Vision OS PDF READER panel -- same routes,
+     different (or no) sandbox root, one already-tested backend.
+  */
+  :root{color-scheme:light dark}
+  html,body{margin:0;padding:0;height:100%;background:#0e0e10;color:#e8e8ea;
+    font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .bar{display:flex;align-items:center;gap:10px;padding:8px 12px;
+    background:#17171a;border-bottom:1px solid #2a2a2e;position:sticky;top:0}
+  .bar .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    opacity:.85}
+  .bar button{background:#232327;color:#e8e8ea;border:1px solid #33333a;
+    border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit}
+  .bar button:disabled{opacity:.35;cursor:default}
+  .bar .page{opacity:.7;min-width:70px;text-align:center}
+  .stage{display:flex;flex-direction:column;align-items:center;padding:16px;
+    gap:12px}
+  .stage img{max-width:100%;box-shadow:0 2px 16px rgba(0,0,0,.4);
+    background:#fff}
+  .msg{padding:24px;opacity:.75}
+  .err{color:#ff8a80}
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="name" id="name">—</span>
+  <span class="page" id="pageLabel" hidden></span>
+  <button type="button" id="prev" hidden>◀</button>
+  <button type="button" id="next" hidden>▶</button>
+</div>
+<div class="stage" id="stage"><div class="msg">Loading…</div></div>
+<script>
+(function(){
+  var qs = new URLSearchParams(location.search);
+  var src = qs.get("src") === "study" ? "study" : "files";
+  var path = qs.get("path") || "";
+  var prefix = src === "study" ? "/api/study" : "/api/files";
+  var pathParam = src === "study" ? "path" : "path";
+  var nameEl = document.getElementById("name");
+  var stage = document.getElementById("stage");
+  var pageLabel = document.getElementById("pageLabel");
+  var prevBtn = document.getElementById("prev");
+  var nextBtn = document.getElementById("next");
+  var ext = (path.split(".").pop() || "").toLowerCase();
+  var isPdf = ext === "pdf";
+  var displayName = path.split("/").pop() || path;
+  nameEl.textContent = displayName;
+  document.title = displayName;
+
+  function fetchJson(url){
+    return fetch(url).then(function(r){ return r.json(); });
+  }
+
+  if (!path) {
+    stage.innerHTML = '<div class="msg err">No file path given.</div>';
+  } else if (isPdf) {
+    var state = { page: 0, pageCount: 0 };
+    function loadPage(){
+      var img = document.createElement("img");
+      img.alt = "page " + (state.page + 1);
+      img.src = prefix + "/pdf-page.png?" + pathParam + "=" + encodeURIComponent(path) +
+        "&page=" + state.page + "&t=" + Date.now();
+      stage.innerHTML = "";
+      stage.appendChild(img);
+      pageLabel.hidden = false;
+      pageLabel.textContent = "page " + (state.page + 1) + " / " + state.pageCount;
+      prevBtn.hidden = false;
+      nextBtn.hidden = false;
+      prevBtn.disabled = state.page <= 0;
+      nextBtn.disabled = state.page >= state.pageCount - 1;
+    }
+    fetchJson(prefix + "/pdf-info?" + pathParam + "=" + encodeURIComponent(path))
+      .then(function(info){
+        if (!info.ok) {
+          stage.innerHTML = '<div class="msg err">' +
+            (info.error || "could not open this PDF") + "</div>";
+          return;
+        }
+        state.pageCount = info.page_count;
+        loadPage();
+      })
+      .catch(function(){
+        stage.innerHTML = '<div class="msg err">Could not reach the preview server.</div>';
+      });
+    prevBtn.addEventListener("click", function(){
+      if (state.page > 0) { state.page--; loadPage(); }
+    });
+    nextBtn.addEventListener("click", function(){
+      if (state.page < state.pageCount - 1) { state.page++; loadPage(); }
+    });
+  } else {
+    var img = document.createElement("img");
+    img.alt = displayName;
+    img.onerror = function(){
+      stage.innerHTML = '<div class="msg err">Could not load this image.</div>';
+    };
+    img.src = prefix + "/image?" + pathParam + "=" + encodeURIComponent(path) + "&t=" + Date.now();
+    stage.innerHTML = "";
+    stage.appendChild(img);
+  }
+})();
+</script>
+</body>
+</html>
