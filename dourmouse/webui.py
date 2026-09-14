@@ -2966,6 +2966,44 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/upload":
             # v5.0: raw-body file upload into the sandboxed uploads root.
             self._handle_upload()
+        elif parsed.path == "/api/browser-pane/open":
+            # 2026-09-14, real live-caught bug: open_browser_pane
+            # (general_roster.py) used to post directly to
+            # get_browser_pane_requests(), a module-level singleton --
+            # correct only when the caller runs in THIS process. Claude
+            # CLI tool calls run inside a freshly-spawned MCP bridge
+            # subprocess (mcp_bridge.py) or code_backends.py's own
+            # subprocess, each with its OWN separate Python process and
+            # therefore its OWN separate, unwired singleton -- the event
+            # was created and immediately dropped on the floor (zero
+            # observers), while the tool's own return text unconditionally
+            # claimed success. Confirmed live: two real attempts through
+            # Claude CLI never produced a real "browser_pane_open" SSE
+            # event, verified by capturing the actual /api/events stream
+            # while background agent_activity events came through fine on
+            # the same connection.
+            #
+            # Real fix: the tool now makes a real HTTP call back to THIS
+            # server instead of touching the singleton directly, so it
+            # works identically whether the caller is in-process (Ollama's
+            # own tool-calling loop) or a genuinely separate subprocess
+            # (Claude CLI / Codex) -- one code path for both, no
+            # process-detection branching.
+            body = self._read_json_body()
+            url = (body.get("url") or "").strip()
+            if not url.lower().startswith(("http://", "https://")):
+                self._send_json({"ok": False, "error": "url must be a real http(s) URL"}, status=400)
+                return
+            # self.server.browser_pane_requests, not a fresh
+            # get_browser_pane_requests() call -- run_server() wires the
+            # SAME instance here at startup (defaulting to the global
+            # singleton when no explicit one was injected), and tests
+            # inject their own instance via run_server's own
+            # browser_pane_requests= parameter. Calling the bare getter
+            # here would bypass that injection and silently talk to a
+            # different, non-test instance.
+            self.server.browser_pane_requests.request_open(url)
+            self._send_json({"ok": True})
         elif parsed.path == "/api/rag/upload":
             # v13.4: real user request — "a page where files can be
             # uploaded to the shared rag database". Same raw-body upload

@@ -705,19 +705,51 @@ def _open_url_tool(arguments: dict[str, Any]) -> str:
 def _open_browser_pane_tool(arguments: dict[str, Any]) -> str:
     """backlog #8's human-visible half: an <iframe>-based pane embedded
     in console.html — separate from the headless automation engine
-    below. See dourmouse/browser_pane.py's own module docstring for the
-    full architecture and why it's a bridge singleton, not a direct
-    server reference (this function has no access to the live HTTP
-    server object, same reason message_bus tools use get_message_bus())."""
+    below.
+
+    Real, live-caught bug (2026-09-14): this used to call
+    get_browser_pane_requests().request_open(url) directly, which only
+    reaches the real UI when this function runs in the SAME process as
+    the web server. It does when Ollama's own tool-calling loop calls it
+    directly, but Claude CLI / Codex tool calls run inside a freshly
+    spawned subprocess (mcp_bridge.py, or code_backends.py's own
+    subprocess) with its own separate, never-wired singleton -- the
+    event fired into a void with zero observers, while this function's
+    own return text unconditionally claimed success. Confirmed live:
+    two real attempts through Claude CLI never produced a real
+    "browser_pane_open" SSE event, verified by capturing the actual
+    /api/events stream directly while unrelated background events came
+    through fine on the same connection at the same time.
+
+    Fixed by calling back into the running server's own real HTTP API
+    instead of touching the singleton directly -- works identically
+    in-process or from a genuinely separate subprocess, and is honest
+    (Rule 2.1/2.2) about a real failure instead of claiming success
+    regardless.
+    """
     from dourmouse.browser_agent import _is_http_url
-    from dourmouse.browser_pane import get_browser_pane_requests
 
     url = (arguments.get("url") or "").strip()
     if not url:
         return "ERROR: open_browser_pane requires a non-empty 'url'."
     if not _is_http_url(url):
         return f"REFUSED: open_browser_pane only accepts http(s) URLs, got {url!r}."
-    get_browser_pane_requests().request_open(url)
+    import json as _json
+    import os as _os
+    import urllib.error
+    import urllib.request
+
+    port = _os.environ.get("DOURMOUSE_UI_PORT", "8765").strip() or "8765"
+    api_url = f"http://127.0.0.1:{port}/api/browser-pane/open"
+    body = _json.dumps({"url": url}).encode("utf-8")
+    req = urllib.request.Request(
+        api_url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 - fixed localhost host
+            resp.read()
+    except (urllib.error.URLError, OSError) as exc:
+        return f"ERROR: open_browser_pane failed to reach the running app's own server: {exc}"
     return f"OPENED BROWSER PANE: {url} (visible to the user now, embedded in the app)."
 
 
@@ -880,6 +912,29 @@ def _ax_ready() -> bool:
     return app_control_ax.ax_trusted()
 
 
+def _activation_actually_took_effect(app_name: str) -> bool | None:
+    """Real, live-caught bug (2026-09-14): activate_app/activate_app_fast
+    only ever checked that macOS ACCEPTED the request (no exception, or
+    activateWithOptions_ returned true) -- neither is a guarantee the app
+    is actually frontmost by the time the call returns, since real window
+    -server scheduling can lag behind the request. Live-caught directly:
+    a real activate_app("Finder") reported clean success, and a real
+    immediate list_running_apps check right after showed Chrome still
+    frontmost. This checks the real current state so the tool can be
+    honest about what actually happened instead of trusting the request
+    alone. Returns True/False when the check itself succeeds, None when
+    the check itself couldn't run (never treat None as a real answer).
+    """
+    from dourmouse import app_control_ax
+
+    try:
+        apps = app_control_ax.list_running_apps_fast()
+    except app_control_ax.AXControlError:
+        return None
+    target = app_name.strip().lower()
+    return any(a["frontmost"] for a in apps if str(a["name"]).strip().lower() == target)
+
+
 def _apps_activate_tool(arguments: dict[str, Any]) -> str:
     from dourmouse.app_control import AppControlError, activate_app
 
@@ -896,14 +951,46 @@ def _apps_activate_tool(arguments: dict[str, Any]) -> str:
     from dourmouse import app_control_ax
 
     try:
-        return app_control_ax.activate_app_fast(app_name, dry_run=dry_run)
+        result = app_control_ax.activate_app_fast(app_name, dry_run=dry_run)
     except app_control_ax.AXControlError as exc:
         if "NOT CONFIGURED" not in str(exc):
             return f"ERROR: {exc}"  # a real, specific failure (e.g. not running) -- not an AppleScript problem either
-    try:
-        return activate_app(app_name, dry_run=dry_run)
-    except AppControlError as exc:
-        return f"ERROR: {exc}"
+        try:
+            result = activate_app(app_name, dry_run=dry_run)
+        except AppControlError as exc2:
+            return f"ERROR: {exc2}"
+    if dry_run:
+        return result
+    return _verify_activation_result(app_name, result)
+
+
+def _verify_activation_result(app_name: str, result: str) -> str:
+    """Real post-activation check (see _activation_actually_took_effect's
+    own docstring for why this exists). One short settle-and-retry: a
+    genuine window-server scheduling lag is real and brief, so a single
+    immediate "not frontmost yet" is not treated as final -- but a
+    second miss after that IS reported honestly, never silently upgraded
+    to the request's own claimed success."""
+    import time
+
+    took_effect = _activation_actually_took_effect(app_name)
+    if took_effect is True or took_effect is None:
+        # None means the check itself couldn't run (e.g. no AX access) --
+        # falling back to trusting the request's own result is the same
+        # honest degrade every other NOT-CONFIGURED path in this module
+        # already uses, not a silent upgrade of a real observed failure.
+        return result
+    time.sleep(0.4)
+    took_effect = _activation_actually_took_effect(app_name)
+    if took_effect is True or took_effect is None:
+        return result
+    return (
+        f"{result} — but macOS did not actually bring {app_name} to the "
+        "front (checked twice, real still-not-frontmost result both "
+        "times). The request was accepted with no error, so this may be "
+        "a real focus/timing quirk on this Mac rather than a Dourmouse "
+        "bug — treat the activation as unconfirmed."
+    )
 
 
 def _apps_quit_tool(arguments: dict[str, Any]) -> str:

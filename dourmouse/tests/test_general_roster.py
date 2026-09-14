@@ -749,14 +749,55 @@ class TestOpenBrowserPane:
         result = _open_browser_pane_tool({"url": "javascript:alert(1)"})
         assert result.startswith("REFUSED")
 
-    def test_opens_and_notifies_observers(self):
-        from dourmouse.browser_pane import get_browser_pane_requests
+    def test_opens_via_a_real_http_call_to_the_running_server(self, monkeypatch):
+        """2026-09-14, real live-caught bug: this used to call the
+        get_browser_pane_requests() singleton directly, which silently
+        did nothing when the caller was a genuinely separate process
+        (Claude CLI / Codex's own subprocess) -- the event had zero
+        observers there, though the tool's own text claimed success
+        regardless. Fixed to call back into the real running server's
+        own HTTP API instead, which works identically whether the
+        caller is in-process or not. See test_browser_pane_wiring.py's
+        own end-to-end version of this exact test for the real-server,
+        real-SSE-client proof; this one only checks the request shape."""
+        seen = {}
 
-        seen = []
-        get_browser_pane_requests().on_request(seen.append)
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"ok": true}'
+
+        def fake_urlopen(req, timeout=None):
+            seen["url"] = req.full_url
+            seen["method"] = req.get_method()
+            seen["body"] = req.data
+            return _FakeResponse()
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", "8765")
         result = _open_browser_pane_tool({"url": "https://example.com"})
         assert "OPENED BROWSER PANE" in result
-        assert seen == [{"type": "browser_pane_open", "url": "https://example.com"}]
+        assert seen["url"] == "http://127.0.0.1:8765/api/browser-pane/open"
+        assert seen["method"] == "POST"
+        assert json.loads(seen["body"]) == {"url": "https://example.com"}
+
+    def test_honest_error_when_the_running_server_is_unreachable(self, monkeypatch):
+        """Rule 2.1/2.2 -- a real failure to reach the server must be
+        reported, never silently swallowed into a fabricated success."""
+        import urllib.error
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.URLError("connection refused")
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        result = _open_browser_pane_tool({"url": "https://example.com"})
+        assert result.startswith("ERROR")
+        assert "OPENED BROWSER PANE" not in result
 
 
 class TestComms:
@@ -1145,6 +1186,11 @@ class TestAppsToolsPreferTheRealAxPathWithAppleScriptFallback:
             "dourmouse.app_control.activate_app",
             lambda *a, **k: (_ for _ in ()).throw(AssertionError("AppleScript path must not run when AX succeeded")),
         )
+        # Real post-activation verification (2026-09-14) runs after any
+        # successful activation -- mocked True here since this test's own
+        # concern is fast-path-vs-fallback selection, not verification
+        # itself (that has its own dedicated tests below).
+        monkeypatch.setattr("dourmouse.general_roster._activation_actually_took_effect", lambda name: True)
         tool = self._tool("activate_app")
         result = tool.handler({"app_name": "Claude"})
         assert result == "ACTIVATED: Claude"
@@ -1161,6 +1207,7 @@ class TestAppsToolsPreferTheRealAxPathWithAppleScriptFallback:
             "dourmouse.app_control.activate_app",
             lambda name, dry_run=False: f"ACTIVATED: {name}",
         )
+        monkeypatch.setattr("dourmouse.general_roster._activation_actually_took_effect", lambda name: True)
         tool = self._tool("activate_app")
         result = tool.handler({"app_name": "Claude"})
         assert result == "ACTIVATED: Claude"
@@ -1183,6 +1230,99 @@ class TestAppsToolsPreferTheRealAxPathWithAppleScriptFallback:
         tool = self._tool("activate_app")
         result = tool.handler({"app_name": "Claude"})
         assert "NOT RUNNING" in result
+
+    # -- real post-activation verification (2026-09-14, live-caught bug) --
+    # activate_app used to trust the request's own "no error" result
+    # unconditionally. Live-caught: a real activate_app("Finder") reported
+    # clean success while Chrome stayed frontmost. These test the real
+    # check, independent of which backend (fast AX or AppleScript)
+    # produced the initial result.
+
+    def test_reports_clean_success_when_the_app_really_is_frontmost(self, monkeypatch):
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.activate_app_fast",
+            lambda name, dry_run=False: f"ACTIVATED: {name}",
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.list_running_apps_fast",
+            lambda: [{"name": "Finder", "frontmost": True}, {"name": "Chrome", "frontmost": False}],
+        )
+        tool = self._tool("activate_app")
+        result = tool.handler({"app_name": "Finder"})
+        assert result == "ACTIVATED: Finder"
+
+    def test_reports_the_real_mismatch_when_it_never_actually_took_effect(self, monkeypatch):
+        """The exact live-caught scenario: the request succeeds, but a
+        real check shows a different app still frontmost, both times
+        (the one retry never resolves it either)."""
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.activate_app_fast",
+            lambda name, dry_run=False: "ACTIVATED: Finder",
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.list_running_apps_fast",
+            lambda: [{"name": "Finder", "frontmost": False}, {"name": "Chrome", "frontmost": True}],
+        )
+        monkeypatch.setattr("time.sleep", lambda s: None)  # real behavior, just not a real 0.4s wait in a test
+        tool = self._tool("activate_app")
+        result = tool.handler({"app_name": "Finder"})
+        assert "ACTIVATED: Finder" in result
+        assert "did not actually bring Finder to the front" in result
+        assert "unconfirmed" in result
+
+    def test_settles_after_one_retry_without_reporting_a_false_alarm(self, monkeypatch):
+        """A genuine, brief window-server scheduling lag must not be
+        reported as a failure -- only a miss confirmed TWICE is."""
+        calls = {"n": 0}
+
+        def _list():
+            calls["n"] += 1
+            frontmost = calls["n"] >= 2  # miss on the first check, resolved by the retry
+            return [{"name": "Finder", "frontmost": frontmost}, {"name": "Chrome", "frontmost": not frontmost}]
+
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.activate_app_fast",
+            lambda name, dry_run=False: "ACTIVATED: Finder",
+        )
+        monkeypatch.setattr("dourmouse.app_control_ax.list_running_apps_fast", _list)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        tool = self._tool("activate_app")
+        result = tool.handler({"app_name": "Finder"})
+        assert result == "ACTIVATED: Finder"
+        assert calls["n"] == 2
+
+    def test_dry_run_skips_verification_entirely(self, monkeypatch):
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.activate_app_fast",
+            lambda name, dry_run=False: f"DRY RUN — activate {name} (not executed)",
+        )
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.list_running_apps_fast",
+            lambda: (_ for _ in ()).throw(AssertionError("must never check frontmost state on a dry run")),
+        )
+        tool = self._tool("activate_app")
+        result = tool.handler({"app_name": "Finder", "dry_run": True})
+        assert result.startswith("DRY RUN")
+
+    def test_falls_back_to_trusting_the_result_when_the_check_itself_cant_run(self, monkeypatch):
+        """No Accessibility access to even ASK who's frontmost is the same
+        honest-degrade shape every other NOT-CONFIGURED path in this
+        module already uses -- never silently treated as a real observed
+        failure."""
+        from dourmouse.app_control_ax import AXControlError
+
+        monkeypatch.setattr(
+            "dourmouse.app_control_ax.activate_app_fast",
+            lambda name, dry_run=False: "ACTIVATED: Finder",
+        )
+
+        def _list_boom():
+            raise AXControlError("NOT CONFIGURED: this process does not have Accessibility permission.")
+
+        monkeypatch.setattr("dourmouse.app_control_ax.list_running_apps_fast", _list_boom)
+        tool = self._tool("activate_app")
+        result = tool.handler({"app_name": "Finder"})
+        assert result == "ACTIVATED: Finder"
 
     def test_quit_uses_the_fast_ax_path_when_it_works(self, monkeypatch):
         monkeypatch.setattr(

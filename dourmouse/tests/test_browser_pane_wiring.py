@@ -60,12 +60,27 @@ class TestRealServerWiring:
 class TestRealSseDelivery:
     def test_real_sse_client_receives_a_real_browser_pane_open_event(self, server, monkeypatch):
         """End-to-end: a real GET /api/events connection actually
-        receives the event a real open_browser_pane tool call triggers —
-        no mocked bridge, the real singleton the tool itself calls."""
+        receives the event a real open_browser_pane tool call triggers.
+
+        Real, live-caught bug (2026-09-14): the tool used to call the
+        singleton directly, which only worked when it ran in the SAME
+        process as the server -- true for Ollama's own tool-calling loop,
+        false for Claude CLI / Codex, which call it from a genuinely
+        separate subprocess with its own unwired singleton. The event
+        fired into a void there, while the tool's own text claimed
+        success regardless. Fixed by having the tool call back into the
+        real running server's own HTTP API instead. This test now sets
+        DOURMOUSE_UI_PORT to the test server's real (randomly-assigned)
+        port -- exactly what a real subprocess does too, by inheriting
+        the parent process's own environment (see code_backends.py's
+        _cli_env), so this is a faithful reproduction of the real
+        cross-process case, not just the in-process one the old version
+        of this test could only ever exercise."""
         srv, port, bpr = server
         from dourmouse.browser_pane import set_browser_pane_requests
 
         set_browser_pane_requests(bpr)  # the tool calls the GLOBAL, not srv's copy directly
+        monkeypatch.setenv("DOURMOUSE_UI_PORT", str(port))
         try:
             events: list[dict] = []
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -98,6 +113,49 @@ class TestRealSseDelivery:
             assert pane_events[0]["url"] == "https://example.com"
         finally:
             set_browser_pane_requests(None)
+
+
+class TestOpenEndpoint:
+    """POST /api/browser-pane/open — the real fix (2026-09-14) for the
+    live-caught bug where open_browser_pane's own return text claimed
+    success even when the caller was a separate subprocess whose
+    singleton had no observers. This is the endpoint that now makes
+    that call work from ANY process, since it always runs in-process
+    with the server itself, regardless of who's calling it over HTTP."""
+
+    def test_rejects_non_http_url_without_touching_the_singleton(self, server):
+        srv, port, bpr = server
+        seen = []
+        bpr.on_request(seen.append)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/browser-pane/open",
+            body=json.dumps({"url": "javascript:alert(1)"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode())
+        conn.close()
+        assert resp.status == 400
+        assert data["ok"] is False
+        assert seen == []
+
+    def test_real_post_reaches_the_real_singleton_and_notifies_observers(self, server):
+        srv, port, bpr = server
+        seen = []
+        bpr.on_request(seen.append)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/browser-pane/open",
+            body=json.dumps({"url": "https://example.com"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode())
+        conn.close()
+        assert resp.status == 200
+        assert data["ok"] is True
+        assert seen == [{"type": "browser_pane_open", "url": "https://example.com"}]
 
 
 class TestCheckEndpoint:
