@@ -3469,6 +3469,19 @@ def build_general_registry() -> DispatchRegistry:
         except Exception as exc:  # noqa: BLE001 - network failures, readable
             return f"DOCS APPEND FAILED: {type(exc).__name__}: {exc}"
 
+    def _docs_insert_image_h(arguments: dict[str, Any]) -> str:
+        from dourmouse.google_services import docs_insert_image
+
+        try:
+            return docs_insert_image(
+                arguments.get("document_id", ""),
+                arguments.get("image_url", ""),
+            )
+        except RuntimeError as exc:
+            return f"DOCS INSERT IMAGE (reported honestly): {exc}"
+        except Exception as exc:  # noqa: BLE001 - network failures, readable
+            return f"DOCS INSERT IMAGE FAILED: {type(exc).__name__}: {exc}"
+
     def _slides_create_h(arguments: dict[str, Any]) -> str:
         from dourmouse.google_services import slides_create
 
@@ -3503,10 +3516,11 @@ def build_general_registry() -> DispatchRegistry:
             "General",
             "Google Sheets, Drive, and Slides — reads link-shared Sheets, "
             "downloads link-shared Drive items, creates Google Docs and "
-            "Slides presentations in the SIGNED-IN user's Drive, and can "
+            "Slides presentations in the SIGNED-IN user's Drive, can "
             "APPEND more text to an existing Doc afterward (docs_append) "
             "to build a long document across multiple calls instead of "
-            "only ever creating a fresh one (real write, requires "
+            "only ever creating a fresh one, and can INSERT an image into "
+            "an existing Doc (docs_insert_image) (real write, requires "
             "confirmation + the Google sign-in with Drive write scope).",
             [
                 ToolSpec(
@@ -3641,6 +3655,38 @@ def build_general_registry() -> DispatchRegistry:
                     confirm_prompt=lambda a: (
                         f"Append {len(a.get('text') or ''):,} characters to "
                         f"the end of Google Doc {a.get('document_id', '?')!r}?"
+                    ),
+                ),
+                ToolSpec(
+                    name="docs_insert_image",
+                    description=(
+                        "Insert an image at the END of an EXISTING Google "
+                        "Doc's body — real write, REQUIRES human "
+                        "confirmation. There was previously NO way to put "
+                        "an image into a Doc at all (docs_append only "
+                        "writes text). image_url must be a real, publicly "
+                        "reachable http(s) URL (Google fetches it "
+                        "server-side) — a generate_image result's own "
+                        "public URL, or any other real public image link; "
+                        "a local /uploads/... path will NOT work here. "
+                        "Needs a real document_id and the Google sign-in "
+                        "with Drive/Docs write scope "
+                        "(GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT "
+                        "CONFIGURED honestly without a signed-in user."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "document_id": {"type": "string", "description": "the token in the doc URL between /d/ and /edit"},
+                            "image_url": {"type": "string", "description": "a real, publicly reachable http(s) URL to the image"},
+                        },
+                        "required": ["document_id", "image_url"],
+                    },
+                    handler=_docs_insert_image_h,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Insert an image into Google Doc "
+                        f"{a.get('document_id', '?')!r}?"
                     ),
                 ),
                 ToolSpec(
@@ -6071,7 +6117,7 @@ def build_general_registry() -> DispatchRegistry:
         "email_identity_status", "email_own_send",
         # Drive
         "drive_search", "drive_read", "drive_download", "drive_create_doc",
-        "docs_append", "drive_share",
+        "docs_append", "docs_insert_image", "drive_share",
         # Sheets / Slides
         "sheets_read", "sheets_create", "slides_create",
         # Calendar
@@ -6100,9 +6146,10 @@ def build_general_registry() -> DispatchRegistry:
             "General",
             "Everything in the signed-in user's Google Workspace: Gmail "
             "(read, search, send, archive, trash, restore), Drive (search, "
-            "read, download, create Docs, and APPEND more text to an "
+            "read, download, create Docs, APPEND more text to an "
             "existing Doc for building a long document across multiple "
-            "calls), Sheets (read link-shared sheets, and CREATE a real new "
+            "calls, and INSERT an image into an existing Doc), Sheets "
+            "(read link-shared sheets, and CREATE a real new "
             "one with initial data), Slides (create), and Calendar (list "
             "events, propose meeting times, and CREATE a real event — real "
             "booking, not just proposing). One "

@@ -3930,7 +3930,19 @@ class _Handler(BaseHTTPRequestHandler):
         # honoured here the same way `autonomous` already forces plain
         # dispatch, so this machine's own configured Ollama backend
         # (local daemon, or Ollama Cloud when a key is set) genuinely runs.
-        force_ollama = (body.get("force_backend") or "").strip().lower() == "ollama"
+        force_backend = (body.get("force_backend") or "").strip().lower()
+        force_ollama = force_backend == "ollama"
+        # 2026-09-14, user-directed: a real third DIRECTIVE VIA option,
+        # FreeLLMAPI (github.com/tashfeenahmed/freellmapi) — a self-hosted,
+        # OpenAI-compatible router the user runs locally that aggregates
+        # ~34 providers' free tiers behind one endpoint. Unlike Ollama
+        # (already the session's own ambient backend, so force_ollama only
+        # needs to bypass Claude Front Mode) this is a genuinely DIFFERENT
+        # backend the session was never built against — the actual
+        # client/config swap for this turn happens right before
+        # session.ask() below, restored in the same finally block that
+        # already restores confirmation_gate.
+        force_freellmapi = force_backend == "freellmapi"
         # v8.18: voice/text response split. The speak-and-listen UI
         # (ui/voice.html) marks its /api/chat calls with voice: true because
         # it transcribes the request and speaks the reply back with zero
@@ -3988,7 +4000,31 @@ class _Handler(BaseHTTPRequestHandler):
                 f"something up or take an action. TASK: {prompt}"
             )
             if self.server.config is not None:
-                model_override = self.server.config.model_for_agent(focus_agent)
+                # 2026-09-14, real live-caught bug (STUDY tab, "HTTP Error
+                # 404: Not Found" on every question): _build_client()
+                # already knows a privacy-pinned agent (mail/docs/study/
+                # etc, model_delegation._LOCAL_ONLY_AGENTS) must run on a
+                # genuinely local Ollama client even when a real Ollama
+                # Cloud key is configured -- it swaps in
+                # load_ollama_config(force_local=True) for the CLIENT.
+                # This model_override computation never got the same
+                # memo: it kept calling model_for_agent() on the ambient
+                # (cloud) config, handing the local client a real cloud-
+                # only model name ("gpt-oss:20b", never pulled locally),
+                # which the local daemon then genuinely 404'd on. Traced
+                # live: client._root was correctly 127.0.0.1:11434, but
+                # the payload's own "model" field still said
+                # "gpt-oss:20b". Mirror _build_client's own check here so
+                # both agree on which config the model name comes from.
+                effective_config = self.server.config
+                if isinstance(effective_config, OllamaConfig):
+                    from dourmouse.model_delegation import _LOCAL_ONLY_AGENTS
+
+                    if focus_agent.strip().lower() in _LOCAL_ONLY_AGENTS:
+                        from dourmouse.config import load_ollama_config
+
+                        effective_config = load_ollama_config(force_local=True)
+                model_override = effective_config.model_for_agent(focus_agent)
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -4010,6 +4046,22 @@ class _Handler(BaseHTTPRequestHandler):
         # mid-flight.
         session, gate, session_lock = self._session_gate_lock_for_tab(tab_id)
         previous_gate = session.confirmation_gate
+        # force_freellmapi: swap in a real client/config built against the
+        # user's own local FreeLLMAPI instance for THIS turn only, restored
+        # in the same finally block below that already restores
+        # confirmation_gate — same temporary-swap pattern, nothing new.
+        previous_client = session.client
+        previous_config = session.config
+        if force_freellmapi:
+            from dourmouse.config import load_freellmapi_config
+            from openai import OpenAI
+
+            freellmapi_cfg = load_freellmapi_config()
+            session.config = freellmapi_cfg
+            session.client = OpenAI(
+                api_key=freellmapi_cfg.api_key or "no-key-configured",
+                base_url=freellmapi_cfg.base_url,
+            )
         report: dict[str, Any] | None = None
         error_msg: str | None = None
         # v5.8: during THIS request the artifact store streams live
@@ -4156,12 +4208,15 @@ class _Handler(BaseHTTPRequestHandler):
                     # straight through is safe.
                     forced_agent=focus_agent or None,
                     should_stop=stream.should_stop,
-                    force_plain_dispatch=autonomous or force_ollama,
+                    force_plain_dispatch=autonomous or force_ollama or force_freellmapi,
                 )
             except Exception as exc:  # surface real failures to the UI
                 error_msg = str(exc)
             finally:
                 session.confirmation_gate = previous_gate
+                if force_freellmapi:
+                    session.client = previous_client
+                    session.config = previous_config
                 # Defensive: this gate instance is shared across every
                 # caller (including hands_free's own session.ask, which
                 # never touches .autonomous at all) — never leave a stale

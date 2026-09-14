@@ -57,6 +57,17 @@ GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 #: v5.29: drive.file added so the full-scope sign-in can CREATE Docs and
 #: Slides in the signed-in user's Drive (files the app creates — the minimal
 #: write scope; drive.readonly alone 403s drive_create_doc / slides_create).
+#: 2026-09-14, real live-caught bug ("can't write in docs / insert images"):
+#: drive.file authorizes the DRIVE API (files.create/update — what
+#: drive_create_doc's full-body-replace media upload actually calls), but
+#: docs_append and docs_insert_image call the separate DOCS API
+#: (docs.googleapis.com documents:batchUpdate) to edit a doc's body
+#: in place — that endpoint checks for the "documents" scope specifically,
+#: which was never requested here at all. No amount of re-signing-in with
+#: the old scope list would ever fix this; the code itself never asked for
+#: it. A user who signed in before this fix must sign in again once for
+#: the new consent to actually grant it (a scope change needs fresh
+#: consent — this app can't retroactively upgrade an old token).
 _IDENTITY_SCOPES = "openid email profile "
 _FULL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly "
@@ -67,7 +78,8 @@ _FULL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.modify "
     "https://www.googleapis.com/auth/calendar.readonly "
     "https://www.googleapis.com/auth/drive.readonly "
-    "https://www.googleapis.com/auth/drive.file"
+    "https://www.googleapis.com/auth/drive.file "
+    "https://www.googleapis.com/auth/documents"
 )
 
 

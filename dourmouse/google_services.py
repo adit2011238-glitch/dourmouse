@@ -754,6 +754,109 @@ def docs_append(document_id: str, text: str) -> str:
     )
 
 
+# 2026-09-14, real live-caught capability gap ("for docs it can't ...
+# insert images"): docs_append can only ever write TEXT (insertText).
+# There was no way to put an image into a Google Doc at all — this is
+# the real, missing mechanism, using the same documents:batchUpdate call
+# docs_append already established, just a different request type
+# (insertInlineImage instead of insertText). Requires the real "documents"
+# OAuth scope (see google_auth.py's _FULL_SCOPES comment for the real bug
+# that scope's own absence caused for docs_append too).
+
+
+def _docs_insert_image_oauth(token: str, document_id: str, image_url: str) -> str:
+    """Insert an image at the end of an existing Google Doc's body (v14).
+
+    ``insertInlineImage`` with ``endOfSegmentLocation`` — the same
+    "append at the end, no index math" mechanism ``_docs_append_oauth``
+    already uses for text. ``image_url`` must be a real, publicly
+    fetchable http(s) URL (the Docs API itself fetches it server-side —
+    this call never uploads image bytes directly); the caller is
+    responsible for that being true (e.g. an already-uploaded
+    ``/uploads/...`` URL is NOT publicly fetchable and will fail here —
+    a real public URL, or a generated image's own hosted URL, is
+    required).
+    """
+    doc_id = (document_id or "").strip()
+    if not doc_id:
+        return "ERROR: docs_insert_image requires a document_id."
+    url = (image_url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        return f"ERROR: docs_insert_image requires a real http(s) image_url, got {url!r}."
+    try:
+        _http_json(
+            "POST",
+            f"{_DOCS_API}/{urllib.parse.quote(doc_id)}:batchUpdate",
+            token,
+            {
+                "requests": [
+                    {
+                        "insertInlineImage": {
+                            "endOfSegmentLocation": {},
+                            "uri": url,
+                        }
+                    }
+                ]
+            },
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg:
+            raise RuntimeError(
+                msg
+                + " — Drive/Docs WRITE needs the full scopes "
+                "(GOOGLE_OAUTH_FULL_SCOPES=1), including the \"documents\" "
+                "scope specifically. If you signed in before this scope "
+                "was added, sign in again — an existing session can't "
+                "retroactively gain a new scope. Nothing was inserted."
+            ) from exc
+        if "404" in msg:
+            raise RuntimeError(
+                msg
+                + f" — no document with id {doc_id!r} was found (wrong id, "
+                "or it isn't a Google Doc). Nothing was inserted."
+            ) from exc
+        if "400" in msg:
+            raise RuntimeError(
+                msg
+                + " — Google could not fetch that image URL itself (it "
+                "must be a real, publicly reachable http(s) URL, not a "
+                "local upload path). Nothing was inserted."
+            ) from exc
+        raise
+    return (
+        f"DOCS INSERT IMAGE OK: image inserted at the end of document "
+        f"{doc_id} — open at https://docs.google.com/document/d/{doc_id}"
+    )
+
+
+def docs_insert_image(document_id: str, image_url: str) -> str:
+    """Insert an image at the end of an existing Google Doc (SIGNED-IN
+    user's OAuth token; v14, write).
+
+    Honest NOT CONFIGURED when no OAuth user is signed in, honest
+    re-sign-in when the session is stale — same per-user guarantee as
+    docs_append/drive_create_doc. Should be confirmation-gated upstream:
+    it writes to a real file.
+    """
+    token = _oauth_access_token()
+    if token:
+        try:
+            return _docs_insert_image_oauth(token, document_id, image_url)
+        except RuntimeError as exc:
+            return f"DOCS INSERT IMAGE (reported honestly): {exc}"
+    reauth = _oauth_user_needs_reauth("DOCS WRITE")
+    if reauth:
+        return reauth
+    return (
+        "NOT CONFIGURED: inserting an image into a Google Doc needs the "
+        "signed-in Google user's OAuth session with Drive/Docs WRITE "
+        "scope. No user is signed in — sign in at /login (with "
+        "GOOGLE_OAUTH_FULL_SCOPES=1 in .env so the session grants Docs), "
+        "then retry. Nothing was inserted."
+    )
+
+
 # -- v5.28: Google Slides (write, per-user OAuth) ------------------------ #
 
 _SLIDES_API = "https://slides.googleapis.com/v1/presentations"

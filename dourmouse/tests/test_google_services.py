@@ -431,6 +431,102 @@ class TestDocsAppend:
         assert "docs_append" in names
 
 
+class TestDocsInsertImage:
+    """2026-09-14 — real capability gap fix, live-caught this session
+    ("for docs it can't ... insert images"): docs_append can only ever
+    write text; there was no way to put an image into a Doc at all.
+    Uses the same real Docs API batchUpdate mechanism as docs_append,
+    just insertInlineImage instead of insertText (hermetic: fake token
+    + fake REST, no network)."""
+
+    def test_not_configured_without_signed_in_user(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: None)
+        monkeypatch.setattr(gs, "_oauth_user_needs_reauth", lambda a: None)
+        out = gs.docs_insert_image("doc123", "https://example.com/x.png")
+        assert out.startswith("NOT CONFIGURED")
+        assert "Nothing was inserted" in out
+
+    def test_missing_document_id_is_a_clear_error(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        out = gs.docs_insert_image("", "https://example.com/x.png")
+        assert out.startswith("ERROR")
+        assert "document_id" in out
+
+    def test_non_http_image_url_is_a_clear_error(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        out = gs.docs_insert_image("doc123", "/uploads/local.png")
+        assert out.startswith("ERROR")
+        assert "http" in out
+
+    def test_happy_path_inserts_via_batch_update(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+        calls = []
+
+        def fake_http_json(method, url, token, body=None):
+            calls.append((method, url, body))
+            return {"documentId": "doc123"}
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.docs_insert_image("doc123", "https://example.com/x.png")
+        assert "DOCS INSERT IMAGE OK" in out
+        assert "doc123" in out
+        assert len(calls) == 1
+        method, url, body = calls[0]
+        assert method == "POST"
+        assert url == "https://docs.googleapis.com/v1/documents/doc123:batchUpdate"
+        req = body["requests"][0]["insertInlineImage"]
+        assert req["endOfSegmentLocation"] == {}
+        assert req["uri"] == "https://example.com/x.png"
+
+    def test_403_surfaces_scope_fix(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 403 on .../batchUpdate: insufficient permissions")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.docs_insert_image("doc123", "https://example.com/x.png")
+        assert "403" in out
+        assert "GOOGLE_OAUTH_FULL_SCOPES" in out
+        assert "Nothing was inserted" in out
+
+    def test_404_reports_the_bad_id_honestly(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 404 on .../batchUpdate: not found")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.docs_insert_image("bogus-id", "https://example.com/x.png")
+        assert "404" in out
+        assert "bogus-id" in out
+        assert "Nothing was inserted" in out
+
+    def test_400_reports_a_bad_image_url_honestly(self, monkeypatch):
+        monkeypatch.setattr(gs, "_oauth_access_token", lambda: "tok")
+
+        def fake_http_json(method, url, token, body=None):
+            raise RuntimeError("GOOGLE API 400 on .../batchUpdate: invalid image")
+
+        monkeypatch.setattr(gs, "_http_json", fake_http_json)
+        out = gs.docs_insert_image("doc123", "https://example.com/nope.png")
+        assert "400" in out
+        assert "Nothing was inserted" in out
+
+    def test_wired_onto_the_docs_agent_and_gated(self):
+        registry = build_general_registry()
+        sub = registry.get_subagent("docs")
+        spec = next(t for t in sub.tools if t.name == "docs_insert_image")
+        assert spec.permission == Permission.REQUIRES_CONFIRMATION
+        assert "docs_insert_image" in registry.gated_tool_names
+
+    def test_wired_onto_google_workspace_too(self):
+        registry = build_general_registry()
+        sub = registry.get_subagent("google_workspace")
+        names = {t.name for t in sub.tools}
+        assert "docs_insert_image" in names
+
+
 class TestDriveSearchFileType:
     """v13.8 (real, live-reproduced bug): drive_search's ONLY parameter was
     a freeform text string, unconditionally wrapped as a

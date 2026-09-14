@@ -1505,6 +1505,99 @@ class TestSseChat:
         models = [c["model"] for c in srv.session.client.chat.completions.calls]
         assert models and all(m == "nvidia/echo-70b" for m in models)
 
+    def test_focus_agent_privacy_pinned_model_matches_the_forced_local_client(self, server, monkeypatch):
+        """2026-09-14, real live-caught bug (STUDY tab, "HTTP Error 404:
+        Not Found" on every question): _build_client() already swaps a
+        privacy-pinned agent (model_delegation._LOCAL_ONLY_AGENTS) onto a
+        genuinely local Ollama client even when a real Ollama Cloud key
+        is configured, but the webui.py handler's own model_override
+        computation used to call model_for_agent() on the AMBIENT
+        (cloud) config regardless — handing the local client a real
+        cloud-only model name it had never pulled, which the local
+        daemon then genuinely 404'd on. This asserts the model actually
+        used agrees with what a forced-local OllamaConfig resolves to,
+        not the ambient cloud config's own default model."""
+        from dourmouse.config import OllamaConfig
+
+        monkeypatch.setattr(
+            "dourmouse.model_delegation._LOCAL_ONLY_AGENTS", frozenset({"echo_agent"})
+        )
+        srv, port = server
+        srv.session.config = OllamaConfig(
+            api_key="real-cloud-key",
+            base_url="https://ollama.com/v1",
+            model="gpt-oss:20b",
+            is_cloud=True,
+        )
+        srv.config = srv.session.config
+        srv.session.client = FakeClient(
+            [
+                _FakeResponse(_FakeMessage(content="Focused echo answer.")),
+            ]
+        )
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST",
+            "/api/chat",
+            body=json.dumps({"prompt": "echo hi", "focus_agent": "echo_agent"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+        conn.close()
+        assert resp.status == 200
+        models = [c["model"] for c in srv.session.client.chat.completions.calls]
+        assert models and all(m == "qwen2.5:7b" for m in models), models
+
+    def test_force_backend_freellmapi_swaps_client_for_this_turn_then_restores(self, server, monkeypatch):
+        """2026-09-14, user-directed: a real third DIRECTIVE VIA option,
+        FreeLLMAPI (github.com/tashfeenahmed/freellmapi) -- a self-hosted
+        OpenAI-compatible router. force_backend:"freellmapi" must swap in
+        a real client built against FreeLLMAPIConfig's own base_url/key
+        for exactly this turn, then restore the session's original
+        client/config afterward so the NEXT ordinary turn is unaffected."""
+        import openai
+
+        srv, port = server
+        original_client = srv.session.client
+        original_config = srv.session.config
+        captured_init = {}
+
+        class _FakeOpenAI:
+            def __init__(self, api_key=None, base_url=None):
+                captured_init["api_key"] = api_key
+                captured_init["base_url"] = base_url
+                self.chat = _FakeChat(
+                    _FakeCompletions([_FakeResponse(_FakeMessage(content="via freellmapi"))])
+                )
+
+        monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+        monkeypatch.setenv("FREELLMAPI_API_KEY", "freellmapi-test-key")
+        monkeypatch.setenv("FREELLMAPI_BASE_URL", "http://localhost:3001/v1")
+
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST",
+            "/api/chat",
+            body=json.dumps({"prompt": "hi", "force_backend": "freellmapi"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+        conn.close()
+        assert resp.status == 200
+        assert captured_init["api_key"] == "freellmapi-test-key"
+        assert captured_init["base_url"] == "http://localhost:3001/v1"
+        # Restored — the swap must not leak into the session's normal state.
+        assert srv.session.client is original_client
+        assert srv.session.config is original_config
+
     def test_focus_agent_with_commas_never_gets_split_into_a_multi_agent_plan(self, server):
         """v13: a real bug fixed here, live-caught through an actual
         directive against the CODE screen's "docs" toolchain — a request

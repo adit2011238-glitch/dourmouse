@@ -357,6 +357,9 @@ class TestRosterShape:
             # v13.9: real write to an existing Google Doc, same
             # confirmation bar as drive_create_doc right above it.
             "docs_append",
+            # 2026-09-14: real write to an existing Google Doc (an image
+            # this time, not text) — same confirmation bar as docs_append.
+            "docs_insert_image",
             # production-testing sweep, 2026-09-12: real write to the
             # user's Google Calendar — same confirmation bar as
             # drive_create_doc/docs_append (see google_services.py's own

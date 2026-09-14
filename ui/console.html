@@ -1402,6 +1402,7 @@ body.bp-open .dock,body.bp-open .body{margin-right:min(48vw,720px)}
           aria-label="Which backend runs the next directive">
           <option value="auto">AUTO — OLLAMA / LOCAL AGENT</option>
           <option value="claude">CLAUDE (DIRECT CLI)</option>
+          <option value="freellmapi">FREELLMAPI (FREE MODELS)</option>
         </select>
       </div>
       <button class="chip" id="micChip" data-tip="Switch to voice-only mode">(MIC)</button>
@@ -1533,24 +1534,38 @@ function isImperativeAffirm(text){
 let newsFeed = [], newsWatcherStatus = null;
 const _NEWS_FEED_CAP = 200;
 
-/* ---------------- directive backend (v13.6) ----------------
-   The dock's DIRECTIVE VIA picker. Two real values only:
-     "auto"   — send whatever focusAgent already holds (empty = let the
-                router pick; on CODE, whatever TOOLCHAIN pinned). The
-                server-side default backend is Ollama/local, which is what
-                the option is labelled after — nothing here changes it.
-     "claude" — send focus_agent="code_claude", which webui.py routes
-                straight to the real Claude Code CLI
-                (_handle_code_claude_passthrough -> code_backends.stream_claude),
-                bypassing the orchestrator entirely.
+/* ---------------- directive backend (v13.6, v14 real 3-way) ----------------
+   The dock's DIRECTIVE VIA picker. Three real values:
+     "auto"       — force this machine's own configured Ollama backend
+                    (local daemon, or Ollama Cloud once a key is set) —
+                    see the force_backend:"ollama" comment at the fetch
+                    call below for the real 2026-09-14 bug this closes
+                    (this used to just mean "don't force Claude", and
+                    silently fell through to Claude whenever Claude
+                    Front Mode was on in Settings).
+     "claude"     — send focus_agent="code_claude", which webui.py routes
+                    straight to the real Claude Code CLI
+                    (_handle_code_claude_passthrough -> code_backends.stream_claude),
+                    bypassing the orchestrator entirely.
+     "freellmapi" — user-directed (2026-09-14): force the user's own
+                    locally-running FreeLLMAPI instance
+                    (github.com/tashfeenahmed/freellmapi, real
+                    self-hosted OpenAI-compatible router over ~34 free
+                    providers — see config.py's FreeLLMAPIConfig for the
+                    real base_url/key it expects). webui.py swaps in a
+                    real client built against it for this turn only.
+   A CODE toolchain pin (focusAgent) always wins over "auto"/"freellmapi"
+   for THAT specific request — those two only apply to a genuinely
+   unpinned, plain directive.
    Persisted with the same try/catch localStorage pattern themeGet/
    codeToolGet already use, so the choice survives a reload instead of
    silently snapping back (the exact gap v13 fixed for the toolchain pin).
    Defaults to "auto": this must not silently move every existing user's
    directives onto a different, metered backend on first load. */
 const BACKEND_MODE_KEY = "dm_backend_mode_v1";
+const BACKEND_MODE_VALUES = new Set(["auto", "claude", "freellmapi"]);
 function backendModeGet(){
-  try{ const v = localStorage.getItem(BACKEND_MODE_KEY); return v === "claude" ? "claude" : "auto"; }
+  try{ const v = localStorage.getItem(BACKEND_MODE_KEY); return BACKEND_MODE_VALUES.has(v) ? v : "auto"; }
   catch{ return "auto"; }
 }
 function backendModeSet(v){ try{ localStorage.setItem(BACKEND_MODE_KEY, v); }catch{ /* private mode: session-only */ } }
@@ -2875,10 +2890,16 @@ async function run(text){
     // keeps its own, separate routing untouched) -- webui.py now honours
     // this by forcing plain dispatch, guaranteeing this machine's own
     // configured Ollama backend (local or cloud key) actually runs.
+    // v14: "freellmapi" is the real third option (user-directed) -- same
+    // "no focus_agent already forcing a route" gate, webui.py swaps in a
+    // real client built against the user's own local FreeLLMAPI instance
+    // for this one turn.
     const directiveFA = directiveFocusAgent();
+    const forceBackend = directiveFA ? undefined
+      : (backendMode === "freellmapi" ? "freellmapi" : (backendMode !== "claude" ? "ollama" : undefined));
     const res = await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({prompt:text, focus_agent:directiveFA, screen:targetScreen, tab_id:tabId(), autonomous:autonomousMode,
-        force_backend:(backendMode!=="claude" && !directiveFA) ? "ollama" : undefined}), signal:myCtrl.signal});
+        force_backend:forceBackend}), signal:myCtrl.signal});
     if(!res.ok||!res.body) throw new Error("HTTP "+res.status);
     const rd=res.body.getReader(), dec=new TextDecoder(); let carry="";
     for(;;){
@@ -3225,10 +3246,10 @@ go.onclick=()=>submit();
 const backendPick = $("backendPick");
 function paintBackendPick(){
   backendPick.value = backendMode;
-  backendPick.classList.toggle("on", backendMode === "claude");
+  backendPick.classList.toggle("on", backendMode !== "auto");
 }
 backendPick.addEventListener("change", ()=>{
-  backendMode = backendPick.value === "claude" ? "claude" : "auto";
+  backendMode = BACKEND_MODE_VALUES.has(backendPick.value) ? backendPick.value : "auto";
   backendModeSet(backendMode);
   paintBackendPick();
 });

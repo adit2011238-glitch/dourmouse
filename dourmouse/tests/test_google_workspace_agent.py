@@ -40,7 +40,7 @@ class TestGoogleWorkspaceAgentExists:
             "gmail_trash", "gmail_bulk_trash", "gmail_untrash",
             "email_identity_status", "email_own_send",
             "drive_search", "drive_read", "drive_download", "drive_create_doc",
-            "docs_append", "drive_share",
+            "docs_append", "docs_insert_image", "drive_share",
             "sheets_read", "sheets_create", "slides_create",
             "list_calendar_events", "propose_time_slots", "create_calendar_event",
             "query_shared_memory",

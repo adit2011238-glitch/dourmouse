@@ -734,6 +734,120 @@ def load_omniroute_config() -> OmniRouteConfig:
     )
 
 
+# 2026-09-14, user-directed: a real third HOME composer backend option,
+# https://github.com/tashfeenahmed/freellmapi -- a self-hosted,
+# OpenAI-compatible router that aggregates ~34 providers' free tiers
+# behind one local endpoint (real project, not a guess: its own README
+# documents `base_url="http://localhost:3001/v1"`, a unified
+# `freellmapi-...` Bearer key from its own Keys page, and
+# `model="auto"` letting the router itself pick a working free
+# provider). Same shape as OmniRouteConfig immediately above (a
+# self-hosted OpenAI-compatible gateway) -- the difference is FreeLLMAPI
+# issues a real per-install unified key from its own web UI rather than
+# being fully keyless, so this carries that key instead of hardcoding
+# an empty string.
+_FREELLMAPI_DEFAULT_BASE_URL = "http://localhost:3001/v1"
+_FREELLMAPI_DEFAULT_MODEL = "auto"
+
+FREELLMAPI_DEFAULT_BASE_URL = _FREELLMAPI_DEFAULT_BASE_URL
+FREELLMAPI_DEFAULT_MODEL = _FREELLMAPI_DEFAULT_MODEL
+
+
+@dataclass(frozen=True)
+class FreeLLMAPIConfig:
+    """FreeLLMAPI self-hosted free-tier router backend (v14).
+
+    Requires a real unified key (``FREELLMAPI_API_KEY``) from the
+    user's own running FreeLLMAPI instance's Keys page -- unlike
+    OmniRoute this is not keyless, since FreeLLMAPI gates its endpoint
+    on that per-install key even though every provider behind it is
+    itself free. Per-agent overrides come from
+    ``DOURMOUSE_FREELLMAPI_MODEL_<AGENT>`` (mirroring the NVIDIA/Ollama/
+    OmniRoute conventions), resolved deterministically (Rule 2.8).
+
+    Honesty (Rule 2.2): this is a routing layer over real third-party
+    free tiers -- failures (rate limits, a provider being down) surface
+    as real errors, never a fabricated success.
+    """
+
+    api_key: str = ""
+    base_url: str = _FREELLMAPI_DEFAULT_BASE_URL
+    model: str = _FREELLMAPI_DEFAULT_MODEL
+    max_retries: int = 2
+    retry_backoff: float = 0.5
+    fallback_model: str = ""
+    agent_models: dict[str, str] = field(default_factory=dict)
+
+    def model_for_agent(self, agent: str | None) -> str:
+        """The FreeLLMAPI model a specific subagent runs on (deterministic).
+
+        Same precedence as OmniRouteConfig.model_for_agent: an explicit
+        per-agent override first, the persisted orchestrator-model
+        setting second (ORCHESTRATOR only), ``self.model`` last.
+        """
+        key = (agent or "").strip().upper()
+        if key and key in self.agent_models:
+            return self.agent_models[key]
+        if key == "ORCHESTRATOR":
+            persisted = _persisted_model_for_backend("freellmapi")
+            if persisted:
+                return persisted
+        return self.model
+
+
+def load_freellmapi_config() -> FreeLLMAPIConfig:
+    """Build the FreeLLMAPI backend config from env (defaults when unset)."""
+    api_key = os.environ.get("FREELLMAPI_API_KEY", "").strip()
+    base_url = os.environ.get(
+        "FREELLMAPI_BASE_URL", _FREELLMAPI_DEFAULT_BASE_URL
+    ).strip() or _FREELLMAPI_DEFAULT_BASE_URL
+    model = os.environ.get(
+        "FREELLMAPI_MODEL", _FREELLMAPI_DEFAULT_MODEL
+    ).strip() or _FREELLMAPI_DEFAULT_MODEL
+    max_retries = int(os.environ.get("FREELLMAPI_MAX_RETRIES", "2"))
+    retry_backoff = float(os.environ.get("FREELLMAPI_RETRY_BACKOFF", "0.5"))
+    fallback_model = os.environ.get("FREELLMAPI_FALLBACK_MODEL", "").strip()
+    agent_models = {}
+    prefix = "DOURMOUSE_FREELLMAPI_MODEL_"
+    for env_name, value in os.environ.items():
+        if env_name.startswith(prefix) and value.strip():
+            agent_name = env_name[len(prefix):].strip().upper()
+            if agent_name:
+                agent_models[agent_name] = value.strip()
+    return FreeLLMAPIConfig(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        max_retries=max_retries,
+        retry_backoff=retry_backoff,
+        fallback_model=fallback_model,
+        agent_models=agent_models,
+    )
+
+
+def freellmapi_available(timeout: float = 1.0) -> bool:
+    """Probe the local FreeLLMAPI gateway (deterministic, Rule 2.8).
+
+    Honors ``FREELLMAPI_BASE_URL`` so tests and non-default deploys are
+    never hardcoded to the default port. A real GET to the gateway's
+    own root is enough to know it's up; never fabricates availability.
+    """
+    import urllib.error
+    import urllib.request
+
+    base_url = os.environ.get(
+        "FREELLMAPI_BASE_URL", _FREELLMAPI_DEFAULT_BASE_URL
+    ).strip() or _FREELLMAPI_DEFAULT_BASE_URL
+    root = base_url[: -len("/v1")] if base_url.endswith("/v1") else base_url
+    try:
+        with urllib.request.urlopen(root, timeout=timeout) as resp:  # noqa: S310
+            return resp.status < 500
+    except urllib.error.HTTPError as exc:
+        return exc.code < 500
+    except Exception:  # noqa: BLE001 - any failure means "not available"
+        return False
+
+
 def omniroute_available(timeout: float = 1.0) -> bool:
     """Probe the local OmniRoute gateway (deterministic, Rule 2.8).
 
@@ -799,6 +913,8 @@ def backend_identity(config: Any) -> tuple[str, bool]:
         return "nvidia", False
     if isinstance(config, OmniRouteConfig):
         return "omniroute", False
+    if isinstance(config, FreeLLMAPIConfig):
+        return "freellmapi", False
     return "unknown", False
 
 
