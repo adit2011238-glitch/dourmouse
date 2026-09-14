@@ -246,23 +246,44 @@ def render_page_png(path: str | Path, page_index: int, scale: float = 2.0) -> by
     the text functions above, this returns raw bytes on success so a
     caller can't mistake a failure string for real image data — the
     error has to be an exception, not a sentinel byte string).
+
+    2026-09-15, real gap found live (a webui.py preview route's
+    `except RuntimeError` silently never caught anything for a request
+    that came back as a raw connection failure to the browser, "Could
+    not reach the preview server" — not this exact file, which turned
+    out fine on direct re-check, but a real, reproducible gap all the
+    same): this docstring already promised RuntimeError "on any
+    failure", but the body below never actually enforced that — a real
+    pdfium-native exception (pypdfium2 raises its own exception types
+    for a malformed/corrupt PDF, not RuntimeError) would propagate
+    UNCAUGHT straight out of this function, past every caller's own
+    `except RuntimeError`, and crash the request handler mid-response
+    — exactly the kind of failure that reaches a browser as a broken
+    connection instead of a clean error. Every non-RuntimeError failure
+    is now wrapped into a real RuntimeError here, so the promise this
+    docstring already made is actually kept.
     """
     pdfium = _pdfium()
     target = Path(path)
     if not target.is_file():
         raise RuntimeError(f"no such file: {target}")
-    with _PDFIUM_LOCK:
-        doc = pdfium.PdfDocument(str(target))
-        try:
-            if not (0 <= page_index < len(doc)):
-                raise RuntimeError(f"page {page_index} out of range (0..{len(doc) - 1})")
-            page = doc[page_index]
-            bitmap = page.render(scale=scale)
-            pil_img = bitmap.to_pil()
-            import io
+    try:
+        with _PDFIUM_LOCK:
+            doc = pdfium.PdfDocument(str(target))
+            try:
+                if not (0 <= page_index < len(doc)):
+                    raise RuntimeError(f"page {page_index} out of range (0..{len(doc) - 1})")
+                page = doc[page_index]
+                bitmap = page.render(scale=scale)
+                pil_img = bitmap.to_pil()
+                import io
 
-            buf = io.BytesIO()
-            pil_img.save(buf, format="PNG")
-            return buf.getvalue()
-        finally:
-            doc.close()
+                buf = io.BytesIO()
+                pil_img.save(buf, format="PNG")
+                return buf.getvalue()
+            finally:
+                doc.close()
+    except RuntimeError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - honest error, never a crash (see docstring above)
+        raise RuntimeError(f"could not render page {page_index}: {type(exc).__name__}: {exc}") from exc

@@ -276,3 +276,40 @@ class TestRenderPagePng:
     def test_out_of_range_page_raises_a_real_error(self, real_pdf):
         with pytest.raises(RuntimeError, match="out of range"):
             pdf_reader.render_page_png(real_pdf, 99)
+
+    def test_a_real_corrupt_pdf_still_raises_a_real_runtimeerror(self, tmp_path):
+        """A real, syntactically invalid "PDF" (just the magic bytes, no
+        real structure) -- pypdfium2 itself already raises RuntimeError
+        for a document load failure specifically, so this passes through
+        unwrapped (see the next test for the wrapping path itself, which
+        this exact failure never reaches)."""
+        bad = tmp_path / "corrupt.pdf"
+        bad.write_bytes(b"%PDF-1.4\nnot a real pdf body at all")
+        with pytest.raises(RuntimeError):
+            pdf_reader.render_page_png(bad, 0)
+
+    def test_a_non_runtimeerror_failure_is_wrapped_not_leaked(self, real_pdf, monkeypatch):
+        """2026-09-15, real gap: this function's own docstring promises
+        RuntimeError "on any failure", but the body never actually
+        enforced that -- only a document-LOAD failure happens to already
+        raise RuntimeError natively; a failure anywhere else in the real
+        pipeline (page rendering, PIL conversion) could be a completely
+        different exception type and used to propagate straight through
+        uncaught. A webui.py caller's `except RuntimeError` never caught
+        that, and the request handler crashed mid-response -- the real,
+        live-observed symptom was a browser fetch() failing as "could
+        not reach the server" instead of getting a clean error. Forces
+        exactly that shape of failure (a non-RuntimeError exception deep
+        in the render path) to prove it's now wrapped, not leaked."""
+
+        class _NotARuntimeError(Exception):
+            pass
+
+        import pypdfium2
+
+        def broken_render(self, *a, **k):
+            raise _NotARuntimeError("a real, non-RuntimeError pdfium failure")
+
+        monkeypatch.setattr(pypdfium2.PdfPage, "render", broken_render)
+        with pytest.raises(RuntimeError, match="could not render page"):
+            pdf_reader.render_page_png(real_pdf, 0)
