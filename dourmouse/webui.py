@@ -4014,16 +4014,16 @@ class _Handler(BaseHTTPRequestHandler):
                 # which the local daemon then genuinely 404'd on. Traced
                 # live: client._root was correctly 127.0.0.1:11434, but
                 # the payload's own "model" field still said
-                # "gpt-oss:20b". Mirror _build_client's own check here so
-                # both agree on which config the model name comes from.
-                effective_config = self.server.config
-                if isinstance(effective_config, OllamaConfig):
-                    from dourmouse.model_delegation import _LOCAL_ONLY_AGENTS
+                # "gpt-oss:20b". 2026-09-14: this exact class of bug turned
+                # out to exist in THREE places (this one, dispatch.py's
+                # own top-level model resolution, and its per-agent
+                # routing refinement) -- all three now share one helper,
+                # dispatch._config_for_agent_model, so they can never
+                # independently disagree again (see its own docstring for
+                # the full diagnosis).
+                from dourmouse.dispatch import _config_for_agent_model
 
-                    if focus_agent.strip().lower() in _LOCAL_ONLY_AGENTS:
-                        from dourmouse.config import load_ollama_config
-
-                        effective_config = load_ollama_config(force_local=True)
+                effective_config = _config_for_agent_model(self.server.config, focus_agent)
                 model_override = effective_config.model_for_agent(focus_agent)
 
         self.send_response(200)

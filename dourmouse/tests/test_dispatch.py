@@ -3601,11 +3601,27 @@ class TestBuildClientOrchestratorRouting:
             elif expected == "gemini":
                 assert isinstance(client, dispatch_module.GeminiClient), agent
             else:
-                # "local" falls through to the passed-in config as-is —
-                # the REAL local Ollama root, not the cloud one, since
-                # forcing a hosted call for a privacy-routed agent would
-                # defeat the entire point of routing it local.
-                assert isinstance(client, dispatch_module.OllamaNativeClient) and client._root != "https://ollama.com", agent
+                # This test hand-builds a bare OllamaConfig() (never
+                # reads env), so a NON-privacy-pinned "local" verdict
+                # (e.g. "atlas") passes that bare, always-local config
+                # straight through unchanged -- untouched by the
+                # 2026-09-14 cloud-only reversal below, which only ever
+                # applies where _build_client itself swaps in a REAL
+                # load_ollama_config() (its privacy-pin branch).
+                from dourmouse.model_delegation import _LOCAL_ONLY_AGENTS
+
+                assert isinstance(client, dispatch_module.OllamaNativeClient), agent
+                if agent in _LOCAL_ONLY_AGENTS:
+                    # 2026-09-14, user-directed: "Ollama should only use
+                    # cloud models from the api key, never local models"
+                    # -- _build_client's privacy-pin branch now calls
+                    # load_ollama_config(force_local=True), which itself
+                    # now uses the real ambient key instead of stripping
+                    # it (see TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud's
+                    # own docstring for the full reversal).
+                    assert client._root == "https://ollama.com", agent
+                else:
+                    assert client._root != "https://ollama.com", agent
 
 
 class TestBuildClientPerAgentApiKeys:
@@ -3660,22 +3676,25 @@ class TestBuildClientPerAgentApiKeys:
 
 
 class TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud:
-    """Real, live-caught privacy bug (2026-09-13): the test right above
-    this one LOOKS like it covers "a real Ollama Cloud key must not
-    affect privacy-pinned agents", but it doesn't -- it hand-constructs
-    a bare `OllamaConfig()`, which never reads the environment at all,
-    so `monkeypatch.setenv("OLLAMA_API_KEY", ...)` in that test was
-    silently never exercised by the code path it's meant to guard.
+    """2026-09-13: this class used to guard the OPPOSITE of what it
+    guards now -- a real, live-caught privacy bug where a genuine Ollama
+    Cloud key silently leaked mail/docs/study-class agents to a
+    third-party API. That guard held until 2026-09-14, when the user
+    explicitly asked for the reverse: "Ollama should only use cloud
+    models from the api key, never local models." This class (name kept
+    for history/searchability) now asserts THAT: any agent, privacy-
+    pinned or not, gets a real Ollama Cloud client whenever a key is
+    configured -- local Ollama is only ever used as the last resort when
+    no key exists at all (config.load_ollama_config's own docstring
+    documents this precedence in full). Callers who need the OLD
+    privacy behavior back would need to explicitly re-scope
+    model_delegation._LOCAL_ONLY_AGENTS' role in _build_client -- not
+    done here, since the user's instruction was unconditional."""
 
-    The REAL bug only appears when the config comes from the REAL
-    `config.load_ollama_config()` (what every actual caller in the app
-    uses) with a real key present: live-verified, before this fix,
-    `_build_client(load_ollama_config(), forced_agent="mail")` returned
-    an `OllamaNativeClient` with `_is_cloud=True` -- a real Gmail-tool
-    turn would have sent its content to Ollama's cloud API. These tests
-    reproduce it with the real function, not a hand-built config."""
-
-    def test_privacy_pinned_agent_stays_local_even_with_a_real_cloud_key_set(self, monkeypatch):
+    def test_privacy_pinned_agent_now_gets_cloud_too_when_a_key_is_set(self, monkeypatch):
+        """2026-09-14, user-directed reversal of the 2026-09-13 privacy
+        guard: a real key now applies to EVERY agent, privacy-pinned or
+        not -- "never local models" while a key exists."""
         monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "split")
         monkeypatch.setenv("OLLAMA_API_KEY", "real-looking-cloud-key")
         monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
@@ -3688,8 +3707,8 @@ class TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud:
             client = dispatch_module._build_client(real_config, forced_agent=agent)
             if not isinstance(client, dispatch_module.OllamaNativeClient):
                 continue  # a heavy-workflow name in this set (e.g. browser) goes to Claude instead -- fine, not the risk this guards
-            assert client._is_cloud is False, (
-                f"{agent} (privacy-pinned) routed to Ollama Cloud with a real key present"
+            assert client._is_cloud is True, (
+                f"{agent} stayed local even though a real Ollama Cloud key is set"
             )
 
     def test_non_privacy_agent_correctly_still_gets_cloud_speed(self, monkeypatch):
@@ -3710,8 +3729,24 @@ class TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud:
         assert isinstance(client, dispatch_module.OllamaNativeClient)
         assert client._is_cloud is True
 
-    def test_force_local_ignores_an_ambient_cloud_key_entirely(self, monkeypatch):
+    def test_force_local_now_uses_a_real_ambient_cloud_key_instead(self, monkeypatch):
+        """2026-09-14, user-directed: force_local used to strip a real,
+        already-configured cloud key unconditionally -- built for the
+        privacy case this class's docstring explains is no longer this
+        codebase's intent. force_local now only means "genuinely local"
+        in the one case that's unavoidable anyway: no key configured at
+        all, so there is no cloud option to use."""
         monkeypatch.setenv("OLLAMA_API_KEY", "real-looking-cloud-key")
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        from dourmouse.config import load_ollama_config
+
+        forced = load_ollama_config(force_local=True)
+        assert forced.is_cloud is True
+        assert forced.api_key == "real-looking-cloud-key"
+        assert "ollama.com" in forced.base_url
+
+    def test_force_local_still_local_when_no_key_exists_at_all(self, monkeypatch):
+        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
         monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
         from dourmouse.config import load_ollama_config
 

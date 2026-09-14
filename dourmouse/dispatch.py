@@ -2171,6 +2171,40 @@ def _nvidia_rotation_factory(
     return factory
 
 
+def _config_for_agent_model(
+    config: NvidiaConfig | OllamaConfig | OmniRouteConfig | None, agent_name: str | None
+) -> Any:
+    """The config a specific agent's MODEL NAME should be resolved from.
+
+    A genuinely local OllamaConfig when ``agent_name`` is privacy-pinned
+    (model_delegation._LOCAL_ONLY_AGENTS) and ``config`` would otherwise
+    route to real Ollama Cloud -- otherwise ``config`` unchanged. This
+    mirrors _build_client's own force_local swap for the CLIENT exactly,
+    on purpose: real, live-caught bug (2026-09-14), found in THREE
+    separate places that each independently decided whether a
+    privacy-pinned agent's turn was local or cloud, using different
+    inputs each time -- webui.py's focus_agent model_override, this
+    function's own top-level ``model`` resolution, and the per-agent
+    routing refinement further down _run_dispatch_loop. All three called
+    ``config.model_for_agent(agent)`` on the ORIGINAL ambient (cloud)
+    config while a real Ollama Cloud key was set, even on a turn whose
+    CLIENT had already been correctly swapped local by _build_client's
+    own privacy check -- handing that local client a real cloud-only
+    model name it had never pulled, and a genuine local-daemon 404 on
+    every such turn (STUDY tab, and any plain conversational query that
+    happened to route to mail/docs/study/etc). One shared helper here so
+    all three call sites can never independently disagree again.
+    """
+    if isinstance(config, OllamaConfig) and agent_name:
+        from dourmouse.model_delegation import _LOCAL_ONLY_AGENTS
+
+        if agent_name.strip().lower() in _LOCAL_ONLY_AGENTS:
+            from dourmouse.config import load_ollama_config
+
+            return load_ollama_config(force_local=True)
+    return config
+
+
 def _build_client(
     config: NvidiaConfig | OllamaConfig | OmniRouteConfig,
     forced_agent: str | None = None,
@@ -3445,26 +3479,48 @@ def run_dispatch_messages(
     )
     if client is None:
         config = config or load_llm_config_with_fallback()
+        _effective_agent = _effective_split_agent(forced_agent, last_user, registry)
         client = _build_client(
             config,
-            forced_agent=_effective_split_agent(forced_agent, last_user, registry),
+            forced_agent=_effective_agent,
             session_stem=session_stem,
             force_plain_dispatch=force_plain_dispatch,
         )
+        # 2026-09-14, real live-caught bug (a plain, non-focus_agent HOME
+        # turn 404'd on "HTTP Error 404: Not Found" -- traced live: the
+        # real HTTP call went to http://127.0.0.1:11434/api/chat, the
+        # LOCAL daemon, carrying "gpt-oss:20b", a real Ollama CLOUD-only
+        # model name never pulled there). Root cause: _build_client()
+        # above independently decides to swap the CLIENT to a genuinely
+        # local OllamaConfig whenever the PEEKED effective agent
+        # (_effective_split_agent, used purely for backend-mode routing)
+        # happens to be privacy-pinned -- deterministic keyword routing
+        # can match one even for an ordinary conversational prompt with
+        # no real focus_agent set. The MODEL resolved right below,
+        # though, was still read from the ORIGINAL ambient `config`
+        # (real Ollama Cloud) -- the two resolutions independently
+        # decided "local" and "cloud" for the same turn. Mirror
+        # _build_client's own force_local check here so the model name
+        # always agrees with the client that will actually receive it,
+        # the same fix already applied where webui.py resolves a
+        # focus_agent turn's model_override -- both now go through the
+        # one shared _config_for_agent_model helper (see its own
+        # docstring for the full three-places-disagreed diagnosis).
+        _model_config = _config_for_agent_model(config, _effective_agent)
         # v5.0 fast dispatch: the orchestrator (looping dispatch brain)
         # defaults to its per-agent model (qwen3:4b on the local backend) so
         # every turn is fast; explicit ``model`` overrides still win.
         # v5.5 brain escalation: multi-step prompts use the full default
         # brain; simple chat stays on the fast orchestrator brain.
         fast = (
-            config.model_for_agent("orchestrator")
-            if hasattr(config, "model_for_agent")
-            else config.model
+            _model_config.model_for_agent("orchestrator")
+            if hasattr(_model_config, "model_for_agent")
+            else _model_config.model
         )
         # ``config`` is typed NvidiaConfig | None at the parameter boundary;
         # getattr avoids the narrowing mypy can't do after the pre-existing
         # ``config = config or load_llm_config()`` reassignment above.
-        default_brain = str(getattr(config, "model", "test-model"))
+        default_brain = str(getattr(_model_config, "model", "test-model"))
         model, escalated_brain = _resolve_brain_model(
             fast=fast, default=default_brain, prompt=str(last_user), explicit=model
         )
@@ -4213,7 +4269,22 @@ def _run_dispatch_loop(
         and len(plan_agents) == 1
         and hasattr(ctx.config, "model_for_agent")
     ):
-        routed_model = ctx.config.model_for_agent(next(iter(plan_agents)))
+        # 2026-09-14, real live-caught bug: this used to call
+        # ctx.config.model_for_agent(...) on the ORIGINAL ambient config
+        # regardless of which agent matched -- for a privacy-pinned
+        # match (mail/docs/study/etc) with a real Ollama Cloud key
+        # configured, that resolved a real cloud-only model name
+        # ("gpt-oss:20b") and clobbered it onto THIS turn's `model`, even
+        # though _build_client already put a genuinely LOCAL client
+        # behind this exact turn earlier in the call -- a real,
+        # live-traced local-daemon 404 on an ordinary conversational
+        # query that happened to keyword-route to a privacy-pinned
+        # agent. See _config_for_agent_model's own docstring for the
+        # full three-places-disagreed diagnosis; this is the third.
+        _routed_agent = next(iter(plan_agents))
+        routed_model = _config_for_agent_model(ctx.config, _routed_agent).model_for_agent(
+            _routed_agent
+        )
         if routed_model and routed_model != model:
             model = routed_model
             if event_sink is not None and ctx.depth == 0:

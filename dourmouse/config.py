@@ -590,10 +590,17 @@ def load_ollama_config(force_local: bool = False) -> OllamaConfig:
     """
     api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
     explicit_base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
-    if force_local:
+    # 2026-09-14, user-directed: "Ollama should only use cloud models from
+    # the api key, never local models." force_local used to unconditionally
+    # strip a real, already-configured cloud key -- built for the privacy
+    # case (mail/docs/study must never leave this machine even when a
+    # cloud key exists elsewhere on it). Per this explicit instruction,
+    # force_local no longer suppresses a real key: it only means "genuinely
+    # local" in the one case that's unavoidable anyway -- no key configured
+    # at all, so there is no cloud option to use.
+    if force_local and not api_key:
         base_url = explicit_base_url or _OLLAMA_DEFAULT_BASE_URL
         is_cloud = False
-        api_key = ""
     elif explicit_base_url:
         base_url = explicit_base_url
         is_cloud = False
