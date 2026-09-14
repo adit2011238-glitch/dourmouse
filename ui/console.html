@@ -2660,9 +2660,33 @@ function makeRevealer(onUpdate, opts){
     // For an "assistant_text"/"done" event carrying the FULL text so far —
     // enqueues only the new suffix beyond what's already shown or queued,
     // so it never re-types text the user has already seen.
+    //
+    // Real, live-caught bug (2026-09-14): this used to slice by LENGTH
+    // alone (text.slice(revealed.length + pending.length)), trusting that
+    // `text` was always the exact same string already shown plus more.
+    // When a turn round-trips server-side (e.g. Grounded Mode appends its
+    // own disclaimer to a reconstructed final answer that is not always a
+    // byte-for-byte continuation of what was already streamed), that slice
+    // index landed INSIDE the new content instead of at its start, so the
+    // reveal spliced two unrelated fragments together mid-word (seen live:
+    // "...open Chrome for you.ounded Mode was on..." — the disclaimer's own
+    // opening "\n\n[DOURMOUSE: Gr" vanished into the cut). Verify the
+    // already-shown text is an actual PREFIX of the new one before doing
+    // the cheap suffix-slice; if it is not, the new text is not a
+    // continuation at all, so replace outright instead of guessing an
+    // index. Correctness over smoothness: a rare visible re-type beats a
+    // silently corrupted answer.
     setTotal(text){
-      const known = revealed.length + pending.length;
-      if(text && text.length > known) this.enqueue(text.slice(known));
+      if(!text) return;
+      const shown = revealed + pending;
+      if(text.length <= shown.length) return;
+      if(text.slice(0, shown.length) === shown){
+        this.enqueue(text.slice(shown.length));
+      } else {
+        revealed = "";
+        pending = text;
+        start();
+      }
     },
     // STOP was clicked, or the turn errored — show everything immediately
     // rather than keep fake-typing an answer that's no longer arriving.

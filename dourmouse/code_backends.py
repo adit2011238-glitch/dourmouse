@@ -104,10 +104,31 @@ _OUTPUT_CAP = 20_000
 # run_code_task("claude", ...) concurrently.
 _CLAUDE_SESSIONS: dict[str, str] = {}
 _CLAUDE_SESSIONS_LOCK = threading.Lock()
+# Real, live-caught bug (2026-09-14): _CLAUDE_SESSIONS_LOCK only ever
+# guarded the dict read/write, not the actual `claude -p` subprocess call
+# that follows -- so two overlapping requests for the SAME session_key
+# (e.g. a background caller and the user's own tab both mid-turn on the
+# same tab/cwd) could both read the same tracked --resume id and both
+# launch a real `claude` subprocess against it at once. The CLI's own
+# local session store is not safe for that: the second process failed
+# live with "Error: Session ID <id> is already in use.", surfaced to the
+# user as a hard-failed "hey". One lock per session_key (created lazily,
+# never removed -- the key space is small and bounded by open tabs/cwds)
+# serializes the mint-or-resume-plus-run sequence per key while leaving
+# DIFFERENT keys free to run fully in parallel, preserving the whole
+# point of per-tab session isolation.
+_CLAUDE_SESSION_RUN_LOCKS: dict[str, threading.Lock] = {}
 # Exact substring of the CLI's real stderr (verified live above) when a
 # tracked session id no longer resolves to a real conversation — e.g. the
 # user pruned their local Claude Code session history out from under us.
 _CLAUDE_NO_SESSION_ERR = "No conversation found with session ID"
+# Exact substring of the CLI's real stderr when a --resume/--session-id
+# targets a session another `claude` process currently has open (see the
+# lock comment above for the real, live-reproduced cause). Kept as a
+# belt-and-suspenders retry trigger alongside the lock, in case a stale
+# id is ever left "in use" by something outside our own lock's reach
+# (e.g. the user running `claude --resume <id>` by hand on the host).
+_CLAUDE_SESSION_IN_USE_ERR = "is already in use"
 # Real wording, live-caught in Claude's own successful (exit 0) stdout, of
 # ITS OWN MCP client failing to connect to the dourmouse bridge for that
 # turn — see the retry site's own comment for the full diagnosis. Matches
@@ -225,6 +246,20 @@ def _claude_session_args(key: str, *, fresh: bool = False) -> list[str]:
 def _forget_claude_session(key: str) -> None:
     with _CLAUDE_SESSIONS_LOCK:
         _CLAUDE_SESSIONS.pop(key, None)
+
+
+def _claude_session_run_lock(key: str) -> threading.Lock:
+    """The lock that serializes real `claude` subprocess runs for one
+    session key. See _CLAUDE_SESSION_RUN_LOCKS's own comment for why this
+    exists. Creating it is itself guarded by _CLAUDE_SESSIONS_LOCK so two
+    callers can never race into two different Lock objects for the same
+    key."""
+    with _CLAUDE_SESSIONS_LOCK:
+        lock = _CLAUDE_SESSION_RUN_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _CLAUDE_SESSION_RUN_LOCKS[key] = lock
+        return lock
 
 
 _CODING_SYSTEM = (
@@ -582,19 +617,23 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int, tab: str | None = N
             task = f"{claude_orchestrator_preamble()}\n\n---\n\n{task}"
         except Exception:  # noqa: BLE001 - a briefing must never break a turn
             pass
-    session_args = _claude_session_args(session_key)
-    proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
-    err = (proc.stderr or "").strip()
-    if proc.returncode != 0 and "--resume" in session_args and _CLAUDE_NO_SESSION_ERR in err:
-        # Our tracked session id no longer resolves to a real conversation
-        # (e.g. the user pruned Claude Code's local session history out from
-        # under us) — never keep retrying a dead id forever. Forget it and
-        # start one honest fresh conversation instead of hard-failing the
-        # whole task over bookkeeping the caller can't see or fix.
-        _forget_claude_session(session_key)
+    with _claude_session_run_lock(session_key):
         session_args = _claude_session_args(session_key)
         proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
         err = (proc.stderr or "").strip()
+        if proc.returncode != 0 and "--resume" in session_args and (
+            _CLAUDE_NO_SESSION_ERR in err or _CLAUDE_SESSION_IN_USE_ERR in err
+        ):
+            # Our tracked session id no longer resolves to a real conversation
+            # (e.g. the user pruned Claude Code's local session history out from
+            # under us), or the CLI reports it already in use — never keep
+            # retrying a dead/stuck id forever. Forget it and start one honest
+            # fresh conversation instead of hard-failing the whole task over
+            # bookkeeping the caller can't see or fix.
+            _forget_claude_session(session_key)
+            session_args = _claude_session_args(session_key)
+            proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
+            err = (proc.stderr or "").strip()
     out = (proc.stdout or "").strip()
     # Real, live-reproduced issue (production-testing sweep, 2026-09-12):
     # `claude -p` can exit 0 with real stdout, but that text is CLAUDE
@@ -914,12 +953,15 @@ def stream_claude(
             pass
         return proc.returncode, final_result, stderr_text
 
-    session_args = _claude_session_args(session_key)
-    returncode, final_result, err = _run_once(session_args)
-    if returncode != 0 and "--resume" in session_args and _CLAUDE_NO_SESSION_ERR in err:
-        _forget_claude_session(session_key)
+    with _claude_session_run_lock(session_key):
         session_args = _claude_session_args(session_key)
         returncode, final_result, err = _run_once(session_args)
+        if returncode != 0 and "--resume" in session_args and (
+            _CLAUDE_NO_SESSION_ERR in err or _CLAUDE_SESSION_IN_USE_ERR in err
+        ):
+            _forget_claude_session(session_key)
+            session_args = _claude_session_args(session_key)
+            returncode, final_result, err = _run_once(session_args)
     err = err.strip()
     if returncode != 0:
         if not err:

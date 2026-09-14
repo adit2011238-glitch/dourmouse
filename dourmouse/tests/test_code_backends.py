@@ -26,8 +26,10 @@ def _reset_claude_sessions():
     the same cwd key ("." when no cwd is passed) and would otherwise see a
     stale --resume from a previous test instead of a fresh --session-id."""
     code_backends._CLAUDE_SESSIONS.clear()
+    code_backends._CLAUDE_SESSION_RUN_LOCKS.clear()
     yield
     code_backends._CLAUDE_SESSIONS.clear()
+    code_backends._CLAUDE_SESSION_RUN_LOCKS.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -704,6 +706,144 @@ class TestClaudeSessionContinuity:
         assert "--session-id" in seen[0]
         assert "--resume" in seen[1]
 
+    def test_session_already_in_use_also_recovers_with_one_fresh_retry(self, monkeypatch):
+        """Real, live-caught bug (2026-09-14): the CLI's own literal
+        error when a --resume id is already held open by another `claude`
+        process ("Error: Session ID <id> is already in use."). The real
+        fix is the per-key run lock (see the concurrency test below), but
+        this is the same honest belt-and-suspenders retry the dead-session
+        case already gets, for any occurrence the lock itself can't reach
+        (e.g. an id left "in use" by something outside our own lock)."""
+        code_backends._CLAUDE_SESSIONS["/tmp/proj"] = "22222222-2222-2222-2222-222222222222"
+        seen: list = []
+
+        class _InUseProc:
+            returncode = 1
+            stdout = ""
+            stderr = "Error: Session ID 22222222-2222-2222-2222-222222222222 is already in use."
+
+        class _OkProc:
+            returncode = 0
+            stdout = "recovered"
+            stderr = ""
+
+        calls = {"n": 0}
+
+        def _fake_run(argv, **kwargs):
+            seen.append(argv)
+            calls["n"] += 1
+            return _InUseProc() if calls["n"] == 1 else _OkProc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+        out = code_backends.run_code_task("claude", "task", cwd="/tmp/proj")
+        assert out == "recovered"
+        assert len(seen) == 2
+        assert "--resume" in seen[0]
+        assert "--session-id" in seen[1]
+        assert code_backends._CLAUDE_SESSIONS["/tmp/proj"] != "22222222-2222-2222-2222-222222222222"
+
+    def test_concurrent_calls_for_the_same_session_key_are_serialized(self, monkeypatch):
+        """Real, live-caught bug (2026-09-14): _CLAUDE_SESSIONS_LOCK only
+        ever guarded the dict read/write, not the subprocess call itself,
+        so two overlapping requests for the same tab/cwd could both read
+        the same --resume id and both launch a real `claude` subprocess
+        against it at once -- the CLI rejected the second with "already in
+        use". Proves the fix: a second call for the SAME key must not even
+        start its subprocess until the first one has fully returned."""
+        import threading
+        import time
+
+        in_flight = {"count": 0, "max_seen": 0}
+        lock = threading.Lock()
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            with lock:
+                in_flight["count"] += 1
+                in_flight["max_seen"] = max(in_flight["max_seen"], in_flight["count"])
+            time.sleep(0.05)
+            with lock:
+                in_flight["count"] -= 1
+            return _Proc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+
+        threads = [
+            threading.Thread(
+                target=code_backends.run_code_task,
+                args=("claude", f"task {i}"),
+                kwargs={"cwd": "/tmp/proj", "tab": "home"},
+            )
+            for i in range(5)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert in_flight["max_seen"] == 1, (
+            "two or more claude subprocesses ran concurrently for the same "
+            "session key -- this is exactly what produces the real "
+            "'already in use' error"
+        )
+
+    def test_different_session_keys_still_run_in_parallel(self, monkeypatch):
+        """The lock must be scoped per key, never global -- otherwise every
+        tab's Claude turn would serialize behind every other tab's,
+        defeating the whole point of per-tab session isolation."""
+        import threading
+        import time
+
+        in_flight = {"count": 0, "max_seen": 0}
+        lock = threading.Lock()
+
+        class _Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def _fake_run(argv, **kwargs):
+            with lock:
+                in_flight["count"] += 1
+                in_flight["max_seen"] = max(in_flight["max_seen"], in_flight["count"])
+            time.sleep(0.05)
+            with lock:
+                in_flight["count"] -= 1
+            return _Proc()
+
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
+
+        threads = [
+            threading.Thread(
+                target=code_backends.run_code_task,
+                args=("claude", "task"),
+                kwargs={"cwd": "/tmp/proj", "tab": f"tab-{i}"},
+            )
+            for i in range(5)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert in_flight["max_seen"] > 1, (
+            "different session keys were serialized against each other -- "
+            "the lock must be per-key, not global"
+        )
+
 
 # --------------------------------------------------------------------------- #
 # Roster wiring
@@ -1114,6 +1254,39 @@ class TestStreamClaude:
         assert "--settings" in argv
         idx = argv.index("--settings")
         assert argv[idx + 1] == '{"enabledPlugins":{"caveman@caveman":false}}'
+
+    def test_session_already_in_use_recovers_with_one_fresh_retry(self, monkeypatch):
+        """Real, live-caught bug (2026-09-14), same root cause and fix as
+        TestClaudeSessionContinuity's own version of this test for the
+        non-streaming _run_claude path -- see that test for the full
+        diagnosis. This is the CODE-screen streaming path's own copy of
+        the same retry condition."""
+        code_backends._CLAUDE_SESSIONS["/tmp/proj::code"] = "33333333-3333-3333-3333-333333333333"
+        monkeypatch.setattr(
+            "dourmouse.general_roster._find_claude_cli", lambda: "/usr/bin/claude"
+        )
+        calls = {"n": 0}
+
+        def _fake_popen(argv, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _FakePopenStream(
+                    [],
+                    returncode=1,
+                    stderr_text=(
+                        "Error: Session ID 33333333-3333-3333-3333-333333333333 "
+                        "is already in use."
+                    ),
+                )
+            return _FakePopenStream([_sse_line({"type": "result", "result": "recovered"})])
+
+        monkeypatch.setattr(code_backends.subprocess, "Popen", _fake_popen)
+        out = code_backends.stream_claude(
+            "task", cwd="/tmp/proj", timeout=30, tab="code", on_delta=lambda t: None
+        )
+        assert out == "recovered"
+        assert calls["n"] == 2
+        assert code_backends._CLAUDE_SESSIONS["/tmp/proj::code"] != "33333333-3333-3333-3333-333333333333"
 
     def test_thinking_deltas_go_to_their_own_callback_not_on_delta(self, monkeypatch):
         lines = [

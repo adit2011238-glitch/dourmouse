@@ -184,6 +184,48 @@ class TestGatedToolsAreVisibleButNeverExecuteUnconfirmed:
         assert result["isError"] is False
         assert "CONFIRMATION REQUIRED" not in result["content"][0]["text"]
 
+    def test_auto_approve_setting_lets_a_gated_tool_actually_run(self, monkeypatch):
+        """Real, live-caught bug (2026-09-14): the user's "skip
+        confirmations" toggle (auto_approve_enabled(), config.py) had no
+        effect at all through this bridge -- confirmation_gate=None was
+        hardcoded, so a live gmail_send kept refusing even with the
+        toggle on. This is the fix: when the setting is on, the gate
+        handed to _execute_tool must approve, and the real handler must
+        run."""
+        monkeypatch.setattr("dourmouse.config.auto_approve_enabled", lambda: True)
+        ran = {"called": False}
+
+        def handler(args):
+            ran["called"] = True
+            return "SENT for real"
+
+        registry = _registry_with(_tool("send_email", Permission.REQUIRES_CONFIRMATION, handler=handler))
+        server = McpBridgeServer(registry)
+
+        result = server._handle_tools_call({"name": "send_email", "arguments": {}})
+
+        assert ran["called"] is True
+        assert result["isError"] is False
+        assert result["content"][0]["text"] == "SENT for real"
+
+    def test_auto_approve_off_still_refuses_as_before(self, monkeypatch):
+        """The default (off) behaviour from the test above this one must
+        be completely unchanged."""
+        monkeypatch.setattr("dourmouse.config.auto_approve_enabled", lambda: False)
+        ran = {"called": False}
+
+        def handler(args):
+            ran["called"] = True
+            return "SENT (must never appear)"
+
+        registry = _registry_with(_tool("send_email", Permission.REQUIRES_CONFIRMATION, handler=handler))
+        server = McpBridgeServer(registry)
+
+        result = server._handle_tools_call({"name": "send_email", "arguments": {}})
+
+        assert ran["called"] is False
+        assert "CONFIRMATION REQUIRED" in result["content"][0]["text"]
+
 
 class TestToolToMcpSchema:
     def test_parameters_reused_as_input_schema_not_re_derived(self):
@@ -331,3 +373,23 @@ class TestConfigFileGeneration:
         assert server_cfg["args"] == ["-m", "dourmouse.mcp_bridge"]
         import sys
         assert server_cfg["command"] == sys.executable
+
+    def test_config_sets_pythonpath_to_the_repo_root(self, tmp_path):
+        """Real, live-reproduced bug (2026-09-14): without this, launching
+        `-m dourmouse.mcp_bridge` from any working directory other than
+        the repo root (e.g. code_backends.py's own dedicated orchestrator
+        workspace subdirectory) fails with "No module named 'dourmouse'"
+        and the CLI just reports the server unavailable -- silently
+        dropping every dourmouse tool with no visible error. Verified
+        live: running the real command from that real subdirectory failed
+        with exactly that error; setting PYTHONPATH to the repo root fixed
+        it and a real initialize handshake succeeded."""
+        from pathlib import Path
+
+        path = tmp_path / "mcp-config.json"
+        build_mcp_config_file(path)
+        config = json.loads(path.read_text(encoding="utf-8"))
+        server_cfg = config["mcpServers"]["dourmouse"]
+        repo_root = str(Path(__file__).resolve().parent.parent.parent)
+        assert server_cfg["env"]["PYTHONPATH"] == repo_root
+        assert (Path(repo_root) / "dourmouse" / "mcp_bridge.py").is_file()

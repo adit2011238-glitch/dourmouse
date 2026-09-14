@@ -249,12 +249,30 @@ class McpBridgeServer:
                 "isError": True,
             }
         try:
-            # confirmation_gate=None is the load-bearing part: for a REGULAR
-            # tool this is a plain pass-through to tool.handler(); for a
-            # REQUIRES_CONFIRMATION tool it makes _execute_tool() return an
-            # honest "CONFIRMATION REQUIRED ... NOT executed" string and
-            # genuinely never call the handler. See the module docstring.
-            result_text = _execute_tool(tool, arguments, confirmation_gate=None)
+            # confirmation_gate=None is the load-bearing part for the
+            # default case: for a REGULAR tool this is a plain pass-through
+            # to tool.handler(); for a REQUIRES_CONFIRMATION tool it makes
+            # _execute_tool() return an honest "CONFIRMATION REQUIRED ...
+            # NOT executed" string and genuinely never call the handler.
+            # See the module docstring.
+            #
+            # Real, live-caught bug (2026-09-14): the user turned on the
+            # real "skip confirmations" Settings toggle (auto_approve_
+            # enabled(), config.py) specifically to stop gated tools from
+            # refusing outright, and it works everywhere the web UI's own
+            # WebConfirmationGate is in the loop -- but this bridge never
+            # instantiates that gate at all, it hardcodes None, so the
+            # toggle was silently never consulted on this path. A live
+            # gmail_send through this exact bridge kept refusing with
+            # "no confirmation channel attached" even with the toggle on.
+            # Fix: read the same setting directly and, when it is on, hand
+            # _execute_tool a gate that approves everything -- the same
+            # honest bypass WebConfirmationGate itself performs, not a
+            # fake auto-click on a prompt nobody sees.
+            from dourmouse.config import auto_approve_enabled
+
+            gate = (lambda _prompt: True) if auto_approve_enabled() else None
+            result_text = _execute_tool(tool, arguments, confirmation_gate=gate)
         except Exception as exc:  # noqa: BLE001 - Rule 2.2: a real failure is reported, never fabricated
             return {
                 "content": [{"type": "text", "text": f"ERROR: tool '{name}' failed: {exc}"}],
@@ -267,16 +285,38 @@ def build_mcp_config_file(path: Any) -> None:
     """Write the --mcp-config JSON a CLI needs to launch this bridge as a
     subprocess. ``path`` is a pathlib.Path (or str); uses THIS process's
     own real python executable (sys.executable) so the launched subprocess
-    shares the same venv/interpreter this server itself is running under —
+    shares the same venv/interpreter this server itself is running under,
     never a guessed "python3" that might resolve to a different, dourmouse-
-    less environment."""
+    less environment.
+
+    Real, live-reproduced bug (2026-09-14): ``dourmouse`` is not an
+    installed package, so ``-m dourmouse.mcp_bridge`` only resolves when
+    the subprocess's OWN working directory happens to be this repo's
+    root. Claude Code CLI spawns each configured MCP server with the
+    same working directory as the ``claude`` process that loaded this
+    config, and several real callers (code_backends.py's own orchestrator
+    session, run via ``_claude_orchestrator_cwd()``'s dedicated workspace
+    subdirectory) deliberately use a DIFFERENT cwd. From there, launching
+    this exact command reproduces:
+        ModuleNotFoundError: No module named 'dourmouse'
+    and the CLI just reports the server as unavailable rather than
+    surfacing that error anywhere the user can see it, so every tool this
+    bridge would have exposed (mail, tasks, browser, world data) silently
+    vanishes with no explanation. Verified live: running this same
+    command from workspace/claude_orchestrator failed with that exact
+    error; setting PYTHONPATH to the repo root fixed it and a real
+    initialize handshake succeeded. Fix: hand the subprocess an explicit
+    PYTHONPATH pointing at this repo's root, so the import resolves no
+    matter what cwd the calling CLI process used."""
     from pathlib import Path
 
+    repo_root = str(Path(__file__).resolve().parent.parent)
     config = {
         "mcpServers": {
             "dourmouse": {
                 "command": sys.executable,
                 "args": ["-m", "dourmouse.mcp_bridge"],
+                "env": {"PYTHONPATH": repo_root},
             }
         }
     }

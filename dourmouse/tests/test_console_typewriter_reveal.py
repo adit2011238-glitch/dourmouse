@@ -81,13 +81,26 @@ class TestMakeRevealer:
         assert "Math.ceil(pending.length / maxTicks)" in body
         assert "Math.max(baseChunk" in body
 
-    def test_set_total_only_enqueues_the_new_suffix(self):
+    def test_set_total_only_enqueues_the_new_suffix_when_it_is_a_real_continuation(self):
+        """Real, live-caught bug (2026-09-14): the old body sliced by
+        LENGTH ALONE (revealed.length + pending.length), trusting `text`
+        was always the exact same string already shown plus more. When a
+        turn round-trips server-side and the "final" text is not a
+        byte-for-byte continuation of what was already streamed, that
+        slice landed INSIDE the new content and spliced two fragments
+        together mid-word (live: "...for you.ounded Mode was on..." — the
+        disclaimer's own opening vanished into the cut). Fixed body must
+        verify the already-shown text is an actual prefix before slicing
+        by length, and fall back to a full replace otherwise -- see the
+        sibling functional tests below for real execution proving both
+        branches."""
         script = _extract_inline_script()
         m = re.search(r"setTotal\(text\)\{(.*?)\n *\},", script, re.S)
         assert m, "setTotal not found"
         body = m.group(1)
-        assert "revealed.length + pending.length" in body
-        assert "text.slice(known)" in body
+        assert "revealed + pending" in body
+        assert "text.slice(0, shown.length) === shown" in body
+        assert "text.slice(shown.length)" in body
 
     def test_functionally_reveals_progressively_not_all_at_once(self, tmp_path):
         """Real execution, not just source grep: feed one huge burst into
@@ -121,6 +134,67 @@ const iv = setInterval(()=>{
         js_file.write_text(harness, encoding="utf-8")
         result = subprocess.run([node, str(js_file)], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, f"typewriter did not reveal progressively:\n{result.stdout}\n{result.stderr}"
+
+    def test_functionally_never_splices_when_final_text_is_a_real_continuation(self, tmp_path):
+        """Real execution of the happy path: a final text that genuinely
+        IS the already-shown text plus more must still take the cheap
+        suffix-only path and end up exactly correct, character for
+        character -- the fix must not regress the common case while
+        guarding the rare one below."""
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node not on PATH in this environment")
+        script = _extract_inline_script()
+        m = re.search(r"(function makeRevealer\(onUpdate, opts\)\{.*?\n\}\n)", script, re.S)
+        assert m, "makeRevealer body not found"
+        harness = m.group(1) + """
+const r = makeRevealer(()=>{}, {tickMs: 1, baseChunk: 1000, maxTicks: 1});
+r.enqueue("Reconnect the dourmouse server on your end and open Chrome for you.");
+r.flushAll();
+r.setTotal("Reconnect the dourmouse server on your end and open Chrome for you.\\n\\n[DOURMOUSE: Grounded Mode was on]");
+r.flushAll();
+const expected = "Reconnect the dourmouse server on your end and open Chrome for you.\\n\\n[DOURMOUSE: Grounded Mode was on]";
+const ok = r.value === expected;
+console.log(JSON.stringify({ok, value: r.value}));
+process.exit(ok ? 0 : 1);
+"""
+        js_file = tmp_path / "revealer_continuation.js"
+        js_file.write_text(harness, encoding="utf-8")
+        result = subprocess.run([node, str(js_file)], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"a real continuation was not reproduced exactly:\n{result.stdout}\n{result.stderr}"
+
+    def test_functionally_replaces_outright_instead_of_splicing_mid_word(self, tmp_path):
+        """Real execution reproducing the exact live bug class (2026-09-14):
+        a "final" text that is NOT a literal continuation of what was
+        already shown (a server-side round-trip whose reconstructed answer
+        diverges from the streamed prefix). The old length-only slice cut
+        into the middle of the new content and glued the two fragments
+        together with no boundary -- e.g. "...for you." immediately
+        followed by "ounded Mode was on..." with "\\n\\n[DOURMOUSE: Gr"
+        silently gone. The fix must never produce a value that is neither
+        the old text nor the new text -- only ever one or the other, never
+        a corrupted hybrid."""
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node not on PATH in this environment")
+        script = _extract_inline_script()
+        m = re.search(r"(function makeRevealer\(onUpdate, opts\)\{.*?\n\}\n)", script, re.S)
+        assert m, "makeRevealer body not found"
+        harness = m.group(1) + """
+const r = makeRevealer(()=>{}, {tickMs: 1, baseChunk: 1000, maxTicks: 1});
+r.enqueue("Reconnect the dourmouse server on your end and open Chrome for you.");
+r.flushAll();
+const finalText = "A totally different reconstructed answer that does not start the same way at all.";
+r.setTotal(finalText);
+r.flushAll();
+const ok = r.value === finalText;
+console.log(JSON.stringify({ok, value: r.value}));
+process.exit(ok ? 0 : 1);
+"""
+        js_file = tmp_path / "revealer_mismatch.js"
+        js_file.write_text(harness, encoding="utf-8")
+        result = subprocess.run([node, str(js_file)], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"a non-continuation was spliced instead of replaced:\n{result.stdout}\n{result.stderr}"
 
 
 class TestRunWiresRevealersInsteadOfDirectBufMutation:
