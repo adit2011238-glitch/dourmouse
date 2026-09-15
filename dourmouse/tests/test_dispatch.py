@@ -1145,6 +1145,26 @@ class TestModelOverride:
         assert call["model"] == "qwen3:4b"
         assert not call.get("tools")
 
+    def test_fast_lane_does_not_toolless_a_real_file_question(self, monkeypatch):
+        """Real, live-caught bug (2026-09-15): "what pdf files are saved
+        on this device" scored the real "system" agent (list_path,
+        exactly the right tool) at 2.0 -- below the 3.0 "agentic"
+        threshold find_agents_for_query uses -- so this used to answer
+        True (pure chat) and hand the model a turn with ZERO tools at
+        all. The model's own leaked reasoning then honestly (and
+        correctly, given what it was actually given) said "There's no
+        file-listing tool in the roster" -- not a model or prompt
+        problem, a real scoping gap. _LIVE_DATA_WORDS already lists
+        "file"/"folder"/"scan"/"backup" for exactly this kind of
+        intent; it must rescue the NOT-agentic case too, not just the
+        already-agentic knowledge-exemption case above."""
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse.dispatch import _is_pure_chat
+
+        registry = build_general_registry()
+        assert not _is_pure_chat("what pdf files are saved on this device", registry)
+        assert not _is_pure_chat("what files are located on this device", registry)
+
     def test_fast_lane_server_routes_to_dell_when_online(self, monkeypatch):
         """v5.30: when the Dell is EXPLICITLY configured and a fresh cached
         probe says online, the fast lane's completion goes to the Dell

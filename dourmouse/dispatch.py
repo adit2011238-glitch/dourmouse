@@ -4095,6 +4095,21 @@ def _is_pure_chat(prompt: str, registry: Any) -> bool:
     find_agents_for_query threshold); the knowledge exemption only ever
     widens the fast lane, and when the fast lane is off the loop's own
     scoped-tools logic is unchanged.
+
+    Real, live-caught bug (2026-09-15): "what pdf files are saved on this
+    device" scored the real "system" agent (list_path/read_path — exactly
+    the right tool) at 2.0 -- below the 3.0 "agentic" threshold, so this
+    returned True (pure chat) via the `not agentic` branch below WITHOUT
+    ever reaching the _LIVE_DATA_WORDS check, which only ever rescues the
+    OPPOSITE case (an agentic-scoring query that turns out to be pure
+    knowledge). The fast lane then handed the model a real answer with
+    ZERO tools available at all -- and its own leaked reasoning showed
+    it correctly, honestly noticing that: "There's no file-listing tool
+    in the roster." Not a model or prompt problem -- the scope handed to
+    it that turn genuinely had no tool in it, for a query that obviously
+    needed one. _LIVE_DATA_WORDS already lists "file"/"folder"/"scan"/
+    "backup" for exactly this kind of intent; now also applied as a
+    safety net on the not-agentic path, not just the exemption path.
     """
     prompt_l = str(prompt).lower()
     if build_plan(str(prompt), registry):
@@ -4106,7 +4121,7 @@ def _is_pure_chat(prompt: str, registry: Any) -> bool:
         for m in find_agents_for_query(registry, str(prompt), limit=2)
     )
     if not agentic:
-        return True
+        return not any(w in prompt_l for w in _LIVE_DATA_WORDS)
     # Agent matched, but a pure knowledge question with no live-data intent
     # answers faster (and just as well) on the local model.
     return any(cue in prompt_l for cue in _KNOWLEDGE_CUES) and not any(
