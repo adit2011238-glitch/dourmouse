@@ -76,6 +76,28 @@ def _hands_free_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _agent_router_model_off(monkeypatch):
+    """Same real leak class as _memory_remote_isolated/_hands_free_off
+    above: this developer's REAL .env now sets
+    DOURMOUSE_AGENT_ROUTER_AUTO=1 (2026-09-15, user-directed — see
+    dourmouse/agent_router_model.py's own docstring), which
+    dourmouse.config's module-level load_dotenv() picks up into
+    os.environ the moment ANY test imports it — completely independent
+    of any individual test's own monkeypatch. Live-caught the same day
+    this flag was added: with it leaking through, dozens of unrelated
+    dispatch/self_dispatch tests started making REAL network calls to
+    this machine's own local Ollama daemon (each with the router's real
+    6s timeout on the critical path), turning a ~6 minute suite into a
+    ~16 minute one and breaking a real timing-sensitive concurrency
+    test outright. Tests that want to exercise the router explicitly
+    set DOURMOUSE_AGENT_ROUTER_AUTO=1 themselves (see
+    test_dispatch.py::TestLocalAgentRouterModelWinsOverKeywordScorer),
+    same override-the-fixture convention every other isolation fixture
+    here already uses."""
+    monkeypatch.delenv("DOURMOUSE_AGENT_ROUTER_AUTO", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _claude_front_mode_off(monkeypatch):
     """Same "hermetic by default, opt in explicitly" convention as every
     other fixture in this file: dispatch.py's Claude-front mode now

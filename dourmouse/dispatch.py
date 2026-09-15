@@ -4250,12 +4250,45 @@ def _run_dispatch_loop(
         # directives can actually execute. Pure chat (no agent match) still
         # sends nothing.
         if not plan_agents:
+            # 2026-09-15, user-directed: "use the local agent router
+            # model as your router for choosing tools" — a real,
+            # user-fine-tuned local model tried FIRST, deterministic
+            # find_agents_for_query strictly as the fallback (see
+            # agent_router_model.py's own docstring for the real,
+            # evidence-based reasoning: it fixes exactly the class of
+            # mistake the keyword scorer just made twice live this same
+            # day -- "documents" keyword-colliding with the `docs`
+            # Google-Workspace agent for a plain local-folder question,
+            # and a correctly-matching `system` agent scoring below the
+            # routing threshold -- while a real failure on ITS side
+            # (observed live: 4/5 coding-shaped queries got no tool call
+            # at all) degrades cleanly to the exact behavior this had
+            # before it existed, never to zero tools.
+            #
+            # Gated behind an explicit opt-in (DOURMOUSE_AGENT_ROUTER_AUTO
+            # =1), same convention as DOURMOUSE_OMNIROUTE_AUTO: a real
+            # dev/test run on THIS machine (this model is a real, local,
+            # fine-tuned Ollama model that genuinely exists here) must
+            # never silently start making a real network call on every
+            # single dispatch test just because Ollama happens to be
+            # reachable -- live-caught during this same change: the full
+            # suite went from ~6 to ~16 minutes and a real timing-
+            # sensitive concurrency test broke, before this gate existed.
+            routed = None
+            if os.environ.get("DOURMOUSE_AGENT_ROUTER_AUTO", "").strip() == "1":
+                from dourmouse.agent_router_model import route_via_local_model
+
+                routed = route_via_local_model(str(last_user), registry.subagent_names)
             from dourmouse.planner import find_agents_for_query
 
-            matches = find_agents_for_query(registry, last_user, limit=2)
-            plan_agents = {
-                m["name"] for m in matches if m["score"] >= 3
-            }
+            if routed:
+                plan_agents = {routed}
+                matches = [{"name": routed, "score": 99.0}]
+            else:
+                matches = find_agents_for_query(registry, last_user, limit=2)
+                plan_agents = {
+                    m["name"] for m in matches if m["score"] >= 3
+                }
             # Real, live-reproduced bug (production-testing sweep,
             # 2026-09-12): the >=3 fallback above routinely qualifies a
             # SECOND, lower-scoring agent alongside a clearly-dominant top

@@ -1165,6 +1165,88 @@ class TestModelOverride:
         assert not _is_pure_chat("what pdf files are saved on this device", registry)
         assert not _is_pure_chat("what files are located on this device", registry)
 
+
+class TestLocalAgentRouterModelWinsOverKeywordScorer:
+    """2026-09-15, user-directed: "use the local agent router model as
+    your router for choosing tools" -- wired as the PRIMARY router for
+    the plain single-agent case, deterministic find_agents_for_query
+    strictly as the fallback. See agent_router_model.py's own docstring
+    for the real, evidence-based reasoning (two real live keyword-
+    scorer misroutes the same day this was requested: "documents"
+    colliding with the docs/Google-Workspace agent for a plain local-
+    folder question, and a correctly-matching agent scoring below the
+    routing threshold)."""
+
+    def test_router_result_overrides_the_keyword_scorer(self, monkeypatch):
+        """A real reproduction of the "documents" collision: the
+        deterministic scorer would pick `docs`, but the local router
+        model (mocked here) correctly says `mail` -- the real tool
+        call must be scoped to the ROUTER's choice."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        monkeypatch.setenv("DOURMOUSE_AGENT_ROUTER_AUTO", "1")
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse import agent_router_model
+
+        registry = build_general_registry()
+        # Sanity check this really does reproduce the collision the fix
+        # exists for -- if this ever stops being true (roster changes),
+        # the test's own premise needs revisiting, not a false pass.
+        from dourmouse.planner import find_agents_for_query
+
+        assert find_agents_for_query(registry, "in my documents what is there", limit=1)[0]["name"] == "docs"
+
+        monkeypatch.setattr(agent_router_model, "route_via_local_model", lambda q, names, timeout=6.0: "mail")
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("in my documents what is there", registry, client=client)
+        call = client.chat.completions.calls[0]
+        tool_names = {t["function"]["name"] for t in (call.get("tools") or [])}
+        assert "gmail_search" in tool_names
+        assert "drive_create_doc" not in tool_names
+
+    def test_falls_back_to_the_keyword_scorer_when_the_router_fails(self, monkeypatch):
+        """The router returning None (any failure shape — network error,
+        no tool call, unknown agent) must fall all the way back to
+        EXACTLY the pre-existing deterministic behavior, never to zero
+        tools."""
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        monkeypatch.setenv("DOURMOUSE_AGENT_ROUTER_AUTO", "1")
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse import agent_router_model
+
+        registry = build_general_registry()
+        monkeypatch.setattr(agent_router_model, "route_via_local_model", lambda q, names, timeout=6.0: None)
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", registry, client=client)
+        call = client.chat.completions.calls[0]
+        tool_names = {t["function"]["name"] for t in (call.get("tools") or [])}
+        assert "gmail_search" in tool_names
+
+    def test_disabled_by_default_never_touches_the_router_module(self, monkeypatch):
+        """Real regression guard: without the explicit opt-in, dispatch
+        must not even IMPORT agent_router_model, let alone call it --
+        this is what keeps every existing/ordinary dispatch test
+        hermetic and fast on a machine that happens to have a real
+        local Ollama daemon reachable (this one). Live-caught during
+        this same change: the full suite went from ~6 to ~16 minutes
+        and a real timing-sensitive concurrency test broke, before this
+        gate existed."""
+        monkeypatch.delenv("DOURMOUSE_AGENT_ROUTER_AUTO", raising=False)
+        monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
+        import dourmouse.agent_router_model as router_mod
+
+        def fail_if_called(*a, **k):
+            raise AssertionError("route_via_local_model must not be called without the opt-in flag")
+
+        monkeypatch.setattr(router_mod, "route_via_local_model", fail_if_called)
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        run_dispatch("check my inbox", registry, client=client)
+        call = client.chat.completions.calls[0]
+        tool_names = {t["function"]["name"] for t in (call.get("tools") or [])}
+        assert "gmail_search" in tool_names
+
     def test_fast_lane_server_routes_to_dell_when_online(self, monkeypatch):
         """v5.30: when the Dell is EXPLICITLY configured and a fresh cached
         probe says online, the fast lane's completion goes to the Dell
