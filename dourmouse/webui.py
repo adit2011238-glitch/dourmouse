@@ -1692,6 +1692,43 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # 2026-09-15, real live-caught bug (reported twice live, both times
+    # for a REAL, existing file that a direct curl call to the exact
+    # same route succeeded on immediately): ui/file_preview.html's own
+    # fetch() calls run from INSIDE the embedded browser pane's
+    # sandboxed iframe (sandbox="allow-scripts allow-forms allow-popups"
+    # -- allow-same-origin deliberately dropped, see console.html's own
+    # comment on the real sandbox-escape combo that closes). Without
+    # allow-same-origin the framed document's origin is OPAQUE ("null"),
+    # so the browser treats file_preview.html's own fetch() calls back
+    # to this exact server as cross-origin and enforces real CORS on
+    # them -- blocked outright, with no Access-Control-Allow-Origin
+    # response header to satisfy it. From file_preview.html's own JS
+    # this is indistinguishable from the server being unreachable (a
+    # rejected fetch() promise), which is exactly the honest "Could not
+    # reach the preview server" message its own .catch() showed --
+    # confirmed live: curl and a direct top-level navigation to the
+    # identical URL both succeeded every time; only the SANDBOXED-
+    # IFRAME fetch failed. Real fix: these specific routes are already
+    # read-only and already sandboxed by real trust boundaries
+    # (_sandboxed_preview_path/_resolve_within_root) — safe to opt in to
+    # CORS explicitly rather than changing the iframe's own security
+    # sandbox to fix a symptom instead of the cause.
+    def _send_json_cors(self, payload: dict[str, Any], status: int = 200) -> None:
+        self._send_json(payload, status=status, headers={"Access-Control-Allow-Origin": "*"})
+
+    def _send_bytes_cors(self, body: bytes, content_type: str, status: int = 200) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_error_cors(self, status: int, message: str) -> None:
+        self._send_bytes_cors(message.encode("utf-8"), "text/plain; charset=utf-8", status=status)
+
     def _read_json_body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
@@ -2795,55 +2832,48 @@ class _Handler(BaseHTTPRequestHandler):
             # arbitrary-absolute-path counterpart to /api/pdf/info above
             # -- same real pdf_reader.pdf_info(), a real
             # open_path-trust-level sandbox (_sandboxed_preview_path)
-            # instead of the uploads-only one.
+            # instead of the uploads-only one. CORS-explicit (see
+            # _send_json_cors's own docstring): fetched from INSIDE the
+            # sandboxed pane iframe, whose opaque origin makes this a
+            # real cross-origin request as far as the browser is
+            # concerned, even though it's this exact same server.
             from dourmouse.pdf_reader import pdf_info
 
             qs = urllib.parse.parse_qs(parsed.query)
             target = _sandboxed_preview_path((qs.get("path") or [""])[0])
             if target is None or target.suffix.lower() != ".pdf":
-                self._send_json({"ok": False, "error": "bad or missing pdf path"}, status=400)
+                self._send_json_cors({"ok": False, "error": "bad or missing pdf path"}, status=400)
                 return
-            self._send_json({"ok": True, **pdf_info(target)})
+            self._send_json_cors({"ok": True, **pdf_info(target)})
         elif path == "/api/files/pdf-page.png":
             from dourmouse.pdf_reader import render_page_png
 
             qs = urllib.parse.parse_qs(parsed.query)
             target = _sandboxed_preview_path((qs.get("path") or [""])[0])
             if target is None or target.suffix.lower() != ".pdf":
-                self.send_error(400, "bad or missing pdf path")
+                self._send_error_cors(400, "bad or missing pdf path")
                 return
             try:
                 page = int((qs.get("page") or ["0"])[0])
             except ValueError:
-                self.send_error(400, "bad page number")
+                self._send_error_cors(400, "bad page number")
                 return
             try:
                 png_bytes = render_page_png(target, page)
             except RuntimeError as exc:
-                self.send_error(404, str(exc))
+                self._send_error_cors(404, str(exc))
                 return
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Length", str(len(png_bytes)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(png_bytes)
+            self._send_bytes_cors(png_bytes, "image/png")
         elif path == "/api/files/image":
             # Raw image bytes for an arbitrary already-open_path-trusted
             # path -- no page rendering needed, just serve the file.
             qs = urllib.parse.parse_qs(parsed.query)
             target = _sandboxed_preview_path((qs.get("path") or [""])[0])
             if target is None or target.suffix.lower() not in _PREVIEWABLE_IMAGE_EXTS:
-                self.send_error(400, "bad or missing image path")
+                self._send_error_cors(400, "bad or missing image path")
                 return
             content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-            body = target.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_bytes_cors(target.read_bytes(), content_type)
         elif path == "/api/study/pdf-info":
             # Same real preview mechanism, sandboxed to the study folder
             # (study_agent._resolve_within_root, already real and
@@ -2851,7 +2881,8 @@ class _Handler(BaseHTTPRequestHandler):
             # study.html's own preview pane, whose real content is
             # mostly scanned-image PDFs (see study_agent.py's own
             # read_study_file docstring for why text extraction alone
-            # was never enough here).
+            # was never enough here). CORS-explicit, same reason as
+            # /api/files/pdf-info above.
             from dourmouse.pdf_reader import pdf_info
             from dourmouse.study_agent import StudyPathError, _resolve_within_root
 
@@ -2860,12 +2891,12 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 target = _resolve_within_root(rel_path)
             except StudyPathError as exc:
-                self._send_json({"ok": False, "error": str(exc)}, status=400)
+                self._send_json_cors({"ok": False, "error": str(exc)}, status=400)
                 return
             if not target.is_file() or target.suffix.lower() != ".pdf":
-                self._send_json({"ok": False, "error": f"not a PDF file: {rel_path!r}"}, status=400)
+                self._send_json_cors({"ok": False, "error": f"not a PDF file: {rel_path!r}"}, status=400)
                 return
-            self._send_json({"ok": True, **pdf_info(target)})
+            self._send_json_cors({"ok": True, **pdf_info(target)})
         elif path == "/api/study/pdf-page.png":
             from dourmouse.pdf_reader import render_page_png
             from dourmouse.study_agent import StudyPathError, _resolve_within_root
@@ -2875,27 +2906,22 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 target = _resolve_within_root(rel_path)
             except StudyPathError as exc:
-                self.send_error(400, str(exc))
+                self._send_error_cors(400, str(exc))
                 return
             if not target.is_file() or target.suffix.lower() != ".pdf":
-                self.send_error(400, f"not a PDF file: {rel_path!r}")
+                self._send_error_cors(400, f"not a PDF file: {rel_path!r}")
                 return
             try:
                 page = int((qs.get("page") or ["0"])[0])
             except ValueError:
-                self.send_error(400, "bad page number")
+                self._send_error_cors(400, "bad page number")
                 return
             try:
                 png_bytes = render_page_png(target, page)
             except RuntimeError as exc:
-                self.send_error(404, str(exc))
+                self._send_error_cors(404, str(exc))
                 return
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Length", str(len(png_bytes)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(png_bytes)
+            self._send_bytes_cors(png_bytes, "image/png")
         elif path == "/api/study/image":
             from dourmouse.study_agent import StudyPathError, _resolve_within_root
 
@@ -2904,19 +2930,13 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 target = _resolve_within_root(rel_path)
             except StudyPathError as exc:
-                self.send_error(400, str(exc))
+                self._send_error_cors(400, str(exc))
                 return
             if not target.is_file() or target.suffix.lower() not in _PREVIEWABLE_IMAGE_EXTS:
-                self.send_error(400, f"not an image file: {rel_path!r}")
+                self._send_error_cors(400, f"not an image file: {rel_path!r}")
                 return
             content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-            body = target.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_bytes_cors(target.read_bytes(), content_type)
         elif path == "/api/gdelt/graph":
             # v13.6, Vision OS "real-time global event ingestion + kinetic
             # knowledge graph" (dourmouse/gdelt_graph.py — real GDELT GKG
@@ -4257,7 +4277,7 @@ class _Handler(BaseHTTPRequestHandler):
         # confirmation_gate/orchestrator loop.
         if focus_agent == "code_claude":
             try:
-                self._handle_code_claude_passthrough(raw_prompt, screen, sink)
+                self._handle_code_claude_passthrough(raw_prompt, screen, sink, session, session_lock)
             finally:
                 if artifacts_store is not None:
                     artifacts_store.set_sink(None)
@@ -4496,7 +4516,7 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:  # noqa: BLE001 -- an audit failure never breaks chat
             pass
 
-    def _handle_code_claude_passthrough(self, prompt: str, screen: str, sink) -> None:
+    def _handle_code_claude_passthrough(self, prompt: str, screen: str, sink, session, session_lock) -> None:
         """v13.2: the CODE screen's CLAUDE CODE toolchain, talking to the
         real Claude Code CLI directly and LIVE — explicit user request
         ("I only want to be talking to claude directly when doing so",
@@ -4508,9 +4528,42 @@ class _Handler(BaseHTTPRequestHandler):
         tool_use/tool_result/done) — a real, no-adapter drop-in, not a new
         client-side rendering path.
 
-        No session_lock/confirmation_gate here (same as _handle_slash_chat
-        right above): this is a real separate program with its OWN tool
+        No confirmation_gate here (same as _handle_slash_chat right
+        above): this is a real separate program with its OWN tool
         permissions, never Dourmouse's orchestrator loop or roster prompt.
+
+        ``session``/``session_lock`` (2026-09-15, real live-reported bug:
+        "when models switch then the model it switches to doesn't have
+        the memory of the chat, it continues with its own thread"): the
+        real cause was TWO separate bugs stacked on each other. First,
+        this handler used to look up ``self.server.session`` directly
+        instead of the caller's already-correctly-resolved PER-TAB
+        session (_session_gate_lock_for_tab) — a multi-tab conversation's
+        own audit trail (record_slash below) was silently written against
+        the wrong, global session. Second, and the real reason switching
+        DIRECTIVE VIA away from CLAUDE lost context entirely: a Claude-CLI
+        turn never appended anything to ``session.messages`` at all (only
+        to the separate audit ledger via record_slash, which the NEXT
+        turn's dispatch loop never reads) — Ollama/FreeLLMAPI build their
+        own turn's context purely from ``session.messages``, so a turn
+        answered by Claude was completely invisible to whichever backend
+        was picked next, and vice versa (a Claude CLI turn started fresh
+        with no memory of what Ollama had just answered, since Claude's
+        own session continuity is a SEPARATE thing — code_backends' own
+        per-tab CLI session file, keyed by ``screen``/tab, never touched
+        by ``session.messages`` either). Appending this turn's real
+        exchange to the shared ``session.messages`` below closes the
+        "switch AWAY from Claude" half of that gap: whatever backend
+        answers next sees it. The reverse direction (an Ollama-answered
+        turn's own memory reaching a LATER Claude CLI turn) is handled
+        right below, by prefixing a short recap of session.messages onto
+        what Claude CLI actually sees — Claude's own CLI session state
+        isn't a Python list this process can just append to, so this is
+        the one real mechanism available: tell it what it may have
+        missed, in the prompt itself. Worst case (Claude already knows a
+        recapped exchange via its own --resume continuity) is harmless
+        redundancy, not a correctness bug; the alternative (say nothing)
+        is the actual live-reported bug this whole fix exists for.
         """
         import time
 
@@ -4520,6 +4573,32 @@ class _Handler(BaseHTTPRequestHandler):
         start = time.perf_counter()
         sink({"type": "brain", "model": "claude-code-cli", "local": False})
         final_text = ""
+
+        # Build the recap BEFORE anything appends this turn's own
+        # exchange to session.messages (right after stream_claude
+        # returns, below) — otherwise the current prompt would recap
+        # itself. Last 3 exchanges (6 messages) is deliberately small:
+        # enough to bridge a real backend switch, not so much it crowds
+        # out Claude's own --resume continuity or the actual request.
+        claude_prompt = prompt
+        try:
+            if session is not None and hasattr(session, "messages"):
+                history = [m for m in session.messages if m.get("role") in ("user", "assistant")]
+                recent = history[-6:]
+                if recent:
+                    lines = [
+                        f"{m['role'].upper()}: {str(m.get('content', ''))[:1000]}"
+                        for m in recent
+                    ]
+                    claude_prompt = (
+                        "[Recent conversation on this device, possibly answered by a "
+                        "different backend you have no memory of — for context only, "
+                        "not part of this request unless relevant]\n"
+                        + "\n".join(lines)
+                        + f"\n\n[Current request]: {prompt}"
+                    )
+        except Exception:  # noqa: BLE001 -- a recap failure must never block the real turn
+            claude_prompt = prompt
 
         def _on_claude_usage(usage: dict[str, Any]) -> None:
             # v13.6: real usage bar -- persist AND emit live so a
@@ -4533,7 +4612,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             final_text = code_backends.stream_claude(
-                prompt,
+                claude_prompt,
                 cwd=str(_PROJECT_ROOT),
                 timeout=300,
                 # Each tab is its own workspace, so each gets its own Claude
@@ -4560,13 +4639,26 @@ class _Handler(BaseHTTPRequestHandler):
         # Bypasses session.ask() same as the slash-command path above —
         # same audit gap, same fix.
         try:
-            session = getattr(self.server, "session", None)
             if session is not None and hasattr(session, "record_slash"):
                 session.record_slash(
                     prompt, final_text, tools=["code_claude"], screen=screen,
                     elapsed_ms=(time.perf_counter() - start) * 1000.0,
                 )
         except Exception:  # noqa: BLE001 -- an audit failure never breaks chat
+            pass
+        # 2026-09-15, real fix for the cross-backend memory gap (see this
+        # method's own docstring): a later Ollama/FreeLLMAPI-answered turn
+        # on this SAME tab builds its context purely from
+        # session.messages, which a Claude-CLI turn never touched before
+        # this. Appended under the same per-tab lock ask() itself uses for
+        # every other backend's own append, so a concurrent turn on this
+        # tab can never interleave with it mid-write.
+        try:
+            if session is not None and hasattr(session, "messages"):
+                with session_lock:
+                    session.messages.append({"role": "user", "content": prompt})
+                    session.messages.append({"role": "assistant", "content": final_text})
+        except Exception:  # noqa: BLE001 -- a memory-sync failure never breaks chat
             pass
 
     def _handle_events(self) -> None:

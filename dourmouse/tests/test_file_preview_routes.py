@@ -206,3 +206,66 @@ class TestFilePreviewPage:
             status, body, headers = _get(port, route)
             assert status == 200
             assert b"<title>Preview</title>" in body
+
+
+class TestPreviewRoutesCarryCors:
+    """2026-09-15, real live-caught bug (reported twice live for a real,
+    existing file that curl succeeded on immediately): file_preview.html
+    fetches these routes from INSIDE the embedded pane's sandboxed
+    iframe (allow-same-origin deliberately dropped, see console.html's
+    own comment on the sandbox-escape combo that closes) -- an opaque
+    iframe origin makes even a same-server fetch a real cross-origin
+    request, silently blocked without an explicit
+    Access-Control-Allow-Origin header. Every real preview route must
+    carry it, on BOTH the success and the error path (a CORS-blocked
+    error response is just as invisible to the page's own JS as a
+    blocked success would be)."""
+
+    def _cors(self, headers: dict) -> str | None:
+        return headers.get("Access-Control-Allow-Origin")
+
+    def test_files_pdf_info_success_and_error(self, server, tmp_path):
+        srv, port = server
+        p = tmp_path / "doc.pdf"
+        _write_minimal_pdf(p)
+        _, _, headers = _get(port, "/api/files/pdf-info?path=" + str(p))
+        assert self._cors(headers) == "*"
+        _, _, headers = _get(port, "/api/files/pdf-info?path=" + str(tmp_path / "nope.pdf"))
+        assert self._cors(headers) == "*"
+
+    def test_files_pdf_page_png_success_and_error(self, server, tmp_path):
+        srv, port = server
+        p = tmp_path / "doc.pdf"
+        _write_minimal_pdf(p)
+        _, _, headers = _get(port, "/api/files/pdf-page.png?path=" + str(p) + "&page=0")
+        assert self._cors(headers) == "*"
+        _, _, headers = _get(port, "/api/files/pdf-page.png?path=" + str(p) + "&page=99")
+        assert self._cors(headers) == "*"
+
+    def test_files_image_success_and_error(self, server, tmp_path):
+        srv, port = server
+        p = tmp_path / "pic.png"
+        p.write_bytes(_MINIMAL_PNG)
+        _, _, headers = _get(port, "/api/files/image?path=" + str(p))
+        assert self._cors(headers) == "*"
+        _, _, headers = _get(port, "/api/files/image?path=" + str(tmp_path / "nope.png"))
+        assert self._cors(headers) == "*"
+
+    def test_study_routes_success_and_error(self, server, monkeypatch, tmp_path):
+        srv, port = server
+        study_dir = tmp_path / "study"
+        study_dir.mkdir()
+        monkeypatch.setenv("DOURMOUSE_STUDY_DIR", str(study_dir))
+        _write_minimal_pdf(study_dir / "book.pdf")
+        (study_dir / "pic.png").write_bytes(_MINIMAL_PNG)
+
+        for url in (
+            "/api/study/pdf-info?path=book.pdf",
+            "/api/study/pdf-info?path=../../etc/passwd",
+            "/api/study/pdf-page.png?path=book.pdf&page=0",
+            "/api/study/pdf-page.png?path=book.pdf&page=99",
+            "/api/study/image?path=pic.png",
+            "/api/study/image?path=missing.png",
+        ):
+            _, _, headers = _get(port, url)
+            assert self._cors(headers) == "*", url

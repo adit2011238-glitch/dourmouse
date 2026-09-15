@@ -3137,6 +3137,69 @@ class TestCodeClaudePassthrough:
         assert last["final_text"] == "result text"
         assert last["user"] == "write a function"
 
+    def test_claude_turn_is_appended_to_session_messages_for_a_later_backend_switch(
+        self, code_claude_server, monkeypatch
+    ):
+        """2026-09-15, real live-reported bug: "when models switch then
+        the model it switches to doesn't have the memory of the chat, it
+        continues with its own thread" -- a Claude CLI turn used to only
+        ever reach the separate audit ledger (record_slash), never
+        session.messages, which is the ONLY thing a later Ollama/
+        FreeLLMAPI-answered turn reads for context. This is the half of
+        the fix that closes "switch AWAY from Claude"."""
+        monkeypatch.setattr(
+            "dourmouse.code_backends.stream_claude", lambda task, **kwargs: "def foo(): pass"
+        )
+        srv, port = code_claude_server
+        self._stream(port, "write a function called foo")
+        roles_and_content = [(m["role"], m["content"]) for m in srv.session.messages]
+        assert ("user", "write a function called foo") in roles_and_content
+        assert ("assistant", "def foo(): pass") in roles_and_content
+
+    def test_a_later_claude_turn_recaps_prior_session_messages(self, code_claude_server, monkeypatch):
+        """The reverse direction: a turn ALREADY in session.messages
+        (e.g. answered by Ollama/FreeLLMAPI before the user switched
+        DIRECTIVE VIA back to CLAUDE) must reach Claude CLI somehow --
+        Claude's own --resume session continuity never saw it, since it
+        was never a Claude turn. Prefixing a recap onto what Claude CLI
+        actually receives is the one real mechanism available."""
+        srv, port = code_claude_server
+        # Simulate a turn a DIFFERENT backend already answered on this
+        # same session, before Claude CLI is asked anything.
+        srv.session.messages.append({"role": "user", "content": "what is the capital of France"})
+        srv.session.messages.append({"role": "assistant", "content": "Paris"})
+
+        seen = {}
+
+        def fake_stream_claude(task, **kwargs):
+            seen["task"] = task
+            return "ok"
+
+        monkeypatch.setattr("dourmouse.code_backends.stream_claude", fake_stream_claude)
+        self._stream(port, "what did I just ask about")
+        assert "capital of France" in seen["task"]
+        assert "Paris" in seen["task"]
+        assert "[Current request]: what did I just ask about" in seen["task"]
+
+    def test_recap_never_pollutes_what_gets_stored_or_audited(self, code_claude_server, monkeypatch):
+        """The recap must only ever reach Claude CLI's own input -- the
+        real record (session.messages, the audit ledger) keeps the
+        user's actual, clean words, or the recap would compound on
+        itself turn after turn."""
+        srv, port = code_claude_server
+        srv.session.messages.append({"role": "user", "content": "earlier question"})
+        srv.session.messages.append({"role": "assistant", "content": "earlier answer"})
+        monkeypatch.setattr(
+            "dourmouse.code_backends.stream_claude", lambda task, **kwargs: "fresh answer"
+        )
+        self._stream(port, "a new question")
+        stored = [m["content"] for m in srv.session.messages if m["role"] == "user"]
+        assert "a new question" in stored
+        assert not any("[Current request]" in c for c in stored)
+        lines = srv.session.session_file.read_text(encoding="utf-8").strip().splitlines()
+        last = json.loads(lines[-1])
+        assert last["user"] == "a new question"
+
 
 class TestSSEStreamShouldStop:
     """v13.5 "stop/directive bug" fix: _SSEStream used to silently
