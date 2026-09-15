@@ -4234,6 +4234,30 @@ def _run_dispatch_loop(
         plan_agents = {ctx.forced_agent}
     else:
         plan = build_plan(str(last_user), registry)
+        # 2026-09-15, real live-caught gap in the fix right below this
+        # one: "in my documents what folders are there and give the
+        # size of each one" reproduces the EXACT "documents" collision
+        # this whole feature exists to fix, but build_plan() -- not the
+        # no-plan single-agent branch further down -- was the one that
+        # actually misrouted it (looks_multi_step's own "and" heuristic
+        # classified it as multi-step, even though it resolved to a
+        # real ONE-step plan). A genuinely multi-step (2+ step) plan is
+        # a different, harder routing problem (which agent for EACH
+        # step) not touched here; a one-step plan is functionally
+        # identical to the no-plan case just below, so it gets the same
+        # router-first treatment, applied BEFORE the plan event is
+        # emitted so what's reported honestly matches what actually
+        # runs.
+        if (
+            plan
+            and len(plan) == 1
+            and os.environ.get("DOURMOUSE_AGENT_ROUTER_AUTO", "").strip() == "1"
+        ):
+            from dourmouse.agent_router_model import route_via_local_model
+
+            routed_step = route_via_local_model(str(last_user), registry.subagent_names)
+            if routed_step and routed_step != plan[0]["subagent"]:
+                plan[0] = {**plan[0], "subagent": routed_step}
         if plan:
             plan_entry: dict[str, Any] = {"type": "plan", "steps": plan, "total": len(plan)}
             transcript.append(plan_entry)

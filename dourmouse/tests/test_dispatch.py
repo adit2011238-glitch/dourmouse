@@ -1221,6 +1221,51 @@ class TestLocalAgentRouterModelWinsOverKeywordScorer:
         tool_names = {t["function"]["name"] for t in (call.get("tools") or [])}
         assert "gmail_search" in tool_names
 
+    def test_router_also_overrides_a_one_step_build_plan_misroute(self, monkeypatch):
+        """Real live-caught gap found testing this exact fix: "in my
+        documents what folders are there and give the size of each
+        one" reproduces the SAME "documents" collision, but
+        looks_multi_step's own live-learned neural net classified it as
+        multi-step (confirmed live: DOURMOUSE_NET=0, this test suite's
+        own hermetic default, makes the DETERMINISTIC heuristic alone
+        classify this same phrase as single-step instead -- a real,
+        env-dependent difference between this hermetic test and the
+        live app that reproduced the bug, so build_plan() itself is
+        monkeypatched here to return the exact real one-step
+        misrouted plan observed live, rather than depending on which
+        way the live-learned net happens to classify this phrase). A
+        genuinely multi-step (2+ step) plan is a different, harder
+        routing problem not touched here; a one-step plan is
+        functionally identical to the no-plan case the other test
+        above covers, so it gets the same router-first treatment.
+        Confirmed live before this fix existed: the "plan" SSE event
+        itself named "docs" and the model went looking for Google
+        Drive files instead of the real local folder."""
+        monkeypatch.setenv("DOURMOUSE_AGENT_ROUTER_AUTO", "1")
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse import agent_router_model, dispatch as dispatch_mod
+
+        registry = build_general_registry()
+        query = "in my documents what folders are there and give the size of each one"
+        real_one_step_plan = [{"n": 1, "task": query, "subagent": "docs"}]
+        monkeypatch.setattr(dispatch_mod, "build_plan", lambda prompt, reg: real_one_step_plan)
+        monkeypatch.setattr(agent_router_model, "route_via_local_model", lambda q, names, timeout=6.0: "system")
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        events: list[dict] = []
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": query},
+        ]
+        run_dispatch_messages(messages, registry, client=client, event_sink=events.append)
+        plan_events = [e for e in events if e.get("type") == "plan"]
+        assert plan_events and plan_events[0]["steps"][0]["subagent"] == "system"
+        call = client.chat.completions.calls[0]
+        tool_names = {t["function"]["name"] for t in (call.get("tools") or [])}
+        assert "list_path" in tool_names
+        assert "drive_create_doc" not in tool_names
+
     def test_disabled_by_default_never_touches_the_router_module(self, monkeypatch):
         """Real regression guard: without the explicit opt-in, dispatch
         must not even IMPORT agent_router_model, let alone call it --
