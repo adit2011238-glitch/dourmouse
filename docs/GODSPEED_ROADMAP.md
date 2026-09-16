@@ -161,11 +161,37 @@ that exists, so this phase runs after Phase 2 has at least its data model in pla
 Authorized-defensive scope only (host + the user's own network + Tailscale). No credential theft,
 no attacks on third parties, no surveillance tooling — matches the spec's own explicit boundary.
 
-- [ ] `SecurityPlatformAdapter` (macOS first, matches current deployment).
-- [ ] Network/host telemetry (connection profile, listening ports, outbound connections, ARP/DNS).
+- [x] `SecurityPlatformAdapter` foundation (`dourmouse/security/platform_adapter.py`, macOS first,
+      matches current deployment): real interfaces, default gateway, DNS resolvers, ARP neighbors,
+      listening ports with exposure classification (LOOPBACK_ONLY / LOCAL_NETWORK / TAILSCALE /
+      ALL_INTERFACES / UNKNOWN), Application Firewall state. Every operation returns
+      `{"available": False, "reason": ...}` honestly rather than fabricating a value; every
+      subprocess call is argument-list-only with a real timeout (no `shell=True`). 35 tests using
+      REAL command output captured live from this machine 2026-09-17 (not synthetic samples) —
+      including the real "en0 (LAN) vs. utun4 (Tailscale) must not be conflated" case a naive grep
+      actually hit earlier this same session, and the real current finding that this machine's own
+      Application Firewall is disabled and a Python process listens on `*:8793` (ALL_INTERFACES).
+- [x] New `security` subagent (`dourmouse/security/tools.py`): `security_status` (a real evidence-
+      backed summary), `list_exposed_services` (filterable by exposure). Read-only — no
+      remediation tool exists yet, deliberately (the spec's own default policy is "ask before
+      changing anything"; a real remediation tool is separate, later work needing
+      REQUIRES_CONFIRMATION when built). Classified LOCAL_ONLY in `model_delegation.py` (same
+      reasoning as `system`/`admin_ops`: this host's own network details are private data).
+      9 tool-layer tests.
+- [x] `GET /api/security` — read-only real-time snapshot, same shape as `platform_adapter`'s own
+      `get_system_security_state()`. 1 endpoint test (against the real adapter, not mocked —
+      the parser-level tests already prove honesty on failure).
+- [ ] Windows/Linux platform adapters (macOS only so far — this machine's real platform).
+- [ ] Network diagnostics engine (latency/jitter/packet-loss/DNS-reachability probes), WiFi
+      security details (the classic `airport` binary is confirmed REMOVED on modern macOS during
+      this pass's own investigation — `system_profiler SPAirPortDataType` is the real replacement,
+      not yet wired), Tailscale-specific status beyond what generic interface/DNS data already
+      shows.
 - [ ] Baseline engine + security event schema + local AI sentries (evidence-backed, never fabricated).
-- [ ] Security dashboard, integrated into the Phase 3 design system, not a bolt-on.
-- [ ] Threat model doc + security test suite (including prompt-injection-via-network-data tests).
+- [ ] Security dashboard UI (the concept mockup exists; no real implementation yet — waits on the
+      Phase 3 design-system work this same telemetry layer now makes buildable).
+- [ ] Threat model doc + security test suite (including prompt-injection-via-network-data tests) +
+      packet capture + any remediation actions (all real, separate, later work).
 
 ## Completion bar (standing, from the user, 2026-09-16)
 

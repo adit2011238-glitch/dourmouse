@@ -87,6 +87,9 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # Spawns background tasks that can call ANY tool, including the
     # private-data ones above -- same reasoning as orchestrator itself.
     "goals",
+    # This host's own network topology, ARP neighbors, and listening
+    # services -- the same privacy class as system/admin_ops above.
+    "security",
     # The user's real Gmail/Drive/Sheets/Slides/Calendar. Textbook private
     # data -- an inbox or a Drive file leaving the machine to answer a
     # question the user thought was local is exactly what this policy

@@ -333,6 +333,29 @@ class TestHttpEndpoints:
         conn.close()
 
 
+class TestSecurityEndpoint:
+    """GET /api/security — real network/host telemetry (Phase 4,
+    docs/GODSPEED_ROADMAP.md). Runs against the REAL platform adapter (no
+    monkeypatching) since it only ever reads this test machine's own,
+    already-real network state — the same thing test_security_platform_adapter.py
+    already proves is honest about failures, so this just proves the
+    route is wired."""
+
+    def test_returns_the_real_expected_shape(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", "/api/security")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read())
+        assert set(data.keys()) == {
+            "interfaces", "default_gateway", "dns", "arp_neighbors", "listening_ports", "firewall",
+        }
+        for section in data.values():
+            assert "available" in section
+        conn.close()
+
+
 class TestGoalsEndpoint:
     """GET /api/goals — read-only inspection of the Phase 2 autonomous
     Goal/Task runtime (docs/GODSPEED_ROADMAP.md). Isolated from whatever

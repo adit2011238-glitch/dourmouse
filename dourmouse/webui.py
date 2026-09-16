@@ -2679,6 +2679,14 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             status = (qs.get("status") or [""])[0].strip().upper() or None
             self._send_json({"goals": store.list_goals(status=status)})
+        elif path == "/api/security":
+            # Phase 4 (docs/GODSPEED_ROADMAP.md): read-only real network/host
+            # security telemetry. No write endpoint here on purpose -- this
+            # subsystem is observation-only in this pass (see
+            # dourmouse/security/tools.py's own docstring).
+            from dourmouse.security.platform_adapter import get_system_security_state
+
+            self._send_json(get_system_security_state())
         elif path == "/api/state":
             # v5.14 Phase R0: the cross-device state snapshot — watchlist,
             # alerts inbox, prefs, recent activity, per-device workspaces.
