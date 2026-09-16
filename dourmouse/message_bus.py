@@ -56,7 +56,7 @@ class MessageBus:
             try:
                 fn(message)
             except Exception:
-                pass
+                pass  # a raising observer must never break the bus (see on_post)
 
     # -- write ------------------------------------------------------------ #
 

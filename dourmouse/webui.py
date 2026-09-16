@@ -399,7 +399,7 @@ class ActivityTracker:
             if changed and self._broadcast is not None:
                 self._broadcast_changed(changed)
         except Exception:
-            pass
+            pass  # an observer must never break dispatch
 
     def _record_fanout(self, entry: dict[str, Any]) -> str | None:
         """Phase 4: applies one delegate_parallel_branch event to
@@ -461,7 +461,7 @@ class ActivityTracker:
                 }
             )
         except Exception:
-            pass
+            pass  # a broken/disconnected broadcaster must never take dispatch down
 
     def _broadcast_changed(self, changed: set[str]) -> None:
         """Push a real, compact delta (only the agents that actually
@@ -479,7 +479,7 @@ class ActivityTracker:
         try:
             self._broadcast(payload)
         except Exception:
-            pass
+            pass  # a broken/disconnected broadcaster must never take dispatch down
 
     def _agent_for(self, entry: dict[str, Any]) -> str | None:
         return self._tool_to_agent.get(entry.get("name", ""))
@@ -656,7 +656,7 @@ class AttentionQueue:
         try:
             self._record(entry, screen)
         except Exception:
-            pass
+            pass  # an observer must never break a real chat turn
 
     def _record(self, entry: dict[str, Any], screen: str) -> None:
         etype = entry.get("type")
@@ -3821,6 +3821,7 @@ class _Handler(BaseHTTPRequestHandler):
         bus = getattr(self.server, "bus", None) or get_message_bus()
         inbox: list[dict] = []
         unread = 0
+        inbox_error = None
         try:
             inbox = bus.inbox(name, limit=20)
             # v3.0: opening an agent's window / selecting it on the map READS
@@ -3831,8 +3832,8 @@ class _Handler(BaseHTTPRequestHandler):
                 bus.mark_read(m["id"], name)
                 m["read"] = True
             unread = bus.unread_count(name)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - a bus bug must surface, not read as an empty inbox
+            inbox_error = str(exc)[:200]
         self._send_json(
             {
                 "agent": {
@@ -3856,6 +3857,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "feed": snap.get("feed", []),
                 "inbox": inbox,
                 "unread": unread,
+                "inbox_error": inbox_error,
             }
         )
 
@@ -5810,7 +5812,7 @@ class _Handler(BaseHTTPRequestHandler):
                 stem = Path(self.server.session.session_file).stem
                 _neuro_feedback(stem, rating)
             except Exception:
-                pass
+                pass  # a raising neural store must never break feedback
         store = self.server.memory
         if store is None or not learn_enabled():
             self._send_json(

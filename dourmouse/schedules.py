@@ -337,7 +337,7 @@ class SchedulerRunner:
                         body=(f"[{entry.get('id')}] {result}")[:600],
                     )
                 except Exception:
-                    pass
+                    pass  # a broken bus must never break the schedule loop
 
     def _due(self, entry: dict[str, Any], now: datetime) -> bool:
         spec = entry.get("spec") or {}

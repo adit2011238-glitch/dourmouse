@@ -2500,7 +2500,7 @@ def _emit_event(
     try:
         event_sink(entry)
     except Exception:
-        pass
+        pass  # a raising sink must never break dispatch
 
 
 def _execute_tool(

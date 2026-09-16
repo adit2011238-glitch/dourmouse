@@ -278,7 +278,7 @@ class DailyReporter:
                 }
             )
         except Exception:
-            pass
+            pass  # an observer must never break the briefing
         # 2) onto the inter-agent bus (dourmouse -> *), capped by the bus itself
         try:
             if self._bus is not None:
@@ -289,7 +289,7 @@ class DailyReporter:
                     body=report,
                 )
         except Exception:
-            pass
+            pass  # a broken bus must never break the briefing
 
     def _fire(self) -> None:
         self.fire_now()

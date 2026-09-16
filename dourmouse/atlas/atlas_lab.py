@@ -334,7 +334,7 @@ def _parse_csv_strategies(
             except (ValueError, TypeError):
                 continue
     except Exception:
-        pass
+        pass  # a leaderboard must never crash because one file changed shape upstream
     return strategies
 
 
@@ -469,7 +469,7 @@ def _sync() -> dict[str, Any]:
         data = json.loads(STRATEGY_CATALOG_PATH.read_text(encoding="utf-8", errors="replace"))
         version = data.get("version", "")
     except Exception:
-        pass
+        pass  # a missing or malformed catalog just leaves the version blank
 
     _LAB_STATE.strategies = strategies
     _LAB_STATE.recent_reports = reports

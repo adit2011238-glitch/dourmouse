@@ -285,7 +285,7 @@ class ChatSession:
                 try:
                     self.memory.ingest_session_file(self.session_file)
                 except Exception:
-                    pass
+                    pass  # a broken store must never break the conversation
         return report
 
     # ------------------------------------------------------------------ #
@@ -461,7 +461,7 @@ class ChatSession:
         try:
             self.memory.remember("chat_history", title, body)
         except Exception:
-            pass
+            pass  # a broken store must never break the conversation
 
     def record_slash(self, prompt: str, final_text: str,
                      tools: list[str] | None = None,
