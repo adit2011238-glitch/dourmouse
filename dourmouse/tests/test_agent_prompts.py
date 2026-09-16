@@ -106,3 +106,32 @@ def test_research_info_scopes_effort_to_the_request() -> None:
     lowered = prompt.lower()
     assert "boiling point of water" in lowered  # the simple-case example
     assert "diverge" in lowered  # the genuine-multi-step-case example
+
+
+def test_rnd_prompt_treats_fetched_content_as_untrusted() -> None:
+    # Real gap found in a security audit (Phase 1, docs/GODSPEED_ROADMAP.md):
+    # research_web_search/research_fetch_url retrieve genuinely adversarial-
+    # controlled internet content, but this prompt had zero instruction-
+    # hierarchy language, unlike the "mail" agent's established "untrusted
+    # data" framing for email/Drive content. Regression lock for the fix.
+    prompt = AGENT_SYSTEM_PROMPTS["rnd"]
+    assert "UNTRUSTED CONTENT" in prompt
+    lowered = prompt.lower()
+    assert "untrusted data" in lowered
+    assert "ignore previous instructions" in lowered
+    assert "prompt-injection attempt" in lowered
+
+
+def test_browser_prompt_treats_page_content_as_untrusted() -> None:
+    # Same audit, same gap. browser_agent.py itself has no prompt constant of
+    # its own -- it's pure tool implementation (browser_open, browser_click,
+    # browser_extract, ...). The real per-agent prompt for those tools is
+    # AGENT_SYSTEM_PROMPTS["browser"], spliced in by dispatch.py exactly like
+    # rnd and mail. It drives a real browser rendering arbitrary third-party
+    # pages, so it gets the same untrusted-content framing.
+    prompt = AGENT_SYSTEM_PROMPTS["browser"]
+    assert "UNTRUSTED CONTENT" in prompt
+    lowered = prompt.lower()
+    assert "untrusted data" in lowered
+    assert "ignore previous instructions" in lowered
+    assert "prompt-injection attempt" in lowered

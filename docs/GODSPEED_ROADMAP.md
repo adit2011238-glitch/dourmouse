@@ -71,6 +71,10 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       reach a user has at the keyboard, gated by the same approval layer as any other high-risk
       action (not a separate permission model). Builds on the existing node/remote-job
       architecture referenced in the spec (Mac/Windows/Dell nodes) rather than a new one.
+      2026-09-16: the user's real desktop machine is now up and reachable over SSH for this work.
+      **Caution (standing, from memory):** a separate forex-engine/ATLAS dourmouse deployment
+      already runs on that same desktop and can be console-killed by mistake — it's live user
+      work, never touch or restart anything there beyond what's explicitly being built here.
 - [ ] Live progress model + notifications through the existing notification mechanism.
 - [ ] Run the spec's 20 acceptance tests for real against the implementation.
 
