@@ -127,6 +127,25 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
 
 ## Phase 3 — UI/UX redesign (Claude Desktop / Claude Code interaction quality)
 
+- [x] Real syntax highlighting for fenced code blocks in `console.html`
+      (the #1 gap identified in `docs/UI_SOURCE_MAP.md` §5 — the language
+      identifier was parsed and discarded; code rendered as unstyled `<pre>`).
+      Hand-rolled tokenizer (matching `md()`'s own hand-rolled-regex
+      approach, no library) for python/javascript/bash/json, wired into
+      `md()`'s existing code-fence branch, styled with the real existing
+      `--amber`/`--ok`/`--blue-dim` tokens (no new colors introduced), plus
+      a language label. Verified three ways: an isolated Node harness (11
+      assertions: keywords/strings/comments per language, the "a `#`
+      inside a string is not a comment" edge case, multi-line block
+      comments, and an explicit XSS-safety check), a live extraction-and-
+      execution of the actual served file's `md()` function against a
+      tagged fence (confirmed correct `data-lang` + `tok-*` spans), and a
+      real rendered screenshot in the Browser pane with computed CSS
+      colors confirmed. 11 new pytest regression tests
+      (`test_console_code_highlighting.py`), matching this codebase's own
+      established source-level (no headless browser) convention for
+      `console.html` tests.
+
 Waits on the frontend audit so the design system replaces real, identified debt rather than
 guessing. Must also surface Phase 2's goals/tasks (chat vs. work distinction from the spec) once
 that exists, so this phase runs after Phase 2 has at least its data model in place.

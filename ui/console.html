@@ -686,6 +686,13 @@ button,input,textarea,select{font:inherit;color:inherit}
   padding:12px 14px;overflow-x:auto;margin:10px 0;position:relative;font-size:11.5px;line-height:1.65;
   font-family:var(--mono);color:var(--on-dark-code)}
 .turn .body pre code{background:none;border:none;padding:0}
+.tok-kw{color:var(--amber)}
+.tok-str{color:var(--ok)}
+.tok-com{color:var(--blue-dim);font-style:italic}
+.turn .body pre[data-lang]::before{content:attr(data-lang);position:absolute;top:7px;left:14px;
+  font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--blue-dim);
+  font-family:var(--mono);pointer-events:none}
+.turn .body pre[data-lang]{padding-top:26px}
 .copybtn{position:absolute;top:7px;right:7px;border:1px solid var(--line-2);background:var(--panel);
   color:var(--blue-dim);border-radius:5px;padding:4px 9px;font-size:8.5px;letter-spacing:.08em;
   cursor:pointer;opacity:0;transition:opacity .12s;min-height:26px}
@@ -2283,11 +2290,55 @@ function paintAttention(){
   });
 }
 
+/* ---------------- code syntax highlighting ----------------
+   Hand-rolled on purpose, matching this file's own md() (also hand-rolled
+   regex, no library) rather than pulling in a highlighting library into an
+   offline-first app that self-hosts even its fonts. Real per-language
+   keyword/string/comment tokenizing for the languages this app's own
+   tools actually produce (Python, JS/TS, Bash, JSON); anything else
+   renders as plain text rather than guessing wrong. Runs on text esc()
+   has ALREADY escaped, so string/comment patterns match the HTML-entity
+   forms (&quot; &#39;), never raw quote characters. */
+const LANG_ALIASES={py:'python',js:'javascript',jsx:'javascript',ts:'javascript',tsx:'javascript',sh:'bash',shell:'bash',zsh:'bash',json5:'json'};
+const LANG_RULES={
+  python:{kw:new Set(['def','return','if','elif','else','for','while','import','from','as','class','try','except','finally','with','pass','break','continue','and','or','not','in','is','None','True','False','lambda','yield','async','await','raise','global','nonlocal','assert','del','self']),
+    line:'#',str:'&quot;&quot;&quot;[\\s\\S]*?&quot;&quot;&quot;|&#39;&#39;&#39;[\\s\\S]*?&#39;&#39;&#39;|&quot;[\\s\\S]*?&quot;|&#39;[\\s\\S]*?&#39;'},
+  javascript:{kw:new Set(['function','return','if','else','for','while','const','let','var','class','import','from','export','default','try','catch','finally','async','await','new','this','typeof','instanceof','of','null','undefined','true','false','break','continue','switch','case','extends','super','static','throw','yield','do']),
+    line:'//',block:['/\\*','\\*/'],str:'&quot;[\\s\\S]*?&quot;|&#39;[\\s\\S]*?&#39;|`[\\s\\S]*?`'},
+  bash:{kw:new Set(['if','then','else','elif','fi','for','while','do','done','case','esac','function','return','exit','export','local','echo','in']),
+    line:'#',str:'&quot;[\\s\\S]*?&quot;|&#39;[\\s\\S]*?&#39;'},
+  json:{kw:new Set(['true','false','null']),str:'&quot;[\\s\\S]*?&quot;'},
+};
+function highlightCode(escaped,lang){
+  const rules = LANG_RULES[LANG_ALIASES[lang]||lang];
+  if(!rules) return escaped;
+  const parts=[];
+  if(rules.block) parts.push(rules.block[0]+'[\\s\\S]*?'+rules.block[1]);
+  if(rules.line) parts.push(rules.line+'.*$');
+  parts.push(rules.str);
+  parts.push('\\b[A-Za-z_][A-Za-z0-9_]*\\b');
+  const re=new RegExp(parts.join('|'),'gm');
+  return escaped.replace(re,(m)=>{
+    if(rules.block && m.startsWith(rules.block[0].replace(/\\/g,''))) return `<span class="tok-com">${m}</span>`;
+    if(rules.line && m.startsWith(rules.line)) return `<span class="tok-com">${m}</span>`;
+    if(m.startsWith('&quot;')||m.startsWith('&#39;')||m.startsWith('`')) return `<span class="tok-str">${m}</span>`;
+    if(rules.kw.has(m)) return `<span class="tok-kw">${m}</span>`;
+    return m;
+  });
+}
+
 /* ---------------- markdown ---------------- */
 function md(src){
   const parts = esc(src).split(/```/); let out="";
   parts.forEach((chunk,i)=>{
-    if(i%2){ out += `<pre><code>${chunk.replace(/^[\w-]*\n/,"")}</code></pre>`; return; }
+    if(i%2){
+      const langMatch = chunk.match(/^([\w-]*)\n/);
+      const lang = langMatch ? langMatch[1].toLowerCase() : "";
+      const code = chunk.replace(/^[\w-]*\n/,"");
+      const langAttr = lang ? ` data-lang="${lang}"` : "";
+      out += `<pre${langAttr}><code>${highlightCode(code, lang)}</code></pre>`;
+      return;
+    }
     let t = chunk.replace(/`([^`\n]+)`/g,"<code>$1</code>")
                  .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
                  // 2026-09-14 (user-directed: "ability to display... screenshots

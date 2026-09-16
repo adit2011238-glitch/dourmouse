@@ -107,10 +107,12 @@ components — everything else uses 0-7.
 
 ## New components Phase 3 builds (priority order, from `docs/UI_SOURCE_MAP.md`'s findings)
 
-1. `DiffWidget` — compact `+N −N` summary, expandable real syntax-highlighted
-   hunks. Highest value: the tools already exist, nothing renders them.
-2. Real syntax highlighting for code blocks generally (language already
-   parsed and discarded today — wire it to an actual highlighter).
+1. ~~Real syntax highlighting for code blocks~~ **done** — hand-rolled
+   tokenizer (python/javascript/bash/json), wired into `md()`, real tokens,
+   verified live. See `docs/GODSPEED_ROADMAP.md` Phase 3.
+2. `DiffWidget` — compact `+N −N` summary, expandable real syntax-highlighted
+   hunks (can now reuse the same tokenizer). Highest remaining value: the
+   diff tools already exist server-side, nothing renders them yet.
 3. `ToolActivity` — the five-state (queued/running/completed/failed/
    cancelled) component described in `docs/UI_DESIGN_REFERENCES.md`,
    replacing the current ad hoc `.act` chip.
