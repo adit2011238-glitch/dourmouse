@@ -41,8 +41,8 @@ severity, root cause, fix, files changed, tests added — never "fixed" without 
 test proving it.
 
 - [x] Confirmed real gated-tool count is **34** (across 6 files), not the ~23 previously tracked — registry has grown. `_run_shell`'s `shell=True` (system_access.py:406) is the intentional, already-gated Bash-equivalent tool, not a bug.
-- [ ] Dead-file removal (re-confirm zero references immediately before deleting): `ui/hub.html`, `ui/graveyard.html`, `ui/product.html`, `ui/agent_chat.html`, `ui/DOURMOUSE_DESKTOP_MOCKUPS.html`, `ui/decision_cards.json`, root `quill-onboarding.html`, unused `ui/assets/vendor/lucide/`.
-- [~] Silent `except Exception: pass` audit (12 uncommented sites across message_bus.py/webui.py/dispatch.py/schedules.py/chat.py/report.py/atlas_lab.py) — fix agent running, pending review.
+- [x] Dead-file removal: re-verifying first caught a real false positive — `hub.html`/`graveyard.html`/`product.html`/`agent_chat.html`/`decision_cards.json` belong to a separate, real, tested ATLAS-hub sub-app (`tools/serve_hub.py`), not dead. Removed only the 2 confirmed-dead files (`ui/DOURMOUSE_DESKTOP_MOCKUPS.html`, root `quill-onboarding.html`) plus the unused Lucide bundle.
+- [x] Silent `except Exception: pass` audit: 15 sites across 7 files. 14 justified (matching comment added), 1 real bug fixed (agent-inbox endpoint faked an empty inbox on bus failure, now surfaces `inbox_error`). Committed `cc72ba7`.
 - [ ] Security pass: shell/subprocess call sites, path traversal, credential handling, prompt-injection boundary for tool output / external content.
 - [ ] Concurrency pass: shared mutable state, race conditions in session/job handling.
 - [ ] Error-handling pass: bare excepts, silent failures, missing timeouts.

@@ -143,10 +143,19 @@ in-file comments as directional, not authoritative, until re-verified.
   content default), `workspace.html` (current *launch* default), `index.html` (legacy, hash
   routing), `app.html` ("consumer, chat-first"), `os.html` ("conversation-first"). Each maintains
   its own copy of the SSE parser, a `:root` palette, and in ≥2 cases the markdown renderer.
-- **Dead files, zero references from `webui.py`/`desktop.py`/`electron/main.js`**: `ui/hub.html`,
-  `ui/graveyard.html` (name is self-describing), `ui/product.html`, `ui/agent_chat.html`,
-  `ui/DOURMOUSE_DESKTOP_MOCKUPS.html` (a static design portfolio, not live UI),
-  `ui/decision_cards.json`, repo-root `quill-onboarding.html`. Plus the unused Lucide bundle (§3).
+- **Genuinely dead, re-verified 2026-09-16 (zero references anywhere in the repo, not just from
+  webui.py/desktop.py/electron)**: `ui/DOURMOUSE_DESKTOP_MOCKUPS.html` (a static design portfolio,
+  never live UI), repo-root `quill-onboarding.html`, and the unused Lucide bundle (§3). Removed.
+- **Correction to an earlier pass in this audit**: `ui/hub.html`, `ui/graveyard.html`,
+  `ui/product.html`, `ui/agent_chat.html`, and `ui/decision_cards.json` are **not dead** — they
+  belong to a separate, real, tested sub-app: `tools/serve_hub.py` serves them as "the dourmouse UI
+  shell" on its own port (8791), embedding ATLAS (8790) and a chat-feed relay (8788); `ui_contrast.py`
+  (a real, documented contrast-checking utility from an earlier interface-audit pass) reads their
+  CSS tokens directly; `dourmouse/tests/test_agent_chat_page.py`,
+  `dourmouse/tests/test_ui_contrast.py`, and `dourmouse/tests/test_ui_focus_visible.py` all
+  exercise them. They're simply outside the `webui.py`/`desktop.py`/`electron` routing this audit
+  started from, not unused. Left untouched — evaluate as part of the separate ATLAS-hub surface if
+  it's ever in scope, not as Dourmouse-console dead weight.
 - **Oversized components**: `console.html` is 7,092 lines / 571,862 bytes, one file for 14
   unrelated screens (chat, email client, project manager, an orthographic world-map/globe
   renderer, a 2D/3D design tool with its own Three.js scene graph, voice control, orchestration),
