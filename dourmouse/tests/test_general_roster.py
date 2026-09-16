@@ -218,6 +218,7 @@ class TestRosterShape:
         registry = build_general_registry()
         assert registry.subagent_names == {
             "orchestrator",
+            "goals",  # Phase 2: persistent autonomous Goal/Task runtime (dourmouse/goal_tools.py)
             "research_info",
             "study",  # backlog #9: Study tab, sandboxed access to the MYP folder
             "apps",  # backlog: control other running apps in the background

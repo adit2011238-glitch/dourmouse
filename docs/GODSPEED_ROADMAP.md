@@ -107,10 +107,21 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       reach a user has at the keyboard, gated by the same approval layer as any other high-risk
       action (not a separate permission model). Builds on the existing node/remote-job
       architecture referenced in the spec (Mac/Windows/Dell nodes) rather than a new one.
-      2026-09-16: the user's real desktop machine is now up and reachable over SSH for this work.
+      2026-09-16: the user's real desktop machine is now up. Real Tailscale network confirmed live
+      (`tailscale status`): `adits-macbook-air` (this Mac), `desktop-4u4t12k` (Windows, real
+      traffic counters, idle), `dourmouseserver` (Windows, a SECOND node literally named this —
+      not yet investigated, treat with the same caution), `iphone173`. Tried a safe, read-only
+      `tailscale ssh desktop-4u4t12k "echo ..."` — reached the host key verification stage (so the
+      machine and an SSH service are genuinely reachable) but did not complete; not investigated
+      further since guessing at credentials/flags for a real remote login isn't something to do
+      unattended. **Real blocker, needs the user**: how they want authentication handled for this
+      node (an SSH key already provisioned? Tailscale SSH enabled on that node specifically?).
+      2026-09-16, same session: user powered the desktop off to save energy — this sub-thread is
+      parked (not abandoned) until it's back up and reachable again.
       **Caution (standing, from memory):** a separate forex-engine/ATLAS dourmouse deployment
       already runs on that same desktop and can be console-killed by mistake — it's live user
-      work, never touch or restart anything there beyond what's explicitly being built here.
+      work, never touch or restart anything there beyond what's explicitly being built here. Same
+      caution extended to `dourmouseserver` until its actual role is understood.
 - [ ] Live progress model + notifications through the existing notification mechanism.
 - [ ] Run the spec's 20 acceptance tests for real against the implementation.
 
@@ -136,6 +147,51 @@ no attacks on third parties, no surveillance tooling — matches the spec's own 
 - [ ] Baseline engine + security event schema + local AI sentries (evidence-backed, never fabricated).
 - [ ] Security dashboard, integrated into the Phase 3 design system, not a bolt-on.
 - [ ] Threat model doc + security test suite (including prompt-injection-via-network-data tests).
+
+## Completion bar (standing, from the user, 2026-09-16)
+
+Self-evaluate against the full 121-page spec at every milestone, not just once at
+the end — and hold the result to the standard of a real, publicly-known engineering
+report a professional would actually publish (a real security audit, a real
+architecture review, the kind a CEO/CTO would read and trust), not an
+AI-assistant-shaped summary. Section 75 of the spec already asks for exactly this
+("judge the repository as if handed to a senior engineering team + security
+reviewer + QA team + DevOps engineer + a new developer") — this raises that bar
+explicitly rather than replacing it. As of this note: **12-15% of the full spec**,
+honestly assessed (recon/docs done; runtime core real and tested; audit, UI
+implementation, and the cybersecurity subsystem are the large remaining pieces).
+
+## UI direction (standing, from the user, 2026-09-16)
+
+Concrete visual direction on top of `docs/DESIGN_SYSTEM.md`/`UI_DESIGN_REFERENCES.md`:
+
+- **Never show the user an em dash or other odd special characters in ANY
+  product-facing text** — UI copy, labels, and (as far as we control it) model
+  output rendered in the UI. This is broader than this session's own writing-style
+  rule (which governs code/commits/chat) — it is a real UI-copy requirement for
+  what Dourmouse itself outputs. Already fixed two real violations found in the
+  concept mockups (Security/Research canvases) the same day this was said.
+- No emoji, no generic/standard gradients, as already established.
+- Fonts stay distinctive, not a generic system stack — already satisfied by the
+  real existing `--dm-font-sans`/`--dm-font-mono` choices (Departure Mono,
+  Monaspace Neon, etc.) — nothing to change here, just don't regress it.
+- Reference feel: Claude Desktop / Grok / Codex — clean, sleek, professional.
+  Concretely: Hermes Desktop's inline "Thinking" / tool-call rows and minimal
+  composer bar are a good fidelity target for `ToolActivity` (see
+  `docs/UI_DESIGN_REFERENCES.md`'s Hermes section).
+- **Custom icon per major section**, Claude-Desktop-sidebar style (simple line
+  icons: New agent/Skills/Messaging/Artifacts in their reference) — Phase 3's
+  icon-system gap (`docs/DESIGN_SYSTEM.md` gap 3) should land as one distinct
+  icon per nav destination (HOME/RESEARCH/CODE/SECURITY/etc.), not a generic
+  shared icon reused everywhere.
+- For the Security/Network center specifically: the user likes an orbital/sphere
+  visualization concept for the network topology (referencing a glowing
+  hex-sphere image) but wants it **practical, not literal** — keep the orbital/
+  radial metaphor, drop the glow/particle/hex-grid sci-fi treatment, which
+  directly conflicts with the design system's own already-established "no
+  decorative glow" principle. A real, calm, evidence-backed radial layout
+  (nodes arranged on a ring or sphere-projection around the host), not a
+  decoration.
 
 ## Notes / decisions log
 

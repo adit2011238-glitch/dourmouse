@@ -84,6 +84,9 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # below refuses them outright.
     "code_claude", "code_codex", "code_deepseek", "code_nvidia", "code_ollama",
     "orchestrator",
+    # Spawns background tasks that can call ANY tool, including the
+    # private-data ones above -- same reasoning as orchestrator itself.
+    "goals",
     # The user's real Gmail/Drive/Sheets/Slides/Calendar. Textbook private
     # data -- an inbox or a Drive file leaving the machine to answer a
     # question the user thought was local is exactly what this policy

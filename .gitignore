@@ -28,7 +28,9 @@ htmlcov/
 # ── Runtime state (sessions, memory db, pids) ────────────────────────────
 workspace/
 data/
+logs/
 *.log
+*.log.*
 nohup.out
 .dourmouse-ui.pid
 .jarvis-ui.pid

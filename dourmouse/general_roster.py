@@ -59,6 +59,7 @@ from dourmouse.dispatch import (
     system_message,
 )
 from dourmouse import config, git_safety, net_errors
+from dourmouse.goal_tools import build_goals_subagent
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.system_access import build_system_subagent
 
@@ -3996,6 +3997,8 @@ def build_general_registry() -> DispatchRegistry:
     )
 
     registry.register_subagent(build_system_subagent())
+
+    registry.register_subagent(build_goals_subagent())
 
     registry.register_subagent(_build_messenger_subagent(registry))
 

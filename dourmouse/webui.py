@@ -2657,6 +2657,28 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json({"artifact": record})
                 return
             self._send_json({"artifacts": store.list()})
+        elif path == "/api/goals":
+            # Phase 2 (docs/GODSPEED_ROADMAP.md): read-only inspection of the
+            # persistent autonomous Goal/Task runtime. ?id=<goal_id> returns
+            # one goal's full snapshot (tasks + real event history); no id
+            # lists every goal, optionally filtered by ?status=. Write
+            # actions (cancel/pause/approve) go through the goals subagent's
+            # tools today — dedicated POST endpoints are real, tracked
+            # Phase 3 UI work, not built speculatively ahead of that UI.
+            from dourmouse.goals import get_goal_store
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            gid = (qs.get("id") or [""])[0].strip()
+            store = get_goal_store()
+            if gid:
+                snap = store.goal_snapshot(gid)
+                if snap is None:
+                    self._send_json({"error": f"no such goal: {gid}"}, status=404)
+                else:
+                    self._send_json({"goal": snap})
+                return
+            status = (qs.get("status") or [""])[0].strip().upper() or None
+            self._send_json({"goals": store.list_goals(status=status)})
         elif path == "/api/state":
             # v5.14 Phase R0: the cross-device state snapshot — watchlist,
             # alerts inbox, prefs, recent activity, per-device workspaces.
@@ -6996,6 +7018,20 @@ def run_server(
         browser_pane_requests if browser_pane_requests is not None else get_browser_pane_requests()
     )
     server.browser_pane_requests.on_request(server.events_broadcast.broadcast)
+    # Phase 2 (docs/GODSPEED_ROADMAP.md): the persistent autonomous Goal/Task
+    # runtime. Deliberately its OWN opt-in gate, separate from live_polling/
+    # live_enabled() above — a worker that can act with a user's own reach is
+    # a materially bigger default-behavior change than a news/markets poll.
+    from dourmouse.goal_runtime import GoalRuntime, goal_runtime_enabled
+    from dourmouse.goals import get_goal_store
+
+    server.goal_runtime: GoalRuntime | None = None
+    if goal_runtime_enabled():
+        server.goal_runtime = GoalRuntime(
+            get_goal_store(), registry, bus=server.bus,
+            state_store=server.state, events_broadcast=server.events_broadcast,
+        )
+        server.goal_runtime.start()
     # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
     # HUD and the dedicated window listen to (live per-brain cards).
     from dourmouse import all_hands

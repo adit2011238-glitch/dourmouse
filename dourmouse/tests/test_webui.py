@@ -332,6 +332,80 @@ class TestHttpEndpoints:
         assert "sessions" in data
         conn.close()
 
+
+class TestGoalsEndpoint:
+    """GET /api/goals — read-only inspection of the Phase 2 autonomous
+    Goal/Task runtime (docs/GODSPEED_ROADMAP.md). Isolated from whatever
+    the process-wide goal-store singleton otherwise holds, same pattern
+    as test_goal_tools.py's own isolation fixture."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_goal_store(self):
+        from dourmouse.goals import GoalStore, set_goal_store
+
+        set_goal_store(GoalStore(None))
+        yield
+        set_goal_store(None)
+
+    def test_no_goals_yet_is_an_honest_empty_list(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/goals")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        assert json.loads(resp.read()) == {"goals": []}
+        conn.close()
+
+    def test_lists_a_real_goal(self, server):
+        from dourmouse.goals import get_goal_store
+
+        get_goal_store().create_goal("Do the real thing")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/goals")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert len(data["goals"]) == 1
+        assert data["goals"][0]["objective"] == "Do the real thing"
+        conn.close()
+
+    def test_id_returns_the_full_snapshot_including_tasks_and_events(self, server):
+        from dourmouse.goals import get_goal_store
+
+        goal = get_goal_store().create_goal("Snapshot me")
+        get_goal_store().create_task(goal["id"], "one step")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", f"/api/goals?id={goal['id']}")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())["goal"]
+        assert len(data["tasks"]) == 1
+        assert any(e["type"] == "goal_created" for e in data["events"])
+        conn.close()
+
+    def test_unknown_id_is_a_real_404_not_a_fabricated_empty_goal(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/goals?id=goal_doesnotexist")
+        resp = conn.getresponse()
+        assert resp.status == 404
+        conn.close()
+
+    def test_status_filter_is_applied(self, server):
+        from dourmouse.goals import get_goal_store
+
+        store = get_goal_store()
+        keep = store.create_goal("Keep")
+        store.update_goal_status(keep["id"], "EXECUTING")
+        store.create_goal("Drop")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/goals?status=executing")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert [g["objective"] for g in data["goals"]] == ["Keep"]
+        conn.close()
+
     def test_sessions_recent_endpoint_with_real_summaries(self, server, tmp_path):
         """Phase 2.3: /api/sessions/recent surfaces REAL data already on disk
         (first user message + last answer per session)."""
