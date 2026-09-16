@@ -7297,6 +7297,10 @@ def serve_forever(
     finally:
         if server.live_runtime is not None:
             server.live_runtime.stop()
+        if server.scheduler_runner is not None:
+            server.scheduler_runner.stop()
+        if server.goal_runtime is not None:
+            server.goal_runtime.stop()
         if server.daily_reporter is not None:
             server.daily_reporter.stop()
         if server.freebuff_watcher is not None:

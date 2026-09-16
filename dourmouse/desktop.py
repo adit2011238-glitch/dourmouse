@@ -1129,6 +1129,10 @@ def launch(
                 pass
         if server.live_runtime is not None:
             server.live_runtime.stop()
+        if getattr(server, "scheduler_runner", None) is not None:
+            server.scheduler_runner.stop()
+        if getattr(server, "goal_runtime", None) is not None:
+            server.goal_runtime.stop()
         if memory is not None:
             memory.close()
         server.shutdown()
