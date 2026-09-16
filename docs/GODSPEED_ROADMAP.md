@@ -55,17 +55,53 @@ Direct translation of the spec's Claude-Code-derived architecture onto Dourmouse
 dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-call plumbing,
 `planner.py`/`agent_router_model.py` routing, the existing tool registry and permission gate).
 
-- [ ] `Goal` and `Task` persistent objects + durable store (survive restart).
-- [ ] Real background worker/runtime independent of the chat UI (biggest known gap — today
-      everything is request-scoped; confirming exact shape via the architecture-map agent).
-- [ ] Plan → Execute → Observe → Verify → Replan loop with an independent verification step
-      (never trust "the model says it's done").
-- [ ] Failure classification + bounded, non-identical-repeat retry + recovery strategies.
-- [ ] Approval-gate system integrated with the existing `DOURMOUSE_AUTO_APPROVE` / confirmation
-      gate rather than a second, competing one.
-- [ ] Scheduler for routines (time-based and event-based), surviving restarts without a new chat
-      prompt.
-- [ ] Multi-agent delegation building on the existing `delegate_task` primitive.
+- [x] `Goal` and `Task` persistent objects + durable store (`dourmouse/goals.py`, SQLite/WAL,
+      mirrors `state_store.StateStore`'s shape exactly). 30 tests, including real restart-survival
+      tests (close the store, reopen the same file, state and the dependency graph are intact).
+- [x] Real background worker (`dourmouse/goal_runtime.py`) — a daemon thread ticking over every
+      active goal, pulling ready tasks (dependency-graph aware, promotes PENDING→READY as
+      dependencies clear), executing each via a real `chat.ChatSession`/`dispatch.run_dispatch_messages`
+      call (the exact same path a normal chat turn already uses — no second execution path),
+      persisting a checkpoint after every single status transition (free, since each write is its
+      own SQLite transaction). 17 tests. This closes the confirmed central gap from
+      docs/ARCHITECTURE.md.
+- [x] Crash recovery: a task found RUNNING at worker startup is never assumed still running — it's
+      routed through the normal retry/fail path with a logged `recovery_attempted` event, never
+      silently re-run.
+- [x] Failure classification + bounded retry (`max_attempts` per task) → goal `BLOCKED` with an
+      honest reason once a task permanently fails. A real bug caught by the tests themselves:
+      completion/permanent-failure was only checked at the TOP of each tick, so a goal's last task
+      finishing mid-tick didn't flip the goal to COMPLETED/BLOCKED until the NEXT tick — fixed to
+      re-resolve immediately after running a batch.
+- [x] Approval-gate integration, **honestly scoped**: a gated tool inside an autonomous task uses
+      the existing `DOURMOUSE_AUTO_APPROVE` toggle (on → proceeds like an interactive yes; off →
+      declines, task goes `WAITING_FOR_APPROVAL` with a real reason, real notification fires). A
+      resumable **per-task approval ticket** (continue just that one task after a later human
+      approval, without flipping the global toggle) is real, separate follow-on work — not built
+      yet, tracked here honestly rather than faked.
+- [x] Notifications reuse the existing, real mechanism exactly (no new channel): `bus.post(...)`
+      for the COMMS panel, `state_store.add_alert(...)` + an `events_broadcast` SSE fan-out for a
+      real native macOS notification via the already-shipped `DesktopNotifier`.
+- [x] New `goals` subagent (`dourmouse/goal_tools.py`, kept OUT of the already-oversized
+      `general_roster.py`, mirroring `system_access.build_system_subagent()`'s own file-per-subagent
+      pattern): `create_goal` (the calling model decomposes the objective into a task graph itself,
+      exactly like `delegate_parallel`'s branches — no separate hidden planner LLM), `add_tasks`
+      (real replanning), `get_goal_status`, `list_goals`, `cancel_goal`. 24 tests.
+- [x] `GET /api/goals` (list, `?status=`) and `GET /api/goals?id=` (full snapshot: tasks + real
+      event history) — read-only for now; write endpoints (pause/cancel/approve buttons) are real
+      Phase 3 UI work, not built speculatively ahead of that UI. 9 tests.
+- [x] Wired into `webui.run_server` behind its own dedicated opt-in gate,
+      **`DOURMOUSE_GOAL_RUNTIME=1`** — deliberately separate from `live_polling`/`live_enabled()`:
+      a worker that can act with a user's own reach is a materially bigger default-behavior change
+      than a news/markets poll. **Off by default. The user needs to opt in once satisfied with
+      testing.**
+- [ ] Scheduler for time/event-based routine creation (a routine auto-creating a `Goal` on a
+      schedule or a filesystem/email event) — not built yet, real follow-on.
+- [ ] Multi-agent delegation building on the existing `delegate_task` primitive — a task's own
+      turn can already call `delegate_task`/`delegate_parallel` normally (nothing blocks it), but
+      the runtime doesn't yet have its own dedicated multi-agent orchestration beyond that.
+- [ ] Real independent verification (currently: "the task's turn completed without raising and
+      wasn't declined" — self-reported, not independently checked against `success_criteria`).
 - [ ] **Cross-device control** (explicit user requirement, 2026-09-16): Dourmouse should be able to
       act on every device on the Tailscale network — every app, every browser — with the same
       reach a user has at the keyboard, gated by the same approval layer as any other high-risk
