@@ -100,8 +100,13 @@ test proving it.
       expected to be dominated by inference noise on this newly-annotated-nowhere codebase but not
       individually confirmed at this volume.
 - [ ] Dead code / duplicate utility sweep beyond the UI dead-file pass and the F841 findings already fixed.
-- [ ] `docs/ARCHITECTURE.md` (done), `docs/SOURCE_MAP.md`, `docs/DEVELOPMENT.md`, `docs/TESTING.md`,
-      `docs/TEST_MATRIX.md` — the last four not yet written.
+- [x] `docs/TESTING.md` written: real pytest/ruff/mypy/gitleaks invocation commands, the honest
+      10-skips breakdown (all real environmental preconditions, never a silenced flake), and a full
+      explanation of `conftest.py`'s autouse hermetic-isolation fixtures and the recurring
+      real-.env-leaking-into-tests bug class they exist to prevent (with an explicit instruction for
+      the next person adding a `DOURMOUSE_*` env var).
+- [ ] `docs/ARCHITECTURE.md` (done), `docs/SOURCE_MAP.md`, `docs/DEVELOPMENT.md`,
+      `docs/TEST_MATRIX.md` — still not written.
 
 ## Phase 2 — Autonomous agent runtime (the core new system)
 
