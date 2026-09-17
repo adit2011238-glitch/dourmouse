@@ -39,7 +39,7 @@ import threading
 from typing import Any
 
 from dourmouse.config import auto_approve_enabled, workspace_dir
-from dourmouse.goals import GoalStore
+from dourmouse.goals import GoalStore, TASK_TERMINAL_STATES
 
 _DEFAULT_TICK_SECONDS = 5.0
 #: How many ready tasks (across all active goals combined isn't tracked
@@ -198,6 +198,15 @@ class GoalRuntime:
             report = self._execute_via_dispatch(goal, task)
         except Exception as exc:
             self._handle_task_failure(goal, task, f"{type(exc).__name__}: {exc}")
+            return
+        # A real, if narrow, race: cancel_goal() can run concurrently while
+        # _execute_via_dispatch() above was still in flight (a real chat
+        # turn can take many seconds). Re-check before writing any
+        # completion/failure/approval status below, so a task already
+        # marked CANCELLED in the meantime is never silently clobbered
+        # back to COMPLETED once its now-moot dispatch call finally returns.
+        current_task = self._store.get_task(task_id)
+        if current_task is None or current_task["status"] in TASK_TERMINAL_STATES:
             return
         if report.get("blocked_reason"):
             reason = report["blocked_reason"]

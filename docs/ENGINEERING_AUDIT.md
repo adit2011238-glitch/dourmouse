@@ -362,6 +362,41 @@ through its enclosing function before removing).
 **Tests run**: full suite.
 **Result**: fixed (two), honestly deferred with reasoning (one).
 
+### 016 — Concurrency pass, first real finding: `cancel_goal` could be silently undone by an in-flight task
+
+**Severity**: MEDIUM (not a crash or data corruption, but a real
+correctness gap: cancelling a goal is meant to stop it, and this let an
+already-in-flight task's stale result resurrect it seconds later without
+any error or indication anything went wrong).
+**Root cause**: `GoalRuntime._run_task` checks the goal's status once,
+before starting a task's dispatch call, but a real dispatch call (a full
+chat turn, potentially tool calls and all) can run for many real seconds.
+Nothing re-checked whether the task had been cancelled (from another
+thread — a normal chat turn calling `cancel_goal`) by the time that call
+finally returned, so a late "success" result would silently overwrite the
+already-CANCELLED task back to COMPLETED.
+**Fix**: re-check the task's own current status immediately after
+`_execute_via_dispatch` returns, before writing any
+completion/failure/approval status; a task already in a terminal state
+(`CANCELLED`/`COMPLETED`/`FAILED`) is left alone.
+**Files changed**: `dourmouse/goal_runtime.py`.
+**Tests added**: `test_cancelling_mid_flight_is_never_clobbered_back_to_completed`
+in `dourmouse/tests/test_goal_runtime.py` — simulates the exact race (the
+scripted fake response calls `cancel_goal` mid-"dispatch", then returns a
+normal success) and proves the task stays CANCELLED.
+**Tests run**: `test_goal_runtime.py` (18/18), then full suite.
+**Result**: fixed.
+**Broader concurrency pass, spot-checked and NOT re-litigated**: the
+three real shared-state tracker classes already in the codebase before
+this session (`ActivityTracker`, `AttentionQueue`, `dispatch.JobTracker`)
+each already hold a real `threading.Lock`, confirmed by direct
+inspection. The per-tab session/gate/lock creation in
+`webui.py`'s `_session_gate_lock_for_tab` correctly holds
+`server.tab_state_lock` around its entire check-then-create sequence — no
+TOCTOU gap there. A full pass across the 5+ independent SQLite stores
+and the rest of `GoalRuntime`'s own tick loop is real, separate,
+not-yet-done work (see the roadmap's own tracked backlog).
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

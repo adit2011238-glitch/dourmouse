@@ -225,6 +225,30 @@ class TestGoalControl:
         assert _FakeSession.calls == []
         assert store.get_goal(goal["id"])["status"] == "CANCELLED"
 
+    def test_cancelling_mid_flight_is_never_clobbered_back_to_completed(self, monkeypatch):
+        """Real, narrow race: cancel_goal() can run on another thread
+        while a task's own dispatch call is still in flight (a real chat
+        turn can take many seconds). Once that call finally returns, the
+        task must stay CANCELLED, not get silently overwritten back to
+        COMPLETED just because its now-moot result showed up late."""
+        store = GoalStore(None)
+        goal = store.create_goal("Cancel while running")
+        task = store.create_task(goal["id"], "slow task")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        def slow_response():
+            # Simulates another thread calling cancel_goal() while this
+            # task's own "dispatch call" is still in flight.
+            store.cancel_goal(goal["id"])
+            return {"final_text": "finished after being cancelled"}
+
+        _install_fake(monkeypatch, {"slow task": slow_response})
+
+        _runtime(store).tick()
+
+        assert store.get_task(task["id"])["status"] == "CANCELLED"
+        assert store.get_goal(goal["id"])["status"] == "CANCELLED"
+
     def test_a_goal_with_no_tasks_yet_is_left_alone(self, monkeypatch):
         _install_fake(monkeypatch, {})
         store = GoalStore(None)

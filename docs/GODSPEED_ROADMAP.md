@@ -58,10 +58,15 @@ test proving it.
       test cases on the one transformation that touched actual boolean logic. Full detail:
       `docs/ENGINEERING_AUDIT.md` findings 010-015. Committed `27476ff`.
 - [ ] Security pass beyond the above: path traversal, credential handling in the ~34 gated tools.
-- [ ] Concurrency pass: shared mutable state, race conditions in session/job handling (the three
-      real shared-state tracker classes — `ActivityTracker`/`AttentionQueue`/`JobTracker` — were
-      spot-checked and all three already have real locks; a full pass across the 5+ independent
-      SQLite stores and the newer `GoalStore`/`GoalRuntime` is still real, separate work).
+- [x] Concurrency pass, first real finding: `ActivityTracker`/`AttentionQueue`/`dispatch.JobTracker`
+      spot-checked and all three already have real locks; `webui.py`'s per-tab session/gate/lock
+      creation correctly holds `tab_state_lock` around its whole check-then-create sequence, no
+      TOCTOU gap. Real bug found and fixed in the NEW code from this same initiative:
+      `GoalRuntime._run_task` could silently overwrite an already-`cancel_goal`'d task back to
+      `COMPLETED` if that task's dispatch call was still in flight when the cancel happened — fixed
+      with a re-check immediately after the call returns, before writing any terminal status. See
+      `docs/ENGINEERING_AUDIT.md` finding #016. A full pass across the 5+ independent SQLite stores
+      is real, separate, not-yet-done work.
 - [ ] Remaining `ruff` backlog (documented, not fixed): a full `S110`/`SIM105` try-except-pass sweep
       beyond the 15 already reviewed (~193 sites), `mypy`/`pyright` type checking, git-history secret
       mining, a full dependency audit.
