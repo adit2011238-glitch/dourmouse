@@ -467,6 +467,53 @@ the one real gap: newer code than the others, written before this
 session's `google_auth.py`/`goals.py` locking convention was established
 as the house pattern, and it never got retrofitted.
 
+### 018 — Git-history secret mining (real tool, full history, clean result)
+
+**Severity**: n/a (verification pass, not a finding — but a real one this
+time, not the working-tree-only pass from finding #006).
+**Scope**: finding #006 explicitly flagged that only the tracked working
+tree had been scanned, and that a secret committed once and later removed
+from the tree would still be permanently readable in history — a real,
+distinct exposure a `.gitignore` rule added after the fact does nothing to
+close. This pass closes that gap. `gitleaks` (industry-standard, not
+previously installed — installed via `brew install gitleaks`, a real dev
+tool, same category as `ruff`) run against the full history of every
+branch: `gitleaks git --log-opts="--all"`. 295 commits, ~166MB of diff
+content, scanned in full.
+**Result**: 168 raw matches, all triaged individually (grouped by file,
+every distinct match value inspected, not just counted):
+- **158** are in `jarvis/research_mesh/fields/exams/papers/_archives/*.html`
+  — the exact same category finding #006 already identified in the working
+  tree (archived, scraped, third-party academic web pages, part of the
+  research corpus, not Dourmouse's own code or secrets). 155 are
+  WordPress/CMS-style CSRF or theme cache-bust tokens repeated identically
+  across multiple pages scraped from the same site (e.g. the identical
+  token `5e7d06...` across five separate economics.ucdavis.edu archives) —
+  client-side, non-secret values by construction. 2 are a genuine-looking
+  Google API key (`AIzaSy...`), but it belongs to `umd.edu`'s own public
+  page (almost certainly a client-side Maps/reCAPTCHA embed key, a common
+  and normal practice for that key type) — a third party's already-public
+  key, incidentally captured by scraping their page, not a Dourmouse or
+  user credential and not an actionable leak for this project.
+- **10** are in `dourmouse/tests/` (`test_v50_features.py` x5,
+  `test_governance.py` x3, `test_google_services.py` x2,
+  `test_live_feeds.py` x1) — every one individually inspected, and every
+  one a deliberately fake, sequential-digit placeholder
+  (`1234567890abcdef`, `sk-test-1234567890abcdef`, a JWT literally encoding
+  `{"sub": "1234567890"}`), used exactly where you would expect: testing
+  env-var key loading and testing the governance/redaction system's own
+  ability to detect and redact secret-shaped strings. A redaction test
+  cannot verify anything without a realistic-looking fake secret to redact.
+- **0** matches touch `dourmouse/` outside `tests/`, `.env`,
+  `dourmouse/local_secrets.py`, `dourmouse/_builtin_oauth.py`, or any real
+  Dourmouse/user credential, anywhere across the full 295-commit history.
+**Fix**: none needed — genuinely clean result, not an unexamined one.
+**Files changed**: none.
+**Tests added**: none (not code; `gitleaks` is a local dev tool, not a
+project dependency, so nothing added to `requirements-dev.txt`).
+**Tests run**: n/a.
+**Result**: verified clean.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
@@ -474,14 +521,15 @@ as the house pattern, and it never got retrofitted.
 Every own-write-path SQLite store's cross-thread safety is now verified
 (finding #017): `goals.py`, `cache.py`, `google_auth.py`,
 `memory_store.py`, `supabase_sync.py`, and (after the fix)
-`global_memory.py`. Still open: external-database read-safety for the
-five read-only readers listed in finding #017 (a concurrently-writing
-external process is a different failure mode than an in-process race),
-database audit (schema/constraints/transactions across every store), full
-network audit, source-ingestion audit, dependency audit (beyond the two
-additions in findings #010/#013), git-history secret mining,
-`mypy`/`pyright` (type checking, distinct from ruff's lint-only checks),
-and a formal `docs/TEST_MATRIX.md`. None of these are silently assumed
+`global_memory.py`. Git-history secret mining is also now done (finding
+#018, clean). Still open: external-database read-safety for the five
+read-only readers listed in finding #017 (a concurrently-writing external
+process is a different failure mode than an in-process race), database
+audit (schema/constraints/transactions across every store), full network
+audit, source-ingestion audit, dependency audit (beyond the two additions
+in findings #010/#013), `mypy`/`pyright` (type checking, distinct from
+ruff's lint-only checks), and a formal `docs/TEST_MATRIX.md`. None of
+these are silently assumed
 clean — they are explicitly not done yet.
 
 **ruff is now configured and run (finding #010)**, curated rule set in

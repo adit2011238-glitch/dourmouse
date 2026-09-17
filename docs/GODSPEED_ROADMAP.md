@@ -78,9 +78,16 @@ test proving it.
       WAL/busy_timeout-hardened from a prior real incident), `supabase_sync.py`. The five read-only
       external-database readers (Claude Code/Codex history, project files) are a different risk
       category, not yet evaluated.
+- [x] Git-history secret mining: installed `gitleaks` (industry-standard, real tool, not previously
+      present), ran it against the full history of every branch (295 commits, ~166MB scanned). 168
+      raw matches, every one individually triaged: 158 are archived third-party academic web pages
+      under `jarvis/research_mesh/` (CMS cache-bust tokens plus one already-public Google Maps-style
+      key belonging to `umd.edu`, not Dourmouse), 10 are deliberately fake placeholder secrets in
+      `dourmouse/tests/` (env-loading and governance/redaction test fixtures). Zero real credentials
+      anywhere in history. See `docs/ENGINEERING_AUDIT.md` finding #018.
 - [ ] Remaining `ruff` backlog (documented, not fixed): a full `S110`/`SIM105` try-except-pass sweep
-      beyond the 15 already reviewed (~193 sites), `mypy`/`pyright` type checking, git-history secret
-      mining, a full dependency audit.
+      beyond the 15 already reviewed (~193 sites), `mypy`/`pyright` type checking, a full dependency
+      audit.
 - [ ] Dead code / duplicate utility sweep beyond the UI dead-file pass and the F841 findings already fixed.
 - [ ] `docs/ARCHITECTURE.md` (done), `docs/SOURCE_MAP.md`, `docs/DEVELOPMENT.md`, `docs/TESTING.md`,
       `docs/TEST_MATRIX.md` — the last four not yet written.
