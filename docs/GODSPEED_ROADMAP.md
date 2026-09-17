@@ -43,11 +43,31 @@ test proving it.
 - [x] Confirmed real gated-tool count is **34** (across 6 files), not the ~23 previously tracked — registry has grown. `_run_shell`'s `shell=True` (system_access.py:406) is the intentional, already-gated Bash-equivalent tool, not a bug.
 - [x] Dead-file removal: re-verifying first caught a real false positive — `hub.html`/`graveyard.html`/`product.html`/`agent_chat.html`/`decision_cards.json` belong to a separate, real, tested ATLAS-hub sub-app (`tools/serve_hub.py`), not dead. Removed only the 2 confirmed-dead files (`ui/DOURMOUSE_DESKTOP_MOCKUPS.html`, root `quill-onboarding.html`) plus the unused Lucide bundle.
 - [x] Silent `except Exception: pass` audit: 15 sites across 7 files. 14 justified (matching comment added), 1 real bug fixed (agent-inbox endpoint faked an empty inbox on bus failure, now surfaces `inbox_error`). Committed `cc72ba7`.
-- [ ] Security pass: shell/subprocess call sites, path traversal, credential handling, prompt-injection boundary for tool output / external content.
-- [ ] Concurrency pass: shared mutable state, race conditions in session/job handling.
-- [ ] Error-handling pass: bare excepts, silent failures, missing timeouts.
-- [ ] Dead code / duplicate utility sweep.
-- [ ] `docs/ARCHITECTURE.md`, `docs/SOURCE_MAP.md`, `docs/DEVELOPMENT.md`, `docs/TESTING.md` written from real findings.
+- [x] Prompt-injection boundary for tool output / external content: `rnd` (web_search/fetch_url) and
+      `browser` agents had none, unlike `mail`/`docs`. Fixed (commit `bc91e6b`).
+- [x] Real static analysis set up (`ruff`, curated config in `pyproject.toml`) and run for the first
+      time — 598 real findings after curation (vs. 1,354 under ruff's noisy defaults). Fixed: 3 live
+      undefined-name bugs (one a real `NameError` on a genuine production code path, caught only
+      because a test called the real function instead of monkeypatching it away), an SSRF guard for
+      `fetch_url` (host validation was missing; scheme validation already existed), an XXE/entity-
+      expansion fix for the two modules parsing real external XML feeds, 3 dead-code removals. Every
+      security-shaped finding (SQL construction, hardcoded-secret-shaped names, `shell=True`,
+      bind-all-interfaces) reviewed individually — 4 real false-positive classes documented inline,
+      1 real-but-low-urgency finding deferred with a full written reason. Plus a safe, mechanical
+      autofix pass (unused imports, import sorting) across 92 files, spot-verified against 9 real
+      test cases on the one transformation that touched actual boolean logic. Full detail:
+      `docs/ENGINEERING_AUDIT.md` findings 010-015. Committed `27476ff`.
+- [ ] Security pass beyond the above: path traversal, credential handling in the ~34 gated tools.
+- [ ] Concurrency pass: shared mutable state, race conditions in session/job handling (the three
+      real shared-state tracker classes — `ActivityTracker`/`AttentionQueue`/`JobTracker` — were
+      spot-checked and all three already have real locks; a full pass across the 5+ independent
+      SQLite stores and the newer `GoalStore`/`GoalRuntime` is still real, separate work).
+- [ ] Remaining `ruff` backlog (documented, not fixed): a full `S110`/`SIM105` try-except-pass sweep
+      beyond the 15 already reviewed (~193 sites), `mypy`/`pyright` type checking, git-history secret
+      mining, a full dependency audit.
+- [ ] Dead code / duplicate utility sweep beyond the UI dead-file pass and the F841 findings already fixed.
+- [ ] `docs/ARCHITECTURE.md` (done), `docs/SOURCE_MAP.md`, `docs/DEVELOPMENT.md`, `docs/TESTING.md`,
+      `docs/TEST_MATRIX.md` — the last four not yet written.
 
 ## Phase 2 — Autonomous agent runtime (the core new system)
 
