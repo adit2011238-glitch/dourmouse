@@ -85,9 +85,20 @@ test proving it.
       key belonging to `umd.edu`, not Dourmouse), 10 are deliberately fake placeholder secrets in
       `dourmouse/tests/` (env-loading and governance/redaction test fixtures). Zero real credentials
       anywhere in history. See `docs/ENGINEERING_AUDIT.md` finding #018.
+- [x] First-ever `mypy` pass: 341 raw errors on a previously-unannotated codebase. Every rare,
+      higher-signal category individually read (not sampled): found and fixed one real, previously
+      invisible bug (Gemini delegation's `on_usage` cost tracking was a silent, total no-op since
+      `call_gemini` never actually implemented the parameter `model_delegation.py` called it with —
+      zero test coverage on either side of the gap, now closed with real tests) plus two trivial
+      cosmetic cleanups. The bulk (attr-defined/union-attr/arg-type/etc., ~334 occurrences) is
+      documented, deliberately deferred backlog, not silently assumed clean. See
+      `docs/ENGINEERING_AUDIT.md` finding #019.
 - [ ] Remaining `ruff` backlog (documented, not fixed): a full `S110`/`SIM105` try-except-pass sweep
-      beyond the 15 already reviewed (~193 sites), `mypy`/`pyright` type checking, a full dependency
-      audit.
+      beyond the 15 already reviewed (~193 sites), a full dependency audit.
+- [ ] Remaining `mypy` backlog (documented, not fixed): ~334 lower-signal occurrences across
+      attr-defined/union-attr/arg-type/misc/assignment/return-value/operator/index/var-annotated,
+      expected to be dominated by inference noise on this newly-annotated-nowhere codebase but not
+      individually confirmed at this volume.
 - [ ] Dead code / duplicate utility sweep beyond the UI dead-file pass and the F841 findings already fixed.
 - [ ] `docs/ARCHITECTURE.md` (done), `docs/SOURCE_MAP.md`, `docs/DEVELOPMENT.md`, `docs/TESTING.md`,
       `docs/TEST_MATRIX.md` — the last four not yet written.

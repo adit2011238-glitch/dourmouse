@@ -47,3 +47,24 @@ ignore = [
 # intentional, never a real shadowing bug; audited individually 2026-09-17
 # before adding this, see docs/ENGINEERING_AUDIT.md).
 "dourmouse/tests/*" = ["S", "B011", "F811"]
+
+[tool.mypy]
+# First-ever type-checking pass on a codebase with zero prior annotations
+# (2026-09-17, see docs/ENGINEERING_AUDIT.md finding #019). Deliberately
+# lenient defaults, not strict mode -- strict mode against 337 previously
+# unchecked files would surface thousands of missing-annotation notes that
+# drown the real signal. External libraries are unannotated here (no
+# third-party stub packages installed), so missing-import noise is
+# suppressed at the source rather than per-call-site.
+ignore_missing_imports = true
+exclude = [
+    "dourmouse-native",
+    "atlas_terminal",
+    "gods-eye-view",
+    "jarvis",
+    "electron-claude-bridge",
+    "supabase",
+    "workspace",
+    "data",
+    "logs",
+]

@@ -2,3 +2,4 @@ pytest==9.1.1
 pytest-cov==7.1.0
 httpx==0.28.1  # test-only: test_key_check builds openai.APIConnectionError requests
 ruff==0.16.8  # engineering audit 2026-09-17: real static analysis, curated rule set in pyproject.toml (see docs/ENGINEERING_AUDIT.md)
+mypy==2.3.1  # engineering audit 2026-09-17: first-ever type-checking pass, lenient config in pyproject.toml (see docs/ENGINEERING_AUDIT.md finding #019)

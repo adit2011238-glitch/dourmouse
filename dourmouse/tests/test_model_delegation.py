@@ -59,6 +59,41 @@ class TestRoutingPolicy:
         assert route_for("news", allow_cloud=False) == md.LOCAL
 
 
+class TestRunCloud:
+    """`_run_cloud` (the Gemini delegation path) had no direct test at all
+    before this: its on_usage wiring silently relied on gemini_backend.
+    call_gemini accepting a keyword it never actually implemented, always
+    raised TypeError, and was defensively swallowed by a fallback branch
+    that always fired. See docs/ENGINEERING_AUDIT.md finding #019."""
+
+    def test_a_successful_call_populates_usage_from_the_real_backend(self, monkeypatch):
+        def fake_call_gemini(prompt, *, timeout, on_usage=None):
+            if on_usage:
+                on_usage({"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18})
+            return "a real answer"
+
+        monkeypatch.setattr(
+            "dourmouse.gemini_backend.call_gemini", fake_call_gemini, raising=False
+        )
+        result = md._run_cloud(DelegationTask(agent="research_info", prompt="hi"), timeout=5.0)
+        assert result.ok is True
+        assert result.text == "a real answer"
+        assert result.usage == {
+            "prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18,
+        }
+
+    def test_a_backend_failure_is_reported_not_swallowed(self, monkeypatch):
+        def fake_call_gemini(prompt, *, timeout, on_usage=None):
+            raise RuntimeError("HTTP 503: overloaded")
+
+        monkeypatch.setattr(
+            "dourmouse.gemini_backend.call_gemini", fake_call_gemini, raising=False
+        )
+        result = md._run_cloud(DelegationTask(agent="research_info", prompt="hi"), timeout=5.0)
+        assert result.ok is False
+        assert "HTTP 503" in result.error
+
+
 class TestFanOut:
     def test_tasks_run_concurrently_not_sequentially(self, monkeypatch):
         """The whole point of the fan-out. Four 0.4s tasks must finish in

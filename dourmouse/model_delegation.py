@@ -285,20 +285,6 @@ def _run_cloud(task: DelegationTask, timeout: float) -> DelegationResult:
             seconds=time.monotonic() - started,
             usage=usage,
         )
-    except TypeError:
-        # The backend may not accept on_usage yet; a missing metric must not
-        # fail a real answer.
-        try:
-            text = gemini_backend.call_gemini(task.prompt, timeout=timeout)
-            return DelegationResult(
-                task=task, ok=True, text=str(text or ""), model_used=CLOUD,
-                seconds=time.monotonic() - started,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return DelegationResult(
-                task=task, ok=False, error=f"{type(exc).__name__}: {exc}",
-                model_used=CLOUD, seconds=time.monotonic() - started,
-            )
     except Exception as exc:  # noqa: BLE001
         return DelegationResult(
             task=task,

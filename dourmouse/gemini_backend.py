@@ -656,6 +656,7 @@ def call_gemini(
     model: str | None = None,
     system: str | None = None,
     max_tokens: int | None = None,
+    on_usage: Callable[[dict[str, int]], None] | None = None,
     timeout: float = _DEFAULT_TIMEOUT,
     base_url: str | None = None,
     transport: GeminiTransport | None = None,
@@ -667,7 +668,12 @@ def call_gemini(
     one wire format to keep correct, one place a shape change has to be
     fixed, and the identical honest-error behaviour for free. The only
     differences are that deltas go to a local buffer instead of a callback
-    and that ``max_tokens`` is honoured here.
+    and that ``max_tokens`` is honoured here. ``on_usage`` has the exact
+    same one-shot, last-frame-wins contract as ``stream_gemini``'s own (see
+    its docstring) — a caller (``model_delegation.py``) already assumed
+    this parameter existed and defensively caught the ``TypeError`` it
+    always raised until now, so usage/cost tracking for every one-shot
+    Gemini delegation call was permanently a no-op.
 
     ``max_tokens`` defaults to None, which sends NO ``maxOutputTokens`` and
     lets the model use its own full ceiling. Read
@@ -689,6 +695,7 @@ def call_gemini(
     )
 
     chunks: list[str] = []
+    last_usage: dict[str, int] = {}
     finish = ""
     blocked = ""
     saw_payload = False
@@ -698,7 +705,16 @@ def call_gemini(
         blocked = _block_reason(payload) or blocked
         answers, _thoughts = _split_parts(payload)
         chunks.extend(answers)
+        usage = _extract_usage(payload)
+        if usage:
+            last_usage = usage
         finish = _finish_reason(payload) or finish
+
+    if on_usage and last_usage:
+        try:
+            on_usage(last_usage)
+        except Exception:  # noqa: BLE001 - usage tracking must never break a real reply
+            pass
 
     text = "".join(chunks)
     if not text:

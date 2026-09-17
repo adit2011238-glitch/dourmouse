@@ -514,6 +514,77 @@ project dependency, so nothing added to `requirements-dev.txt`).
 **Tests run**: n/a.
 **Result**: verified clean.
 
+### 019 — First-ever type-checking pass (`mypy`), one real bug found and fixed
+
+**Severity**: MEDIUM (the real bug: silent, permanent no-op of a real
+feature — same failure shape as finding #017, smaller blast radius).
+**Scope**: installed `mypy` (never run on this codebase before) with a
+deliberately lenient config (`ignore_missing_imports`, no strict mode —
+see `pyproject.toml`'s own comment on why: 337 previously-unchecked files
+would drown in missing-annotation noise under strict mode on a first
+pass). Ran against the whole `dourmouse/` package: 341 raw errors,
+dominated by `attr-defined` (206) and `union-attr` (22) — expected, not
+investigated further this pass, on a codebase with zero prior
+annotations (dynamic attribute patterns, monkeypatched test doubles, and
+un-narrowed `Optional`s are the overwhelmingly likely source, matching
+ordinary experience adopting a type checker onto an untyped codebase, but
+this is stated as a reasonable expectation, not verified line-by-line).
+Every one of the remaining, rarer, higher-signal categories WAS
+individually read and triaged, not sampled: `call-overload` (2),
+`call-arg` (1), `no-redef` (1), `exit-return` (1), `list-item` (1),
+`dict-item` (1).
+**Result of that triage**:
+- **One real, fixed bug**: `model_delegation.py`'s Gemini delegation path
+  (`_run_cloud`) called `gemini_backend.call_gemini(..., on_usage=
+  _on_usage)`, but `call_gemini` never actually implemented an `on_usage`
+  parameter at all — every real call raised `TypeError`, defensively
+  caught by a fallback branch that therefore always fired. Usage/cost
+  tracking for every one-shot Gemini delegation call has been a silent,
+  total no-op since this code was written, with zero test coverage on
+  either side of the gap (no test called `_run_cloud` at all, and no test
+  exercised `call_gemini` with `on_usage`). The sibling function
+  `stream_gemini` already had a complete, correct, already-tested
+  implementation of exactly this (`_extract_usage`, fire-once-on-last-
+  frame semantics) — `call_gemini` re-implements the same request/parse
+  loop locally (a documented, deliberate choice, not a mistake) but never
+  had the usage half ported over. Fixed by adding the same `on_usage`
+  parameter to `call_gemini` and wiring `_extract_usage` into its own
+  loop, mirroring `stream_gemini`'s exact semantics. The now-permanently-
+  dead `TypeError` fallback branch in `model_delegation.py` was removed
+  (Rule: no error handling for a scenario that can no longer happen).
+- **One trivial cleanup**: `general_roster.py`'s `_web_search_tool` had a
+  redundant, byte-identical re-annotation of `last_exc` at its second
+  assignment (`no-redef`) — cosmetic, zero behavior change, removed.
+- **One test-only cleanup**: a fake context manager's `__exit__` in
+  `test_google_services.py` was annotated to return `bool` while always
+  returning `False` (`exit-return`) — misleading (implies `True`/suppress
+  is possible when it never is); retyped to `-> None`.
+- **Three confirmed false positives, verified by reading the real code
+  and the real call site, not assumed**: `webui.py`'s `_handle_memory_
+  remote_search` (`list-item`) and `atlas_lab.py`'s `_serialize_findings`
+  sort key (`call-overload`) are both mypy inferring an overly narrow
+  literal type from a `dict`/`list` construction in code with no explicit
+  annotations — both behave correctly at runtime (`MemoryStore.search`'s
+  real signature is `source: str | None`; the sort key's `dict` really
+  does hold a `str` under `"verdict"` at runtime). `spotify_services.py`'s
+  playback-payload branch (`dict-item`) is the real, correct Spotify Web
+  API contract (`{"uris": [...]}` for tracks vs. `{"context_uri": ...}`
+  for albums/playlists), not a mistake. None of the three were changed.
+**Files changed**: `dourmouse/gemini_backend.py`, `dourmouse/
+model_delegation.py`, `dourmouse/general_roster.py`, `dourmouse/tests/
+test_google_services.py`, `pyproject.toml`, `requirements-dev.txt`.
+**Tests added**: `test_call_gemini_usage_fires_exactly_once_with_the_
+last_frame`, `test_call_gemini_a_failing_on_usage_callback_never_breaks_
+the_real_reply`, `test_call_gemini_no_usage_metadata_means_on_usage_
+never_fires` in `test_gemini_backend.py`; `TestRunCloud` (two tests, the
+success path proving `usage` now actually populates, and a failure path
+proving errors are still reported) in `test_model_delegation.py` — a
+class that did not exist before, since `_run_cloud` had no direct test
+at all.
+**Tests run**: `test_gemini_backend.py` + `test_model_delegation.py`
+(62/62), then full suite.
+**Result**: fixed.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
@@ -527,10 +598,21 @@ read-only readers listed in finding #017 (a concurrently-writing external
 process is a different failure mode than an in-process race), database
 audit (schema/constraints/transactions across every store), full network
 audit, source-ingestion audit, dependency audit (beyond the two additions
-in findings #010/#013), `mypy`/`pyright` (type checking, distinct from
-ruff's lint-only checks), and a formal `docs/TEST_MATRIX.md`. None of
-these are silently assumed
-clean — they are explicitly not done yet.
+in findings #010/#013), and a formal `docs/TEST_MATRIX.md`. None of
+these are silently assumed clean — they are explicitly not done yet.
+
+**`mypy` is now configured and run for the first time (finding #019)**,
+lenient config in `pyproject.toml`. Real remaining backlog from that run,
+triaged by category but not individually fixed line-by-line — the same
+deliberate, documented deferral as ruff's own backlog below, not an
+oversight: `attr-defined` (206 occurrences), `union-attr` (22),
+`arg-type` (44), `misc` (16), `assignment` (16), `return-value` (13),
+`operator` (8), `index` (5), `var-annotated` (4). Expected to be
+overwhelmingly type-inference noise from a previously-unannotated
+codebase (dynamic attributes, un-narrowed `Optional`s, test doubles) —
+consistent with the 6 sampled higher-signal categories, of which 3 of 6
+turned out to be exactly that once actually read. Not yet individually
+confirmed at this volume, and not claimed to be.
 
 **ruff is now configured and run (finding #010)**, curated rule set in
 `pyproject.toml`. Real remaining backlog from that run, triaged but not

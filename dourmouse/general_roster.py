@@ -639,7 +639,7 @@ def _web_search_tool(arguments: dict[str, Any]) -> str:
         return _wikipedia_search(query, max_results)
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         errors.append(f"Wikipedia failed: {exc}")
-        last_exc: BaseException | str = exc
+        last_exc = exc
     # Every keyless engine is down or unparseable. Classify on the last real
     # failure so an offline machine reads as offline rather than "not found",
     # and keep the per-engine detail in the log rather than in chat.

@@ -409,6 +409,54 @@ def test_call_gemini_returns_the_full_text(with_key):
     assert gemini_backend.call_gemini("hi", transport=transport) == "one two"
 
 
+def test_call_gemini_usage_fires_exactly_once_with_the_last_frame(with_key):
+    """call_gemini re-implements stream_gemini's own request/parse loop
+    rather than calling it (a local buffer instead of a callback), so its
+    on_usage wiring is separate code, not free from the streaming path's
+    own coverage -- this was in fact missing entirely until this fix (see
+    docs/ENGINEERING_AUDIT.md finding #019): every real caller that passed
+    on_usage got a bare TypeError, silently caught, real usage never
+    recorded. Same growing-usageMetadata contract as stream_gemini's own
+    test_usage_uses_usage_trackers_key_names_and_fires_exactly_once."""
+    first = _text_chunk("part one")
+    first["usageMetadata"] = {
+        "promptTokenCount": 11, "candidatesTokenCount": 3, "totalTokenCount": 14,
+    }
+    second = _text_chunk(" and two", finish="STOP")
+    second["usageMetadata"] = {
+        "promptTokenCount": 11, "candidatesTokenCount": 7, "totalTokenCount": 18,
+    }
+    transport = _RecordingTransport(_sse(first, second))
+    seen: list[dict] = []
+    text = gemini_backend.call_gemini(
+        "two parts", on_usage=seen.append, transport=transport
+    )
+    assert text == "part one and two"
+    assert len(seen) == 1
+    assert seen[0] == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+
+
+def test_call_gemini_a_failing_on_usage_callback_never_breaks_the_real_reply(with_key):
+    chunk = _text_chunk("real answer", finish="STOP")
+    chunk["usageMetadata"] = {"promptTokenCount": 1, "candidatesTokenCount": 1}
+    transport = _RecordingTransport(_sse(chunk))
+
+    def _boom(_usage):
+        raise OSError("disk full")
+
+    assert (
+        gemini_backend.call_gemini("hi", on_usage=_boom, transport=transport)
+        == "real answer"
+    )
+
+
+def test_call_gemini_no_usage_metadata_means_on_usage_never_fires(with_key):
+    transport = _RecordingTransport(_sse(_text_chunk("ok", finish="STOP")))
+    seen: list[dict] = []
+    gemini_backend.call_gemini("hi", on_usage=seen.append, transport=transport)
+    assert seen == []
+
+
 # --------------------------------------------------------------------------- #
 # Errors are surfaced verbatim, never swallowed
 # --------------------------------------------------------------------------- #
