@@ -65,8 +65,19 @@ test proving it.
       `GoalRuntime._run_task` could silently overwrite an already-`cancel_goal`'d task back to
       `COMPLETED` if that task's dispatch call was still in flight when the cancel happened — fixed
       with a re-check immediately after the call returns, before writing any terminal status. See
-      `docs/ENGINEERING_AUDIT.md` finding #016. A full pass across the 5+ independent SQLite stores
-      is real, separate, not-yet-done work.
+      `docs/ENGINEERING_AUDIT.md` finding #016. Second, higher-severity real bug found in the same
+      pass: `global_memory.py`'s singleton store used a `check_same_thread=True` connection (the
+      stdlib default) while being reached from every top-level chat turn on `webui.py`'s
+      `ThreadingHTTPServer` (one thread per request) — silently no-opped on any thread but whichever
+      one built it first, since both dispatch.py call sites swallow the resulting
+      `sqlite3.ProgrammingError`. Confirmed live against the pre-fix code (16/16 threads failed).
+      Fixed with `check_same_thread=False` plus a real lock (matching `google_auth.py`/
+      `memory_store.py`'s existing pattern) and double-checked-locking on the singleton itself
+      (matching `goals.get_goal_store()`). See finding #017. Every own-write-path SQLite store now
+      verified clean by direct reading: `cache.py`, `google_auth.py`, `memory_store.py` (already
+      WAL/busy_timeout-hardened from a prior real incident), `supabase_sync.py`. The five read-only
+      external-database readers (Claude Code/Codex history, project files) are a different risk
+      category, not yet evaluated.
 - [ ] Remaining `ruff` backlog (documented, not fixed): a full `S110`/`SIM105` try-except-pass sweep
       beyond the 15 already reviewed (~193 sites), `mypy`/`pyright` type checking, git-history secret
       mining, a full dependency audit.

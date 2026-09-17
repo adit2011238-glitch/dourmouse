@@ -397,17 +397,92 @@ TOCTOU gap there. A full pass across the 5+ independent SQLite stores
 and the rest of `GoalRuntime`'s own tick loop is real, separate,
 not-yet-done work (see the roadmap's own tracked backlog).
 
+### 017 — Concurrency pass, second finding: `global_memory.py`'s store was unsafe across the ThreadingHTTPServer's own worker threads
+
+**Severity**: HIGH (silent, near-total feature failure once enabled, not a
+rare edge case — see below).
+**Root cause**: `GlobalMemory.__init__` opened its one persistent
+`sqlite3.Connection` with the stdlib default `check_same_thread=True`, and
+the process-wide singleton (`get_default_memory()`) that owns it is reached
+from `dispatch.py` on every top-level chat turn. `webui.py` runs a
+`ThreadingHTTPServer` — one real OS thread per request — so any turn
+landing on a thread other than whichever one happened to construct the
+singleton first would raise `sqlite3.ProgrammingError: SQLite objects
+created in a thread can only be used in that same thread`. Both real call
+sites (`dispatch.py`'s ingestion and retrieval wiring) wrap that call in a
+bare `try/except Exception: pass` (deliberately, so a memory failure can
+never break a turn) — which meant this didn't crash, it just silently
+no-opped. Confirmed live: a 16-thread probe run against the pre-fix class
+(via `git show HEAD:...`, exec'd in isolation so nothing in the working
+tree was touched) failed on all 16 threads. Since ingestion and retrieval
+almost never land on the exact same single thread on a real threaded
+server, this feature would have appeared to do close to nothing for any
+real multi-tab user the moment `DOURMOUSE_GLOBAL_MEMORY=1` was set — a
+second, independent instance of the exact "existing tests are evidence of
+what someone thought should work" pattern from finding #011, and worse in
+practice because the failure mode is total silence rather than a crash.
+A second, smaller bug in the same area: `get_default_memory()`'s
+lazy-singleton construction (`if _default_instance is None: _default_instance
+= GlobalMemory()`) had no lock at all, so two threads racing in before
+either finished constructing it could each build and use their own
+`GlobalMemory`, leaking one connection permanently.
+**Fix**: `check_same_thread=False` plus a real `threading.Lock` wrapping
+every `sqlite3` touch (`__init__`'s table creation, `add`, `search`,
+`close`) — the exact same pattern already established and audited this
+session in `google_auth.py`'s `AuthStore` and `memory_store.py`. The
+singleton constructor now uses the same double-checked-locking pattern
+`goals.get_goal_store()` already uses (a direct precedent from this same
+initiative's Phase 2 work), with its own module-level lock.
+**Files changed**: `dourmouse/global_memory.py`.
+**Tests added**: `TestGlobalMemoryConcurrency` in
+`dourmouse/tests/test_global_memory.py` — `test_add_and_search_from_
+multiple_threads_never_raises` (16 real threads hammering `add`/`search`
+concurrently) and `test_get_default_memory_singleton_survives_a_
+concurrent_first_call` (8 threads released simultaneously via a
+`threading.Barrier`, asserts every thread got the identical instance).
+Both fail against the pre-fix code (verified directly, not assumed) and
+pass against the fix.
+**Tests run**: `test_global_memory.py` (29/29), then full suite.
+**Result**: fixed.
+**Broader survey this same pass**: every module doing its own
+`sqlite3.connect` was enumerated (12 files) and each own-write-path store
+read line-by-line, not just grepped. `cache.py` opens a fresh connection
+per call (no shared cross-thread connection object at all) and already
+wraps each one in a module-level lock — confirmed correct, no change
+needed. `google_auth.py` was already correct. `memory_store.py` and
+`supabase_sync.py` were read in full: every single method touching
+`self._conn` is wrapped in `with self._lock:` with no gaps, both already
+use `check_same_thread=False` plus `PRAGMA journal_mode=WAL` and a real
+30s `busy_timeout` — `memory_store.py`'s own comments document a prior,
+separate live incident (2026-08-31, before this session) where
+multi-process contention against this exact file was diagnosed and fixed,
+so this store had already earned its hardening the hard way. Both
+confirmed clean, no changes needed. `desktop_rag.py`, `history_import.py`,
+`project_bookkeeper.py`, `project_import.py`, and `shared_rag.py` only
+open read-only (`mode=ro`) connections into other applications' external
+databases (Claude Code/Codex history, project files) — a different risk
+category (a concurrently-writing external process, not our own
+in-process race) that this pass did not evaluate. `global_memory.py` was
+the one real gap: newer code than the others, written before this
+session's `google_auth.py`/`goals.py` locking convention was established
+as the house pattern, and it never got retrofitted.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
-Concurrency/race-condition pass, database audit (schema/constraints/
-transactions across the 5+ independent SQLite stores), full network audit,
-source-ingestion audit, dependency audit (beyond the two additions in
-findings #010/#013), git-history secret mining, `mypy`/`pyright` (type
-checking, distinct from ruff's lint-only checks), and a formal
-`docs/TEST_MATRIX.md`. None of these are silently assumed clean — they are
-explicitly not done yet.
+Every own-write-path SQLite store's cross-thread safety is now verified
+(finding #017): `goals.py`, `cache.py`, `google_auth.py`,
+`memory_store.py`, `supabase_sync.py`, and (after the fix)
+`global_memory.py`. Still open: external-database read-safety for the
+five read-only readers listed in finding #017 (a concurrently-writing
+external process is a different failure mode than an in-process race),
+database audit (schema/constraints/transactions across every store), full
+network audit, source-ingestion audit, dependency audit (beyond the two
+additions in findings #010/#013), git-history secret mining,
+`mypy`/`pyright` (type checking, distinct from ruff's lint-only checks),
+and a formal `docs/TEST_MATRIX.md`. None of these are silently assumed
+clean — they are explicitly not done yet.
 
 **ruff is now configured and run (finding #010)**, curated rule set in
 `pyproject.toml`. Real remaining backlog from that run, triaged but not

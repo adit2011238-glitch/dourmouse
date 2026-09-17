@@ -5,6 +5,7 @@ mocking discipline: no real backend needed to exercise this)."""
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -174,6 +175,59 @@ class TestGlobalMemoryStore:
         assert ok is True
         assert calls == []
         mem.close()
+
+
+class TestGlobalMemoryConcurrency:
+    def test_add_and_search_from_multiple_threads_never_raises(self, tmp_path, monkeypatch):
+        """webui.py runs a ThreadingHTTPServer: one real thread per request.
+        Before check_same_thread=False plus an explicit lock, a second
+        thread touching the same GlobalMemory instance raised
+        sqlite3.ProgrammingError -- silently swallowed by dispatch.py's own
+        try/except, so retrieval would just silently no-op on every thread
+        but whichever one happened to construct the instance first."""
+        monkeypatch.setattr("urllib.request.urlopen", _fake_ollama([1.0, 0.0]))
+        mem = GlobalMemory(tmp_path / "test.sqlite3")
+        errors: list[Exception] = []
+
+        def worker(i):
+            try:
+                mem.add(f"item {i}", screen="RESEARCH")
+                mem.search("item")
+            except Exception as exc:  # noqa: BLE001 - the test wants to catch every error
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(16)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        assert len(mem.search("item", top_k=16)) == 16
+        mem.close()
+
+    def test_get_default_memory_singleton_survives_a_concurrent_first_call(self, tmp_path, monkeypatch):
+        """The lazy singleton is reached from dispatch.py on every top-level
+        turn; two turns racing in before either finishes constructing it
+        must never end up with two live GlobalMemory instances (one leaked
+        connection, non-deterministic writes)."""
+        monkeypatch.setattr("urllib.request.urlopen", _fake_ollama([1.0, 0.0]))
+        monkeypatch.setattr(global_memory_module, "_default_db_path", lambda: tmp_path / "default.sqlite3")
+        monkeypatch.setattr(global_memory_module, "_default_instance", None)
+        instances: list[GlobalMemory] = []
+        barrier = threading.Barrier(8)
+
+        def worker():
+            barrier.wait()
+            instances.append(global_memory_module.get_default_memory())
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len({id(i) for i in instances}) == 1
 
 
 class TestGlobalMemoryEnabled:

@@ -36,6 +36,7 @@ import json
 import os
 import shutil
 import sqlite3
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -189,22 +190,32 @@ class GlobalMemory:
 
     def __init__(self, db_path: str | Path | None = None):
         self.db_path = Path(db_path) if db_path else _default_db_path()
-        self._conn = sqlite3.connect(str(self.db_path))
-        self._conn.execute(
-            """CREATE TABLE IF NOT EXISTS memory (
-                id TEXT PRIMARY KEY,
-                text TEXT NOT NULL,
-                screen TEXT NOT NULL,
-                session_id TEXT,
-                metadata TEXT,
-                embedding TEXT NOT NULL,
-                ts REAL NOT NULL
-            )"""
-        )
-        self._conn.commit()
+        # check_same_thread=False + an explicit lock: this store is reached
+        # from dispatch.py's per-turn ingestion/retrieval, and webui.py runs
+        # a ThreadingHTTPServer (one thread per request) -- the stdlib default
+        # (check_same_thread=True) would raise sqlite3.ProgrammingError the
+        # first time a request landed on a different thread than whichever
+        # one first constructed this instance. Same pattern as
+        # google_auth.py's AuthStore and memory_store.py.
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._lock = threading.Lock()
+        with self._lock:
+            self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS memory (
+                    id TEXT PRIMARY KEY,
+                    text TEXT NOT NULL,
+                    screen TEXT NOT NULL,
+                    session_id TEXT,
+                    metadata TEXT,
+                    embedding TEXT NOT NULL,
+                    ts REAL NOT NULL
+                )"""
+            )
+            self._conn.commit()
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def add(
         self, text: str, *, screen: str = "", session_id: str = "",
@@ -219,14 +230,15 @@ class GlobalMemory:
         if vec is None:
             return False
         item_id = item_id or f"m{time.time_ns()}"
-        self._conn.execute(
-            "INSERT OR REPLACE INTO memory VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                item_id, text, screen, session_id,
-                json.dumps(metadata or {}), json.dumps(vec), time.time(),
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO memory VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    item_id, text, screen, session_id,
+                    json.dumps(metadata or {}), json.dumps(vec), time.time(),
+                ),
+            )
+            self._conn.commit()
         return True
 
     def search(self, query: str, *, top_k: int = 5, screen: str | None = None) -> list[dict[str, Any]]:
@@ -241,7 +253,8 @@ class GlobalMemory:
         if screen:
             sql += " WHERE screen = ?"
             params = (screen,)
-        rows = self._conn.execute(sql, params).fetchall()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         scored = []
         for rid, text, scr, sess, meta, emb_json, ts in rows:
             try:
@@ -273,15 +286,22 @@ class GlobalMemory:
 
 
 _default_instance: GlobalMemory | None = None
+_default_instance_lock = threading.Lock()
 
 
 def get_default_memory() -> GlobalMemory:
     """Lazily-constructed process-wide default store, matching the
     lazy-singleton pattern this codebase already uses elsewhere for
-    similarly process-lifetime resources."""
+    similarly process-lifetime resources (see goals.get_goal_store).
+    Double-checked locking: webui.py's ThreadingHTTPServer means the
+    first real request to touch global memory can arrive on any worker
+    thread, and two such requests racing here would otherwise each
+    construct their own GlobalMemory (one connection silently leaked)."""
     global _default_instance
     if _default_instance is None:
-        _default_instance = GlobalMemory()
+        with _default_instance_lock:
+            if _default_instance is None:
+                _default_instance = GlobalMemory()
     return _default_instance
 
 
