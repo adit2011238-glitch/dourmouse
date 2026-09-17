@@ -25,10 +25,11 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import defusedxml.ElementTree as ET  # real external RSS bodies -- never the stdlib parser on untrusted XML
 
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -72,7 +73,7 @@ _SCR_IDS = {"gainers": "day_gainers", "losers": "day_losers"}
 
 _IMAP_HOST = "DOURMOUSE_IMAP_HOST"
 _IMAP_USER = "DOURMOUSE_IMAP_USER"
-_IMAP_PASS = "DOURMOUSE_IMAP_PASS"
+_IMAP_PASS = "DOURMOUSE_IMAP_PASS"  # noqa: S105 - an env VAR NAME, not the password's value
 _TASKS_ENV = "DOURMOUSE_TASKS_FILE"
 
 

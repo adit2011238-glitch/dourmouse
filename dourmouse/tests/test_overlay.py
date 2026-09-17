@@ -13,10 +13,7 @@ from __future__ import annotations
 import sys
 import time
 
-import pytest
-
 from dourmouse import overlay, tray
-
 
 # --------------------------------------------------------------------------- #
 # summarize_activity: pure function over an ActivityTracker snapshot

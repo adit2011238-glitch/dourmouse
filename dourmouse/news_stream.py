@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import hashlib
 import threading
-import time
 from typing import Any, Callable
 
 #: How often to poll every source, in seconds. 180s (3 minutes) — frequent

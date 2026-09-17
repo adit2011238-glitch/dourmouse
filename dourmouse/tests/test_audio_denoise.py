@@ -83,14 +83,12 @@ class TestRnnoiseDenoiserRealLibrary:
                 assert out.shape == (_CHUNK_SAMPLES,)
 
     def test_wrong_length_raises_a_clear_error(self):
-        with audio_denoise.RnnoiseDenoiser() as d:
-            with pytest.raises(ValueError, match="does not resample"):
-                d.process(np.zeros(999, dtype=np.int16))
+        with audio_denoise.RnnoiseDenoiser() as d, pytest.raises(ValueError, match="does not resample"):
+            d.process(np.zeros(999, dtype=np.int16))
 
     def test_2d_input_raises_a_clear_error(self):
-        with audio_denoise.RnnoiseDenoiser() as d:
-            with pytest.raises(ValueError, match="1D mono"):
-                d.process(np.zeros((_CHUNK_SAMPLES, 2), dtype=np.int16))
+        with audio_denoise.RnnoiseDenoiser() as d, pytest.raises(ValueError, match="1D mono"):
+            d.process(np.zeros((_CHUNK_SAMPLES, 2), dtype=np.int16))
 
     def test_process_after_close_raises(self):
         d = audio_denoise.RnnoiseDenoiser()

@@ -7,8 +7,6 @@ the roster wiring of the new ``docs`` subagent.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from dourmouse import google_services as gs

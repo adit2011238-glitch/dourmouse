@@ -1017,7 +1017,7 @@ def launch(
                     and getattr(main_window, "width", None) is not None
                     and getattr(atlas_window, "move", None) is not None):
                 atlas_window.move(
-                    int(getattr(main_window, "x")) + int(getattr(main_window, "width")) + 8,
+                    int(main_window.x) + int(main_window.width) + 8,
                     int(getattr(main_window, "y", 0) or 0),
                 )
         except Exception:  # noqa: BLE001 -- tiling is best-effort

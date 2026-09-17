@@ -77,7 +77,6 @@ def forex_inventory() -> dict[str, Any]:
 
     # normalized manifest (FX pairs x timeframes)
     manifest = _csv_rows(root / "market-data" / "normalized" / "manifest.csv")
-    pairs: dict[str, dict[str, Any]] = {}
     timeframe_counts: dict[str, int] = {}
     total_bars = 0
     d1_rows = []

@@ -34,7 +34,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
 
 _OUTPUT_CAP = 20_000  # chars of command output returned to the model
 

@@ -19,7 +19,6 @@ from dourmouse.atlas import atlas_lab as al
 # the same package) so these tests exercise the ACTUAL /atlas-lab routes.
 from dourmouse.tests.test_webui import server  # noqa: F401, E402
 
-
 # --------------------------------------------------------------------------- #
 # Fixtures: hermetic state (no real repo, no network)
 # --------------------------------------------------------------------------- #
@@ -223,7 +222,7 @@ class TestLatestBacktest:
         assert get_latest_backtest() is None
 
     def test_returns_most_recent_completed(self):
-        from dourmouse.atlas.atlas_lab import get_latest_backtest, BacktestRequest
+        from dourmouse.atlas.atlas_lab import BacktestRequest, get_latest_backtest
         state = al.StrategyLabState()
         state.backtest_requests["bt_old"] = BacktestRequest(
             id="bt_old", pair="EURUSD", status="done",
@@ -316,3 +315,40 @@ class TestAtlasLabRoutes:
         payload = json.loads(body.decode("utf-8"))
         assert payload["ok"] is True
         assert isinstance(payload["leaderboard"], list)
+
+
+class TestBuildReportSummary:
+    """Real, direct calls to _build_report (not monkeypatched) -- the only
+    prior test coverage of this function replaced it entirely
+    (monkeypatch.setattr(al, "_build_report", ...) above), so a real,
+    live NameError in its summary section (direction/entry/exit_cond
+    referenced as bare names that were never assigned, instead of the
+    real report["direction"]/["entry_condition"]/["exit_condition"]
+    dict keys) went undetected until this exact function was actually
+    called with real inputs during the engineering audit."""
+
+    def test_summary_builds_without_crashing_on_a_real_shaped_spec(self):
+        spec = {
+            "strategy_name": "RSI Reversion",
+            "strategy_type": "mean_reversion",
+            "direction": "SHORT",
+            "entry_condition": "RSI(14) > 70",
+            "exit_condition": "RSI(14) < 50",
+            "parameters": {"rsi_period": 14},
+        }
+        report = al._build_report(
+            spec=spec, pair="EURUSD", exit_code=0,
+            raw_output='{"validation": {"sharpe": 1.2, "win_rate": 0.55}}',
+            raw_error="", explanation="Fades RSI overbought/oversold extremes.",
+        )
+        assert "SHORT" in report["summary_markdown"]
+        assert "RSI(14) > 70" in report["summary_markdown"]
+        assert "RSI(14) < 50" in report["summary_markdown"]
+
+    def test_summary_handles_missing_entry_and_exit_conditions_honestly(self):
+        spec = {"strategy_name": "Untitled", "direction": "LONG"}
+        report = al._build_report(
+            spec=spec, pair="GBPUSD", exit_code=0,
+            raw_output="not json", raw_error="", explanation="No explanation given.",
+        )
+        assert "See parameters." in report["summary_markdown"]

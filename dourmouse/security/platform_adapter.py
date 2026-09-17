@@ -212,7 +212,7 @@ def _classify_exposure(bind_addr: str) -> str:
     honestly rather than lumping every listening port together."""
     if bind_addr in ("127.0.0.1", "::1", "localhost"):
         return "LOOPBACK_ONLY"
-    if bind_addr in ("*", "0.0.0.0", "::"):
+    if bind_addr in ("*", "0.0.0.0", "::"):  # noqa: S104 - classifying an observed bind address, not binding anything
         return "ALL_INTERFACES"
     if bind_addr.startswith("100.") or bind_addr.startswith("fd7a:"):
         return "TAILSCALE"

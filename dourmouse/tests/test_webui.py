@@ -2553,8 +2553,8 @@ class TestSystemBrowserClaimFlow:
 
     def _patch_google(self, monkeypatch):
         """Patch google_auth's network surface so the flow is hermetic."""
-        from dourmouse import google_auth
         import dourmouse.webui as webui_module
+        from dourmouse import google_auth
 
         monkeypatch.setattr(google_auth, "google_configured", lambda: True)
         monkeypatch.setattr(
@@ -2842,8 +2842,8 @@ class TestSetupWizardGoogleStep:
 
     def _patch_google(self, monkeypatch):
         """Same hermetic patch as TestSystemBrowserClaimFlow — no network."""
-        from dourmouse import google_auth
         import dourmouse.webui as webui_module
+        from dourmouse import google_auth
 
         monkeypatch.setattr(google_auth, "google_configured", lambda: True)
         monkeypatch.setattr(

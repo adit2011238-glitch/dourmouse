@@ -19,14 +19,13 @@ from __future__ import annotations
 import csv
 import json
 import os
-import re
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -738,14 +737,13 @@ def _run_backtest_worker(req_id: str) -> None:
             if req_id in state.backtest_requests:
                 state.backtest_requests[req_id].progress = 0.25
 
-        # Build a simple strategy description for the CLI.
+        # Build a simple strategy description for the CLI. _build_report()
+        # below re-derives direction/entry_condition/exit_condition from
+        # spec itself -- computing them here too was dead code (an
+        # engineering-audit find, 2026-09-17: this exact copy was almost
+        # certainly the source of _build_report's own real bare-name bug,
+        # see docs/ENGINEERING_AUDIT.md finding #011).
         strategy_type = spec.get("strategy_type", "momentum")
-        params = spec.get("parameters", {})
-        lookback = params.get("lookback", 20)
-        direction = spec.get("direction", "LONG")
-        entry = spec.get("entry_condition", "momentum signal")
-        exit_cond = spec.get("exit_condition", "reversal signal")
-
         explanation = spec.get("explanation", "Strategy description not provided.")
 
         # Run the research command. We use the managed CLI runner.
@@ -828,7 +826,6 @@ def _build_report(
 
     # Extract metrics from the parsed output.
     validation = parsed.get("validation", {}) if isinstance(parsed, dict) else {}
-    windows = parsed.get("windows", []) if isinstance(parsed, list) else []
     # If the output is a dict with pair keys, it's a multi-pair result.
     if isinstance(parsed, dict) and not validation:
         for key, val in parsed.items():
@@ -896,22 +893,22 @@ def _build_report(
     }
 
     # Add a human-readable summary.
-    lines = [f"## {report['strategy_name']} — {pair} ({direction})"]
+    lines = [f"## {report['strategy_name']} — {pair} ({report['direction']})"]
     lines.append(f"\n**Verdict: {verdict}**")
     if report["worth_paper_trading"]:
         lines.append("✅ *This strategy is worth paper trading.*")
     else:
         lines.append("⏸ *More observation needed before paper trading.*")
 
-    lines.append(f"\n### What the strategy does")
+    lines.append("\n### What the strategy does")
     lines.append(explanation)
 
-    lines.append(f"\n### Entry condition")
-    lines.append(entry if entry else "See parameters.")
-    lines.append(f"\n### Exit condition")
-    lines.append(exit_cond if exit_cond else "See parameters.")
+    lines.append("\n### Entry condition")
+    lines.append(report["entry_condition"] or "See parameters.")
+    lines.append("\n### Exit condition")
+    lines.append(report["exit_condition"] or "See parameters.")
 
-    lines.append(f"\n### Performance metrics")
+    lines.append("\n### Performance metrics")
     metrics = report["metrics"]
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")

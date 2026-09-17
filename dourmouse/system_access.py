@@ -401,7 +401,11 @@ def _delete_path_tool(arguments: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 def _run_shell(command: str, cwd: str, timeout: int) -> str:
-    proc = subprocess.run(
+    # Only ever reached via run_privileged_command, which is
+    # REQUIRES_CONFIRMATION and deliberately unsandboxed by design (see
+    # this module's own top-of-file docstring) -- the real, gated
+    # Bash-equivalent tool, not an unreviewed shell=True call site.
+    proc = subprocess.run(  # noqa: S602
         command,
         shell=True,
         cwd=cwd,

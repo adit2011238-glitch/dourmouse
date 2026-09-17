@@ -7,8 +7,6 @@ path when pypdf is absent.
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
 from dourmouse import extract

@@ -9,8 +9,6 @@ from __future__ import annotations
 import json
 import urllib.error
 
-import pytest
-
 from dourmouse import agent_router_model as router
 
 

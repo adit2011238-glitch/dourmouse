@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-from dourmouse.dispatch import DispatchRegistry, Subagent, ToolSpec, Permission
+from dourmouse.dispatch import DispatchRegistry, Permission, Subagent, ToolSpec
 from dourmouse.eval_harness import GradedResult, grade_answer, run_bench, run_question
 
 

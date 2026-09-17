@@ -14,7 +14,7 @@ import time
 import pytest
 
 from dourmouse.browser_pane import BrowserPaneRequests
-from dourmouse.dispatch import DispatchRegistry, Subagent, ToolSpec
+from dourmouse.dispatch import DispatchRegistry, Subagent
 from dourmouse.general_roster import _open_browser_pane_tool
 from dourmouse.webui import run_server
 

@@ -63,7 +63,7 @@ except Exception:  # noqa: BLE001 - dotenv missing = env/secrets still work
     pass
 
 _AUTH_URL = "https://accounts.spotify.com/authorize"
-_TOKEN_URL = "https://accounts.spotify.com/api/token"
+_TOKEN_URL = "https://accounts.spotify.com/api/token"  # noqa: S105 - a public OAuth endpoint URL, not a secret
 _API_URL = "https://api.spotify.com/v1"
 _REDIRECT_PORT = int(os.environ.get("SPOTIFY_REDIRECT_PORT", "8766"))
 _LOGIN_TIMEOUT = int(os.environ.get("SPOTIFY_LOGIN_TIMEOUT", "180"))

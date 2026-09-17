@@ -23,16 +23,14 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
 from dourmouse.forex_ops import (
     ForexNotConfiguredError,
-    get_forex_data_path,
     forex_events,
     forex_ibkr,
     forex_inventory,
-    forex_paper,
+    get_forex_data_path,
 )
 
 _LONG = 600          # validation / backtests / event refresh

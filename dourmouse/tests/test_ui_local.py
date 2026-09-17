@@ -4,8 +4,8 @@
 # no build step. The HUD features (particles, radar sweep, motion states, backend
 # indicator) are also pinned here so a future refactor cannot silently drop them.
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 class TestFullyLocal:

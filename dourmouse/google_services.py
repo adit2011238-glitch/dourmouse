@@ -28,8 +28,8 @@ from __future__ import annotations
 import base64
 import imaplib
 import json
-import re
 import os
+import re
 import smtplib
 import urllib.error
 import urllib.parse
@@ -1695,9 +1695,7 @@ def _gviz_to_json(payload: str) -> str:
                 out.append("'")
                 i += 2
                 continue
-            if nxt in ",}]:":  # closing a quoted value
-                out.append('"')
-            elif prev in ":,[{":  # opening a quoted value
+            if nxt in ",}]:" or prev in ":,[{":  # closing a quoted value
                 out.append('"')
             else:
                 out.append(ch)  # apostrophe inside a value — keep literal

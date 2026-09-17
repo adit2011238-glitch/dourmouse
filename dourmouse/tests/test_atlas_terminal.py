@@ -9,7 +9,6 @@ honest unconfigured state, and a full AppTest boot of the streamlit app
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest

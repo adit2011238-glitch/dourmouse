@@ -25,7 +25,6 @@ from __future__ import annotations
 import http.client
 import json
 import threading
-from pathlib import Path
 
 import pytest
 

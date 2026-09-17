@@ -19,8 +19,6 @@ import sqlite3
 import threading
 import time
 
-import pytest
-
 from dourmouse.project_import import (
     discover_claude_code_projects,
     discover_codex_projects,

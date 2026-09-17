@@ -289,7 +289,10 @@ def main(argv: list[str] | None = None) -> int:
     addresses = detect_addresses()
 
     if not args.no_write:
-        write_env("0.0.0.0", token)
+        # Always paired with a real access token in the same write -- webui.py's
+        # own run_server refuses a non-loopback bind without DOURMOUSE_ACCESS_TOKEN
+        # set, so this can never widen the bind surface unauthenticated.
+        write_env("0.0.0.0", token)  # noqa: S104
         print("[ENV] DOURMOUSE_HOST=0.0.0.0 written to .env (remote reach).")
         print("[ENV] DOURMOUSE_ACCESS_TOKEN written to .env (auth gate).")
         print("[ENV] RESTART the UI server for the new binding to take effect:")

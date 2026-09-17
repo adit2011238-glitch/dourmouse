@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from dourmouse.general_roster import build_general_registry
 from dourmouse import google_services as gs
 from dourmouse.dispatch import Permission
+from dourmouse.general_roster import build_general_registry
 
 MID = "1a0060b6ad85118b"
 

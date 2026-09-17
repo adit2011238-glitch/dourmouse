@@ -212,8 +212,11 @@ class GoalStore:
         """Goals the worker should keep advancing on its own this tick."""
         placeholders = ",".join("?" for _ in GOAL_ACTIVE_STATES)
         with self._lock, self._connect() as connection:
+            # placeholders is only "?" marks, one per entry in the fixed, hardcoded
+            # GOAL_ACTIVE_STATES frozenset, never a value -- the real values are
+            # bound below via tuple(GOAL_ACTIVE_STATES).
             rows = connection.execute(
-                f"SELECT * FROM goals WHERE status IN ({placeholders}) ORDER BY"
+                f"SELECT * FROM goals WHERE status IN ({placeholders}) ORDER BY"  # noqa: S608
                 " CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2"
                 " WHEN 'low' THEN 3 ELSE 4 END, created_at ASC",
                 tuple(GOAL_ACTIVE_STATES),
@@ -251,8 +254,10 @@ class GoalStore:
         this is safe even if a task is mid-flight this tick — it simply
         will not be picked up again."""
         with self._lock, self._connect() as connection:
+            # Both "NOT IN (...)" placeholder strings below are only "?" marks,
+            # one per entry in a fixed, hardcoded state frozenset, never a value.
             cursor = connection.execute(
-                "UPDATE goals SET status='CANCELLED', updated_at=? WHERE id=? AND status NOT IN ({})".format(
+                "UPDATE goals SET status='CANCELLED', updated_at=? WHERE id=? AND status NOT IN ({})".format(  # noqa: S608
                     ",".join("?" for _ in GOAL_TERMINAL_STATES)
                 ),
                 (_now(), goal_id, *GOAL_TERMINAL_STATES),
@@ -261,7 +266,7 @@ class GoalStore:
             if changed:
                 placeholders = ",".join("?" for _ in TASK_TERMINAL_STATES)
                 connection.execute(
-                    f"UPDATE tasks SET status='CANCELLED', updated_at=? WHERE goal_id=? AND status NOT IN ({placeholders})",
+                    f"UPDATE tasks SET status='CANCELLED', updated_at=? WHERE goal_id=? AND status NOT IN ({placeholders})",  # noqa: S608
                     (_now(), goal_id, *TASK_TERMINAL_STATES),
                 )
         if changed:

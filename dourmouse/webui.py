@@ -59,14 +59,13 @@ def _log_traceback(tag: str) -> None:
     print(f"[webui] {tag}", file=sys.stderr, flush=True)
     traceback.print_exc(file=sys.stderr)
 
+from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.chat import ChatSession
 from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
     OmniRouteConfig,
-    load_llm_config,
 )
-from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.dispatch import DispatchRegistry, JobTracker
 from dourmouse.governance import RbacPolicy
 from dourmouse.learn import learn_enabled, open_default_store, record_feedback
@@ -74,7 +73,6 @@ from dourmouse.live_runtime import LiveRuntime, live_enabled
 from dourmouse.memory_store import MemoryStore, RemoteMemoryStoreUnavailable
 from dourmouse.message_bus import BROADCAST, MessageBus, get_message_bus
 from dourmouse.planner import find_agents_for_query  # re-exported for callers
-
 
 _DEFAULT_ROLE = "operator"
 
@@ -1511,7 +1509,7 @@ def _safe_asset_path(rel: str) -> Path | None:
     return target if target.is_file() else None
 
 
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"})
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"})  # noqa: S104 - a comparison set, not a bind call
 # Host-header validation before any value is rendered into the pairing page:
 # hostname / IPv4 / bracketed IPv6 only — rejects header-injection outright.
 _SAFE_HOST_RE = re.compile(r"^(?:[A-Za-z0-9._-]+|\[[0-9A-Fa-f:]+\])$")
@@ -3038,9 +3036,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(build_semantic_graph(self.server.memory, _uploads_root().parent))
         elif path == "/api/semantic/status":
-            from dourmouse.semantic_graph import semantic_graph_available
-
             from dourmouse.memory_embed import embed_enabled
+            from dourmouse.semantic_graph import semantic_graph_available
 
             self._send_json({
                 "qdrant_available": semantic_graph_available(),
@@ -4283,8 +4280,9 @@ class _Handler(BaseHTTPRequestHandler):
         previous_client = session.client
         previous_config = session.config
         if force_freellmapi:
-            from dourmouse.config import load_freellmapi_config
             from openai import OpenAI
+
+            from dourmouse.config import load_freellmapi_config
 
             freellmapi_cfg = load_freellmapi_config()
             session.config = freellmapi_cfg
@@ -4837,9 +4835,9 @@ class _Handler(BaseHTTPRequestHandler):
         host, port = host_header, None
         # "host:port" splits on the LAST colon; bracketed IPv6 "[::1]:8765"
         # is safe because the brackets group the colons.
-        if ":" in host_header and not host_header.startswith("["):
-            host, _, port = host_header.rpartition(":")
-        elif host_header.startswith("[") and "]:" in host_header:
+        has_unbracketed_port = ":" in host_header and not host_header.startswith("[")
+        has_bracketed_port = host_header.startswith("[") and "]:" in host_header
+        if has_unbracketed_port or has_bracketed_port:
             host, _, port = host_header.rpartition(":")
         if not _SAFE_HOST_RE.match(host or "") or "/" in host:
             host, port = "127.0.0.1", None

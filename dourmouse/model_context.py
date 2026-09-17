@@ -25,7 +25,6 @@ failure mode the briefing is meant to prevent in the first place.
 from __future__ import annotations
 
 import threading
-from typing import Any
 
 _cache_lock = threading.Lock()
 _preamble_cache: str | None = None

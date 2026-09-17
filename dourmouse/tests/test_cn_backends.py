@@ -13,7 +13,6 @@ import pytest
 
 from dourmouse import cn_backends, code_backends
 
-
 # --------------------------------------------------------------------------- #
 # cn_backends.load_backend directly
 # --------------------------------------------------------------------------- #

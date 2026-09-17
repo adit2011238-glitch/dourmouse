@@ -60,7 +60,7 @@ _PLAIN_TEXT_EXTS = {
     ".tsx", ".java", ".c", ".h", ".cpp", ".hpp", ".cc", ".go", ".rs",
     ".rb", ".php", ".sql", ".swift", ".kt", ".m", ".mm", ".pl", ".r",
     ".lua", ".vim", ".gradle", ".properties", ".gitignore", ".dockerfile",
-    ".makefile", ".cfg", ".conf", ".rtf",
+    ".makefile", ".conf", ".rtf",
 }
 #: Needs a real extractor (reused, not reinvented — dourmouse/extract.py).
 _PDF_EXTS = {".pdf"}

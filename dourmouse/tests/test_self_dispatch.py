@@ -30,7 +30,6 @@ from dourmouse.dispatch import (
 )
 from dourmouse.general_roster import build_general_registry
 
-
 # --- shared fake client (same shape as test_dispatch.py) ---
 
 class _FakeFunction:

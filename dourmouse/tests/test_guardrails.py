@@ -23,7 +23,6 @@ from dourmouse.guardrails import (
     evaluate_trade,
 )
 
-
 # Default config the user confirmed for Phase 0.
 CFG = GuardrailConfig(
     max_position_pct=0.10,

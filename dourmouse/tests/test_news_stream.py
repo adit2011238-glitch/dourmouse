@@ -17,8 +17,8 @@ import time
 
 import pytest
 
-from dourmouse.news_stream import NewsStreamWatcher, _dedup_key
 import dourmouse.news_stream as ns_module
+from dourmouse.news_stream import NewsStreamWatcher, _dedup_key
 
 
 def _item(title, severity="", link="", **extra):

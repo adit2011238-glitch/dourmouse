@@ -9,7 +9,6 @@ uses a canned HTTP response. No fabricated tool output anywhere (Rule 2.2).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -20,10 +19,10 @@ from dourmouse.general_roster import (
     _draft_message_tool,
     _edit_file_tool,
     _fetch_url_tool,
-    _open_browser_pane_tool,
-    _open_url_tool,
     _list_calendar_events_tool,
     _list_files_tool,
+    _open_browser_pane_tool,
+    _open_url_tool,
     _propose_time_slots_tool,
     _query_shared_memory_tool,
     _read_file_tool,
@@ -665,6 +664,7 @@ class TestResearchInfo:
             def read(self, n=None):
                 return b"<html><head><title>x</title></head><body><h1>Hi</h1><p>World &amp; more</p></body></html>"
 
+        monkeypatch.setattr("socket.gethostbyname", lambda host: "93.184.215.14")
         monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _FakeResponse())
         result = _fetch_url_tool({"url": "https://example.com/page"})
         assert "FETCHED" in result
@@ -680,9 +680,36 @@ class TestResearchInfo:
         def fake_urlopen(*a, **k):
             raise urllib.error.URLError("down")
 
+        monkeypatch.setattr("socket.gethostbyname", lambda host: "93.184.215.14")
         monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
         result = _fetch_url_tool({"url": "https://example.com/"})
         assert "FETCH FAILED" in result
+
+    def test_fetch_url_refuses_a_private_address(self, monkeypatch):
+        """SSRF guard (engineering audit, 2026-09-17): a model-supplied
+        URL that resolves to an internal address must never be fetched,
+        matching the docs/ENGINEERING_AUDIT.md #003 prompt-injection
+        finding this closes a real residual gap on."""
+        monkeypatch.setattr("socket.gethostbyname", lambda host: "169.254.169.254")
+        result = _fetch_url_tool({"url": "http://metadata.internal/latest/"})
+        assert result.startswith("REFUSED:")
+        assert "private/internal address" in result
+
+    def test_fetch_url_refuses_loopback(self, monkeypatch):
+        monkeypatch.setattr("socket.gethostbyname", lambda host: "127.0.0.1")
+        result = _fetch_url_tool({"url": "http://localhost:11434/api/tags"})
+        assert result.startswith("REFUSED:")
+
+    def test_fetch_url_honest_error_on_unresolvable_host(self, monkeypatch):
+        import socket as socket_module
+
+        def fail(host):
+            raise socket_module.gaierror("nodename nor servname provided")
+
+        monkeypatch.setattr("socket.gethostbyname", fail)
+        result = _fetch_url_tool({"url": "https://this-genuinely-does-not-exist.invalid/"})
+        assert result.startswith("ERROR:")
+        assert "could not resolve" in result
 
     def test_open_url_opens_browser(self, monkeypatch):
         opened = {}

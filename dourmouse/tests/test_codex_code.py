@@ -17,7 +17,11 @@ import pytest
 from dourmouse import general_roster
 from dourmouse.general_roster import (
     _codex_code_tool as run_tool,
+)
+from dourmouse.general_roster import (
     _find_codex_cli as find_cli,
+)
+from dourmouse.general_roster import (
     build_general_registry,
 )
 

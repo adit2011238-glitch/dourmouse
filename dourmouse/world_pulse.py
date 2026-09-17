@@ -101,10 +101,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+
+import defusedxml.ElementTree as ET  # real external feed bodies (17 sources) -- never the stdlib parser on untrusted XML
 
 from dourmouse import live_feeds
 

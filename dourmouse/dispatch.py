@@ -41,12 +41,15 @@ import sys
 import threading
 import time
 import traceback
-from dataclasses import dataclass, field, replace as _dataclass_replace
+from dataclasses import dataclass, field
+from dataclasses import replace as _dataclass_replace
 from enum import Enum
 from typing import Any, Callable
 
 from openai import OpenAI
 
+from dourmouse import model_router
+from dourmouse.backend_fallback import load_llm_config_with_fallback, probe_ollama_fallback
 from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
@@ -57,10 +60,7 @@ from dourmouse.config import (
     fast_lane_model,
     fast_lane_model_swap_enabled,
     fast_lane_server_enabled,
-    load_llm_config,
 )
-from dourmouse import model_router
-from dourmouse.backend_fallback import load_llm_config_with_fallback, probe_ollama_fallback
 from dourmouse.governance import (
     BudgetTracker,
     DlpFilter,
@@ -1473,7 +1473,7 @@ def _show_thinking_enabled() -> bool:
 #: The documented qwen3 soft switch. Appended to the LAST user message because
 #: the template only honours it on the active turn — a system-message
 #: placement was measured as NOT working (367 tok, reasoning still leaked).
-_NO_THINK_TOKEN = "/no_think"
+_NO_THINK_TOKEN = "/no_think"  # noqa: S105 - a real model control-string, not a secret
 
 
 def _append_no_think(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

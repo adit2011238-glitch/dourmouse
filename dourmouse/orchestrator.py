@@ -22,13 +22,12 @@ from typing import Any, Callable
 
 from openai import OpenAI
 
+from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
     OmniRouteConfig,
-    load_llm_config,
 )
-from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.research_agent import RESEARCH_TOOL_SPEC, call_research_tool
 
 _SYSTEM_PROMPT = (

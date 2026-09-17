@@ -15,7 +15,6 @@ import pytest
 from dourmouse import google_auth
 from dourmouse.google_auth import AuthStore
 
-
 # -- PKCE ------------------------------------------------------------------ #
 
 class TestPkce:
@@ -359,8 +358,7 @@ class TestSessionTtlSeconds:
         assert google_auth.session_ttl_seconds() > thirty_days_seconds
 
     def test_access_token_returns_valid_directly(self, tmp_path, monkeypatch):
-        import time
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timezone
         monkeypatch.setattr(google_auth, "client_id", lambda: "c")
         monkeypatch.setattr(google_auth, "client_secret", lambda: "s")
         store = AuthStore(tmp_path / "auth.db")

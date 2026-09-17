@@ -1098,8 +1098,8 @@ class TestModelOverride:
         (covered by the sibling test above)."""
         monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         from dourmouse.config import OllamaConfig
-        from dourmouse.general_roster import build_general_registry
         from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
 
         config = OllamaConfig(model="qwen3:8b")
         registry = build_general_registry()
@@ -1125,8 +1125,8 @@ class TestModelOverride:
         Live-data questions (weather today, prices) stay agentic."""
         monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
         monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
-        from dourmouse.general_roster import build_general_registry
         from dourmouse.dispatch import _is_pure_chat
+        from dourmouse.general_roster import build_general_registry
 
         registry = build_general_registry()
         assert _is_pure_chat("what is the tallest mountain on earth", registry)
@@ -1158,8 +1158,8 @@ class TestModelOverride:
         "file"/"folder"/"scan"/"backup" for exactly this kind of
         intent; it must rescue the NOT-agentic case too, not just the
         already-agentic knowledge-exemption case above."""
-        from dourmouse.general_roster import build_general_registry
         from dourmouse.dispatch import _is_pure_chat
+        from dourmouse.general_roster import build_general_registry
 
         registry = build_general_registry()
         assert not _is_pure_chat("what pdf files are saved on this device", registry)
@@ -1184,8 +1184,8 @@ class TestLocalAgentRouterModelWinsOverKeywordScorer:
         call must be scoped to the ROUTER's choice."""
         monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         monkeypatch.setenv("DOURMOUSE_AGENT_ROUTER_AUTO", "1")
-        from dourmouse.general_roster import build_general_registry
         from dourmouse import agent_router_model
+        from dourmouse.general_roster import build_general_registry
 
         registry = build_general_registry()
         # Sanity check this really does reproduce the collision the fix
@@ -1210,8 +1210,8 @@ class TestLocalAgentRouterModelWinsOverKeywordScorer:
         tools."""
         monkeypatch.setenv("DOURMOUSE_FAST_LANE", "0")
         monkeypatch.setenv("DOURMOUSE_AGENT_ROUTER_AUTO", "1")
-        from dourmouse.general_roster import build_general_registry
         from dourmouse import agent_router_model
+        from dourmouse.general_roster import build_general_registry
 
         registry = build_general_registry()
         monkeypatch.setattr(agent_router_model, "route_via_local_model", lambda q, names, timeout=6.0: None)
@@ -1242,8 +1242,9 @@ class TestLocalAgentRouterModelWinsOverKeywordScorer:
         itself named "docs" and the model went looking for Google
         Drive files instead of the real local folder."""
         monkeypatch.setenv("DOURMOUSE_AGENT_ROUTER_AUTO", "1")
+        from dourmouse import agent_router_model
+        from dourmouse import dispatch as dispatch_mod
         from dourmouse.general_roster import build_general_registry
-        from dourmouse import agent_router_model, dispatch as dispatch_mod
 
         registry = build_general_registry()
         query = "in my documents what folders are there and give the size of each one"
@@ -2281,7 +2282,7 @@ class TestMaxLlmTokens:
         # the 4600 the original 8192-era sizing used.
         window = dispatch_module._OLLAMA_NUM_CTX
         assert dispatch_module._MAX_LLM_TOKENS > 4600 * 1.5
-        assert dispatch_module._MAX_LLM_TOKENS > window / 3
+        assert window / 3 < dispatch_module._MAX_LLM_TOKENS
 
     def test_the_three_budgets_still_fit_inside_the_window(self):
         """system prompt + history + response must leave real headroom.
@@ -4024,8 +4025,8 @@ class TestBrainEventReportsTheRealOrchestratorBackend:
         answers (ClaudeCliClient ignores the model string either way) —
         only the label was wrong. Both events must report claude_cli."""
         from dourmouse.config import OllamaConfig
-        from dourmouse.general_roster import build_general_registry
         from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
 
         monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "claude")
         monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")
@@ -4056,8 +4057,8 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
 
     def test_a_query_that_resolves_to_mail_uses_mails_real_split_side(self, monkeypatch):
         from dourmouse.config import OllamaConfig
-        from dourmouse.general_roster import build_general_registry
         from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
 
         monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "split")
         monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
@@ -4110,8 +4111,8 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
 
     def test_gibberish_with_no_agent_match_falls_back_to_claude(self, monkeypatch):
         from dourmouse.config import OllamaConfig
-        from dourmouse.general_roster import build_general_registry
         from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
 
         monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "split")
         monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "hi")

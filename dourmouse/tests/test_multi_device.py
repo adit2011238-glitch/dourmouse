@@ -181,7 +181,6 @@ class TestBindConfig:
 
     def test_serve_forever_resolves_host_from_env(self, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_HOST", "127.0.0.1")
-        from dourmouse.webui import serve_forever
 
         # run_server is the seam; serve_forever would block. Just verify the
         # env resolution helper is what serve_forever uses.

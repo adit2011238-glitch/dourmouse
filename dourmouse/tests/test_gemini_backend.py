@@ -22,7 +22,6 @@ import pytest
 from dourmouse import gemini_backend
 from dourmouse.config import GEMINI_ENV_KEYS, load_gemini_config
 
-
 # --------------------------------------------------------------------------- #
 # Fixtures / helpers
 # --------------------------------------------------------------------------- #

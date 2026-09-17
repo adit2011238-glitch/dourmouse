@@ -24,7 +24,7 @@ original bytes — never left half-patched.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -269,7 +269,7 @@ def _syntax_error_note(path: Path, new_text: str) -> str | None:
             return f"line {exc.lineno}, col {exc.offset}: {exc.msg}"
         return None
     try:
-        from dourmouse.repo_map import language_for, _parser_for  # deferred: optional dep
+        from dourmouse.repo_map import _parser_for, language_for  # deferred: optional dep
     except Exception:  # noqa: BLE001 - tree-sitter not installed: skip the check, don't fail
         return None
     lang = language_for(path)

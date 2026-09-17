@@ -27,7 +27,7 @@ import json
 import statistics
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 __all__ = ["PROMPTS", "Sample", "PromptResult", "ModelResult", "run_model", "percentile"]

@@ -39,6 +39,8 @@ def get_atlas_repo_path() -> Path:
     """
     from dourmouse.research_agent import (
         AtlasNotConfiguredError as _ResearchAtlasNotConfiguredError,
+    )
+    from dourmouse.research_agent import (
         get_atlas_repo_path as _resolve_repo_path,
     )
 

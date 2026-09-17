@@ -8,8 +8,6 @@ TestClient. This is the exact file that ships to the Dell (LAN-only).
 from __future__ import annotations
 
 import importlib.util
-import json
-import os
 from pathlib import Path
 
 import pytest

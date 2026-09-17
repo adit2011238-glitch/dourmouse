@@ -6,12 +6,10 @@ Wraps load_llm_config() to probe the primary backend and fall back silently.
 from __future__ import annotations
 
 import os
-import time
 import urllib.error
 import urllib.request
-from dataclasses import replace
 
-from dourmouse.config import load_llm_config, llm_backend
+from dourmouse.config import OllamaConfig, llm_backend, load_llm_config
 
 
 def _probe_backend(base_url: str, timeout: float = 3.0) -> bool:

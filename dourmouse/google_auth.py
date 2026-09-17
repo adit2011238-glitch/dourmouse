@@ -40,7 +40,7 @@ from dourmouse import config
 
 #: Google OAuth endpoints (fixed, deterministic).
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 - a public OAuth endpoint URL, not a secret
 GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 

@@ -120,7 +120,6 @@ def cmd_quote(code: str) -> dict[str, Any]:
 
 def cmd_order(code: str, side: str, volume: float,
               paper_confirm: bool) -> dict[str, Any]:
-    from dourmouse.mt5_ops import MT5NotConfiguredError
 
     if not paper_confirm:
         return {"error": "paper confirmation required: pass paper_confirm="

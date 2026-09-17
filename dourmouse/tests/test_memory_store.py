@@ -189,6 +189,7 @@ class TestMemoryStoreUnavailable:
         and the TOOL must report NOT CONFIGURED — never a silent fake."""
 
         import sqlite3
+
         import dourmouse.memory_store as ms
 
         # sqlite3.Connection does not allow attribute assignment, so patch the

@@ -32,10 +32,12 @@ untouched.
 from __future__ import annotations
 
 import difflib
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -49,6 +51,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
+from dourmouse import config, git_safety, net_errors
 from dourmouse.dispatch import (
     DispatchRegistry,
     Permission,
@@ -58,7 +61,6 @@ from dourmouse.dispatch import (
     run_dispatch_messages,
     system_message,
 )
-from dourmouse import config, git_safety, net_errors
 from dourmouse.goal_tools import build_goals_subagent
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.security.tools import build_security_subagent
@@ -659,12 +661,42 @@ def _strip_html(raw: str) -> str:
     return raw.strip()
 
 
+def _refuse_private_fetch_target(url: str) -> str | None:
+    """SSRF guard (engineering audit, 2026-09-17): fetch_url takes a
+    model-supplied URL, and per docs/ENGINEERING_AUDIT.md's own
+    prompt-injection finding (#003), a page this agent has already
+    visited could try to redirect a LATER fetch at an internal address
+    (a cloud metadata endpoint, this machine's own loopback services, a
+    router's admin page) rather than the public web the tool's own
+    description promises. Scheme validation alone (http/https only)
+    already blocks file://, but says nothing about the HOST. Resolves
+    the hostname once and refuses private/loopback/link-local/reserved
+    destinations; returns None when the target is a normal public
+    address. Not DNS-rebinding-proof (a second resolution at connect
+    time could differ) -- a real, meaningful improvement over no check
+    at all, not a complete guarantee."""
+    host = urllib.parse.urlparse(url).hostname
+    if not host:
+        return "ERROR: fetch_url could not determine a host from that URL."
+    try:
+        resolved = socket.gethostbyname(host)
+        addr = ipaddress.ip_address(resolved)
+    except (socket.gaierror, ValueError) as exc:
+        return f"ERROR: fetch_url could not resolve {host!r}: {exc}"
+    if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast:
+        return f"REFUSED: {host!r} resolves to {addr} (a private/internal address) -- fetch_url only fetches the public web."
+    return None
+
+
 def _fetch_url_tool(arguments: dict[str, Any]) -> str:
     url = (arguments.get("url") or "").strip()
     if not url:
         return "ERROR: fetch_url requires a 'url'."
     if not url.lower().startswith(("http://", "https://")):
         return "ERROR: fetch_url only accepts http(s) URLs (got a non-web scheme)."
+    refusal = _refuse_private_fetch_target(url)
+    if refusal:
+        return refusal
     try:
         max_chars = int(arguments.get("max_chars", 8000))
     except (TypeError, ValueError):
@@ -820,13 +852,12 @@ def _study_read_tool(arguments: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 def _apps_list_tool(arguments: dict[str, Any]) -> str:
-    from dourmouse.app_control import AppControlError, list_running_apps
-
     # Real win, needs no permission at all (same NSWorkspace primitive as
     # activate/quit_app_fast) — always tried first; AppleScript is a
     # real fallback only for the platform/import case, since a working
     # NSWorkspace call can't meaningfully disagree with itself on retry.
     from dourmouse import app_control_ax
+    from dourmouse.app_control import AppControlError, list_running_apps
 
     try:
         apps = app_control_ax.list_running_apps_fast()
@@ -1433,7 +1464,7 @@ _MEMORY_REMOTE_URL_ENV = "DOURMOUSE_MEMORY_REMOTE_URL"
 #: that machine has one configured (webui.py's _authorized() only
 #: exempts LOOPBACK clients from it; a cross-machine call is never
 #: loopback). See RemoteMemoryStore.__init__'s own comment.
-_MEMORY_REMOTE_TOKEN_ENV = "DOURMOUSE_MEMORY_REMOTE_TOKEN"
+_MEMORY_REMOTE_TOKEN_ENV = "DOURMOUSE_MEMORY_REMOTE_TOKEN"  # noqa: S105 - an env VAR NAME, not the token's value
 
 
 def _memory_db_path() -> Path:

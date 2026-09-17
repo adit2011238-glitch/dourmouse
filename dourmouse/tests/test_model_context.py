@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dourmouse import model_context
 from dourmouse.model_context import agent_context, claude_orchestrator_preamble, reset_cache
 
 

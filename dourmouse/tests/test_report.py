@@ -9,13 +9,14 @@ All deterministic (Rule 2.8), all hermetic (Rule 2.1).
 
 from __future__ import annotations
 
-import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import pytest
 
 from dourmouse import report as report_module
+from dourmouse.general_roster import build_general_registry
+from dourmouse.message_bus import MessageBus
 from dourmouse.report import (
     DailyReporter,
     _report_enabled,
@@ -25,8 +26,6 @@ from dourmouse.report import (
     build_morning_report,
     schedule_brief_on_open,
 )
-from dourmouse.message_bus import MessageBus
-from dourmouse.general_roster import build_general_registry
 
 
 class _FakeTracker:

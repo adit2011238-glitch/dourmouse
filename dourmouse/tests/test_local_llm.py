@@ -14,12 +14,10 @@ import http.client
 import json
 import threading
 import time
-from typing import Any
 
 import pytest
 
 import dourmouse.dispatch as dispatch_module
-
 from dourmouse import config as config_module
 from dourmouse.config import (
     OllamaConfig,
@@ -28,7 +26,6 @@ from dourmouse.config import (
     ollama_available,
 )
 from dourmouse.general_roster import build_general_registry
-
 
 # --------------------------------------------------------------------------- #
 # OllamaConfig + load_ollama_config

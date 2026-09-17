@@ -17,7 +17,6 @@ import pytest
 from dourmouse import desktop
 from dourmouse.tests.test_webui import _echo_registry
 
-
 # --------------------------------------------------------------------------- #
 # HTTP routes
 # --------------------------------------------------------------------------- #

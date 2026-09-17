@@ -277,7 +277,14 @@ def mt5_order(code: str, side: str, volume: float = 0.01,
     name = _find_symbol(mt5mod, code)
     if name is None:
         return {"error": f"{code} not listed on this server — cannot order"}
-    sym = mt5mod.symbol_info(name)
+    # Engineering audit, 2026-09-17: this used to fetch mt5mod.symbol_info(name)
+    # here and never use it (dead code -- volume_min/volume_max/volume_step/
+    # digits were never checked). Client-side validation against those
+    # constraints, and price rounding to the symbol's real tick size, is a
+    # real, deferred improvement, NOT added here: getting MT5's own rounding
+    # semantics wrong for live order placement is worse than relying on the
+    # broker's own honest rejection (handled below via result.retcode) until
+    # someone can verify the exact behavior against a real MT5 server.
     request = {
         "action": mt5mod.TRADE_ACTION_DEAL,
         "symbol": name,
@@ -313,9 +320,9 @@ def mt5_order(code: str, side: str, volume: float = 0.01,
 # terminal sits at the no-account screen, so in-process calls would freeze
 # the roster / HUD. The worker is killed on timeout; honesty preserved.
 
+import json  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
-import json  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 _ROSTER_ROOT = Path(__file__).resolve().parent.parent

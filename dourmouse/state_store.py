@@ -194,8 +194,10 @@ class StateStore:
         connection.execute(f"ALTER TABLE {table} RENAME TO {legacy}")
         connection.execute(_TABLE_DDL[table])
         cols = ", ".join(_LEGACY_COLUMNS[table])
+        # table/legacy/cols are always one of this module's own hardcoded
+        # _TABLE_DDL keys / _LEGACY_COLUMNS values -- never user input.
         connection.execute(
-            "INSERT INTO {table} (owner, {cols}) SELECT '{shared}', {cols} FROM {legacy}".format(
+            "INSERT INTO {table} (owner, {cols}) SELECT '{shared}', {cols} FROM {legacy}".format(  # noqa: S608
                 table=table, cols=cols, shared=SHARED_OWNER, legacy=legacy
             )
         )

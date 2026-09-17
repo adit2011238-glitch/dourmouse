@@ -33,13 +33,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from dourmouse.memory_store import MemoryStore, MemoryStoreUnavailable
+from dourmouse.memory_store import MemoryStore, MemoryStoreUnavailable, RemoteMemoryStore
 
 _LEARN_ENV = "DOURMOUSE_LEARN"
 _MEMORY_DB_ENV = "DOURMOUSE_MEMORY_DB"
 _WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
 _MEMORY_REMOTE_URL_ENV = "DOURMOUSE_MEMORY_REMOTE_URL"
-_MEMORY_REMOTE_TOKEN_ENV = "DOURMOUSE_MEMORY_REMOTE_TOKEN"
+_MEMORY_REMOTE_TOKEN_ENV = "DOURMOUSE_MEMORY_REMOTE_TOKEN"  # noqa: S105 - an env VAR NAME, not the token's value
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 _OFF_VALUES = {"", "0", "false", "no", "off"}

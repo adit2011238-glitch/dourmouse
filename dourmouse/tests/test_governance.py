@@ -28,10 +28,11 @@ from dourmouse.dispatch import (
     DispatchRegistry,
     Subagent,
     ToolSpec,
-    run_dispatch_messages,
     _call_with_retry,
     _is_transient_error,
+    run_dispatch_messages,
 )
+from dourmouse.general_roster import build_general_registry
 from dourmouse.governance import (
     BudgetLimits,
     BudgetTracker,
@@ -40,8 +41,6 @@ from dourmouse.governance import (
     validate_against_schema,
     validate_tool_arguments,
 )
-from dourmouse.general_roster import build_general_registry
-
 
 # --- shared fake client (same shape as test_dispatch.py) ---
 
@@ -1218,6 +1217,7 @@ class TestRoleEndpoint:
         role is the ceiling. Same-role reassertion stays allowed."""
         monkeypatch.setenv("DOURMOUSE_ROLE", "readonly")
         import threading
+
         from dourmouse.webui import run_server
 
         srv = run_server(build_general_registry(), port=0, client=None, config=None)

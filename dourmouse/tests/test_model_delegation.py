@@ -30,7 +30,7 @@ class TestRoutingPolicy:
         )
 
     def test_the_two_sets_never_overlap(self):
-        assert md._LOCAL_ONLY_AGENTS & md._CLOUD_OK_AGENTS == set()
+        assert set() == md._LOCAL_ONLY_AGENTS & md._CLOUD_OK_AGENTS
 
     @pytest.mark.parametrize(
         "agent", ["mail", "memory", "markets", "dev_coding", "atlas_cmd", "admin_ops"]

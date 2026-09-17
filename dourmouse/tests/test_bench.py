@@ -9,7 +9,6 @@ import pytest
 from dourmouse import bench
 from dourmouse.bench import ModelResult, PromptResult, Sample, percentile
 
-
 # --------------------------------------------------------------------------- #
 # percentile — the statistic the whole comparison rests on
 # --------------------------------------------------------------------------- #

@@ -172,7 +172,7 @@ class TestIngestLocalTree:
         found = [h for h in hits if "huge.txt" in h["title"]]
         # snippet check aside, confirm the real stored row is capped+labeled
         row = store._conn.execute(
-            "SELECT body FROM facts WHERE title LIKE ?", (f"%huge.txt%",)
+            "SELECT body FROM facts WHERE title LIKE ?", ("%huge.txt%",)
         ).fetchone()
         assert "TRUNCATED" in row["body"]
         assert len(row["body"]) < len(big)

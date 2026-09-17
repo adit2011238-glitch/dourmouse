@@ -6,7 +6,7 @@ fetcher + injected clock — no real waiting, no network).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 

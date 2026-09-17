@@ -70,9 +70,8 @@ def test_timed_records_duration_on_success(_logs_to_tmp):
 
 def test_timed_still_records_when_the_block_raises(_logs_to_tmp):
     """A slow failure must be as visible as a slow success."""
-    with pytest.raises(ValueError):
-        with obs.timed("fetch"):
-            raise ValueError("boom")
+    with pytest.raises(ValueError), obs.timed("fetch"):
+        raise ValueError("boom")
 
     (row,) = obs.read_recent("perf.log")
     assert row["op"] == "fetch"

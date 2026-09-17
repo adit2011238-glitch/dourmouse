@@ -18,8 +18,8 @@ import pytest
 
 from dourmouse.dispatch import DispatchRegistry, Permission, Subagent, ToolSpec
 from dourmouse.mcp_bridge import (
-    McpBridgeServer,
     _EXCLUDED_TOOL_NAMES,
+    McpBridgeServer,
     build_mcp_config_file,
     exposed_tools,
 )

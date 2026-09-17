@@ -61,6 +61,7 @@ from dotenv import load_dotenv
 
 from .guardrails import GuardrailConfig
 
+
 def user_config_dir() -> Path:
     """Where an INSTALLED Dourmouse keeps its configuration.
 

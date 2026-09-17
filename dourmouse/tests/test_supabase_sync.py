@@ -12,8 +12,6 @@ and current_user()-style isolation held for two seeded users.
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 

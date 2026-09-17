@@ -138,7 +138,7 @@ class TestSearchTheWebStillRoutesToResearchInfo:
 
 class TestUnknownToolGuardNamesTheRealTools:
     def _call(self, tool_name, arguments="{}"):
-        from dourmouse.tests.test_planner import _FakeFunction, _FakeToolCall
+        from dourmouse.tests.test_planner import _FakeToolCall
 
         registry = build_general_registry()
         first = _FakeMessage(
