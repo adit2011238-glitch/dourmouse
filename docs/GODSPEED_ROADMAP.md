@@ -10,6 +10,14 @@ fake/stub UI or security theater, no work skipped, full pytest suite passes befo
 never break what already works. Work phase by phase, checked off below as it lands. This file is
 the resumable checklist across sessions — update it at every phase boundary.
 
+**`docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`** (added 2026-09-18) is the standing,
+harsh-adversarial yardstick every domain is measured against — built from the 121-page spec, a
+real Hermes/Claude-Code/Codex architectural comparison, two real reference repos (ThreatSentinel,
+AI-Scientist), a distilled backend-architecture guide, a distilled UI-design-principles guide, and
+every direct user instruction layered on since. This roadmap tracks phase-by-phase progress; that
+document defines what "done" means for each domain and holds the permanent per-domain acceptance
+tests. Read it before any future "how far along are we" self-assessment.
+
 ## Phase 0 — Recon and baseline (in progress)
 
 - [x] Read the full 121-page spec.
