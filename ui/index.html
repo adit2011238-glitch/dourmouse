@@ -1866,7 +1866,7 @@
   </div>
 </div>
 <!-- v5.20: honest offline/stale marker — cached data is never shown as live -->
-<div id="offlinebanner" aria-live="polite"><span class="live-dot"></span>OFFLINE · SHOWING CACHED DATA — MARKED STALE · RECONNECT TO REFRESH</div>
+<div id="offlinebanner" aria-live="polite"><span class="live-dot"></span>OFFLINE · SHOWING CACHED DATA · MARKED STALE · RECONNECT TO REFRESH</div>
 <!-- v5.21 — always-on Spotify music dock (bottom-center): now-playing with
      previous / pause-resume / next controls + a search bar. Play anything
      from anywhere — no directive needed. -->
@@ -1910,14 +1910,14 @@
       <select id="sessionpick" title="Resume a recent session (real data from workspace/sessions)"><option value="">⌁ RESUME SESSION…</option></select>
       <button id="mapbtn" title="Open the agent orchestration map in a panel in this window">⧉ AGENT MAP</button>
       <button id="atlasTermBtn" title="Open the ATLAS Terminal (backtesting &amp; strategy lab) in a panel in this window">◈ ATLAS TERMINAL</button>
-      <button id="hubbtn" title="Open the COMMERCIAL HUB — ATLAS / DOURMOUSE / TAILSCALE FEED in one shell">◉ COMMERCIAL HUB</button>
-      <button id="setupbtn" title="Capability checklist — what's configured and how to fix the rest">[SETUP]</button>
+      <button id="hubbtn" title="Open the COMMERCIAL HUB: ATLAS / DOURMOUSE / TAILSCALE FEED in one shell">◉ COMMERCIAL HUB</button>
+      <button id="setupbtn" title="Capability checklist: what's configured and how to fix the rest">[SETUP]</button>
       </div>
       <div class="clock" id="clock">--:--:--</div>
-      <div class="memload" id="memload">MEM_LOAD: —</div>
+      <div class="memload" id="memload">MEM_LOAD: -</div>
       <div class="memline" id="memline">MEMORY: -- FACTS // LEARNING --</div>
-      <div class="sessline" id="sessionlabel">SESSION: —</div>
-      <div class="sessline" id="backendline">BACKEND: — —</div>
+      <div class="sessline" id="sessionlabel">SESSION: -</div>
+      <div class="sessline" id="backendline">BACKEND: - -</div>
     </div>
   </header>
 
@@ -1968,7 +1968,7 @@
            take damage earns trust. -->
       <div class="col-title">SYSTEM SELF-PORTRAIT</div>
       <div id="integritypanel" class="bx bx-m">
-        <div id="integrity" data-state="nominal">SYSTEM INTEGRITY — —</div>
+        <div id="integrity" data-state="nominal">SYSTEM INTEGRITY - -</div>
         <div class="integ-sub" id="integritysub">AGENTS REPORTING // LIVE TELEMETRY</div>
         <div class="hud-dial">
           <div class="hd-spin"></div><div class="hd-core"></div>
@@ -2048,7 +2048,7 @@
             <button id="spotifySearchBtn" class="vtbtn" title="Search Spotify for a track to play">[SEARCH]</button>
           </div>
           <div id="spotifyresults"><div class="iv-empty">SEARCH TO PLAY ANY SONG</div></div>
-          <div class="repo-meta">MY PLAYLISTS — CLICK TO PLAY</div>
+          <div class="repo-meta">MY PLAYLISTS · CLICK TO PLAY</div>
           <div id="spotifylists"><div class="iv-empty">LOADING…</div></div>
           <div class="repo-meta">RECENTLY PLAYED</div>
           <div id="spotifyrecent"><div class="iv-empty">LOADING…</div></div>
@@ -2064,7 +2064,7 @@
         <div class="repo-bar">
           <button id="artClearBtn" class="vtbtn" title="Clear the session artifact store">[CLEAR]</button>
         </div>
-        <div id="artifactbody"><div class="iv-empty">NO ARTIFACTS YET — ASK A RESEARCH/CODING AGENT FOR A TABLE, CHART, OR REPORT</div></div>
+        <div id="artifactbody"><div class="iv-empty">NO ARTIFACTS YET · ASK A RESEARCH/CODING AGENT FOR A TABLE, CHART, OR REPORT</div></div>
       </div>
       <!-- v8.2 — ATLAS SPEWRATE: real measured output rate of the last
            managed ATLAS run (candidates evaluated per second, parsed from
@@ -2111,7 +2111,7 @@
           <button id="rescanBtn" class="vtbtn" title="Re-index the ATLAS repo (idempotent)">[RESCAN]</button>
         </div>
         <div id="repofacts"><div class="iv-empty">PROJECT MEMORY STANDBY</div></div>
-        <div class="repo-meta" id="repometa">LAST SCAN: —</div>
+        <div class="repo-meta" id="repometa">LAST SCAN: -</div>
       </div>
     </aside>
   </div>
@@ -2122,7 +2122,7 @@
     <div class="console-inner">
       <span class="keyhint">⌘ + ENTER TO BROADCAST</span>
       <button id="micBtn" class="vtbtn" title="Speak a directive (local STT)">[MIC]</button>
-      <textarea id="input" rows="1" placeholder="Ask anything — or /all <goal> to put every resource (Claude · ChatGPT/Codex · DeepSeek · web) on it · /claude /codex /freebuff…" spellcheck="false"></textarea>
+      <textarea id="input" rows="1" placeholder="Ask anything, or /all <goal> to put every resource (Claude · ChatGPT/Codex · DeepSeek · web) on it · /claude /codex /freebuff…" spellcheck="false"></textarea>
       <button id="spkBtn" class="vtbtn" title="Hear the last reply (local TTS)">[SPK]</button>
       <button id="send">[SEND_DIRECTIVE]</button>
     </div>
@@ -2395,7 +2395,7 @@
         <div class="ninfo">
           <div class="ndesc">${esc(ag.description)}</div>
           <div class="nmodel">MODEL: ${esc(ag.model || 'default')}</div>
-          <div class="nperf">[STATE: <span class="rate">—</span>]</div>
+          <div class="nperf">[STATE: <span class="rate">-</span>]</div>
           <div class="nchips">${chips}</div>
         </div>`;
       el.querySelector('.nwin').addEventListener('click', () => openAgentWindow(ag.name));
@@ -2550,7 +2550,7 @@
     frameWatchdog = setTimeout(() => {
       fail(sameOrigin
         ? 'This screen did not load in time.'
-        : 'Nothing loaded from that address — the service may not be running, or it may refuse to be embedded.');
+        : 'Nothing loaded from that address. The service may not be running, or it may refuse to be embedded.');
     }, timeoutMs || 8000);
 
     el.frame.src = href;
@@ -2634,7 +2634,7 @@
         const names = Object.keys(agents);
         if (!names.length) {
           // Rule 12 — a missing value is absent, not zero.
-          int.textContent = 'SYSTEM INTEGRITY — —'; int.dataset.state = 'absent';
+          int.textContent = 'SYSTEM INTEGRITY - -'; int.dataset.state = 'absent';
           if (sub) sub.textContent = 'NO TELEMETRY // AWAITING ROSTER';
         } else {
           // Rule 09 — integrity is what damage costs, not how busy we are.
@@ -2685,16 +2685,16 @@
         const proj = a.project ? ' <span class="fblabel">' + esc(a.project) + '</span>' : '';
         const state = a.turnState === 'running' ? 'running' : a.status;
         let label = title;
-        if (a.kind === 'turn_started') label = '◈ ' + title + ' — turn started [' + state + ']';
-        else if (a.kind === 'turn_finished') label = '◈ ' + title + ' — turn finished [' + state + ']';
-        else if (a.kind === 'thread_created') label = '◈ NEW THREAD — ' + title + ' [' + state + ']';
-        else if (a.kind === 'status_changed') label = '◈ ' + title + ' — status ' + state;
+        if (a.kind === 'turn_started') label = '◈ ' + title + ' · turn started [' + state + ']';
+        else if (a.kind === 'turn_finished') label = '◈ ' + title + ' · turn finished [' + state + ']';
+        else if (a.kind === 'thread_created') label = '◈ NEW THREAD · ' + title + ' [' + state + ']';
+        else if (a.kind === 'status_changed') label = '◈ ' + title + ' · status ' + state;
         fline('FREEBUFF', `<span class="msg">${esc(label)}</span>${proj}`, null);
       } else if (evt.type === 'freebuff_watch') {
         if (evt.state === 'online') {
-          fline('FREEBUFF', '<span class="msg">Freebuff watch online — live thread activity streaming</span>', null);
+          fline('FREEBUFF', '<span class="msg">Freebuff watch online · live thread activity streaming</span>', null);
         } else {
-          fline('FREEBUFF', '<span class="msg">Freebuff watch offline — ' + esc(String(evt.detail || 'app unreachable')) + '</span>', 'fb-offline');
+          fline('FREEBUFF', '<span class="msg">Freebuff watch offline · ' + esc(String(evt.detail || 'app unreachable')) + '</span>', 'fb-offline');
         }
       }
     };
@@ -2740,10 +2740,10 @@
       const r = await fetch('/api/telemetry');
       const t = await r.json();
       if (t.unavailable) {
-        memload.textContent = 'MEM_LOAD: — (host telemetry unavailable)';
-        mThrough.el.textContent = '—';
-        mLat.el.textContent = '—';
-        mInst.el.textContent = '—';
+        memload.textContent = 'MEM_LOAD: - (host telemetry unavailable)';
+        mThrough.el.textContent = '-';
+        mLat.el.textContent = '-';
+        mInst.el.textContent = '-';
         for (const b of [mThrough.bar, mLat.bar, mInst.bar]) b.style.width = '0%';
         return;
       }
@@ -3118,7 +3118,7 @@
             // the old bug where this popup, fired from an SSE callback and
             // not a user gesture, was silently blocked in a plain browser.
             if (evt.run_id) {
-              fline('ALL HANDS', 'Run <b>' + esc(evt.run_id) + '</b> started — every resource is on the goal. Opening the ALL HANDS panel…', null);
+              fline('ALL HANDS', 'Run <b>' + esc(evt.run_id) + '</b> started. Every resource is on the goal. Opening the ALL HANDS panel…', null);
               const ahHref = '/all-hands?run=' + encodeURIComponent(evt.run_id);
               const ahRun = evt.run_id;
               openFramePanel(ahHref, 'ALL HANDS // RUN ' + String(ahRun), () => {
@@ -3199,7 +3199,7 @@
             // v4.2: the dispatch loop caught the model fixating on one plan
             // step and re-pointed it at the unexecuted steps.
             const nums = (evt.steps || []).join(', ');
-            fline('PLAN', `checkpoint — step(s) not yet executed: <span class="planstep">${esc(nums)}</span> — continuing`, null);
+            fline('PLAN', `checkpoint · step(s) not yet executed: <span class="planstep">${esc(nums)}</span> · continuing`, null);
             break;
           }
           case 'plan': {
@@ -3376,7 +3376,7 @@
       return;
     }
     sessions.forEach(s => {
-      const label = `${s.name.replace('.jsonl','')} — ${(s.first_user || '').slice(0, 60)}`;
+      const label = `${s.name.replace('.jsonl','')} · ${(s.first_user || '').slice(0, 60)}`;
       sessionPick.appendChild(new Option(label, s.name));
     });
   }).catch(() => {});
@@ -3386,7 +3386,7 @@
     fetch('/api/sessions/recent').then(r => r.json()).then(data => {
       const s = (data.sessions || []).find(x => x.name === name);
       if (!s) return;
-      fline('RESUME', `<span class="directive">${esc(name.replace('.jsonl',''))}</span> — first: <span class="msg">${esc(s.first_user || '(none)')}</span> · last: <span class="msg">${esc(s.last_answer || '(none)')}</span>`, null);
+      fline('RESUME', `<span class="directive">${esc(name.replace('.jsonl',''))}</span> · first: <span class="msg">${esc(s.first_user || '(none)')}</span> · last: <span class="msg">${esc(s.last_answer || '(none)')}</span>`, null);
       feed.scrollTop = feed.scrollHeight;
     }).catch(() => {});
   });
@@ -3480,7 +3480,7 @@
     }
     // done
     if (s.rate == null) {
-      spewEl.innerHTML = '<div class="repofact"><div class="rf-title">SPEWRATE // — CANDIDATES/SEC</div>' +
+      spewEl.innerHTML = '<div class="repofact"><div class="rf-title">SPEWRATE · CANDIDATES/SEC</div>' +
         '<div class="rf-path">' + num(s.elapsed_s) + 's ELAPSED · ' + esc(s.note || '') + '</div></div>';
       return;
     }
@@ -3505,7 +3505,7 @@
     const n = v => String(Number(v) || 0);
     const pairDays = Object.keys(b.pair_days || {}).map(p => p + ' ' + b.pair_days[p] + 'd').join(' · ');
     const rows = [];
-    rows.push('<div class="repofact"><div class="rf-title">REPO // ' + esc(s.branch || '?') + ' · ' + esc(s.last_commit || '—') + ' · ' + n(s.dirty_files) + ' DIRTY</div>' +
+    rows.push('<div class="repofact"><div class="rf-title">REPO · ' + esc(s.branch || '?') + ' · ' + esc(s.last_commit || '-') + ' · ' + n(s.dirty_files) + ' DIRTY</div>' +
       '<div class="rf-path">' + n(s.source_files) + ' SOURCES · ' + n(s.test_files) + ' TESTS · ' + n(s.deliverable_files) + ' DELIVERABLES</div></div>');
     rows.push('<div class="repofact"><div class="rf-title">FX ARCHIVE // ' + n(b.total_pair_days) + ' PAIR-DAYS' + (b.done_marker ? ' · BOOTSTRAP DONE' : '') + '</div>' +
       (pairDays ? '<div class="rf-path">' + esc(pairDays) + '</div>' : '<div class="rf-path">NO ARCHIVED BID-DAYS YET</div>') + '</div>');
@@ -3543,7 +3543,7 @@
     rows.push('<div class="repofact"><div class="rf-title">' + env + ' // ACCT ' + esc(String(a.login || '?')) + ' · ' + esc(a.server || '?') + '</div>' +
       '<div class="rf-path">EQUITY ' + mnum(a.equity) + ' ' + esc(a.currency || 'USD') + ' · FREE MARGIN ' + mnum(a.margin_free) + '</div></div>');
     rows.push('<div class="repofact"><div class="rf-title">UNIVERSE // ' + mnum(avail) + ' SYMBOLS LISTED' + (miss ? ' · ' + mnum(miss) + ' MISSING' : '') + '</div>' +
-      '<div class="rf-path">' + esc((univ.available ? Object.values(univ.available).slice(0, 8).join(', ') : '—') + (miss ? ' …' : '')) + '</div></div>');
+      '<div class="rf-path">' + esc((univ.available ? Object.values(univ.available).slice(0, 8).join(', ') : '-') + (miss ? ' …' : '')) + '</div></div>');
     mt5PanelEl.innerHTML = rows.join('');
   }
   async function pollMt5() {
@@ -3592,7 +3592,7 @@
     if (!d) { srvBodyEl.innerHTML = '<div class="iv-empty">COMPUTE NODE STANDBY</div>'; return; }
     const up = !!d.online;
     const url = d.url || 'DOURMOUSE_SERVER_URL';
-    const lat = d.latency_ms != null ? d.latency_ms + 'ms' : '—';
+    const lat = d.latency_ms != null ? d.latency_ms + 'ms' : '-';
     if (srvBadgeEl) {
       srvBadgeEl.textContent = up ? 'ONLINE' : 'OFFLINE';
       srvBadgeEl.style.color = up ? 'var(--green)' : 'var(--amber)';
@@ -3604,12 +3604,12 @@
         '<div class="repofact"><div class="rf-title">VERSION // ' + esc(d.version || '?') + ' · OLLAMA ' + (d.ollama ? 'UP' : 'DOWN') + '</div>' +
         '<div class="rf-path">' + esc(url) + '</div></div>';
     } else {
-      const why = d.error ? ' — ' + esc(d.error) : '';
+      const why = d.error ? ' · ' + esc(d.error) : '';
       srvBodyEl.innerHTML =
         '<div class="repofact"><div class="rf-title"><span style="color:var(--amber)">○ OFFLINE</span> // LOCAL AI IN CHARGE</div>' +
         '<div class="rf-path">' + esc(url) + why + '</div></div>' +
         '<div class="repofact"><div class="rf-title">MODEL // ' + esc(d.model || '?') + '</div>' +
-        '<div class="rf-path">FAILOVER AUTO — THE FAST LANE ROUTES HERE WHEN ONLINE</div></div>';
+        '<div class="rf-path">FAILOVER AUTO · THE FAST LANE ROUTES HERE WHEN ONLINE</div></div>';
     }
   }
   async function pollServer() {
@@ -3675,7 +3675,7 @@
       return;
     }
     if (neuroBadgeEl) neuroBadgeEl.textContent = d.active ? 'ACTIVE' : (d.experience_count > 0 ? 'LEARNING' : 'STANDBY');
-    const pct = v => v == null ? '—' : (Math.round(v * 100) + '%');
+    const pct = v => v == null ? '-' : (Math.round(v * 100) + '%');
     const rows = [];
     rows.push('<div class="repofact"><div class="rf-title">' +
       (d.active ? 'ACTIVE // BLENDING INTO ORCHESTRATION' : d.experience_count > 0 ? 'LEARNING // COLLECTING EXPERIENCE' : 'STANDBY // NO DATA YET') +
@@ -3683,10 +3683,10 @@
       (d.agents && d.agents.length ? ' · ' + String(d.agents.length) + ' AGENTS' : '') + '</div></div>');
     if (d.last_train) {
       rows.push('<div class="repofact"><div class="rf-title">LAST TRAIN // ' + esc(String(d.last_train).replace('T', ' ')) + '</div>' +
-        '<div class="rf-path">LOSS ' + (d.loss == null ? '—' : Number(d.loss).toFixed(3)) + ' · VAL ' + pct(d.val_acc) +
+        '<div class="rf-path">LOSS ' + (d.loss == null ? '-' : Number(d.loss).toFixed(3)) + ' · VAL ' + pct(d.val_acc) +
         ' · TRAIN ' + pct(d.train_acc) + ' · ROUTING ' + pct(d.agent_acc) + '</div></div>');
     } else {
-      rows.push('<div class="repofact"><div class="rf-path">No trained weights yet — deterministic heuristics still drive orchestration (zero regression).</div></div>');
+      rows.push('<div class="repofact"><div class="rf-path">No trained weights yet; deterministic heuristics still drive orchestration (zero regression).</div></div>');
     }
     if (neuroBodyEl) neuroBodyEl.innerHTML = rows.join('');
   }
@@ -3744,7 +3744,7 @@
       if (!d.ok) { spotResultsEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'SEARCH FAILED') + '</div>'; return; }
       const rows = (d.results || []).map(t =>
         '<div class="repofact"><div class="rf-title">' + esc(t.name) + '</div>' +
-        '<div class="rf-path">' + esc(t.artists) + ' — ' + spotPlayRow(t.uri) + '</div></div>');
+        '<div class="rf-path">' + esc(t.artists) + ' · ' + spotPlayRow(t.uri) + '</div></div>');
       spotResultsEl.innerHTML = rows.length
         ? rows.join('')
         : '<div class="iv-empty">NO MATCHES (HONEST)</div>';
@@ -3772,7 +3772,7 @@
       if (!d.ok) { spotRecentEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'RECENT UNAVAILABLE') + '</div>'; return; }
       const rows = (d.recent || []).map(t =>
         '<div class="repofact"><div class="rf-title">' + esc(t.name) + '</div>' +
-        '<div class="rf-path">' + esc(t.artists) + ' — ' + spotPlayRow(t.uri) + '</div></div>');
+        '<div class="rf-path">' + esc(t.artists) + ' · ' + spotPlayRow(t.uri) + '</div></div>');
       spotRecentEl.innerHTML = rows.length
         ? rows.join('')
         : '<div class="iv-empty">NO RECENT TRACKS (HONEST)</div>';
@@ -3786,7 +3786,7 @@
       if (!d.ok) { spotTopEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'TOP UNAVAILABLE') + '</div>'; return; }
       const rows = (d.top || []).map(t =>
         '<div class="repofact"><div class="rf-title">' + esc(t.name) + '</div>' +
-        '<div class="rf-path">' + esc(t.artists) + ' — ' + spotPlayRow(t.uri) + '</div></div>');
+        '<div class="rf-path">' + esc(t.artists) + ' · ' + spotPlayRow(t.uri) + '</div></div>');
       spotTopEl.innerHTML = rows.length
         ? rows.join('')
         : '<div class="iv-empty">NO TOP TRACKS (HONEST)</div>';
@@ -3802,7 +3802,7 @@
   function renderSpot(d) {
     if (!d.configured) {
       if (spotBadgeEl) spotBadgeEl.textContent = '';
-      if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">SPOTIFY NOT CONFIGURED — ' + esc(d.hint || 'set SPOTIFY_CLIENT_ID') + '</div>';
+      if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">SPOTIFY NOT CONFIGURED: ' + esc(d.hint || 'set SPOTIFY_CLIENT_ID') + '</div>';
       if (spotMusicEl) spotMusicEl.hidden = true;
       spotMiniSet('SPOTIFY NOT LINKED', false); // dock always visible
       return;
@@ -3888,7 +3888,7 @@
     try {
       const r = await fetch('/api/spotify/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       await r.json();
-      if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">Browser opened — approve the app there, then CHECK.</div>';
+      if (spotBodyEl) spotBodyEl.innerHTML = '<div class="iv-empty">Browser opened. Approve the app there, then CHECK.</div>';
       setTimeout(() => { pollSpot(); spotLoadPlaylists(); spotLoadRecent(); spotLoadTop(); }, 4000);
     } catch (e) { /* transient */ }
   });
@@ -3903,7 +3903,7 @@
     if (!d.configured) {
       if (repoCountEl) repoCountEl.textContent = '';
       if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'PROJECT MEMORY NOT CONFIGURED') + '</div>';
-      if (repometaEl) repometaEl.textContent = 'LAST SCAN: —';
+      if (repometaEl) repometaEl.textContent = 'LAST SCAN: -';
       if (rescanBtnEl) rescanBtnEl.disabled = true;
       return;
     }
@@ -3951,7 +3951,7 @@
         const r = await fetch('/api/repo/scan', { method: 'POST' });
         const d = await r.json();
         if (d.ok) {
-          if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">SCAN OK — ' + esc(String(d.stats.scanned)) + ' SCANNED // +' + esc(String(d.stats.added)) + ' NEW // ' + esc(String(d.stats.total_facts)) + ' FACTS</div>';
+          if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">SCAN OK: ' + esc(String(d.stats.scanned)) + ' SCANNED // +' + esc(String(d.stats.added)) + ' NEW // ' + esc(String(d.stats.total_facts)) + ' FACTS</div>';
           fline('PROJECT_MEMORY', 'repo re-indexed: ' + esc(String(d.stats.scanned)) + ' scanned, ' + esc(String(d.stats.total_facts)) + ' facts in memory', null);
         } else {
           if (repofactsEl) repofactsEl.innerHTML = '<div class="iv-empty">' + esc(d.error || 'SCAN FAILED') + '</div>';
@@ -4052,7 +4052,7 @@
     if (!artifactBodyEl) return;
     if (!items || !items.length) {
       if (artifactBadgeEl) artifactBadgeEl.textContent = '';
-      artifactBodyEl.innerHTML = '<div class="iv-empty">NO ARTIFACTS YET — ASK A RESEARCH/CODING AGENT FOR A TABLE, CHART, OR REPORT</div>';
+      artifactBodyEl.innerHTML = '<div class="iv-empty">NO ARTIFACTS YET · ASK A RESEARCH/CODING AGENT FOR A TABLE, CHART, OR REPORT</div>';
       return;
     }
     if (artifactBadgeEl) artifactBadgeEl.textContent = items.length + ' RENDERED';
@@ -4219,7 +4219,7 @@ const __runV524 = () => {
       tb.addEventListener('click', () => { DECK.active = tb.dataset.tab; deckRender(); });
     });
     const lines = DECK.lines[DECK.active] || [];
-    DECK.body.innerHTML = lines.slice(-30).join('') || '<div class="td-line">— idle —</div>';
+    DECK.body.innerHTML = lines.slice(-30).join('') || '<div class="td-line">(idle)</div>';
     DECK.body.scrollTop = DECK.body.scrollHeight;
   }
   function deckAdd(tab, html) {
@@ -4281,7 +4281,7 @@ const __runV524 = () => {
         }
         case 'confirmation_requested': {
           lastConfirmId = evt.id || null;
-          deckAdd('TOOLS', `<span class="warn">CONFIRM</span> ${esc(evt.prompt)} — thumbs up to approve`);
+          deckAdd('TOOLS', `<span class="warn">CONFIRM</span> ${esc(evt.prompt)}: thumbs up to approve`);
           break;
         }
         case 'error': {
@@ -4485,9 +4485,9 @@ const __runV524 = () => {
     const stack = document.getElementById('hxStack');
     if (!stack) return;
     const items = [
-      { n: '01', label: 'AGENT MESH', d: '29 subagents coordinate on one directive — each with its own tools, model and live window.' },
+      { n: '01', label: 'AGENT MESH', d: '29 subagents coordinate on one directive, each with its own tools, model and live window.' },
       { n: '02', label: 'WORLD MONITOR', d: 'Global intelligence bridge streaming real events from the configured feeds.' },
-      { n: '03', label: 'SPOTIFY DOCK', d: 'Always-on music dock — search any song from anywhere in the app.' },
+      { n: '03', label: 'SPOTIFY DOCK', d: 'Always-on music dock: search any song from anywhere in the app.' },
       { n: '04', label: 'VOICE LAB', d: 'Full local STT + TTS pipeline: whisper large-v3-turbo and piper amy.' },
       { n: '05', label: 'GOOGLE WORKSPACE', d: 'Gmail read/send, Calendar and Drive behind one Google sign-in.' },
       { n: '06', label: 'ATLAS QUANT CORE', d: 'Evolutionary strategy search with walk-forward validation and a strict gate.' },
@@ -4564,7 +4564,7 @@ const __runV524 = () => {
     const scroll = document.getElementById('pbScroll');
     if (!scroll) return;
     document.getElementById('pbTxt').textContent =
-      Array.from({ length: 12 }, (_, i) => `DOURMOUSE SECTOR ${String(i + 1).padStart(2, '0')} — the agent mesh stays coherent across every domain: dispatch routes, tools execute, results stream home. Edge blur fades this column so the HUD never clips.`).join('\n\n');
+      Array.from({ length: 12 }, (_, i) => `DOURMOUSE SECTOR ${String(i + 1).padStart(2, '0')}: the agent mesh stays coherent across every domain: dispatch routes, tools execute, results stream home. Edge blur fades this column so the HUD never clips.`).join('\n\n');
   })();
 
   // 6 — perspective text scroll (skiper28)
@@ -4640,7 +4640,7 @@ __probeMark('registered');
     <div class="dm-grid">
       <div class="dm-card" id="atlasLatestCard"><div class="dm-k">LATEST REPORT <b>HOVER / TAP TO EXPAND</b></div><div id="atlasLatest" class="dm-empty">LOADING…</div></div>
       <div class="dm-card">
-        <div class="dm-k">MANAGED RUN <b id="atlasRunState">—</b></div>
+        <div class="dm-k">MANAGED RUN <b id="atlasRunState">-</b></div>
         <div id="atlasRun" class="dm-empty">LOADING…</div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="dm-btn" id="atlasRunFxDaily">RUN FX-DAILY</button>
@@ -4654,8 +4654,8 @@ __probeMark('registered');
   <section class="dmview" id="view-world">
     <div class="dmv-head"><h2>WORLD MONITOR</h2><div class="dmv-sub">WORLD PULSE · SELF-HOSTED KEYLESS FEED · #/world</div></div>
     <div class="wp-hero" id="wpHero">
-      <div class="wp-score"><span class="wp-num" id="wpScore">—</span><span class="wp-lab" id="wpLabel">LOADING</span></div>
-      <div class="wp-meta" id="wpMeta">self-hosted keyless monitor — markets · news · disasters · cyber · conflict · macro</div>
+      <div class="wp-score"><span class="wp-num" id="wpScore">-</span><span class="wp-lab" id="wpLabel">LOADING</span></div>
+      <div class="wp-meta" id="wpMeta">self-hosted keyless monitor · markets · news · disasters · cyber · conflict · macro</div>
       <div class="wp-refresh" id="wpRefresh" title="Refresh">⟳</div>
     </div>
     <div class="wp-chips" id="wpChips"></div>
@@ -4689,7 +4689,7 @@ __probeMark('registered');
     </div>
     <div class="dm-grid">
       <div class="dm-card"><div class="dm-k">NOW PLAYING</div><div id="mediaNow" class="dm-empty">LOADING…</div></div>
-      <div class="dm-card"><div class="dm-k">MY PLAYLISTS — CLICK TO PLAY</div><div id="mediaLists" class="dm-empty">LOADING…</div></div>
+      <div class="dm-card"><div class="dm-k">MY PLAYLISTS · CLICK TO PLAY</div><div id="mediaLists" class="dm-empty">LOADING…</div></div>
     </div>
     <div class="dm-grid">
       <div class="dm-card"><div class="dm-k">RECENTLY PLAYED</div><div id="mediaRecent" class="dm-empty">LOADING…</div></div>
@@ -4730,7 +4730,7 @@ __probeMark('registered');
         <div class="dm-set"><span>ALERTS AUTO-EXPAND</span><span class="dm-toggle" id="prefAlerts"><i></i></span></div>
       </div>
       <div class="dm-card"><div class="dm-k">DATA SCOPE</div><div id="settingsScope" class="dm-empty">LOADING…</div></div>
-      <div class="dm-card"><div class="dm-k">DEVICES</div><div class="dm-empty">Device sessions (pair → revoke → biometrics) ship in Phase R4. Every device reads this one store — pair a phone with <b>python -m dourmouse.mobile_link</b>, open /mobile, and the watchlist / alerts / prefs follow YOUR Google account; signed-out devices share the shared bucket.</div></div>
+      <div class="dm-card"><div class="dm-k">DEVICES</div><div class="dm-empty">Device sessions (pair → revoke → biometrics) ship in Phase R4. Every device reads this one store; pair a phone with <b>python -m dourmouse.mobile_link</b>, open /mobile, and the watchlist / alerts / prefs follow YOUR Google account; signed-out devices share the shared bucket.</div></div>
     </div>
     <div class="dm-grid">
       <div class="dm-card"><div class="dm-k">CAPABILITY CHECKLIST</div><div id="settingsSetup" class="dm-empty">LOADING…</div></div>
@@ -4749,12 +4749,12 @@ __probeMark('registered');
     <div class="dmv-head"><h2>MOTION</h2><div class="dmv-sub">SKIPER EFFECTS · 3D CORE · #/motion</div></div>
     <div class="motion-stack">
       <div class="motion-block">
-        <div class="mb-tag">MODEL 3D — WIREFRAME CORE</div>
+        <div class="mb-tag">MODEL 3D · WIREFRAME CORE</div>
         <div class="mb-title">THE DOURMOUSE CORE</div>
         <div class="globe-wrap"><canvas id="globe3d" aria-hidden="true"></canvas></div>
       </div>
       <div class="motion-block">
-        <div class="mb-tag">EFFECT 1/6 — COUNT-UP</div>
+        <div class="mb-tag">EFFECT 1/6 · COUNT-UP</div>
         <div class="mb-title">ANIMATED NUMBERS · SKIPER 37</div>
         <div class="num-stage">
           <div class="num-big" id="numA" data-target="2146000" data-prefix="$" data-suffix="">$0</div>
@@ -4763,31 +4763,31 @@ __probeMark('registered');
         </div>
       </div>
       <div class="motion-block">
-        <div class="mb-tag">EFFECT 2/6 — HOVER EXPAND</div>
+        <div class="mb-tag">EFFECT 2/6 · HOVER EXPAND</div>
         <div class="mb-title">ACCORDION STACK · SKIPER 53</div>
         <div class="hx-stack" id="hxStack"></div>
       </div>
       <div class="motion-block">
-        <div class="mb-tag">EFFECT 3/6 — CREATIVE CAROUSEL</div>
+        <div class="mb-tag">EFFECT 3/6 · CREATIVE CAROUSEL</div>
         <div class="mb-title">3D FLIP DECK · SKIPER 50</div>
         <div class="cf-stage" id="cfStageCreative"></div>
         <div class="cf-nav" id="cfNavCreative"></div>
       </div>
       <div class="motion-block">
-        <div class="mb-tag">EFFECT 4/6 — COVERFLOW</div>
+        <div class="mb-tag">EFFECT 4/6 · COVERFLOW</div>
         <div class="mb-title">DEPTH FAN · SKIPER 49</div>
         <div class="cf-stage" id="cfStageCover"></div>
         <div class="cf-nav" id="cfNavCover"></div>
       </div>
       <div class="motion-block">
-        <div class="mb-tag">EFFECT 5/6 — PROGRESSIVE BLUR</div>
+        <div class="mb-tag">EFFECT 5/6 · PROGRESSIVE BLUR</div>
         <div class="mb-title">EDGE FADE · SKIPER 41</div>
         <div class="pb-scroll" id="pbScroll"><div class="pb-txt" id="pbTxt"></div></div>
         <div class="pb-edge top"></div>
         <div class="pb-edge bot"></div>
       </div>
       <div class="motion-block">
-        <div class="mb-tag">EFFECT 6/6 — PERSPECTIVE SCROLL</div>
+        <div class="mb-tag">EFFECT 6/6 · PERSPECTIVE SCROLL</div>
         <div class="mb-title">3D TILT TEXT · SKIPER 28</div>
         <div class="p3d-scroll" id="p3dScroll"><div class="p3d-pane"><div class="p3d-txt" id="p3dTxt">DOURMOUSE · ALL SYSTEMS · ONE CORE · ZERO COMPROMISE</div></div></div>
       </div>
@@ -4805,13 +4805,13 @@ __probeMark('registered');
           <div id="brStatus" class="dm-empty" style="border:none">LOADING…</div>
         </div>
         <div class="dm-card" style="margin-top:10px">
-          <div class="dm-k">LATEST SCREENSHOT — WHAT THE AGENT SEES</div>
+          <div class="dm-k">LATEST SCREENSHOT · WHAT THE AGENT SEES</div>
           <div class="br-shot" id="brShotWrap"><img id="brShot" alt="browser screenshot" src="/api/browser/screenshot"></div>
           <div class="br-note" id="brShotNote"></div>
         </div>
         <div class="dm-card" style="margin-top:10px">
           <div class="dm-k">ACTIVITY FEED</div>
-          <div id="brActivity" class="dm-empty" style="border:none">—</div>
+          <div id="brActivity" class="dm-empty" style="border:none">-</div>
         </div>
       </div>
       <div>
@@ -4824,7 +4824,7 @@ __probeMark('registered');
           <div class="br-note" style="margin-top:4px">
             The BROWSER agent drives a real headless Chrome on this Mac to open pages, fill
             forms, sign up for accounts and log in. It reports everything through the task
-            deck — watch the SEARCH/CODE/MAIL tabs when you send a directive. Submitting a
+            deck. Watch the SEARCH/CODE/MAIL tabs when you send a directive. Submitting a
             form, logging in, or storing credentials always asks for your confirmation
             first. Screenshots of the agent's screen land here.
           </div>
@@ -4859,7 +4859,7 @@ __probeMark('registered');
 <!-- command palette (⌘K desktop · ⚡ mobile) -->
 <div id="dmpalette" role="dialog" aria-label="Command palette">
   <div class="dmp-box">
-    <div class="dmp-head"><span class="dmp-k">⌘K</span><input id="dmpInput" placeholder="Type a command — e.g. open atlas" autocomplete="off" spellcheck="false"><span class="dmp-k">ESC</span></div>
+    <div class="dmp-head"><span class="dmp-k">⌘K</span><input id="dmpInput" placeholder="Type a command, e.g. open atlas" autocomplete="off" spellcheck="false"><span class="dmp-k">ESC</span></div>
     <div class="dmp-list" id="dmpList"></div>
   </div>
 </div>
@@ -4975,8 +4975,8 @@ __probeMark('registered');
     if (!el) return;
     el.className = '';
     el.innerHTML = state.me
-      ? `SIGNED IN AS <b>${esc(state.me)}</b> — watchlist, alerts, prefs and resume are YOURS alone. Another Google account on this server sees its own data; shared/system alerts appear for everyone.`
-      : `SHARED SCOPE — nobody is signed in, so every device shares one watchlist / alerts / prefs. <a href="/login" style="color:var(--amber)">SIGN IN WITH GOOGLE</a> to get your own.`;
+      ? `SIGNED IN AS <b>${esc(state.me)}</b>: watchlist, alerts, prefs and resume are YOURS alone. Another Google account on this server sees its own data; shared/system alerts appear for everyone.`
+      : `SHARED SCOPE: nobody is signed in, so every device shares one watchlist / alerts / prefs. <a href="/login" style="color:var(--amber)">SIGN IN WITH GOOGLE</a> to get your own.`;
   }
 
   function renderBadges() {
@@ -5010,7 +5010,7 @@ __probeMark('registered');
     const row = $('mutedRow');
     if (!row) return;
     const muted = state.muted || [];
-    if (!muted.length) { row.className = 'dm-empty'; row.innerHTML = 'NONE — ALL SOURCES ACTIVE'; return; }
+    if (!muted.length) { row.className = 'dm-empty'; row.innerHTML = 'NONE · ALL SOURCES ACTIVE'; return; }
     row.className = '';
     row.innerHTML = muted.map(k =>
       `<span class="dm-row" style="border:none;padding:4px 0"><span class="dm-tag ${esc(k)}">${esc(k.toUpperCase())}</span>` +
@@ -5027,14 +5027,14 @@ __probeMark('registered');
     const suggestions = ['NVDA', 'EURUSD', 'GBPUSD', 'SPY', 'TSLA'].filter(s => !have.has(s));
     const rows = items.map(w =>
       `<div class="dm-row"><button class="dm-star on" data-sym="${esc(w.symbol)}" title="Unstar">★</button>` +
-      `<div class="grow"><div class="n">${esc(w.symbol)}${w.name ? ' — ' + esc(w.name) : ''}</div>` +
+      `<div class="grow"><div class="n">${esc(w.symbol)}${w.name ? ' · ' + esc(w.name) : ''}</div>` +
       `<div class="d">via ${esc(w.source)} · ${esc(w.created)}</div></div></div>`
     ).join('') +
     (suggestions.length ? suggestions.map(s =>
       `<div class="dm-row"><button class="dm-star" data-sym="${s}" title="Star ${s}">☆</button>` +
-      `<div class="grow"><div class="n">${s}</div><div class="d">suggested — star to watch</div></div></div>`
+      `<div class="grow"><div class="n">${s}</div><div class="d">suggested: star to watch</div></div></div>`
     ).join('') : '');
-    if (!items.length && !suggestions.length) { list.className = 'dm-empty'; list.innerHTML = 'NOTHING WATCHED — STAR A SYMBOL BELOW'; return; }
+    if (!items.length && !suggestions.length) { list.className = 'dm-empty'; list.innerHTML = 'NOTHING WATCHED · STAR A SYMBOL BELOW'; return; }
     list.className = '';
     list.innerHTML = rows;
   }
@@ -5056,7 +5056,7 @@ __probeMark('registered');
     if (!other.length) { box.classList.remove('show'); box.innerHTML = ''; return; }
     const last = other[0];
     box.classList.add('show');
-    box.innerHTML = `<div class="dmresume-inner"><div class="t">CONTINUE WHERE YOU LEFT OFF — <b>${esc(last.device)}</b> was at <b>${esc(last.workspace)}</b></div>` +
+    box.innerHTML = `<div class="dmresume-inner"><div class="t">CONTINUE WHERE YOU LEFT OFF: <b>${esc(last.device)}</b> was at <b>${esc(last.workspace)}</b></div>` +
       `<button id="dmResumeGo">CONTINUE</button><button id="dmResumeNo">DISMISS</button></div>`;
     const go = $('dmResumeGo'), no = $('dmResumeNo');
     if (go) go.addEventListener('click', () => { location.hash = last.workspace.startsWith('#') ? last.workspace.slice(1) : last.workspace; });
@@ -5071,7 +5071,7 @@ __probeMark('registered');
 
   async function toggleWatch(symbol, on) {
     const res = await postJSON('/api/state/watchlist', { action: on ? 'add' : 'remove', symbol });
-    if (res.ok) { toast(on ? '★ ' + symbol + ' starred — synced to every device' : '☆ ' + symbol + ' removed'); fetchState(); }
+    if (res.ok) { toast(on ? '★ ' + symbol + ' starred, synced to every device' : '☆ ' + symbol + ' removed'); fetchState(); }
     else if (res.error) toast('✕ ' + res.error);
   }
 
@@ -5097,7 +5097,7 @@ __probeMark('registered');
       runBtn.disabled = true; runBtn.textContent = 'STARTING…';
       const res = await postJSON('/api/atlas/run', { command: 'fx-daily' });
       runBtn.disabled = false; runBtn.textContent = 'RUN FX-DAILY';
-      if (res.ok) toast('fx-daily started — a SYSTEM alert was created');
+      if (res.ok) toast('fx-daily started, a SYSTEM alert was created');
       else toast('✕ ' + (res.error || 'could not start'));
       renderAtlas(); fetchState();
     });
@@ -5153,7 +5153,7 @@ __probeMark('registered');
     const el = $('mediaNow'); if (!el) return;
     try {
       const r = await fetch('/api/spotify'); const d = await r.json();
-      if (!d.configured) { el.className = 'dm-empty'; el.textContent = 'SPOTIFY NOT CONFIGURED — ' + (d.hint || ''); return; }
+      if (!d.configured) { el.className = 'dm-empty'; el.textContent = 'SPOTIFY NOT CONFIGURED: ' + (d.hint || ''); return; }
       el.className = '';
       const np = d.now_playing ? esc(String(d.now_playing).replace(/\n/g, ' ').slice(0, 160)) : 'NOTHING PLAYING';
       el.innerHTML = '<div class="dm-row" style="padding:6px 2px"><span class="g">♪</span><div class="grow"><div class="n">' + np + '</div></div>' +
@@ -5219,7 +5219,7 @@ __probeMark('registered');
       const r = await fetch('/api/atlas');
       const d = await r.json();
       if (!d.configured) {
-        const msg = 'ATLAS NOT CONFIGURED — ' + esc(d.error || '');
+        const msg = 'ATLAS NOT CONFIGURED: ' + esc(d.error || '');
         if (statusEl) statusEl.className = 'dm-empty'; statusEl && (statusEl.innerHTML = msg);
         if (portEl) { portEl.className = 'dm-empty'; portEl.innerHTML = msg; }
         return;
@@ -5228,13 +5228,13 @@ __probeMark('registered');
       // v5.31 — skiper28: feed the perspective tape with real telemetry.
       if (tapeEl) {
         const segs = [
-          ['BRANCH', st.branch || '—'],
-          ['COMMIT', st.last_commit || '—'],
+          ['BRANCH', st.branch || '-'],
+          ['COMMIT', st.last_commit || '-'],
           ['DIRTY', String(st.dirty_files ?? 0)],
           ['SOURCES', String(st.source_files ?? 0)],
           ['TESTS', String(st.test_files ?? 0)],
           ['PAIR-DAYS', String(bs.total_pair_days ?? 0)],
-          ['VERSION', d.version || '—'],
+          ['VERSION', d.version || '-'],
         ];
         const copy = segs.map(s => `<span><b>${esc(s[0])}</b> ${esc(s[1])}</span>`).join('');
         tapeEl.innerHTML = copy + copy; // duplicated for the seamless loop
@@ -5243,7 +5243,7 @@ __probeMark('registered');
         statusEl.innerHTML =
           `<div class="dm-row"><div class="grow"><div class="n">REPO</div><div class="d">${esc(d.repo || '')}</div></div></div>` +
           `<div class="dm-row"><div class="grow"><div class="n">VERSION</div><div class="d">${esc(d.version || '')}</div></div></div>` +
-          `<div class="dm-row"><div class="grow"><div class="n">BRANCH</div><div class="d">${esc(st.branch || '—')} · last: ${esc(st.last_commit || '—')}</div></div></div>` +
+          `<div class="dm-row"><div class="grow"><div class="n">BRANCH</div><div class="d">${esc(st.branch || '-')} · last: ${esc(st.last_commit || '-')}</div></div></div>` +
           `<div class="dm-row"><div class="grow"><div class="n">FILES</div><div class="d"><b class="roll" data-n="${Number(st.source_files) || 0}">0</b> src · <b class="roll" data-n="${Number(st.test_files) || 0}">0</b> tests · <b class="roll" data-n="${Number(st.dirty_files) || 0}">0</b> dirty</div></div></div>`;
         rollNums(statusEl); // skiper37 count-up
       }
@@ -5264,7 +5264,7 @@ __probeMark('registered');
         // and hover/tap expands (the old slice(0,220) truncated forever).
         latestEl.innerHTML = rep && rep.date
           ? `<div class="dm-row"><div class="grow"><div class="n">FX DAILY · ${esc(rep.date)}</div><div class="d exclamp">${esc(rep.summary || rep.headline || 'report written')}</div></div></div>`
-          : `<div class="dm-empty" style="border:none;padding:8px">NO REPORT YET — RUN FX-DAILY</div>`;
+          : `<div class="dm-empty" style="border:none;padding:8px">NO REPORT YET · RUN FX-DAILY</div>`;
       }
       const run = d.last_run || {};
       if (runEl) { runEl.className = '';
@@ -5279,7 +5279,7 @@ __probeMark('registered');
           `<div class="dm-row"><div class="grow"><div class="n">${esc(st.branch || 'ATLAS')} · ${esc(st.last_commit || '')}</div><div class="d">${esc(String(d.version || ''))}</div></div></div>`;
       }
     } catch (e) {
-      if (statusEl) { statusEl.className = 'dm-empty'; statusEl.innerHTML = 'ATLAS UNREACHABLE — RETRY'; }
+      if (statusEl) { statusEl.className = 'dm-empty'; statusEl.innerHTML = 'ATLAS UNREACHABLE · RETRY'; }
     }
   }
 
@@ -5292,12 +5292,12 @@ __probeMark('registered');
       const wm = d.worldmonitor || {};
       if (statusEl) { statusEl.className = '';
         statusEl.innerHTML =
-          `<div class="dm-row"><div class="grow"><div class="n">WORLD MONITOR BRIDGE ${wm.ok ? '— LIVE' : '— NOT CONFIGURED'}</div><div class="d">${esc(wm.detail || '')}</div></div></div>` +
+          `<div class="dm-row"><div class="grow"><div class="n">WORLD MONITOR BRIDGE ${wm.ok ? '(LIVE)' : '(NOT CONFIGURED)'}</div><div class="d">${esc(wm.detail || '')}</div></div></div>` +
           `<div class="dm-row"><div class="grow"><div class="n">FIX-IT</div><div class="d">${esc(wm.hint || '')}</div></div></div>`;
       }
       if (connEl) { connEl.className = '';
         const rows = Object.entries(d).map(([name, v]) =>
-          `<div class="dm-row"><div class="grow"><div class="n">${esc(name.toUpperCase())} ${v && v.ok ? '✓' : '—'}</div><div class="d">${esc((v && (v.detail || v.hint)) || '')}</div></div></div>`
+          `<div class="dm-row"><div class="grow"><div class="n">${esc(name.toUpperCase())} ${v && v.ok ? '✓' : '-'}</div><div class="d">${esc((v && (v.detail || v.hint)) || '')}</div></div></div>`
         ).join('');
         connEl.innerHTML = rows || '<div class="dm-empty" style="border:none;padding:8px">NO CONNECTIONS REPORTED</div>';
       }
@@ -5327,7 +5327,7 @@ __probeMark('registered');
         lists.innerHTML = PULSE_ORDER.map(name => {
           const items = (d.items || {})[name] || [];
           const head = `<div class="dm-k">${name.toUpperCase()}</div>`;
-          if (!items.length) return `<div class="wp-group">${head}<div class="wp-item">— no items (source offline)</div></div>`;
+          if (!items.length) return `<div class="wp-group">${head}<div class="wp-item">(no items, source offline)</div></div>`;
           const rows = items.map(it => {
             const sev = it.severity ? `<span class="wp-sev">[${esc(it.severity)}]</span> ` : '';
             const link = it.link ? `<a href="${esc(it.link)}" target="_blank" rel="noopener">↗</a>` : '';
@@ -5357,7 +5357,7 @@ __probeMark('registered');
       const d = await r.json();
       if (connEl) { connEl.className = '';
         connEl.innerHTML = Object.entries(d).map(([name, v]) =>
-          `<div class="dm-row"><div class="grow"><div class="n">${esc(name.toUpperCase())} ${v && v.ok ? '✓' : '—'}</div><div class="d">${esc((v && v.detail) || '')}</div></div></div>`
+          `<div class="dm-row"><div class="grow"><div class="n">${esc(name.toUpperCase())} ${v && v.ok ? '✓' : '-'}</div><div class="d">${esc((v && v.detail) || '')}</div></div></div>`
         ).join('');
       }
     } catch (e) { /* quiet */ }
@@ -5383,25 +5383,25 @@ __probeMark('registered');
       const rows = [
         `<div class="dm-row"><div class="grow"><div class="n">ENGINE</div><div class="d">${esc(s.engine || '?')}</div></div></div>`,
         `<div class="dm-row"><div class="grow"><div class="n">MODE</div><div class="d">${s.headless ? 'headless (invisible)' : 'visible window'}</div></div></div>`,
-        `<div class="dm-row"><div class="grow"><div class="n">CREDENTIAL VAULT</div><div class="d">${(s.sites && s.sites.length) ? esc(s.sites.join(', ')) : 'empty — stored by the agent on request'}</div></div></div>`,
+        `<div class="dm-row"><div class="grow"><div class="n">CREDENTIAL VAULT</div><div class="d">${(s.sites && s.sites.length) ? esc(s.sites.join(', ')) : 'empty, stored by the agent on request'}</div></div></div>`,
       ];
       if (s.launch_error) rows.push(`<div class="br-note">${esc(s.launch_error)}</div>`);
       const st = $('brStatus');
       st.innerHTML = rows.join(''); st.classList.remove('dm-empty');
       const acts = (s.activity || []).slice().reverse();
       $('brActivity').innerHTML = acts.length
-        ? acts.map(a => `<div class="br-act"><b>${esc((a.kind || '').toUpperCase())}</b> · ${esc((a.at || '').slice(11, 19))} — ${esc(a.text || '')}</div>`).join('')
-        : '— no activity yet — send a directive that uses the browser';
+        ? acts.map(a => `<div class="br-act"><b>${esc((a.kind || '').toUpperCase())}</b> · ${esc((a.at || '').slice(11, 19))}: ${esc(a.text || '')}</div>`).join('')
+        : '(no activity yet, send a directive that uses the browser)';
       const shot = $('brShot');
       if (shot) { shot.src = '/api/browser/screenshot?t=' + Date.now();
-        shot.onerror = () => { const n = $('brShotNote'); if (n) n.textContent = 'no screenshot yet — the agent saves one with browser_screenshot'; }; }
+        shot.onerror = () => { const n = $('brShotNote'); if (n) n.textContent = 'no screenshot yet, the agent saves one with browser_screenshot'; }; }
     } catch (e) { const st = $('brStatus'); if (st) st.innerHTML = 'BROWSER STATUS UNAVAILABLE'; }
     try {
       const m = await (await fetch('/api/email/identity')).json();
       const mailRows = [
-        `<div class="dm-row"><div class="grow"><div class="n">NAME</div><div class="d">${esc(m.name || '—')}</div></div></div>`,
-        `<div class="dm-row"><div class="grow"><div class="n">OWN ADDRESS</div><div class="d">${esc(m.own_address || '—')}</div></div></div>`,
-        `<div class="dm-row"><div class="grow"><div class="n">SENDER MODE</div><div class="d">${esc(m.sender_mode || '—')}</div></div></div>`,
+        `<div class="dm-row"><div class="grow"><div class="n">NAME</div><div class="d">${esc(m.name || '-')}</div></div></div>`,
+        `<div class="dm-row"><div class="grow"><div class="n">OWN ADDRESS</div><div class="d">${esc(m.own_address || '-')}</div></div></div>`,
+        `<div class="dm-row"><div class="grow"><div class="n">SENDER MODE</div><div class="d">${esc(m.sender_mode || '-')}</div></div></div>`,
         ...(m.smtp_identity ? [`<div class="dm-row"><div class="grow"><div class="n">DEDICATED SMTP</div><div class="d">${esc(m.smtp_identity.from)} via ${esc(m.smtp_identity.host)}:${esc(m.smtp_identity.port)}</div></div></div>`] : []),
         ...(m.alias_note ? [`<div class="br-note">${esc(m.alias_note)}</div>`] : []),
       ];
@@ -5465,7 +5465,7 @@ __probeMark('registered');
     if (item.action === 'run-fx-daily') {
       closePalette();
       const res = await postJSON('/api/atlas/run', { command: 'fx-daily' });
-      toast(res.ok ? 'fx-daily started — alert created' : '✕ ' + (res.error || 'failed'));
+      toast(res.ok ? 'fx-daily started, alert created' : '✕ ' + (res.error || 'failed'));
       renderAtlas(); fetchState();
     }
     if (item.action === 'run-fx-refresh') {

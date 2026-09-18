@@ -325,6 +325,25 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       `docs/UI_SOURCE_MAP.md`); the rest are specialized secondary windows (STUDY, ALL_HANDS,
       per-agent windows, the ATLAS lab, a product/marketing page) of lower daily-visibility.
 
+- [x] `index.html` swept (2026-09-18), the top-priority file from the list above -- 257 raw em
+      dashes, 95 genuinely real (product HTML text/attributes and JS strings), 162 pre-existing
+      code comments correctly left untouched. A hand-built tokenizer specific to this sweep (the
+      prior one had its own real bug: nested template-literal `${...}` interpolation desynced a
+      naive backtick-depth-1 quote tracker, both undercounting AND overcounting depending on the
+      file's own structure -- caught by cross-checking against `grep -c` ground truth, which the
+      tokenizer's own output had to match exactly before being trusted). Every genuine placeholder
+      glyph (`'—'` used as "no value yet") replaced with a plain ASCII `-`; every clause-joining
+      sentence rewritten with natural punctuation (period, comma, colon, semicolon), chosen per
+      sentence; every short label-pair (`"EFFECT 1/6 — COUNT-UP"`-shaped) standardized on the
+      middle dot `·` this same file already uses as its own separator convention everywhere else,
+      rather than inventing a new one. Verified two ways beyond the line diff: every affected
+      `<script>` block re-extracted and syntax-checked clean with `node --check` (confirms no
+      broken quote balance from any of the 95 edits), and a live dev-preview render confirmed the
+      real, running app's own header tooltips, textarea placeholder, and a genuine live SSE event
+      (`Freebuff watch offline · app unreachable`) all render the corrected text, not just the
+      static source. Zero existing tests referenced the old text. 17 files remain, `workspace.html`
+      next.
+
 Waits on the frontend audit so the design system replaces real, identified debt rather than
 guessing. Must also surface Phase 2's goals/tasks (chat vs. work distinction from the spec) once
 that exists, so this phase runs after Phase 2 has at least its data model in place.
