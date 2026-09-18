@@ -3702,6 +3702,27 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             ok = schedules_module.Schedules().set_enabled(schedule_id, bool(body.get("enabled")))
             self._send_json({"ok": ok})
+        elif parsed.path == "/api/schedules/update":
+            # 2026-09-18 (Domain C acceptance test 4): "editing a routine's
+            # schedule from the UI actually reschedules the real underlying
+            # job." Schedules.update_spec re-parses schedule_text through
+            # the exact same parse_schedule() the create path already
+            # validates with -- an honest ValueError (bad text, or no such
+            # schedule) becomes a clean 400, never a raw 500.
+            from dourmouse import schedules as schedules_module
+
+            body = self._read_json_body()
+            schedule_id = str(body.get("id") or "").strip()
+            schedule_text = str(body.get("schedule_text") or "").strip()
+            if not schedule_id or not schedule_text:
+                self._send_json({"ok": False, "error": "id and schedule_text are required"}, status=400)
+                return
+            try:
+                updated = schedules_module.Schedules().update_spec(schedule_id, schedule_text)
+            except ValueError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self._send_json({"ok": True, "schedule": updated})
         elif parsed.path == "/api/schedules/remove":
             # 2026-09-18: the TIMETABLE screen's DELETE action -- a thin
             # route over Schedules.remove, already existed, already used

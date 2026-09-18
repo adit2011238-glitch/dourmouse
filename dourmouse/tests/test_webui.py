@@ -843,6 +843,61 @@ class TestSchedulesEndpoints:
         assert resp.status == 400
         conn.close()
 
+    def test_update_over_real_http_reschedules_the_real_job(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.schedules import Schedules
+
+        store = Schedules()
+        entry = store.add("gmail_search", {"query": "receipt"}, {
+            "kind": "weekday", "time": "09:00", "weekday": 0,
+        }, "every Monday at 9:00")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/schedules/update",
+            body=json.dumps({"id": entry["id"], "schedule_text": "every Friday at 17:00"}),
+            headers={"Content-Type": "application/json"},
+        )
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data["ok"] is True
+        assert data["schedule"]["schedule_text"] == "every Friday at 17:00"
+        assert store.list()[0]["schedule_text"] == "every Friday at 17:00"
+        assert store.list()[0]["tool"] == "gmail_search"  # untouched
+
+    def test_update_an_unparseable_schedule_is_a_real_400_not_a_silent_no_op(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.schedules import Schedules
+
+        store = Schedules()
+        entry = store.add("list_tasks", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/schedules/update",
+            body=json.dumps({"id": entry["id"], "schedule_text": "sometimes, whenever"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert resp.status == 400
+        assert data["ok"] is False
+        assert store.list()[0]["schedule_text"] == "every 60 minutes"  # untouched by the rejected edit
+
+    def test_update_missing_fields_is_a_real_400(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/schedules/update",
+            body=json.dumps({"schedule_text": "daily at 9:00"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 400
+        conn.close()
+
     def test_remove_deletes_a_real_schedule(self, server, monkeypatch, tmp_path):
         self._isolate(monkeypatch, tmp_path)
         from dourmouse.schedules import Schedules

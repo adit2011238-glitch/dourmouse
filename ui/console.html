@@ -6915,9 +6915,25 @@ function scheduleRowHtml(e){
     </div>
     <div style="display:flex;gap:6px;align-self:flex-start">
       <button class="btn" data-toggle-schedule="${esc(e.id)}" data-enable="${paused ? "1" : "0"}" style="min-height:auto;padding:4px 9px;font-size:8.5px">${paused ? "RESUME" : "PAUSE"}</button>
+      <button class="btn" data-edit-schedule="${esc(e.id)}" data-current-text="${esc(e.schedule_text || "")}" style="min-height:auto;padding:4px 9px;font-size:8.5px">EDIT</button>
       <button class="btn" data-remove-schedule="${esc(e.id)}" style="min-height:auto;padding:4px 9px;font-size:8.5px">DELETE</button>
     </div>
   </div>`;
+}
+async function editSchedule(id, currentText){
+  const next = prompt(
+    "New schedule (\"every Monday at 9:00\", \"daily at 8:30\", \"every 30 minutes\", \"weekly\"). "
+    + "What this routine DOES stays the same -- only WHEN it runs changes.",
+    currentText,
+  );
+  if(next === null || next.trim() === "" || next === currentText) return;
+  try{
+    const r = await fetch("/api/schedules/update", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id, schedule_text: next})});
+    const j = await r.json();
+    if(!r.ok || j.ok===false){ alert("Couldn't reschedule: " + (j.error || "unknown error")); return; }
+  }catch{ alert("Couldn't reach the server to reschedule this."); return; }
+  await loadSchedules();
 }
 function paintSchedules(){
   const box = $("timetableBody");
@@ -6934,6 +6950,9 @@ function paintSchedules(){
     el.onclick = () => toggleSchedule(el.dataset.toggleSchedule, el.dataset.enable === "1");
   });
   box.querySelectorAll("[data-remove-schedule]").forEach(el => { el.onclick = () => removeSchedule(el.dataset.removeSchedule); });
+  box.querySelectorAll("[data-edit-schedule]").forEach(el => {
+    el.onclick = () => editSchedule(el.dataset.editSchedule, el.dataset.currentText);
+  });
 }
 loadSchedules();
 setInterval(() => { if(screen === "TIMETABLE") loadSchedules(); }, 4000);

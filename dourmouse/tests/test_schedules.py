@@ -282,6 +282,50 @@ class TestStore:
         store = schedules.Schedules(tmp_path / "schedules.jsonl")
         assert store.set_enabled("no-such-schedule", False) is False
 
+    def test_update_spec_reschedules_the_real_underlying_job(self, tmp_path):
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        e = store.add("gmail_search", {"query": "receipt"}, {
+            "kind": "weekday", "time": "09:00", "weekday": 0,
+        }, "every Monday at 9:00")
+        updated = store.update_spec(e["id"], "every Friday at 17:00")
+        assert updated["schedule_text"] == "every Friday at 17:00"
+        assert updated["spec"]["weekday"] == 4
+        assert updated["spec"]["time"] == "17:00"
+        reloaded = store.list()[0]
+        assert reloaded["schedule_text"] == "every Friday at 17:00"
+
+    def test_update_spec_never_touches_the_tool_or_its_arguments(self, tmp_path):
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        e = store.add("gmail_search", {"query": "receipt"}, {
+            "kind": "weekday", "time": "09:00", "weekday": 0,
+        }, "every Monday at 9:00")
+        updated = store.update_spec(e["id"], "daily at 8:00")
+        assert updated["tool"] == "gmail_search"
+        assert updated["arguments"] == {"query": "receipt"}
+        assert updated["id"] == e["id"]
+
+    def test_update_spec_preserves_enabled_and_last_run_history(self, tmp_path):
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        e = store.add("list_tasks", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+        store.mark_run(e["id"])
+        store.set_enabled(e["id"], False)
+        updated = store.update_spec(e["id"], "daily at 8:00")
+        assert updated["enabled"] is False
+        assert updated["last_run"] is not None
+
+    def test_update_spec_rejects_an_unparseable_schedule_with_an_honest_reason(self, tmp_path):
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        e = store.add("list_tasks", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+        with pytest.raises(ValueError):
+            store.update_spec(e["id"], "sometimes, whenever")
+        # the original schedule survives a rejected edit untouched
+        assert store.list()[0]["schedule_text"] == "every 60 minutes"
+
+    def test_update_spec_on_an_unknown_id_raises(self, tmp_path):
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        with pytest.raises(ValueError):
+            store.update_spec("no-such-schedule", "daily at 9:00")
+
 
 class TestRosterTools:
     def test_schedule_recurring_validates_tool(self, tmp_path, monkeypatch):

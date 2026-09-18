@@ -1153,6 +1153,51 @@ full suite.
 **Result**: fixed -- acceptance test 7 closed, live-verified against the real dev-preview server
 with a real gated tool call, a real decline, a real human approval click, and a real resume.
 
+### 030 -- Schedule editing, the real remaining half of Domain C (acceptance test 4)
+
+**Severity**: n/a (feature completion -- the single named remaining gap in Domain C after finding
+#027 closed the rest of it).
+**Context**: `Schedules` (`schedules.py`) had `add`/`list`/`remove`/`mark_run`/`set_enabled` but no
+way to change an existing schedule at all -- deleting and recreating loses the entry's id,
+`last_run` history, and enabled/paused state, which is not the same thing as editing it.
+**Design**: `Schedules.update_spec(schedule_id, schedule_text)`, deliberately scoped to WHEN a
+routine runs, never WHAT it does. Re-parses `schedule_text` through the exact same
+`parse_schedule()` the create path already validates with -- the same real honesty guarantee, no
+double standard for an edit -- and replaces only `spec`/`schedule_text`, leaving
+`id`/`tool`/`arguments`/`created_at`/`last_run`/`enabled` untouched. A rejected edit (unparseable
+text) raises the same `ValueError` `parse_schedule` already raises for the create path, and the
+original schedule survives completely untouched -- never partially applied. Editing the tool or
+its own arguments would need the same validation the create path already does (must resolve to a
+real, existing, `REGULAR`-tier tool) -- deliberately not bundled into this one method, so a
+schedule's identity and history are never at risk from a bad edit to something unrelated.
+**A real bug caught before it ever ran, not live**: the new `/api/schedules/update` route's first
+version referenced `schedules_module` without importing it in its own branch -- the exact same
+Python function-scoping trap finding #029 already caught for `get_goal_store` (`do_POST` is one
+large function; a name imported anywhere in it becomes local to the WHOLE function, even though
+only one branch executes per request). Caught by pattern-matching the earlier finding rather than
+waiting to hit the same `UnboundLocalError` again at runtime -- fixed with the same local import
+every other branch in `do_POST` already independently carries.
+**Live proof, against the real dev-preview server**: a real schedule (`every Monday at 9:00`) was
+created directly in the live store. A real click on the real TIMETABLE screen's new EDIT button
+(a `prompt()` pre-filled with the schedule's own current text, honest about scope: "what this
+routine DOES stays the same, only WHEN it runs changes") changed it to `every Friday at 17:00`.
+Confirmed by a direct backend read, not just the UI: `spec.weekday` moved from `0` to `4`,
+`next_run` recomputed correctly to the following Friday, and `tool`/`arguments` were provably
+untouched.
+**Files changed**: `dourmouse/schedules.py` (`update_spec`), `dourmouse/webui.py`
+(`POST /api/schedules/update`), `ui/console.html` (EDIT button on a schedule row),
+`dourmouse/tests/test_schedules.py` (5 tests), `dourmouse/tests/test_webui.py` (3 tests).
+**Tests added**: 8 new, spanning the store method (reschedules the real job; never touches
+tool/arguments; preserves enabled/last_run history; an unparseable edit is rejected with the
+original untouched; an unknown id raises) and the full HTTP route (reschedules for real over
+HTTP; an unparseable edit is a real 400 with the original untouched, not a silent no-op; missing
+fields is a real 400).
+**Tests run**: `test_schedules.py` + `test_webui.py` + `test_general_roster.py` together
+(357/357), then full suite.
+**Result**: fixed -- Domain C fully closed. All 4 acceptance tests now real: creation (finding
+#027), survival across restart and honest catch-up (both pre-existing, already tested), and now
+editing.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

@@ -268,6 +268,37 @@ class Schedules:
             self._save(entries)
         return changed
 
+    def update_spec(self, schedule_id: str, schedule_text: str) -> dict[str, Any]:
+        """Domain C acceptance test 4 (2026-09-18): "editing a routine's
+        schedule from the UI actually reschedules the real underlying
+        job" -- the deliberately scoped edit this ships. Changes WHEN a
+        routine runs, never WHAT it does: re-parses schedule_text through
+        the exact same parse_schedule() the create path already uses and
+        already validates, and replaces only spec/schedule_text, keeping
+        id/tool/arguments/created_at/last_run/enabled untouched. Editing
+        the tool or its arguments would need the same validation the
+        create path already does (a real, existing, REGULAR-tier tool) --
+        real, separate, deliberately not bundled into this one method so
+        a schedule's own identity and history are never at risk of being
+        silently replaced by a bad edit to something else entirely.
+
+        Raises ValueError with the parser's own honest message on an
+        unparseable schedule_text -- the SAME real validation the create
+        path already gets, no double standard for an edit."""
+        spec = parse_schedule(schedule_text)  # raises ValueError with an honest reason
+        entries = self._load()
+        updated: dict[str, Any] | None = None
+        for e in entries:
+            if e.get("id") == schedule_id:
+                e["spec"] = spec
+                e["schedule_text"] = schedule_text
+                updated = e
+                break
+        if updated is None:
+            raise ValueError(f"no such schedule: {schedule_id}")
+        self._save(entries)
+        return updated
+
 
 class SchedulerRunner:
     """Background thread that runs user schedules when they come due.

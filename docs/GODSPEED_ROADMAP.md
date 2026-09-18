@@ -343,12 +343,14 @@ that exists, so this phase runs after Phase 2 has at least its data model in pla
 - [x] A real, user-facing scheduling/timetable UI over the existing `scheduler_runner` primitive
       (new, explicit user ask -- see `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain C): the
       TIMETABLE screen (finding #027), a visible list of every scheduled routine, next-run time,
-      last-run time, and pause/resume/delete. Live-verified: a real chat message created a real
-      schedule through the real `schedule_recurring` tool and the real, currently configured
-      Ollama Cloud backend, then paused/resumed/deleted over real browser clicks. Deliberately no
-      creation form (natural language through any chat composer already does this for real) and
-      no edit action yet (no `update()` method on the store -- real, separate, not-yet-done work,
-      the largest remaining item in this domain).
+      last-run time, and pause/resume/edit/delete (edit: finding #030, `Schedules.update_spec`,
+      deliberately scoped to WHEN a routine runs, never WHAT it does). Live-verified: a real chat
+      message created a real schedule through the real `schedule_recurring` tool and the real,
+      currently configured Ollama Cloud backend, then paused/resumed/edited/deleted over real
+      browser clicks, edit confirmed by a direct backend read (Monday -> Friday, `tool`/
+      `arguments` untouched). Deliberately no creation form (natural language through any chat
+      composer already does this for real). Domain C is now fully closed -- all 4 acceptance
+      tests real.
 - [ ] Real data only — every widget has loading/empty/stale/error states, nothing fabricated.
 
 ## Phase 4 — Defensive cybersecurity subsystem

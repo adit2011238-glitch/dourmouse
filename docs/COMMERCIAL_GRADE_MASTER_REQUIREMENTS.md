@@ -205,7 +205,8 @@ The founding spec already specifies routines (Skill = HOW, Routine = WHEN) and a
 scheduler supporting one-time, daily/weekly/monthly, cron-like, and event-based triggers
 (file-created, email-received, calendar-event, webhook). `scheduler_runner` already exists in the
 codebase per this session's own shutdown-cleanup fix (finding #007) -- meaning the backend
-primitive exists. **Status, updated 2026-09-18 (finding #027)**: the timetable UI is now real --
+primitive exists. **Status, updated 2026-09-18 (findings #027, #030) -- CLOSED, all 4 acceptance
+tests real**. The timetable UI is now real --
 `ui/console.html`'s TIMETABLE screen, backed by 3 new routes (`GET /api/schedules`, `POST
 /api/schedules/toggle`, `POST /api/schedules/remove`) over the pre-existing, already-tested
 `Schedules` store. Pause/resume is a genuinely new store capability (`set_enabled`), proven live
@@ -227,10 +228,14 @@ that's already real and already tested.
 3. A missed run (app was closed at trigger time) is either caught up honestly or logged as missed
    -- never silently pretended to have happened. Already true and already tested
    (`test_catch_up_runs_once_after_missed_window`), pre-existing.
-4. Editing a routine's schedule from the UI actually reschedules the real underlying job. **Not
-   built**: no `update()` method exists on the store; faking "edit" as delete-then-recreate would
-   silently lose the entry's id and `last_run` history. Real, separate, not-yet-done work -- the
-   single largest remaining item in this domain.
+4. Editing a routine's schedule from the UI actually reschedules the real underlying job.
+   **Closed** (finding #030): `Schedules.update_spec` re-parses the schedule text through the
+   exact same `parse_schedule()` the create path already validates with, deliberately scoped to
+   WHEN a routine runs, never WHAT it does -- the entry's id, `last_run` history, and
+   enabled/paused state all survive an edit untouched, unlike a delete-then-recreate. Live-
+   verified: a real EDIT click rescheduled a real routine from Monday to Friday, confirmed by a
+   direct backend read (`spec.weekday` 0 -> 4, `next_run` recomputed correctly, `tool`/`arguments`
+   provably untouched).
 
 ## 6. Domain D — Self-extension (Dourmouse adds agents/tools/scope to itself)
 
