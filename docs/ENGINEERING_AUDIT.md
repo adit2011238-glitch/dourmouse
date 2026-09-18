@@ -865,6 +865,53 @@ existing tests fixed to account for the new call.
 dev-preview server as described above.
 **Result**: fixed — acceptance test 11 closed.
 
+### 026 -- The GOALS screen: the autonomous runtime finally has a UI (acceptance test 15)
+
+**Severity**: n/a (feature completion -- the single largest UI gap in the whole product).
+**Context**: findings #023-#025 hardened the Goal/Task runtime's real behavior (default-on
+autonomy, crash recovery, independent verification), but every one of those findings was verified
+through the API and the database directly. Before doing any UI work, every `ui/*.html` file was
+grepped for `/api/goals` and `/api/audit` -- zero matches, in any file. The headline autonomous
+feature of this whole product had no UI surface at all: a user could create a goal from chat and
+it would genuinely run forever in the background, and there was no way to see it, its tasks, or
+what it had actually done without calling the API by hand.
+**Design**: a new GOALS screen in `ui/console.html`, following the exact same `SCREENS`/`show()`/
+`pane-<name>` pattern every other screen in this console already uses (no new navigation idiom
+invented). Polled every 4 seconds while the screen is the active one, not pushed over the shared
+`/api/events` SSE stream ORCHESTRATION's live agent feed uses -- the goal runtime has no event-sink
+wiring into that stream today, and adding one is real, separate runtime-layer work, stated plainly
+as a deliberate scope line, not silently skipped. Shows every goal (status, priority, blocked
+reason), a live cross-goal audit trail (finding #022, now also carrying finding #025's
+`verification` events), and lets a task list be expanded per goal on demand (lazy-fetched via
+`GET /api/goals?id=`, not bundled into the list poll, so an active session with many goals never
+pays for task data it isn't looking at).
+**The runtime's first real write action**: a CANCEL button on every non-terminal goal, backed by
+a new `POST /api/goals/cancel` route in `webui.py`. Deliberately a thin route, not new logic:
+`GoalStore.cancel_goal` already existed and was already tested (`test_goals.py`) -- safe against a
+task mid-flight, since the worker checks goal status before starting any task. A resumable
+per-task APPROVAL action (acceptance test 7's real remaining gap) was deliberately NOT added here
+-- it needs real runtime-side design (when should a `WAITING_FOR_APPROVAL` task actually resume,
+how does the worker recheck it) that a thin route over existing logic can't honestly provide;
+tracked separately, not smuggled in under this UI pass.
+**Live proof, not just passing tests**: against the real, unmodified dev-preview server (a fresh
+isolated `.dev-preview-workspace`, `DOURMOUSE_UI_PORT=18765` -- the established test port, kept
+well clear of the real desktop deployment's own port per the standing caution in
+`docs/GODSPEED_ROADMAP.md`), two real goals were created directly in the live database and
+watched end to end through real browser clicks: the goal list rendered correctly (6 goals total,
+2 active, matching real leftover state from finding #025's own earlier live-verification runs in
+the same workspace); clicking a goal's title expanded its real task list; clicking CANCEL on
+"A goal nobody has touched yet." genuinely cancelled it (confirmed via a direct backend read, not
+just a UI read) -- the active count dropped from 2 to 1, the goal moved into FINISHED as
+`CANCELLED`, and a real `goal_status_changed` event appeared at the top of the live audit trail.
+**Result**: fixed -- acceptance test 15 closed end to end (data, API, and now UI).
+**Files changed**: `dourmouse/webui.py` (`POST /api/goals/cancel`), `ui/console.html` (GOALS
+screen), `dourmouse/tests/test_webui.py` (`TestGoalsCancelEndpoint`, 4 tests).
+**Tests added**: a real goal cancelled end to end over real HTTP; a missing `id` is a real 400,
+not a silent no-op; an unknown goal id reports `{"ok": false}`, not an error; an already-terminal
+goal cannot be "uncancelled" by this route.
+**Tests run**: `test_webui.py -k "TestGoalsCancelEndpoint or TestAuditEndpoint or
+TestGoalRuntimeWiring"` (10/10), then full suite.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

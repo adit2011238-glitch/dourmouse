@@ -3611,6 +3611,24 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/state/workspace":
             # v5.14 Phase R0: record where THIS device left off (resume).
             self._handle_state_workspace()
+        elif parsed.path == "/api/goals/cancel":
+            # 2026-09-18: the GOALS screen (console.html) is the first real
+            # write action on the Goal/Task runtime exposed over HTTP --
+            # /api/goals (finding, docs/GODSPEED_ROADMAP.md Phase 2) was
+            # read-only on purpose, deferring write endpoints until real UI
+            # needed them. cancel_goal (goals.py) already existed, already
+            # tested (test_goals.py), and is safe against a task mid-flight
+            # (the worker checks goal status before starting any task) --
+            # this route is a thin, direct call to it, not new logic.
+            from dourmouse.goals import get_goal_store
+
+            body = self._read_json_body()
+            goal_id = str(body.get("id") or "").strip()
+            if not goal_id:
+                self._send_json({"ok": False, "error": "id is required"}, status=400)
+                return
+            ok = get_goal_store().cancel_goal(goal_id)
+            self._send_json({"ok": ok})
         else:
             self.send_error(404, "not found")
 

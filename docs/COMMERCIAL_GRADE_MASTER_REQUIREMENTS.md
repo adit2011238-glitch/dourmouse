@@ -177,10 +177,17 @@ dispatch calls instead of one. Not yet built: a deterministic check against expl
 per-task success criteria (no such schema field exists on a task yet) — the reasoning-pass
 verifier closes the more urgent half; a richer criteria-based check remains real, separate,
 not-yet-done follow-on work, now the largest remaining item in this domain. Test 15 (inspect what
-the agent actually did) is real at the data and API level — `goal_events`/`all_events`/
-`export_events_markdown` + `GET /api/audit` (finding #022) — but still not closed end to end: no
-UI surface exists yet, so a real user still cannot see this without calling the API directly.
-Backend done, UI tracked as Phase 3 follow-on.
+the agent actually did) **closed** (finding #026): the GOALS screen (`ui/console.html`) is a real,
+live-verified UI over `goal_events`/`all_events`/`export_events_markdown` + `GET /api/audit`
+(finding #022) -- every goal, expandable per-goal task lists on demand, and the real cross-goal
+audit trail, polled every 4s while the screen is open. Before this, a user could create a goal
+that ran forever in the background and had zero way to see it without calling the API by hand --
+confirmed by grepping every UI file in the product for `/api/goals` or `/api/audit` before
+starting this work and finding not one reference anywhere. Also the runtime's first real write
+action: a CANCEL button per active goal, a thin route over the already-tested `cancel_goal`.
+Live-verified end to end against the real dev-preview server: list, expand-to-tasks, cancel, and
+the resulting audit-trail entry all confirmed with real clicks and a real backend read, not just
+passing tests.
 
 **Harsh pessimism check**: a reviewer should be allowed to say "prove it" for every single one of
 the 20 — a live demo, not a code pointer, for each.

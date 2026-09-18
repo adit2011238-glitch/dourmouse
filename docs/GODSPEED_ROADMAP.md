@@ -205,7 +205,8 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       (`goal_events`, auto-logged by every goal/task lifecycle method plus real tool_call/
       tool_result/recovery_attempted logging in `goal_runtime.py`) — the actual gap was narrowly
       "no cross-goal query, no human-readable export, no UI surface." First two closed; the UI
-      surface is tracked below under Phase 3. Real bug caught by the new tests before shipping:
+      surface (the GOALS screen) followed later this same phase -- see finding #026 below. Real
+      bug caught by the new tests before shipping:
       `since` was first treated as a Unix float, but `goal_events.at` is a real ISO-8601 string
       throughout this module — fixed end to end rather than converting types at a boundary. See
       `docs/ENGINEERING_AUDIT.md` finding #022.
@@ -226,6 +227,17 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       check against explicit, structured per-task success criteria (no such schema field exists
       yet) is real, separate follow-on — the reasoning-pass verifier closes the more urgent half.
       See `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain B for the full per-test status.
+- [x] Test 15 UI surface (the GOALS screen, `ui/console.html`): before this, no UI file in the
+      whole product referenced `/api/goals` or `/api/audit` -- confirmed by grep, not assumed -- so
+      the autonomous runtime that findings #023-#025 had just hardened was invisible; a goal could
+      run forever in the background with no way to see it short of calling the API by hand. Now: a
+      live goal list (status, priority, blocked reason), tasks expandable per goal on demand, the
+      real cross-goal audit trail, and the runtime's first real write action (CANCEL, a thin route
+      over the already-tested `cancel_goal`). Polled every 4s while the screen is open, not pushed
+      over the shared SSE stream ORCHESTRATION uses -- the runtime has no event-sink wiring into
+      that stream today, real separate follow-on if ever needed. Live-verified against the real
+      dev-preview server with real clicks: list, expand, cancel, and the resulting audit entry all
+      confirmed, not just passing tests. See `docs/ENGINEERING_AUDIT.md` finding #026.
 
 ## Phase 3 — UI/UX redesign (Claude Desktop / Claude Code interaction quality)
 

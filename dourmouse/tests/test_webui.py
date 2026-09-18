@@ -605,6 +605,83 @@ class TestAuditEndpoint:
         conn.close()
 
 
+class TestGoalsCancelEndpoint:
+    """POST /api/goals/cancel (2026-09-18) -- the GOALS screen's one write
+    action (ui/console.html), a thin route over goals.GoalStore.cancel_goal,
+    already tested in test_goals.py. See docs/ENGINEERING_AUDIT.md finding
+    #026."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_goal_store(self):
+        from dourmouse.goals import GoalStore, set_goal_store
+
+        set_goal_store(GoalStore(None))
+        yield
+        set_goal_store(None)
+
+    def test_cancels_a_real_goal(self, server):
+        from dourmouse.goals import get_goal_store
+
+        store = get_goal_store()
+        goal = store.create_goal("Do the thing")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/goals/cancel",
+            body=json.dumps({"id": goal["id"]}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert data == {"ok": True}
+        assert store.get_goal(goal["id"])["status"] == "CANCELLED"
+
+    def test_missing_id_is_a_real_400_not_a_silent_no_op(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/goals/cancel",
+            body=json.dumps({}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 400
+        conn.close()
+
+    def test_unknown_goal_id_reports_false_not_an_error(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/goals/cancel",
+            body=json.dumps({"id": "no-such-goal"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert resp.status == 200
+        assert data == {"ok": False}
+
+    def test_an_already_completed_goal_cannot_be_uncancelled_by_this_route(self, server):
+        from dourmouse.goals import get_goal_store
+
+        store = get_goal_store()
+        goal = store.create_goal("Already done")
+        store.update_goal_status(goal["id"], "COMPLETED")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/goals/cancel",
+            body=json.dumps({"id": goal["id"]}),
+            headers={"Content-Type": "application/json"},
+        )
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data == {"ok": False}
+        assert store.get_goal(goal["id"])["status"] == "COMPLETED"
+
+
 class TestSpotifyWidgetInjection:
     """v13.x backlog item 8: the floating widget is injected at serve time
     (dourmouse/webui.py::_serve_static) onto every screen EXCEPT the

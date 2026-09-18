@@ -1400,6 +1400,8 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
          beyond the one-time initial snapshot. -->
     <section class="pane" id="pane-orchestration"><div class="panehead">◆ ORCHESTRATION · LIVE AGENT STREAM</div>
       <div class="panebody" id="orchestrationBody"></div></section>
+    <section class="pane" id="pane-goals"><div class="panehead">◆ GOALS · AUTONOMOUS RUNTIME</div>
+      <div class="panebody" id="goalsBody"></div></section>
 
     <section class="pane" id="pane-news"><div class="panehead">◆ NEWS · LIVE FEED</div>
       <div class="panebody" id="newsBody"></div>
@@ -1480,7 +1482,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
-const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION"];
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS"];
 // v8.29: screens whose composer submissions get their OWN independent
 // thread (a real per-screen conversation, not a shared feed forced onto
 // COMMS). COMMS is deliberately absent — it's a real Gmail inbox now, not
@@ -1786,6 +1788,7 @@ function show(name){
   if(name==="ATLAS") paintAtlas();
   if(name==="GLOBE") paintGlobe();
   if(name==="ORCHESTRATION") paintOrchestration();
+  if(name==="GOALS") loadGoals();
   if(name==="NEWS") paintNews();
   if(name==="DESIGN3D") paintDesign3d();
   if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
@@ -6670,6 +6673,137 @@ async function loadOrchestrationSnapshot(){
   }catch{}
 }
 loadOrchestrationSnapshot();
+
+// 2026-09-18: the GOALS screen -- the autonomous Goal/Task runtime
+// (goal_runtime.py, goals.py) had real, tested, live-verified backend
+// behavior (default-on autonomy, crash recovery, independent verification
+// -- docs/ENGINEERING_AUDIT.md findings #023-#025) and precisely zero UI
+// surface: no screen anywhere referenced /api/goals or /api/audit. A user
+// could create a goal and it would genuinely run forever in the
+// background, completely invisibly. This closes that gap: a live view of
+// every goal, its tasks on demand, and the real cross-goal audit trail
+// (finding #022), plus the one write action already safe to expose
+// (cancel_goal, already tested in test_goals.py).
+//
+// Polled every 4s while this screen is the active one, NOT pushed over
+// the shared /api/events SSE stream the way ORCHESTRATION's agent feed
+// is -- the runtime has no event-sink wiring into that stream today, and
+// adding one is real, separate runtime-layer work, not a UI concern.
+// Same accepted tradeoff as every other polled panel in this console
+// (refreshUsageBar, connection status).
+
+// mirrors goals.py's GOAL_ACTIVE_STATES / GOAL_TERMINAL_STATES -- no
+// shared schema between the Python store and this console, same as
+// every other state enum already re-listed on this side (see
+// SCREEN_LABELS etc.) -- keep these in sync by hand if goals.py's own
+// frozensets ever change.
+const GOAL_ACTIVE_STATES_JS = new Set(["PLANNING","READY","EXECUTING","VERIFYING","RECOVERING","REPLANNING"]);
+const GOAL_TERMINAL_STATES_JS = new Set(["COMPLETED","FAILED","CANCELLED","EXPIRED"]);
+let _goals = [];
+let _goalAudit = [];
+let _goalExpanded = {};  // goal_id -> tasks[], lazy-fetched on first expand
+
+function goalStatusDot(status){
+  if(GOAL_ACTIVE_STATES_JS.has(status)) return '<span class="dot" style="background:var(--ok);animation:pulse 1.2s ease-in-out infinite"></span>';
+  if(status === "FAILED") return '<span class="dot no"></span>';
+  if(status === "WAITING_FOR_APPROVAL" || status === "WAITING_FOR_AUTHENTICATION" || status === "BLOCKED") return '<span class="dot" style="background:var(--warn)"></span>';
+  return '<span class="dot"></span>';
+}
+function taskStatusDot(status){
+  if(status === "FAILED") return '<span class="dot no"></span>';
+  if(status === "RUNNING" || status === "VERIFYING" || status === "RETRYING") return '<span class="dot" style="background:var(--ok);animation:pulse 1.2s ease-in-out infinite"></span>';
+  if(status === "WAITING_FOR_APPROVAL" || status === "BLOCKED") return '<span class="dot" style="background:var(--warn)"></span>';
+  return '<span class="dot"></span>';
+}
+function describeAuditEvent(e){
+  const d = e.detail || {};
+  switch(e.type){
+    case "goal_created": return `Goal created: ${d.objective || ""}`;
+    case "goal_status_changed": return `Goal -> ${d.status || "?"}${d.blocked_reason ? " (" + d.blocked_reason + ")" : ""}`;
+    case "task_created": return `Task added: ${d.description || ""}`;
+    case "task_status_changed": return `Task -> ${d.status || "?"}${d.error ? " (" + d.error + ")" : ""}`;
+    case "verification": return `Verification: ${d.verified ? "VERIFIED" : "NOT VERIFIED"}${d.error ? " (verifier error: " + d.error + ")" : ""}`;
+    case "recovery_attempted": return `Recovery attempted${d.reason ? ": " + d.reason : (d.attempt != null ? " (attempt " + d.attempt + ")" : "")}`;
+    case "tool_call": return `Called ${d.name || "a tool"}`;
+    case "tool_result": return `Result from ${d.name || "a tool"}`;
+    case "note": return d.error ? `Note: ${d.error}` : "Note";
+    default: return e.type;
+  }
+}
+async function loadGoals(){
+  try{
+    const [gRes, aRes] = await Promise.all([fetch("/api/goals"), fetch("/api/audit?limit=40")]);
+    const gJson = await gRes.json(), aJson = await aRes.json();
+    _goals = gJson.goals || [];
+    _goalAudit = aJson.events || [];
+  }catch{}
+  if(screen === "GOALS") paintGoals();
+}
+async function toggleGoalExpand(goalId){
+  if(_goalExpanded[goalId]){ delete _goalExpanded[goalId]; paintGoals(); return; }
+  try{
+    const r = await fetch("/api/goals?id=" + encodeURIComponent(goalId));
+    const j = await r.json();
+    _goalExpanded[goalId] = (j.goal && j.goal.tasks) || [];
+  }catch{ _goalExpanded[goalId] = []; }
+  paintGoals();
+}
+async function cancelGoal(goalId){
+  if(!confirm("Cancel this goal? Every task still in progress stops for good.")) return;
+  try{
+    const r = await fetch("/api/goals/cancel", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id: goalId})});
+    const j = await r.json();
+    if(!r.ok || j.ok===false){ alert("Couldn't cancel this goal."); return; }
+  }catch{ alert("Couldn't cancel this goal."); return; }
+  await loadGoals();
+}
+function taskRowHtml(t){
+  return `<div class="row" style="padding-left:16px">
+    ${taskStatusDot(t.status)}
+    <div class="g">
+      <div class="n">${esc(t.description)} <span style="color:var(--blue-deep);font-weight:normal">· ${esc(t.status)}</span></div>
+      ${t.last_error ? `<div class="d">${esc(t.last_error)}</div>` : ""}
+    </div>
+  </div>`;
+}
+function goalRowHtml(g){
+  const expanded = _goalExpanded[g.id];
+  const canCancel = !GOAL_TERMINAL_STATES_JS.has(g.status);
+  return `<div class="row">
+    ${goalStatusDot(g.status)}
+    <div class="g">
+      <div class="n" style="cursor:pointer" data-toggle-goal="${esc(g.id)}">${esc(g.objective)} <span style="color:var(--blue-deep);font-weight:normal">· ${esc(g.status)} · ${esc(g.priority)}</span></div>
+      ${g.blocked_reason ? `<div class="d">${esc(g.blocked_reason)}</div>` : ""}
+      ${expanded ? `<div style="margin-top:6px">${expanded.length ? expanded.map(taskRowHtml).join("") : '<div class="d">No tasks yet.</div>'}</div>` : ""}
+    </div>
+    ${canCancel ? `<button class="btn" data-cancel-goal="${esc(g.id)}" style="min-height:auto;padding:4px 9px;font-size:8.5px;align-self:flex-start">CANCEL</button>` : ""}
+  </div>`;
+}
+function auditRowHtml(e){
+  return `<div class="row">
+    <span class="dot"></span>
+    <div class="g">
+      <div class="n">${esc(describeAuditEvent(e))}</div>
+      <div class="d">${esc((e.at || "").replace("T", " ").slice(0, 19))} UTC${e.goal_id ? " · " + esc(e.goal_id.slice(0, 12)) : ""}</div>
+    </div>
+  </div>`;
+}
+function paintGoals(){
+  const box = $("goalsBody");
+  const active = _goals.filter(g => !GOAL_TERMINAL_STATES_JS.has(g.status));
+  const terminal = _goals.filter(g => GOAL_TERMINAL_STATES_JS.has(g.status));
+  box.innerHTML = `
+    <p class="lede">${_goals.length} GOALS TOTAL. ${active.length} STILL RUNNING.</p>
+    ${active.length ? `<div class="sec">ACTIVE</div>${active.map(goalRowHtml).join("")}` : '<p class="note" style="padding:8px 0">Nothing running right now. A goal created from any screen shows up here the moment the worker picks it up.</p>'}
+    ${terminal.length ? `<div class="sec" style="margin-top:14px">FINISHED (${terminal.length})</div>${terminal.slice(0, 20).map(goalRowHtml).join("")}` : ""}
+    <div class="sec" style="margin-top:14px">LIVE AUDIT TRAIL</div>
+    ${_goalAudit.length ? _goalAudit.map(auditRowHtml).join("") : '<p class="note" style="padding:8px 0">No recorded activity yet.</p>'}`;
+  box.querySelectorAll("[data-toggle-goal]").forEach(el => { el.onclick = () => toggleGoalExpand(el.dataset.toggleGoal); });
+  box.querySelectorAll("[data-cancel-goal]").forEach(el => { el.onclick = () => cancelGoal(el.dataset.cancelGoal); });
+}
+loadGoals();
+setInterval(() => { if(screen === "GOALS") loadGoals(); }, 4000);
 
 async function paintNews(){
   const box = $("newsBody");
