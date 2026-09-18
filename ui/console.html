@@ -6825,12 +6825,36 @@ function paintGoals(){
     <p class="lede">${_goals.length} GOALS TOTAL. ${active.length} STILL RUNNING.</p>
     ${active.length ? `<div class="sec">ACTIVE</div>${active.map(goalRowHtml).join("")}` : '<p class="note" style="padding:8px 0">Nothing running right now. A goal created from any screen shows up here the moment the worker picks it up.</p>'}
     ${terminal.length ? `<div class="sec" style="margin-top:14px">FINISHED (${terminal.length})</div>${terminal.slice(0, 20).map(goalRowHtml).join("")}` : ""}
-    <div class="sec" style="margin-top:14px">LIVE AUDIT TRAIL</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
+      <div class="sec" style="margin:0">LIVE AUDIT TRAIL</div>
+      <button class="btn" id="exportAuditBtn" style="min-height:auto;padding:4px 9px;font-size:8.5px">EXPORT MARKDOWN</button>
+    </div>
     ${_goalAudit.length ? _goalAudit.map(auditRowHtml).join("") : '<p class="note" style="padding:8px 0">No recorded activity yet.</p>'}`;
   box.querySelectorAll("[data-toggle-goal]").forEach(el => { el.onclick = () => toggleGoalExpand(el.dataset.toggleGoal); });
   box.querySelectorAll("[data-cancel-goal]").forEach(el => { el.onclick = () => cancelGoal(el.dataset.cancelGoal); });
   box.querySelectorAll("[data-approve-task]").forEach(el => { el.onclick = () => resolveTaskApproval(el.dataset.approveTask, true); });
   box.querySelectorAll("[data-decline-task]").forEach(el => { el.onclick = () => resolveTaskApproval(el.dataset.declineTask, false); });
+  const exportBtn = $("exportAuditBtn");
+  if(exportBtn) exportBtn.onclick = exportAuditMarkdown;
+}
+async function exportAuditMarkdown(){
+  // finding #022's own backend (?format=markdown) had no UI button
+  // anywhere until now -- a real, human-readable report, not a second
+  // export format invented for this button.
+  try{
+    const r = await fetch("/api/audit?format=markdown");
+    const j = await r.json();
+    if(!r.ok || !j.markdown){ alert("Couldn't export the audit trail."); return; }
+    const blob = new Blob([j.markdown], {type: "text/markdown"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dourmouse-audit-${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch{ alert("Couldn't export the audit trail."); }
 }
 loadGoals();
 setInterval(() => { if(screen === "GOALS") loadGoals(); }, 4000);

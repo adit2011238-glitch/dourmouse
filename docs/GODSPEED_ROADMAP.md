@@ -336,9 +336,10 @@ that exists, so this phase runs after Phase 2 has at least its data model in pla
 - [x] A real audit-trail/activity UI surface over `GET /api/audit` (backend and API done, finding
       #022) -- closes acceptance test 15 ("the user can inspect what the agent actually did")
       fully, not just at the API level: the GOALS screen's LIVE AUDIT TRAIL section (finding
-      #026), chronological, human-described per event type. Remaining, small, real: no one-click
-      "export as Markdown" button in the UI yet, even though the backend `?format=markdown`
-      response has existed since finding #022 -- the API is real, the button is not.
+      #026), chronological, human-described per event type, plus a real EXPORT MARKDOWN button
+      (2026-09-18) wired straight to the backend's own `?format=markdown` response (finding #022)
+      -- a real Blob download, live-verified against the real dev-preview server (a genuine
+      17,945-character, 61-entry real report fetched and downloaded, not a stub).
 - [x] A real, user-facing scheduling/timetable UI over the existing `scheduler_runner` primitive
       (new, explicit user ask -- see `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain C): the
       TIMETABLE screen (finding #027), a visible list of every scheduled routine, next-run time,
