@@ -107,6 +107,64 @@ class TestGoalLifecycle:
         assert store.get_goal(goal["id"])["status"] == "COMPLETED"
 
 
+class TestResolveTaskApproval:
+    """Acceptance test 7, the resumable per-task approval ticket -- see
+    docs/ENGINEERING_AUDIT.md finding #029. Before this, the only way
+    past a WAITING_FOR_APPROVAL task was the global DOURMOUSE_AUTO_APPROVE
+    toggle."""
+
+    def _waiting_task(self, store):
+        goal = store.create_goal("Do the gated thing")
+        task = store.create_task(goal["id"], "delete an important file")
+        store.update_task_status(task["id"], "WAITING_FOR_APPROVAL", error="a gated action needs approval")
+        store.update_goal_status(goal["id"], "WAITING_FOR_APPROVAL", blocked_reason="needs approval")
+        return goal, task
+
+    def test_approving_resumes_the_task_and_the_goal(self, store):
+        goal, task = self._waiting_task(store)
+        assert store.resolve_task_approval(task["id"], True) is True
+        assert store.get_task(task["id"])["status"] == "READY"
+        assert store.get_goal(goal["id"])["status"] == "EXECUTING"
+
+    def test_approving_writes_a_one_time_ticket_into_the_task_result(self, store):
+        _, task = self._waiting_task(store)
+        store.resolve_task_approval(task["id"], True)
+        assert store.get_task(task["id"])["result"] == {"approved_for_next_run": True}
+
+    def test_declining_fails_the_task_and_blocks_the_goal_with_the_real_reason(self, store):
+        goal, task = self._waiting_task(store)
+        assert store.resolve_task_approval(task["id"], False, reason="too risky") is True
+        updated_task = store.get_task(task["id"])
+        assert updated_task["status"] == "FAILED"
+        assert updated_task["last_error"] == "too risky"
+        updated_goal = store.get_goal(goal["id"])
+        assert updated_goal["status"] == "BLOCKED"
+        assert "too risky" in updated_goal["blocked_reason"]
+
+    def test_declining_with_no_reason_is_still_honest_not_a_blank(self, store):
+        _, task = self._waiting_task(store)
+        store.resolve_task_approval(task["id"], False)
+        assert store.get_task(task["id"])["last_error"] == "declined by human reviewer"
+
+    def test_a_task_not_actually_waiting_cannot_be_resolved(self, store):
+        goal = store.create_goal("Normal goal")
+        task = store.create_task(goal["id"], "ordinary task")  # status READY, never waited
+        assert store.resolve_task_approval(task["id"], True) is False
+        assert store.get_task(task["id"])["status"] == "READY"
+
+    def test_unknown_task_id_returns_false(self, store):
+        assert store.resolve_task_approval("no-such-task", True) is False
+
+    def test_a_real_event_is_logged_to_the_audit_trail(self, store):
+        goal, task = self._waiting_task(store)
+        store.resolve_task_approval(task["id"], True, reason="looks safe")
+        events = store.goal_events(goal["id"])
+        resolved = [e for e in events if e["type"] == "approval_resolved"]
+        assert len(resolved) == 1
+        assert resolved[0]["task_id"] == task["id"]
+        assert resolved[0]["detail"] == {"approved": True, "reason": "looks safe"}
+
+
 class TestTaskDependencyGraph:
     def test_task_with_no_dependencies_starts_ready(self, store):
         goal = store.create_goal("A goal")

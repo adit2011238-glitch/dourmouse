@@ -1076,6 +1076,83 @@ separate: promoting an approved tool's permission tier (there is no path to ever
 self-added tool run unattended -- a deliberate, not accidental, absence); a UI action to
 re-approve a corrected draft after `APPROVAL_FAILED` (today the model must draft a fresh one).
 
+### 029 -- The resumable per-task approval ticket (acceptance test 7)
+
+**Severity**: n/a (feature completion -- the largest remaining named gap in Domain B, called out
+explicitly in findings #025, #026, and #027 as real, separate, not-yet-done work every time it
+came up).
+**Context**: `goal_runtime.py`'s own module docstring named this honestly since the module was
+first written: a REQUIRES_CONFIRMATION tool inside an autonomous task either runs (the GLOBAL
+`DOURMOUSE_AUTO_APPROVE` toggle) or the task waits forever at `WAITING_FOR_APPROVAL` -- the only
+way past it was flipping that toggle, approving every gated action on every task everywhere, not
+just the one a human actually reviewed. `GOAL_ACTIVE_STATES` (`goals.py`) has never included
+`WAITING_FOR_APPROVAL`, so a waiting task/goal is invisible to the worker's own `tick()` forever
+until something explicitly moves it back to an active state -- nothing did.
+**Design**: `GoalStore.resolve_task_approval(task_id, approved, reason)` -- the one real path in
+or out of `WAITING_FOR_APPROVAL`. Approving writes a one-time ticket into the task's own `result`
+column (no schema migration -- reuses the existing flexible JSON field) and moves task -> READY,
+goal -> EXECUTING, so the worker's own next tick picks it back up. `goal_runtime.py`'s `_run_task`
+reads and immediately CONSUMES the ticket in the same `update_task_status` call that marks the
+task `RUNNING` again -- before the task's own dispatch call ever runs -- so it can never silently
+carry over to an unrelated later retry of the same task (a crash mid-run, an unrelated failure-
+then-retry, or a second different gated action hit during the same run all leave the ticket
+already consumed, requiring fresh human approval rather than inheriting a stale blanket grant).
+The confirmation-gate builder itself was extracted from a bare module-level function
+(`_autonomous_confirmation_gate`) into `_confirmation_gate_for(approved_this_run)`, a small,
+directly unit-testable closure factory -- `_FakeSession` (this test file's own scripted double)
+replaces `ChatSession` entirely and never actually calls a real confirmation_gate, so testing the
+gate LOGIC needed to happen at this level, not only through the harder-to-probe full dispatch
+path. Declining is immediate and explicit: the task goes straight to `FAILED` with the human's own
+reason and the goal straight to `BLOCKED`, not left to generic attempt-count-exhaustion heuristics
+that would otherwise never fire (a WAITING_FOR_APPROVAL task typically has plenty of attempts left
+when it first waits) and could leave a declined task silently stalling the goal forever with no
+clear signal anything is wrong.
+**A real bug caught by the full HTTP test, not code review**: the new `/api/goals/tasks/approve`
+route's first version raised `UnboundLocalError: cannot access local variable 'get_goal_store'`
+on every real request. Root cause: `do_POST` is one large function, and a DIFFERENT `elif` branch
+elsewhere in it already does `from dourmouse.goals import get_goal_store` -- Python's scoping
+rules make an imported name local to the WHOLE enclosing function the moment it's imported
+ANYWHERE in that function's body, even though only one branch ever executes per request. Fixed by
+adding the same local import to this route's own branch, matching the exact pattern every other
+branch in `do_POST` already independently follows.
+**Live proof, against the real dev-preview server, no test hooks**: a real goal/task was created
+directly in the live database describing a `send_draft` call (a real REQUIRES_CONFIRMATION tool).
+The real worker picked it up, the real model called the tool for real, and the real confirmation
+gate genuinely declined it (`DECLINED BY USER: Send a email message to test@example.com...`),
+moving the real task and goal to `WAITING_FOR_APPROVAL` -- confirmed by polling the live database
+directly, not assumed. The task was then approved through a real click on the real GOALS screen's
+new APPROVE button (the task expanded to show its own real reason first, matching the same
+deliberate "read it before you approve it" pattern as Agent Smith's own review screen). The real
+audit trail shows the complete, honest sequence: `approval_resolved` (approved: true) ->
+task READY -> goal EXECUTING -> task RUNNING -> a SECOND real `send_draft` call, this time NOT
+declined -> `NOT CONFIGURED: no messaging channel backend wired yet... nothing was sent`. The
+approval ticket worked exactly as designed. What happened next was an unplanned, genuinely useful
+demonstration of a separate safeguard (finding #025) still doing its own job even after a human
+approval: the independent verifier correctly judged that a real tool call returning "not
+configured, nothing sent" does NOT mean the task's actual objective (sending a message) was
+accomplished, marked it `NOT_VERIFIED`, retried once, reached the same honest conclusion, and the
+goal correctly finished `BLOCKED` with a precise, accurate reason -- a human approving the GATE
+never means the system stops checking whether the work actually happened.
+**Files changed**: `dourmouse/goals.py` (`resolve_task_approval`), `dourmouse/goal_runtime.py`
+(`_confirmation_gate_for`, ticket consumption in `_run_task`), `dourmouse/webui.py`
+(`POST /api/goals/tasks/approve`), `ui/console.html` (APPROVE/DECLINE on a waiting task row),
+`dourmouse/tests/test_goals.py` (`TestResolveTaskApproval`, 7 tests), `dourmouse/tests/
+test_goal_runtime.py` (`TestConfirmationGateFor` + `TestResumableApprovalTicket`, 6 tests),
+`dourmouse/tests/test_webui.py` (`TestGoalsTaskApprovalEndpoint`, 4 tests).
+**Tests added**: 17 new, spanning the store method (approve resumes both task and goal; the
+one-time ticket is written correctly; declining fails the task and blocks the goal with the real
+reason, with and without an explicit reason given; a task not actually waiting can't be resolved;
+an unknown task id reports false; a real audit event is logged), the gate builder in isolation
+(a fresh ticket approves regardless of global auto-approve; no ticket and no global auto-approve
+declines; global auto-approve still works without a per-task ticket), the full worker resume path
+(an approved task is genuinely picked up and completes on the next tick; the ticket is consumed by
+the run it authorized, not left dangling for an unrelated future retry to inherit; declining fails
+the task for good and the worker never touches it again), and the full HTTP surface.
+**Tests run**: `test_goals.py` + `test_goal_runtime.py` + `test_webui.py` together (279/279), then
+full suite.
+**Result**: fixed -- acceptance test 7 closed, live-verified against the real dev-preview server
+with a real gated tool call, a real decline, a real human approval click, and a real resume.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

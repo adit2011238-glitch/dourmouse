@@ -28,10 +28,12 @@ Phase 2, not silently assumed done):
 - A REQUIRES_CONFIRMATION tool inside an autonomous task either runs
   (``DOURMOUSE_AUTO_APPROVE=1``) or the task is marked
   WAITING_FOR_APPROVAL with an honest reason and a real notification
-  goes out (auto-approve off). A resumable "approval ticket" that lets
-  one specific blocked task continue after a later human approval
-  (rather than requiring the global toggle to be flipped) is real,
-  separate follow-on work.
+  goes out (auto-approve off). 2026-09-18 (finding #029, acceptance
+  test 7): a resumable per-task approval ticket now lets one specific
+  blocked task continue after a later human approval
+  (``GoalStore.resolve_task_approval``, the GOALS screen's own
+  APPROVE/DECLINE buttons on a WAITING_FOR_APPROVAL task), without
+  needing the global toggle flipped for every task everywhere.
 - Cross-device (Tailscale) execution is not wired in this pass — tasks
   run against this host's own tool registry only.
 """
@@ -70,7 +72,7 @@ def goal_runtime_enabled() -> bool:
 
     This does not remove any real safety gate: a REQUIRES_CONFIRMATION
     tool inside an autonomous task still pauses at WAITING_FOR_APPROVAL
-    (see ``_autonomous_confirmation_gate``/``_run_task`` below) whether
+    (see ``_confirmation_gate_for``/``_run_task`` below) whether
     this flag is on or off -- flipping the default makes the already-
     exposed, already-documented tool actually do what it already claimed
     to do, it does not grant any new capability the model didn't already
@@ -79,13 +81,23 @@ def goal_runtime_enabled() -> bool:
     return os.environ.get("DOURMOUSE_GOAL_RUNTIME", "1").strip() != "0"
 
 
-def _autonomous_confirmation_gate(_prompt_text: str) -> bool:
-    """Autonomous tasks have no live human to ask synchronously.
-    Auto-approve on: proceed, exactly like an interactive session after
-    a yes. Auto-approve off: decline honestly (never hang, never
-    silently approve) so the caller classifies this as needing
-    approval rather than pretending the action happened."""
-    return auto_approve_enabled()
+def _confirmation_gate_for(approved_this_run: bool):
+    """Autonomous tasks have no live human to ask synchronously. Built
+    fresh per task-run (not a single module-level function) since
+    2026-09-18 (finding #029, acceptance test 7): a task carrying a
+    one-time approval ticket (a human already reviewed and approved this
+    SPECIFIC task through the GOALS screen) gets its gated calls approved
+    for this run only, without needing the GLOBAL DOURMOUSE_AUTO_APPROVE
+    toggle flipped for every task everywhere. Otherwise: auto-approve on
+    proceeds exactly like an interactive session after a yes; off,
+    decline honestly (never hang, never silently approve) so the caller
+    classifies this as needing approval rather than pretending the
+    action happened."""
+
+    def gate(_prompt_text: str) -> bool:
+        return approved_this_run or auto_approve_enabled()
+
+    return gate
 
 
 class GoalRuntime:
@@ -214,10 +226,24 @@ class GoalRuntime:
 
     def _run_task(self, goal: dict[str, Any], task: dict[str, Any]) -> None:
         goal_id, task_id = goal["id"], task["id"]
-        self._store.update_task_status(task_id, "RUNNING", increment_attempt=True)
+        # Acceptance test 7 (finding #029): a one-time approval ticket,
+        # written by resolve_task_approval when a human approves a
+        # WAITING_FOR_APPROVAL task. Read and consumed right here, before
+        # the task's own dispatch call ever runs -- clearing it in the
+        # SAME update_task_status call that marks RUNNING means it can
+        # never silently carry over to an unrelated later retry of this
+        # same task (a crash mid-run, an unrelated failure-then-retry, or
+        # a second, different gated action hit during this run all leave
+        # the ticket already consumed, requiring fresh human approval
+        # again rather than inheriting a stale blanket grant).
+        approved_this_run = bool((task.get("result") or {}).get("approved_for_next_run"))
+        self._store.update_task_status(
+            task_id, "RUNNING", increment_attempt=True,
+            result={} if approved_this_run else None,
+        )
         self._store.set_current_task(goal_id, task_id)
         try:
-            report = self._execute_via_dispatch(goal, task)
+            report = self._execute_via_dispatch(goal, task, approved_this_run)
         except Exception as exc:
             self._handle_task_failure(goal, task, f"{type(exc).__name__}: {exc}")
             return
@@ -276,13 +302,15 @@ class GoalRuntime:
             result={"final_text": final_text, "verified": True, "note": "independently verified"},
         )
 
-    def _execute_via_dispatch(self, goal: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    def _execute_via_dispatch(
+        self, goal: dict[str, Any], task: dict[str, Any], approved_this_run: bool = False,
+    ) -> dict[str, Any]:
         from dourmouse.chat import ChatSession  # lazy: keep this module importable without pulling in every backend
 
         session_file = workspace_dir() / "sessions" / f"goal_{goal['id']}_task_{task['id']}.jsonl"
         session = ChatSession(
             self._registry, session_file=session_file,
-            confirmation_gate=_autonomous_confirmation_gate,
+            confirmation_gate=_confirmation_gate_for(approved_this_run),
         )
         blocked_reason: list[str] = []
         #: Real evidence of what actually happened, handed to the

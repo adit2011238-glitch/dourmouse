@@ -352,6 +352,90 @@ class TestApprovalGating:
         assert store.get_goal(goal["id"])["status"] == "WAITING_FOR_APPROVAL"
 
 
+class TestConfirmationGateFor:
+    """The gate-builder itself (finding #029, acceptance test 7), tested
+    directly and in isolation rather than only through the harder-to-
+    probe full dispatch path -- _FakeSession replaces ChatSession
+    entirely, so it never actually calls a real confirmation_gate."""
+
+    def test_a_fresh_approval_ticket_approves_regardless_of_global_auto_approve(self, monkeypatch):
+        import dourmouse.goal_runtime as gr
+
+        monkeypatch.setattr(gr, "auto_approve_enabled", lambda: False)
+        gate = gr._confirmation_gate_for(approved_this_run=True)
+        assert gate("do the risky thing") is True
+
+    def test_no_ticket_and_no_global_auto_approve_declines(self, monkeypatch):
+        import dourmouse.goal_runtime as gr
+
+        monkeypatch.setattr(gr, "auto_approve_enabled", lambda: False)
+        gate = gr._confirmation_gate_for(approved_this_run=False)
+        assert gate("do the risky thing") is False
+
+    def test_global_auto_approve_still_works_without_a_per_task_ticket(self, monkeypatch):
+        import dourmouse.goal_runtime as gr
+
+        monkeypatch.setattr(gr, "auto_approve_enabled", lambda: True)
+        gate = gr._confirmation_gate_for(approved_this_run=False)
+        assert gate("do the risky thing") is True
+
+
+class TestResumableApprovalTicket:
+    """The end-to-end resume path (finding #029): a human approves one
+    specific WAITING_FOR_APPROVAL task through GoalStore.resolve_task_approval
+    (the GOALS screen's own APPROVE/DECLINE action), and the worker's own
+    next tick genuinely picks it back up -- no global toggle involved."""
+
+    def test_an_approved_task_is_picked_up_and_completes_on_the_next_tick(self, monkeypatch):
+        _install_fake(monkeypatch, {"delete an old file": {"final_text": "deleted, all clear"}})
+        store = GoalStore(None)
+        goal = store.create_goal("Risky goal")
+        task = store.create_task(goal["id"], "delete an old file")
+        store.update_task_status(task["id"], "WAITING_FOR_APPROVAL", error="needs approval")
+        store.update_goal_status(goal["id"], "WAITING_FOR_APPROVAL", blocked_reason="needs approval")
+
+        assert store.resolve_task_approval(task["id"], True) is True
+        assert store.get_task(task["id"])["status"] == "READY"
+
+        _runtime(store).tick()
+
+        assert store.get_task(task["id"])["status"] == "COMPLETED"
+        assert store.get_goal(goal["id"])["status"] == "COMPLETED"
+
+    def test_the_ticket_is_consumed_by_the_run_it_authorized_not_left_dangling(self, monkeypatch):
+        """A real bug this guards against: if update_task_status's own
+        result=None default silently kept the stale ticket around,
+        an UNRELATED later retry of the same task would inherit a
+        blanket approval nobody actually granted it."""
+        _install_fake(monkeypatch, {"delete an old file": {"final_text": "deleted, all clear"}})
+        store = GoalStore(None)
+        goal = store.create_goal("Risky goal")
+        task = store.create_task(goal["id"], "delete an old file")
+        store.update_task_status(task["id"], "WAITING_FOR_APPROVAL", error="needs approval")
+        store.update_goal_status(goal["id"], "WAITING_FOR_APPROVAL", blocked_reason="needs approval")
+        store.resolve_task_approval(task["id"], True)
+
+        _runtime(store).tick()
+
+        result = store.get_task(task["id"])["result"]
+        assert result is not None and "approved_for_next_run" not in result
+
+    def test_declining_fails_the_task_for_good_the_worker_never_touches_it_again(self, monkeypatch):
+        _install_fake(monkeypatch, {"delete an old file": {"final_text": "should never run"}})
+        store = GoalStore(None)
+        goal = store.create_goal("Risky goal")
+        task = store.create_task(goal["id"], "delete an old file")
+        store.update_task_status(task["id"], "WAITING_FOR_APPROVAL", error="needs approval")
+        store.update_goal_status(goal["id"], "WAITING_FOR_APPROVAL", blocked_reason="needs approval")
+
+        store.resolve_task_approval(task["id"], False, reason="not worth the risk")
+        _runtime(store).tick()
+
+        assert store.get_task(task["id"])["status"] == "FAILED"
+        assert store.get_goal(goal["id"])["status"] == "BLOCKED"
+        assert _task_calls() == []  # the worker never ran the declined task at all
+
+
 class TestGoalControl:
     def test_a_cancelled_goal_is_never_advanced(self, monkeypatch):
         _install_fake(monkeypatch, {"should not run": {"final_text": "ran anyway"}})

@@ -682,6 +682,99 @@ class TestGoalsCancelEndpoint:
         assert store.get_goal(goal["id"])["status"] == "COMPLETED"
 
 
+class TestGoalsTaskApprovalEndpoint:
+    """POST /api/goals/tasks/approve (2026-09-18) -- the resumable
+    per-task approval ticket, acceptance test 7. See
+    docs/ENGINEERING_AUDIT.md finding #029. No chat tool reaches
+    GoalStore.resolve_task_approval; this route is the only way in,
+    same human-only posture as self-extension approval."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_goal_store(self):
+        from dourmouse.goals import GoalStore, set_goal_store
+
+        set_goal_store(GoalStore(None))
+        yield
+        set_goal_store(None)
+
+    def _waiting_task(self):
+        from dourmouse.goals import get_goal_store
+
+        store = get_goal_store()
+        goal = store.create_goal("Risky goal")
+        task = store.create_task(goal["id"], "delete an important file")
+        store.update_task_status(task["id"], "WAITING_FOR_APPROVAL", error="needs approval")
+        store.update_goal_status(goal["id"], "WAITING_FOR_APPROVAL", blocked_reason="needs approval")
+        return goal, task
+
+    def test_approving_over_real_http_resumes_the_task(self, server):
+        from dourmouse.goals import get_goal_store
+
+        goal, task = self._waiting_task()
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/goals/tasks/approve",
+            body=json.dumps({"task_id": task["id"], "approved": True}),
+            headers={"Content-Type": "application/json"},
+        )
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data == {"ok": True}
+        store = get_goal_store()
+        assert store.get_task(task["id"])["status"] == "READY"
+        assert store.get_goal(goal["id"])["status"] == "EXECUTING"
+
+    def test_declining_over_real_http_blocks_the_goal_with_the_real_reason(self, server):
+        from dourmouse.goals import get_goal_store
+
+        goal, task = self._waiting_task()
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/goals/tasks/approve",
+            body=json.dumps({"task_id": task["id"], "approved": False, "reason": "too risky"}),
+            headers={"Content-Type": "application/json"},
+        )
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data == {"ok": True}
+        store = get_goal_store()
+        assert store.get_task(task["id"])["status"] == "FAILED"
+        assert "too risky" in store.get_goal(goal["id"])["blocked_reason"]
+
+    def test_missing_task_id_is_a_real_400(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/goals/tasks/approve",
+            body=json.dumps({"approved": True}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 400
+        conn.close()
+
+    def test_a_task_not_actually_waiting_reports_false_not_an_error(self, server):
+        from dourmouse.goals import get_goal_store
+
+        store = get_goal_store()
+        goal = store.create_goal("Normal goal")
+        task = store.create_task(goal["id"], "ordinary task")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/goals/tasks/approve",
+            body=json.dumps({"task_id": task["id"], "approved": True}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert resp.status == 200
+        assert data == {"ok": False}
+
+
 class TestSchedulesEndpoints:
     """GET /api/schedules + POST /api/schedules/toggle + .../remove
     (2026-09-18) -- the TIMETABLE screen's HTTP surface, the first one

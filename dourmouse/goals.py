@@ -273,6 +273,47 @@ class GoalStore:
             self._log_event(goal_id, None, "goal_status_changed", {"status": "CANCELLED"})
         return changed
 
+    def resolve_task_approval(self, task_id: str, approved: bool, reason: str = "") -> bool:
+        """The resumable per-task approval ticket (2026-09-18) -- acceptance
+        test 7, the largest remaining gap named in findings #025/#026/#027.
+        Before this, the only way past a WAITING_FOR_APPROVAL task was
+        flipping the GLOBAL DOURMOUSE_AUTO_APPROVE toggle, approving every
+        gated action on every task everywhere, not just the one a human
+        actually reviewed.
+
+        Approving writes a one-time ticket into the task's own ``result``
+        (no schema migration needed -- reuses the existing flexible JSON
+        column) and moves the task back to READY / the goal back to
+        EXECUTING so the worker's own next tick picks it up. goal_runtime.py
+        consumes the ticket the instant the task starts running again
+        (before any tool call happens), so it can never silently carry
+        over to an unrelated later retry of the same task.
+
+        Declining is immediate and explicit, not a hope that generic
+        retry-exhaustion heuristics eventually notice: the task goes
+        straight to FAILED with the human's own reason, and the goal goes
+        straight to BLOCKED, not EXECUTING -- a human's "no" is a direct
+        terminal answer, the same shape as the original WAITING_FOR_APPROVAL
+        transition itself, not something left to attempt-count bookkeeping.
+        """
+        task = self.get_task(task_id)
+        if task is None or task["status"] != "WAITING_FOR_APPROVAL":
+            return False
+        goal_id = task["goal_id"]
+        if approved:
+            self.update_task_status(task_id, "READY", result={"approved_for_next_run": True})
+            self.update_goal_status(goal_id, "EXECUTING")
+        else:
+            self.update_task_status(task_id, "FAILED", error=reason or "declined by human reviewer")
+            self.update_goal_status(
+                goal_id, "BLOCKED",
+                blocked_reason=f"task declined by human reviewer: {reason or '(no reason given)'}",
+            )
+        self._log_event(
+            goal_id, task_id, "approval_resolved", {"approved": approved, "reason": reason},
+        )
+        return True
+
     @staticmethod
     def _serialize_goal(row: sqlite3.Row) -> dict[str, Any]:
         return {

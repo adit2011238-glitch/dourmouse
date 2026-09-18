@@ -3670,6 +3670,23 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             ok = get_goal_store().cancel_goal(goal_id)
             self._send_json({"ok": ok})
+        elif parsed.path == "/api/goals/tasks/approve":
+            # 2026-09-18 (finding #029, acceptance test 7): the resumable
+            # per-task approval ticket -- GoalStore.resolve_task_approval
+            # is the only place this ever gets resolved, and this route is
+            # the only way to reach it. No chat tool exists for this, same
+            # human-only posture as /api/self_extensions/approve.
+            from dourmouse.goals import get_goal_store
+
+            body = self._read_json_body()
+            task_id = str(body.get("task_id") or "").strip()
+            if not task_id:
+                self._send_json({"ok": False, "error": "task_id is required"}, status=400)
+                return
+            approved = bool(body.get("approved"))
+            reason = str(body.get("reason") or "").strip()
+            ok = get_goal_store().resolve_task_approval(task_id, approved, reason)
+            self._send_json({"ok": ok})
         elif parsed.path == "/api/schedules/toggle":
             # 2026-09-18: the TIMETABLE screen's PAUSE/RESUME action --
             # Schedules.set_enabled (schedules.py), new this same change,

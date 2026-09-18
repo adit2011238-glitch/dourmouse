@@ -161,9 +161,16 @@ default live behavior, not just built-but-dormant infrastructure.
     becoming mixed together.
 
 **Status, updated 2026-09-18**: test 1-6, 9-10, 12-14, 16-20 real and exercised by this session's
-own tests. Test 7 (approval requested, waits, auto-continues after approval) real at the global
-`DOURMOUSE_AUTO_APPROVE` toggle level; a resumable PER-TASK approval ticket is real, separate,
-not-yet-done work. Test 8 (crash mid-task, resumes from durable state, no duplicated side
+own tests. Test 7 (approval requested, waits, auto-continues after approval) **closed** (finding
+#029): a resumable PER-TASK approval ticket (`GoalStore.resolve_task_approval`, the GOALS screen's
+own APPROVE/DECLINE on a waiting task) -- a human approves the ONE task they reviewed, not every
+gated action on every task everywhere via the global toggle. Live-verified against the real
+dev-preview server: a real gated `send_draft` call was genuinely declined, the real task/goal
+reached `WAITING_FOR_APPROVAL`, a real click on the real APPROVE button resumed it, and the SAME
+tool call ran for real on the next attempt -- no more decline. The approval ticket is one-time,
+consumed the instant the task starts running again, before its own dispatch call happens, so it
+can never silently carry over to an unrelated later retry. Test 8 (crash mid-task, resumes from
+durable state, no duplicated side
 effects) **verified live** (finding #024): a real `kill -9` mid-dispatch against the real
 dev-preview server, restarted, real automatic recovery (`recovery_attempted` event, RETRYING,
 successful retry, correct real answer) — not assumed from unit tests. Test 11 (a task claims

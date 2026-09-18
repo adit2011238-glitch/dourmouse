@@ -6765,13 +6765,35 @@ async function cancelGoal(goalId){
   await loadGoals();
 }
 function taskRowHtml(t){
+  const needsApproval = t.status === "WAITING_FOR_APPROVAL";
   return `<div class="row" style="padding-left:16px">
     ${taskStatusDot(t.status)}
     <div class="g">
       <div class="n">${esc(t.description)} <span style="color:var(--blue-deep);font-weight:normal">· ${esc(t.status)}</span></div>
       ${t.last_error ? `<div class="d">${esc(t.last_error)}</div>` : ""}
+      ${needsApproval ? `<div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn go" data-approve-task="${esc(t.id)}" style="min-height:auto;padding:4px 9px;font-size:8.5px">APPROVE</button>
+        <button class="btn" data-decline-task="${esc(t.id)}" style="min-height:auto;padding:4px 9px;font-size:8.5px">DECLINE</button>
+      </div>` : ""}
     </div>
   </div>`;
+}
+async function resolveTaskApproval(taskId, approved){
+  if(approved && !confirm("Approve this one task? It resumes on the worker's next tick, gated actions in "
+    + "this run only, not a blanket approval for anything else.")) return;
+  if(!approved && !confirm("Decline this task for good? The goal will be marked blocked.")) return;
+  let reason = "";
+  if(!approved){
+    reason = prompt("Optional reason (shown in the goal's blocked status):") || "";
+  }
+  try{
+    const r = await fetch("/api/goals/tasks/approve", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({task_id: taskId, approved, reason})});
+    const j = await r.json();
+    if(!r.ok || j.ok===false){ alert("Couldn't resolve this task."); return; }
+  }catch{ alert("Couldn't reach the server to resolve this task."); return; }
+  _goalExpanded = {};  // task statuses just changed; force a fresh fetch next expand
+  await loadGoals();
 }
 function goalRowHtml(g){
   const expanded = _goalExpanded[g.id];
@@ -6807,6 +6829,8 @@ function paintGoals(){
     ${_goalAudit.length ? _goalAudit.map(auditRowHtml).join("") : '<p class="note" style="padding:8px 0">No recorded activity yet.</p>'}`;
   box.querySelectorAll("[data-toggle-goal]").forEach(el => { el.onclick = () => toggleGoalExpand(el.dataset.toggleGoal); });
   box.querySelectorAll("[data-cancel-goal]").forEach(el => { el.onclick = () => cancelGoal(el.dataset.cancelGoal); });
+  box.querySelectorAll("[data-approve-task]").forEach(el => { el.onclick = () => resolveTaskApproval(el.dataset.approveTask, true); });
+  box.querySelectorAll("[data-decline-task]").forEach(el => { el.onclick = () => resolveTaskApproval(el.dataset.declineTask, false); });
 }
 loadGoals();
 setInterval(() => { if(screen === "GOALS") loadGoals(); }, 4000);

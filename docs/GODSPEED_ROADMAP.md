@@ -255,6 +255,19 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       a unit test): the changelog's first design wrote into the actual tracked repo on every
       approval; fixed to be workspace-relative like every other piece of this feature's state.
       See `docs/ENGINEERING_AUDIT.md` finding #028.
+- [x] Test 7 (resumable per-task approval ticket): the largest remaining named gap in Domain B,
+      called out in three separate prior findings every time it came up. `GoalStore.
+      resolve_task_approval` -- a human approves the ONE task they reviewed (the GOALS screen's
+      own APPROVE/DECLINE on a waiting task), not every gated action on every task everywhere via
+      the global `DOURMOUSE_AUTO_APPROVE` toggle. The ticket is one-time, consumed the instant the
+      task starts running again, before its own dispatch call happens. Live-verified against the
+      real dev-preview server: a real gated `send_draft` call was genuinely declined, a real click
+      on the real APPROVE button resumed it, and the same tool call ran for real on the next
+      attempt -- no more decline. An unplanned bonus proof: the independent verifier (finding
+      #025) still correctly caught that the tool's own honest "not configured, nothing sent"
+      result didn't mean the task's real objective was accomplished, even after human approval
+      passed the gate -- two safeguards doing their own separate jobs correctly. See
+      `docs/ENGINEERING_AUDIT.md` finding #029.
 
 ## Phase 3 — UI/UX redesign (Claude Desktop / Claude Code interaction quality)
 
