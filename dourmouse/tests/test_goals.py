@@ -190,6 +190,67 @@ class TestEventsAndSnapshot:
         assert [e["type"] for e in events] == ["goal_created", "goal_status_changed", "goal_status_changed"]
 
 
+class TestCrossGoalAuditTrail:
+    """2026-09-18: goal_events() only ever answers "what happened on ONE
+    goal" -- the founding spec's own audit-trail requirement ("the user
+    should be able to inspect what the assistant actually did") is a
+    global question. all_events()/export_events_markdown() are the same
+    real data, a second query shape over it."""
+
+    def test_all_events_spans_every_goal_newest_first(self, store):
+        first = store.create_goal("First goal")
+        second = store.create_goal("Second goal")
+        events = store.all_events()
+        goal_ids = [e["goal_id"] for e in events]
+        assert first["id"] in goal_ids
+        assert second["id"] in goal_ids
+        # newest first: the second goal's creation event comes before the first's
+        assert goal_ids.index(second["id"]) < goal_ids.index(first["id"])
+
+    def test_all_events_since_excludes_earlier_entries(self, store):
+        from datetime import datetime, timezone
+        from time import sleep
+
+        store.create_goal("Old goal")
+        sleep(0.02)
+        cutoff = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        sleep(0.02)
+        recent = store.create_goal("Recent goal")
+        events = store.all_events(since=cutoff)
+        assert all(e["goal_id"] == recent["id"] for e in events)
+        assert len(events) >= 1
+
+    def test_all_events_limit_is_bounded(self, store):
+        goal = store.create_goal("A goal")
+        for i in range(10):
+            store.create_task(goal["id"], f"step {i}")
+        events = store.all_events(limit=3)
+        assert len(events) == 3
+
+    def test_export_markdown_is_real_readable_text_not_json_dump(self, store):
+        goal = store.create_goal("Research competitors")
+        store.create_task(goal["id"], "gather pricing")
+        report = store.export_events_markdown(goal_id=goal["id"])
+        assert "# Dourmouse Audit Trail" in report
+        assert goal["id"] in report
+        assert "goal_created" in report
+        assert "task_created" in report
+        # no em dash or decorative separator in generated product text
+        assert "—" not in report
+        assert " // " not in report
+
+    def test_export_markdown_global_scope_covers_every_goal(self, store):
+        store.create_goal("First goal")
+        store.create_goal("Second goal")
+        report = store.export_events_markdown()
+        assert "Scope: All goals" in report
+        assert report.count("goal_created") == 2
+
+    def test_export_markdown_empty_scope_is_honest_not_fabricated(self, store):
+        report = store.export_events_markdown(goal_id="goal_doesnotexist")
+        assert "Entries: 0" in report
+
+
 class TestRestartSurvival:
     """The entire reason this module exists: a goal's state must be
     readable by a FRESH GoalStore instance pointed at the same file,

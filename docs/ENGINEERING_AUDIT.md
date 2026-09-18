@@ -663,6 +663,55 @@ also clears `GEMINI_API_KEY`/`GOOGLE_AI_STUDIO_KEY` (this developer's real
 **Tests run**: `test_connections.py` (18/18), then full suite.
 **Result**: fixed.
 
+### 022 — Cross-goal audit trail: the data existed, the global query and export did not
+
+**Severity**: MEDIUM (a named acceptance test from the founding spec's own 20-test autonomy
+checklist — "the user can inspect what the agent actually did through the activity/audit
+history" — was not actually satisfiable at the product level before this).
+**Context**: `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` (added the same day) names this
+directly in Domain B. Investigating it properly turned up a codebase in much better shape than
+assumed: `goals.py`'s `goal_events`/`log_event`/`goal_snapshot` already form a real, genuinely
+append-only (no update/delete method exists for the table anywhere), comprehensive event log —
+`create_goal`/`update_goal_status`/`cancel_goal`/`create_task`/`update_task_status` all already
+auto-log real events, and `goal_runtime.py`'s own `_run_task`/`_execute_via_dispatch` already log
+real `tool_call`/`tool_result`/`recovery_attempted` events with real tool arguments and results,
+not placeholders. `/api/goals?id=<id>` already surfaces one goal's full event history via
+`goal_snapshot()`.
+**Root cause (the real, narrow gap)**: every one of those real query paths is scoped to a single
+goal. There was no way to ask "what has the assistant done across every goal," and no
+human-readable export at all — despite the founding spec's own explicit ask for exactly that
+("Implement an event log/audit trail... The user should be able to inspect what the assistant
+actually did") and the user's own later "Jarvis feature" list separately, independently asking
+for "an immutable background ledger that... automatically render[s] them into an audit-ready
+Markdown report." Confirmed live: `console.html` has zero rendering of goal events anywhere
+(grepped, zero matches) — the backend data was real and complete, but neither globally queryable
+nor human-presentable.
+**Fix**: `GoalStore.all_events(since=None, limit=500)` — the same `goal_events` table, a second
+query shape over it (cross-goal, newest-first, optional ISO-8601 time cutoff), not a second
+logging system. `GoalStore.export_events_markdown(goal_id=None, since=None, limit=500)` — a real,
+chronological, human-readable Markdown report, global or scoped to one goal. `GET /api/audit` in
+`webui.py` exposes both (`?goal_id=`, `?since=`, `?format=markdown`), mirroring `/api/goals`'s own
+exact route-handling style.
+**A real bug caught by writing and running the tests, not assumed working**: the first
+implementation treated `since` as a Unix-timestamp float and used `datetime.fromtimestamp(...)`
+to render it — `goal_events.at` is actually stored as an ISO-8601 string (matching `_now()`'s own
+real format throughout `goals.py`), so the first version raised `TypeError: argument must be int
+or float, not str` the moment a real test exercised it. Fixed by changing `since` to accept the
+table's own real ISO-8601 string type end to end (store, route, and the Markdown formatter's
+`datetime.fromisoformat`), rather than converting types at a layer boundary.
+**Honestly still not done**: a real UI surface in `console.html` (or a new dedicated
+screen/panel) rendering this data for the user — the backend and API are real and tested, but
+Acceptance Test 15 is not fully closed until a human can see this without calling the API
+directly. Tracked as real, separate, not-yet-done work in `docs/GODSPEED_ROADMAP.md` Phase 3.
+**Files changed**: `dourmouse/goals.py`, `dourmouse/webui.py`.
+**Tests added**: `TestCrossGoalAuditTrail` (6 tests) in `dourmouse/tests/test_goals.py`;
+`TestAuditEndpoint` (4 tests) in `dourmouse/tests/test_webui.py`, hitting a real
+`ThreadingHTTPServer` over real HTTP, not a mock.
+**Tests run**: `test_goals.py` (36/36), `test_webui.py::TestAuditEndpoint` (4/4), then full suite.
+Live-verified against the real file-backed store via the browser (`fetch('/api/audit')` returned
+a real, honest `{"events": []}` on a clean store).
+**Result**: fixed (backend + API); UI surface tracked as separate follow-on.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

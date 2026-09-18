@@ -426,6 +426,70 @@ class GoalStore:
         goal["events"] = self.goal_events(goal_id, limit=200)
         return goal
 
+    def all_events(self, since: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        """The cross-goal audit trail (2026-09-18): ``goal_events`` only
+        ever answered "what happened on ONE goal" -- the founding spec's
+        own audit-trail requirement ("the user should be able to inspect
+        what the assistant actually did") is a global question, not a
+        per-goal one. Same table, same real data, a second query shape
+        over it -- not a second logging system.
+
+        ``since`` is an ISO-8601 string, matching ``at``'s own real stored
+        type (``_now()``'s format) -- NOT a Unix timestamp. ISO-8601's
+        zero-padded fields sort correctly as plain text, so SQLite's
+        ordinary string comparison already does the right thing; no
+        epoch conversion needed or wanted.
+        """
+        limit = max(1, min(2000, int(limit)))
+        query = "SELECT * FROM goal_events WHERE 1=1"
+        params: list[Any] = []
+        if since:
+            query += " AND at>=?"
+            params.append(since)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            {
+                "id": r["id"], "goal_id": r["goal_id"], "task_id": r["task_id"],
+                "type": r["type"], "detail": json.loads(r["detail"]), "at": r["at"],
+            }
+            for r in rows
+        ]
+
+    def export_events_markdown(self, goal_id: str | None = None, since: str | None = None, limit: int = 500) -> str:
+        """A real, human-readable, audit-ready report -- the founding
+        spec's own words ("Implement an event log/audit trail... The user
+        should be able to inspect what the assistant actually did") and
+        the same shape a real SOC-style audit export takes. Renders
+        exactly what's in the database; never summarizes or drops an
+        entry, since a redacted-looking audit trail is worse than a
+        verbose one. ``since`` is an ISO-8601 string, matching
+        ``all_events``'s own convention -- see its docstring for why.
+        """
+        events = self.goal_events(goal_id, limit=limit) if goal_id else self.all_events(since=since, limit=limit)
+        if goal_id and since:
+            events = [e for e in events if e["at"] >= since]
+        title = f"# Dourmouse Audit Trail\n\n"
+        scope = f"Goal `{goal_id}`" if goal_id else "All goals"
+        lines = [title, f"Scope: {scope}", f"Entries: {len(events)}", ""]
+        # goal_events() returns oldest-first; all_events() returns
+        # newest-first (see their own docstrings) -- normalize to
+        # chronological order for a report a human reads top to bottom.
+        ordered = list(reversed(events)) if not goal_id else events
+        for e in ordered:
+            when = datetime.fromisoformat(e["at"]).strftime("%Y-%m-%d %H:%M:%S UTC")
+            where = f"goal {e['goal_id']}" + (f" / task {e['task_id']}" if e["task_id"] else "")
+            lines.append(f"## {when} ({e['type']})")
+            lines.append(f"*{where}*")
+            lines.append("")
+            lines.append("```json")
+            lines.append(json.dumps(e["detail"], indent=2, default=str))
+            lines.append("```")
+            lines.append("")
+        return "\n".join(lines)
+
 
 def default_store() -> GoalStore:
     """The persistent store the real serving path mounts (same workspace

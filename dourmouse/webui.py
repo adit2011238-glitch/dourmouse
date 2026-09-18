@@ -2677,6 +2677,36 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             status = (qs.get("status") or [""])[0].strip().upper() or None
             self._send_json({"goals": store.list_goals(status=status)})
+        elif path == "/api/audit":
+            # 2026-09-18: the founding spec's own explicit audit-trail
+            # requirement ("the user should be able to inspect what the
+            # assistant actually did") answered globally, not per-goal --
+            # goal_snapshot() above already exposed one goal's own event
+            # history; this is the cross-goal view over the exact same
+            # real data (goals.GoalStore.all_events / export_events_
+            # markdown), never a second logging system. ?goal_id=<id>
+            # scopes to one goal; ?since=<ISO-8601 timestamp, matching
+            # goal_events' own stored "at" format> scopes by time;
+            # ?format=markdown returns a real, human-readable report
+            # instead of raw JSON events.
+            from dourmouse.goals import get_goal_store
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            gid = (qs.get("goal_id") or [""])[0].strip() or None
+            fmt = (qs.get("format") or [""])[0].strip().lower()
+            since = (qs.get("since") or [""])[0].strip() or None
+            try:
+                limit = int(qs.get("limit", ["500"])[0])
+            except ValueError:
+                limit = 500
+            store = get_goal_store()
+            if fmt == "markdown":
+                self._send_json({
+                    "markdown": store.export_events_markdown(goal_id=gid, since=since, limit=limit),
+                })
+                return
+            events = store.goal_events(gid, limit=limit) if gid else store.all_events(since=since, limit=limit)
+            self._send_json({"events": events})
         elif path == "/api/security":
             # Phase 4 (docs/GODSPEED_ROADMAP.md): read-only real network/host
             # security telemetry. No write endpoint here on purpose -- this

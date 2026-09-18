@@ -157,12 +157,16 @@ live behavior of the product.
 20. Multiple agents/goals run simultaneously without their state, credentials, memory, or files
     becoming mixed together.
 
-**Real gap this pass surfaced, tracked explicitly**: test 8 is now partially covered by finding
+**Real gaps this pass surfaced, tracked explicitly**: test 8 is now partially covered by finding
 #016's concurrency fix (a cancelled goal can no longer be silently resurrected by a late-arriving
 task result) — but a genuinely engineered crash-recovery drill (kill -9 the process mid-goal,
 confirm resumption) has not been run. Flagged as real, not-yet-done verification work, not assumed
 passing from unit tests alone (per this project's own stated rule: a passing test is evidence of
-what someone thought should work, not proof the system works).
+what someone thought should work, not proof the system works). Test 15 (inspect what the agent
+actually did) is now real at the data and API level — `goal_events`/`all_events`/
+`export_events_markdown` + `GET /api/audit` (finding #022) — but still not closed end to end: no
+UI surface exists yet, so a real user still cannot see this without calling the API directly.
+Backend done, UI tracked as Phase 3 follow-on.
 
 **Harsh pessimism check**: a reviewer should be allowed to say "prove it" for every single one of
 the 20 — a live demo, not a code pointer, for each.

@@ -505,6 +505,73 @@ class TestGoalsEndpoint:
         conn.close()
 
 
+class TestAuditEndpoint:
+    """GET /api/audit (2026-09-18) — the cross-goal audit trail, the same
+    real event data goal_snapshot() already exposes per-goal, answering
+    the founding spec's own global question ("what did the assistant
+    actually do") rather than a per-goal one. See
+    docs/ENGINEERING_AUDIT.md finding #022."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_goal_store(self):
+        from dourmouse.goals import GoalStore, set_goal_store
+
+        set_goal_store(GoalStore(None))
+        yield
+        set_goal_store(None)
+
+    def test_no_goals_yet_is_an_honest_empty_list(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/audit")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        assert json.loads(resp.read()) == {"events": []}
+        conn.close()
+
+    def test_spans_every_goal_by_default(self, server):
+        from dourmouse.goals import get_goal_store
+
+        store = get_goal_store()
+        first = store.create_goal("First goal")
+        second = store.create_goal("Second goal")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/audit")
+        resp = conn.getresponse()
+        goal_ids = {e["goal_id"] for e in json.loads(resp.read())["events"]}
+        assert goal_ids == {first["id"], second["id"]}
+        conn.close()
+
+    def test_goal_id_scopes_to_one_goal(self, server):
+        from dourmouse.goals import get_goal_store
+
+        store = get_goal_store()
+        keep = store.create_goal("Keep")
+        store.create_goal("Drop")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", f"/api/audit?goal_id={keep['id']}")
+        resp = conn.getresponse()
+        events = json.loads(resp.read())["events"]
+        assert all(e["goal_id"] == keep["id"] for e in events)
+        assert len(events) >= 1
+        conn.close()
+
+    def test_format_markdown_returns_a_real_readable_report(self, server):
+        from dourmouse.goals import get_goal_store
+
+        get_goal_store().create_goal("Research competitors")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/audit?format=markdown")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert "# Dourmouse Audit Trail" in data["markdown"]
+        assert "goal_created" in data["markdown"]
+        conn.close()
+
+
 class TestSpotifyWidgetInjection:
     """v13.x backlog item 8: the floating widget is injected at serve time
     (dourmouse/webui.py::_serve_static) onto every screen EXCEPT the

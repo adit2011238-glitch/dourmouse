@@ -189,6 +189,16 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       already runs on that same desktop and can be console-killed by mistake — it's live user
       work, never touch or restart anything there beyond what's explicitly being built here. Same
       caution extended to `dourmouseserver` until its actual role is understood.
+- [x] Cross-goal audit trail (acceptance test 15's data/API half): `GoalStore.all_events`/
+      `export_events_markdown` + `GET /api/audit` (`?goal_id=`, `?since=`, `?format=markdown`).
+      Investigation found the underlying event log already real and comprehensive
+      (`goal_events`, auto-logged by every goal/task lifecycle method plus real tool_call/
+      tool_result/recovery_attempted logging in `goal_runtime.py`) — the actual gap was narrowly
+      "no cross-goal query, no human-readable export, no UI surface." First two closed; the UI
+      surface is tracked below under Phase 3. Real bug caught by the new tests before shipping:
+      `since` was first treated as a Unix float, but `goal_events.at` is a real ISO-8601 string
+      throughout this module — fixed end to end rather than converting types at a boundary. See
+      `docs/ENGINEERING_AUDIT.md` finding #022.
 - [ ] Live progress model + notifications through the existing notification mechanism.
 - [ ] Run the spec's 20 acceptance tests for real against the implementation.
 
@@ -256,6 +266,15 @@ that exists, so this phase runs after Phase 2 has at least its data model in pla
 - [ ] Design tokens (spacing/color/type/icon) replacing scattered magic numbers.
 - [ ] Tool-activity / code-diff / terminal-output components.
 - [ ] Command palette, right-side context panel, global status bar, live activity feed.
+- [ ] A real audit-trail/activity UI surface over `GET /api/audit` (backend and API done, finding
+      #022) — closes acceptance test 15 ("the user can inspect what the agent actually did")
+      fully, not just at the API level. A timeline view (goal/task/tool events, chronological,
+      filterable by goal), plus a one-click "export as Markdown" using the already-real
+      `?format=markdown` response.
+- [ ] A real, user-facing scheduling/timetable UI over the existing `scheduler_runner` primitive
+      (new, explicit user ask — see `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain C): a
+      visible, editable calendar/list of every scheduled routine, next-run time, last result, and
+      pause/edit/delete.
 - [ ] Real data only — every widget has loading/empty/stale/error states, nothing fabricated.
 
 ## Phase 4 — Defensive cybersecurity subsystem
