@@ -682,6 +682,108 @@ class TestGoalsCancelEndpoint:
         assert store.get_goal(goal["id"])["status"] == "COMPLETED"
 
 
+class TestSchedulesEndpoints:
+    """GET /api/schedules + POST /api/schedules/toggle + .../remove
+    (2026-09-18) -- the TIMETABLE screen's HTTP surface, the first one
+    this store (schedules.py) has ever had; the store and the chat-facing
+    tools (schedule_recurring/list_schedules/cancel_schedule) already
+    existed and were already tested. See docs/ENGINEERING_AUDIT.md
+    finding #027."""
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+
+    def test_list_is_honestly_empty_with_nothing_scheduled(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/schedules")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        assert json.loads(resp.read()) == {"schedules": []}
+        conn.close()
+
+    def test_list_includes_human_readable_fields(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.schedules import Schedules
+
+        Schedules().add("list_tasks", {}, {
+            "kind": "weekday", "time": "09:00", "weekday": 0,
+        }, "every Monday at 9:00")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/schedules")
+        entry = json.loads(conn.getresponse().read())["schedules"][0]
+        conn.close()
+        assert entry["tool"] == "list_tasks"
+        assert "schedule_description" in entry and entry["schedule_description"]
+        assert "next_run" in entry and entry["next_run"]
+
+    def test_toggle_pauses_a_real_schedule(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.schedules import Schedules
+
+        store = Schedules()
+        entry = store.add("list_tasks", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/schedules/toggle",
+            body=json.dumps({"id": entry["id"], "enabled": False}),
+            headers={"Content-Type": "application/json"},
+        )
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data == {"ok": True}
+        assert store.list()[0]["enabled"] is False
+
+    def test_toggle_missing_id_is_a_real_400(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/schedules/toggle",
+            body=json.dumps({"enabled": False}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 400
+        conn.close()
+
+    def test_remove_deletes_a_real_schedule(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.schedules import Schedules
+
+        store = Schedules()
+        entry = store.add("list_tasks", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/schedules/remove",
+            body=json.dumps({"id": entry["id"]}),
+            headers={"Content-Type": "application/json"},
+        )
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data == {"ok": True}
+        assert store.list() == []
+
+    def test_remove_unknown_id_reports_false_not_an_error(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/schedules/remove",
+            body=json.dumps({"id": "no-such-schedule"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert resp.status == 200
+        assert data == {"ok": False}
+
+
 class TestSpotifyWidgetInjection:
     """v13.x backlog item 8: the floating widget is injected at serve time
     (dourmouse/webui.py::_serve_static) onto every screen EXCEPT the

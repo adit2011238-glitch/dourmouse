@@ -250,6 +250,24 @@ class Schedules:
                 break
         self._save(entries)
 
+    def set_enabled(self, schedule_id: str, enabled: bool) -> bool:
+        """Pause/resume (2026-09-18, the TIMETABLE UI's one-click pause) --
+        deliberately separate from remove(): a paused schedule keeps its
+        id, its history (last_run), and its place in the file, so resuming
+        it is not the same as recreating it from scratch. _tick_once
+        already skips any entry where enabled is falsy, so this alone is
+        the complete implementation -- no runner change needed."""
+        entries = self._load()
+        changed = False
+        for e in entries:
+            if e.get("id") == schedule_id:
+                e["enabled"] = bool(enabled)
+                changed = True
+                break
+        if changed:
+            self._save(entries)
+        return changed
+
 
 class SchedulerRunner:
     """Background thread that runs user schedules when they come due.

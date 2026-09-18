@@ -303,15 +303,21 @@ that exists, so this phase runs after Phase 2 has at least its data model in pla
 - [ ] Design tokens (spacing/color/type/icon) replacing scattered magic numbers.
 - [ ] Tool-activity / code-diff / terminal-output components.
 - [ ] Command palette, right-side context panel, global status bar, live activity feed.
-- [ ] A real audit-trail/activity UI surface over `GET /api/audit` (backend and API done, finding
-      #022) — closes acceptance test 15 ("the user can inspect what the agent actually did")
-      fully, not just at the API level. A timeline view (goal/task/tool events, chronological,
-      filterable by goal), plus a one-click "export as Markdown" using the already-real
-      `?format=markdown` response.
-- [ ] A real, user-facing scheduling/timetable UI over the existing `scheduler_runner` primitive
-      (new, explicit user ask — see `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain C): a
-      visible, editable calendar/list of every scheduled routine, next-run time, last result, and
-      pause/edit/delete.
+- [x] A real audit-trail/activity UI surface over `GET /api/audit` (backend and API done, finding
+      #022) -- closes acceptance test 15 ("the user can inspect what the agent actually did")
+      fully, not just at the API level: the GOALS screen's LIVE AUDIT TRAIL section (finding
+      #026), chronological, human-described per event type. Remaining, small, real: no one-click
+      "export as Markdown" button in the UI yet, even though the backend `?format=markdown`
+      response has existed since finding #022 -- the API is real, the button is not.
+- [x] A real, user-facing scheduling/timetable UI over the existing `scheduler_runner` primitive
+      (new, explicit user ask -- see `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain C): the
+      TIMETABLE screen (finding #027), a visible list of every scheduled routine, next-run time,
+      last-run time, and pause/resume/delete. Live-verified: a real chat message created a real
+      schedule through the real `schedule_recurring` tool and the real, currently configured
+      Ollama Cloud backend, then paused/resumed/deleted over real browser clicks. Deliberately no
+      creation form (natural language through any chat composer already does this for real) and
+      no edit action yet (no `update()` method on the store -- real, separate, not-yet-done work,
+      the largest remaining item in this domain).
 - [ ] Real data only — every widget has loading/empty/stale/error states, nothing fabricated.
 
 ## Phase 4 — Defensive cybersecurity subsystem

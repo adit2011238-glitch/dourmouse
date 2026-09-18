@@ -116,6 +116,26 @@ class TestSchedulerRunner:
         runner._tick_once()
         assert len(calls) == 1
 
+    def test_a_paused_entry_never_fires_even_when_due(self, tmp_path):
+        """set_enabled(False) (the TIMETABLE UI's PAUSE button) must
+        actually stop the real runner, not just flip a cosmetic flag --
+        _tick_once's own enabled check is what this proves end to end."""
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        entry = store.add("list_tasks", {}, {
+            "kind": "interval", "interval_seconds": 60,
+        }, "every 60 minutes")
+        store.set_enabled(entry["id"], False)
+        calls = []
+        tracker = _FakeTracker()
+        runner = schedules.SchedulerRunner(
+            self._registry(), tracker, store=store,
+            fetcher=lambda tool, args: calls.append(tool) or "ok",
+            now_fn=lambda: datetime(2026, 8, 12, 9, 0), tick=1.0,
+        )
+        runner._tick_once()
+        assert calls == []
+        assert store.list()[0]["last_run"] is None
+
     def test_not_due_until_scheduled_time(self, tmp_path):
         store = schedules.Schedules(tmp_path / "schedules.jsonl")
         entry = store.add("list_tasks", {}, {
@@ -245,6 +265,22 @@ class TestStore:
         }, "every 60 minutes")
         reloaded = schedules.Schedules(path).list()
         assert len(reloaded) == 1 and reloaded[0]["tool"] == "list_tasks"
+
+    def test_set_enabled_pauses_and_resumes_without_losing_the_entry(self, tmp_path):
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        e = store.add("gmail_search", {"query": "receipt"}, {
+            "kind": "weekday", "time": "09:00", "weekday": 0,
+        }, "every Monday at 9:00")
+        assert store.list()[0]["enabled"] is True
+        assert store.set_enabled(e["id"], False) is True
+        assert store.list()[0]["enabled"] is False
+        assert store.list()[0]["id"] == e["id"]  # paused, not recreated
+        assert store.set_enabled(e["id"], True) is True
+        assert store.list()[0]["enabled"] is True
+
+    def test_set_enabled_on_an_unknown_id_reports_false(self, tmp_path):
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        assert store.set_enabled("no-such-schedule", False) is False
 
 
 class TestRosterTools:

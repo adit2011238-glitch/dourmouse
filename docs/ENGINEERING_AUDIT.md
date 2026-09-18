@@ -912,6 +912,61 @@ goal cannot be "uncancelled" by this route.
 **Tests run**: `test_webui.py -k "TestGoalsCancelEndpoint or TestAuditEndpoint or
 TestGoalRuntimeWiring"` (10/10), then full suite.
 
+### 027 -- The TIMETABLE screen: Domain C's real gap, the user's own explicit ask
+
+**Severity**: n/a (feature completion -- one of the two explicit items in the user's own founding
+request: "add a scheduling feature and such timetable").
+**Context**: `schedules.py` (the `Schedules` store, `SchedulerRunner`) and its three chat-facing
+tools (`schedule_recurring`/`list_schedules`/`cancel_schedule`, `general_roster.py`) already
+existed and were already well tested -- a real, honest, working backend, confirmed by
+`docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain C before starting. What was missing,
+confirmed by grep before writing any code: zero HTTP routes over that store, and zero UI files
+referencing them. A user could create a real recurring routine through chat and it would run
+forever, correctly, in the background -- with no visible, editable timetable, exactly the gap the
+user's own request named.
+**Design**: three new routes (`GET /api/schedules`, `POST /api/schedules/toggle`, `POST
+/api/schedules/remove`) and a new TIMETABLE screen in `ui/console.html`, following the exact same
+pattern the GOALS screen (finding #026) just established. `GET /api/schedules` computes
+`schedule_description`/`next_run` server-side via the store's own existing `describe_spec`/
+`describe_next_run` helpers, so the UI never re-derives schedule date-math in JS. A genuinely new
+capability had to be added to the store itself: `Schedules.set_enabled()` -- pause/resume,
+deliberately NOT the same as `remove()` (a paused entry keeps its id and its `last_run` history;
+resuming it is not recreating it from scratch). `SchedulerRunner._tick_once` already skipped any
+entry with a falsy `enabled` field, so this one store method is the complete implementation --
+proven by a new test that pauses a due entry and confirms the real runner genuinely skips it, not
+just that the store field flipped.
+**A deliberate scope line, stated plainly**: no creation form in the UI. Typing a plain sentence
+("every Monday at 8am, review my email and brief me") into any existing chat composer already
+works today, for real, through the same `schedule_recurring` tool this finding's own live proof
+exercised -- building a second, parallel natural-language parser bolted onto this one screen would
+duplicate real reasoning the model already does, for no honest gain. Acceptance test 4 (editing a
+routine's schedule from the UI) was also deliberately NOT built: no `update()` method exists on
+the store, and faking "edit" as delete-then-recreate would silently lose the entry's id and
+history -- real, separate, not-yet-done work, same category of considered exclusion as finding
+#026's per-task approval gap.
+**Live proof, not just passing tests**: a real HTTP POST to `/api/chat` (the same endpoint the
+real UI composer calls) with the plain sentence "Schedule a recurring routine: every Monday at
+8am, call list_tasks with no arguments" -- no test hooks, no scripted backend -- was handled by
+the real, currently-configured Ollama Cloud backend (`gpt-oss:20b`), which reasoned about it,
+called the real `schedule_recurring` tool with `{"tool": "list_tasks", "schedule_text": "every
+Monday at 8:00", "arguments": {"include_done": false}}`, and got back `SCHEDULED sched-001:
+list_tasks every Monday at 08:00 -- next run 2026-09-21 08:00`. That real entry then appeared
+correctly in the TIMETABLE screen over real browser clicks: PAUSE moved it to a PAUSED section
+with a real dot-color change and the button relabeled RESUME; RESUME moved it back to ACTIVE;
+DELETE removed it for good, confirmed by a direct backend read (`GET /api/schedules` returning
+`{"schedules": []}`), not just a UI read.
+**Files changed**: `dourmouse/schedules.py` (`Schedules.set_enabled`), `dourmouse/webui.py` (3
+routes), `ui/console.html` (TIMETABLE screen), `dourmouse/tests/test_schedules.py` (3 tests),
+`dourmouse/tests/test_webui.py` (`TestSchedulesEndpoints`, 6 tests).
+**Tests added**: `set_enabled` pauses/resumes without losing the entry's id or history; an unknown
+id reports `False`; a paused entry is genuinely skipped by the real runner even when due; each of
+the 3 new HTTP routes over real requests (list with human-readable fields, toggle, toggle missing
+id is a real 400, remove, remove of an unknown id reports `{"ok": false}` not an error).
+**Tests run**: `test_schedules.py` (25/25), `test_webui.py -k TestSchedulesEndpoints` (6/6), then
+full suite.
+**Result**: fixed -- Domain C's real gap closed; acceptance tests 1-3 genuinely demonstrated live,
+test 4 explicitly named as remaining, separate work.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

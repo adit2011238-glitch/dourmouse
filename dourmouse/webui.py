@@ -2707,6 +2707,27 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             events = store.goal_events(gid, limit=limit) if gid else store.all_events(since=since, limit=limit)
             self._send_json({"events": events})
+        elif path == "/api/schedules":
+            # 2026-09-18: the TIMETABLE screen's read half (docs/
+            # COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md Domain C) -- the
+            # store (schedules.py) and the chat-facing tools
+            # (schedule_recurring/list_schedules/cancel_schedule,
+            # general_roster.py) already existed and were already tested;
+            # this route is the first HTTP surface over the same real
+            # data, nothing new logically. describe_spec/describe_next_run
+            # computed server-side so the UI never re-derives schedule
+            # date-math in JS.
+            from dourmouse import schedules as schedules_module
+
+            store = schedules_module.Schedules()
+            out = []
+            for entry in store.list():
+                out.append({
+                    **entry,
+                    "schedule_description": schedules_module.describe_spec(entry.get("spec") or {}),
+                    "next_run": schedules_module.describe_next_run(entry),
+                })
+            self._send_json({"schedules": out})
         elif path == "/api/security":
             # Phase 4 (docs/GODSPEED_ROADMAP.md): read-only real network/host
             # security telemetry. No write endpoint here on purpose -- this
@@ -3628,6 +3649,35 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "id is required"}, status=400)
                 return
             ok = get_goal_store().cancel_goal(goal_id)
+            self._send_json({"ok": ok})
+        elif parsed.path == "/api/schedules/toggle":
+            # 2026-09-18: the TIMETABLE screen's PAUSE/RESUME action --
+            # Schedules.set_enabled (schedules.py), new this same change,
+            # tested in test_schedules.py including that a paused entry is
+            # genuinely skipped by the real runner, not just cosmetically
+            # flagged.
+            from dourmouse import schedules as schedules_module
+
+            body = self._read_json_body()
+            schedule_id = str(body.get("id") or "").strip()
+            if not schedule_id:
+                self._send_json({"ok": False, "error": "id is required"}, status=400)
+                return
+            ok = schedules_module.Schedules().set_enabled(schedule_id, bool(body.get("enabled")))
+            self._send_json({"ok": ok})
+        elif parsed.path == "/api/schedules/remove":
+            # 2026-09-18: the TIMETABLE screen's DELETE action -- a thin
+            # route over Schedules.remove, already existed, already used
+            # by the cancel_schedule chat tool (general_roster.py), and
+            # already tested.
+            from dourmouse import schedules as schedules_module
+
+            body = self._read_json_body()
+            schedule_id = str(body.get("id") or "").strip()
+            if not schedule_id:
+                self._send_json({"ok": False, "error": "id is required"}, status=400)
+                return
+            ok = schedules_module.Schedules().remove(schedule_id)
             self._send_json({"ok": ok})
         else:
             self.send_error(404, "not found")

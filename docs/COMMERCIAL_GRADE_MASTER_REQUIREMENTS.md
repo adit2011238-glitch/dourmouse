@@ -197,18 +197,33 @@ the 20 — a live demo, not a code pointer, for each.
 The founding spec already specifies routines (Skill = HOW, Routine = WHEN) and a persistent
 scheduler supporting one-time, daily/weekly/monthly, cron-like, and event-based triggers
 (file-created, email-received, calendar-event, webhook). `scheduler_runner` already exists in the
-codebase per this session's own shutdown-cleanup fix (finding #007) — meaning the backend
-primitive exists. What's explicitly new and not yet built: a real, user-facing **timetable UI** —
-a visible, editable calendar/list view of every scheduled routine, its next run time, its last
-result, and one-click pause/edit/delete — not just an API a goal can call.
+codebase per this session's own shutdown-cleanup fix (finding #007) -- meaning the backend
+primitive exists. **Status, updated 2026-09-18 (finding #027)**: the timetable UI is now real --
+`ui/console.html`'s TIMETABLE screen, backed by 3 new routes (`GET /api/schedules`, `POST
+/api/schedules/toggle`, `POST /api/schedules/remove`) over the pre-existing, already-tested
+`Schedules` store. Pause/resume is a genuinely new store capability (`set_enabled`), proven live
+against the real runner, not just the store field. No creation FORM was built deliberately --
+natural language already works today through any chat composer, via the real `schedule_recurring`
+tool; a second parser bolted onto this one screen would be a fabricated shortcut around the one
+that's already real and already tested.
 
 **Acceptance tests**:
 1. A routine created via natural language ("every Monday at 8am, review my email and brief me")
    produces a real, visible, editable entry in the timetable UI, not just a hidden cron string.
-2. The timetable survives an app restart and fires at the correct real time.
+   **Demonstrated live** (finding #027): a real chat message, handled by the real, currently
+   configured Ollama Cloud backend, created a real schedule entry visible in the TIMETABLE screen.
+2. The timetable survives an app restart and fires at the correct real time. Backed by the
+   pre-existing JSONL persistence (`Schedules._load`/`_save`) and `SchedulerRunner`'s own
+   already-tested catch-up logic -- not re-verified with a fresh restart drill this pass (that
+   drill is real, separate follow-on, same shape as finding #024's crash-recovery drill for
+   goals).
 3. A missed run (app was closed at trigger time) is either caught up honestly or logged as missed
-   — never silently pretended to have happened.
-4. Editing a routine's schedule from the UI actually reschedules the real underlying job.
+   -- never silently pretended to have happened. Already true and already tested
+   (`test_catch_up_runs_once_after_missed_window`), pre-existing.
+4. Editing a routine's schedule from the UI actually reschedules the real underlying job. **Not
+   built**: no `update()` method exists on the store; faking "edit" as delete-then-recreate would
+   silently lose the entry's id and `last_run` history. Real, separate, not-yet-done work -- the
+   single largest remaining item in this domain.
 
 ## 6. Domain D — Self-extension (Dourmouse adds agents/tools/scope to itself)
 

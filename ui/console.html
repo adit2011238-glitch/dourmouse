@@ -1402,6 +1402,8 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
       <div class="panebody" id="orchestrationBody"></div></section>
     <section class="pane" id="pane-goals"><div class="panehead">◆ GOALS · AUTONOMOUS RUNTIME</div>
       <div class="panebody" id="goalsBody"></div></section>
+    <section class="pane" id="pane-timetable"><div class="panehead">◆ TIMETABLE · SCHEDULED ROUTINES</div>
+      <div class="panebody" id="timetableBody"></div></section>
 
     <section class="pane" id="pane-news"><div class="panehead">◆ NEWS · LIVE FEED</div>
       <div class="panebody" id="newsBody"></div>
@@ -1482,7 +1484,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
-const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS"];
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS","TIMETABLE"];
 // v8.29: screens whose composer submissions get their OWN independent
 // thread (a real per-screen conversation, not a shared feed forced onto
 // COMMS). COMMS is deliberately absent — it's a real Gmail inbox now, not
@@ -1789,6 +1791,7 @@ function show(name){
   if(name==="GLOBE") paintGlobe();
   if(name==="ORCHESTRATION") paintOrchestration();
   if(name==="GOALS") loadGoals();
+  if(name==="TIMETABLE") loadSchedules();
   if(name==="NEWS") paintNews();
   if(name==="DESIGN3D") paintDesign3d();
   if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
@@ -6804,6 +6807,85 @@ function paintGoals(){
 }
 loadGoals();
 setInterval(() => { if(screen === "GOALS") loadGoals(); }, 4000);
+
+// 2026-09-18: the TIMETABLE screen -- Domain C (docs/
+// COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md), the user's own explicit ask
+// ("add a scheduling feature and such timetable"). schedules.py's store
+// and its chat-facing tools (schedule_recurring/list_schedules/
+// cancel_schedule) already existed and were already tested; before this,
+// zero UI files referenced /api/schedules either. No form here for
+// CREATING a schedule -- typing a plain sentence like "every Monday at
+// 8am, review my email and brief me" into any chat composer already
+// works today, through the real schedule_recurring tool the model can
+// already call; building a second, parallel natural-language parser just
+// for this screen would be a fabricated shortcut around the one that
+// already exists and is already tested. This screen is the missing
+// other half: see it, pause it, delete it.
+let _schedules = [];
+function scheduleStatusDot(entry){
+  if(entry.enabled === false) return '<span class="dot"></span>';
+  return '<span class="dot ok"></span>';
+}
+async function loadSchedules(){
+  try{
+    const r = await fetch("/api/schedules");
+    const j = await r.json();
+    _schedules = j.schedules || [];
+  }catch{}
+  if(screen === "TIMETABLE") paintSchedules();
+}
+async function toggleSchedule(id, enable){
+  try{
+    const r = await fetch("/api/schedules/toggle", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id, enabled: enable})});
+    const j = await r.json();
+    if(!r.ok || j.ok===false){ alert("Couldn't update this schedule."); return; }
+  }catch{ alert("Couldn't update this schedule."); return; }
+  await loadSchedules();
+}
+async function removeSchedule(id){
+  if(!confirm("Delete this schedule for good?")) return;
+  try{
+    const r = await fetch("/api/schedules/remove", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id})});
+    const j = await r.json();
+    if(!r.ok || j.ok===false){ alert("Couldn't delete this schedule."); return; }
+  }catch{ alert("Couldn't delete this schedule."); return; }
+  await loadSchedules();
+}
+function scheduleRowHtml(e){
+  const paused = e.enabled === false;
+  const argsPreview = e.arguments && Object.keys(e.arguments).length ? " " + esc(JSON.stringify(e.arguments)) : "";
+  return `<div class="row">
+    ${scheduleStatusDot(e)}
+    <div class="g">
+      <div class="n">${esc(e.tool)}${argsPreview} <span style="color:var(--blue-deep);font-weight:normal">· ${esc(e.schedule_description || e.schedule_text || "")}</span></div>
+      <div class="d">${paused ? "PAUSED · " : ""}next ${esc(e.next_run || "-")}${e.last_run ? " · last ran " + esc(String(e.last_run).replace("T", " ").slice(0, 19)) : " · never run yet"}</div>
+    </div>
+    <div style="display:flex;gap:6px;align-self:flex-start">
+      <button class="btn" data-toggle-schedule="${esc(e.id)}" data-enable="${paused ? "1" : "0"}" style="min-height:auto;padding:4px 9px;font-size:8.5px">${paused ? "RESUME" : "PAUSE"}</button>
+      <button class="btn" data-remove-schedule="${esc(e.id)}" style="min-height:auto;padding:4px 9px;font-size:8.5px">DELETE</button>
+    </div>
+  </div>`;
+}
+function paintSchedules(){
+  const box = $("timetableBody");
+  const active = _schedules.filter(e => e.enabled !== false);
+  const paused = _schedules.filter(e => e.enabled === false);
+  box.innerHTML = `
+    <p class="lede">${_schedules.length} ROUTINES SCHEDULED. ${active.length} ACTIVE.</p>
+    <p class="note" style="padding:8px 0">Tell Dourmouse what to do and when, from any chat -- for example
+      "every Monday at 8am, review my email and brief me." A real routine shows up here the moment it's created.</p>
+    ${_schedules.length ? "" : '<p class="note" style="padding:8px 0">Nothing scheduled yet.</p>'}
+    ${active.length ? `<div class="sec" style="margin-top:6px">ACTIVE</div>${active.map(scheduleRowHtml).join("")}` : ""}
+    ${paused.length ? `<div class="sec" style="margin-top:14px">PAUSED (${paused.length})</div>${paused.map(scheduleRowHtml).join("")}` : ""}`;
+  box.querySelectorAll("[data-toggle-schedule]").forEach(el => {
+    el.onclick = () => toggleSchedule(el.dataset.toggleSchedule, el.dataset.enable === "1");
+  });
+  box.querySelectorAll("[data-remove-schedule]").forEach(el => { el.onclick = () => removeSchedule(el.dataset.removeSchedule); });
+}
+loadSchedules();
+setInterval(() => { if(screen === "TIMETABLE") loadSchedules(); }, 4000);
 
 async function paintNews(){
   const box = $("newsBody");
