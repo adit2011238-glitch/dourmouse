@@ -22,6 +22,14 @@ from dourmouse.goals import GoalStore
 #: verification existed keeps its original, unrelated meaning.
 _VERIFIER_PROMPT_MARKER = "You are a strict, skeptical verifier"
 
+#: _verify_goal_criteria (finding, success-criteria check) constructs its
+#: OWN fresh ChatSession too, over the same chat_module.ChatSession
+#: reference -- a real, deliberately DIFFERENT opening phrase from
+#: _VERIFIER_PROMPT_MARKER above (the two prompts used to collide on the
+#: same opening words, caught before it ever caused a real test
+#: collision) so the fake can tell them apart.
+_GOAL_CRITERIA_PROMPT_MARKER = "You are reviewing a completed multi-task goal"
+
 
 class _FakeSession:
     """Records every ``ask()`` call and returns a scripted response keyed
@@ -37,6 +45,9 @@ class _FakeSession:
     #: COMPLETED exactly as before. Tests exercising verification itself
     #: override this directly, same shape as `responses`' own values.
     verification_response: object = {"final_text": "VERDICT: VERIFIED"}
+    #: Default: a goal with declared success_criteria passes cleanly, same
+    #: reasoning as verification_response above.
+    goal_criteria_response: object = {"final_text": "VERDICT: SATISFIED"}
 
     def __init__(self, registry, session_file=None, confirmation_gate=None):
         self.registry = registry
@@ -44,7 +55,9 @@ class _FakeSession:
 
     def ask(self, prompt, event_sink=None, forced_agent=None, force_plain_dispatch=False):
         type(self).calls.append((prompt, forced_agent))
-        if prompt.startswith(_VERIFIER_PROMPT_MARKER):
+        if prompt.startswith(_GOAL_CRITERIA_PROMPT_MARKER):
+            scripted = type(self).goal_criteria_response
+        elif prompt.startswith(_VERIFIER_PROMPT_MARKER):
             scripted = type(self).verification_response
         else:
             scripted = type(self).responses.get(prompt, {"final_text": "done"})
@@ -62,14 +75,19 @@ def _install_fake(monkeypatch, responses: dict[str, object]):
     _FakeSession.calls = []
     _FakeSession.responses = responses
     _FakeSession.verification_response = {"final_text": "VERDICT: VERIFIED"}
+    _FakeSession.goal_criteria_response = {"final_text": "VERDICT: SATISFIED"}
     monkeypatch.setattr(chat_module, "ChatSession", _FakeSession)
 
 
 def _task_calls() -> list[tuple[str, str | None]]:
     """``_FakeSession.calls`` minus the independent-verification call every
-    completed task now also makes -- for tests whose own point is task
-    execution/ordering/routing, not verification."""
-    return [c for c in _FakeSession.calls if not c[0].startswith(_VERIFIER_PROMPT_MARKER)]
+    completed task now also makes, and minus any goal-criteria check --
+    for tests whose own point is task execution/ordering/routing, not
+    verification."""
+    return [
+        c for c in _FakeSession.calls
+        if not c[0].startswith(_VERIFIER_PROMPT_MARKER) and not c[0].startswith(_GOAL_CRITERIA_PROMPT_MARKER)
+    ]
 
 
 def _runtime(store: GoalStore) -> GoalRuntime:
@@ -101,6 +119,95 @@ class TestSingleTaskGoal:
 
         assert store.get_task(task["id"])["status"] == "FAILED"
         assert store.get_goal(goal["id"])["status"] == "BLOCKED"
+
+
+class TestGoalSuccessCriteria:
+    """success_criteria has existed on every goal since this module's
+    first version but nothing ever read it back until now -- finding
+    #025's own docstring named this precisely as real, separate,
+    not-yet-done follow-on work. See the module's own _verify_goal_criteria."""
+
+    def test_a_goal_with_no_criteria_completes_exactly_as_before(self, monkeypatch):
+        _install_fake(monkeypatch, {"do the one thing": {"final_text": "it is done"}})
+        store = GoalStore(None)
+        goal = store.create_goal("A simple goal")  # no success_criteria at all
+        store.create_task(goal["id"], "do the one thing")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        updated = store.get_goal(goal["id"])
+        assert updated["status"] == "COMPLETED"
+        assert "criteria_checked" not in updated["result"]
+        # no extra real LLM round trip for a goal that never asked for one
+        assert not any(c[0].startswith(_GOAL_CRITERIA_PROMPT_MARKER) for c in _FakeSession.calls)
+
+    def test_satisfied_criteria_complete_the_goal_with_the_real_reasoning_kept(self, monkeypatch):
+        _install_fake(monkeypatch, {"write the report": {"final_text": "report written, cites 3 sources"}})
+        _FakeSession.goal_criteria_response = {"final_text": "All good.\n\nVERDICT: SATISFIED"}
+        store = GoalStore(None)
+        goal = store.create_goal("Write a cited report", success_criteria=["cites at least 3 real sources"])
+        store.create_task(goal["id"], "write the report")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        updated = store.get_goal(goal["id"])
+        assert updated["status"] == "COMPLETED"
+        assert updated["result"]["criteria_checked"] is True
+        assert "SATISFIED" in updated["result"]["reasoning"]
+
+    def test_unsatisfied_criteria_block_the_goal_instead_of_completing_it(self, monkeypatch):
+        """The real point of this whole feature: a goal whose tasks all
+        reported success must NOT silently complete if its own declared
+        bar was not actually met."""
+        _install_fake(monkeypatch, {"write the report": {"final_text": "report written, no sources cited"}})
+        _FakeSession.goal_criteria_response = {
+            "final_text": "The report cites zero sources, not 3.\n\nVERDICT: NOT_SATISFIED"
+        }
+        store = GoalStore(None)
+        goal = store.create_goal("Write a cited report", success_criteria=["cites at least 3 real sources"])
+        store.create_task(goal["id"], "write the report")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        updated = store.get_goal(goal["id"])
+        assert updated["status"] == "BLOCKED"
+        assert "cites zero sources" in updated["blocked_reason"]
+        # the real, completed task work is never thrown away just because
+        # the GOAL's own bar wasn't met
+        task = store.list_tasks(goal["id"])[0]
+        assert task["status"] == "COMPLETED"
+
+    def test_a_broken_criteria_checker_completes_the_real_work_honestly_uncertain(self, monkeypatch):
+        _install_fake(monkeypatch, {"write the report": {"final_text": "report written"}})
+        _FakeSession.goal_criteria_response = {"raises": "verifier backend unavailable"}
+        store = GoalStore(None)
+        goal = store.create_goal("Write a report", success_criteria=["is at least 100 words"])
+        store.create_task(goal["id"], "write the report")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        updated = store.get_goal(goal["id"])
+        assert updated["status"] == "COMPLETED"
+        assert updated["result"]["criteria_checked"] is False
+        assert "could not run" in updated["result"]["note"]
+
+    def test_a_real_verification_event_is_logged_to_the_audit_trail(self, monkeypatch):
+        _install_fake(monkeypatch, {"write the report": {"final_text": "report written"}})
+        store = GoalStore(None)
+        goal = store.create_goal("Write a report", success_criteria=["is real"])
+        store.create_task(goal["id"], "write the report")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        events = store.goal_events(goal["id"])
+        goal_verifications = [e for e in events if e["type"] == "verification" and e["detail"].get("scope") == "goal"]
+        assert len(goal_verifications) == 1
+        assert goal_verifications[0]["detail"]["satisfied"] is True
 
 
 class TestIndependentVerification:

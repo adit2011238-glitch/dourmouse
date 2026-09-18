@@ -216,7 +216,19 @@ def build_goals_subagent() -> Subagent:
                         "objective": {"type": "string"},
                         "tasks": {"type": "array", "items": _TASK_ITEM_SCHEMA},
                         "priority": {"type": "string", "enum": ["critical", "high", "normal", "low", "background"], "default": "normal"},
-                        "success_criteria": {"type": "array", "items": {"type": "string"}, "default": []},
+                        "success_criteria": {
+                            "type": "array", "items": {"type": "string"}, "default": [],
+                            "description": (
+                                "Optional, but real: concrete, checkable conditions for this goal "
+                                "to count as truly done (e.g. 'the report cites at least 3 real "
+                                "sources', 'the email was actually sent'). When every task "
+                                "finishes, an independent reviewer checks each criterion against "
+                                "what the tasks actually produced -- an unmet criterion blocks "
+                                "completion with an honest reason instead of the goal silently "
+                                "reporting done. Leave empty for a goal with no specific bar "
+                                "beyond finishing its tasks."
+                            ),
+                        },
                     },
                     "required": ["objective", "tasks"],
                 },

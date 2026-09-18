@@ -223,9 +223,18 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       never once used, now real — live-verified end to end against the real dev-preview server
       (`RUNNING` → `VERIFYING` → `COMPLETED`, a real independently-reasoned verdict logged to the
       real audit trail). Real, deliberate cost tradeoff: every task now makes two real dispatch
-      calls, not one. See `docs/ENGINEERING_AUDIT.md` finding #025. Remaining: a deterministic
-      check against explicit, structured per-task success criteria (no such schema field exists
-      yet) is real, separate follow-on — the reasoning-pass verifier closes the more urgent half.
+      calls, not one. See `docs/ENGINEERING_AUDIT.md` finding #025.
+- [x] Deterministic success-criteria check (finding #031): `success_criteria`, declarable on any
+      goal since this module's first version but never once read back, now gets a real, goal-
+      scoped independent check (`_verify_goal_criteria`) before a goal is allowed to complete --
+      criterion-by-criterion, not one vague verdict. `GOAL_STATES`' own `VERIFYING` value, defined
+      since the module's first version and never once used for a goal before, now real. An
+      unsatisfied criterion routes the goal to `BLOCKED` with the real reasoning, never silently
+      reported done -- the real, already-completed task work underneath is never thrown away.
+      Live-verified with a real, unscripted model call: a task fully succeeded on its own terms
+      while the goal it belonged to still correctly blocked because its own declared bar (a
+      specific token that never appeared) was not met, visible in both the real audit trail and
+      the real GOALS screen. Domain B is now fully closed -- all 20 acceptance tests real.
       See `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain B for the full per-test status.
 - [x] Test 15 UI surface (the GOALS screen, `ui/console.html`): before this, no UI file in the
       whole product referenced `/api/goals` or `/api/audit` -- confirmed by grep, not assumed -- so

@@ -1198,6 +1198,70 @@ fields is a real 400).
 #027), survival across restart and honest catch-up (both pre-existing, already tested), and now
 editing.
 
+### 031 -- Deterministic success-criteria check, Domain B's real remaining nuance
+
+**Severity**: n/a (feature completion -- the exact gap finding #025's own docstring named: "no
+such criteria field exists on a TASK yet ... a richer criteria-based check remains real, separate,
+not-yet-done follow-on work").
+**Context**: `success_criteria` (a `list[str]`) has existed on every goal since `goals.py`'s very
+first version -- settable through `create_goal`'s own schema, stored, retrievable via
+`goal_snapshot()` -- but nothing anywhere ever read it back. A goal could declare "the report
+cites at least 3 real sources" and that declaration was pure documentation: `_complete_goal`
+marked a goal `COMPLETED` the instant every task's own independent verification passed, with zero
+check against what the goal itself had said would count as actually done.
+**Design**: `_verify_goal_criteria`, the goal-scoped sibling of finding #025's own
+`_verify_completion`, called from `_complete_goal` only when a goal declares at least one
+criterion (zero added latency or cost for the common case of a goal with none). Same real
+independent-reasoning shape -- a fresh, tool-less `ChatSession` so the check cannot itself take
+any action -- but shown every task's own real result summary and asked to judge EACH declared
+criterion individually, not one vague "was this done" question, ending with a single
+`VERDICT: SATISFIED`/`VERDICT: NOT_SATISFIED` line. `GOAL_STATES`'s own `VERIFYING` value, defined
+since the module's first version and never once used for a goal before (only for tasks), is now
+real. An unsatisfied verdict routes the goal to `BLOCKED` with the real reasoning naming which
+criterion failed -- immediate and explicit, the same shape as the pre-existing permanent-task-
+failure path, not left to a generic heuristic that might never fire. The real, already-completed
+task work is never thrown away: a goal blocked on its own criteria still shows every task
+`COMPLETED`, exactly as it happened. If the checker itself cannot run, the goal still completes
+(never blocked forever on a broken checker) with the uncertainty stated plainly, matching finding
+#025's own fail-safe design precisely.
+**A real prompt collision caught before it ever ran, not live**: the new goal-criteria prompt's
+first draft opened with the exact same words as `_verify_completion`'s own
+`_VERIFIER_PROMPT_MARKER` ("You are a strict, skeptical verifier") -- in the real test double
+(`_FakeSession`, `test_goal_runtime.py`) this would have made the two checks indistinguishable,
+silently routing goal-criteria checks through the per-task verifier's own scripted response and
+vice versa. Caught while writing the test fixture, before ever running a test: reworded the
+opening to be genuinely distinct, and gave `_FakeSession` a third, separately-scripted
+`goal_criteria_response` track.
+**A second real gap closed in the same pass**: `create_goal`'s own `success_criteria` parameter
+had zero description in its JSON schema -- nothing ever told the model this field mattered, which
+plausibly explains why it went unused in practice even though it always existed. Given a real
+description now that it is genuinely enforced, and a real, unscripted Ollama Cloud call
+immediately used it meaningfully on the very first try (see live proof below).
+**Live proof, against the real dev-preview server, no test hooks**: a real chat message asked the
+model to create a goal with a deliberately unsatisfiable criterion (a specific token the task's
+own simple response would never contain). The real model populated `success_criteria` correctly
+on its own. The real worker ran the task, which genuinely said hello and was independently
+verified as accomplishing exactly what it was asked -- then the goal itself correctly failed its
+OWN declared bar and went `BLOCKED`, not `COMPLETED`, with the real reasoning
+("Criterion: XYZZY-UNIQUE-TOKEN-99 -- Not satisfied (no evidence of that token in the output)")
+visible in the real audit trail and the real GOALS screen, task still shown `COMPLETED`
+underneath. The GOALS screen needed one small addition (a "Must satisfy: ..." line on expand) to
+surface the declared criteria; the existing `blocked_reason` display already handled the rest with
+zero changes, confirming the original screen design was general enough for this new case for
+free.
+**Files changed**: `dourmouse/goal_runtime.py` (`_verify_goal_criteria`, `_complete_goal`),
+`dourmouse/goal_tools.py` (schema description), `ui/console.html` (success-criteria display),
+`dourmouse/tests/test_goal_runtime.py` (`TestGoalSuccessCriteria`, 5 tests, plus a third
+scripted-response track on `_FakeSession`).
+**Tests added**: a goal with no criteria completes exactly as before with zero extra LLM round
+trip; satisfied criteria complete the goal with the real reasoning kept; unsatisfied criteria
+block the goal instead of completing it, with the real completed task work left intact; a broken
+criteria checker completes the real work honestly-uncertain rather than destroying it; a real
+`verification` (scope `goal`) event is logged to the audit trail.
+**Tests run**: `test_goal_runtime.py` (35/35), then full suite.
+**Result**: fixed -- Domain B's last named nuance closed, live-verified with a real model, a real
+unmet criterion, and a real block.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

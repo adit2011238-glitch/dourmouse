@@ -6803,6 +6803,7 @@ function goalRowHtml(g){
     <div class="g">
       <div class="n" style="cursor:pointer" data-toggle-goal="${esc(g.id)}">${esc(g.objective)} <span style="color:var(--blue-deep);font-weight:normal">· ${esc(g.status)} · ${esc(g.priority)}</span></div>
       ${g.blocked_reason ? `<div class="d">${esc(g.blocked_reason)}</div>` : ""}
+      ${expanded && g.success_criteria && g.success_criteria.length ? `<div class="d" style="margin-top:4px">Must satisfy: ${g.success_criteria.map(esc).join(" · ")}</div>` : ""}
       ${expanded ? `<div style="margin-top:6px">${expanded.length ? expanded.map(taskRowHtml).join("") : '<div class="d">No tasks yet.</div>'}</div>` : ""}
     </div>
     ${canCancel ? `<button class="btn" data-cancel-goal="${esc(g.id)}" style="min-height:auto;padding:4px 9px;font-size:8.5px;align-self:flex-start">CANCEL</button>` : ""}

@@ -160,8 +160,9 @@ default live behavior, not just built-but-dormant infrastructure.
 20. Multiple agents/goals run simultaneously without their state, credentials, memory, or files
     becoming mixed together.
 
-**Status, updated 2026-09-18**: test 1-6, 9-10, 12-14, 16-20 real and exercised by this session's
-own tests. Test 7 (approval requested, waits, auto-continues after approval) **closed** (finding
+**Status, updated 2026-09-18 -- all 20 acceptance tests now real, Domain B closed**: tests 1-6,
+9-10, 12-14, 16-20 real and exercised by this session's own tests. Test 7 (approval requested,
+waits, auto-continues after approval) **closed** (finding
 #029): a resumable PER-TASK approval ticket (`GoalStore.resolve_task_approval`, the GOALS screen's
 own APPROVE/DECLINE on a waiting task) -- a human approves the ONE task they reviewed, not every
 gated action on every task everywhere via the global toggle. Live-verified against the real
@@ -180,10 +181,14 @@ tool-call evidence from the actual run rather than the worker's own claim, with 
 `NOT_VERIFIED` verdict routed through the normal failure/retry path. Live-verified: a real task
 passed through `RUNNING` → `VERIFYING` → `COMPLETED` with a real, independently-reasoned verdict
 logged to the real audit trail. A real, deliberate cost tradeoff: every task now makes two real
-dispatch calls instead of one. Not yet built: a deterministic check against explicit, structured
-per-task success criteria (no such schema field exists on a task yet) — the reasoning-pass
-verifier closes the more urgent half; a richer criteria-based check remains real, separate,
-not-yet-done follow-on work, now the largest remaining item in this domain. Test 15 (inspect what
+dispatch calls instead of one. The deterministic-criteria-check gap named here is now **closed**
+too (finding #031): `success_criteria`, declarable on any goal since this module's first version
+but never once read back, now gets a real, goal-scoped independent check (`_verify_goal_criteria`)
+before a goal is allowed to complete -- criterion-by-criterion, not one vague verdict, with an
+unsatisfied criterion routing the goal to `BLOCKED` rather than silently reporting done. Live-
+verified with a real, unscripted model call: a task fully succeeded on its own terms (independently
+verified as such) while the GOAL it belonged to still correctly blocked because its own declared
+bar (a specific token that never appeared) was not met. Test 15 (inspect what
 the agent actually did) **closed** (finding #026): the GOALS screen (`ui/console.html`) is a real,
 live-verified UI over `goal_events`/`all_events`/`export_events_markdown` + `GET /api/audit`
 (finding #022) -- every goal, expandable per-goal task lists on demand, and the real cross-goal

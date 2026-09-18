@@ -45,7 +45,7 @@ import threading
 from typing import Any
 
 from dourmouse.config import auto_approve_enabled, workspace_dir
-from dourmouse.goals import GoalStore, TASK_TERMINAL_STATES
+from dourmouse.goals import GOAL_TERMINAL_STATES, GoalStore, TASK_TERMINAL_STATES
 
 _DEFAULT_TICK_SECONDS = 5.0
 #: How many ready tasks (across all active goals combined isn't tracked
@@ -412,6 +412,58 @@ class GoalRuntime:
             verified = False
         return {"verified": verified, "reasoning": reasoning, "error": None}
 
+    def _verify_goal_criteria(
+        self, goal: dict[str, Any], summary: str, criteria: list[str],
+    ) -> dict[str, Any]:
+        """Acceptance test 11's other half (finding #025's own docstring
+        named this precisely: "no such criteria field exists on a task
+        yet ... a richer criteria-based check remains real, separate,
+        not-yet-done follow-on work"). ``success_criteria`` has existed on
+        every goal since this module's first version (``create_goal``'s
+        own schema, ``goals.py``'s ``Goal`` row) but nothing ever read it
+        back -- a goal could declare "the report cites 3 real sources" and
+        that declaration was pure documentation, never checked against
+        what the tasks actually produced.
+
+        Same real, independent-reasoning-pass shape as ``_verify_completion``
+        (a fresh tool-less ChatSession, so this call cannot itself take any
+        action), but goal-scoped: shown every task's own real result
+        summary, asked to judge EACH declared criterion explicitly, not
+        one vague "was this done" question. Skipped entirely when a goal
+        declares no criteria (the common case today) -- no added latency
+        or cost for a goal that never asked for this.
+        """
+        from dourmouse.chat import ChatSession
+        from dourmouse.dispatch import DispatchRegistry
+
+        criteria_list = "\n".join(f"- {c}" for c in criteria)
+        prompt = (
+            "You are reviewing a completed multi-task goal against its own declared success "
+            "criteria. You did not do this work yourself -- judge only the evidence below.\n\n"
+            f"GOAL: {goal['objective']}\n\n"
+            f"THE GOAL DECLARED THESE SUCCESS CRITERIA AT CREATION TIME:\n{criteria_list}\n\n"
+            f"WHAT THE GOAL'S OWN TASKS ACTUALLY PRODUCED:\n{summary}\n\n"
+            "Go through the declared criteria ONE AT A TIME. For each, state plainly whether "
+            "the real evidence above satisfies it or not -- a criterion with no supporting "
+            "evidence is NOT satisfied, regardless of how confident the task summaries sound. "
+            "End your answer with exactly one line, verbatim: 'VERDICT: SATISFIED' if and only "
+            "if EVERY criterion is satisfied, otherwise 'VERDICT: NOT_SATISFIED'."
+        )
+        try:
+            session = ChatSession(DispatchRegistry(), session_file=None)
+            result = session.ask(prompt, force_plain_dispatch=True)
+            reasoning = (result.get("final_text") or "").strip()
+        except Exception as exc:  # noqa: BLE001 - a broken verifier must never destroy real completed work
+            return {"satisfied": False, "reasoning": "", "error": f"{type(exc).__name__}: {exc}"}
+        normalized = reasoning.upper()
+        if "NOT_SATISFIED" in normalized or "NOT SATISFIED" in normalized:
+            satisfied = False
+        elif "VERDICT: SATISFIED" in normalized:
+            satisfied = True
+        else:
+            satisfied = False
+        return {"satisfied": satisfied, "reasoning": reasoning, "error": None}
+
     def _handle_task_failure(self, goal: dict[str, Any], task: dict[str, Any], error: str) -> None:
         goal_id, task_id = goal["id"], task["id"]
         current = self._store.get_task(task_id)
@@ -432,6 +484,40 @@ class GoalRuntime:
         summary = "\n".join(
             f"- {t['description']}: {(t['result'] or {}).get('final_text', '')[:300]}" for t in tasks
         )
+        criteria = goal.get("success_criteria") or []
+        if criteria:
+            self._store.update_goal_status(goal_id, "VERIFYING")
+            verdict = self._verify_goal_criteria(goal, summary, criteria)
+            self._store.log_event(
+                goal_id, "verification",
+                {"scope": "goal", "satisfied": verdict["satisfied"], "reasoning": verdict["reasoning"][:2000], "error": verdict["error"]},
+            )
+            # Same real, narrow race _verify_completion's own docstring
+            # already names: cancel_goal() can land while this second real
+            # LLM round trip is in flight.
+            current = self._store.get_goal(goal_id)
+            if current is None or current["status"] in GOAL_TERMINAL_STATES:
+                return
+            if verdict["error"] is not None:
+                self._store.update_goal_status(
+                    goal_id, "COMPLETED",
+                    result={"summary": summary, "criteria_checked": False, "note": f"criteria check could not run: {verdict['error']}"},
+                )
+                self._notify(goal_id, f"Done: {goal['objective']}", "every task completed (criteria check could not run)")
+                return
+            if not verdict["satisfied"]:
+                self._store.update_goal_status(
+                    goal_id, "BLOCKED",
+                    blocked_reason=f"success criteria not met: {verdict['reasoning'][:500]}",
+                )
+                self._notify(goal_id, f"Blocked: {goal['objective']}", "every task completed, but success criteria were not met")
+                return
+            self._store.update_goal_status(
+                goal_id, "COMPLETED",
+                result={"summary": summary, "criteria_checked": True, "reasoning": verdict["reasoning"][:2000]},
+            )
+            self._notify(goal_id, f"Done: {goal['objective']}", "every task completed, success criteria verified")
+            return
         self._store.update_goal_status(goal_id, "COMPLETED", result={"summary": summary})
         self._notify(goal_id, f"Done: {goal['objective']}", "every task completed")
 
