@@ -585,6 +585,84 @@ at all.
 (62/62), then full suite.
 **Result**: fixed.
 
+### 020 — Setup wizard claimed "Local, no key needed" on a machine that was never going to run local Ollama
+
+**Severity**: MEDIUM (a real, live, user-facing accuracy bug in the
+first-run experience — not a crash, but exactly the "the UI says one
+thing, the system does another" class of bug this whole audit exists to
+catch). User-caught, live, by asking a direct question about the running
+setup wizard rather than reported as a symptom.
+**Root cause**: `ui/setup.html`'s "Choose your brain" step calls
+`detect_ollama()`, which only ever probes the LOCAL server at
+`127.0.0.1:11434` — it has no way to know that
+`config.load_ollama_config()` (the function that actually builds the
+runtime client) unconditionally prefers Ollama Cloud the instant
+`OLLAMA_API_KEY` is present in the environment, per an explicit,
+deliberate 2026-09-14 user instruction ("Ollama should only use cloud
+models from the api key, never local models") already documented in that
+function's own docstring. On this exact machine, `OLLAMA_API_KEY` is
+already set in the real `.env` — so the wizard showed "Local · Ollama, 8
+model(s) available, works now, no key needed" and auto-selected it as the
+default, while the real runtime was always going to use Ollama Cloud
+instead, key or no key, local models or not. Two genuinely separate code
+paths (the wizard's own local-only probe, and the runtime's real
+local-vs-cloud decision) that can silently disagree, with the wizard's
+copy never disclosing that a key elsewhere in the environment overrides
+what it just detected.
+**Fix**: `dourmouse/firstrun.py`'s `setup_status()` now also reports
+`ollama_cloud_key_configured` (a plain, real `bool(OLLAMA_API_KEY)`
+check, same honesty standard as the existing `has_nvidia_key` field).
+`ui/setup.html` uses it to show "Ollama Cloud" (not "Local") with an
+honest explanation whenever a key is present, regardless of whether local
+Ollama also happens to be running, and to auto-select that option instead
+of silently defaulting to a "Local" pick that was never going to be
+honored.
+**Files changed**: `dourmouse/firstrun.py`, `ui/setup.html`.
+**Tests added**: `test_setup_status_reports_when_a_cloud_key_would_
+override_local`, `test_setup_status_reports_false_with_no_cloud_key` in
+`dourmouse/tests/test_webui.py::TestFirstRunSetup`.
+**Tests run**: `TestFirstRunSetup` (7/7), then full suite. Live-verified
+in the browser: `/api/setup/status` confirmed to carry the new field, and
+the wizard's Step 2 screenshot-confirmed showing "Ollama Cloud" with the
+honest explanation on this real machine.
+**Result**: fixed.
+
+### 021 — Gemini was fully wired but invisible on the connection-status report
+
+**Severity**: MEDIUM (user-directed audit: "remember it should use the
+ollama api key, the gemini api key, claude and codex cli, these 4 should
+all be wired in" — checking this claim directly surfaced a real gap).
+**Root cause**: `dourmouse/connections.py`'s `check_connections()` is the
+one deterministic, honest report of every backend Dourmouse can actually
+reach (surfaced in the UI as "N OF M CONNECTIONS LIVE" and via
+`/api/connections`) — its own module docstring enumerates ollama, nvidia,
+claude, codex, gmail, freebuff, slack, alpaca, atlas, server. Gemini was
+never in that list, despite `gemini_backend.py` being a fully real,
+working backend (`call_gemini`/`stream_gemini`, image generation, the
+delegation path fixed in finding #019). `gemini_backend.gemini_status()`
+already existed with the exact `{ok, detail, hint}` shape this report
+needs — its own docstring says so explicitly ("the exact shape every
+probe in connections.py returns, so this can be dropped into that report
+without translation") — but nothing had ever actually called it. A
+backend can be completely functional and still be invisible on the one
+screen whose entire purpose is showing which backends are functional.
+**Fix**: wired `gemini_status()` into `check_connections()`, mirroring
+the existing per-backend `try/except` pattern. Also found and fixed the
+same decorative `//` this session's Phase 3 sweep already eliminated from
+every UI file, in `format_connections()`'s own header line
+(`"CONNECTION STATUS //"` → `"CONNECTION STATUS"`) — server-side Python
+text, not caught by that sweep since it only covered `ui/*.html`.
+**Files changed**: `dourmouse/connections.py`.
+**Tests added**: `test_gemini_tracks_env` in
+`dourmouse/tests/test_connections.py::TestEnvGates`; added `"gemini"` to
+the existing shape/off-by-default/format-text assertion loops in
+`TestReportShape`/`TestFormat`. The hermetic `no_real_probes` fixture now
+also clears `GEMINI_API_KEY`/`GOOGLE_AI_STUDIO_KEY` (this developer's real
+`.env` sets `GEMINI_API_KEY`, the same leak class documented throughout
+`dourmouse/tests/conftest.py` — see `docs/TESTING.md`).
+**Tests run**: `test_connections.py` (18/18), then full suite.
+**Result**: fixed.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

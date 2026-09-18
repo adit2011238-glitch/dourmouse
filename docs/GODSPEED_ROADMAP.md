@@ -205,6 +205,41 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       established source-level (no headless browser) convention for
       `console.html` tests.
 
+- [x] Product-facing copy cleanup (user-directed, 2026-09-17): "the user should never see special
+      characters, em dashes and other such things... js sleek professional like on claude desktop,
+      grok chatbots and codex." Live-verified in the browser first: the running app's own header
+      read "DOURMOUSE // HOME" and the status bar showed a bare em dash as a placeholder glyph,
+      directly contradicting the instruction. Full sweep of `ui/console.html` (7,143 lines, the main
+      daily UI), `ui/login.html`, and `ui/setup.html` (the two first-run screens): every `<title>`,
+      panel header, and sub-section header's decorative `//` separator replaced (a `·` middle dot,
+      or removed outright and left to layout spacing, matching the reference apps' own minimal
+      style); every `—`-as-clause-joiner sentence rewritten with natural punctuation (period, comma,
+      colon, semicolon, or a parenthetical, chosen per sentence, not a blind find-replace); every
+      bare `"—"` used as a "no value yet" placeholder glyph replaced with a plain ASCII `-`.
+      Methodology, since a first pass using markup-adjacency heuristics and a naive multi-line-
+      template-literal scan both missed real instances (documented honestly rather than silently):
+      built a proper character-level state-machine tokenizer (tracks `//` line comments, `/* */`
+      and `<!-- -->` block comments, and `'`/`"`/`` ` `` string/template literals) to enumerate every
+      em dash genuinely inside a string or template, then read every single flagged line's real
+      surrounding context by hand rather than trusting the tokenizer's own state label (which had a
+      real desync bug of its own, caught by cross-checking against a plain grep for
+      `textContent`/`innerHTML`/`alert(`/`placeholder=` assignments containing an em dash, which
+      independently returned zero remaining hits). Six existing tests asserted the literal old text
+      (the placeholder glyph itself, or an exact substring of the old copy) and were updated to
+      match the new, correct strings, not reverted. Live-verified in the browser afterward: home
+      screen, `/login` (both the Google and access-token flows), and the `/setup` wizard's first two
+      steps all screenshot-confirmed clean.
+      **Remaining, honestly not done**: 18 other UI files under `ui/` were NOT swept this pass, with
+      a real raw em-dash count each (not yet triaged into real-vs-comment, so these are upper
+      bounds, not confirmed defect counts): `index.html` (257, the `/index.html` HUD surface),
+      `workspace.html` (116, the `/workspace` Vision floating-panel UI), `os.html` (51), `atlas_lab.html`
+      (28), `hud.html` (27), `product.html` (21), `map.html` (20), `study.html` (12), `voice.html`
+      (11), `mobile.html` (9), `agent.html` (7), `all_hands.html` (7), `app.html` (6), `hub.html` (4),
+      `graveyard.html` (3), `design-system.html` (2), `agent_chat.html` (1), `file_preview.html` (1).
+      Prioritize `workspace.html` and `index.html` next (both real, reachable daily-use surfaces per
+      `docs/UI_SOURCE_MAP.md`); the rest are specialized secondary windows (STUDY, ALL_HANDS,
+      per-agent windows, the ATLAS lab, a product/marketing page) of lower daily-visibility.
+
 Waits on the frontend audit so the design system replaces real, identified debt rather than
 guessing. Must also surface Phase 2's goals/tasks (chat vs. work distinction from the spec) once
 that exists, so this phase runs after Phase 2 has at least its data model in place.

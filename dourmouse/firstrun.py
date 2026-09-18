@@ -145,13 +145,28 @@ def probe_node(url: str) -> dict[str, Any]:
 
 
 def setup_status() -> dict[str, Any]:
-    """What setup should show on open — all probes are real."""
+    """What setup should show on open — all probes are real.
+
+    ``ollama_cloud_key_configured`` (2026-09-17, user-caught): ``detect_ollama()``
+    only ever probes the LOCAL server at 127.0.0.1 — it has no way to know
+    that ``config.load_ollama_config()`` (the function that actually builds
+    the runtime client) unconditionally prefers Ollama Cloud the moment
+    ``OLLAMA_API_KEY`` is set, per an explicit 2026-09-14 user instruction
+    ("Ollama should only use cloud models from the api key, never local
+    models") — see that function's own docstring. Without this field,
+    "Local · Ollama, works now, no key needed" was shown and picked even on
+    an install where a real key already sat in the user's own ``.env``,
+    which meant the wizard's own words were honestly wrong: this install
+    was never going to run local Ollama at all, key or no key, the moment
+    that env var existed. See docs/ENGINEERING_AUDIT.md finding #020.
+    """
     from dourmouse.config import is_configured
 
     return {
         "configured": is_configured(),
         "config_path": str(user_env_path()),
         "ollama": detect_ollama(),
+        "ollama_cloud_key_configured": bool(os.environ.get("OLLAMA_API_KEY", "").strip()),
         "nvidia_signup_url": NVIDIA_SIGNUP_URL,
         "has_nvidia_key": bool(os.environ.get("NVIDIA_API_KEY", "").strip()),
     }

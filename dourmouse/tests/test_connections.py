@@ -33,6 +33,8 @@ def no_real_probes(monkeypatch):
         "ATLAS_REPO_PATH",
         "ATLAS_VENV_PATH",
         "FREEBUFF_API_TOKEN",
+        "GEMINI_API_KEY",
+        "GOOGLE_AI_STUDIO_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -45,6 +47,7 @@ class TestReportShape:
             "nvidia",
             "claude",
             "codex",
+            "gemini",
             "gmail",
             "freebuff",
             "slack",
@@ -58,7 +61,7 @@ class TestReportShape:
 
     def test_everything_off_when_nothing_configured(self):
         report = conn.check_connections()
-        for key in ("ollama", "nvidia", "claude", "codex", "gmail", "slack", "alpaca"):
+        for key in ("ollama", "nvidia", "claude", "codex", "gemini", "gmail", "slack", "alpaca"):
             assert report[key]["ok"] is False, f"{key} should be off"
 
 
@@ -70,6 +73,17 @@ class TestEnvGates:
         assert "present" in conn.check_connections()["nvidia"]["detail"]
         # the key itself is never echoed back
         assert "nv-test" not in json.dumps(conn.check_connections())
+
+    def test_gemini_tracks_env(self, monkeypatch):
+        """2026-09-18 (see docs/ENGINEERING_AUDIT.md finding #021):
+        gemini_backend.gemini_status() already existed, built specifically
+        to drop into this report, but nothing had ever called it — Gemini
+        was fully wired as a real backend yet invisible here."""
+        assert conn.check_connections()["gemini"]["ok"] is False
+        monkeypatch.setenv("GEMINI_API_KEY", "gm-test")
+        assert conn.check_connections()["gemini"]["ok"] is True
+        assert "present" in conn.check_connections()["gemini"]["detail"]
+        assert "gm-test" not in json.dumps(conn.check_connections())
 
     def test_slack_and_alpaca_track_env(self, monkeypatch):
         monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
@@ -224,7 +238,7 @@ class TestFreebuff:
 class TestFormat:
     def test_format_mentions_services_and_fixes(self):
         text = conn.format_connections()
-        for name in ("ollama", "nvidia", "claude", "codex", "gmail", "freebuff", "atlas"):
+        for name in ("ollama", "nvidia", "claude", "codex", "gemini", "gmail", "freebuff", "atlas"):
             assert name in text, f"{name} missing from report text"
         assert "FREEBUFF APP" in text
 

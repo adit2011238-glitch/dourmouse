@@ -9,6 +9,8 @@ Dourmouse can actually reach today:
                  account — claude.ai login is what ``claude -p`` uses)
 - ``codex``    — the user's real Codex CLI on PATH + ~/.codex/auth.json
                  (their ChatGPT login). Usage limits surface at run time.
+- ``gemini``   — GEMINI_API_KEY (or GOOGLE_AI_STUDIO_KEY) present in .env;
+                 delegates to gemini_backend.gemini_status() (2026-09-18).
 - ``gmail``    — the mail tools' Gmail config (env or local_secrets.py)
 - ``freebuff`` — the Freebuff Desktop app (its own loopback renderer API
                  on 51819) reporting whether an authed account is readable
@@ -257,6 +259,24 @@ def check_connections() -> dict[str, dict[str, Any]]:
         "hint": "npm i -g @openai/codex && codex login (usage limits show at run time)",
     }
 
+    # 2026-09-18: gemini_backend.gemini_status() already returns exactly
+    # this report's {ok, detail, hint} shape (its own docstring says so),
+    # but nothing had ever actually called it from here — Gemini was fully
+    # wired as a real backend (call_gemini/stream_gemini, image generation,
+    # delegation) yet invisible on the one screen meant to show whether
+    # every backend is really connected. See docs/ENGINEERING_AUDIT.md
+    # finding #021.
+    try:
+        from dourmouse.gemini_backend import gemini_status
+
+        out["gemini"] = gemini_status()
+    except Exception:  # noqa: BLE001 - a broken import never kills the report
+        out["gemini"] = {
+            "ok": False,
+            "detail": "gemini module unavailable",
+            "hint": "add GEMINI_API_KEY to .env",
+        }
+
     gmail = _gmail_status()
     out["gmail"] = {
         "ok": gmail["ok"] == "configured",
@@ -443,7 +463,7 @@ def format_connections() -> str:
 
     Deterministic (Rule 2.8) — no parameters today; the full report.
     """
-    lines = ["CONNECTION STATUS //", ""]
+    lines = ["CONNECTION STATUS", ""]
     for name, item in sorted(check_connections().items()):
         mark = "●" if item["ok"] else "○"
         lines.append(f"{mark} {name}: {item['detail']}")

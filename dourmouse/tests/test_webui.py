@@ -476,7 +476,7 @@ class TestGoalsEndpoint:
         resp = conn.getresponse()
         assert resp.status == 200
         body = resp.read().decode()
-        assert "DOURMOUSE // CONSOLE" in body
+        assert "<title>DOURMOUSE</title>" in body
         conn.close()
 
     def test_hud_still_served_at_index_html(self, server):
@@ -2823,6 +2823,25 @@ class TestFirstRunSetup:
 
         pkg = Path(__file__).resolve().parent.parent
         assert pkg not in user_config_dir().parents
+
+    def test_setup_status_reports_when_a_cloud_key_would_override_local(self, monkeypatch):
+        """User-caught live bug (2026-09-17, see docs/ENGINEERING_AUDIT.md
+        finding #020): detect_ollama() only ever probes the LOCAL server,
+        so it has no way to know that config.load_ollama_config() always
+        prefers Ollama Cloud the moment OLLAMA_API_KEY is set. Without this
+        field, setup.html showed "Local · Ollama, works now, no key
+        needed" and picked it as the default on an install that was never
+        going to run local Ollama at all, key or no key."""
+        from dourmouse.firstrun import setup_status
+
+        monkeypatch.setenv("OLLAMA_API_KEY", "real-key-value")
+        assert setup_status()["ollama_cloud_key_configured"] is True
+
+    def test_setup_status_reports_false_with_no_cloud_key(self, monkeypatch):
+        from dourmouse.firstrun import setup_status
+
+        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+        assert setup_status()["ollama_cloud_key_configured"] is False
 
 
 class TestSetupWizardGoogleStep:
