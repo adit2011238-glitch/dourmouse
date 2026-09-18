@@ -2396,6 +2396,70 @@ def _cancel_schedule_tool(arguments: dict[str, Any]) -> str:
     return f"SCHEDULE {sid}: not found (nothing cancelled)."
 
 
+def _draft_tool_tool(arguments: dict[str, Any]) -> str:
+    """Domain D (docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md): drafts a
+    new tool for a described capability gap. Deliberately the ONLY
+    self-extension action reachable from chat -- there is NO approve tool
+    anywhere in this roster, on purpose. A draft is written to a real
+    workspace file and does not touch the live registry at all; approval
+    is a separate, human-only action through the UI/API
+    (POST /api/self_extensions/approve, webui.py), never the model."""
+    from dourmouse import self_extensions as se
+    from dourmouse.general_roster import build_general_registry
+
+    capability_gap = (arguments.get("capability_gap") or "").strip()
+    tool_name = (arguments.get("tool_name") or "").strip()
+    description = (arguments.get("description") or "").strip()
+    parameters_schema = arguments.get("parameters_schema")
+    handler_source = arguments.get("handler_source") or ""
+    test_source = arguments.get("test_source") or ""
+    if not capability_gap:
+        return "ERROR: draft_tool requires 'capability_gap' (what's missing, and why)."
+    if not description:
+        return "ERROR: draft_tool requires 'description'."
+    if not isinstance(parameters_schema, dict):
+        return "ERROR: 'parameters_schema' must be a JSON object (a tool parameters schema)."
+    if not handler_source.strip() or "def handle(" not in handler_source:
+        return "ERROR: 'handler_source' must define a function named exactly 'handle(arguments: dict) -> str'."
+    if not test_source.strip():
+        return "ERROR: 'test_source' is required -- a real test file, not a stub (Domain D acceptance test 1)."
+    existing = frozenset(build_general_registry().tool_names)
+    name_error = se.validate_tool_name(tool_name, existing_names=existing)
+    if name_error:
+        return f"ERROR: {name_error}"
+    syntax_error = se.check_syntax(handler_source)
+    if syntax_error:
+        return f"ERROR: handler_source does not parse: {syntax_error}"
+    test_syntax_error = se.check_syntax(test_source)
+    if test_syntax_error:
+        return f"ERROR: test_source does not parse: {test_syntax_error}"
+    store = se.SelfExtensions()
+    entry = store.add_draft(
+        capability_gap=capability_gap,
+        tool_name=tool_name,
+        description=description,
+        parameters_schema=parameters_schema,
+        handler_source=handler_source,
+        test_source=test_source,
+    )
+    return (
+        f"DRAFTED {entry['id']}: {tool_name}. This is NOT live and NOT registered -- "
+        "a human must review the real source and approve it (the AGENT SMITH screen in "
+        "the app, or GET /api/self_extensions to see it). Nothing was added to the "
+        "running system by this call."
+    )
+
+
+def _list_self_extension_drafts_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse import self_extensions as se
+
+    entries = se.SelfExtensions().list()
+    if not entries:
+        return "SELF-EXTENSION DRAFTS: none."
+    lines = [f"- {e['id']} [{e['status']}]: {e['tool_name']} -- {e['capability_gap']}" for e in entries]
+    return "SELF-EXTENSION DRAFTS:\n" + "\n".join(lines)
+
+
 def _subagent(name: str, domain: str, description: str, tools: list[ToolSpec]) -> Subagent:
     return Subagent(name=name, domain=domain, description=description, tools=tuple(tools))
 
@@ -5847,6 +5911,117 @@ def build_general_registry() -> DispatchRegistry:
             ],
         )
     )
+
+    # -- Agent Smith (Domain D: self-extension) ------------------------- #
+    # 2026-09-18: "the single most architecturally sensitive item" in
+    # docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md. Two tools only, both
+    # inert with respect to the live registry -- draft_tool writes a real
+    # file to a workspace staging area and returns; nothing here can ever
+    # register, approve, or execute a self-added tool. That gate is
+    # webui.py's POST /api/self_extensions/approve, human-only, reachable
+    # only from a UI click, never a chat tool. See dourmouse/
+    # self_extensions.py's own module docstring for the full design.
+    from dourmouse import self_extensions as se_module
+
+    registry.register_subagent(
+        _subagent(
+            "agent_smith",
+            "General",
+            "Drafts new tools for a described capability gap. Never registers or "
+            "approves anything itself -- drafting only, a human approves separately.",
+            [
+                ToolSpec(
+                    name="draft_tool",
+                    description=(
+                        "Draft a brand-new tool because none of your existing tools can "
+                        "do something the user needs. Writes a real draft to a staging "
+                        "area for human review -- it is NEVER live, callable, or "
+                        "registered by this call, no matter what. A human must "
+                        "separately approve it before it can ever run.\n\n"
+                        "handler_source must define exactly one function:\n"
+                        "  def handle(arguments: dict) -> str:\n"
+                        "      ...\n"
+                        "returning a plain string result (or 'ERROR: ...' on bad input, "
+                        "matching every other tool in this system).\n\n"
+                        "test_source must be a real, complete pytest file (not a stub) "
+                        "that imports the handler through this exact, fixed contract:\n"
+                        f"  {se_module.LOAD_APPROVED_CONTRACT.splitlines()[0]}\n"
+                        f"  {se_module.LOAD_APPROVED_CONTRACT.splitlines()[1]}\n"
+                        "Every assertion MUST be inside a function named test_something(): "
+                        "pytest only ever runs functions it discovers by that name -- bare "
+                        "assert statements at module level are NEVER collected or run, even "
+                        "though Python executes them at import time; a file with only those "
+                        "will be rejected as 'no tests ran', not silently accepted. Write at "
+                        "least one test function that calls handle(...) with valid input and "
+                        "checks the real result, and one that checks an obviously bad input "
+                        "returns an 'ERROR: ...' string, not a crash."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "capability_gap": {
+                                "type": "string",
+                                "description": "what's missing and why the user needs it",
+                            },
+                            "tool_name": {
+                                "type": "string",
+                                "description": "lowercase_with_underscores, 3-64 chars, must not already exist",
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "shown to future model calls, same as any tool's own description",
+                            },
+                            "parameters_schema": {
+                                "type": "object",
+                                "description": "a JSON-schema object, same shape as any tool's own 'parameters'",
+                            },
+                            "handler_source": {"type": "string"},
+                            "test_source": {"type": "string"},
+                        },
+                        "required": [
+                            "capability_gap", "tool_name", "description",
+                            "parameters_schema", "handler_source", "test_source",
+                        ],
+                    },
+                    handler=_draft_tool_tool,
+                ),
+                ToolSpec(
+                    name="list_self_extension_drafts",
+                    description="List every self-extension draft (id, status, tool name, capability gap).",
+                    parameters={"type": "object", "properties": {}},
+                    handler=_list_self_extension_drafts_tool,
+                ),
+            ],
+        )
+    )
+
+    # -- Self-extended tools (Domain D: what a human has actually approved) --
+    # The other half of Agent Smith: every tool here was drafted by the
+    # model and approved by a human (dourmouse/self_extensions.py's own
+    # approve()), never wired in live -- this loader only runs at process
+    # start, exactly like any other Python import, so a freshly approved
+    # tool becomes callable only after a real restart (Rule 2.8: no live
+    # code injection into a running process). A single broken approved
+    # module must never take down the whole server on startup -- reported
+    # honestly as a note on the subagent, not raised.
+    self_extended_tools: list[ToolSpec] = []
+    self_extended_errors: list[str] = []
+    for _ext_name in se_module.list_approved_names():
+        try:
+            self_extended_tools.append(se_module.load_approved(_ext_name).TOOL_SPEC)
+        except Exception as exc:  # noqa: BLE001 -- one broken self-extension must never break server startup
+            self_extended_errors.append(f"{_ext_name}: {type(exc).__name__}: {exc}")
+    if self_extended_tools:
+        registry.register_subagent(
+            _subagent(
+                "self_extended",
+                "General",
+                "Tools Dourmouse drafted for itself and a human approved (Domain D). "
+                + (f"{len(self_extended_errors)} approved extension(s) failed to load: "
+                   + "; ".join(self_extended_errors) if self_extended_errors else ""),
+                self_extended_tools,
+            )
+        )
 
     # -- 3D & UI Design agent ------------------------------------------ #
     # Real spec-generation + cataloguing tools for the desktop

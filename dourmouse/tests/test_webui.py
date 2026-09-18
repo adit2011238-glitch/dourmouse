@@ -784,6 +784,123 @@ class TestSchedulesEndpoints:
         assert data == {"ok": False}
 
 
+class TestSelfExtensionsEndpoints:
+    """GET /api/self_extensions (+?id=) + POST .../approve + .../reject --
+    Domain D's HTTP surface. The approve route is THE review gate: no
+    chat tool anywhere in this codebase can reach it (see
+    TestAgentSmith.test_no_approve_or_reject_tool_exists_anywhere_in_the_roster,
+    test_general_roster.py). See docs/ENGINEERING_AUDIT.md finding #028."""
+
+    _HANDLER = (
+        "def handle(arguments: dict) -> str:\n"
+        "    text = arguments.get(\"text\", \"\")\n"
+        "    if not isinstance(text, str) or not text:\n"
+        "        return \"ERROR: 'text' must be a non-empty string.\"\n"
+        "    return text[::-1]\n"
+    )
+    _TEST_OK = (
+        "from dourmouse.self_extensions import load_approved\n\n\n"
+        "def test_reverses_text():\n"
+        "    mod = load_approved(\"reverse_text_http\")\n"
+        "    assert mod.handle({\"text\": \"abc\"}) == \"cba\"\n"
+    )
+    _PARAMS = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+
+    def _isolate(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+
+    def test_list_is_honestly_empty_with_nothing_drafted(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/self_extensions")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        assert json.loads(resp.read()) == {"drafts": []}
+        conn.close()
+
+    def test_detail_returns_the_real_full_source_for_human_review(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.self_extensions import SelfExtensions
+
+        entry = SelfExtensions().add_draft(
+            capability_gap="no way to reverse text", tool_name="reverse_text_http",
+            description="Reverses text.", parameters_schema=self._PARAMS,
+            handler_source=self._HANDLER, test_source=self._TEST_OK,
+        )
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", f"/api/self_extensions?id={entry['id']}")
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data["draft"]["handler_source"] == self._HANDLER
+        assert data["draft"]["test_source"] == self._TEST_OK
+
+    def test_detail_unknown_id_is_a_real_404(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/self_extensions?id=no-such-draft")
+        resp = conn.getresponse()
+        assert resp.status == 404
+        conn.close()
+
+    def test_approve_over_real_http_makes_a_genuinely_working_extension(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.self_extensions import SelfExtensions, load_approved
+
+        entry = SelfExtensions().add_draft(
+            capability_gap="no way to reverse text", tool_name="reverse_text_http",
+            description="Reverses text.", parameters_schema=self._PARAMS,
+            handler_source=self._HANDLER, test_source=self._TEST_OK,
+        )
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/self_extensions/approve",
+            body=json.dumps({"id": entry["id"]}),
+            headers={"Content-Type": "application/json"},
+        )
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data["ok"] is True, data.get("error")
+        mod = load_approved("reverse_text_http")
+        assert mod.handle({"text": "abc"}) == "cba"
+
+    def test_approve_missing_id_is_a_real_400(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/self_extensions/approve",
+            body=json.dumps({}), headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        assert resp.status == 400
+        conn.close()
+
+    def test_reject_over_real_http(self, server, monkeypatch, tmp_path):
+        self._isolate(monkeypatch, tmp_path)
+        from dourmouse.self_extensions import SelfExtensions
+
+        store = SelfExtensions()
+        entry = store.add_draft(
+            capability_gap="x", tool_name="reverse_text_http", description="d",
+            parameters_schema=self._PARAMS, handler_source=self._HANDLER, test_source=self._TEST_OK,
+        )
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST", "/api/self_extensions/reject",
+            body=json.dumps({"id": entry["id"], "reason": "not needed"}),
+            headers={"Content-Type": "application/json"},
+        )
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        assert data["ok"] is True
+        assert store.get(entry["id"])["status"] == "REJECTED"
+
+
 class TestSpotifyWidgetInjection:
     """v13.x backlog item 8: the floating widget is injected at serve time
     (dourmouse/webui.py::_serve_static) onto every screen EXCEPT the

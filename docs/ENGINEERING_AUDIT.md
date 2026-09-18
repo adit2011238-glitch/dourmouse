@@ -967,6 +967,115 @@ full suite.
 **Result**: fixed -- Domain C's real gap closed; acceptance tests 1-3 genuinely demonstrated live,
 test 4 explicitly named as remaining, separate work.
 
+### 028 -- Domain D: self-extension, "the single most architecturally sensitive item"
+
+**Severity**: n/a (feature completion -- the other explicit item in the user's own founding
+request, paired with scheduling: "DOURMOUSE should also be able to add new agents add itself new
+features and scope").
+**Context**: `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain D names this exactly: "a system
+that writes and registers its own new tools/agents needs a review gate, or it becomes an
+unbounded-trust problem." Confirmed by an architecture survey before writing any code: every tool
+in this codebase is a hardcoded Python object statically imported at edit time; there was no
+plugin/dynamic-loading mechanism anywhere, and zero existing scaffolding (`agent_smith` existed
+only as a placeholder name in the requirements doc).
+**Design**: a new `dourmouse/self_extensions.py` module and `agent_smith` subagent
+(`general_roster.py`), following the four constraints Domain D itself lists literally:
+1. `draft_tool` writes a real draft (capability gap, tool name, description, parameters schema,
+   handler source, test source) to a workspace staging file. It never touches the live registry.
+2. Approval is human-only: `POST /api/self_extensions/approve` (webui.py), reachable only from
+   the new AGENT SMITH screen's own APPROVE button. There is NO approve or reject tool anywhere
+   in the chat-facing roster -- a dedicated regression test
+   (`TestAgentSmith.test_no_approve_or_reject_tool_exists_anywhere_in_the_roster`) asserts this
+   directly against the live registry, not just by code review.
+3. `_write_approved_module` ALWAYS forces `Permission.REQUIRES_CONFIRMATION` on the written
+   `ToolSpec`, regardless of anything the draft's own source claims -- a self-added tool can never
+   grant itself unattended execution.
+4. Approval re-validates syntax, writes the real module, sanity-imports it, then runs the draft's
+   own test file through a REAL `pytest` subprocess -- never mocked, because mocking away the
+   actual test run is exactly the "side channel" acceptance test 4 says must never exist. A
+   failing test blocks approval (`APPROVAL_FAILED`, honest reason, the half-written module
+   deleted) rather than silently merging broken code. A real, permanent, per-installation
+   changelog (`workspace/self_extensions/CHANGELOG.md`) gets a new entry on every real approval.
+An approved tool becomes callable only after a real process restart -- `general_roster.py`'s new
+loader scans `workspace/self_extensions/approved/*.py` once, at `build_general_registry()` time,
+exactly like any other Python import. No live code injection into a running process, on purpose
+(Rule 2.8): claiming a self-added tool is live before a restart would itself be a fabricated-
+success bug.
+**A real bug caught live, not in a unit test**: the first design had the changelog live at
+`docs/SELF_EXTENSIONS.md` in the git-tracked repo (matching the requirements doc's own literal
+path). Live-verifying the real HTTP approval route exposed the actual problem: `webui.py`'s
+`POST /api/self_extensions/approve` never threaded a `repo_root` override through, so every real
+approval -- including from this session's own automated `test_webui.py` runs -- silently wrote
+into the ACTUAL tracked repository as a side effect of approving a draft. Fixed by moving the
+changelog to `workspace/self_extensions/CHANGELOG.md`, workspace-relative like every other piece
+of self-extension state, consistent with this module's own stated design principle ("a
+self-added tool is a property of one installation, not something this change silently ships to
+every other Dourmouse install"). The stray polluted file the bug had already written into the
+real repo (never committed) was deleted; every test call site updated to match; full 341-test
+re-run confirmed clean afterward.
+**A second real gap caught live**: the first live draft (a real, unscripted Ollama Cloud
+`gpt-oss:20b` call, asked to add `celsius_to_fahrenheit`) produced a genuinely correct
+`handle()` implementation but a test file written as bare module-level `assert` statements --
+valid Python, but never collected by pytest as real tests ("no tests ran"), so approval correctly
+refused it (`APPROVAL_FAILED`). Not a bug in the approval logic -- it worked exactly as designed,
+refusing to silently accept a test file that wasn't actually a real test. Fixed the ROOT cause
+instead of the symptom: `draft_tool`'s own tool description (told to every future model call, not
+just this one) now explicitly states the `def test_something():` requirement and explains why a
+bare assert is invisible to pytest. Re-tried live with the improved instructions and the same
+real model self-corrected on the next draft, producing properly collectible tests.
+**Live proof, in full, against the real dev-preview server**: a real, unscripted chat message
+("You have no tool to convert Celsius to Fahrenheit...") made the real model call `draft_tool` for
+real, producing genuinely correct Python. The draft was reviewed in the real AGENT SMITH screen
+(full `handler_source`/`test_source` rendered, readable) and approved for real over HTTP; the real
+subprocess pytest run genuinely passed; the real changelog was written to the real workspace path,
+confirmed the actual tracked repo was untouched. The real server was then restarted (a genuine
+process kill and relaunch, not simulated), and `GET /api/roster` confirmed
+`celsius_to_fahrenheit_v2` was now really registered under a new `self_extended` subagent. A
+FRESH chat thread (no prior context biasing the model) was then asked to use the tool: the real
+model called it, and the real `REQUIRES_CONFIRMATION` gate genuinely paused the request
+(`confirmation_requested`, id `confirm-1`) -- proving a self-added tool categorically cannot
+bypass human confirmation, the single most important property this whole domain exists to
+guarantee. Only after a real `POST /api/confirm` did the tool actually execute, returning the
+mathematically correct result (`"98.6"` for 37°C), and the model reported it back correctly
+(`"37 °C equals 98.6 °F."`).
+**A third real gap, caught by the full suite, not live testing**: adding a new subagent broke two
+pre-existing exhaustive-set tests elsewhere in the codebase that had nothing to do with this
+feature directly -- `test_dispatch.py`'s own full roster-shape assertion (same class of fix as
+`test_general_roster.py`'s, above) and `test_model_delegation.py`'s routing-policy completeness
+check, which requires every real subagent to have an explicit local-only/cloud-ok classification.
+`agent_smith` was classified `_LOCAL_ONLY_AGENTS` (`model_delegation.py`) -- it drafts real Python
+source that becomes part of this very system, the same sensitivity class as the existing
+`dev_coding`/`code_*` agents right next to it, not public-web material. A first attempt also
+proactively classified `self_extended` (the approved-tools subagent) the same way, which broke
+the SAME test's other direction (a policy entry for an agent that doesn't currently exist is
+itself an error in this codebase's own convention, matching the already-documented reasoning for
+why removed agents like the old `atlas`/`atlas_cmd`/`atlas_ui` names were deleted rather than
+left dangling) -- reverted; any unclassified agent already defaults to local routing, so
+`self_extended` is never accidentally cloud-routed by this deliberate omission.
+**Files changed**: `dourmouse/self_extensions.py` (new), `dourmouse/general_roster.py`
+(`agent_smith` subagent + `self_extended` startup loader), `dourmouse/webui.py` (4 routes),
+`dourmouse/model_delegation.py` (routing policy), `ui/console.html` (AGENT SMITH screen),
+`dourmouse/tests/test_self_extensions.py` (new, 21 tests), `dourmouse/tests/test_general_roster.py`
+(`TestAgentSmith`, 10 tests, plus the roster-shape test's expected-subagent set),
+`dourmouse/tests/test_webui.py` (`TestSelfExtensionsEndpoints`, 6 tests),
+`dourmouse/tests/test_dispatch.py` (roster-shape set).
+**Tests added**: 37 new, spanning syntax/name validation, the draft store, the full approve/reject
+paths (a genuinely correct draft approved for real; a draft whose own test fails never silently
+merged; a name collision with a real tool refused; bad syntax caught again at approval time even
+after passing the initial chat-tool check; an already-decided draft can't be approved or rejected
+twice), the chat-facing tools (including the critical "no approve/reject tool anywhere in the
+roster" invariant), the startup loader (an approved extension becomes a real live tool after a
+registry rebuild; a hand-corrupted approved file never crashes server startup), and the full HTTP
+surface.
+**Tests run**: `test_self_extensions.py` + `test_general_roster.py` + `test_webui.py` together
+(341/341), then full suite.
+**Result**: fixed -- Domain D's core loop (draft, human-only review, forced confirmation tier,
+real test enforcement, real changelog, restart-gated activation) is real and live-verified end to
+end. Acceptance tests 1-4 all genuinely demonstrated, not assumed. Not yet built, real and
+separate: promoting an approved tool's permission tier (there is no path to ever let a
+self-added tool run unattended -- a deliberate, not accidental, absence); a UI action to
+re-approve a corrected draft after `APPROVAL_FAILED` (today the model must draft a fresh one).
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

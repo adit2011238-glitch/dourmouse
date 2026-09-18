@@ -1998,6 +1998,12 @@ class TestEndToEndThroughGeneralRoster:
                                   # sharing its tools BY REFERENCE with
                                   # mail/docs/scheduling (see
                                   # general_roster.py's own comment).
+            "agent_smith",  # 2026-09-18: Domain D self-extension -- drafts
+                             # only, no approve tool anywhere in this
+                             # roster. "self_extended" is NOT listed here
+                             # on purpose -- it only registers once at
+                             # least one extension has actually been
+                             # approved, empty in this hermetic test.
         }
 
     def test_trading_subagent_added_later_dispatchable(self):

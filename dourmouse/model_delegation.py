@@ -83,6 +83,20 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # risk, so these never route anywhere but local, and in practice the tool
     # below refuses them outright.
     "code_claude", "code_codex", "code_deepseek", "code_nvidia", "code_ollama",
+    # 2026-09-18: drafts real Python source that becomes part of this very
+    # system after a human approves it (Domain D, dourmouse/
+    # self_extensions.py) -- the same privacy/sensitivity class as the
+    # coding agents right above, not public-web material.
+    #
+    # "self_extended" (the tools a human has actually approved) is
+    # deliberately NOT listed here -- it only registers once at least one
+    # extension exists, so it isn't always a real agent, and this
+    # module's own established pattern (see the removed atlas/atlas_cmd/
+    # atlas_ui comment above) is to never pin a name that doesn't
+    # currently resolve to anything. Any unclassified agent defaults to
+    # LOCAL routing anyway (this module's own safe fallback), so
+    # self_extended is never accidentally cloud-routed by this omission.
+    "agent_smith",
     "orchestrator",
     # Spawns background tasks that can call ANY tool, including the
     # private-data ones above -- same reasoning as orchestrator itself.

@@ -2728,6 +2728,26 @@ class _Handler(BaseHTTPRequestHandler):
                     "next_run": schedules_module.describe_next_run(entry),
                 })
             self._send_json({"schedules": out})
+        elif path == "/api/self_extensions":
+            # 2026-09-18 (Domain D): read-only listing/detail over
+            # self_extensions.SelfExtensions -- the human review surface
+            # for a draft agent_smith wrote. ?id= returns one draft's FULL
+            # source (handler_source/test_source) so a human can actually
+            # read the real code before approving, not just metadata.
+            from dourmouse.self_extensions import SelfExtensions
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            ext_id = (qs.get("id") or [""])[0].strip()
+            store = SelfExtensions()
+            if ext_id:
+                entry = store.get(ext_id)
+                if entry is None:
+                    self._send_json({"error": f"no such draft: {ext_id}"}, status=404)
+                else:
+                    self._send_json({"draft": entry})
+                return
+            status_filter = (qs.get("status") or [""])[0].strip().upper() or None
+            self._send_json({"drafts": store.list(status=status_filter)})
         elif path == "/api/security":
             # Phase 4 (docs/GODSPEED_ROADMAP.md): read-only real network/host
             # security telemetry. No write endpoint here on purpose -- this
@@ -3679,6 +3699,33 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             ok = schedules_module.Schedules().remove(schedule_id)
             self._send_json({"ok": ok})
+        elif parsed.path == "/api/self_extensions/approve":
+            # 2026-09-18 (Domain D): THE approval gate -- the only place in
+            # this entire codebase a self-extension draft can become a
+            # real, forced-REQUIRES_CONFIRMATION tool. Reachable only from
+            # a human clicking APPROVE in the UI, same auth posture as
+            # every other write route in this handler (do_POST's own
+            # _authorized() check above); there is no equivalent chat tool
+            # anywhere in general_roster.py, on purpose -- the model can
+            # draft, never approve its own or anyone else's draft.
+            from dourmouse.self_extensions import approve as approve_extension
+
+            body = self._read_json_body()
+            ext_id = str(body.get("id") or "").strip()
+            if not ext_id:
+                self._send_json({"ok": False, "error": "id is required"}, status=400)
+                return
+            self._send_json(approve_extension(ext_id))
+        elif parsed.path == "/api/self_extensions/reject":
+            from dourmouse.self_extensions import reject as reject_extension
+
+            body = self._read_json_body()
+            ext_id = str(body.get("id") or "").strip()
+            if not ext_id:
+                self._send_json({"ok": False, "error": "id is required"}, status=400)
+                return
+            reason = str(body.get("reason") or "").strip()
+            self._send_json(reject_extension(ext_id, reason=reason))
         else:
             self.send_error(404, "not found")
 

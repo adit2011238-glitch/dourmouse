@@ -1404,6 +1404,8 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
       <div class="panebody" id="goalsBody"></div></section>
     <section class="pane" id="pane-timetable"><div class="panehead">◆ TIMETABLE · SCHEDULED ROUTINES</div>
       <div class="panebody" id="timetableBody"></div></section>
+    <section class="pane" id="pane-agentsmith"><div class="panehead">◆ AGENT SMITH · SELF-EXTENSION DRAFTS</div>
+      <div class="panebody" id="agentSmithBody"></div></section>
 
     <section class="pane" id="pane-news"><div class="panehead">◆ NEWS · LIVE FEED</div>
       <div class="panebody" id="newsBody"></div>
@@ -1484,7 +1486,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
-const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS","TIMETABLE"];
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS","TIMETABLE","AGENTSMITH"];
 // v8.29: screens whose composer submissions get their OWN independent
 // thread (a real per-screen conversation, not a shared feed forced onto
 // COMMS). COMMS is deliberately absent — it's a real Gmail inbox now, not
@@ -1507,7 +1509,7 @@ const THREAD_SCREENS = ["HOME","RESEARCH","CODE","MEDIA","NEWS","DESIGN3D","COMM
 // checking "how's the quant research going" landed on disaster data
 // instead — a real, confusing mislabel. This maps the DISPLAYED text only;
 // every internal id/comparison still uses "ATLAS" untouched.
-const SCREEN_LABELS = { ATLAS: "WORLD", DESIGN3D: "DESIGN", GLOBE: "EYE", ORCHESTRATION: "AGENTS" };
+const SCREEN_LABELS = { ATLAS: "WORLD", DESIGN3D: "DESIGN", GLOBE: "EYE", ORCHESTRATION: "AGENTS", AGENTSMITH: "AGENT SMITH" };
 const sys = {roster:null,conns:null,server:null,backend:null,memory:null,telemetry:null,version:null,me:null,voice:null};
 let screen = "HOME", focusAgent = "", speak = false, voiceMode = false;
 // v13.7 (real live bug fix): busy/queue/ctrl/pendingDeclines used to be ONE
@@ -1792,6 +1794,7 @@ function show(name){
   if(name==="ORCHESTRATION") paintOrchestration();
   if(name==="GOALS") loadGoals();
   if(name==="TIMETABLE") loadSchedules();
+  if(name==="AGENTSMITH") loadSelfExtensions();
   if(name==="NEWS") paintNews();
   if(name==="DESIGN3D") paintDesign3d();
   if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
@@ -6886,6 +6889,114 @@ function paintSchedules(){
 }
 loadSchedules();
 setInterval(() => { if(screen === "TIMETABLE") loadSchedules(); }, 4000);
+
+// 2026-09-18: the AGENT SMITH screen -- Domain D (docs/
+// COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md), "the single most
+// architecturally sensitive item" in that whole document. This is the
+// ONLY place APPROVE/REJECT exist anywhere in the product -- there is no
+// chat tool for either (dourmouse/general_roster.py's agent_smith
+// subagent only drafts and lists), so this screen IS the entire human
+// review gate. APPROVE/REJECT are deliberately rendered only inside the
+// EXPANDED detail view, next to the real handler_source/test_source, so
+// approving without the actual code already open in front of you isn't
+// a one-click accident.
+let _selfExtensions = [];
+let _selfExtExpanded = {};  // id -> full draft detail (fetched on expand)
+function selfExtStatusDot(status){
+  if(status === "DRAFTED") return '<span class="dot" style="background:var(--warn)"></span>';
+  if(status === "APPROVED") return '<span class="dot ok"></span>';
+  if(status === "APPROVAL_FAILED") return '<span class="dot no"></span>';
+  return '<span class="dot"></span>';
+}
+async function loadSelfExtensions(){
+  try{
+    const r = await fetch("/api/self_extensions");
+    const j = await r.json();
+    _selfExtensions = j.drafts || [];
+  }catch{}
+  if(screen === "AGENTSMITH") paintSelfExtensions();
+}
+async function toggleSelfExtExpand(id){
+  if(_selfExtExpanded[id]){ delete _selfExtExpanded[id]; paintSelfExtensions(); return; }
+  try{
+    const r = await fetch("/api/self_extensions?id=" + encodeURIComponent(id));
+    const j = await r.json();
+    _selfExtExpanded[id] = j.draft || null;
+  }catch{ _selfExtExpanded[id] = null; }
+  paintSelfExtensions();
+}
+async function approveSelfExtension(id){
+  if(!confirm("Approve this self-added tool? A human -- you -- is responsible for every line of "
+    + "the source you just reviewed. It will need a server restart before it can actually run, "
+    + "and every call will still require your confirmation even after that.")) return;
+  try{
+    const r = await fetch("/api/self_extensions/approve", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id})});
+    const j = await r.json();
+    if(!r.ok || j.ok===false){ alert("Approval failed: " + (j.error || "unknown error")); return; }
+    alert("Approved. Restart the server for " + (j.entry && j.entry.tool_name) + " to become callable.");
+  }catch{ alert("Couldn't reach the server to approve this."); return; }
+  delete _selfExtExpanded[id];
+  await loadSelfExtensions();
+}
+async function rejectSelfExtension(id){
+  if(!confirm("Reject this draft for good?")) return;
+  try{
+    const r = await fetch("/api/self_extensions/reject", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id})});
+    const j = await r.json();
+    if(!r.ok || j.ok===false){ alert("Couldn't reject this draft."); return; }
+  }catch{ alert("Couldn't reach the server to reject this."); return; }
+  delete _selfExtExpanded[id];
+  await loadSelfExtensions();
+}
+function selfExtDetailHtml(id, detail){
+  if(!detail) return '<div class="d" style="margin-top:6px">Couldn\'t load the full draft.</div>';
+  const canDecide = detail.status === "DRAFTED";
+  return `<div style="margin-top:8px">
+    <div class="d">${esc(detail.description)}</div>
+    ${detail.decision_reason ? `<div class="d" style="margin-top:4px;color:var(--blue-deep)">${esc(detail.decision_reason)}</div>` : ""}
+    <div class="sec" style="margin-top:10px">PARAMETERS SCHEMA</div>
+    <pre class="actdetail">${esc(JSON.stringify(detail.parameters_schema, null, 2))}</pre>
+    <div class="sec" style="margin-top:10px">HANDLER SOURCE</div>
+    <pre class="actdetail">${esc(detail.handler_source)}</pre>
+    <div class="sec" style="margin-top:10px">TEST SOURCE</div>
+    <pre class="actdetail">${esc(detail.test_source)}</pre>
+    ${canDecide ? `<div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn go" data-approve-ext="${esc(id)}">APPROVE</button>
+      <button class="btn" data-reject-ext="${esc(id)}">REJECT</button>
+    </div>` : ""}
+  </div>`;
+}
+function selfExtRowHtml(e){
+  const expanded = _selfExtExpanded[e.id];
+  const isExpanded = e.id in _selfExtExpanded;
+  return `<div class="row">
+    ${selfExtStatusDot(e.status)}
+    <div class="g">
+      <div class="n" style="cursor:pointer" data-toggle-ext="${esc(e.id)}">${esc(e.tool_name)} <span style="color:var(--blue-deep);font-weight:normal">· ${esc(e.status)}</span></div>
+      <div class="d">${esc(e.capability_gap)}</div>
+      ${isExpanded ? selfExtDetailHtml(e.id, expanded) : ""}
+    </div>
+  </div>`;
+}
+function paintSelfExtensions(){
+  const box = $("agentSmithBody");
+  const pending = _selfExtensions.filter(e => e.status === "DRAFTED");
+  const decided = _selfExtensions.filter(e => e.status !== "DRAFTED");
+  box.innerHTML = `
+    <p class="lede">${_selfExtensions.length} DRAFTS TOTAL. ${pending.length} AWAITING YOUR REVIEW.</p>
+    <p class="note" style="padding:8px 0">Dourmouse drafts new tools for itself when it hits something it can't
+      already do -- it can NEVER approve its own drafts. Click a draft to read the real source before deciding.
+      An approved tool still needs a server restart, and still asks for your confirmation on every real call.</p>
+    ${pending.length ? `<div class="sec">AWAITING REVIEW</div>${pending.map(selfExtRowHtml).join("")}` : '<p class="note" style="padding:8px 0">Nothing waiting on you right now.</p>'}
+    ${decided.length ? `<div class="sec" style="margin-top:14px">DECIDED (${decided.length})</div>${decided.map(selfExtRowHtml).join("")}` : ""}`;
+  box.querySelectorAll("[data-toggle-ext]").forEach(el => { el.onclick = () => toggleSelfExtExpand(el.dataset.toggleExt); });
+  box.querySelectorAll("[data-approve-ext]").forEach(el => { el.onclick = () => approveSelfExtension(el.dataset.approveExt); });
+  box.querySelectorAll("[data-reject-ext]").forEach(el => { el.onclick = () => rejectSelfExtension(el.dataset.rejectExt); });
+}
+loadSelfExtensions();
+setInterval(() => { if(screen === "AGENTSMITH") loadSelfExtensions(); }, 4000);
 
 async function paintNews(){
   const box = $("newsBody");

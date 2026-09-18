@@ -231,27 +231,54 @@ New, explicit ask. This is the single most architecturally sensitive item in thi
 system that writes and registers its own new tools/agents needs a review gate, or it becomes an
 unbounded-trust problem.
 
+**Status, updated 2026-09-18 (finding #028)**: real, closed, live-verified end to end. One
+deliberate deviation from the sketch below, stated honestly: rather than reusing test 7's
+per-task approval ticket (still real, separate, not-yet-done work at the time this was built --
+see Domain B), self-extension got its OWN dedicated human-only approval route
+(`POST /api/self_extensions/approve`, reachable only from the new AGENT SMITH screen's own
+button). Waiting on test 7 first would have blocked this entire domain on an unrelated,
+independently-scoped gap; a purpose-built gate for exactly this one high-stakes action is more
+defensible than stretching a not-yet-real generic mechanism to cover it. "Lowest permission tier"
+is implemented as ALWAYS `Permission.REQUIRES_CONFIRMATION`, forced at write time regardless of
+what the draft's own source claims -- not merely "by default" (a self-added tool has no path to
+ever request or receive `REGULAR`, unattended execution). The changelog lives at
+`workspace/self_extensions/CHANGELOG.md`, not `docs/SELF_EXTENSIONS.md` in the tracked repo as
+first sketched -- a real bug, caught live, showed the tracked-repo path let every real approval
+silently write into the actual git working tree; workspace-relative matches every other piece of
+self-extension state and keeps a self-added tool a property of one installation, never something
+this change ships to every other install.
+
 **Concrete design, adversarially scoped**:
-- A new `agent_smith` (name placeholder) subagent whose only job is: given a described capability
-  gap, draft a new tool function or subagent definition, matching the house conventions
-  `docs/TESTING.md` and `docs/ENGINEERING_AUDIT.md` already establish (real error handling, no
-  fabricated success, a real test file).
-- The draft is written to a real file, registered nowhere automatically. It requires the SAME
-  approval-gate mechanism as any other high-risk action (§4, test 7) before being wired into
-  `general_roster.py`'s live registry.
-- A self-added tool inherits the LOWEST permission tier by default (Domain B's permission system,
-  §4) — it does not get to grant itself elevated access.
-- Every self-added capability is logged in a real, permanent, human-readable changelog
-  (`docs/SELF_EXTENSIONS.md` or equivalent) — what was added, why, when, by which goal.
+- A new `agent_smith` subagent whose only job is: given a described capability gap, draft a new
+  tool function, matching the house conventions `docs/TESTING.md` and `docs/ENGINEERING_AUDIT.md`
+  already establish (real error handling, no fabricated success, a real test file). Subagent
+  definitions (not just individual tools) remain real, separate, not-yet-done follow-on.
+- The draft is written to a real file, registered nowhere automatically. Approval is human-only,
+  reachable only through the UI, never a chat tool -- a dedicated regression test asserts no
+  approve/reject tool exists anywhere in the live registry, not just by code review.
+- A self-added tool is ALWAYS forced to `REQUIRES_CONFIRMATION` -- it cannot grant itself elevated
+  access no matter what it asks for.
+- Every self-added capability is logged in a real, permanent, human-readable, per-installation
+  changelog (`workspace/self_extensions/CHANGELOG.md`) -- what was added, why, when, by which
+  goal.
 
 **Harsh acceptance tests**:
 1. Ask Dourmouse to add a genuinely new, useful tool. Confirm it drafts real code and a real test,
-   not a stub.
-2. Confirm the draft does NOT self-register without an explicit approval step.
+   not a stub. **Demonstrated live**: a real, unscripted Ollama Cloud call drafted a genuinely
+   correct `celsius_to_fahrenheit` implementation from a plain-English request.
+2. Confirm the draft does NOT self-register without an explicit approval step. **Demonstrated
+   live**: the tool was confirmed not-live both by direct API check and by the model's own
+   (overly cautious, but correct) refusal to call it before approval.
 3. Confirm a self-added tool cannot request `REQUIRES_CONFIRMATION`-bypass or elevated
-   permissions for itself.
+   permissions for itself. **Demonstrated live, the hardest way possible**: after real approval
+   and a genuine server restart, a fresh chat thread's real tool call against the newly-live
+   extension genuinely paused on a real `confirmation_requested` event and only executed after a
+   real `POST /api/confirm`.
 4. Confirm the full pytest suite still passes after a self-added tool lands (i.e., self-extension
    goes through the same CI discipline as human-written code, never a side channel).
+   **Demonstrated live**: approval runs the draft's own test through a real pytest subprocess
+   before merging -- proven both ways, catching a real draft whose test genuinely failed to
+   collect (bare asserts, no `test_` functions) and correctly refusing to approve it.
 
 ## 7. Domain E — Memory: short-term, long-term, and the device wiki (new, explicit user ask)
 

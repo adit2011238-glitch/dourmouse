@@ -238,6 +238,23 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       that stream today, real separate follow-on if ever needed. Live-verified against the real
       dev-preview server with real clicks: list, expand, cancel, and the resulting audit entry all
       confirmed, not just passing tests. See `docs/ENGINEERING_AUDIT.md` finding #026.
+- [x] Domain D (self-extension, "the single most architecturally sensitive item" in
+      `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`): `agent_smith` (`general_roster.py`) drafts
+      a real tool + real test for a described capability gap; a human -- never the model, no
+      approve/reject tool exists anywhere in the roster, checked by a dedicated test -- reviews
+      the actual source in the new AGENT SMITH screen and approves over
+      `POST /api/self_extensions/approve`; approval runs the draft's own test through a real
+      pytest subprocess and forces `Permission.REQUIRES_CONFIRMATION` regardless of what the
+      draft claims; an approved tool becomes callable only after a real server restart
+      (`general_roster.py`'s new startup loader). Live-verified in full against the real
+      dev-preview server: a real Ollama Cloud call drafted a genuinely correct
+      `celsius_to_fahrenheit` tool, approval genuinely ran and passed a real pytest subprocess,
+      a real restart made it live, and -- the hardest proof -- a fresh chat thread's real call to
+      the new tool genuinely paused on a real confirmation event and only executed after a real
+      human approval, returning the mathematically correct result. A real bug caught live (not in
+      a unit test): the changelog's first design wrote into the actual tracked repo on every
+      approval; fixed to be workspace-relative like every other piece of this feature's state.
+      See `docs/ENGINEERING_AUDIT.md` finding #028.
 
 ## Phase 3 — UI/UX redesign (Claude Desktop / Claude Code interaction quality)
 

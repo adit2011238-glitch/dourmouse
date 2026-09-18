@@ -17,10 +17,12 @@ from dourmouse.general_roster import (
     _delete_file_tool,
     _diff_preview_tool,
     _draft_message_tool,
+    _draft_tool_tool,
     _edit_file_tool,
     _fetch_url_tool,
     _list_calendar_events_tool,
     _list_files_tool,
+    _list_self_extension_drafts_tool,
     _open_browser_pane_tool,
     _open_url_tool,
     _propose_time_slots_tool,
@@ -268,6 +270,14 @@ class TestRosterShape:
                                   # excluded from find_agents_for_query's
                                   # own automatic scoring (see planner.py's
                                   # _ROLLUP_AGENT_NAMES) -- reached by name.
+            "agent_smith",  # 2026-09-18: Domain D self-extension --
+                             # draft_tool/list_self_extension_drafts only,
+                             # no approve tool anywhere in this roster.
+                             # "self_extended" (approved extensions
+                             # becoming real tools) is NOT listed here on
+                             # purpose -- it only registers when at least
+                             # one extension has actually been approved,
+                             # empty in every hermetic test environment.
         }
 
     def test_orchestrator_exposes_delegate_task(self):
@@ -872,6 +882,122 @@ class TestScheduling:
         assert "NOT CONFIGURED" in result
         # Honesty contract: never claims events were read when they weren't.
         assert "no events were fetched" in result
+
+
+class TestAgentSmith:
+    """Domain D -- docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md's own
+    "single most architecturally sensitive item." The critical invariant
+    this class exists to guard: there is NO approve/reject tool anywhere
+    in the roster reachable from chat. A model can draft; only a human,
+    through webui.py's HTTP route, ever approves."""
+
+    _HANDLER = (
+        "def handle(arguments: dict) -> str:\n"
+        "    text = arguments.get(\"text\", \"\")\n"
+        "    if not isinstance(text, str) or not text:\n"
+        "        return \"ERROR: 'text' must be a non-empty string.\"\n"
+        "    return text[::-1]\n"
+    )
+    _TEST = (
+        "from dourmouse.self_extensions import load_approved\n\n\n"
+        "def test_reverses_text():\n"
+        "    mod = load_approved(\"reverse_text\")\n"
+        "    assert mod.handle({\"text\": \"abc\"}) == \"cba\"\n\n\n"
+        "def test_rejects_empty():\n"
+        "    mod = load_approved(\"reverse_text\")\n"
+        "    assert mod.handle({\"text\": \"\"}).startswith(\"ERROR\")\n"
+    )
+    _PARAMS = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+
+    def test_no_approve_or_reject_tool_exists_anywhere_in_the_roster(self):
+        registry = build_general_registry()
+        names = registry.tool_names
+        assert not any("approve" in n.lower() for n in names)
+        assert not any("reject" in n.lower() for n in names)
+
+    def test_draft_tool_is_regular_tier_never_confirmation_gated(self):
+        registry = build_general_registry()
+        spec = registry.lookup("draft_tool")
+        assert spec.permission is Permission.REGULAR
+
+    def test_draft_tool_writes_a_real_draft_not_a_stub(self, workspace):
+        out = _draft_tool_tool({
+            "capability_gap": "no way to reverse text", "tool_name": "reverse_text",
+            "description": "Reverses text.", "parameters_schema": self._PARAMS,
+            "handler_source": self._HANDLER, "test_source": self._TEST,
+        })
+        assert "DRAFTED" in out and "reverse_text" in out
+        assert "NOT live" in out
+
+    def test_draft_tool_requires_a_real_test_not_a_stub(self, workspace):
+        out = _draft_tool_tool({
+            "capability_gap": "x", "tool_name": "reverse_text", "description": "d",
+            "parameters_schema": self._PARAMS, "handler_source": self._HANDLER, "test_source": "",
+        })
+        assert "ERROR" in out and "test_source" in out
+
+    def test_draft_tool_rejects_a_name_collision_with_a_real_tool(self, workspace):
+        out = _draft_tool_tool({
+            "capability_gap": "x", "tool_name": "web_search", "description": "d",
+            "parameters_schema": self._PARAMS, "handler_source": self._HANDLER, "test_source": self._TEST,
+        })
+        assert "ERROR" in out and "already exists" in out
+
+    def test_draft_tool_rejects_broken_handler_syntax(self, workspace):
+        out = _draft_tool_tool({
+            "capability_gap": "x", "tool_name": "reverse_text", "description": "d",
+            "parameters_schema": self._PARAMS, "handler_source": "def handle(:\n  broken",
+            "test_source": self._TEST,
+        })
+        assert "ERROR" in out and "does not parse" in out
+
+    def test_list_self_extension_drafts_reports_none_when_empty(self, workspace):
+        assert _list_self_extension_drafts_tool({}) == "SELF-EXTENSION DRAFTS: none."
+
+    def test_list_self_extension_drafts_shows_a_real_draft(self, workspace):
+        _draft_tool_tool({
+            "capability_gap": "no way to reverse text", "tool_name": "reverse_text",
+            "description": "Reverses text.", "parameters_schema": self._PARAMS,
+            "handler_source": self._HANDLER, "test_source": self._TEST,
+        })
+        out = _list_self_extension_drafts_tool({})
+        assert "reverse_text" in out and "DRAFTED" in out
+
+    def test_an_approved_extension_becomes_a_real_live_tool_after_rebuild(self, workspace):
+        """The other half of Domain D: after a human approves (simulated
+        directly here via self_extensions.approve, the same function
+        webui.py's approval route calls), a FRESH build_general_registry()
+        call -- standing in for a real server restart -- must show the
+        tool as genuinely live, callable, and still forced to
+        REQUIRES_CONFIRMATION no matter what the draft asked for."""
+        from dourmouse import self_extensions as se
+
+        store = se.SelfExtensions()
+        entry = store.add_draft(
+            capability_gap="no way to reverse text", tool_name="reverse_text",
+            description="Reverses text.", parameters_schema=self._PARAMS,
+            handler_source=self._HANDLER, test_source=self._TEST,
+        )
+        result = se.approve(entry["id"], store=store)
+        assert result["ok"] is True, result.get("error")
+        registry = build_general_registry()
+        assert "self_extended" in registry.subagent_names
+        spec = registry.lookup("reverse_text")
+        assert spec is not None
+        assert spec.permission is Permission.REQUIRES_CONFIRMATION
+        assert spec.handler({"text": "abc"}) == "cba"
+
+    def test_a_broken_approved_module_never_crashes_registry_startup(self, workspace):
+        """A human can only approve through the real approve() path, which
+        already validates syntax and runs the real test -- but a hand-
+        edited or corrupted file in the approved/ directory must still
+        never take the whole server down. Honest degradation, not a
+        crash."""
+        approved_dir = workspace / "self_extensions" / "approved"
+        approved_dir.mkdir(parents=True, exist_ok=True)
+        (approved_dir / "broken_ext.py").write_text("def handle(:\n  this is not valid python", encoding="utf-8")
+        registry = build_general_registry()  # must not raise
+        assert registry.lookup("broken_ext") is None
 
 
 class TestDevCoding:
