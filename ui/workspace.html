@@ -520,15 +520,15 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <button class="dockbtn" type="button" data-open="atlaslab">+ ATLAS LAB</button>
     <button class="dockbtn" type="button" data-open="allhands">+ ALL HANDS</button>
     <button class="dockbtn" type="button" id="organizeBtn">⊞ ORGANIZE</button>
-    <span class="hfpill" id="handsFreePill" title="Hands-free voice loop (dourmouse/hands_free.py)">● HANDS-FREE: —</span>
+    <span class="hfpill" id="handsFreePill" title="Hands-free voice loop (dourmouse/hands_free.py)">● HANDS-FREE: -</span>
     <a class="backlink" href="/">← CONSOLE</a>
   </div>
 </div>
 
 <div id="usagebar">
-  <div class="ub-item"><span class="ub-k">CLAUDE</span><span class="ub-v" id="ubClaude">—</span></div>
+  <div class="ub-item"><span class="ub-k">CLAUDE</span><span class="ub-v" id="ubClaude">-</span></div>
   <span class="ub-sep">|</span>
-  <div class="ub-item"><span class="ub-k">OLLAMA</span><span class="ub-v" id="ubOllama">—</span></div>
+  <div class="ub-item"><span class="ub-k">OLLAMA</span><span class="ub-v" id="ubOllama">-</span></div>
 </div>
 
 <div id="visBackdrop">
@@ -541,19 +541,19 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
 <div id="visdock">
   <div class="hd"><span id="visKillDot" class="dot"></span>HAND CONTROL <span id="visHandsCount" style="margin-left:auto;color:var(--blue-dim)">0 hands</span></div>
   <div class="bd">
-    <div class="row"><span>Gesture</span><b id="visGesture">—</b></div>
+    <div class="row"><span>Gesture</span><b id="visGesture">-</b></div>
     <div class="row"><span>Focused window</span><b id="visFocused">none</b></div>
-    <div class="row"><span>Signal</span><b id="visSignal">—</b></div>
-    <div class="row"><span>Delegate</span><b id="visDelegate">—</b></div>
+    <div class="row"><span>Signal</span><b id="visSignal">-</b></div>
+    <div class="row"><span>Delegate</span><b id="visDelegate">-</b></div>
     <button class="hb" id="visToggle" type="button">ENABLE HAND CONTROL</button>
     <div class="note">Pinch a titlebar with one hand to drag it. Pinch with BOTH hands and
       change the distance between them to resize the focused window; change the angle
-      between them to tilt it. Gated by the tray.py camera kill-switch — verified
+      between them to tilt it. Gated by the tray.py camera kill-switch, verified
       live-desktop, not this sandbox (see page source for the full
       honesty note). Raw landmarks are EMA-smoothed and pinch has real on/off hysteresis
-      (see LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO below) — SIGNAL
+      (see LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO below); SIGNAL
       above reports NOISY when smoothing is actively correcting a jittery frame. DELEGATE
-      tries GPU first and falls back to CPU automatically (see startHandControl below) —
+      tries GPU first and falls back to CPU automatically (see startHandControl below);
       an embedded desktop webview's GPU compute support is real but frequently degraded or
       absent compared to a normal browser tab, and MediaPipe's GPU delegate then either
       fails outright or silently produces near-zero real detections, which reads to a user
@@ -779,7 +779,7 @@ function openPanel(type){
   const existing = findPanelByType(type);
   if(existing){ bringToFront(existing.id); return existing; }
   const titles = { mail: "GMAIL INBOX", chat: "COMPANION", research: "RESEARCH", map: "WORLD MAP",
-                   globe: "3D VIEW — GOD'S EYE", design3d: "3D MODEL", upload: "UPLOAD TO RAG",
+                   globe: "3D VIEW · GOD'S EYE", design3d: "3D MODEL", upload: "UPLOAD TO RAG",
                    browser: "LIVE BROWSER", pdf: "PDF READER", eventgraph: "EVENT GRAPH",
                    timetravel: "TIME TRAVEL", semanticmap: "SEMANTIC MAP",
                    agentmap: "AGENT MAP", atlaslab: "ATLAS LAB", allhands: "ALL HANDS" };
@@ -819,7 +819,7 @@ async function pollHandsFreeStatus() {
     if (status.enabled && status.running) {
       pill.textContent = "● HANDS-FREE: LISTENING";
       pill.className = "hfpill live";
-      pill.title = "Hands-free voice loop active — say the wake word (dourmouse/hands_free.py)";
+      pill.title = "Hands-free voice loop active: say the wake word (dourmouse/hands_free.py)";
     } else if (status.enabled && !status.running) {
       pill.textContent = "● HANDS-FREE: ERROR";
       pill.className = "hfpill error";
@@ -1114,12 +1114,12 @@ function applyPanelControlToolResult(ev, log){
     const found = findPanelByType(action.panel);
     if(found){ setPanelRect(found, { x: action.x, y: action.y }); bringToFront(found.id);
       note = "→ moved " + action.panel + " to (" + Math.round(action.x) + ", " + Math.round(action.y) + ")"; }
-    else note = "→ " + action.panel + " isn't open — open it first";
+    else note = "→ " + action.panel + " isn't open; open it first";
   }else if(action.action === "resize"){
     const found = findPanelByType(action.panel);
     if(found){ setPanelRect(found, { w: action.width, h: action.height }); bringToFront(found.id);
       note = "→ resized " + action.panel + " to " + Math.round(action.width) + "x" + Math.round(action.height); }
-    else note = "→ " + action.panel + " isn't open — open it first";
+    else note = "→ " + action.panel + " isn't open; open it first";
   }else if(action.action === "organize"){
     const n = autoArrangePanels();
     note = n > 0 ? "→ organized " + n + " panel(s)" : "→ nothing open to organize";
@@ -1211,7 +1211,7 @@ async function loadGlobePanel(p){
       <div style="padding:14px;font-size:12px;line-height:1.6">
         <div style="color:var(--amber-hi);margin-bottom:6px">God's Eye View isn't running</div>
         <div style="color:var(--blue-dim);margin-bottom:8px">A real photorealistic 3D globe with live
-          aircraft/ship/satellite/earthquake layers — runs as its own dev server next to DourMouse.</div>
+          aircraft/ship/satellite/earthquake layers, running as its own dev server next to DourMouse.</div>
         <div style="background:#04080e;border:1px solid var(--line);border-radius:2px;padding:8px;
           font-size:11px;color:var(--blue-hi);margin-bottom:8px">cd gods-eye-view<br>npm run dev -- --host localhost --port 4173</div>
         <button class="hb" id="globeRecheck" type="button" style="width:auto;padding:6px 12px">CHECK AGAIN</button>
@@ -1275,11 +1275,11 @@ async function dispatchDesign3D(directive, statusEl, opts){
         if(ev.type === "confirmation_requested"){
           // write_manifest_entry's real confirmation gate -- same as every
           // other confirmed-write path, never bypassed for this panel.
-          statusEl.innerHTML = `<span>◆ SAVE TO MANIFEST — approve?</span> `+
+          statusEl.innerHTML = `<span>◆ SAVE TO MANIFEST: approve?</span> `+
             `<button class="d3chip" id="d3ConfirmYes" type="button">APPROVE</button> `+
             `<button class="d3chip" id="d3ConfirmNo" type="button">DECLINE</button>`;
           statusEl.querySelector("#d3ConfirmYes").onclick = async () => {
-            statusEl.textContent = "Approved — saving…";
+            statusEl.textContent = "Approved, saving…";
             try{ await fetch("/api/confirm", { method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ id: ev.id, approved: true }) }); }catch(_){}
           };
@@ -1310,7 +1310,7 @@ function loadDesign3DPanel(p){
         <input id="d3AskInput" type="text" placeholder='Tell it what to show, e.g. "a red box next to a blue sphere"' autocomplete="off">
         <button id="d3AskGo" type="button">GO</button>
       </div>
-      <div class="d3status" id="d3Status">Ask above, or add a primitive manually — the AI can also SAVE what you build to the manifest by name.</div>
+      <div class="d3status" id="d3Status">Ask above, or add a primitive manually. The AI can also SAVE what you build to the manifest by name.</div>
     </div>`;
   const addRow = p.body.querySelector("#d3AddRow");
   ["box","sphere","cylinder","cone","plane","torus"].forEach(t => {
@@ -1336,7 +1336,7 @@ function loadDesign3DPanel(p){
         const got = extractDesign3DPrimitives(ev.name, ev.text);
         if(got && window.Design3D){
           window.Design3D.loadState(got.primitives);
-          status.textContent = `Loaded ${got.primitives.length} primitive(s)`+(got.name ? ` — "${got.name}"` : "")+".";
+          status.textContent = `Loaded ${got.primitives.length} primitive(s)`+(got.name ? `: "${got.name}"` : "")+".";
         }
       },
       onDone: (finalText) => {
@@ -1372,7 +1372,7 @@ function loadUploadPanel(p){
   p.body.innerHTML = `
     <div class="upwrap">
       <div class="updrop" id="upDrop">Drop files here, or click to choose<br>
-        <span style="font-size:9.5px">Indexed into the shared RAG database the moment they finish uploading — search them from any chat via query_shared_memory.</span></div>
+        <span style="font-size:9.5px">Indexed into the shared RAG database the moment they finish uploading; search them from any chat via query_shared_memory.</span></div>
       <input type="file" id="upInput" multiple style="display:none">
       <div class="uplist" id="upList"></div>
     </div>`;
@@ -1401,7 +1401,7 @@ function loadUploadPanel(p){
       });
       const r = await res.json();
       if(!res.ok || r.ok === false){
-        statusEl.textContent = "failed — " + (r.error || ("HTTP " + res.status));
+        statusEl.textContent = "failed: " + (r.error || ("HTTP " + res.status));
         statusEl.className = "s bad";
         return;
       }
@@ -1409,11 +1409,11 @@ function loadUploadPanel(p){
         statusEl.textContent = `indexed (${r.indexed_chars.toLocaleString()} chars)`;
         statusEl.className = "s ok";
       }else{
-        statusEl.textContent = "saved, not indexed — " + (r.reason || r.index_error || "unknown");
+        statusEl.textContent = "saved, not indexed: " + (r.reason || r.index_error || "unknown");
         statusEl.className = "s warn";
       }
     }catch(e){
-      statusEl.textContent = "failed — " + String(e.message || e);
+      statusEl.textContent = "failed: " + String(e.message || e);
       statusEl.className = "s bad";
     }
   }
@@ -1463,15 +1463,15 @@ function loadBrowserPanel(p){
     try{
       const st = await api("/api/browser/status");
       if(!st.ready){
-        statusEl.textContent = "playwright not installed" + (st.launch_error ? " — " + st.launch_error : "");
+        statusEl.textContent = "playwright not installed" + (st.launch_error ? ": " + st.launch_error : "");
         statusEl.className = "brstatus bad";
       }else if(st.launch_error){
-        statusEl.textContent = "launch error — " + st.launch_error;
+        statusEl.textContent = "launch error: " + st.launch_error;
         statusEl.className = "brstatus bad";
       }else{
         const shots = st.shots || [];
         statusEl.textContent = (st.headless ? "headless" : "visible") + " · "
-          + (shots.length ? shots.length + " screenshot(s) captured" : "no screenshot yet — ask the companion to open a page");
+          + (shots.length ? shots.length + " screenshot(s) captured" : "no screenshot yet; ask the companion to open a page");
         statusEl.className = "brstatus ok";
         if(shots.length){
           // Cache-busting query param -- the server already sends
@@ -1492,7 +1492,7 @@ function loadBrowserPanel(p){
         actEl.appendChild(row);
       }
     }catch(e){
-      statusEl.textContent = "unavailable — " + String(e.message || e);
+      statusEl.textContent = "unavailable: " + String(e.message || e);
       statusEl.className = "brstatus bad";
     }
   }
@@ -1519,7 +1519,7 @@ function loadPdfPanel(p){
       </div>
       <div class="pdfnav" style="display:none">
         <button type="button" class="pdfprev">◀</button>
-        <span class="pdfpage">page — / —</span>
+        <span class="pdfpage">page - / -</span>
         <button type="button" class="pdfnext">▶</button>
       </div>
       <div class="pdfimgwrap"><img class="pdfimg" alt="rendered PDF page" style="display:none"></div>
@@ -1779,7 +1779,7 @@ function loadEventGraphPanel(p){
         statusEl.textContent = "GDELT poller disabled (DOURMOUSE_GDELT_POLLER=0)";
         statusEl.className = "egstatus bad";
       }else if(status.last_error && !status.last_fetch_at){
-        statusEl.textContent = "waiting for first fetch — " + status.last_error;
+        statusEl.textContent = "waiting for first fetch: " + status.last_error;
         statusEl.className = "egstatus bad";
       }else{
         const when = status.last_fetch_at
@@ -1789,7 +1789,7 @@ function loadEventGraphPanel(p){
         statusEl.className = "egstatus ok";
       }
     }catch(e){
-      statusEl.textContent = "unavailable — " + String(e.message || e);
+      statusEl.textContent = "unavailable: " + String(e.message || e);
       statusEl.className = "egstatus bad";
     }
   }
@@ -1823,7 +1823,7 @@ function loadSemanticMapPanel(p){
     p.body.querySelector(".egcanvas"), p.body.querySelector(".eghover"), p.body.querySelector(".egcanvaswrap"),
     {
       colorForNode: n => _SEMANTIC_CLUSTER_PALETTE[(n.cluster || 0) % _SEMANTIC_CLUSTER_PALETTE.length],
-      hoverText: n => `${n.label} — ${n.source} (cluster ${n.cluster})`,
+      hoverText: n => `${n.label} · ${n.source} (cluster ${n.cluster})`,
     }
   );
 
@@ -1840,7 +1840,7 @@ function loadSemanticMapPanel(p){
       statusEl.textContent = `${snap.nodes.length} facts · ${snap.edges.length} links · ${clusterCount} cluster${clusterCount === 1 ? "" : "s"} (real embeddings)`;
       statusEl.className = "egstatus ok";
     }catch(e){
-      statusEl.textContent = "unavailable — " + String(e.message || e);
+      statusEl.textContent = "unavailable: " + String(e.message || e);
       statusEl.className = "egstatus bad";
     }
   }
@@ -1894,7 +1894,7 @@ function loadTimeTravelPanel(p){
       }
       if(data.commits.length) selectCommit(data.commits[0].hash);
     }catch(e){
-      logEl.innerHTML = `<div class="tterr">unavailable — ${esc(String(e.message || e))}</div>`;
+      logEl.innerHTML = `<div class="tterr">unavailable: ${esc(String(e.message || e))}</div>`;
     }
   }
 
@@ -1981,7 +1981,7 @@ async function handleUtterance(text){
     voxLog("<b>command:</b> " + esc(recognized.action) + " " + esc(JSON.stringify(recognized.args)));
     dispatchVoiceCommand(recognized);
   }else{
-    voxLog("<b>not a command</b> — sending to companion as chat");
+    voxLog("<b>not a command</b>: sending to companion as chat");
     const p = openPanel("chat");
     sendChatMessage(p, text);
   }
@@ -2137,7 +2137,7 @@ function applyKillSwitch(cameraEnabled){
   const was = HAND.cameraAllowed;
   HAND.cameraAllowed = cameraEnabled;
   HAND.killDot.className = "dot " + (cameraEnabled ? "ok" : "bad");
-  if(!cameraEnabled && HAND.running){ stopHandControl(); toast("camera kill-switch engaged — hand control stopped"); }
+  if(!cameraEnabled && HAND.running){ stopHandControl(); toast("camera kill-switch engaged, hand control stopped"); }
   void was;
 }
 function visionKillSwitchLoop(){ pollVisionBridge().finally(() => setTimeout(visionKillSwitchLoop, 1500)); }
@@ -2185,7 +2185,7 @@ async function _createFaceLandmarker(vision, fileset, delegate){
   });
 }
 async function startHandControl(){
-  if(!HAND.cameraAllowed){ toast("camera kill-switch is engaged — re-enable it from the tray icon"); return; }
+  if(!HAND.cameraAllowed){ toast("camera kill-switch is engaged; re-enable it from the tray icon"); return; }
   if(HAND.startingUp || HAND.running) return;
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast("no camera available in this browser"); return; }
   HAND.startingUp = true;
@@ -2239,9 +2239,9 @@ function stopHandControl(){
   HAND.toggleBtn.textContent = "ENABLE HAND CONTROL";
   HAND.toggleBtn.classList.remove("on");
   HAND.handsCountEl.textContent = "0 hands";
-  HAND.gestureEl.textContent = "—";
-  HAND.signalEl.textContent = "—";
-  HAND.delegateEl.textContent = "—";
+  HAND.gestureEl.textContent = "-";
+  HAND.signalEl.textContent = "-";
+  HAND.delegateEl.textContent = "-";
   resetHandSmoothing(); HAND.lastHandCount = 0;
   AdaptiveRate.reset(); _lastHandResult = null;
   const ctx = HAND.overlay.getContext("2d"); if(ctx) ctx.clearRect(0, 0, HAND.overlay.width, HAND.overlay.height);
@@ -2521,7 +2521,7 @@ function onHandFrame(res){
   if(rawHands.length !== HAND.lastHandCount) resetHandSmoothing();
   HAND.lastHandCount = rawHands.length;
 
-  if(rawHands.length === 0){ HAND.gestureEl.textContent = "—"; HAND.signalEl.textContent = "—"; endHandDrag(); endTwoHand(); return; }
+  if(rawHands.length === 0){ HAND.gestureEl.textContent = "-"; HAND.signalEl.textContent = "-"; endHandDrag(); endTwoHand(); return; }
 
   // ---- EMA-smooth every raw landmark BEFORE any distance/midpoint math
   // reads it (see LANDMARK_SMOOTH_ALPHA doc above) — smoothing only the

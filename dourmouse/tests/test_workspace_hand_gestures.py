@@ -406,7 +406,7 @@ class TestHandLandmarkerDelegateFallback:
     def test_stop_resets_the_delegate_readout_and_closes_the_old_instance(self):
         script = _extract_inline_script()
         fn = _extract_function(script, "stopHandControl")
-        assert 'HAND.delegateEl.textContent = "—"' in fn
+        assert 'HAND.delegateEl.textContent = "-"' in fn
         assert "HAND.handLM.close()" in fn
 
 

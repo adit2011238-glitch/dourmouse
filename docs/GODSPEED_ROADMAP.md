@@ -344,6 +344,27 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       static source. Zero existing tests referenced the old text. 17 files remain, `workspace.html`
       next.
 
+- [x] `workspace.html` swept (2026-09-18), the second-priority file (the `/workspace` Vision
+      floating-panel UI). 116 raw em dashes; 43 flagged real by the tokenizer, of which 4 were
+      themselves a real, narrow tokenizer gap (a `<script type="module">` block -- the tokenizer
+      only recognized a bare `<script>` opening tag as entering JS mode, so `//` comments inside
+      the module block were never masked; caught by reading each flagged line, not by trusting the
+      tool blindly, exactly the discipline the original methodology called for) -- left untouched
+      as the genuine code comments they are, 39 real fixes applied. Same fix vocabulary as
+      `index.html`: ASCII `-` for placeholder glyphs, `·` for short label pairs, natural
+      punctuation (comma/colon/semicolon/period) chosen per sentence for clause-joiners. Verified
+      the same two ways: every script block (including the `type="module"` one, checked separately
+      since `node --check` needs ESM input handled differently from a classic script) syntax-clean
+      after all 39 edits, and a live dev-preview render of the actual Vision workspace confirmed
+      the HAND CONTROL panel's placeholder fields and its full multi-sentence explanation paragraph
+      both render the corrected text for real. A real, live-caught bug: the full suite (run before
+      committing, as always) failed one pre-existing test that asserted the literal old em-dash
+      string inside `stopHandControl()` -- an earlier grep-based stale-reference check missed it
+      because it searched a handful of representative substrings, not every one of the 39 changed
+      lines individually; fixed to assert the new, correct text, not reverted, and a second,
+      exhaustive per-fix grep across the whole test suite afterward confirmed no others were
+      missed. 16 files remain.
+
 Waits on the frontend audit so the design system replaces real, identified debt rather than
 guessing. Must also surface Phase 2's goals/tasks (chat vs. work distinction from the spec) once
 that exists, so this phase runs after Phase 2 has at least its data model in place.
