@@ -160,13 +160,19 @@ default live behavior, not just built-but-dormant infrastructure.
 20. Multiple agents/goals run simultaneously without their state, credentials, memory, or files
     becoming mixed together.
 
-**Real gaps this pass surfaced, tracked explicitly**: test 8 is now partially covered by finding
-#016's concurrency fix (a cancelled goal can no longer be silently resurrected by a late-arriving
-task result) — but a genuinely engineered crash-recovery drill (kill -9 the process mid-goal,
-confirm resumption) has not been run. Flagged as real, not-yet-done verification work, not assumed
-passing from unit tests alone (per this project's own stated rule: a passing test is evidence of
-what someone thought should work, not proof the system works). Test 15 (inspect what the agent
-actually did) is now real at the data and API level — `goal_events`/`all_events`/
+**Status, updated 2026-09-18**: test 1-6, 9-10, 12-14, 16-20 real and exercised by this session's
+own tests. Test 7 (approval requested, waits, auto-continues after approval) real at the global
+`DOURMOUSE_AUTO_APPROVE` toggle level; a resumable PER-TASK approval ticket is real, separate,
+not-yet-done work. Test 8 (crash mid-task, resumes from durable state, no duplicated side
+effects) **verified live** (finding #024): a real `kill -9` mid-dispatch against the real
+dev-preview server, restarted, real automatic recovery (`recovery_attempted` event, RETRYING,
+successful retry, correct real answer) — not assumed from unit tests. Test 11 (a task claims
+completion but the artifact is invalid; a real verifier catches it) is the one big remaining gap:
+verification is still self-reported ("the task's own turn completed without raising"), not an
+independent check against each task's own success criteria — real, separate, not-yet-done work,
+and arguably the single most important remaining item in this whole domain now that tests 8 and
+the runtime's default-on status (finding #023) are closed. Test 15 (inspect what the agent
+actually did) is real at the data and API level — `goal_events`/`all_events`/
 `export_events_markdown` + `GET /api/audit` (finding #022) — but still not closed end to end: no
 UI surface exists yet, so a real user still cannot see this without calling the API directly.
 Backend done, UI tracked as Phase 3 follow-on.

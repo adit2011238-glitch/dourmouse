@@ -769,6 +769,48 @@ This is the founding spec's own headline claim, verified true by default for the
 session, not asserted from a passing unit test.
 **Result**: fixed.
 
+### 024 — Crash-recovery drill (acceptance test 8), genuinely performed, not assumed
+
+**Severity**: n/a (verification pass, not a bug — see below for why it was worth doing anyway).
+**Context**: acceptance test 8 ("the runtime is restarted during a task; the task resumes from
+durable state without duplicating external side effects") was flagged as real, honestly
+not-yet-done verification work in finding #016 and in
+`docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain B — "a genuinely engineered crash-recovery
+drill (kill -9 the process mid-goal, confirm resumption) has not been run." With finding #023
+making the autonomous runtime the default live behavior for every install, this stopped being a
+nice-to-have to verify eventually and became something worth confirming before moving on.
+**Method**: against the real, unmodified dev-preview server (no special test hooks): inserted a
+real goal/task directly into its live SQLite file from a separate process, ran a tight local poll
+loop against the same database file (avoiding HTTP round-trip latency, which caused the first
+attempt to miss the window entirely — the task was already COMPLETED by the time a browser-based
+check landed), and sent `kill -9` to the real server PID the instant the task flipped to
+`RUNNING` — a genuine process kill mid-dispatch, not a graceful shutdown.
+**Result, in full, from the real event log**:
+```
+task_created
+-> READY
+-> RUNNING                                          (first real dispatch call starts)
+[kill -9 sent here — the whole process dies mid-call]
+[server restarted fresh, same as a real app relaunch after a crash]
+recovery_attempted   {"reason": "found RUNNING at worker startup"}
+-> RETRYING           error: "worker restarted mid-execution"
+-> RUNNING                                          (second real dispatch call, automatic)
+-> COMPLETED
+```
+The retried attempt produced a real, correct, on-topic answer (a real question about the Eiffel
+Tower and Golden Gate Bridge, answered correctly). `GoalRuntime._recover_orphaned_tasks` (called
+from `.start()`, before the tick loop begins) already existed, already correctly implements the
+founding spec's own stated principle ("never blindly repeat an external side effect" — it routes
+an orphaned `RUNNING` task through the normal retry/fail path rather than assuming it's still
+alive or silently marking it complete), and worked correctly on the first real drill, no code
+changes needed.
+**Files changed**: none (verification only).
+**Tests added**: none — this was a real, live, manual drill against a running process, not
+something naturally expressed as a pytest unit test (the scenario requires an actual process
+kill mid-flight, which is closer in spirit to `test_goal_runtime.py`'s own existing
+`_recover_orphaned_tasks` unit-level coverage, already present, than to a new integration test).
+**Result**: verified — acceptance test 8 closed for real, not assumed.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

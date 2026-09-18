@@ -210,7 +210,14 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       throughout this module — fixed end to end rather than converting types at a boundary. See
       `docs/ENGINEERING_AUDIT.md` finding #022.
 - [ ] Live progress model + notifications through the existing notification mechanism.
-- [ ] Run the spec's 20 acceptance tests for real against the implementation.
+- [ ] Run the spec's 20 acceptance tests for real against the implementation. Test 8 (crash
+      mid-task, resumes without duplicating side effects) genuinely drilled 2026-09-18: real
+      `kill -9` against the real dev-preview server mid-dispatch, restarted, real automatic
+      recovery confirmed from the live event log (`recovery_attempted` → `RETRYING` → successful
+      retry with a correct real answer) — see `docs/ENGINEERING_AUDIT.md` finding #024. Test 11
+      (independent verification, not self-reported) is the largest remaining real gap in this
+      whole domain now that tests 8 and default-on autonomy (finding #023) are closed. See
+      `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain B for the full per-test status.
 
 ## Phase 3 — UI/UX redesign (Claude Desktop / Claude Code interaction quality)
 
