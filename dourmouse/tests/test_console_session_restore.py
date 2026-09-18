@@ -196,13 +196,13 @@ class TestAvgTurnLatencyLabel:
         return result.stdout.strip()
 
     def test_no_session_yet_shows_dash(self, tmp_path):
-        assert self._run(tmp_path, "{session: null}") == "—"
+        assert self._run(tmp_path, "{session: null}") == "-"
 
     def test_404_shaped_session_shows_dash(self, tmp_path):
-        assert self._run(tmp_path, '{session: {ok: false}}') == "—"
+        assert self._run(tmp_path, '{session: {ok: false}}') == "-"
 
     def test_empty_turns_shows_dash(self, tmp_path):
-        assert self._run(tmp_path, '{session: {ok: true, turns: []}}') == "—"
+        assert self._run(tmp_path, '{session: {ok: true, turns: []}}') == "-"
 
     def test_sub_second_average_shown_in_ms(self, tmp_path):
         sys_value = '{session: {ok: true, turns: [{elapsed_ms: 400}, {elapsed_ms: 600}]}}'
@@ -228,7 +228,7 @@ class TestAvgTurnLatencyLabel:
 
     def test_all_slash_commands_shows_dash_not_a_fabricated_zero(self, tmp_path):
         sys_value = '{session: {ok: true, turns: [{elapsed_ms: 0.0}, {elapsed_ms: 0.0}]}}'
-        assert self._run(tmp_path, sys_value) == "—"
+        assert self._run(tmp_path, sys_value) == "-"
 
 
 class TestCodeToolDefaultAndPersistence:

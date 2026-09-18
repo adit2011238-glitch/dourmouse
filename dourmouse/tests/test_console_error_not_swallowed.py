@@ -61,7 +61,7 @@ class TestErrorReachesTheVisibleReply:
         script = _extract_inline_script()
         # The live-streaming fallback (not restoreSession's replay path,
         # which has no lastError to show) must branch on lastError.
-        assert 'lastError\n      ? `<p><em>No reply — ${esc(lastError)}</em></p>`' in script
+        assert 'lastError\n      ? `<p><em>No reply: ${esc(lastError)}</em></p>`' in script
 
     def test_genuinely_empty_response_with_no_error_keeps_the_honest_generic_message(self):
         """Never invent a cause that wasn't there — a real empty response

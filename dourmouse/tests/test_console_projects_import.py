@@ -151,7 +151,7 @@ class TestImportedProjectsShelf:
         script = _extract_inline_script()
         # Neither source configured.
         assert "!cc.configured && !cx.configured" in script
-        assert "nothing to import yet" in script
+        assert "Nothing to import yet" in script
         # Configured but zero projects found.
         assert "not found on this machine" in script
 

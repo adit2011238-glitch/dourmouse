@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>DOURMOUSE // SETUP</title>
+<title>DOURMOUSE · SETUP</title>
 <link rel="stylesheet" href="assets/dourmouse-ui.css">
 <style>
 /* Retheme: Claude-Desktop-directed calm/minimal system (retires the
@@ -196,13 +196,13 @@ code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:12p
 
     <button class="opt" id="optOllama" aria-pressed="false" onclick="pick('ollama')">
       <span class="ic"></span>
-      <span><span class="t">Local — Ollama</span>
+      <span><span class="t" id="ollamaTitle">Local · Ollama</span>
       <span class="d" id="ollamaDetail">checking…</span></span>
     </button>
 
     <button class="opt" id="optNvidia" aria-pressed="false" onclick="pick('nvidia')">
       <span class="ic"></span>
-      <span><span class="t">NVIDIA cloud — much faster</span>
+      <span><span class="t">NVIDIA cloud, much faster</span>
       <span class="d">Free to start. Takes about two minutes to set up.</span></span>
     </button>
 
@@ -216,10 +216,10 @@ code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:12p
     <div id="nvBox" class="hide">
       <div class="guide">
         <ol>
-          <li>Open <a href="#" id="nvLink" target="_blank" rel="noopener">build.nvidia.com</a> — it opens in your browser.</li>
+          <li>Open <a href="#" id="nvLink" target="_blank" rel="noopener">build.nvidia.com</a>. It opens in your browser.</li>
           <li>Sign up with an email. No card is needed.</li>
           <li>Pick any model, then press <b>Get API Key</b>.</li>
-          <li>Copy the whole key — it starts with <code>nvapi-</code>.</li>
+          <li>Copy the whole key. It starts with <code>nvapi-</code>.</li>
           <li>Paste it below. We check it works before saving.</li>
         </ol>
       </div>
@@ -250,7 +250,7 @@ code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:12p
   <div class="card hide" id="s3">
     <h1>Connect Google</h1>
     <p>Optional. Sign in and Dourmouse can read and act on your Gmail,
-       Calendar and Drive when you ask it to — nothing is touched until you
+       Calendar and Drive when you ask it to. Nothing is touched until you
        do. Skip this and use Dourmouse with no Google account at all; you
        can connect one later from Settings.</p>
 
@@ -273,7 +273,7 @@ code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:12p
     </div>
 
     <div class="note hide" id="gNotConfigured">GOOGLE SIGN-IN IS NOT CONFIGURED on
-      this install — the server has no OAuth client set. You can still use
+      this install: the server has no OAuth client set. You can still use
       Dourmouse fully without it; this can be added later in Settings.</div>
 
     <div class="actions">
@@ -289,11 +289,11 @@ code{background:var(--panel2);padding:1px 5px;color:var(--blue-hi);font-size:12p
     <p id="doneDetail"></p>
     <div class="sec">Saved to</div>
     <p><code id="cfgPath"></code></p>
-    <p class="note">This file holds your key. It stays on this machine — it is
+    <p class="note">This file holds your key. It stays on this machine; it is
        never bundled into a build or uploaded. You can change any of this later
        in Settings.</p>
     <p class="note" id="restartNote">Dourmouse needs to restart so the new
-      setting takes effect — the backend is chosen when the app starts.</p>
+      setting takes effect: the backend is chosen when the app starts.</p>
     <div class="actions">
       <button class="go" id="openBtn" onclick="restartAndOpen()">RESTART AND OPEN</button>
     </div>
@@ -351,7 +351,7 @@ async function checkKey(){
     const r = await api("/api/setup/validate-key", {api_key: $("nvKey").value});
     keyOk = !!r.ok;
     m.className = "msg " + (r.ok ? "ok" : "bad");
-    m.textContent = (r.ok ? "✓ " : "✗ ") + (r.detail || "") + (r.hint ? " — " + r.hint : "");
+    m.textContent = (r.ok ? "✓ " : "✗ ") + (r.detail || "") + (r.hint ? " (" + r.hint + ")" : "");
   }catch(e){ keyOk = false; m.className = "msg bad"; m.textContent = "✗ " + e.message; }
   refresh();
 }
@@ -391,7 +391,7 @@ async function restartAndOpen(){
         if(res.ok){ location.href = "/"; return; }
       }catch(e){ /* expected while the process is down */ }
     }
-    note.textContent = "Dourmouse is restarting — reopen it from your desktop icon.";
+    note.textContent = "Dourmouse is restarting. Reopen it from your desktop icon.";
     btn.textContent = "CLOSE";
   }catch(e){
     note.textContent = "Close and reopen Dourmouse to apply your settings.";
@@ -461,7 +461,7 @@ function gShowManualLink(url){
   const m = $("gMsg");
   m.className = "msg";
   const safe = String(url).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-  m.innerHTML = 'Could not open your browser automatically — ' +
+  m.innerHTML = 'Could not open your browser automatically. ' +
     '<a href="' + safe + '" target="_blank" rel="noopener">open this link</a> to continue, ' +
     'then come back here.';
 }
@@ -476,7 +476,7 @@ function gPollClaim(claim){
       clearInterval(gClaimTimer);
       const m = $("gMsg");
       m.className = "msg bad";
-      m.textContent = "Didn't hear back from Google — try again, or just skip and connect later.";
+      m.textContent = "Didn't hear back from Google. Try again, or just skip and connect later.";
       const btn = $("gSigninBtn");
       btn.disabled = false; btn.textContent = "TRY AGAIN";
       return;
@@ -519,11 +519,11 @@ async function gStartSignin(){
       return;
     }
     m.className = "msg";
-    m.textContent = "Approve it in the window that just opened — this page " +
+    m.textContent = "Approve it in the window that just opened. This page " +
       "picks it up automatically once you're done.";
     gPollClaim(claim);
   }catch(e){
-    m.className = "msg bad"; m.textContent = "Could not reach Google — " + e.message;
+    m.className = "msg bad"; m.textContent = "Could not reach Google: " + e.message;
     btn.disabled = false; btn.textContent = "Sign in with Google";
   }
 }
@@ -550,7 +550,7 @@ async function gInit(){
       $("gNotConfigured").classList.remove("hide");
     }
   }catch(e){
-    $("gMsg").textContent = "Could not check Google sign-in — you can still skip.";
+    $("gMsg").textContent = "Could not check Google sign-in. You can still skip.";
   }
 }
 gInit();
@@ -559,15 +559,26 @@ gInit();
   try{
     status = await api("/api/setup/status");
     const o = status.ollama || {};
-    $("ollamaDetail").textContent = o.ok
-      ? (o.detail || "ready") + " — works now, no key needed"
-      : (o.detail || "not detected") + (o.hint ? " · " + o.hint : "");
-    $("optOllama").classList.toggle("ready", !!o.ok);
-    $("optOllama").classList.toggle("down", !o.ok);
+    if(status.ollama_cloud_key_configured){
+      // An OLLAMA_API_KEY already sitting in this install's config means
+      // config.load_ollama_config() always prefers Ollama Cloud over any
+      // local server, key or no key (a deliberate, explicit choice, not a
+      // bug) -- so saying "Local" here would be wrong regardless of
+      // whether a local Ollama also happens to be running.
+      $("ollamaTitle").textContent = "Ollama Cloud";
+      $("ollamaDetail").textContent = "A key is already configured on this machine; cloud models are used, not local.";
+    } else {
+      $("ollamaTitle").textContent = "Local · Ollama";
+      $("ollamaDetail").textContent = o.ok
+        ? (o.detail || "ready") + " · works now, no key needed"
+        : (o.detail || "not detected") + (o.hint ? " · " + o.hint : "");
+    }
+    $("optOllama").classList.toggle("ready", !!o.ok || !!status.ollama_cloud_key_configured);
+    $("optOllama").classList.toggle("down", !o.ok && !status.ollama_cloud_key_configured);
     $("nvLink").href = status.nvidia_signup_url || "https://build.nvidia.com";
-    if(o.ok) pick("ollama");
+    if(o.ok || status.ollama_cloud_key_configured) pick("ollama");
   }catch(e){
-    $("ollamaDetail").textContent = "could not check — " + e.message;
+    $("ollamaDetail").textContent = "could not check: " + e.message;
   }
   refresh();
 })();

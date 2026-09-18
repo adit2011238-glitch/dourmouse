@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DOURMOUSE // SIGN IN</title>
+<title>DOURMOUSE · SIGN IN</title>
 <link rel="stylesheet" href="assets/dourmouse-ui.css">
 <style>
   /* Retheme: Claude-Desktop-directed calm/minimal system (retires the
@@ -209,10 +209,10 @@
   <div class="gate">
     <div class="brand">
       <div class="mark">◈</div>
-      <h1>DOURMOUSE // SIGN IN</h1>
+      <h1>DOURMOUSE · SIGN IN</h1>
     </div>
     <p class="sub">One DourMouse, every device. Sign in with your Google
-      account and everything linked to it — Gmail, Calendar, Drive —
+      account and everything linked to it (Gmail, Calendar, Drive)
       works on this device.</p>
 
     <!-- Signed-out: the Gmail-style Google button (shown only when the
@@ -220,7 +220,7 @@
     <div class="google-card" id="signedOut">
       <div class="g-title">Continue with Google</div>
       <div class="g-note">Your watchlist, alerts and prefs follow the
-        account — not the device.</div>
+        account, not the device.</div>
       <button class="gbtn" id="ggoogleBtn" style="display:none">
         <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true">
           <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
@@ -243,7 +243,7 @@
       <div class="signed-tag">SIGNED IN WITH GOOGLE</div>
       <button class="gbtn ghost" id="glogout">SIGN OUT</button>
       <div class="g-note" style="margin-top:12px">Linking a second Google
-        account? SIGN OUT, then sign in with the other one — each account
+        account? SIGN OUT, then sign in with the other one. Each account
         keeps its own watchlist, alerts and linked services.</div>
       <a class="enter" href="/">Open the command centre →</a>
     </div>
@@ -264,7 +264,7 @@
   async function attempt() {
     msg.textContent = ''; msg.className = '';
     const token = tok.value.trim();
-    if (!token) { msg.textContent = '// TOKEN REQUIRED'; return; }
+    if (!token) { msg.textContent = 'TOKEN REQUIRED'; return; }
     try {
       const r = await fetch('/api/login', {
         method: 'POST',
@@ -273,9 +273,9 @@
       });
       const body = await r.json().catch(() => ({}));
       if (r.ok && body.ok) { location.href = '/'; return; }
-      if (body.enabled === false) { msg.className = 'ok'; msg.textContent = '// NO TOKEN CONFIGURED — PROCEED'; setTimeout(() => location.href='/', 600); return; }
-      msg.textContent = '// ACCESS DENIED — INVALID TOKEN';
-    } catch (e) { msg.textContent = '// NETWORK ERROR: ' + e; }
+      if (body.enabled === false) { msg.className = 'ok'; msg.textContent = 'NO TOKEN CONFIGURED, PROCEEDING'; setTimeout(() => location.href='/', 600); return; }
+      msg.textContent = 'ACCESS DENIED: INVALID TOKEN';
+    } catch (e) { msg.textContent = 'NETWORK ERROR: ' + e; }
   }
   document.getElementById('go').addEventListener('click', attempt);
   tok.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
@@ -415,11 +415,11 @@
         // Drive via OAuth) 500 on unverified apps, so the button now signs you
         // in with your identity and the app-password path covers mail.
         const scopes = d.scopes === 'full'
-          ? 'One click — Google shows your account chooser, then you are in (Gmail, Calendar and Drive included).'
-          : 'One click — Google shows your account chooser, then you are in. Gmail works via the app password; Calendar/Drive unlock when GOOGLE_OAUTH_FULL_SCOPES=1 is set on a verified app.';
+          ? 'One click: Google shows your account chooser, then you are in (Gmail, Calendar and Drive included).'
+          : 'One click: Google shows your account chooser, then you are in. Gmail works via the app password; Calendar/Drive unlock when GOOGLE_OAUTH_FULL_SCOPES=1 is set on a verified app.';
         gmsg.textContent = scopes;
         if (reason === 'denied') {
-          gmsg.innerHTML = '<span class="warn">Sign-in was cancelled — no problem, nothing changed.</span>';
+          gmsg.innerHTML = '<span class="warn">Sign-in was cancelled, no problem, nothing changed.</span>';
         }
       } else {
         gmsg.innerHTML = '<span class="warn">GOOGLE LOGIN NOT CONFIGURED.</span> To link your ' +
@@ -431,7 +431,7 @@
       }
     } catch (e) {
       document.getElementById('ggoogleBtn').style.display = 'none';
-      gmsg.textContent = 'Server unreachable — the access token below still works.';
+      gmsg.textContent = 'Server unreachable. The access token below still works.';
     }
   })();
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>DOURMOUSE // CONSOLE</title>
+<title>DOURMOUSE</title>
   <!-- v8.7 PWA: the console is now the default surface at "/", so it must
        carry the SAME install metadata the HUD had. Without these, making
        the console default would silently kill "Add to Home Screen", the
@@ -1301,10 +1301,10 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
       </svg></span>
       DOURMOUSE
     </span>
-    <span id="mastScreen">// HOME</span>
+    <span id="mastScreen">HOME</span>
     <span class="right">
-      <span>MEM_LOAD: <b id="mMem">—</b></span>
-      <span>SESSION: <b id="mSess">—</b></span>
+      <span>MEM_LOAD: <b id="mMem">-</b></span>
+      <span>SESSION: <b id="mSess">-</b></span>
       <span><b id="mClock">--:--:--</b></span>
     </span>
   </div>
@@ -1323,10 +1323,10 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
     <nav class="rail" id="rail" aria-label="Session stream">
       <div class="railhead">◆ SESSION STREAM</div>
       <div class="railbody" id="agents"><div class="note">Loading roster…</div></div>
-      <div class="railfoot" id="railFoot">—</div>
+      <div class="railfoot" id="railFoot">-</div>
     </nav>
 
-    <section class="pane on" id="pane-home"><div class="panehead">◆ CENTRAL AGENT DISPATCH // ARC CORE</div>
+    <section class="pane on" id="pane-home"><div class="panehead">◆ CENTRAL AGENT DISPATCH · ARC CORE</div>
       <!-- v13: attnBox sits OUTSIDE .panebody on purpose — see paintAttention()'s
            own comment. .panebody is hidden by the same CSS rule that retires
            HOME's dashboard once a conversation starts (by design, for the
@@ -1345,15 +1345,15 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
          directive here used to silently redirect to HOME, read as "comms
          is broken"). The inbox list above and the thread below coexist,
          same as RESEARCH's suggestion cards + thread. -->
-    <section class="pane" id="pane-comms"><div class="panehead">◆ COMMS // GMAIL</div>
+    <section class="pane" id="pane-comms"><div class="panehead">◆ COMMS · GMAIL</div>
       <div class="panebody" id="commsBody"></div>
       <div class="thread" id="thread-comms"></div></section>
 
-    <section class="pane" id="pane-research"><div class="panehead">◆ RESEARCH // LIVE WEB</div>
+    <section class="pane" id="pane-research"><div class="panehead">◆ RESEARCH · LIVE WEB</div>
       <div class="panebody" id="researchBody"></div>
       <div class="thread" id="thread-research"></div></section>
 
-    <section class="pane" id="pane-code"><div class="panehead">◆ CODE // TOOLCHAIN</div>
+    <section class="pane" id="pane-code"><div class="panehead">◆ CODE · TOOLCHAIN</div>
       <div class="panebody" id="codeBody"></div>
       <div class="thread" id="thread-code"></div></section>
 
@@ -1362,14 +1362,14 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
          vision_bridge.py, proactive.py). Not a THREAD_SCREENS entry — this
          is a real status-and-control panel (kill switch, capability
          reports), not an LLM chat surface. See paintVision(). -->
-    <section class="pane" id="pane-vision"><div class="panehead">◆ VISION // OVERLAY · TRAY · WAKE-WORD · HAND-TRACKING · PROACTIVE</div>
+    <section class="pane" id="pane-vision"><div class="panehead">◆ VISION · OVERLAY · TRAY · WAKE-WORD · HAND-TRACKING · PROACTIVE</div>
       <div class="panebody" id="visionBody"></div></section>
 
     <section class="pane" id="pane-media"><div class="panehead">◆ MEDIA</div>
       <div class="panebody" id="mediaBody"></div>
       <div class="thread" id="thread-media"></div></section>
 
-    <section class="pane" id="pane-projects"><div class="panehead">◆ PROJECTS // BOOKSHELF</div>
+    <section class="pane" id="pane-projects"><div class="panehead">◆ PROJECTS · BOOKSHELF</div>
       <div class="panebody" id="projectsBody"></div></section>
 
     <section class="pane" id="pane-settings"><div class="panehead">◆ SETTINGS</div>
@@ -1380,14 +1380,14 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
          3d_models/). Every request routes through the normal /api/chat
          dispatch at the design_3d agent — same thread/confirmation pipeline
          as every other THREAD_SCREENS entry, not a shortcut around it. -->
-    <section class="pane" id="pane-design3d"><div class="panehead">◆ 3D &amp; UI DESIGN // SPEC CATALOGUE</div>
+    <section class="pane" id="pane-design3d"><div class="panehead">◆ 3D &amp; UI DESIGN · SPEC CATALOGUE</div>
       <div class="panebody" id="design3dBody"></div>
       <div class="thread" id="thread-design3d"></div></section>
 
-    <section class="pane" id="pane-atlas"><div class="panehead">◆ WORLD // MONITOR</div>
+    <section class="pane" id="pane-atlas"><div class="panehead">◆ WORLD · MONITOR</div>
       <div class="panebody" id="atlasBody"></div></section>
 
-    <section class="pane" id="pane-globe"><div class="panehead">◆ GLOBE // GOD'S EYE VIEW</div>
+    <section class="pane" id="pane-globe"><div class="panehead">◆ GLOBE · GOD'S EYE VIEW</div>
       <div class="panebody" id="globeBody" style="padding:0"></div></section>
 
     <!-- v14 (user-directed, 2026-09-12): the real gap this closes — the
@@ -1398,14 +1398,14 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
          live, per-agent status + feed, fed by the SAME real event stream
          every chat turn already emits — no separate polling loop needed
          beyond the one-time initial snapshot. -->
-    <section class="pane" id="pane-orchestration"><div class="panehead">◆ ORCHESTRATION // LIVE AGENT STREAM</div>
+    <section class="pane" id="pane-orchestration"><div class="panehead">◆ ORCHESTRATION · LIVE AGENT STREAM</div>
       <div class="panebody" id="orchestrationBody"></div></section>
 
-    <section class="pane" id="pane-news"><div class="panehead">◆ NEWS // LIVE FEED</div>
+    <section class="pane" id="pane-news"><div class="panehead">◆ NEWS · LIVE FEED</div>
       <div class="panebody" id="newsBody"></div>
       <div class="thread" id="thread-news"></div></section>
 
-    <section class="pane" id="pane-voice"><div class="panehead">◆ VOICE // HANDS-FREE</div>
+    <section class="pane" id="pane-voice"><div class="panehead">◆ VOICE · HANDS-FREE</div>
       <div class="panebody" style="padding:0">
         <div class="voicewrap">
           <div class="vmain">
@@ -1439,15 +1439,15 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
         <span class="lbl">DIRECTIVE VIA</span>
         <select id="backendPick" title="Which backend runs the next directive"
           aria-label="Which backend runs the next directive">
-          <option value="auto">AUTO — OLLAMA / LOCAL AGENT</option>
+          <option value="auto">AUTO · OLLAMA / LOCAL AGENT</option>
           <option value="claude">CLAUDE (DIRECT CLI)</option>
           <option value="freellmapi">FREELLMAPI (FREE MODELS)</option>
         </select>
       </div>
       <button class="chip" id="micChip" data-tip="Switch to voice-only mode">(MIC)</button>
-      <button class="chip" id="attachChip" data-tip="Attach a file or image — or just drag one onto this box">(ATTACH)</button>
+      <button class="chip" id="attachChip" data-tip="Attach a file or image, or just drag one onto this box">(ATTACH)</button>
       <input type="file" id="attachInput" multiple hidden>
-      <textarea id="ta" rows="1" placeholder="Ask anything — or /all &lt;goal&gt; to put every resource on it"></textarea>
+      <textarea id="ta" rows="1" placeholder="Ask anything, or /all &lt;goal&gt; to put every resource on it"></textarea>
       <!-- Phase 5 (bounded autonomous multi-step execution): off by default,
            real honest tooltip — see the onclick wiring below for why this
            is truthful and not oversold. -->
@@ -1459,17 +1459,17 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
   </div>
 
   <div class="foot">
-    <span id="footL">SCREEN 01 / 10 — HOME</span>
+    <span id="footL">SCREEN 01 / 10 · HOME</span>
     <!-- v13.6: real, persisted usage totals (GET /api/usage). Claude shows a
          real dollar cost because the CLI's own result event reports one;
          Ollama shows tokens and requests only — it has no real dollar cost
          and none is invented here. -->
     <span id="usagebar" aria-live="off">
-      <span class="ub-item"><span class="ub-k">CLAUDE</span><span class="ub-v" id="ubClaude">—</span></span>
+      <span class="ub-item"><span class="ub-k">CLAUDE</span><span class="ub-v" id="ubClaude">-</span></span>
       <span class="ub-sep">·</span>
-      <span class="ub-item"><span class="ub-k">OLLAMA</span><span class="ub-v" id="ubOllama">—</span></span>
+      <span class="ub-item"><span class="ub-k">OLLAMA</span><span class="ub-v" id="ubOllama">-</span></span>
     </span>
-    <span>BACKEND: <b id="footBackend">—</b> · NODE: <b id="footNode">—</b></span>
+    <span>BACKEND: <b id="footBackend">-</b> · NODE: <b id="footNode">-</b></span>
   </div>
 </div>
 
@@ -1774,8 +1774,8 @@ function show(name){
     .forEach(b => b.setAttribute("aria-selected", String(b.dataset.screen===name)));
   tabsMoreBtn.setAttribute("aria-selected", String(OVERFLOW_SCREENS.includes(name)));
   SCREENS.forEach(s => { const p = $("pane-"+s.toLowerCase()); if(p) p.classList.toggle("on", s===name); });
-  $("mastScreen").textContent = "// " + (SCREEN_LABELS[name] || name);
-  $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / ${String(SCREENS.length).padStart(2,"0")} — ${SCREEN_LABELS[name] || name}`;
+  $("mastScreen").textContent = SCREEN_LABELS[name] || name;
+  $("footL").textContent = `SCREEN ${String(SCREENS.indexOf(name)+1).padStart(2,"0")} / ${String(SCREENS.length).padStart(2,"0")} · ${SCREEN_LABELS[name] || name}`;
   if(name==="COMMS") paintComms();
   if(name==="RESEARCH") paintResearch();
   if(name==="CODE") paintCode();
@@ -1820,12 +1820,12 @@ const THEMES = {
        and swatch in place would have made the picker advertise a design
        the console no longer draws. */
     name:"TERMINAL CORE",
-    desc:"Flat zinc layers, hairline rules, mono throughout. The dense operator workbench — highest information per pixel.",
+    desc:"Flat zinc layers, hairline rules, mono throughout. The dense operator workbench, highest information per pixel.",
     sw:{bg:"#09090B",dot:"#F59E0B",bars:["#FAFAFA","#A1A1AA","#3F3F46"]}
   },
   aether: {
     name:"AETHER WORKSPACE",
-    desc:"Paper and ink. Light, serif, generous — built for long reading, not glanceable status.",
+    desc:"Paper and ink. Light, serif, generous, built for long reading, not glanceable status.",
     sw:{bg:"#f9f9f8",dot:"#1a1c1c",bars:["#1a1c1c","#747878","#c4c7c7"]}
   },
   protocol: {
@@ -1893,8 +1893,8 @@ function syncProjectChrome(){
   const ta = $("ta");
   if(ta) ta.placeholder = project
     ? `Ask anything in "${project.name}"…`
-    : "Ask anything — or /all <goal> to put every resource on it";
-  document.title = project ? `DOURMOUSE // ${project.name}` : "DOURMOUSE // CONSOLE";
+    : "Ask anything, or /all <goal> to put every resource on it";
+  document.title = project ? `DOURMOUSE · ${project.name}` : "DOURMOUSE";
 }
 function leaveActiveProject(){
   try{ sessionStorage.removeItem(ACTIVE_PROJECT_KEY); }catch{}
@@ -1911,7 +1911,7 @@ async function openProjectChat(project){
     const res = await fetch("/api/projects/open", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({path: project.path})});
     const r = await res.json();
-    if(!res.ok || r.ok===false){ alert("Couldn't open this project — "+(r.error||("HTTP "+res.status))); return; }
+    if(!res.ok || r.ok===false){ alert("Couldn't open this project: "+(r.error||("HTTP "+res.status))); return; }
     const name = r.project.name || project.path;
     // 2026-09-14 (live-caught, user-directed): give it a real separate,
     // titled window when the native bridge can — same feature-detect
@@ -1926,7 +1926,7 @@ async function openProjectChat(project){
     syncProjectChrome();
     show("HOME");
     const ta = $("ta"); if(ta) ta.focus();
-  }catch(e){ alert("Couldn't open this project — "+String(e.message||e)); }
+  }catch(e){ alert("Couldn't open this project: "+String(e.message||e)); }
 }
 function tabId(){
   const project = activeProject();
@@ -2048,7 +2048,7 @@ function bootLines(){
   L.push(b.model ? `BRAIN :: ${String(b.model).split("/").pop()} <b>ONLINE</b>`
                  : `BRAIN :: backend unreported <span class="dn">DOWN</span>`);
   L.push(s.online ? `NODE  :: ${s.node} · ${s.latency_ms}ms <b>SYNCED</b>`
-                  : `NODE  :: offline — using fallback <span class="dn">OFFLINE</span>`);
+                  : `NODE  :: offline, using fallback <span class="dn">OFFLINE</span>`);
   /* /api/memory returns {active, count, gate} — NOT `facts`. Reading the
      wrong key made the boot report "memory unavailable DOWN" while the
      HOME screen showed 72 facts from the same payload: a false failure,
@@ -2117,16 +2117,16 @@ async function refresh(){
    exactly 0ms. */
 function avgTurnLatencyLabel(){
   const s = sys.session;
-  if(!s || !s.ok || !Array.isArray(s.turns) || !s.turns.length) return "—";
+  if(!s || !s.ok || !Array.isArray(s.turns) || !s.turns.length) return "-";
   const withTiming = s.turns.filter(t => t.elapsed_ms != null && t.elapsed_ms > 0);
-  if(!withTiming.length) return "—";
+  if(!withTiming.length) return "-";
   const avg = withTiming.reduce((sum,t) => sum + t.elapsed_ms, 0) / withTiming.length;
   return avg >= 1000 ? (avg/1000).toFixed(1)+"s" : Math.round(avg)+"ms";
 }
 function paintMast(){
   const t = sys.telemetry||{}, b = sys.backend||{}, s = sys.server||{};
-  $("mMem").textContent = (t.mem_used_gb!=null) ? `${t.mem_used_gb}GB / ${t.mem_total_gb}GB` : "—";
-  $("footBackend").textContent = b.model ? b.model.split("/").pop() : "—";
+  $("mMem").textContent = (t.mem_used_gb!=null) ? `${t.mem_used_gb}GB / ${t.mem_total_gb}GB` : "-";
+  $("footBackend").textContent = b.model ? b.model.split("/").pop() : "-";
   $("footNode").textContent = s.online ? `${s.node} ${s.latency_ms}ms` : "OFFLINE";
   const r = sys.roster ? (sys.roster.subagents||[]).length : 0;
   $("railFoot").textContent = `${r} AGENTS / ${liveEvents.length} EVENTS`;
@@ -2170,18 +2170,18 @@ function paintHome(){
   const c = sys.conns||{}; const okN = Object.values(c).filter(x=>x&&x.ok).length;
   $("homeBody").innerHTML = `
     <p class="lede">${rost.length} AGENTS MOUNTED. ${okN} OF ${Object.keys(c).length} CONNECTIONS LIVE.
-      ${s.online?`COMPUTE NODE ${esc(s.node)} ONLINE AT ${s.latency_ms}MS.`:"COMPUTE NODE OFFLINE — RUNNING ON THE CONFIGURED BACKEND."}</p>
+      ${s.online?`COMPUTE NODE ${esc(s.node)} ONLINE AT ${s.latency_ms}MS.`:"COMPUTE NODE OFFLINE. RUNNING ON THE CONFIGURED BACKEND."}</p>
     <div class="metrics">
-      <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"—"} FACTS</span></div>
+      <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"-"} FACTS</span></div>
       ${memoryStoreMetric(m)}
       <div class="metric"><span class="k">LEARNING</span><span class="v">${m.active?"ON":"OFF"}</span></div>
       <div class="metric"><span class="k">CONNECTIONS</span><span class="v">${okN}/${Object.keys(c).length}</span></div>
       <div class="metric"><span class="k">AVG TURN TIME</span><span class="v">${esc(avgTurnLatencyLabel())}</span></div>
-      <div class="metric"><span class="k">VERSION</span><span class="v">${esc((sys.version||{}).current||"—")}</span></div>
+      <div class="metric"><span class="k">VERSION</span><span class="v">${esc((sys.version||{}).current||"-")}</span></div>
     </div>
     <div class="cards" id="homeCards"></div>`;
   const cards = [
-    ["COMMS","Your Gmail inbox — read, search, reply.","COMMS"],
+    ["COMMS","Your Gmail inbox: read, search, reply.","COMMS"],
     ["RESEARCH","Live web search with sources.","RESEARCH"],
     ["CODE","Pick a toolchain and write code.","CODE"],
     ["VISION","Kill switch, overlay, wake-word, hand-tracking status.","VISION"],
@@ -2619,7 +2619,7 @@ function addReply(threadEl){
   // status line; the per-tool blow-by-blow is opt-in, not on the page by
   // default. Nothing about act()'s own real-detail expansion changed —
   // this just gates the whole chip LIST behind one more collapse.
-  d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">—</span><span class="st"></span><span class="tm"></span></div>
+  d.innerHTML=`<div class="gut"><span class="who">DOURMOUSE</span><span class="mdl">-</span><span class="st"></span><span class="tm"></span></div>
     <button type="button" class="thinkToggle" style="display:none"><span class="tcar">▸</span> THINKING</button>
     <div class="think" style="display:none"></div>
     <button type="button" class="stepsToggle" style="display:none"><span class="car">▸</span><span class="stepsCount">0</span> steps</button>
@@ -2674,7 +2674,7 @@ function act(acts,label,name,bad,spin,detail){
     const car=document.createElement("span"); car.className="car"; car.textContent="▸"; a.appendChild(car);
     const pre=document.createElement("pre"); pre.className="actdetail"; pre.hidden=true;
     pre.textContent = trimmed.length>8000
-      ? trimmed.slice(0,8000)+`\n… truncated (${trimmed.length.toLocaleString()} chars total — COPY unavailable past this point)`
+      ? trimmed.slice(0,8000)+`\n… truncated (${trimmed.length.toLocaleString()} chars total, COPY unavailable past this point)`
       : trimmed;
     wrap.appendChild(a); wrap.appendChild(pre);
     a.onclick=()=>{ pre.hidden=!pre.hidden; car.textContent=pre.hidden?"▸":"▾"; };
@@ -2710,7 +2710,7 @@ function addApproval(node, evt, declineMap, screenKey){
   const isEmail = _isEmailSendPrompt(evt.prompt);
   box.innerHTML = isEmail
     ? `<div class="t">◆ SEND THIS EMAIL?</div><div class="p"></div>
-       <div class="hint">Type <b>send it</b> in the box below to send — or click CANCEL.</div>
+       <div class="hint">Type <b>send it</b> in the box below to send, or click CANCEL.</div>
        <div class="r"><button class="btn">CANCEL</button></div>`
     : `<div class="t">◆ APPROVAL REQUIRED</div><div class="p"></div>
        ${evt.autonomous ? '<div class="hint">Approving this lets the project keep going automatically.</div>' : ''}
@@ -2995,7 +2995,7 @@ async function run(text){
         switch(e.type){
           case "brain":{
             const raw=e.model||""; const onNode=raw.startsWith("server:");
-            const shown=raw.replace(/^server:/,"").split("/").pop()||"—";
+            const shown=raw.replace(/^server:/,"").split("/").pop()||"-";
             const kind=localCloudSuffix(e);
             node.mdl.textContent = (onNode?`${(sys.server&&sys.server.node)||"NODE"} · ${shown}`:shown)+kind;
             node.mdl.classList.toggle("local", e.local===true);
@@ -3014,7 +3014,7 @@ async function run(text){
             // confirmation the .tm clock alone can't give.
             const shownModel=(e.model||"").split("/").pop()||e.model||"";
             node.st.textContent = `THINKING · ${e.elapsed_s}s confirmed alive`;
-            liveAdd("act", `Still working (${shownModel})`, `${e.elapsed_s}s elapsed — no answer yet, connection is alive`);
+            liveAdd("act", `Still working (${shownModel})`, `${e.elapsed_s}s elapsed, no answer yet, connection is alive`);
             break; }
           case "thinking_delta":{
             // v13.1: real reasoning tokens, on a channel of their own —
@@ -3060,7 +3060,7 @@ async function run(text){
             // labeled with which AGENT and which MODEL/backend actually
             // handled that branch, since several branches can be
             // in-flight under one "N steps" disclosure at the same time).
-            const modelShown=(e.model||"").split("/").pop()||e.model||"—";
+            const modelShown=(e.model||"").split("/").pop()||e.model||"-";
             const label=`branch ${(e.index??0)+1}/${e.total||"?"} · ${e.agent||"any"} · ${modelShown}${localCloudSuffix(e)}`;
             if(e.phase==="start"){
               act(node.acts,"USING",label,false,true,e.task||"");
@@ -3092,7 +3092,7 @@ async function run(text){
               const href = "/all-hands?run=" + encodeURIComponent(e.run_id);
               const box = document.createElement("div"); box.className="approve";
               box.innerHTML = `<div class="t">◆ ALL HANDS STARTED</div>`+
-                `<div class="p">Run <b>${esc(e.run_id)}</b> — every resource is on the goal.</div>`+
+                `<div class="p">Run <b>${esc(e.run_id)}</b>: every resource is on the goal.</div>`+
                 `<div class="r"><a class="btn" href="${esc(href)}" target="_blank" rel="noopener" `+
                 `style="text-decoration:none;display:inline-block">OPEN ALL HANDS</a></div>`;
               node.body.parentNode.insertBefore(box, node.body);
@@ -3129,8 +3129,8 @@ async function run(text){
       const b=document.createElement("div"); b.className="errbox";
       b.innerHTML=`<div class="t">◆ REQUEST FAILED</div><div></div>`;
       b.children[1].textContent = String(err.message||err) + (s.online
-        ? " — the stream ended early. Retry, or check SETTINGS."
-        : " — the compute node is offline and the fallback did not answer.");
+        ? ". The stream ended early. Retry, or check SETTINGS."
+        : ". The compute node is offline and the fallback did not answer.");
       node.body.parentNode.insertBefore(b,node.body);
       liveAdd("err","Request failed",String(err.message||err).slice(0,80));
     }
@@ -3159,7 +3159,7 @@ async function run(text){
     // actual reason; keep "No reply." only for the genuine case (the
     // model produced literally nothing, no error at all).
     node.body.innerHTML = md(buf) || (lastError
-      ? `<p><em>No reply — ${esc(lastError)}</em></p>`
+      ? `<p><em>No reply: ${esc(lastError)}</em></p>`
       : "<p><em>No reply.</em></p>");
     wireCopies(node.body);
     node.st.textContent = stopped?"STOPPED":"DONE";
@@ -3221,7 +3221,7 @@ function restoreTranscriptEvent(node, e){
   switch(e.type){
     case "brain":{
       const raw=e.model||""; const onNode=raw.startsWith("server:");
-      const shown=raw.replace(/^server:/,"").split("/").pop()||"—";
+      const shown=raw.replace(/^server:/,"").split("/").pop()||"-";
       const kind=localCloudSuffix(e);
       node.mdl.textContent = (onNode?`${(sys.server&&sys.server.node)||"NODE"} · ${shown}`:shown)+kind;
       node.mdl.classList.toggle("local", e.local===true);
@@ -3240,7 +3240,7 @@ function restoreTranscriptEvent(node, e){
       const nm=e.name||e.tool||""; act(node.acts,"RESULT",transcriptToolLabel(nm),false,false,e.text||"");
       node.noteStep(); break; }
     case "delegate_parallel_branch":{
-      const modelShown=(e.model||"").split("/").pop()||e.model||"—";
+      const modelShown=(e.model||"").split("/").pop()||e.model||"-";
       const label=`branch ${(e.index??0)+1}/${e.total||"?"} · ${e.agent||"any"} · ${modelShown}${localCloudSuffix(e)}`;
       if(e.phase==="start"){ act(node.acts,"USING",label,false,false,e.task||""); node.noteStep(); }
       else if(e.phase==="result"){ act(node.acts,"RESULT",label,!e.ok,false, e.ok ? (e.text||"") : ("ERROR: "+(e.error||""))); node.noteStep(); }
@@ -3360,7 +3360,7 @@ async function refreshUsageBar(){
     const o = u.ollama || {};
     ollamaEl.textContent = `${(o.prompt_tokens||0)+(o.completion_tokens||0)} TOK · ${o.requests||0} REQ`;
   }catch{
-    claudeEl.textContent = "—"; ollamaEl.textContent = "—";
+    claudeEl.textContent = "-"; ollamaEl.textContent = "-";
   }
 }
 refreshUsageBar();
@@ -3435,7 +3435,7 @@ function paintCode(){
     b.innerHTML=`<span class="dot ${av===true?"ok":av===false?"no":""}"></span>
       <span><span class="on"></span><span class="od"></span></span>`;
     b.querySelector(".on").textContent = t.name;
-    b.querySelector(".od").textContent = t.desc + (av===false ? " — not available" : "");
+    b.querySelector(".od").textContent = t.desc + (av===false ? " (not available)" : "");
     b.onclick=()=>{ codeTool=t.id; codeToolSet(t.id); focusAgent=t.id; menu.classList.remove("on");
       $("toolBtn").setAttribute("aria-expanded","false"); paintCode(); };
     menu.appendChild(b);
@@ -3446,7 +3446,7 @@ function paintCode(){
   $("toolState").textContent = av===false ? "● UNAVAILABLE" : av===true ? "● READY" : "";
   $("toolState").style.color = av===false ? "var(--bad)" : "var(--ok)";
   const c = cur.conn ? (sys.conns||{})[cur.conn] : null;
-  $("toolNote").textContent = c ? (c.ok ? c.detail : `${c.detail} — fix: ${c.hint||"see SETTINGS"}`)
+  $("toolNote").textContent = c ? (c.ok ? c.detail : `${c.detail} (fix: ${c.hint||"see SETTINGS"})`)
                                 : "Routing handled by Dourmouse.";
   focusAgent = codeTool;
 }
@@ -3482,28 +3482,28 @@ async function paintVision(){
   box.innerHTML = `
     <div class="scopeNote">Overlay, tray, wake-word listening, and continuous
       hand-tracking are native/background pieces of the DOURMOUSE desktop
-      app — most of them only do anything once that actual desktop app
+      app: most of them only do anything once that actual desktop app
       (not just this browser console) is running on a live session with
       camera/mic permission granted. Wake-word's own honesty note (from
       dourmouse/wakeword.py): real ONNX inference is verified in this
       sandbox, but the CONTINUOUS MICROPHONE CAPTURE loop returned only
-      silence here — the signature of a process never granted real macOS
-      microphone permission — so a live desktop session is what actually
+      silence here, the signature of a process never granted real macOS
+      microphone permission, so a live desktop session is what actually
       confirms it fires on a spoken wake word. Vision-bridge's own honesty
       note (from dourmouse/vision_bridge.py): its kill-switch reach only
       works into an in-progress browser session while dourmouse/tray.py is
       actually running. This screen reports the real, current status of
-      each — never a decorative guess.</div>
+      each, never a decorative guess.</div>
     <div id="visionKillSwitch"></div>
-    <div class="sec">OVERLAY // ALWAYS-ON-TOP STATUS WINDOW</div>
+    <div class="sec">OVERLAY · ALWAYS-ON-TOP STATUS WINDOW</div>
     <div id="visionOverlay"></div>
-    <div class="sec">TRAY // SYSTEM TRAY ICON</div>
+    <div class="sec">TRAY · SYSTEM TRAY ICON</div>
     <div id="visionTray"></div>
-    <div class="sec">WAKE-WORD // LOCAL LISTENER</div>
+    <div class="sec">WAKE-WORD · LOCAL LISTENER</div>
     <div id="visionWakeword"></div>
-    <div class="sec">HAND-TRACKING BRIDGE // KILL-SWITCH REACH</div>
+    <div class="sec">HAND-TRACKING BRIDGE · KILL-SWITCH REACH</div>
     <div id="visionBridge"></div>
-    <div class="sec">PROACTIVE SURFACING // ALERT POPUPS</div>
+    <div class="sec">PROACTIVE SURFACING · ALERT POPUPS</div>
     <div id="visionProactive"></div>
     <div class="sec">RELATED</div>
     <div class="cards" id="visionRelated"></div>`;
@@ -3517,14 +3517,14 @@ async function paintVision(){
   wbtn.className = "card"; wbtn.href = "/workspace"; wbtn.target = "_blank";
   wbtn.rel = "noopener";
   wbtn.innerHTML = `<div class="h">◆ OPEN VISION WORKSPACE</div>
-    <div class="d">Floating multi-window desktop — drag/resize real panels
+    <div class="d">Floating multi-window desktop. Drag/resize real panels
     with your mouse or (camera-permitting) your hands, or drive it by
     voice. Opens in a new tab.</div>`;
   rel.appendChild(wbtn);
   const dbtn = document.createElement("button");
   dbtn.className = "card"; dbtn.type = "button";
   dbtn.innerHTML = `<div class="h">3D &amp; UI DESIGN</div>
-    <div class="d">Spatial/UI spec generation — conceptually part of this
+    <div class="d">Spatial/UI spec generation, conceptually part of this
     same Vision ambition. Opens the DESIGN screen.</div>`;
   dbtn.onclick = () => show("DESIGN3D");
   rel.appendChild(dbtn);
@@ -3547,10 +3547,10 @@ async function paintVision(){
 
 function renderVisionKillSwitch(ks){
   $("visionKillSwitch").innerHTML = `
-    <div class="sec">KILL SWITCH // MIC + CAMERA</div>
+    <div class="sec">KILL SWITCH · MIC + CAMERA</div>
     <div class="row"><span class="dot ${visDotCls(ks.mic_enabled)}"></span>
       <div class="g"><div class="n">MIC ${ks.mic_enabled ? "ARMED" : "KILLED"}</div>
-      <div class="d">real shared state — the same on-disk file dourmouse/tray.py's
+      <div class="d">real shared state: the same on-disk file dourmouse/tray.py's
         tray icon and dourmouse/overlay.py both read</div></div>
       <button class="chip" type="button" id="visMicBtn">${ks.mic_enabled ? "KILL MIC" : "ENABLE MIC"}</button></div>
     <div class="row"><span class="dot ${visDotCls(ks.camera_enabled)}"></span>
@@ -3602,8 +3602,8 @@ function renderVisionWakeword(w){
   $("visionWakeword").innerHTML = `
     <div class="row"><span class="dot ${w.enabled ? "ok" : ""}"></span>
       <div class="g"><div class="n">DOURMOUSE_WAKEWORD ${w.enabled ? "ON" : "OFF (default)"}</div>
-      <div class="d">model: ${esc(w.model || "—")} · threshold: ${esc(String(w.threshold))}</div>
-      <div class="d">inference: ${esc(w.inference_engine || "—")} · capture: ${esc(w.capture_engine || "—")}</div>
+      <div class="d">model: ${esc(w.model || "-")} · threshold: ${esc(String(w.threshold))}</div>
+      <div class="d">inference: ${esc(w.inference_engine || "-")} · capture: ${esc(w.capture_engine || "-")}</div>
       <div class="d">listening: ${esc(String(w.listening))}</div>
       <div class="d">${esc(w.note || "")}</div></div></div>`;
 }
@@ -3611,7 +3611,7 @@ function renderVisionWakeword(w){
 function renderVisionBridge(v){
   $("visionBridge").innerHTML = `
     <div class="row"><span class="dot ${visDotCls(v.reachable)}"></span>
-      <div class="g"><div class="n">port ${esc(String(v.configured_port))} — ${v.reachable ? "REACHABLE (live probe)" : "unreachable"}</div>
+      <div class="g"><div class="n">port ${esc(String(v.configured_port))}: ${v.reachable ? "REACHABLE (live probe)" : "unreachable"}</div>
       <div class="d">${v.reachable && v.state
         ? `mic_enabled: ${esc(String(v.state.mic_enabled))} · camera_enabled: ${esc(String(v.state.camera_enabled))}`
         : esc(v.error || "")}</div>
@@ -3643,7 +3643,7 @@ function paintComms(){
   const box = $("commsBody");
   box.innerHTML = `
     <div class="toolbar">
-      <input id="mailQ" type="text" placeholder="Search — from:, subject:, or plain words (empty = recent inbox)"
+      <input id="mailQ" type="text" placeholder="Search by from:, subject:, or plain words (empty = recent inbox)"
         style="flex:1;min-width:160px;background:var(--panel2);border:1px solid var(--line-2);
         color:var(--blue-hi);font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:6px">
       <button class="chip" type="button" id="mailSearchBtn">SEARCH</button>
@@ -3836,8 +3836,8 @@ function paintProjects(){
   const names=Object.keys(data);
   if(!names.length){
     const note=document.createElement("div"); note.className="note";
-    note.textContent="Nothing shelved yet. Any real answer — from HOME, RESEARCH, CODE, "+
-      "MEDIA, or NEWS — has a SHELVE button once it finishes. Click it to file that answer under a "+
+    note.textContent="Nothing shelved yet. Any real answer, from HOME, RESEARCH, CODE, "+
+      "MEDIA, or NEWS, has a SHELVE button once it finishes. Click it to file that answer under a "+
       "named project; it shows up here, grouped by project, never auto-collected.";
     box.appendChild(note);
   } else {
@@ -3903,7 +3903,7 @@ function paintProjects(){
 const STALE_AFTER_DAYS = 14;
 function paintImportedShelf(box){
   const sec=document.createElement("div"); sec.className="shelf"; sec.id="importedShelf";
-  sec.innerHTML=`<div class="shelfhead"><span class="shelfname">PROJECTS — CLAUDE CODE &amp; CODEX CLI</span>
+  sec.innerHTML=`<div class="shelfhead"><span class="shelfname">PROJECTS · CLAUDE CODE &amp; CODEX CLI</span>
     <span class="shelfcount" id="importedCount"></span>
     <span class="shelfmeta" id="importedRefreshedAt"></span>
     <button class="mini" type="button" id="importedNewBtn">+ NEW PROJECT</button>
@@ -3912,7 +3912,7 @@ function paintImportedShelf(box){
       <input type="text" class="mailfield" id="importedNewName" placeholder="Project name">
       <button class="mini" type="button" id="importedNewAdvancedToggle">+ set a real path (optional)</button>
       <div id="importedNewAdvanced" hidden>
-        <input type="text" class="mailfield" id="importedNewPath" placeholder="Real path — leave blank to auto-create under Documents/Dourmouse Projects">
+        <input type="text" class="mailfield" id="importedNewPath" placeholder="Real path, leave blank to auto-create under Documents/Dourmouse Projects">
       </div>
       <input type="text" class="mailfield" id="importedNewDesc" placeholder="Description (optional)">
       <button class="chip" type="button" id="importedNewSave">CREATE</button>
@@ -3952,23 +3952,23 @@ async function createBookkeeperProject(){
     const res=await fetch("/api/projects/create",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({name,path,description})});
     const r=await res.json();
-    if(!res.ok || r.ok===false){ status.textContent="Failed — "+esc(r.error||("HTTP "+res.status)); return; }
+    if(!res.ok || r.ok===false){ status.textContent="Failed: "+esc(r.error||("HTTP "+res.status)); return; }
     $("importedNewForm").hidden=true; status.textContent="";
     $("importedNewName").value=""; $("importedNewPath").value=""; $("importedNewDesc").value="";
     $("importedNewAdvanced").hidden=true; $("importedNewAdvancedToggle").hidden=false;
     loadImportedProjects();
-  }catch(e){ status.textContent="Failed — "+esc(String(e.message||e)); }
+  }catch(e){ status.textContent="Failed: "+esc(String(e.message||e)); }
   finally{ $("importedNewSave").disabled=false; }
 }
 async function deleteBookkeeperProject(path, name){
-  if(!confirm(`Remove "${name}" from the PROJECTS bookshelf? This only stops tracking it here — the real folder and its session history are never touched.`)) return;
+  if(!confirm(`Remove "${name}" from the PROJECTS bookshelf? This only stops tracking it here. The real folder and its session history are never touched.`)) return;
   try{
     const res=await fetch("/api/projects/delete",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({path})});
     const r=await res.json();
-    if(!res.ok || r.ok===false){ alert("Delete failed — "+(r.error||("HTTP "+res.status))); return; }
+    if(!res.ok || r.ok===false){ alert("Delete failed: "+(r.error||("HTTP "+res.status))); return; }
     loadImportedProjects();
-  }catch(e){ alert("Delete failed — "+String(e.message||e)); }
+  }catch(e){ alert("Delete failed: "+String(e.message||e)); }
 }
 async function loadImportedProjects(){
   // The cheap path: GET /api/projects/bookkeeper is a persisted-file read,
@@ -3981,7 +3981,7 @@ async function loadImportedProjects(){
   try{ r = await api("/api/projects/bookkeeper"); }
   catch(e){
     if($("importedBody")){
-      $("importedBody").innerHTML = `<div class="note">Could not load project history — ${esc(String(e.message||e))}.</div>`;
+      $("importedBody").innerHTML = `<div class="note">Could not load project history: ${esc(String(e.message||e))}.</div>`;
     }
     return;
   }
@@ -3999,12 +3999,12 @@ async function refreshBookkeeperProjects(){
     const res = await fetch("/api/projects/bookkeeper/refresh",{method:"POST"});
     const r = await res.json();
     if(!res.ok || r.ok===false){
-      if($("importedBody")) $("importedBody").innerHTML = `<div class="note">Refresh failed — ${esc(r.error||("HTTP "+res.status))}.</div>`;
+      if($("importedBody")) $("importedBody").innerHTML = `<div class="note">Refresh failed: ${esc(r.error||("HTTP "+res.status))}.</div>`;
       return;
     }
     renderBookkeeperProjects(r);
   }catch(e){
-    if($("importedBody")) $("importedBody").innerHTML = `<div class="note">Refresh failed — ${esc(String(e.message||e))}.</div>`;
+    if($("importedBody")) $("importedBody").innerHTML = `<div class="note">Refresh failed: ${esc(String(e.message||e))}.</div>`;
   }finally{
     if($("importedRefreshBtn")){ $("importedRefreshBtn").disabled=false; $("importedRefreshBtn").textContent="REFRESH"; }
   }
@@ -4014,7 +4014,7 @@ function importedSourceLabel(sources){
   if(has("claude_code")&&has("codex_cli")) return "VIA BOTH";
   if(has("claude_code")) return "VIA CLAUDE CODE";
   if(has("codex_cli")) return "VIA CODEX";
-  return (sources||[]).join(", ")||"—";
+  return (sources||[]).join(", ")||"-";
 }
 function importedRelTime(iso){
   if(!iso) return "no recorded activity";
@@ -4090,7 +4090,7 @@ function renderBookkeeperProjects(r){
   if(!cc.configured && !cx.configured){
     body.innerHTML = `<div class="note">Neither Claude Code (${esc(cc.root||"~/.claude/projects")}) `+
       `nor Codex CLI (${esc(cx.db||"~/.codex/state_5.sqlite")}) session history was found on this `+
-      `machine — nothing to import yet. Use Claude Code or Codex CLI here and REFRESH.</div>`;
+      `machine. Nothing to import yet: use Claude Code or Codex CLI here and REFRESH.</div>`;
     return;
   }
   if(!projects.length){
@@ -4156,7 +4156,7 @@ function bookOpen(it){
 
 /* ---------------- other panes ---------------- */
 function paintResearch(){
-  $("researchBody").innerHTML = `<div class="note">Ask a question below — it routes to the research agent,
+  $("researchBody").innerHTML = `<div class="note">Ask a question below and it routes to the research agent,
     searches the live web and cites sources. Results stay right here.</div>
     <div class="sec">TRY</div><div class="cards" id="rc"></div>`;
   [["Latest on open-weight models",""],["What happened in the news today",""],["Compare two frameworks",""]]
@@ -4194,7 +4194,7 @@ let d3dView = "chat"; // "chat" | "3d" | "2d"
 function paintDesign3d(){
   const box = $("design3dBody");
   box.innerHTML = `
-    <div class="d3dScopeNote">Primitive-composition editor — not a mesh/CAD
+    <div class="d3dScopeNote">Primitive-composition editor, not a mesh/CAD
       tool. No vertex/face/UV geometry and no real 3D asset file
       (.obj/.glb/.fbx/.stl) is ever produced anywhere on this screen; a "3D
       model" here is always just named primitives (box/sphere/cylinder/
@@ -4224,7 +4224,7 @@ function paintDesign3dChat(){
       3d_models/). The design_3d agent can generate a UI component spec,
       describe a simple 3D model as a composition of primitives
       (box/sphere/cylinder/cone/plane/torus) with position/scale/material,
-      list or read the manifest, and write a new entry to it — every write
+      list or read the manifest, and write a new entry to it. Every write
       asks for approval first, right here in the thread below.</div>
     <div class="sec">TRY</div>
     <div class="cards" id="d3dCards"></div>
@@ -4241,7 +4241,7 @@ function paintDesign3dChat(){
     <div class="toolbar">
       <button type="button" id="d3dGenBtn">GENERATE &amp; SAVE TO MANIFEST</button>
     </div>
-    <div class="sec">3D MODEL SPEC (primitive-level — not a real mesh)</div>
+    <div class="sec">3D MODEL SPEC (primitive-level, not a real mesh)</div>
     <textarea id="d3dModelDesc" class="mailfield mailfieldbody" placeholder="Describe the model as primitives, e.g. &quot;a desk lamp: a cylinder base at 0,0,0 and a sphere shade at 0,1,0&quot;"></textarea>
     <div class="toolbar">
       <button class="chip" type="button" id="d3dModelBtn">DESCRIBE 3D MODEL SPEC</button>
@@ -4280,7 +4280,7 @@ function paintDesign3dChat(){
     const desc=$("d3dModelDesc").value.trim();
     if(!desc){ alert("Describe the model first."); return; }
     focusAgent="design_3d";
-    ta.value = `Generate a 3D model spec (primitive composition only — `+
+    ta.value = `Generate a 3D model spec (primitive composition only, `+
       `not a real mesh) for: ${desc}`;
     submit();
   };
@@ -4327,7 +4327,7 @@ async function dispatchDesignDirective(directive, statusEl, opts){
             <div class="r"><button class="btn go">APPROVE</button><button class="btn">DECLINE</button></div></div>`;
           statusEl.querySelector(".p").textContent = e.prompt||"Write this to the manifest?";
           const [yes,no]=statusEl.querySelectorAll("button");
-          yes.onclick=async()=>{ statusEl.textContent="Approved — writing…";
+          yes.onclick=async()=>{ statusEl.textContent="Approved, writing…";
             try{ await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
               body:JSON.stringify({id:e.id,approved:true,tab_id:tabId()})}); }catch{} };
           no.onclick=async()=>{ statusEl.textContent="Declined.";
@@ -4359,7 +4359,7 @@ function paintDesign3dWorkspace3D(){
     <div class="note">Real interactive Three.js scene editor. Drag to orbit
       the camera, scroll to zoom, click a primitive to select it, then use
       the real transform gizmo (Three.js TransformControls) to move/rotate/
-      scale it with the mouse — or type exact numbers on the right.</div>
+      scale it with the mouse, or type exact numbers on the right.</div>
     <div class="toolbar">
       <span class="lbl">ADD</span>
       <div class="d2dPalette" id="d3dAddRow"></div>
@@ -4376,7 +4376,7 @@ function paintDesign3dWorkspace3D(){
       </div>
       <div class="d3dPanel">
         <div class="sec" style="margin:0 0 6px">SELECTED OBJECT</div>
-        <div class="note" id="d3dSelNote">Nothing selected — add a primitive or click one in the scene.</div>
+        <div class="note" id="d3dSelNote">Nothing selected. Add a primitive or click one in the scene.</div>
         <div id="d3dSelFields" style="display:none">
           <div class="d3dField"><span class="k">POSITION (X Y Z)</span><div class="d3dXYZ">
             <input class="d3dNum" id="d3dPX" type="number" step="0.1">
@@ -4389,7 +4389,7 @@ function paintDesign3dWorkspace3D(){
           <div class="d3dField"><span class="k">COLOR</span><div class="d3dSwatch">
             <input type="color" id="d3dObjColor"><input class="d3dNum" id="d3dObjColorHex" type="text" style="flex:1"></div></div>
           <div class="note" style="margin-top:2px">The ROTATE gizmo works live
-            in the viewport, but rotation is NOT saved — the manifest's 3D
+            in the viewport, but rotation is NOT saved: the manifest's 3D
             model shape (generate_3d_model_spec / write_manifest_entry) only
             has position/scale/material, no rotation field.</div>
         </div>
@@ -4476,14 +4476,14 @@ function paintDesign3dWorkspace3D(){
 
 async function saveDesign3DModel(){
   const status=$("d3dSaveStatus");
-  if(!window.Design3D){ status.textContent="3D editor not ready yet — try again in a moment."; return; }
+  if(!window.Design3D){ status.textContent="3D editor not ready yet, try again in a moment."; return; }
   const state = window.Design3D.getState();
   if(!state.primitives.length){ status.textContent="Add at least one primitive first."; return; }
   const name = $("d3dModelName").value.trim();
   if(!name){ status.textContent="Name the model first."; return; }
   const desc = $("d3dModelDescField").value.trim();
   const payload = { name, description: desc, primitives: state.primitives };
-  const directive = `Call write_manifest_entry now with these EXACT arguments — do not `+
+  const directive = `Call write_manifest_entry now with these EXACT arguments. Do not `+
     `alter, round, or omit any value: ${JSON.stringify(payload)}\n\nThis persists a 3D `+
     `model spec (primitive composition only, still not a real mesh) to the UI design manifest.`;
   let written = null;
@@ -4491,7 +4491,7 @@ async function saveDesign3DModel(){
     pending: "Asking the design_3d agent to write this to the manifest…",
     onToolResult: (e)=>{ if(e.name==="write_manifest_entry") written=e.text; },
     onDone: (finalText)=>{ if(written==null) status.textContent = finalText ||
-      "The agent finished without calling write_manifest_entry — nothing was saved."; },
+      "The agent finished without calling write_manifest_entry: nothing was saved."; },
   });
   if(written==null) return; // status already reflects declined/error/no tool call
   if(written.startsWith("ERROR")){ status.textContent = written; return; }
@@ -4502,24 +4502,24 @@ async function saveDesign3DModel(){
       const parsed = JSON.parse(written.slice(jsonStart));
       const saved = parsed[name];
       ok = !!(saved && JSON.stringify(saved.primitives)===JSON.stringify(state.primitives));
-      if(!ok) note = " — what was written differs from the scene you edited (the AI may not "+
+      if(!ok) note = " What was written differs from the scene you edited (the AI may not "+
         "have transcribed it exactly); LOAD it back to check.";
-    }catch{ note = " — couldn't verify (response wasn't parseable JSON)."; }
+    }catch{ note = " Couldn't verify (response wasn't parseable JSON)."; }
   }
-  status.textContent = ok ? `Saved — manifest entry "${name}" written.`
-    : "Write finished, but verification failed"+note;
+  status.textContent = ok ? `Saved: manifest entry "${name}" written.`
+    : "Write finished, but verification failed."+note;
 }
 
 async function loadDesign3DModel(name){
   const status=$("d3dSaveStatus");
   if(!name){ status.textContent="Enter a model name to load."; return; }
-  if(!window.Design3D){ status.textContent="3D editor not ready yet — try again in a moment."; return; }
+  if(!window.Design3D){ status.textContent="3D editor not ready yet, try again in a moment."; return; }
   let raw = null;
   await dispatchDesignDirective(`Read the manifest entry named "${name}".`, status, {
     pending: `Reading manifest entry "${name}"…`,
     onToolResult: (e)=>{ if(e.name==="read_manifest_entry") raw=e.text; },
     onDone: (finalText)=>{ if(raw==null) status.textContent = finalText ||
-      "The agent finished without calling read_manifest_entry — nothing was loaded."; },
+      "The agent finished without calling read_manifest_entry: nothing was loaded."; },
   });
   if(raw==null) return;
   if(raw.startsWith("ERROR")){ status.textContent = raw; return; }
@@ -4527,14 +4527,14 @@ async function loadDesign3DModel(name){
   try{ parsed = JSON.parse(raw); }catch{ status.textContent="Couldn't parse the manifest response."; return; }
   const entry = parsed[name];
   if(!entry || !Array.isArray(entry.primitives)){
-    status.textContent = `"${name}" isn't a 3D model entry (no 'primitives' array — `+
+    status.textContent = `"${name}" isn't a 3D model entry (no 'primitives' array, `+
       `it looks like a UI component; try the 2D workspace).`;
     return;
   }
   window.Design3D.loadState(entry.primitives);
   $("d3dModelName").value = name;
   $("d3dModelDescField").value = entry.description || "";
-  status.textContent = `Loaded "${name}" — ${entry.primitives.length} primitive(s).`;
+  status.textContent = `Loaded "${name}": ${entry.primitives.length} primitive(s).`;
   window.__d3dOnChange && window.__d3dOnChange();
 }
 
@@ -4559,7 +4559,7 @@ function paintDesign3dWorkspace2D(){
   $("d3dViewBody").innerHTML = `
     <div class="note">Real interactive layout canvas. Pick a category, click
       the canvas to place it, drag a shape to move it, drag a corner handle
-      to resize it. Position on this canvas is a local layout aid only —
+      to resize it. Position on this canvas is a local layout aid only:
       the manifest format has no position field, so SAVE persists only the
       selected shape's category/description/size/color/opacity.</div>
     <div class="toolbar">
@@ -4572,7 +4572,7 @@ function paintDesign3dWorkspace2D(){
       </div>
       <div class="d3dPanel">
         <div class="sec" style="margin:0 0 6px">SELECTED COMPONENT</div>
-        <div class="note" id="d2dSelNote">Nothing selected — place a shape or click one on the canvas.</div>
+        <div class="note" id="d2dSelNote">Nothing selected. Place a shape or click one on the canvas.</div>
         <div id="d2dSelFields" style="display:none">
           <input id="d2dName" class="mailfield" type="text" placeholder="Name (e.g. glass_hud_panel)">
           <select id="d2dCategory" class="mailfield"></select>
@@ -4754,7 +4754,7 @@ async function saveDesign2DComponent(){
     name: s.name.trim(), category: s.category, description: s.description.trim(),
     width: Math.round(s.width), height: Math.round(s.height), color: s.color, opacity: s.opacity,
   };
-  const directive = `Call write_manifest_entry now with these EXACT arguments — do not `+
+  const directive = `Call write_manifest_entry now with these EXACT arguments. Do not `+
     `alter, round, or omit any value: ${JSON.stringify(payload)}\n\nThis persists a UI `+
     `component spec to the UI design manifest.`;
   let written = null;
@@ -4762,7 +4762,7 @@ async function saveDesign2DComponent(){
     pending: "Asking the design_3d agent to write this to the manifest…",
     onToolResult: (e)=>{ if(e.name==="write_manifest_entry") written=e.text; },
     onDone: (finalText)=>{ if(written==null) status.textContent = finalText ||
-      "The agent finished without calling write_manifest_entry — nothing was saved."; },
+      "The agent finished without calling write_manifest_entry: nothing was saved."; },
   });
   if(written==null) return;
   if(written.startsWith("ERROR")){ status.textContent = written; return; }
@@ -4775,12 +4775,12 @@ async function saveDesign2DComponent(){
       ok = !!(saved && saved.category===payload.category && saved.dimensions &&
         saved.dimensions.width===payload.width && saved.dimensions.height===payload.height &&
         saved.color===payload.color);
-      if(!ok) note = " — what was written differs from the canvas (the AI may not have "+
+      if(!ok) note = " What was written differs from the canvas (the AI may not have "+
         "transcribed it exactly); LOAD it back to check.";
-    }catch{ note = " — couldn't verify (response wasn't parseable JSON)."; }
+    }catch{ note = " Couldn't verify (response wasn't parseable JSON)."; }
   }
-  status.textContent = ok ? `Saved — manifest entry "${payload.name}" written.`
-    : "Write finished, but verification failed"+note;
+  status.textContent = ok ? `Saved: manifest entry "${payload.name}" written.`
+    : "Write finished, but verification failed."+note;
 }
 
 async function loadDesign2DComponent(name){
@@ -4791,7 +4791,7 @@ async function loadDesign2DComponent(name){
     pending: `Reading manifest entry "${name}"…`,
     onToolResult: (e)=>{ if(e.name==="read_manifest_entry") raw=e.text; },
     onDone: (finalText)=>{ if(raw==null) status.textContent = finalText ||
-      "The agent finished without calling read_manifest_entry — nothing was loaded."; },
+      "The agent finished without calling read_manifest_entry: nothing was loaded."; },
   });
   if(raw==null) return;
   if(raw.startsWith("ERROR")){ status.textContent = raw; return; }
@@ -4799,7 +4799,7 @@ async function loadDesign2DComponent(name){
   try{ parsed = JSON.parse(raw); }catch{ status.textContent="Couldn't parse the manifest response."; return; }
   const entry = parsed[name];
   if(!entry || Array.isArray(entry.primitives) || !entry.dimensions){
-    status.textContent = `"${name}" isn't a UI component entry (looks like a 3D model — `+
+    status.textContent = `"${name}" isn't a UI component entry (looks like a 3D model, `+
       `try the 3D workspace).`;
     return;
   }
@@ -4833,11 +4833,11 @@ function paintSettings(){
       <div id="detailsRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
     <div class="note">Off shows what DOURMOUSE is doing in plain language.
-      On shows the actual tool/agent name it called — turn this on when
+      On shows the actual tool/agent name it called. Turn this on when
       something misbehaves; knowing which agent ran is the difference
       between a fix and a guess.</div>
     <div class="sec">INTELLIGENCE</div>
-    <div class="row"><div class="g"><div class="n">${esc(b.model||"—")}</div>
+    <div class="row"><div class="g"><div class="n">${esc(b.model||"-")}</div>
       <div class="d">${esc(b.backend||"")} · ${esc(b.base_url||"")}</div></div></div>
     <div class="row"><div class="g"><div class="n">Compute node</div>
       <div class="d">${s.online?`${esc(s.node)} · ${esc(s.model)} · ${s.latency_ms}ms`:"offline"}</div></div></div>
@@ -4850,7 +4850,7 @@ function paintSettings(){
     <div class="toolbar">
       <span class="lbl">API KEYS</span>
     </div>
-    <div class="note">Your own keys, stored only on this machine — never sent anywhere but the provider itself.</div>
+    <div class="note">Your own keys, stored only on this machine. Never sent anywhere but the provider itself.</div>
     <div id="byokRows"></div>
     <div class="toolbar">
       <span class="lbl">ORCHESTRATOR MODEL</span>
@@ -4883,23 +4883,23 @@ function paintSettings(){
     </div>
     <div class="note" id="appDryRunNote">Loading…</div>
     <div class="sec">MEMORY</div>
-    <div class="row"><div class="g"><div class="n">${m.count!=null?`${m.count} facts stored`:"—"}</div>
+    <div class="row"><div class="g"><div class="n">${m.count!=null?`${m.count} facts stored`:"-"}</div>
       <div class="d">${m.active?"learning loop on":esc(m.gate||"")}</div></div></div>
     <div class="toolbar">
       <button class="chip" type="button" id="importHistoryBtn">IMPORT CLAUDE + CODEX HISTORY</button>
     </div>
     <div class="note" id="importHistoryNote">Pulls session history already on disk into
-      long-term memory — no API call, nothing sent anywhere. Safe to run again later;
+      long-term memory. No API call, nothing sent anywhere. Safe to run again later;
       re-importing the same session just refreshes it, never duplicates it.</div>
     <div id="profileBlock"></div>
     <div class="sec">ACCOUNT</div>
     <div class="row"><div class="g"><div class="n">${me.me?esc(me.me):"Not signed in"}</div>
       <div class="d">${me.me?"Gmail, Calendar and Drive available":'<a href="/login" style="color:var(--amber)">Sign in</a> to enable mail, calendar and Drive'}</div></div></div>
     <div class="sec">VOICE</div>
-    <div class="row"><div class="g"><div class="n">STT ${esc(v.stt||"—")} · TTS ${esc(v.tts||"—")}</div>
-      <div class="d">whisper: ${esc(v.whisper_model||"—")} · piper: ${esc(v.piper_voice||"—")}</div></div></div>
+    <div class="row"><div class="g"><div class="n">STT ${esc(v.stt||"-")} · TTS ${esc(v.tts||"-")}</div>
+      <div class="d">whisper: ${esc(v.whisper_model||"-")} · piper: ${esc(v.piper_voice||"-")}</div></div></div>
     <div class="sec">HOST</div>
-    <div class="row"><div class="g"><div class="n">${esc(t.host||"—")}</div>
+    <div class="row"><div class="g"><div class="n">${esc(t.host||"-")}</div>
       <div class="d">${t.cpu_pct!=null?`CPU ${t.cpu_pct}% · MEM ${t.mem_used_gb}/${t.mem_total_gb} GB`:"telemetry unavailable"}</div></div></div>
     <div class="sec">CONNECTIONS</div>${rows}
     <div class="note" style="margin-top:12px">Secrets are never shown here. Configure them in <code>.env</code> on the host.</div>`;
@@ -4962,7 +4962,7 @@ function paintSettings(){
         <span class="dot ${on ? "ok" : "no"}"></span>
         <div class="g">
           <div class="n">${esc(k.label)}</div>
-          <div class="d byokStatus">${on ? "Configured" : `Not configured — get a key at ${esc(k.hint)}`}</div>
+          <div class="d byokStatus">${on ? "Configured" : `Not configured. Get a key at ${esc(k.hint)}`}</div>
           <div style="display:flex;gap:6px;margin-top:6px">
             <input type="password" class="byokInput" autocomplete="off" spellcheck="false"
               placeholder="${on ? "Paste a new key to replace it…" : "Paste your API key…"}">
@@ -5058,12 +5058,12 @@ function paintSettings(){
         row.appendChild(btn);
       });
       const srcLabel = {
-        env_override: "pinned by an environment variable — change that to move it",
+        env_override: "pinned by an environment variable, change that to move it",
         persisted: "set here in Settings",
         default_nvidia: "the built-in default",
         default_active_backend: "the built-in default",
       }[j.source] || "";
-      note.textContent = `Currently: ${j.current || "—"}${srcLabel ? " · " + srcLabel : ""}`;
+      note.textContent = `Currently: ${j.current || "-"}${srcLabel ? " · " + srcLabel : ""}`;
     } catch (err) {
       note.textContent = "Could not load orchestrator model options: " + (err.message || err);
     }
@@ -5101,8 +5101,8 @@ function paintSettings(){
             const jj = await rr.json();
             note.textContent = jj.ok
               ? (val
-                  ? "On — a zero-tool answer now gets one honest nudge, then a caveat if it still skips grounding."
-                  : "Off — answers are never flagged for skipping tool use.")
+                  ? "On: a zero-tool answer now gets one honest nudge, then a caveat if it still skips grounding."
+                  : "Off: answers are never flagged for skipping tool use.")
               : "Could not save: " + (jj.detail || "unknown error");
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
@@ -5113,8 +5113,8 @@ function paintSettings(){
       });
       if (!note.textContent || note.textContent === "Loading…") {
         note.textContent = j.enabled
-          ? "On — a zero-tool answer gets one honest nudge, then a caveat if it still skips grounding."
-          : "Off — answers are never flagged for skipping tool use.";
+          ? "On: a zero-tool answer gets one honest nudge, then a caveat if it still skips grounding."
+          : "Off: answers are never flagged for skipping tool use.";
       }
     } catch (err) {
       note.textContent = "Could not load Grounded Mode: " + (err.message || err);
@@ -5201,8 +5201,8 @@ function paintSettings(){
             const jj = await rr.json();
             note.textContent = jj.ok
               ? (val
-                  ? "On — Claude Code is the front for every tab; non-heavy work splits across Ollama/Gemini behind the scenes."
-                  : "Off — this machine's plain configured default backend answers directly, unchanged from before this feature.")
+                  ? "On: Claude Code is the front for every tab; non-heavy work splits across Ollama/Gemini behind the scenes."
+                  : "Off: this machine's plain configured default backend answers directly, unchanged from before this feature.")
               : "Could not save: " + (jj.detail || "unknown error");
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
@@ -5213,8 +5213,8 @@ function paintSettings(){
       });
       if (!note.textContent || note.textContent === "Loading…") {
         note.textContent = j.enabled
-          ? "On — Claude Code is the front for every tab; non-heavy work splits across Ollama/Gemini behind the scenes."
-          : "Off — this machine's plain configured default backend answers directly, unchanged from before this feature.";
+          ? "On: Claude Code is the front for every tab; non-heavy work splits across Ollama/Gemini behind the scenes."
+          : "Off: this machine's plain configured default backend answers directly, unchanged from before this feature.";
       }
     } catch (err) {
       note.textContent = "Could not load Claude Front Mode: " + (err.message || err);
@@ -5252,8 +5252,8 @@ function paintSettings(){
             const jj = await rr.json();
             note.textContent = jj.ok
               ? (val
-                  ? "On — Gmail, Calendar and Drive will be requested via Google sign-in. Only works if your Google Cloud OAuth app is verified, OR is in Testing mode with your account added as a test user — otherwise Google's own consent screen will fail. Sign out and sign in again for this to take effect."
-                  : "Off — Google sign-in only proves your identity. Gmail still works via an app password; Calendar and Drive are unavailable.")
+                  ? "On: Gmail, Calendar and Drive will be requested via Google sign-in. Only works if your Google Cloud OAuth app is verified, OR is in Testing mode with your account added as a test user, otherwise Google's own consent screen will fail. Sign out and sign in again for this to take effect."
+                  : "Off: Google sign-in only proves your identity. Gmail still works via an app password; Calendar and Drive are unavailable.")
               : "Could not save: " + (jj.detail || "unknown error");
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
@@ -5264,8 +5264,8 @@ function paintSettings(){
       });
       if (!note.textContent || note.textContent === "Loading…") {
         note.textContent = j.enabled
-          ? "On — Gmail, Calendar and Drive are requested via Google sign-in."
-          : "Off — Google sign-in only proves your identity. Gmail still works via an app password; Calendar and Drive are unavailable.";
+          ? "On: Gmail, Calendar and Drive are requested via Google sign-in."
+          : "Off: Google sign-in only proves your identity. Gmail still works via an app password; Calendar and Drive are unavailable.";
       }
     } catch (err) {
       note.textContent = "Could not load Google Full Access: " + (err.message || err);
@@ -5302,8 +5302,8 @@ function paintSettings(){
             const jj = await rr.json();
             note.textContent = jj.ok
               ? (val
-                  ? "On — every app-control action is previewed (validated, blocklist-checked, described) but not executed."
-                  : "Off — app-control actions run for real (still confirmation-gated per action).")
+                  ? "On: every app-control action is previewed (validated, blocklist-checked, described) but not executed."
+                  : "Off: app-control actions run for real (still confirmation-gated per action).")
               : "Could not save: " + (jj.detail || "unknown error");
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
@@ -5314,8 +5314,8 @@ function paintSettings(){
       });
       if (!note.textContent || note.textContent === "Loading…") {
         note.textContent = j.enabled
-          ? "On — every app-control action is previewed (validated, blocklist-checked, described) but not executed."
-          : "Off — app-control actions run for real (still confirmation-gated per action).";
+          ? "On: every app-control action is previewed (validated, blocklist-checked, described) but not executed."
+          : "Off: app-control actions run for real (still confirmation-gated per action).";
       }
     } catch (err) {
       note.textContent = "Could not load App Control Dry Run: " + (err.message || err);
@@ -5376,7 +5376,7 @@ async function paintProfileBlock(){
     box.innerHTML = `
       <div class="sec">WORKING-STYLE PROFILE</div>
       <div class="note">Generated once, from your imported history. Working style,
-        preferences, communication style and general interests only — never
+        preferences, communication style and general interests only. Never
         regenerated automatically, never any biographical detail.</div>
       <pre style="white-space:pre-wrap;font-size:11px;padding:10px;border:1px solid var(--line-2);border-radius:2px;margin-top:8px">${esc(status.profile||"")}</pre>`;
     return;
@@ -5388,7 +5388,7 @@ async function paintProfileBlock(){
       <button class="chip" type="button" id="genProfileBtn">GENERATE MY PROFILE (ONE-TIME)</button>
     </div>
     <div class="note" id="genProfileNote">Reads your imported history once to build a
-      profile of working style, preferences, communication style and general interests —
+      profile of working style, preferences, communication style and general interests,
       deliberately never any name, age, location or other identifying detail. Runs once,
       ever; import your history first if you haven't (above).</div>`;
   const btn = $("genProfileBtn");
@@ -5403,7 +5403,7 @@ async function paintProfileBlock(){
       const j = await r.json();
       if(!j.ok){
         note.textContent = j.reason === "no_source_material"
-          ? "No imported history yet — import Claude/Codex history first, then try again."
+          ? "No imported history yet. Import Claude/Codex history first, then try again."
           : "Could not generate: " + (j.reason || j.error || "unknown error");
         btn.disabled = false; btn.textContent = prev;
       } else {
@@ -5615,7 +5615,7 @@ async function paintAtlas(){
     <div class="note" id="mapBrief" style="display:none"></div>
     <div class="sec">STRONGEST SIGNALS</div>
     <div id="mapList"><div class="note">Loading items…</div></div>
-    <div class="sec">PINNED — click any point to compare</div>
+    <div class="sec">PINNED · click any point to compare</div>
     <div id="mapPinned"></div>
     <div class="sec">CROSS-CHANNEL PROXIMITY</div>
     <div class="note" id="mapCorrelations">Checking…</div>
@@ -5666,7 +5666,7 @@ async function paintAtlas(){
     mapData = await api("/api/worldmap");
   }catch(e){
     if(!activeGeo){
-      $("mapNote").textContent = `World monitor unreachable — ${esc(String(e.message||e))}`;
+      $("mapNote").textContent = `World monitor unreachable: ${esc(String(e.message||e))}`;
       $("mapList").innerHTML = "";
     }
     return;
@@ -5684,7 +5684,7 @@ function renderAtlasData(){
   if(!mapData) return;
   const counts = mapData.counts || {};
   const total = Object.values(counts).reduce((a,b)=>a+b, 0);
-  $("mapPulse").textContent = `${mapData.pulse_score ?? "—"} ${mapData.pulse_label || ""}`.trim();
+  $("mapPulse").textContent = `${mapData.pulse_score ?? "-"} ${mapData.pulse_label || ""}`.trim();
   buildLayersRow();
   drawMap();
 
@@ -5692,7 +5692,7 @@ function renderAtlasData(){
   const un = mapData.unmappable || {};
   const names = Object.keys(un);
   $("mapNote").textContent = names.length
-    ? `Plotting ${total} located items. Not on the map: ${names.join(", ")} — these feeds carry no coordinates, or need a key that isn't configured, so they are omitted rather than placed at a guessed position.`
+    ? `Plotting ${total} located items. Not on the map: ${names.join(", ")}. These feeds carry no coordinates, or need a key that isn't configured, so they are omitted rather than placed at a guessed position.`
     : `Plotting ${total} located items.`;
 
   /* Ranked list: severity first, then magnitude where present. */
@@ -6030,7 +6030,7 @@ function renderGlobeFrame(canvas){
    side," which is what this was actually for. */
 function cardHTML(p){
   const parts = [`<b>${esc(p.title||"")}</b>`];
-  parts.push(`<div style="font-family:var(--mono);font-size:10px;opacity:.8">${esc(p.chan)} · ${esc(p.severity||"—")}</div>`);
+  parts.push(`<div style="font-family:var(--mono);font-size:10px;opacity:.8">${esc(p.chan)} · ${esc(p.severity||"-")}</div>`);
   if(p.summary) parts.push(`<div>${esc(p.summary)}</div>`);
   if(p.at) parts.push(`<div>${esc(p.at)}</div>`);
   if(p.country) parts.push(`<div>${esc(p.country)}</div>`);
@@ -6207,7 +6207,7 @@ async function loadBrief(){
     const b = await api("/api/world/brief");
     box.textContent = b.text || "No brief available.";
   }catch(e){
-    box.textContent = "Brief unavailable — " + (e.message||e);
+    box.textContent = "Brief unavailable: " + (e.message||e);
   }
 }
 
@@ -6227,7 +6227,7 @@ async function loadCorrelations(){
       box.appendChild(d);
     });
   }catch(e){
-    box.textContent = "Correlations unavailable — " + (e.message||e);
+    box.textContent = "Correlations unavailable: " + (e.message||e);
   }
 }
 
@@ -6249,7 +6249,7 @@ async function loadRegions(){
       <input type="number" id="regMaxLon" placeholder="max lon" style="width:84px">
       <button class="chip" type="button" id="regAdd">ADD REGION</button>
     </div>
-    <div class="note">Draw-on-map isn't built yet — enter a bounding box directly. You'll be told which real located items currently fall inside each region below.</div>
+    <div class="note">Draw-on-map isn't built yet. Enter a bounding box directly. You'll be told which real located items currently fall inside each region below.</div>
     <div id="regList"><div class="note">Loading…</div></div>`;
   $("regAdd").onclick = async () => {
     const payload = {
@@ -6285,7 +6285,7 @@ async function renderRegionList(){
     const d = document.createElement("div"); d.className = "row";
     d.innerHTML = `<div class="g"><div class="n"></div><div class="d"></div></div>
       <button class="chip" type="button">DELETE</button>`;
-    d.querySelector(".n").textContent = `${r.name} — ${n} item${n===1?"":"s"} inside right now`;
+    d.querySelector(".n").textContent = `${r.name}: ${n} item${n===1?"":"s"} inside right now`;
     d.querySelector(".d").textContent = `lat ${r.min_lat}..${r.max_lat} · lon ${r.min_lon}..${r.max_lon}`;
     d.querySelector("button").onclick = async () => {
       await fetch("/api/world/regions/delete", {
@@ -6494,7 +6494,7 @@ function newsToast(item){
     document.body.appendChild(box);
   }
   const t = document.createElement("div"); t.className = "attnpanel"; t.style.cssText = "cursor:pointer";
-  t.innerHTML = `<div class="attnhead">◆ IMPORTANT — ${esc((item.channel||"").toUpperCase())}</div>
+  t.innerHTML = `<div class="attnhead">◆ IMPORTANT · ${esc((item.channel||"").toUpperCase())}</div>
     <div class="attnrow"><span class="attnsum"></span></div>`;
   t.querySelector(".attnsum").textContent = item.title;
   t.onclick = () => { show("NEWS"); t.remove(); };
@@ -6536,13 +6536,13 @@ async function paintGlobe(){
       <div class="glasswrap">
         <div class="glasscard">
           <h2><span class="eye">◆</span> God's Eye View isn't running</h2>
-          <p>A separate app — a photorealistic 3D globe with live aircraft, ships,
+          <p>A separate app: a photorealistic 3D globe with live aircraft, ships,
              satellites, earthquakes and public cameras. It runs on its own,
              right next to Dourmouse.</p>
           <div class="steps">cd <code>gods-eye-view</code><br>npm run dev -- --host localhost --port 4173</div>
           <p style="margin-bottom:0">First time only: copy <code style="color:#8fd3ff">.env.example</code>
              to <code style="color:#8fd3ff">.env</code> and add a Google Maps API key
-             (the one metered key it needs — everything else is free or optional).</p>
+             (the one metered key it needs; everything else is free or optional).</p>
           <div class="glassbtnrow" style="margin-top:16px">
             <button class="glassbtn primary" type="button" id="globeRecheck">Check again</button>
             <button class="glassbtn secondary" type="button" id="globeOpenTab">Open in new tab</button>
@@ -6557,7 +6557,7 @@ async function paintGlobe(){
   box.innerHTML = `
     <div class="globetoolbar">
       <span class="dot"></span>
-      <span class="lbl2">GOD'S EYE VIEW — LIVE</span>
+      <span class="lbl2">GOD'S EYE VIEW · LIVE</span>
       <a href="${esc(GODS_EYE_URL)}" target="_blank" rel="noopener">open in new tab ↗</a>
     </div>
     <iframe class="globeframe" id="globeFrame" src="${esc(GODS_EYE_URL)}"
@@ -6584,7 +6584,7 @@ function orchLastLine(last){
   const tool = esc(last.tool || "");
   const bits = [];
   if(last.ok === false) bits.push("failed");
-  return `${tool}${bits.length ? " — " + bits.join(", ") : ""}`;
+  return `${tool}${bits.length ? " (" + bits.join(", ") + ")" : ""}`;
 }
 function paintOrchestration(){
   const box = $("orchestrationBody");
@@ -6595,12 +6595,12 @@ function paintOrchestration(){
     const a = _orchAgents[name] || {status: "idle", last: null, feed: []};
     const feed = (a.feed || []).slice(-5).reverse();
     const feedHtml = feed.length
-      ? feed.map(f => `<div class="d" style="margin-top:1px">${esc(f.tool || "")}${f.ok === false ? " — failed" : ""}</div>`).join("")
+      ? feed.map(f => `<div class="d" style="margin-top:1px">${esc(f.tool || "")}${f.ok === false ? " (failed)" : ""}</div>`).join("")
       : "";
     return `<div class="row" data-agent="${esc(name)}">
       ${orchStatusDot(a.status)}
       <div class="g">
-        <div class="n">${esc(name.toUpperCase())} <span style="color:var(--blue-deep);font-weight:normal">— ${esc(a.status.toUpperCase())}</span></div>
+        <div class="n">${esc(name.toUpperCase())} <span style="color:var(--blue-deep);font-weight:normal">· ${esc(a.status.toUpperCase())}</span></div>
         <div class="d">${orchLastLine(a.last)}</div>
         ${feedHtml}
       </div>
@@ -6610,7 +6610,7 @@ function paintOrchestration(){
   box.innerHTML = `
     <p class="lede">${names.length} AGENTS WIRED. ${active.length} ACTIVE RIGHT NOW.</p>
     ${fanoutIds.length ? `<div class="sec">ACTIVE FAN-OUT</div>${fanoutIds.map(id => orchFanoutRowHtml(id, _orchFanouts[id])).join("")}` : ""}
-    ${active.length ? `<div class="sec" style="margin-top:${fanoutIds.length ? "14px" : "0"}">ACTIVE</div>${active.map(rowHtml).join("")}` : (fanoutIds.length ? "" : `<p class="note" style="padding:8px 0">Nothing running right now — this fills in live the moment any agent is delegated a task, on any screen.</p>`)}
+    ${active.length ? `<div class="sec" style="margin-top:${fanoutIds.length ? "14px" : "0"}">ACTIVE</div>${active.map(rowHtml).join("")}` : (fanoutIds.length ? "" : `<p class="note" style="padding:8px 0">Nothing running right now. This fills in live the moment any agent is delegated a task, on any screen.</p>`)}
     <div class="sec" style="margin-top:14px">IDLE (${idle.length})</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px">
       ${idle.map(n => `<span class="chip" style="cursor:default" data-agent="${esc(n)}">${esc(n)}</span>`).join("")}
@@ -6646,17 +6646,17 @@ function orchFanoutRowHtml(runId, run){
   const indices = Object.keys(run.branches).map(Number).sort((a,b) => a - b);
   const branchRows = indices.map(i => {
     const b = run.branches[i] || {};
-    const modelShown = (b.model || "").split("/").pop() || b.model || "—";
+    const modelShown = (b.model || "").split("/").pop() || b.model || "-";
     const label = `branch ${i + 1}/${run.total || indices.length} · ${esc(b.agent || "any")} · ${esc(modelShown)}${localCloudSuffix(b)}`;
     const phaseNote = b.phase === "result"
-      ? (b.ok === false ? `failed — ${esc((b.error || "").slice(0, 140))}` : `done in ${b.elapsed_s ?? "?"}s`)
+      ? (b.ok === false ? `failed: ${esc((b.error || "").slice(0, 140))}` : `done in ${b.elapsed_s ?? "?"}s`)
       : "working…";
-    return `<div class="d" style="margin-top:1px">${label} — ${phaseNote}</div>`;
+    return `<div class="d" style="margin-top:1px">${label} · ${phaseNote}</div>`;
   }).join("");
   return `<div class="row" data-run="${esc(runId)}">
     <span class="dot" style="background:var(--ok);animation:pulse 1.2s ease-in-out infinite"></span>
     <div class="g">
-      <div class="n">FAN-OUT <span style="color:var(--blue-deep);font-weight:normal">— ${indices.length}/${run.total || indices.length} REPORTING</span></div>
+      <div class="n">FAN-OUT <span style="color:var(--blue-deep);font-weight:normal">· ${indices.length}/${run.total || indices.length} REPORTING</span></div>
       ${branchRows}
     </div>
   </div>`;
@@ -6677,8 +6677,8 @@ async function paintNews(){
   const statusLine = st === null
     ? '<div class="note">Checking the news watcher’s status…</div>'
     : !st.running
-    ? '<div class="note">The background news watcher is not running on this server — showing manual search only.</div>'
-    : `<div class="note">Live — polling disasters/conflict events/world news every ${Math.round((st.status&&st.status.poll_interval_seconds)||180)}s. Last poll: ${st.status && st.status.last_poll_ok===false ? "failed (retrying)" : "ok"}.</div>`;
+    ? '<div class="note">The background news watcher is not running on this server. Showing manual search only.</div>'
+    : `<div class="note">Live: polling disasters/conflict events/world news every ${Math.round((st.status&&st.status.poll_interval_seconds)||180)}s. Last poll: ${st.status && st.status.last_poll_ok===false ? "failed (retrying)" : "ok"}.</div>`;
   const feedRows = newsFeed.length
     ? newsFeed.slice(0, 60).map(it => {
         const badge = it.important ? '<span class="attnkind">IMPORTANT</span>' : "";
@@ -6687,7 +6687,7 @@ async function paintNews(){
           <div class="d"></div>
         </div>${badge}</div>`;
       }).join("")
-    : '<div class="note">No live items yet — the watcher polls its sources on a fixed interval; the first batch lands within a few minutes of server start.</div>';
+    : '<div class="note">No live items yet. The watcher polls its sources on a fixed interval; the first batch lands within a few minutes of server start.</div>';
   box.innerHTML = `◆ LIVE FEED${statusLine}
     <div id="newsFeedList">${feedRows}</div>
     <div class="sec">TRY</div><div class="cards" id="nc"></div>`;
@@ -6746,7 +6746,7 @@ function initVoice(){
     note.textContent="This browser has no speech recognition. Dictation needs Chrome, or the server-side Whisper pipeline (SETTINGS shows it is not configured).";
     return;
   }
-  note.textContent="Speech recognition runs in this browser. Server-side Whisper/Piper are not configured — SETTINGS shows their state.";
+  note.textContent="Speech recognition runs in this browser. Server-side Whisper/Piper are not configured; SETTINGS shows their state.";
   btn.onclick=()=>{
     if(listening){ try{rec.stop();}catch{} return; }
     rec = new SR(); rec.lang="en-US"; rec.interimResults=true; rec.continuous=false;
@@ -6793,7 +6793,7 @@ async function uploadAndInsert(file){
   try{
     const res = await fetch(`/api/upload?name=${encodeURIComponent(name)}`, {method:"POST", body:file});
     const r = await res.json();
-    if(!res.ok || r.ok===false){ alert("Upload failed — "+(r.error||("HTTP "+res.status))); return; }
+    if(!res.ok || r.ok===false){ alert("Upload failed: "+(r.error||("HTTP "+res.status))); return; }
     const url = `/uploads/${encodeURIComponent(r.name)}`;
     const link = _IMAGE_EXT_RE.test(r.name) ? `![${r.name}](${url})` : `[${r.name}](${url})`;
     const ta = $("ta");
@@ -6801,7 +6801,7 @@ async function uploadAndInsert(file){
     ta.value += sep + link + "\n";
     ta.dispatchEvent(new Event("input"));
     ta.focus();
-  }catch(e){ alert("Upload failed — "+String(e.message||e)); }
+  }catch(e){ alert("Upload failed: "+String(e.message||e)); }
 }
 $("attachChip").onclick=()=>$("attachInput").click();
 $("attachInput").onchange=()=>{
@@ -6821,7 +6821,7 @@ $("ta").addEventListener("drop", e=>{
 setInterval(()=>{ $("mClock").textContent=new Date().toTimeString().slice(0,8); },1000);
 $("mClock").textContent=new Date().toTimeString().slice(0,8);
 (async()=>{ try{ const d=await api("/api/sessions/recent");
-  const s=(d.sessions||[])[0]; $("mSess").textContent = s? (s.name||"").replace(/\.jsonl$/,"").slice(-13) : "—";
+  const s=(d.sessions||[])[0]; $("mSess").textContent = s? (s.name||"").replace(/\.jsonl$/,"").slice(-13) : "-";
 }catch{} })();
 initVoice(); paintQueue();
 
