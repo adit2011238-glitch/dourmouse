@@ -325,12 +325,19 @@ class TestNotifications:
 
 
 class TestEnvGate:
-    def test_disabled_by_default(self, monkeypatch):
+    def test_enabled_by_default(self, monkeypatch):
+        """2026-09-18: flipped from opt-in to opt-out -- see
+        goal_runtime_enabled's own docstring for the real bug this
+        closes (create_goal was unconditionally registered and callable
+        with the old off-by-default flag, so a "successful" tool call
+        could silently do nothing forever)."""
         monkeypatch.delenv("DOURMOUSE_GOAL_RUNTIME", raising=False)
-        assert goal_runtime_enabled() is False
+        assert goal_runtime_enabled() is True
 
-    def test_enabled_only_by_the_literal_value_one(self, monkeypatch):
+    def test_only_the_literal_value_zero_opts_out(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "0")
+        assert goal_runtime_enabled() is False
         monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "1")
         assert goal_runtime_enabled() is True
-        monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "true")
-        assert goal_runtime_enabled() is False
+        monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "false")
+        assert goal_runtime_enabled() is True  # only "0" opts out, not any falsy-looking string

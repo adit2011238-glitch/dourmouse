@@ -50,11 +50,29 @@ _MAX_TASKS_PER_TICK = 3
 
 
 def goal_runtime_enabled() -> bool:
-    """Opt-in gate, same shape as DOURMOUSE_AGENT_ROUTER_AUTO /
-    DOURMOUSE_OMNIROUTE_AUTO — a persistent agent that can act with a
-    user's own reach must never silently start running the moment the
-    code lands."""
-    return os.environ.get("DOURMOUSE_GOAL_RUNTIME", "").strip() == "1"
+    """Default ON since 2026-09-18 (opt-OUT, not opt-in) — a real, live
+    bug this flag itself was causing, not a cautious choice worth keeping.
+    ``goal_tools.build_goals_subagent`` (the ``create_goal``/``add_tasks``
+    tool family) is registered by ``general_roster.py`` UNCONDITIONALLY,
+    with no check of this flag anywhere in that path -- so with the flag
+    off (the old default), the model could call ``create_goal``, get back
+    a real goal id, and tell the user work was now happening in the
+    background, while no worker thread ever existed to advance it. The
+    goal just sat in CREATED/READY forever. That is exactly the founding
+    spec's own named anti-pattern: "Do not create fake background
+    execution in which the UI merely displays a spinner while no real
+    worker is operating" -- except here it was worse than a spinner,
+    it was a tool call that looked completely successful.
+
+    This does not remove any real safety gate: a REQUIRES_CONFIRMATION
+    tool inside an autonomous task still pauses at WAITING_FOR_APPROVAL
+    (see ``_autonomous_confirmation_gate``/``_run_task`` below) whether
+    this flag is on or off -- flipping the default makes the already-
+    exposed, already-documented tool actually do what it already claimed
+    to do, it does not grant any new capability the model didn't already
+    have a tool for. Set ``DOURMOUSE_GOAL_RUNTIME=0`` to opt back out.
+    """
+    return os.environ.get("DOURMOUSE_GOAL_RUNTIME", "1").strip() != "0"
 
 
 def _autonomous_confirmation_gate(_prompt_text: str) -> bool:

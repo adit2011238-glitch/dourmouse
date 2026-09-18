@@ -712,6 +712,63 @@ Live-verified against the real file-backed store via the browser (`fetch('/api/a
 a real, honest `{"events": []}` on a clean store).
 **Result**: fixed (backend + API); UI surface tracked as separate follow-on.
 
+### 023 — `create_goal` could report success while silently doing nothing, forever
+
+**Severity**: HIGH (the single headline capability the founding spec opens with — "it should run
+forever without prompting, in the background" — was a live no-op by default; a tool call that
+returns success while accomplishing nothing is a worse failure mode than an error, per this
+project's own Rule 2.2).
+**Context**: user asked directly, after the previous self-assessment, "how far are we from the
+121 page doc" — answering that honestly meant actually re-examining Domain B (§4 of
+`docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`) rather than restating the existing estimate.
+**Root cause**: `goal_runtime_enabled()` gated whether `webui.run_server` started a real
+`GoalRuntime` worker thread — but `goal_tools.build_goals_subagent()` (the `create_goal`/
+`add_tasks`/`get_goal_status`/`list_goals`/`cancel_goal` tool family) is registered by
+`general_roster.py` completely unconditionally, with no check of that flag anywhere in that code
+path. With the flag off (the original default), a user could ask Dourmouse to do something
+autonomously, the model would call `create_goal`, the call would succeed and return a real goal
+id, Dourmouse would tell the user work was now happening in the background — and because no
+worker thread existed anywhere in the process to ever advance that goal, it would sit in
+CREATED/READY state permanently. Confirmed: zero other place in the codebase checked this flag
+before exposing the tool. This is precisely the founding spec's own explicitly named anti-pattern
+("Do not create fake background execution in which the UI merely displays a spinner while no
+real worker is operating") — worse than a spinner, since nothing on screen even hinted that
+nothing was happening.
+**Fix**: `goal_runtime_enabled()` flipped from opt-in (`DOURMOUSE_GOAL_RUNTIME=1` required) to
+opt-out (`DOURMOUSE_GOAL_RUNTIME=0` to disable); default is now enabled. No safety gate was
+removed by this change — a `REQUIRES_CONFIRMATION` tool inside an autonomous task still pauses at
+`WAITING_FOR_APPROVAL` exactly as before, regardless of this flag; the flip only makes the
+already-exposed, already-documented tool actually do what it already claimed to do.
+**A real, newly-surfaced consequence handled directly**: this wiring (`run_server` starting a
+real `GoalRuntime` thread) had zero direct test coverage before this pass, and flipping the
+default meant every existing test using `test_webui.py`'s `server` fixture would now also start a
+real background worker thread against whatever the process-wide goal-store singleton held at
+that moment. Added a new autouse `_goal_runtime_off` fixture to `conftest.py` (same "hermetic by
+default, opt in explicitly" convention as every other isolation fixture there) before running
+anything, and added the first direct test coverage for the wiring itself
+(`TestGoalRuntimeWiring`, 2 tests, confirming a real thread starts/doesn't start).
+**Files changed**: `dourmouse/goal_runtime.py`, `dourmouse/webui.py`, `dourmouse/tests/conftest.py`.
+**Tests added/updated**: `TestEnvGate` in `test_goal_runtime.py` (2 tests updated to the new
+default); `TestGoalRuntimeWiring` in `test_webui.py` (2 new tests, previously zero coverage of
+this wiring).
+**Tests run**: `test_goal_runtime.py` (18/18), `TestGoalRuntimeWiring` (2/2), then full suite.
+**Live proof, not just passing tests**: against the real dev-preview server (unmodified, no
+special test flags, the actual default this finding changes), a goal was inserted directly into
+its own live SQLite file from a separate external process — standing in for exactly what the
+`create_goal` tool itself does — with zero further interaction. The server's own already-running
+background worker, entirely on its own:
+```
+10:08:46.445  task -> READY        (inserted externally)
+10:08:48.980  task -> RUNNING      (picked up by the real worker thread, ~2.5s later, unprompted)
+10:08:53.678  task -> COMPLETED    (~4.7s of real dispatch execution: a real model call, real
+                                     text back: "Hello." plus the real, unbypassed Grounded Mode
+                                     honesty disclaimer about zero tool calls)
+10:08:53.680  goal -> COMPLETED
+```
+This is the founding spec's own headline claim, verified true by default for the first time this
+session, not asserted from a passing unit test.
+**Result**: fixed.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

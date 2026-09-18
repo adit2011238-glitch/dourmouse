@@ -133,6 +133,39 @@ def server(monkeypatch, tmp_path):
     thread.join(timeout=2)
 
 
+class TestGoalRuntimeWiring:
+    """run_server's goal_runtime wiring (webui.py, just above the
+    `all_hands`/`atlas_lab` hub binding) had zero direct test coverage
+    before 2026-09-18's opt-in-to-opt-out flip -- worth real coverage
+    now given the stakes of that default change. The `server` fixture
+    above never exercises this path directly since the autouse
+    `_goal_runtime_off` conftest fixture keeps it off there by design;
+    these two tests explicitly opt back in/out themselves, the same
+    override-the-fixture convention every other isolation fixture in
+    this suite uses."""
+
+    def test_enabled_by_default_a_real_worker_thread_starts(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "1")
+        srv = run_server(_echo_registry(), port=0, client=None, config=None)
+        try:
+            assert srv.goal_runtime is not None
+            assert srv.goal_runtime._thread is not None
+            assert srv.goal_runtime._thread.is_alive()
+        finally:
+            srv.goal_runtime.stop()
+            srv.server_close()
+
+    def test_explicit_opt_out_starts_no_worker(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path / "ws"))
+        monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "0")
+        srv = run_server(_echo_registry(), port=0, client=None, config=None)
+        try:
+            assert srv.goal_runtime is None
+        finally:
+            srv.server_close()
+
+
 class TestConfirmationGate:
     def test_block_then_resolve_approves(self):
         events: list[dict] = []

@@ -122,10 +122,13 @@ real, independently verifiable, functioning backend — not merely present in a 
 
 This is the founding spec's own 20-acceptance-test workstream (§ B of the 121-page doc, read in
 full this session). Current real status: `dourmouse/goals.py` + `goal_runtime.py` +
-`goal_tools.py` exist, 80+ real tests, wired into `run_server`, but **gated behind
-`DOURMOUSE_GOAL_RUNTIME=1` and off by default** — meaning the founding spec's own headline ask
-("it should run forever without prompting, in the background") is built but not yet the default
-live behavior of the product.
+`goal_tools.py` exist, 84+ real tests, wired into `run_server`, and **default ON since
+2026-09-18** (`DOURMOUSE_GOAL_RUNTIME=0` to opt out) — flipped from the original opt-in default
+after investigating it directly surfaced a real live bug: `create_goal` was registered
+unconditionally regardless of the flag, so with the worker off, a successful-looking tool call
+could promise background work that then silently never happened, forever. The founding spec's
+own headline ask ("it should run forever without prompting, in the background") is now the
+default live behavior, not just built-but-dormant infrastructure.
 
 **The 20 acceptance tests, verbatim from the founding spec, kept here as the permanent checklist**:
 

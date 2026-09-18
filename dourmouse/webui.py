@@ -7055,9 +7055,11 @@ def run_server(
     )
     server.browser_pane_requests.on_request(server.events_broadcast.broadcast)
     # Phase 2 (docs/GODSPEED_ROADMAP.md): the persistent autonomous Goal/Task
-    # runtime. Deliberately its OWN opt-in gate, separate from live_polling/
-    # live_enabled() above — a worker that can act with a user's own reach is
-    # a materially bigger default-behavior change than a news/markets poll.
+    # runtime. Default ON since 2026-09-18 (opt-OUT via
+    # DOURMOUSE_GOAL_RUNTIME=0) -- see goal_runtime_enabled's own docstring
+    # for the real bug the old opt-in default was causing: create_goal is
+    # registered unconditionally, so with the worker never started, a
+    # "successful" create_goal call could silently do nothing forever.
     from dourmouse.goal_runtime import GoalRuntime, goal_runtime_enabled
     from dourmouse.goals import get_goal_store
 

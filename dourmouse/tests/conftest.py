@@ -241,3 +241,23 @@ def _desktop_rag_env_isolated(monkeypatch):
     """
     for key in _DESKTOP_RAG_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _goal_runtime_off(monkeypatch):
+    """2026-09-18: goal_runtime_enabled() flipped from opt-in to opt-out
+    (a real live bug it was causing, see its own docstring) -- meaning
+    every test that spins up a real run_server() would now ALSO start a
+    real background GoalRuntime worker thread ticking every 5 real
+    seconds, where before the same test silently got an inert one. Left
+    unguarded, that thread would tick against whatever the process-wide
+    goal-store singleton holds at that moment -- including goals a
+    completely unrelated test created in the same singleton, if that
+    test's own isolation is imperfect -- and _run_task really does call
+    ChatSession.ask() against real backends. Same "hermetic by default,
+    opt in explicitly" convention as every other fixture in this file:
+    tests that specifically exercise the real runtime-starting-in-webui
+    behavior (test_goal_runtime.py's own tests construct GoalRuntime
+    directly and are unaffected by this) set the env var themselves.
+    """
+    monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "0")

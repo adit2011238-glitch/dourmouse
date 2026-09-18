@@ -157,11 +157,21 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
 - [x] `GET /api/goals` (list, `?status=`) and `GET /api/goals?id=` (full snapshot: tasks + real
       event history) — read-only for now; write endpoints (pause/cancel/approve buttons) are real
       Phase 3 UI work, not built speculatively ahead of that UI. 9 tests.
-- [x] Wired into `webui.run_server` behind its own dedicated opt-in gate,
-      **`DOURMOUSE_GOAL_RUNTIME=1`** — deliberately separate from `live_polling`/`live_enabled()`:
-      a worker that can act with a user's own reach is a materially bigger default-behavior change
-      than a news/markets poll. **Off by default. The user needs to opt in once satisfied with
-      testing.**
+- [x] Wired into `webui.run_server`. **Default ON since 2026-09-18** (`DOURMOUSE_GOAL_RUNTIME=0`
+      to opt out), flipped from the original opt-in default — a real, live bug, not a cautious
+      choice worth keeping: `create_goal`/`add_tasks` are registered by `general_roster.py`
+      unconditionally, with no check of this flag anywhere in that path, so with the worker off
+      by default the model could call `create_goal`, get back a real goal id, tell the user work
+      was now happening in the background, and nothing would ever advance it — exactly the
+      founding spec's own named anti-pattern ("do not create fake background execution... no real
+      worker is operating"), just worse than a spinner since the tool call looked fully
+      successful. No safety gate was removed by this flip: a `REQUIRES_CONFIRMATION` tool inside
+      an autonomous task still pauses at `WAITING_FOR_APPROVAL` regardless of this flag. New
+      direct test coverage for the wiring itself (previously untested): `TestGoalRuntimeWiring`
+      in `test_webui.py` (2 tests) confirms a real worker thread starts/doesn't start; a new
+      autouse `_goal_runtime_off` fixture in `conftest.py` keeps every other test hermetic (the
+      same override-the-fixture convention as every other isolation fixture there — see
+      `docs/TESTING.md`).
 - [ ] Scheduler for time/event-based routine creation (a routine auto-creating a `Goal` on a
       schedule or a filesystem/email event) — not built yet, real follow-on.
 - [ ] Multi-agent delegation building on the existing `delegate_task` primitive — a task's own
