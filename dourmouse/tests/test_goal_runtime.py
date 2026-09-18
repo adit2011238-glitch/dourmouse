@@ -11,6 +11,18 @@ from dourmouse.goal_runtime import GoalRuntime, goal_runtime_enabled
 from dourmouse.goals import GoalStore
 
 
+#: _verify_completion (goal_runtime.py) constructs its own ChatSession
+#: over the exact same chat_module.ChatSession reference this fake
+#: replaces -- so EVERY test using this fake also exercises the fake
+#: verifier call, whether or not the test itself cares about
+#: verification. Its prompt always starts with this exact header (see
+#: _verify_completion's own prompt text); _FakeSession recognizes it and
+#: answers separately from the task-description-keyed responses below,
+#: defaulting to a clean VERIFIED so every test written before
+#: verification existed keeps its original, unrelated meaning.
+_VERIFIER_PROMPT_MARKER = "You are a strict, skeptical verifier"
+
+
 class _FakeSession:
     """Records every ``ask()`` call and returns a scripted response keyed
     by the exact prompt text (== the task description). A response is
@@ -20,6 +32,11 @@ class _FakeSession:
 
     calls: list[tuple[str, str | None]] = []
     responses: dict[str, object] = {}
+    #: Default: every task's independent verification passes cleanly, so
+    #: existing tests (written before verification existed) keep reaching
+    #: COMPLETED exactly as before. Tests exercising verification itself
+    #: override this directly, same shape as `responses`' own values.
+    verification_response: object = {"final_text": "VERDICT: VERIFIED"}
 
     def __init__(self, registry, session_file=None, confirmation_gate=None):
         self.registry = registry
@@ -27,7 +44,10 @@ class _FakeSession:
 
     def ask(self, prompt, event_sink=None, forced_agent=None, force_plain_dispatch=False):
         type(self).calls.append((prompt, forced_agent))
-        scripted = type(self).responses.get(prompt, {"final_text": "done"})
+        if prompt.startswith(_VERIFIER_PROMPT_MARKER):
+            scripted = type(self).verification_response
+        else:
+            scripted = type(self).responses.get(prompt, {"final_text": "done"})
         if callable(scripted):
             scripted = scripted()
         if event_sink is not None:
@@ -41,7 +61,15 @@ class _FakeSession:
 def _install_fake(monkeypatch, responses: dict[str, object]):
     _FakeSession.calls = []
     _FakeSession.responses = responses
+    _FakeSession.verification_response = {"final_text": "VERDICT: VERIFIED"}
     monkeypatch.setattr(chat_module, "ChatSession", _FakeSession)
+
+
+def _task_calls() -> list[tuple[str, str | None]]:
+    """``_FakeSession.calls`` minus the independent-verification call every
+    completed task now also makes -- for tests whose own point is task
+    execution/ordering/routing, not verification."""
+    return [c for c in _FakeSession.calls if not c[0].startswith(_VERIFIER_PROMPT_MARKER)]
 
 
 def _runtime(store: GoalStore) -> GoalRuntime:
@@ -75,6 +103,118 @@ class TestSingleTaskGoal:
         assert store.get_goal(goal["id"])["status"] == "BLOCKED"
 
 
+class TestIndependentVerification:
+    """Acceptance test 11 (founding spec): "a task claims completion but
+    the actual artifact/result is invalid; a real verifier catches it."
+    _FakeSession.verification_response defaults to VERIFIED (see its own
+    docstring) so every test in this file NOT about verification keeps its
+    original meaning; these tests override it directly."""
+
+    def test_a_genuinely_verified_task_completes_marked_as_such(self, monkeypatch):
+        _install_fake(monkeypatch, {"do the real thing": {"final_text": "it is done"}})
+        store = GoalStore(None)
+        goal = store.create_goal("A goal")
+        task = store.create_task(goal["id"], "do the real thing")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        result = store.get_task(task["id"])["result"]
+        assert store.get_task(task["id"])["status"] == "COMPLETED"
+        assert result["verified"] is True
+        assert result["note"] == "independently verified"
+
+    def test_a_not_verified_verdict_is_a_real_failure_not_a_silent_success(self, monkeypatch):
+        """The whole point of this feature: a confident-sounding final_text
+        must not reach COMPLETED just because the worker claims success."""
+        _install_fake(monkeypatch, {"claim success with no evidence": {"final_text": "Done! Email sent."}})
+        _FakeSession.verification_response = {
+            "final_text": "The report claims an email was sent, but no tool call shows this "
+                           "happening.\nVERDICT: NOT_VERIFIED",
+        }
+        store = GoalStore(None)
+        goal = store.create_goal("A goal")
+        task = store.create_task(goal["id"], "claim success with no evidence", max_attempts=1)
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        assert store.get_task(task["id"])["status"] == "FAILED"
+        assert "NOT accomplished" in store.get_task(task["id"])["last_error"]
+        assert store.get_goal(goal["id"])["status"] == "BLOCKED"
+
+    def test_a_not_verified_task_retries_before_giving_up_same_as_any_other_failure(self, monkeypatch):
+        _install_fake(monkeypatch, {"retry me": {"final_text": "claimed done"}})
+        _FakeSession.verification_response = {"final_text": "VERDICT: NOT_VERIFIED"}
+        store = GoalStore(None)
+        goal = store.create_goal("A goal")
+        task = store.create_task(goal["id"], "retry me", max_attempts=3)
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        assert store.get_task(task["id"])["status"] == "RETRYING"
+        assert store.get_task(task["id"])["attempt_count"] == 1
+
+    def test_a_broken_verifier_completes_the_real_work_honestly_uncertain(self, monkeypatch):
+        """The verifier failing to run must never destroy or block real,
+        otherwise-successful work -- but the uncertainty is stated
+        plainly, never silently upgraded to "verified"."""
+        _install_fake(monkeypatch, {"do real work": {"final_text": "the real work is done"}})
+        _FakeSession.verification_response = {"raises": "verifier backend unreachable"}
+        store = GoalStore(None)
+        goal = store.create_goal("A goal")
+        task = store.create_task(goal["id"], "do real work")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        result = store.get_task(task["id"])["result"]
+        assert store.get_task(task["id"])["status"] == "COMPLETED"
+        assert result["final_text"] == "the real work is done"
+        assert result["verified"] is False
+        assert "verification could not run" in result["note"]
+
+    def test_verifier_sees_real_tool_evidence_not_just_the_final_claim(self, monkeypatch):
+        """The verifier prompt must carry the real tool-call trace, not
+        just the worker's own final_text -- otherwise it is just asking
+        the same unreliable source to confirm itself in different words."""
+        _install_fake(monkeypatch, {
+            "use a tool": {
+                "final_text": "saved the file",
+                "events": [
+                    {"type": "tool_use", "name": "write_file", "raw_arguments": {"path": "x.txt"}},
+                    {"type": "tool_result", "name": "write_file", "text": "SAVED: x.txt"},
+                ],
+            },
+        })
+        store = GoalStore(None)
+        goal = store.create_goal("A goal")
+        store.create_task(goal["id"], "use a tool")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        verifier_calls = [c for c in _FakeSession.calls if c[0].startswith(_VERIFIER_PROMPT_MARKER)]
+        assert len(verifier_calls) == 1
+        assert "CALLED: write_file" in verifier_calls[0][0]
+        assert "SAVED: x.txt" in verifier_calls[0][0]
+
+    def test_verification_event_is_logged_to_the_real_audit_trail(self, monkeypatch):
+        _install_fake(monkeypatch, {"do it": {"final_text": "done"}})
+        store = GoalStore(None)
+        goal = store.create_goal("A goal")
+        store.create_task(goal["id"], "do it")
+        store.update_goal_status(goal["id"], "EXECUTING")
+
+        _runtime(store).tick()
+
+        events = store.goal_events(goal["id"])
+        verification_events = [e for e in events if e["type"] == "verification"]
+        assert len(verification_events) == 1
+        assert verification_events[0]["detail"]["verified"] is True
+
+
 class TestDependencyOrdering:
     def test_a_dependent_task_only_runs_after_its_dependency_completes(self, monkeypatch):
         _install_fake(monkeypatch, {
@@ -89,11 +229,11 @@ class TestDependencyOrdering:
         runtime = _runtime(store)
 
         runtime.tick()
-        assert [c[0] for c in _FakeSession.calls] == ["first step"]
+        assert [c[0] for c in _task_calls()] == ["first step"]
         assert store.get_goal(goal["id"])["status"] == "EXECUTING"
 
         runtime.tick()
-        assert [c[0] for c in _FakeSession.calls] == ["first step", "second step"]
+        assert [c[0] for c in _task_calls()] == ["first step", "second step"]
         assert store.get_goal(goal["id"])["status"] == "COMPLETED"
 
     def test_independent_branches_both_run_in_the_same_tick(self, monkeypatch):
@@ -106,7 +246,7 @@ class TestDependencyOrdering:
 
         _runtime(store).tick()
 
-        assert {c[0] for c in _FakeSession.calls} == {"branch a", "branch b"}
+        assert {c[0] for c in _task_calls()} == {"branch a", "branch b"}
         assert store.get_goal(goal["id"])["status"] == "COMPLETED"
 
     def test_forced_agent_is_threaded_through_to_the_session(self, monkeypatch):
@@ -118,7 +258,7 @@ class TestDependencyOrdering:
 
         _runtime(store).tick()
 
-        assert _FakeSession.calls == [("pick an agent", "dev_coding")]
+        assert _task_calls() == [("pick an agent", "dev_coding")]
 
 
 class TestFailureAndRecovery:

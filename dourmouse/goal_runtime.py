@@ -16,11 +16,15 @@ does, rather than building a second, parallel tool-execution path.
 Honest, stated v1 scope (the rest is tracked in docs/GODSPEED_ROADMAP.md
 Phase 2, not silently assumed done):
 
-- Verification is "the task's own turn completed without raising and
-  was not declined at an approval gate" — NOT an independent check that
-  the model's claim of success is actually true. A real verifier (a
-  second reasoning pass, or a deterministic check against each task's
-  own success criteria) is real, separate follow-on work.
+- Verification (2026-09-18, see ``_verify_completion``) is a genuine
+  second, independent reasoning pass over a fresh ChatSession with NO
+  tools available -- the model that did the work does not get to grade
+  its own homework. It is shown the real tool-call evidence from the
+  actual run, not just the worker's own final_text. Deliberately NOT a
+  deterministic check against per-task success criteria, since no such
+  criteria field exists on a task yet (the founding spec's own suggested
+  richer task schema) -- that remains real, separate follow-on work; this
+  closes the more urgent half (self-reported vs. independently checked).
 - A REQUIRES_CONFIRMATION tool inside an autonomous task either runs
   (``DOURMOUSE_AUTO_APPROVE=1``) or the task is marked
   WAITING_FOR_APPROVAL with an honest reason and a real notification
@@ -236,13 +240,40 @@ class GoalRuntime:
         if not final_text:
             self._handle_task_failure(goal, task, "the model produced no final response for this task")
             return
+        self._store.update_task_status(task_id, "VERIFYING")
+        verdict = self._verify_completion(goal, task, final_text, report.get("tool_trace") or [])
+        self._store.log_event(
+            goal_id, "verification",
+            {"verified": verdict["verified"], "reasoning": verdict["reasoning"][:2000], "error": verdict["error"]},
+            task_id=task_id,
+        )
+        # Same real, narrow race as the dispatch call itself (finding #016):
+        # the verification call above is a second real LLM round trip, so
+        # cancel_goal() can just as easily land while THIS one is in flight.
+        current_task = self._store.get_task(task_id)
+        if current_task is None or current_task["status"] in TASK_TERMINAL_STATES:
+            return
+        if verdict["error"] is not None:
+            # The verifier itself couldn't run -- the real work is not
+            # thrown away and not blocked forever on a broken checker, but
+            # the uncertainty is stated plainly, never silently upgraded.
+            self._store.update_task_status(
+                task_id, "COMPLETED",
+                result={
+                    "final_text": final_text, "verified": False,
+                    "note": f"verification could not run: {verdict['error']}",
+                },
+            )
+            return
+        if not verdict["verified"]:
+            self._handle_task_failure(
+                goal, task,
+                f"independent verification found this task NOT accomplished: {verdict['reasoning'][:500]}",
+            )
+            return
         self._store.update_task_status(
             task_id, "COMPLETED",
-            result={
-                "final_text": final_text,
-                "verified": False,
-                "note": "self-reported completion; independent verification is a tracked follow-on",
-            },
+            result={"final_text": final_text, "verified": True, "note": "independently verified"},
         )
 
     def _execute_via_dispatch(self, goal: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
@@ -254,15 +285,22 @@ class GoalRuntime:
             confirmation_gate=_autonomous_confirmation_gate,
         )
         blocked_reason: list[str] = []
+        #: Real evidence of what actually happened, handed to the
+        #: independent verifier below -- NOT reconstructed from the
+        #: model's own final_text, which is exactly the thing being
+        #: checked. One line per real tool call/result pair, kept short.
+        tool_trace: list[str] = []
 
         def sink(entry: dict[str, Any]) -> None:
             etype = entry.get("type")
             if etype in ("tool_use", "function"):
+                name = entry.get("name")
                 self._store.log_event(
                     goal["id"], "tool_call",
-                    {"name": entry.get("name"), "arguments": entry.get("raw_arguments") or entry.get("arguments")},
+                    {"name": name, "arguments": entry.get("raw_arguments") or entry.get("arguments")},
                     task_id=task["id"],
                 )
+                tool_trace.append(f"CALLED: {name}")
             elif etype in ("tool_result", "function_result"):
                 text = str(entry.get("text") or "")
                 self._store.log_event(
@@ -272,6 +310,7 @@ class GoalRuntime:
                 )
                 if text.startswith("DECLINED BY USER:"):
                     blocked_reason.append(f"a gated action needs approval: {text}")
+                tool_trace.append(f"RESULT ({entry.get('name')}): {text[:300]}")
 
         report = session.ask(
             task["description"],
@@ -280,7 +319,70 @@ class GoalRuntime:
             force_plain_dispatch=True,
         )
         report["blocked_reason"] = blocked_reason[0] if blocked_reason else None
+        report["tool_trace"] = tool_trace
         return report
+
+    def _verify_completion(
+        self, goal: dict[str, Any], task: dict[str, Any], final_text: str, tool_trace: list[str],
+    ) -> dict[str, Any]:
+        """Acceptance test 11 (founding spec): "a task claims completion but
+        the actual artifact/result is invalid; a real verifier catches it."
+        Self-reporting was the honestly-tracked v1 gap (see this module's
+        own former docstring) -- the model that did the work is not a
+        credible judge of whether it actually worked.
+
+        A second, genuinely independent reasoning pass: a FRESH ChatSession
+        over an EMPTY DispatchRegistry (no tools at all, so this call
+        cannot itself take any action, gated or not -- it can only judge),
+        shown the real tool-call evidence collected during the real run
+        (never the model's own final_text alone, which is exactly the
+        thing being checked), asked for a strict, skeptical verdict.
+
+        Honest on every failure mode: a genuine NOT_VERIFIED verdict is
+        treated as a real task failure (routed through the normal retry
+        path, same as any other failure) -- never silently downgraded to
+        a warning. If the verifier itself cannot run (network error, no
+        backend available), the real work is NOT thrown away and NOT
+        blocked forever on a broken checker -- it completes, but with the
+        uncertainty stated plainly in the result, never quietly upgraded
+        to "verified".
+        """
+        from dourmouse.chat import ChatSession
+        from dourmouse.dispatch import DispatchRegistry
+
+        evidence = "\n".join(tool_trace) if tool_trace else "(no tool calls were made during this run)"
+        prompt = (
+            "You are a strict, skeptical verifier reviewing another agent's work. "
+            "You did not do this work yourself -- judge only the evidence below.\n\n"
+            f"TASK: {task['description']}\n\n"
+            f"THE AGENT'S OWN FINAL REPORT:\n{final_text}\n\n"
+            f"REAL TOOL-CALL EVIDENCE FROM THE ACTUAL RUN:\n{evidence}\n\n"
+            "Did the agent's REAL actions (the tool-call evidence, not just its own claim) "
+            "genuinely accomplish this task? If the task required an external action "
+            "(sending, creating, saving, deleting, posting) and the evidence shows no real "
+            "tool call that did that, say so explicitly -- a confident-sounding report with no "
+            "supporting evidence is NOT verified. End your answer with exactly one line, "
+            "verbatim: 'VERDICT: VERIFIED' or 'VERDICT: NOT_VERIFIED'."
+        )
+        try:
+            session = ChatSession(DispatchRegistry(), session_file=None)
+            result = session.ask(prompt, force_plain_dispatch=True)
+            reasoning = (result.get("final_text") or "").strip()
+        except Exception as exc:  # noqa: BLE001 - a broken verifier must never destroy real completed work
+            return {"verified": False, "reasoning": "", "error": f"{type(exc).__name__}: {exc}"}
+        # NOT_VERIFIED must win a substring collision against VERIFIED (a
+        # reasoning paragraph can say "this was not verified" before the
+        # instructed final line) -- check for the negative phrase first.
+        # Fail-safe default: an unclear or missing verdict is NOT treated
+        # as verified (Rule 2.2 -- honest by default, never optimistic).
+        normalized = reasoning.upper()
+        if "NOT_VERIFIED" in normalized or "NOT VERIFIED" in normalized:
+            verified = False
+        elif "VERDICT: VERIFIED" in normalized:
+            verified = True
+        else:
+            verified = False
+        return {"verified": verified, "reasoning": reasoning, "error": None}
 
     def _handle_task_failure(self, goal: dict[str, Any], task: dict[str, Any], error: str) -> None:
         goal_id, task_id = goal["id"], task["id"]

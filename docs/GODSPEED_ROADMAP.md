@@ -214,10 +214,18 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       mid-task, resumes without duplicating side effects) genuinely drilled 2026-09-18: real
       `kill -9` against the real dev-preview server mid-dispatch, restarted, real automatic
       recovery confirmed from the live event log (`recovery_attempted` → `RETRYING` → successful
-      retry with a correct real answer) — see `docs/ENGINEERING_AUDIT.md` finding #024. Test 11
-      (independent verification, not self-reported) is the largest remaining real gap in this
-      whole domain now that tests 8 and default-on autonomy (finding #023) are closed. See
-      `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain B for the full per-test status.
+      retry with a correct real answer) — see `docs/ENGINEERING_AUDIT.md` finding #024.
+- [x] Test 11 (independent verification, not self-reported): a genuine second reasoning pass over
+      a tool-less `ChatSession`, shown the real tool-call evidence from the actual run, a real
+      `NOT_VERIFIED` verdict routed through the normal failure/retry path exactly like any other
+      failure. `TASK_STATES`' own `VERIFYING` state, defined since this module's first version and
+      never once used, now real — live-verified end to end against the real dev-preview server
+      (`RUNNING` → `VERIFYING` → `COMPLETED`, a real independently-reasoned verdict logged to the
+      real audit trail). Real, deliberate cost tradeoff: every task now makes two real dispatch
+      calls, not one. See `docs/ENGINEERING_AUDIT.md` finding #025. Remaining: a deterministic
+      check against explicit, structured per-task success criteria (no such schema field exists
+      yet) is real, separate follow-on — the reasoning-pass verifier closes the more urgent half.
+      See `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain B for the full per-test status.
 
 ## Phase 3 — UI/UX redesign (Claude Desktop / Claude Code interaction quality)
 

@@ -811,6 +811,60 @@ kill mid-flight, which is closer in spirit to `test_goal_runtime.py`'s own exist
 `_recover_orphaned_tasks` unit-level coverage, already present, than to a new integration test).
 **Result**: verified — acceptance test 8 closed for real, not assumed.
 
+### 025 — Real independent verification (acceptance test 11), not self-reported
+
+**Severity**: n/a (feature completion, the largest remaining named gap in Domain B — see
+`docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`).
+**Context**: `goal_runtime.py`'s own module docstring had named this as honestly-tracked v1
+scope since it was first written: "Verification is 'the task's own turn completed without
+raising' — NOT an independent check that the model's claim of success is actually true." With
+tests 8 and default-on autonomy (findings #023/#024) closed, this became the clear next-highest
+item.
+**Design**: a genuine second, independent reasoning pass — a fresh `ChatSession` over an EMPTY
+`DispatchRegistry` (no tools available at all, so the verifier cannot itself take any action,
+gated or not; it can only judge), shown the REAL tool-call evidence collected during the actual
+run (never the worker's own `final_text` alone, which is exactly the thing being checked — the
+model that did the work does not get to grade its own homework). A genuine `NOT_VERIFIED`
+verdict is routed through the normal failure/retry path, same as any other failure. If the
+verifier itself cannot run, the real work is not thrown away and not blocked forever on a broken
+checker, but the uncertainty is stated plainly in the result (`"verification could not run: ..."`
+), never silently upgraded to verified. `TASK_STATES` already had a `VERIFYING` state defined
+since this module's very first version — never once used until now, confirming this was designed
+for from the start and simply never wired in.
+**A real cost tradeoff, stated honestly, not hidden**: every task now makes two real dispatch
+calls instead of one (the work, then the verification), roughly doubling per-task latency and
+API cost. Deliberate: the founding spec is explicit that a confident-sounding fabricated success
+is a worse failure mode than a slower, more expensive honest one, and this codebase's own Rule
+2.2 agrees throughout.
+**A real test-infrastructure problem caught before it silently broke the suite**: the existing
+`_FakeSession` test double (`test_goal_runtime.py`) replaces `chat_module.ChatSession` globally —
+since `_verify_completion` constructs its own `ChatSession` over that exact same reference, every
+existing test in the file would have also exercised the fake verifier call, and its old default
+unscripted response (`{"final_text": "done"}`) contains no verdict at all, which my own parsing
+correctly treats as fail-safe `NOT_VERIFIED` — meaning literally every pre-existing test expecting
+a task to reach `COMPLETED` would have started failing. Fixed by giving `_FakeSession` a
+dedicated, separately-overridable `verification_response` (defaulting to a clean `VERIFIED`, so
+every test written before this feature existed keeps its original, unrelated meaning) recognized
+by a distinctive prompt-header marker, and by fixing 3 existing tests that asserted on the raw
+call list (now containing the verification call too) to filter to task-only calls via a new
+`_task_calls()` helper.
+**Live proof, not just passing tests**: against the real, unmodified dev-preview server, a real
+goal was created and watched end to end. The task genuinely passed through `RUNNING` →
+`VERIFYING` (that dormant state, used for real for the first time) → `COMPLETED`, with a real,
+independently-reasoned verdict logged to the real audit trail: *"The agent produced the word
+'banana' in its output, which meets the task requirement. No external action was required, and
+the evidence shows no tool call was made — all consistent with the task. VERDICT: VERIFIED."*
+**Files changed**: `dourmouse/goal_runtime.py`, `dourmouse/tests/test_goal_runtime.py`.
+**Tests added**: `TestIndependentVerification` (6 tests) — a genuinely verified task marked as
+such; a `NOT_VERIFIED` verdict treated as a real failure, not a silent success; a `NOT_VERIFIED`
+task retrying through the normal failure path; a broken verifier completing the real work
+honestly-uncertain rather than destroying it; the verifier prompt carrying real tool evidence,
+not just the worker's own claim; a real `verification` event logged to the audit trail. Plus 3
+existing tests fixed to account for the new call.
+**Tests run**: `test_goal_runtime.py` (24/24), then full suite. Live-verified against the real
+dev-preview server as described above.
+**Result**: fixed — acceptance test 11 closed.
+
 ---
 
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)

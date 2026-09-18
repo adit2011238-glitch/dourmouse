@@ -167,12 +167,17 @@ not-yet-done work. Test 8 (crash mid-task, resumes from durable state, no duplic
 effects) **verified live** (finding #024): a real `kill -9` mid-dispatch against the real
 dev-preview server, restarted, real automatic recovery (`recovery_attempted` event, RETRYING,
 successful retry, correct real answer) — not assumed from unit tests. Test 11 (a task claims
-completion but the artifact is invalid; a real verifier catches it) is the one big remaining gap:
-verification is still self-reported ("the task's own turn completed without raising"), not an
-independent check against each task's own success criteria — real, separate, not-yet-done work,
-and arguably the single most important remaining item in this whole domain now that tests 8 and
-the runtime's default-on status (finding #023) are closed. Test 15 (inspect what the agent
-actually did) is real at the data and API level — `goal_events`/`all_events`/
+completion but the artifact is invalid; a real verifier catches it) **closed** (finding #025): a
+genuine second, independent reasoning pass over a tool-less `ChatSession`, shown the real
+tool-call evidence from the actual run rather than the worker's own claim, with a real
+`NOT_VERIFIED` verdict routed through the normal failure/retry path. Live-verified: a real task
+passed through `RUNNING` → `VERIFYING` → `COMPLETED` with a real, independently-reasoned verdict
+logged to the real audit trail. A real, deliberate cost tradeoff: every task now makes two real
+dispatch calls instead of one. Not yet built: a deterministic check against explicit, structured
+per-task success criteria (no such schema field exists on a task yet) — the reasoning-pass
+verifier closes the more urgent half; a richer criteria-based check remains real, separate,
+not-yet-done follow-on work, now the largest remaining item in this domain. Test 15 (inspect what
+the agent actually did) is real at the data and API level — `goal_events`/`all_events`/
 `export_events_markdown` + `GET /api/audit` (finding #022) — but still not closed end to end: no
 UI surface exists yet, so a real user still cannot see this without calling the API directly.
 Backend done, UI tracked as Phase 3 follow-on.
