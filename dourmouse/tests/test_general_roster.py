@@ -287,6 +287,13 @@ class TestRosterShape:
                          # write/execute/deploy tool anywhere on this
                          # subagent, the genuinely write-free toolset
                          # finding #038 said did not yet exist.
+            "evidence_pipeline",  # 2026-09-20: Domain G's chat-reachable
+                                   # wiring over research_pipeline/'s own
+                                   # stage functions -- named "evidence_
+                                   # pipeline", not "research_*", after a
+                                   # real live collision: "deep_research"
+                                   # word-matched "research" and stole
+                                   # research_info's own routing.
         }
 
     def test_orchestrator_exposes_delegate_task(self):

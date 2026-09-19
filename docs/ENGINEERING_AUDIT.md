@@ -2189,6 +2189,65 @@ separate, not-yet-built pieces of Domain G's own core loop.
 
 ---
 
+### 050 -- Domain G: chat reachability, closed
+
+**Severity**: n/a (feature -- the last named gap in Domain G's own core loop besides the multi-
+source orchestration loop and 3-device distribution).
+**Context**: named explicitly in this session's own standing status report to the user: every prior
+Domain G stage function (findings #042-#049) was only reachable by writing a short Python script --
+there was no subagent, so a user could never actually ask Dourmouse to research something.
+**Design**: `dourmouse/research_pipeline_tools.py`, mirroring `research_mesh_tools.py`'s own shape
+(one dedicated module, one `build_research_pipeline_subagent(registry)` factory). Six real tools
+(`research_plan`, `research_discover_sources`, `research_extract_evidence`, `research_detect_
+contradictions`, `research_synthesize`, `research_status`), each a thin, honest wrapper over an
+already-tested stage function: loads a `ResearchRecord` from the real `ResearchStore` (finding
+#047's `DEFAULT_DB`) keyed by the exact question text, calls the real stage, persists the result,
+reports a real error string on a caught `ValueError`/`IndexError` rather than crashing the tool
+call. No new call path -- the stage functions themselves are completely unchanged. Named limitation
+(not hidden): each call runs one real stage synchronously (a few seconds to tens of seconds for a
+real web fetch and model call) -- no background/goal-runtime integration yet, the same already-
+documented limitation `research_mesh_qualify` carries. The caller drives the multi-stage loop turn
+by turn.
+**A real bug caught immediately, before any test ran**: the first draft named the subagent
+`deep_research`. `find_agents_for_query`'s deterministic router gives a `+3` bonus for a query token
+matching an agent's own NAME stem, and `deep_research`'s stems include `"research"` -- exactly the
+word this codebase's own routing tests deliberately use to mean "route to `research_info`" (a
+comment in `test_planner.py` explains this was chosen specifically as "a real word match, not a
+substring accident" after a prior `"search"`/`"research_info"` substring incident). Adding
+`deep_research` reintroduced the identical class of collision one level up: three existing,
+unrelated `test_planner.py` tests broke, all routing a genuine "Research X online..." query to the
+new agent instead of `research_info`. Fixed by renaming to `evidence_pipeline` (stems `"evidence"`,
+`"pipeline"`, confirmed to collide with nothing) -- no scorer change needed, the same resolution
+finding #048 already used for a name-collision one domain over.
+**A second real bug, caught by live verification, not a unit test**: a plain-prose dispatch call
+("Use the evidence_pipeline agent: call research_plan with...", no `forced_agent`) reported "I do
+not have access to any tools in this turn" -- natural-language auto-routing to the brand-new
+subagent is not yet confirmed working, a real, separate, not-yet-investigated gap named honestly
+here rather than papered over. The SAME call with an explicit `forced_agent="evidence_pipeline"`
+(the mechanism `delegate_task`/`delegate_parallel` already use, and the one a caller can always use
+directly) worked correctly -- see the live proof below.
+**Live proof**: a real dispatch call forced onto `evidence_pipeline` (routing temporarily forced
+local in-process for this one verification run, after two consecutive genuine Gemini outages --
+HTTP 503 "high demand" and a `MALFORMED_FUNCTION_CALL` response, unrelated to this code, confirmed
+by the fact `"default"` JSON-schema keys are already used in 68 other tool schemas across this
+codebase with no issue) correctly called `research_plan` (5 real sub-questions produced) then
+`research_status` (accurately reported `stage=PLANNED`, `plan: 5 real sub-question(s)`, `sources: 0`)
+-- a real, working, end-to-end chat-reachable pipeline, not just isolated stage-function tests.
+**Files changed**: new `dourmouse/research_pipeline_tools.py`; `dourmouse/general_roster.py`
+(import + registration); `dourmouse/model_delegation.py` (`_CLOUD_OK_AGENTS`).
+**Tests added**: new `dourmouse/tests/test_research_pipeline_tools.py` (12 tests covering every
+tool's happy path, its required-precondition error, and the subagent's own tool roster), plus the
+three exhaustive real-subagent-name assertions updated together as this codebase's own convention
+requires.
+**Tests run**: `test_research_pipeline_tools.py` (12/12), `test_general_roster.py` +
+`test_model_delegation.py` + `test_dispatch.py` + `test_planner.py` (413/413).
+**Result**: fixed -- Domain G is now chat-reachable end to end. The multi-source/multi-sub-question
+orchestration loop, natural-language auto-routing to `evidence_pipeline` (named above, not yet
+investigated), and the 3-device distribution remain Domain G's last real, separate, not-yet-built
+pieces.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

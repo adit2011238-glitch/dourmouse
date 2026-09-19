@@ -646,6 +646,20 @@ and a real build sequence, not just a requirement statement:
       live: the same seeded contradiction now correctly detected with a
       real note; a real compatible-claims control case correctly found
       none. See `docs/ENGINEERING_AUDIT.md` finding #049.
+- [x] Domain G, chat reachability closed 2026-09-20 -- a new `evidence_
+      pipeline` subagent (`research_pipeline_tools.py`), six real tools
+      wrapping every already-tested stage function. Real bug caught before
+      any test ran: the first-draft name `deep_research` word-matched
+      "research" and stole `research_info`'s own routing on 3 existing
+      `test_planner.py` tests -- renamed `evidence_pipeline`, no scorer
+      change needed. Real, separate gap named honestly: plain-prose
+      auto-routing to the new agent isn't yet confirmed working;
+      `forced_agent="evidence_pipeline"` does. Live-verified end to end:
+      `research_plan` produced 5 real sub-questions, `research_status`
+      accurately reported the real persisted state, through a real
+      dispatch call (Gemini was genuinely down twice during verification,
+      unrelated to this code -- isolated by forcing local routing for the
+      one proof run). See `docs/ENGINEERING_AUDIT.md` finding #050.
 - [x] Domain H, piece 1/7 (project-instruction file, `DOURMOUSE.md`) -- shipped
       2026-09-19. `dourmouse/project_instructions.py` reads the workspace's
       own `DOURMOUSE.md`, spliced into `dispatch.py`'s shared

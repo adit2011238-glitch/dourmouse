@@ -2084,6 +2084,9 @@ class TestEndToEndThroughGeneralRoster:
                          # read_file/search_files/diff_preview only, the
                          # genuinely write-free toolset finding #038 said
                          # did not yet exist.
+            "evidence_pipeline",  # 2026-09-20: Domain G's chat-reachable
+                                   # wiring over research_pipeline/'s own
+                                   # stage functions.
         }
 
     def test_trading_subagent_added_later_dispatchable(self):

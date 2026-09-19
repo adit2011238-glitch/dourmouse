@@ -449,9 +449,15 @@ answered). Live-caught bug: the first live run against a seeded contradiction fo
 model correctly said "yes" but skipped the exact "NOTE:" label the prompt asked for, and the strict
 parser discarded a correct verdict over the formatting miss; fixed with a lenient parser requiring
 only the verdict marker. Re-verified live: the same seeded contradiction correctly detected with a
-real note, and a real compatible-claims control case correctly found none. The multi-source/
-multi-sub-question orchestration loop, chat reachability, and the 3-device distribution are still
-open, real, separate pieces of the same workstream.
+real note, and a real compatible-claims control case correctly found none. **Chat reachability
+closed 2026-09-20** (finding #050): a new `evidence_pipeline` subagent (`research_pipeline_tools.py`)
+wraps every stage function as a real tool. Real bug caught before any test ran: the first-draft name
+`deep_research` word-matched "research" and stole `research_info`'s own routing -- renamed
+`evidence_pipeline`. Live-verified end to end through a real dispatch call: `research_plan` produced
+5 real sub-questions, `research_status` accurately reported the real persisted state. Real, separate
+gap named honestly: plain-prose auto-routing to the new agent is not yet confirmed working (an
+explicit `forced_agent` is). The multi-source/multi-sub-question orchestration loop and the 3-device
+distribution are still open, real, separate pieces of the same workstream.
 **Real infrastructure check, 2026-09-19**: the Dell compute node is `enabled` but NOT `configured`
 in this dev environment (`remote_server.server_url_configured()` is `False`) and a live
 `server_available(force=True)` check returned `False` -- honestly offline or unreachable from here
@@ -515,13 +521,14 @@ time rather than invented fresh. Concretely:
    the record forever, the same terminal-but-visible pattern `research_mesh`'s own `NOT_QUALIFIED`
    and `goal_runtime.py`'s own `BLOCKED` already establish in this codebase -- do not `DELETE` a row,
    ever.
-5. Chat reachability: `dourmouse/research_pipeline_tools.py` (the now-three-times-proven dedicated-
-   module-plus-`build_X_subagent()`-factory shape), a `research` subagent (name TBD to avoid
-   colliding with the existing `research_info`/`rnd` names -- check `general_roster.py`'s real
-   roster before picking one).
-6. Live proof: a real multi-source question with a genuine contradiction seeded in (two real pages
-   that actually disagree), confirming the record surfaces both sides rather than picking a winner
-   silently. Device distribution (Domain G's other half) layers on AFTER this single-device version
+5. **Shipped (finding #050)**: chat reachability, `dourmouse/research_pipeline_tools.py` (the
+   dedicated-module-plus-`build_X_subagent()`-factory shape, now used a fourth time), an
+   `evidence_pipeline` subagent -- named after a real live collision with `research_info`'s own
+   routing ruled out `deep_research` and every other `research_*`-stemmed name.
+6. **Shipped (finding #049)**: contradiction detection. Live proof: a real seeded contradiction (two
+   different completion years for the Eiffel Tower) was correctly detected with a real note; a real
+   compatible-claims control case correctly found none. Device distribution (Domain G's other half)
+   layers on AFTER this single-device version
    is real and tested, by making stage 2's extraction calls dispatchable to the Dell node via the
    already-real `generate_with_fallback`, once that node is confirmed reachable.
 

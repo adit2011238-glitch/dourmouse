@@ -127,6 +127,10 @@ _CLOUD_OK_AGENTS = frozenset({
     "globe",
     "rnd",
     "music",
+    # 2026-09-20: real public-web research (Domain G's chat-reachable
+    # wiring) -- the same class of work research_info/rnd already do,
+    # reached through the same forced_agent mechanism.
+    "evidence_pipeline",
     # 2026-09-14: real image generation (generate_image, image_gen.py).
     # The tool itself always calls Gemini's cloud API regardless of this
     # setting (there is no local image-gen backend at all) -- this only
