@@ -4142,6 +4142,22 @@ _COMPLETE_ANSWER_TOOLS = {
 }
 
 
+def _first_nonempty_str(d: dict[str, Any], *keys: str) -> str:
+    """First non-empty string found under any of `keys` in `d`.
+
+    Same alias-tolerant lookup as general_roster._target_agent_name
+    (duplicated, not imported: general_roster imports FROM this module, so
+    the reverse import would be circular) — delegate_task names its target
+    argument 'subagent', delegate_parallel's branches use 'agent_or_task',
+    and a model reaches for either name on either tool.
+    """
+    for key in keys:
+        value = str(d.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _run_dispatch_loop(
     messages: list[dict[str, Any]],
     registry: DispatchRegistry,
@@ -4511,12 +4527,52 @@ def _run_dispatch_loop(
         # re-searching instead of moving to the write step). Inject ONE
         # deterministic reminder listing the unexecuted steps so the run does
         # not end half-finished. Bounded: at most _MAX_PLAN_REMINDERS per run.
+        def _delegated_targets() -> set[str]:
+            """Subagent names reached this run via delegate_task/
+            delegate_parallel. A step done THROUGH delegation never shows
+            its own tool's name in `transcript` — only "delegate_task" or
+            "delegate_parallel" does, owned by "orchestrator" — so
+            `tool_owner` lookups alone can never attribute it to the real
+            target subagent. Real bug this fixes: a plan step handed off
+            via delegate_task genuinely completes, but the checkpoint
+            below still saw it as untouched and re-nagged the model (or
+            the exit-path caveat claimed it was "not executed via tools")
+            purely because the ownership check only recognized a DIRECT
+            tool call, never a delegated one.
+            """
+            targets: set[str] = set()
+            for e in transcript:
+                if e.get("type") != "tool_use":
+                    continue
+                try:
+                    args = json.loads(e.get("raw_arguments") or "{}")
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(args, dict):
+                    continue
+                name = e.get("name")
+                if name == "delegate_task":
+                    target = _first_nonempty_str(args, "subagent", "agent", "agent_or_task")
+                    if target:
+                        targets.add(target)
+                elif name == "delegate_parallel":
+                    for branch in args.get("branches") or []:
+                        if isinstance(branch, dict):
+                            target = _first_nonempty_str(
+                                branch, "agent_or_task", "agent", "subagent"
+                            )
+                            if target:
+                                targets.add(target)
+            return targets
+
         def _missing_plan_steps() -> list[dict[str, Any]]:
             used_tools = {e["name"] for e in transcript if e.get("type") == "tool_use"}
+            delegated = _delegated_targets()
             touched_steps = {
                 s["n"]
                 for s in plan
                 if any(tool_owner.get(u) == s["subagent"] for u in used_tools)
+                or s["subagent"] in delegated
             }
             return [s for s in plan if s["n"] not in touched_steps]
 

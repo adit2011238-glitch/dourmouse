@@ -2267,6 +2267,47 @@ class TestPlanCheckpoint:
         assert "Saved to /Users/me" not in report["final_text"]
         assert report["final_text"].startswith("The file is written and verified.")
 
+    def test_step_completed_via_delegate_task_gets_no_reminder(self):
+        """Real bug: a plan step satisfied through delegate_task (rather
+        than a direct call to the step's own tool) used to look untouched
+        to the checkpoint. tool_owner only recognizes a tool call BY THAT
+        NAME, and the only transcript entry a delegated step leaves at this
+        level is named "delegate_task", owned by "orchestrator" -- never
+        the step's real subagent. _delegated_targets (dispatch.py) now also
+        credits delegate_task's own 'subagent' argument."""
+        from dourmouse.general_roster import _build_delegate_tool
+
+        r = self._two_agent_registry()
+        delegate_tool = _build_delegate_tool(r)
+        r.register_subagent(
+            Subagent(
+                name="orchestrator", domain="Both", description="lead",
+                tools=(delegate_tool,),
+            )
+        )
+        client = FakeClient([
+            self._tool("ping_a", "x"),  # step 1, direct
+            _FakeResponse(  # step 2, via delegate_task instead of a direct ping_b call
+                _FakeMessage(
+                    tool_calls=[
+                        _FakeToolCall(
+                            "d1",
+                            "delegate_task",
+                            json.dumps({"subagent": "agent_b", "task": "ping_b it"}),
+                        )
+                    ]
+                )
+            ),
+            self._tool("ping_b", "w"),  # the nested run's own real tool call
+            _FakeResponse(_FakeMessage(content="ping_b done for real")),  # nested run's final text
+            _FakeResponse(_FakeMessage(content="both steps done")),  # top run's final text
+        ])
+        report = run_dispatch("ping_a now then ping_b later", r, client=client)
+        reminders = [e for e in report["transcript"] if e["type"] == "plan_reminder"]
+        assert reminders == [], f"step 2 was delegated, not skipped: {reminders}"
+        assert "not executed" not in report["final_text"].lower()
+        assert report["final_text"] == "both steps done"
+
 
 # --------------------------------------------------------------------------- #
 # v13.2 (live-caught, real bug — user report: "the model easily loses the
