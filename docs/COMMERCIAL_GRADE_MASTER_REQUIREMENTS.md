@@ -357,8 +357,11 @@ has actually ended before writing a single file here, not just before the live-p
 and surfaced a real reliability gap in the pre-existing `delegate_parallel` fan-out tool, now
 fixed and live-verified (`docs/ENGINEERING_AUDIT.md` finding #032) -- a branch that only ran out
 of its own turn budget was reported `OK`, indistinguishable from a branch that actually finished.
-Domain F is not yet closed: the named-specialist-role extension below remains real, separate,
-not-yet-done follow-on work.
+Named specialist roles have since shipped too -- `researcher`/`coder`/`tester`/`security_sentry`,
+live-verified routing to real subagents with zero explicit routing from the model (finding #038).
+Domain F is still not fully closed: `reviewer` was deliberately deferred (no currently-registered
+subagent has a genuinely write-free toolset that fits it -- see finding #038's own reasoning),
+real, separate, not-yet-done follow-on.
 
 Already substantially real (`general_roster.py`'s subagent registry, `model_delegation.py`'s
 routing policy, `TestFanOut`'s concurrent-execution tests). Extend per the Hermes/Claude-Code

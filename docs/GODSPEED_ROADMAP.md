@@ -541,9 +541,21 @@ and a real build sequence, not just a requirement statement:
       `ps aux | grep -i "claude.*Documents/dourmouse"` before writing a
       single file, not just before the live-proof step. See §7's own Build
       plan.
-- [ ] Domain F remainder (named specialist roles) -- a `role` table on
-      `delegate_parallel` branches, not a second roster system. See §8's
-      own Build plan.
+- [x] Domain F remainder (named specialist roles) -- shipped 2026-09-19.
+      `general_roster.py`'s `_DELEGATE_ROLE_PRESETS`: `researcher`, `coder`,
+      `tester`, `security_sentry` each map to a real, already-registered
+      subagent (no second roster system, no new tool-allowlist layer -- a
+      role routed to one real subagent already only sees that subagent's
+      own fixed toolset). `reviewer` deliberately deferred: no
+      currently-registered subagent has a genuinely write-free toolset that
+      fits reviewing arbitrary code, and a stern prompt on a write-capable
+      one would not be an enforced restriction -- named as real, separate
+      follow-on (register a real, narrow, read-only subagent first), not
+      silently dropped. Live-verified with a real model: a real 2-branch
+      fan-out with no explicit `agent_or_task` on either branch correctly
+      resolved `researcher` -> `research_info` and `security_sentry` ->
+      `security`, the latter returning genuinely real host/network
+      telemetry. See `docs/ENGINEERING_AUDIT.md` finding #038.
 - [ ] Domain G (structured research pipeline + 3-device network) --
       single-device pipeline first, device distribution layered on once
       the Dell node is confirmed reachable (it was NOT, live-checked

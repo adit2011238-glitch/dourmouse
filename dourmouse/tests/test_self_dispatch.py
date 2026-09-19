@@ -915,6 +915,83 @@ class TestDelegateParallelTool:
         assert "best effort from the branch" in result["text"]  # the real partial text is never discarded
 
 
+class TestDelegateParallelNamedRoles:
+    """Domain F named-specialist-role extension (general_roster.py's
+    _DELEGATE_ROLE_PRESETS): a role adds a persona prefix and, only when
+    agent_or_task is omitted, picks a real default subagent for it -- never
+    a new tool-allowlist layer (see the module-level comment on
+    _DELEGATE_ROLE_PRESETS for why: no such mechanism exists in this
+    codebase, checked directly before this was designed)."""
+
+    def test_role_with_no_agent_defaults_to_the_presets_real_subagent(self, registry, jobs):
+        tool_call = _delegate_parallel_call(
+            "c1", [{"role": "researcher", "instructions": "find real sources on X"}]
+        )
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="researched")),  # the branch's own turn
+            _FakeResponse(_FakeMessage(content="parent done")),
+        ])
+        run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+        job = jobs.snapshot()[0]
+        assert job["subagent"] == "research_info"
+        assert "acting as a RESEARCHER" in job["task"]
+        assert "find real sources on X" in job["task"]
+
+    def test_explicit_agent_always_wins_over_the_roles_default(self, registry, jobs):
+        """A role is a helpful default, never a silent override of what the
+        caller explicitly asked for."""
+        tool_call = _delegate_parallel_call(
+            "c1",
+            [{"role": "researcher", "agent_or_task": "security", "instructions": "check the LAN"}],
+        )
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="checked")),
+            _FakeResponse(_FakeMessage(content="parent done")),
+        ])
+        run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+        job = jobs.snapshot()[0]
+        assert job["subagent"] == "security"  # explicit agent, NOT the researcher preset's default
+        assert "acting as a RESEARCHER" in job["task"]  # persona still applied
+
+    def test_unknown_role_errors_listing_known_roles(self, registry, jobs):
+        tool_call = _delegate_parallel_call(
+            "c1", [{"role": "wizard", "instructions": "cast a spell"}]
+        )
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="ok")),
+        ])
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "unknown role 'wizard'" in result["text"]
+        assert "researcher" in result["text"] and "security_sentry" in result["text"]
+        assert jobs.count() == 0
+
+    def test_no_role_is_unchanged_plain_behavior(self, registry, jobs):
+        tool_call = _delegate_parallel_call(
+            "c1", [{"agent_or_task": "echo_agent", "instructions": "just echo"}]
+        )
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="echoed")),
+            _FakeResponse(_FakeMessage(content="parent done")),
+        ])
+        run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+        job = jobs.snapshot()[0]
+        assert job["task"] == "just echo"  # byte-identical, no persona prefix leaked in
+        assert job["subagent"] == "echo_agent"
+
+
 class TestDelegateParallelConcurrency:
     """Real concurrency: several nested runs genuinely in flight at once,
     tagged with their own agent + model, aggregated coherently."""

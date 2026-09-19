@@ -2696,6 +2696,58 @@ def _safe_emit(sink: Callable[[dict[str, Any]], None] | None, entry: dict[str, A
         pass
 
 
+#: Domain F named-specialist-role extension. A "role" is a persona prefix
+#: plus a real, already-registered subagent to default to -- NOT a new
+#: tool-allowlist enforcement layer (checked directly in
+#: self_extensions.py before designing this: agent_smith's own "scoped
+#: permissions" force ONE newly-drafted tool to REQUIRES_CONFIRMATION, a
+#: different mechanism entirely; no reusable per-branch allowlist exists
+#: in this codebase). The real restriction comes from
+#: _build_delegate_parallel_tool's own pre-existing "forced_agent ROUTING
+#: DIRECTIVE" behavior below: a branch routed to one real subagent already
+#: only ever sees that subagent's own fixed toolset. "reviewer" is
+#: deliberately NOT in this table yet -- no currently-registered subagent
+#: has a genuinely write-free toolset that also fits reviewing arbitrary
+#: code/text, and pointing it at dev_coding (which can write files) would
+#: be a prompt-level request, not an enforced restriction; claiming
+#: otherwise here would be exactly the kind of overclaim this codebase's
+#: own audit discipline exists to catch. Real, separate follow-on: design
+#: and register a real, narrow, read-only subagent first.
+_DELEGATE_ROLE_PRESETS: dict[str, dict[str, str]] = {
+    "researcher": {
+        "prefix": (
+            "You are acting as a RESEARCHER on a multi-specialist team. "
+            "Find and report real facts with real sources; never guess."
+        ),
+        "default_agent": "research_info",
+    },
+    "coder": {
+        "prefix": (
+            "You are acting as a CODER on a multi-specialist team. "
+            "Write and run real code for the task given; report exactly "
+            "what you wrote and what running it actually produced."
+        ),
+        "default_agent": "dev_coding",
+    },
+    "tester": {
+        "prefix": (
+            "You are acting as a TESTER on a multi-specialist team. "
+            "Write and run real tests against the real code/behavior "
+            "described; report real pass/fail results, never assumed ones."
+        ),
+        "default_agent": "dev_coding",
+    },
+    "security_sentry": {
+        "prefix": (
+            "You are acting as a SECURITY SENTRY on a multi-specialist "
+            "team. Check real, current host/network state; report exactly "
+            "what you found, never a generic or assumed answer."
+        ),
+        "default_agent": "security",
+    },
+}
+
+
 def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
     """The orchestrator's fan-out tool: run SEVERAL nested dispatch runs at
     once instead of delegate_task's one-at-a-time self-dispatch.
@@ -2783,6 +2835,18 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
             if not instructions:
                 return f"ERROR: branch {i} is missing a non-empty 'instructions'."
             target = _target_agent_name(item, "agent_or_task", "agent", "subagent")
+            role = str(item.get("role") or "").strip().lower()
+            if role:
+                preset = _DELEGATE_ROLE_PRESETS.get(role)
+                if preset is None:
+                    return (
+                        f"ERROR: branch {i} names unknown role {role!r}. Known: "
+                        f"{', '.join(sorted(_DELEGATE_ROLE_PRESETS))}."
+                    )
+                # Explicit agent_or_task always wins -- a role is a helpful
+                # default, never a silent override of what the caller asked for.
+                target = target or preset["default_agent"]
+                instructions = preset["prefix"] + "\n\n" + instructions
             if target and target not in registry.subagent_names:
                 return (
                     f"ERROR: branch {i} names unknown subagent {target!r} — "
@@ -2983,6 +3047,17 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                         "properties": {
                             "agent_or_task": {"type": "string", "default": ""},
                             "instructions": {"type": "string"},
+                            "role": {
+                                "type": "string", "default": "",
+                                "enum": ["", *sorted(_DELEGATE_ROLE_PRESETS)],
+                                "description": (
+                                    "Optional named specialist role for this branch -- adds a "
+                                    "persona instruction and, when agent_or_task is omitted, "
+                                    "picks a sensible default subagent for that role. Known "
+                                    "roles: " + ", ".join(sorted(_DELEGATE_ROLE_PRESETS)) + ". "
+                                    "Leave empty for a plain, unstyled branch."
+                                ),
+                            },
                         },
                         "required": ["instructions"],
                     },

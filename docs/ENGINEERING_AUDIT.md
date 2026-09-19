@@ -1572,6 +1572,56 @@ including through a real delegation hop.
 
 ---
 
+### 038 -- Named specialist roles on `delegate_parallel` (Domain F remainder)
+
+**Severity**: n/a (feature -- Domain F's own remaining piece, per its harsh acceptance test).
+**Context**: Domain F asked for named specialist roles (Researcher, Coder, Reviewer, Tester,
+Security Sentry) reachable through `delegate_parallel`. A first design draft (written the same day)
+assumed a reusable per-branch tool-allowlist mechanism modeled on `agent_smith`'s own "scoped
+permissions" -- corrected before writing any code, by checking `self_extensions.py` directly:
+`agent_smith` forces ONE newly-drafted tool to `Permission.REQUIRES_CONFIRMATION`, a different
+mechanism entirely; no reusable allowlist exists in this codebase. The real, already-existing
+mechanism reused instead: `_build_delegate_parallel_tool`'s own docstring already states a named
+`agent_or_task` becomes "a forced_agent ROUTING DIRECTIVE run on that one subagent's configured
+model" -- a branch routed to one real subagent already only ever sees that subagent's own fixed
+toolset, no new enforcement layer needed.
+**Design**: `general_roster.py` gains `_DELEGATE_ROLE_PRESETS`, a small, real, named table --
+`researcher` -> `research_info`, `coder`/`tester` -> `dev_coding`, `security_sentry` -> `security`,
+each with a real persona-prefix instruction. An optional `role` field on each `delegate_parallel`
+branch (JSON-schema `enum`-constrained to the known names) prepends that persona to the branch's own
+instructions and, ONLY when the caller does not name an explicit `agent_or_task`, defaults the
+routing target to the preset's real subagent -- an explicit target always wins, a role never
+silently overrides what the caller actually asked for.
+**Deliberately not included, named explicitly, not silently dropped**: `reviewer` is NOT in the
+table. No currently-registered subagent has a genuinely write-free toolset that also fits reviewing
+arbitrary code/text (`dev_coding` can write files; `study` is real read-only but hard-scoped to the
+user's own personal study folder, the wrong domain entirely) -- pointing it at a write-capable
+subagent with a stern prompt would be a request, not an enforced restriction, and claiming otherwise
+here would be exactly the kind of overclaim this codebase's own audit discipline exists to catch.
+Registering a real, narrow, read-only subagent first is real, separate follow-on work.
+**Live proof, real chat, real model, real tools**: a real `/api/chat` call asked for a
+`delegate_parallel` fan-out with `role=researcher` and `role=security_sentry`, explicitly withholding
+`agent_or_task` on both branches. Real result: `[branch 0] agent=research_info ... [branch 1]
+agent=security` -- both roles resolved to their real preset subagents with zero explicit routing
+from the model. The `security_sentry` branch returned genuinely real host/network telemetry (real
+interface IPs, real default gateway, real DNS resolvers, a real disabled-Application-Firewall
+finding, real listening ports with real PIDs) -- the exact same class of live, unprompted finding
+Domain I's own foundation work already surfaced once before. The `researcher` branch failed
+honestly (a real 404 from the search service), not fabricated.
+**Files changed**: `dourmouse/general_roster.py` (`_DELEGATE_ROLE_PRESETS`, the branch-parsing loop,
+the tool's own JSON schema).
+**Tests added**: `test_self_dispatch.py::TestDelegateParallelNamedRoles` (4 tests: a role with no
+explicit agent resolves to its preset's real subagent; an explicit agent always wins over the role's
+default while the persona still applies; an unknown role errors, listing the known ones; no role at
+all leaves the branch's task byte-identical, a real regression guard).
+**Tests run**: the new class (4/4), then `test_self_dispatch.py` + `test_general_roster.py` +
+`test_dispatch.py` + `test_model_delegation.py` (414/414).
+**Result**: fixed -- Domain F's own remaining named-role gap closed, live-verified with a real
+model routing to real subagents with zero new enforcement machinery, `reviewer` honestly deferred
+rather than faked.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified
