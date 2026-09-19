@@ -412,18 +412,20 @@ this acceptance test in full.
 
 ## 9. Domain G — Research capability, upgraded
 
-**Scope correction, user-directed, 2026-09-19**: the founding spec's own workstream A ("a
-Claude-Code-architecture translation for a distributed research network") is a real **3-device**
-network -- this Mac, the Dell compute node (already a real, wired backend, see Domain A's `compute`
-subagent), and the DOURMOUSE desktop (the separate Windows machine documented across prior-session
-memory: its own dourmouse server on port 8765, the live history sync between it and this Mac) --
-genuinely distributing real research/compute work across the user's own 3 real machines. This is
-explicitly **not** the 500-field jarvis qualification mesh rebuilt in finding #033
-(`dourmouse/research_mesh/`) -- that mesh is real and valuable on its own terms (field-specialist
-qualification against real held-out exam corpora) but was the wrong target for this workstream, per
-direct user correction. **Not yet started**: no code here today distributes a research task across
-the 3 real devices; the structured research pipeline below and the 3-device distribution are two
-real, separate pieces of the same workstream, both still open.
+**Scope correction, user-directed, 2026-09-19, refined 2026-09-20 against the real reference
+flowchart image the user supplied**: the founding spec's own workstream A ("a Claude-Code-
+architecture translation for a distributed research network") is a real **3-node** network -- the
+reference image's own "RESEARCH & ANALYSIS" branch names them explicitly: **Mac Desktop** (this
+machine), **Dell Laptop** (already a real, wired backend -- Domain A's `compute` subagent), and
+**Research Network** (a third node, distinct from a single named device in the image -- read most
+plausibly as network-wide/external research reach rather than one more physical box; not yet
+confirmed against the user's own intent, tracked honestly as an open question rather than guessed
+into a specific device). This is explicitly **not** the 500-field jarvis qualification mesh rebuilt
+in finding #033 (`dourmouse/research_mesh/`) -- that mesh is real and valuable on its own terms
+(field-specialist qualification against real held-out exam corpora) but was the wrong target for
+this workstream, per direct user correction. **Piece 1 shipped 2026-09-20** (finding #042): the
+real data model and persisted store. The actual pipeline stage functions and the 3-device
+distribution are still open, real, separate pieces of the same workstream.
 **Real infrastructure check, 2026-09-19**: the Dell compute node is `enabled` but NOT `configured`
 in this dev environment (`remote_server.server_url_configured()` is `False`) and a live
 `server_available(force=True)` check returned `False` -- honestly offline or unreachable from here

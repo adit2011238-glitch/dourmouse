@@ -556,11 +556,17 @@ and a real build sequence, not just a requirement statement:
       resolved `researcher` -> `research_info` and `security_sentry` ->
       `security`, the latter returning genuinely real host/network
       telemetry. See `docs/ENGINEERING_AUDIT.md` finding #038.
-- [ ] Domain G (structured research pipeline + 3-device network) --
-      single-device pipeline first, device distribution layered on once
-      the Dell node is confirmed reachable (it was NOT, live-checked
-      2026-09-19: `server_url_configured()` is `False`). See §9's own
-      Build plan.
+- [ ] Domain G, piece 1 shipped 2026-09-20 -- the real data model and
+      persisted store (`dourmouse/research_pipeline/`), mirroring
+      `research_mesh/store.py`'s own proven shape. Real bug caught by its
+      own test and fixed before commit (a source-dedup loop that missed
+      duplicates within the same incoming batch). No model call yet, no
+      chat reachability yet -- the plan/discover/extract/synthesize stage
+      functions are next, same incremental pattern as every other domain.
+      Device distribution still layered on after, once the Dell node is
+      confirmed reachable (it was NOT, live-checked 2026-09-19:
+      `server_url_configured()` is `False`). See §9's own Build plan and
+      `docs/ENGINEERING_AUDIT.md` finding #042.
 - [x] Domain H, piece 1/7 (project-instruction file, `DOURMOUSE.md`) -- shipped
       2026-09-19. `dourmouse/project_instructions.py` reads the workspace's
       own `DOURMOUSE.md`, spliced into `dispatch.py`'s shared

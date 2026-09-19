@@ -1767,6 +1767,48 @@ architecture's own "always running... continuous data stream" requirement.
 
 ---
 
+### 042 -- Domain G: the real data model and persisted store (first piece)
+
+**Severity**: n/a (feature -- the smallest, first real piece of Domain G's own build plan, per this
+session's own established "smallest lift first" sequencing, same shape as findings #033/#037/#039).
+**Context**: Domain G was pure scoping before this -- zero pipeline code existed. This finding
+starts the real build: the data model and persistence, mirroring `research_mesh/store.py`'s own
+proven one-row-JSON-body SQLite shape (finding #033) rather than inventing new persistence
+plumbing a fourth time.
+**Design**: `dourmouse/research_pipeline/core.py` -- a real `Claim` dataclass matching this domain's
+own spec field list verbatim (`claim, source_id, url, document_hash, location, passage,
+retrieved_at, agent`), a `Contradiction` dataclass, and a `ResearchRecord` state machine (`PLANNED
+-> SOURCES_DISCOVERED -> EVIDENCE_EXTRACTED -> SYNTHESIZED`) enforcing real transition order (
+cannot discover sources before a plan exists, cannot synthesize before real evidence exists).
+`reject_claim` never deletes -- it replaces a claim with a `REJECTED`-status copy carrying the same
+real provenance, so the record stays honest about what was once believed, matching this domain's
+own harsh acceptance test 3 ("a rejected hypothesis... must remain visible, never quietly
+discarded") applied to claims as well as hypotheses. `ResearchStore` (`dourmouse/research_pipeline/
+store.py`) persists the whole record as one row, workspace-relative from the start.
+**A real bug caught by its own test, fixed before commit**: `add_sources`'s first draft computed
+`existing = set(self.sources)` once before its dedup loop, so it deduped against sources already
+present from BEFORE the call, but not against duplicates WITHIN the same incoming batch -- passing
+`["https://a.com", "https://b.com", "https://a.com"]` let the repeated URL through twice. Caught by
+`test_add_sources_deduplicates_and_advances_stage` on first run, fixed by tracking `seen` as a
+running set updated during the same loop, not a static snapshot taken before it.
+**Deliberately not built yet, named explicitly**: the actual stage FUNCTIONS (a real `ChatSession`
+call for planning, real source discovery through the already-real `research_info` tools, real
+per-source evidence extraction with real citations, contradiction detection, synthesis) are real,
+separate, not-yet-built follow-on -- this finding is the data model and store only, no model call
+anywhere in it, no chat reachability yet. Building the stage functions next follows the exact same
+incremental, independently-tested, live-verified pattern as every other domain this session.
+**Files changed**: new `dourmouse/research_pipeline/` package (`__init__.py`, `core.py`, `store.py`).
+**Tests added**: new `dourmouse/tests/test_research_pipeline.py` (17 tests: full state-machine
+transition order and its guards, dedup-on-add, never-delete-only-reject, active-claims filtering,
+contradiction accumulation, lossless save/load round-trip including rejected-status claims and
+contradictions, idempotent update not a duplicate row, cross-instance persistence, most-recent-first
+listing).
+**Tests run**: the new file (17/17, 0.23s).
+**Result**: fixed -- Domain G's own real foundation now exists and is tested; the actual research
+pipeline (plan/discover/extract/synthesize) builds on top of it next.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified
