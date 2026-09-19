@@ -564,12 +564,17 @@ networks, no exploit deployment against third parties, no covert surveillance. T
 older than and takes precedence over any later feature request that doesn't explicitly and
 narrowly override it (see §0's note on the excluded Jarvis-list items).
 
-**Real status**: `dourmouse/security/platform_adapter.py` foundation only (interfaces, gateway,
-DNS, ARP, listening ports with exposure classification, Application Firewall state — macOS only,
-44 real tests). Baselines, anomaly detection, AI sentries, the dashboard UI, and remediation
-actions are NOT built. A real, live finding already surfaced by the foundation work: this
-machine's Application Firewall was disabled and a process was listening on all interfaces — the
-exact kind of thing the sentry system should have caught and alerted on by itself, unprompted.
+**Real status, updated 2026-09-19**: `platform_adapter.py`'s own foundation (interfaces, gateway,
+DNS, ARP, listening ports with exposure classification, Application Firewall state -- macOS only,
+44 real tests) now has a real sentry on top of it, `dourmouse/security/sentry.py` -- a fully
+deterministic scan (no model call; corrected away from an LLM-scored design before writing any
+detection rule, see `docs/ENGINEERING_AUDIT.md` finding #039), real persisted false-positive memory,
+and real alerting for a genuinely new HIGH finding, reachable now via `security_sentry_scan`. The
+disabled-firewall/all-interfaces finding this section itself named as a real, live example was used
+as the sentry's own live proof: it correctly detected, scored, and alerted on this machine's own
+real, still-current instance of exactly that condition. Baselines beyond firewall/exposed-ports,
+new-LAN-device detection, a continuously-running background scheduler, the live SSE push, the
+dashboard UI, and remediation actions are still NOT built -- real, separate, named follow-on.
 
 **ThreatSentinel-adapted architecture for the AI sentry** (the real, concrete plan — see §0 for
 why this repo, not a vendored copy):

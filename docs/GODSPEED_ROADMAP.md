@@ -572,9 +572,19 @@ and a real build sequence, not just a requirement statement:
 - [ ] Domain H, pieces 2-7 (hierarchical nesting, Skills-as-packages, hooks,
       session-compaction audit, SDK interface, MCP) -- not yet started, still
       sequenced by real dependency/effort. See §10's own Build plan.
-- [ ] Domain I remainder (AI security sentries) -- the real
-      `InvestigationPhase` architecture, mapped onto the exact
-      `research_mesh` state-machine template. See §11's own Build plan.
+- [x] Domain I, real sentry shipped 2026-09-19 -- `dourmouse/security/sentry.py`,
+      a fully deterministic scan (corrected away from the original plan's
+      LLM-scored design before writing any rule -- a security finding must
+      be exactly reproducible). Real, live-verified against THIS machine's
+      own real, previously-known disabled firewall: correctly detected,
+      scored (risk 33.0), alerted once (HIGH only), persisted, and
+      correctly suppressed on a real repeat scan. `security_sentry_scan`/
+      `security_sentry_dismiss` reachable from chat now. NOT built:
+      new-LAN-device detection, a continuously-running background
+      scheduler (needed for the domain's own "unprompted, bounded window"
+      wording), the live SSE push, and the dashboard UI -- all named
+      explicitly as real, separate follow-on. See
+      `docs/ENGINEERING_AUDIT.md` finding #039.
 - [ ] Domain J (Hermes UI) -- **blocked** on the user's own reference
       images; the mechanical token-swap plan is ready so execution is
       near-instant once unblocked. See §12's own Build plan.

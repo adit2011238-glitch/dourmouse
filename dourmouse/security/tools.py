@@ -17,6 +17,8 @@ from typing import Any
 
 from dourmouse.dispatch import Subagent, ToolSpec
 from dourmouse.security import platform_adapter as pa
+from dourmouse.security.sentry import DEFAULT_DB as _SENTRY_DB
+from dourmouse.security.sentry import SentryStore, run_scan
 
 
 def _format_interfaces(result: dict[str, Any]) -> str:
@@ -79,6 +81,40 @@ def _list_exposed_services(arguments: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _security_sentry_scan(_arguments: dict[str, Any]) -> str:
+    result = run_scan()
+    lines = [
+        f"Security sentry scan: {len(result.all_findings)} active finding(s), "
+        f"risk score {result.risk_score:.1f}"
+        + (f", {len(result.suppressed_false_positives)} previously dismissed" if result.suppressed_false_positives else "")
+        + "."
+    ]
+    for f in result.all_findings:
+        is_new = f in result.new_findings
+        lines.append(
+            f"\n[{f.severity.upper()}{' - NEW' if is_new else ''}] {f.title}"
+            f"\n  {f.detail}"
+            f"\n  Suggested (not applied): {f.recommended_action}"
+            f"\n  fingerprint={f.fingerprint} (use security_sentry_dismiss to mark a false positive)"
+        )
+    if result.alerts_written:
+        lines.append(f"\n{result.alerts_written} real alert(s) written for new HIGH-severity finding(s).")
+    unavailable = [k for k, ok in result.telemetry_available.items() if not ok]
+    if unavailable:
+        lines.append(f"\nTelemetry unavailable for: {', '.join(unavailable)} (honest gap, not fabricated).")
+    return "\n".join(lines)
+
+
+def _security_sentry_dismiss(arguments: dict[str, Any]) -> str:
+    fingerprint = str(arguments.get("fingerprint") or "").strip()
+    if not fingerprint:
+        return "ERROR: security_sentry_dismiss requires a non-empty 'fingerprint'."
+    ok = SentryStore(_SENTRY_DB).mark_false_positive(fingerprint)
+    if not ok:
+        return f"ERROR: no known finding with fingerprint {fingerprint!r} (run security_sentry_scan first)."
+    return f"Marked {fingerprint} as a false positive -- it will not be reported as a new finding again."
+
+
 def build_security_subagent() -> Subagent:
     return Subagent(
         name="security",
@@ -102,6 +138,31 @@ def build_security_subagent() -> Subagent:
                 description="List real listening network services, optionally filtered by exposure (LOOPBACK_ONLY, LOCAL_NETWORK, TAILSCALE, ALL_INTERFACES, UNKNOWN).",
                 parameters={"type": "object", "properties": {"exposure": {"type": "string", "default": ""}}},
                 handler=_list_exposed_services,
+            ),
+            ToolSpec(
+                name="security_sentry_scan",
+                description=(
+                    "Run a real security scan: checks this host's real telemetry against a "
+                    "real, deterministic rule set (no model judgment) -- currently a disabled "
+                    "Application Firewall and any service exposed to more than this machine. "
+                    "A genuinely NEW high-severity finding writes a real, persisted alert. A "
+                    "finding already dismissed with security_sentry_dismiss stays suppressed."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_security_sentry_scan,
+            ),
+            ToolSpec(
+                name="security_sentry_dismiss",
+                description=(
+                    "Mark a security_sentry_scan finding (by its fingerprint) as a false "
+                    "positive so it stops being reported as new on future scans."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"fingerprint": {"type": "string"}},
+                    "required": ["fingerprint"],
+                },
+                handler=_security_sentry_dismiss,
             ),
         ),
     )

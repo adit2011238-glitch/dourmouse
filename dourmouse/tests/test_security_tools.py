@@ -35,11 +35,14 @@ _FAKE_SNAPSHOT = {
 
 
 class TestBuildSecuritySubagent:
-    def test_registers_both_tools(self):
+    def test_registers_all_tools(self):
         subagent = sec_tools.build_security_subagent()
-        assert {t.name for t in subagent.tools} == {"security_status", "list_exposed_services"}
+        assert {t.name for t in subagent.tools} == {
+            "security_status", "list_exposed_services",
+            "security_sentry_scan", "security_sentry_dismiss",
+        }
 
-    def test_neither_tool_requires_confirmation(self):
+    def test_no_tool_requires_confirmation(self):
         from dourmouse.dispatch import Permission
 
         subagent = sec_tools.build_security_subagent()

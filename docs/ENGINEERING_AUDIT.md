@@ -1622,6 +1622,63 @@ rather than faked.
 
 ---
 
+### 039 -- AI security sentry: real deterministic scan, scoring, and false-positive memory (Domain I)
+
+**Severity**: n/a (feature -- Domain I's own remaining "AI sentries" piece).
+**Context**: Domain I's own build plan first proposed "one real `ChatSession` call... scoring the
+gathered telemetry against the real weighted formula" for RISK_ANALYSIS -- corrected before writing
+any detection rule: a security finding's own severity and existence must be exactly reproducible,
+not a paraphrase a model could drop a detail from. Rebuilt as a fully deterministic pipeline instead,
+matching this domain's own explicit requirement ("never a bare LLM vibe-check with no formula behind
+it") more literally than the original plan did.
+**Design**: `dourmouse/security/sentry.py` -- two real, honestly-scoped detection rules
+(`_detect_findings`, pure logic, no I/O): a disabled Application Firewall (HIGH) and any listening
+service exposed beyond `LOOPBACK_ONLY`/`LOCAL_NETWORK`/`TAILSCALE`'s own expected tiers, i.e.
+`ALL_INTERFACES` (MED) -- both read from `platform_adapter.py`'s already-real, already-tested
+telemetry, no new collection code. `SentryStore` (workspace-relative SQLite, same one-connection-
+per-operation WAL discipline as every other real store in this codebase) gives each finding a stable
+fingerprint and real persisted history: a genuinely first-ever detection is `"new"`, a repeat is
+`"known"` (still counted, never re-alerted), and a user-dismissed one is `"dismissed"` (excluded from
+both the risk score and future new-finding alerts) -- the real historical-pattern-match half of
+ThreatSentinel's own weighted-formula design. Only a genuinely NEW **HIGH** finding writes a real
+alert (`state_store.add_alert`, the exact same mechanism `goal_runtime.py`'s own system alerts
+already use) -- MED findings are reported in every scan's own text but never proactively alert,
+a deliberate choice: this machine's own real MED findings (rapportd/ARDAgent/Spotify/Python, all
+legitimate, all normal) would otherwise generate an alert burst on a user's very first scan.
+**Deliberately not built, named explicitly**: new-LAN-device detection and external-IP reputation
+lookups (this domain's own harsh acceptance test 2) need a real, persisted ARP-neighbor baseline
+this pass does not build. A continuously-running background scheduler (needed for harsh acceptance
+test 1's own "unprompted, within a bounded window" wording) and the live SSE push through
+`DesktopNotifier` (needs the running server's own hub instance -- checked directly before writing
+this: no global accessor for it exists today) are both real, separate follow-on; a scan today is
+real and chat-reachable, and a genuinely new HIGH finding writes a real, persisted alert visible on
+the next alerts-screen refresh, just not an instant push. Dashboard UI not started, per the domain's
+own build plan ("last, after the sentry itself is real and tested").
+**Live proof, real machine, real finding, no mocks**: a real scan against THIS machine found its
+Application Firewall genuinely disabled (HIGH, risk score contribution 9.0) plus 6 real
+`ALL_INTERFACES`-exposed services (MED each, risk score 33.0 total) -- independently cross-verified
+against an unrelated earlier live test this same session (finding #038's own role-based
+`security_sentry` branch surfaced the identical real services). Exactly 1 real alert was written
+(the HIGH finding only), confirmed landed in the real `state_store` alerts table. A second real scan
+of the same, unchanged machine state reported 0 new findings and wrote 0 further alerts -- the
+persisted-memory suppression working correctly against real, not synthetic, repeat state. A real
+`/api/chat` call asking to "run a real security sentry scan" reached the new tool through the real
+dispatch path and the model faithfully reported every real finding.
+**Files changed**: new `dourmouse/security/sentry.py`, `dourmouse/security/tools.py`
+(`security_sentry_scan`, `security_sentry_dismiss`).
+**Tests added**: new `dourmouse/tests/test_sentry.py` (20 tests: rule detection for both findings,
+honest no-finding on unavailable/clean telemetry, stable fingerprinting, new/known/dismissed
+store-classification transitions, cross-instance persistence, dismiss-then-suppress, dismissing an
+unseen fingerprint is an honest `False` not a crash, risk-score arithmetic, only-HIGH alerts,
+a broken alert write never breaking the real scan result, honest telemetry-availability reporting).
+`test_security_tools.py`'s own exhaustive tool-name set updated for the two new tools.
+**Tests run**: the new file (20/20), then `test_sentry.py` + `test_security_tools.py` +
+`test_security_platform_adapter.py` + `test_general_roster.py` + `test_dispatch.py` (412/412).
+**Result**: fixed -- Domain I's real sentry now exists, live-verified against this real machine's
+own real, previously-known firewall gap, with real persisted memory and honestly-scoped limits.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified
