@@ -79,6 +79,10 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # a name only ever widens what MAY be routed to cloud for agents
     # that still exist -- it never silently exposes a real one.
     "dev_coding",
+    # Reads real file content from the user's own repositories to review it
+    # (2026-09-20, Domain F's reviewer role) -- same privacy class as
+    # dev_coding right above, even though it cannot write or execute.
+    "reviewer",
     # Delegating to a coding CLI from inside a delegated turn is a recursion
     # risk, so these never route anywhere but local, and in practice the tool
     # below refuses them outright.

@@ -2080,6 +2080,10 @@ class TestEndToEndThroughGeneralRoster:
                                # jarvis/research_mesh/agents package -- real
                                # field-specialist qualification, now backed
                                # by RealBrain and reachable from chat.
+            "reviewer",  # 2026-09-20: Domain F's own deferred role, closed --
+                         # read_file/search_files/diff_preview only, the
+                         # genuinely write-free toolset finding #038 said
+                         # did not yet exist.
         }
 
     def test_trading_subagent_added_later_dispatchable(self):

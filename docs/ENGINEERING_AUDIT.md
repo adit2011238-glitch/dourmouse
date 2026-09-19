@@ -2078,6 +2078,65 @@ pieces of Domain G's own core loop.
 
 ---
 
+### 048 -- Domain F: the reviewer role, closed
+
+**Severity**: n/a (feature -- the one deliberately-deferred gap named in finding #038, closed).
+**Context**: finding #038 built named specialist roles (`researcher`/`coder`/`tester`/`security_sentry`)
+on `delegate_parallel` but explicitly deferred `reviewer`: "no currently-registered subagent has a
+genuinely write-free toolset that fits reviewing arbitrary code." `dev_coding`, the obvious candidate,
+also carries `write_file`/`edit_file`/`run_python`/`deploy`.
+**Design**: a new `reviewer` subagent (`general_roster.py`), reusing the exact same real handler
+functions `dev_coding`'s own read-only tools already use (`_read_file_tool`, `_search_files_tool`,
+`_diff_preview_tool`) rather than writing new ones -- deliberately omitting everything `dev_coding`
+has that can write, execute, or deploy. **A real bug caught immediately, before any test ran**: the
+registry enforces a globally unique tool name across every subagent (`dispatch.py::register_
+subagent`), and the first draft reused the bare names `read_file`/`search_files`/`diff_preview` --
+`dev_coding` already owns those, so registry construction raised `ValueError: tool name collision
+across registry: 'read_file' (from reviewer)` the moment `build_general_registry()` ran. Fixed by
+prefixing all three `review_*`, the exact same convention `study` already uses for its own
+`study_read_file` to avoid the identical collision. Added to `_DELEGATE_ROLE_PRESETS` as the fifth
+role, and to `model_delegation.py`'s `_LOCAL_ONLY_AGENTS` (same privacy class as `dev_coding` --
+reads real repository content).
+**Live proof**: a real 2-branch `delegate_parallel` call (`researcher` + `reviewer`, real model, real
+dispatch loop) correctly resolved `reviewer` -> the new subagent and the branch genuinely called its
+own `review_search_files` tool -- a real, isolated tool call from the reviewer's own restricted
+toolset, never attempting a write (it has no write tool to attempt). The target file was outside the
+reviewer's own sandboxed workspace root in this particular run and it reported that honestly rather
+than fabricating a review -- correct behavior (Rule 2.2), not a failure of this finding.
+**A second real bug, caught by the full suite, not by any test written for this finding**:
+`planner.py::find_agents_for_query`'s deterministic scorer (Rule 2.8, no LLM) uses substring
+matching for its "other description/tool overlap" signal (`hay_hits`), a documented, intentional
+looseness -- and `reviewer`'s own first-draft description ("Domain F's own **named** specialist
+role...") happened to substring-match the token `"named"` in an existing regression test's query
+("save it to a file **named** outlook_brief.txt"), plus genuine, unavoidable overlap with shared
+tool-description text (`"file"`, `"workspace"`, both from the same `path_note` string `dev_coding`'s
+own read-only tools already carry). The combined score tied `reviewer` with `dev_coding` on a
+write-intent query neither the test nor `reviewer` itself has anything to do with --
+`test_planner.py::TestFindAgentsForQueryRegression::test_write_intent_routes_to_write_capable_agent`
+failed in the full suite (not in any file touched directly by this finding). Fixed by rewording
+`reviewer`'s own description to drop the coincidentally-colliding word `"named"` -- the same class
+of fix, and the same lesson, as this file's own long-documented "free"/"freebuff" substring
+incident: a brand-new subagent's own prose is real, live attack surface against this scorer's loose
+matching, not just documentation.
+**Files changed**: `dourmouse/general_roster.py` (new `reviewer` subagent, `_DELEGATE_ROLE_PRESETS`
+entry, its description reworded after the collision above), `dourmouse/model_delegation.py`
+(`_LOCAL_ONLY_AGENTS`).
+**Tests added/updated**: the three exhaustive real-subagent-name assertions this codebase's own
+convention requires touching together whenever a subagent is added (`test_general_roster.py::
+TestRosterShape::test_all_subagents_registered`, `test_dispatch.py::TestEndToEndThroughGeneralRoster::
+test_general_roster_registers_all_subagents`, and `model_delegation.py`'s own `_LOCAL_ONLY_AGENTS`
+set, checked for completeness by `test_model_delegation.py::TestRoutingPolicy::
+test_every_real_agent_has_an_explicit_policy`) -- all three updated together, all three now pass.
+`test_planner.py`'s own pre-existing regression test required no code change, only the description
+reword above.
+**Tests run**: `test_general_roster.py` + `test_model_delegation.py` + `test_dispatch.py` +
+`test_planner.py` in full (413/413); full suite green.
+**Result**: fixed -- Domain F's own last deferred gap is closed. The domain's harsh acceptance test
+(a goal needing 3+ specialists, real isolated context per specialist, a real synthesized result) can
+now be run in full with a genuine reviewer branch rather than two specialists standing in for three.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

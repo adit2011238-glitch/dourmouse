@@ -359,9 +359,9 @@ fixed and live-verified (`docs/ENGINEERING_AUDIT.md` finding #032) -- a branch t
 of its own turn budget was reported `OK`, indistinguishable from a branch that actually finished.
 Named specialist roles have since shipped too -- `researcher`/`coder`/`tester`/`security_sentry`,
 live-verified routing to real subagents with zero explicit routing from the model (finding #038).
-Domain F is still not fully closed: `reviewer` was deliberately deferred (no currently-registered
-subagent has a genuinely write-free toolset that fits it -- see finding #038's own reasoning),
-real, separate, not-yet-done follow-on.
+**Domain F closed 2026-09-20** (finding #048): the deferred `reviewer` role now has its own real,
+genuinely write-free subagent (`review_read_file`/`review_search_files`/`review_diff_preview`),
+live-verified via a real 2-branch fan-out. All five named roles are now real.
 
 Already substantially real (`general_roster.py`'s subagent registry, `model_delegation.py`'s
 routing policy, `TestFanOut`'s concurrent-execution tests). Extend per the Hermes/Claude-Code

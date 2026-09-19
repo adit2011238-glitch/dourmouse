@@ -556,6 +556,15 @@ and a real build sequence, not just a requirement statement:
       resolved `researcher` -> `research_info` and `security_sentry` ->
       `security`, the latter returning genuinely real host/network
       telemetry. See `docs/ENGINEERING_AUDIT.md` finding #038.
+- [x] Domain F closed 2026-09-20 -- the `reviewer` role, the one gap finding
+      #038 deliberately deferred. A new, genuinely write-free `reviewer`
+      subagent (`review_read_file`/`review_search_files`/`review_diff_
+      preview` -- prefixed to avoid a real tool-name collision with
+      `dev_coding`'s own bare names, caught live the moment the registry
+      first built). Live-verified: a real 2-branch fan-out (`researcher` +
+      `reviewer`) correctly resolved the new role and the branch genuinely
+      called its own restricted tool, never attempting a write. Domain F
+      is now fully closed. See `docs/ENGINEERING_AUDIT.md` finding #048.
 - [x] Domain G, piece 1 shipped 2026-09-20 -- the real data model and
       persisted store (`dourmouse/research_pipeline/`), mirroring
       `research_mesh/store.py`'s own proven shape. Real bug caught by its

@@ -2745,6 +2745,15 @@ _DELEGATE_ROLE_PRESETS: dict[str, dict[str, str]] = {
         ),
         "default_agent": "security",
     },
+    "reviewer": {
+        "prefix": (
+            "You are acting as a REVIEWER on a multi-specialist team. Read "
+            "the real code and report real, specific problems (or state "
+            "plainly that you found none) -- you cannot write, edit, or "
+            "run anything, so never claim to have fixed or tested something."
+        ),
+        "default_agent": "reviewer",
+    },
 }
 
 
@@ -4171,6 +4180,81 @@ def build_general_registry() -> DispatchRegistry:
                 ),
             ],
 )
+    )
+
+    registry.register_subagent(
+        _subagent(
+            "reviewer",
+            "General",
+            (
+                "Read-only code review: read files, search the codebase, and "
+                "preview a diff. Cannot write, edit, execute, or deploy "
+                "anything -- Domain F's own specialist review role for a "
+                "second, independent look at code someone else wrote or "
+                "changed."
+            ),
+            [
+                # Real gap closed (2026-09-20): finding #038 deliberately
+                # deferred the "reviewer" role because no currently-
+                # registered subagent had a genuinely write-free toolset --
+                # dev_coding (the obvious candidate) also carries
+                # write_file/edit_file/run_python/deploy. This subagent
+                # reuses the SAME real handler functions dev_coding's own
+                # read-only tools already use (read_file/search_files/
+                # diff_preview) rather than inventing new ones, and
+                # deliberately omits everything dev_coding has that can
+                # write, execute, or deploy. Tool names are prefixed
+                # "review_" -- the registry enforces a globally unique tool
+                # name across every subagent, and dev_coding already owns
+                # the bare names (same reason "study" uses "study_read_file"
+                # rather than a second, colliding "read_file").
+                ToolSpec(
+                    name="review_read_file",
+                    description="Read a text file from the workspace sandbox." + path_note,
+                    parameters={
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                    handler=_read_file_tool,
+                ),
+                ToolSpec(
+                    name="review_search_files",
+                    description=(
+                        "grep-style content search across the workspace sandbox "
+                        "(file:line:match). Use to find where something is "
+                        "defined, referenced, or mentioned." + path_note
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "path": {"type": "string", "default": "."},
+                            "max_results": {"type": "integer", "default": 50},
+                        },
+                        "required": ["query"],
+                    },
+                    handler=_search_files_tool,
+                ),
+                ToolSpec(
+                    name="review_diff_preview",
+                    description=(
+                        "Show a unified diff of a PROPOSED write against the "
+                        "current file, WITHOUT writing anything. Use to "
+                        "inspect what a change would do before it happens." + path_note
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["path", "content"],
+                    },
+                    handler=_diff_preview_tool,
+                ),
+            ],
+        )
     )
 
     registry.register_subagent(
