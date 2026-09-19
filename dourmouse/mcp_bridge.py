@@ -70,11 +70,25 @@ itself via --mcp-config, see build_mcp_config_file() below):
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from typing import Any
 
 from dourmouse.dispatch import DispatchRegistry, Permission, ToolSpec, _execute_tool
+
+#: Env var name ClaudeCliClient (dispatch.py) sets to a fresh, per-invocation
+#: temp file path when it wants a real record of what this bridge actually
+#: executed during one `claude -p` call. Verified live (2026-09-19): the
+#: real `claude` CLI inherits its own process env into an MCP stdio server
+#: it spawns via --mcp-config and merges the config's own "env" dict on top
+#: rather than replacing it, so a var set only on that one subprocess call
+#: (never touching the cached, shared mcp-config.json) reaches this bridge
+#: correctly scoped to that single invocation. Unset (the normal case for a
+#: manual/standalone run of this bridge, or any non-ClaudeCliClient caller
+#: of run_code_task) means _log_toolcall is a no-op. Must match the literal
+#: string code_backends.py's _run_claude_once sets.
+_TOOLCALL_LOG_ENV_VAR = "DOURMOUSE_MCP_TOOLCALL_LOG"
 
 #: MCP protocol version this server speaks (the current stable spec
 #: version at the time this was built — the handshake is a real
@@ -274,11 +288,47 @@ class McpBridgeServer:
             gate = (lambda _prompt: True) if auto_approve_enabled() else None
             result_text = _execute_tool(tool, arguments, confirmation_gate=gate)
         except Exception as exc:  # noqa: BLE001 - Rule 2.2: a real failure is reported, never fabricated
+            result_text = f"ERROR: tool '{name}' failed: {exc}"
+            self._log_toolcall(name, arguments, result_text)
             return {
-                "content": [{"type": "text", "text": f"ERROR: tool '{name}' failed: {exc}"}],
+                "content": [{"type": "text", "text": result_text}],
                 "isError": True,
             }
+        self._log_toolcall(name, arguments, result_text)
         return {"content": [{"type": "text", "text": str(result_text)}], "isError": False}
+
+    def _log_toolcall(self, name: str, arguments: dict[str, Any], result_text: str) -> None:
+        """Best-effort real-tool-call record, read back by ClaudeCliClient
+        (dispatch.py) after its `claude -p` call returns and replayed as
+        real transcript "tool_use"/"tool_result" entries -- see that
+        class's own comment. Logged unconditionally on EVERY call attempt
+        (success, error, or a REQUIRES_CONFIRMATION refusal), matching
+        dispatch.py's own convention for its normal tool-calling loop: a
+        "tool_use" entry is appended the instant a call is attempted,
+        before the outcome is known, because grounded-mode cares whether
+        the model tried to ground its answer, not just whether the attempt
+        succeeded.
+
+        An observer, same discipline as every other event_sink/chime_fn in
+        this codebase: logging must never break the real tool call it is
+        recording. Not just "no exception propagates" -- a log_path that is
+        set but unwritable (e.g. its directory vanished) is silently
+        swallowed too, so a filesystem hiccup on the recording side can
+        never turn a real, successful tool call into a failed one.
+        """
+        log_path = os.environ.get(_TOOLCALL_LOG_ENV_VAR)
+        if not log_path:
+            return
+        try:
+            record = {
+                "name": name,
+                "raw_arguments": json.dumps(arguments, default=str),
+                "result_text": result_text,
+            }
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+        except OSError:
+            pass
 
 
 def build_mcp_config_file(path: Any) -> None:

@@ -188,6 +188,13 @@ _SETTINGS_OVERRIDE_ARGS = (
 _mcp_config_path_cache: str | None = None
 _mcp_config_lock = threading.Lock()
 
+#: Must match mcp_bridge.py's own _TOOLCALL_LOG_ENV_VAR literally -- kept as
+#: a separate local constant (not imported) for the same reason
+#: _ensure_mcp_config_path's own mcp_bridge import is lazy: this module
+#: must not gain a module-load-time dependency on a sibling that itself
+#: imports dispatch.py's internals.
+_MCP_TOOLCALL_LOG_ENV_VAR = "DOURMOUSE_MCP_TOOLCALL_LOG"
+
 
 def _ensure_mcp_config_path() -> str:
     """Return the path to a real, up-to-date --mcp-config JSON, writing it
@@ -481,7 +488,8 @@ def _inject_shared_context(task: str) -> str:
 
 
 def _run_claude_once(
-    cli: str, task: str, session_args: list[str], *, cwd: str | None, timeout: int
+    cli: str, task: str, session_args: list[str], *, cwd: str | None, timeout: int,
+    toolcall_log_path: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     mcp_args: list[str] = []
     try:
@@ -496,6 +504,23 @@ def _run_claude_once(
         # Dourmouse tool access for this one call (its own bash/file tools
         # are untouched either way).
         mcp_args = []
+    env = _cli_env(cli)
+    if toolcall_log_path and mcp_args:
+        # Real tool calls this invocation makes through the dourmouse MCP
+        # bridge land in mcp_bridge.py's own subprocess -- a SEPARATE OS
+        # process this `claude` binary spawns via --mcp-config, invisible
+        # to dispatch.py's normal transcript bookkeeping otherwise (see
+        # ClaudeCliClient._create's own comment in dispatch.py for the real
+        # bug this closes: grounded-mode read tool_calls=None, unconditionally,
+        # on every claude_cli completion, and treated a genuinely tool-backed
+        # answer as if it were guessed). Only set when mcp_args is non-empty
+        # -- a broken/missing MCP config above already means no bridge
+        # subprocess will exist to read this var at all. A fresh path per
+        # call (never the cached, shared mcp-config.json itself) is enough:
+        # verified live (2026-09-19) that this real CLI inherits its own
+        # process env into a spawned MCP server and merges the config's own
+        # "env" dict on top rather than replacing it.
+        env[_MCP_TOOLCALL_LOG_ENV_VAR] = toolcall_log_path
     try:
         return subprocess.run(
             [
@@ -503,7 +528,7 @@ def _run_claude_once(
                 *session_args, task, *mcp_args,
             ],
             cwd=cwd,
-            env=_cli_env(cli),
+            env=env,
             stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
             capture_output=True,
             text=True,
@@ -569,7 +594,10 @@ def _cli_env(cli: str | None = None) -> dict[str, str]:
     return env
 
 
-def _run_claude(task: str, *, cwd: str | None, timeout: int, tab: str | None = None) -> str:
+def _run_claude(
+    task: str, *, cwd: str | None, timeout: int, tab: str | None = None,
+    toolcall_log_path: str | None = None,
+) -> str:
     # Lazy import: code_backends must not import general_roster at module
     # load time (general_roster imports code_backends for the new tools).
     from dourmouse.general_roster import _find_claude_cli
@@ -619,7 +647,10 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int, tab: str | None = N
             pass
     with _claude_session_run_lock(session_key):
         session_args = _claude_session_args(session_key)
-        proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
+        proc = _run_claude_once(
+            cli, task, session_args, cwd=cwd, timeout=timeout,
+            toolcall_log_path=toolcall_log_path,
+        )
         err = (proc.stderr or "").strip()
         if proc.returncode != 0 and "--resume" in session_args and (
             _CLAUDE_NO_SESSION_ERR in err or _CLAUDE_SESSION_IN_USE_ERR in err
@@ -632,7 +663,10 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int, tab: str | None = N
             # bookkeeping the caller can't see or fix.
             _forget_claude_session(session_key)
             session_args = _claude_session_args(session_key)
-            proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
+            proc = _run_claude_once(
+                cli, task, session_args, cwd=cwd, timeout=timeout,
+                toolcall_log_path=toolcall_log_path,
+            )
             err = (proc.stderr or "").strip()
     out = (proc.stdout or "").strip()
     # Real, live-reproduced issue (production-testing sweep, 2026-09-12):
@@ -654,7 +688,10 @@ def _run_claude(task: str, *, cwd: str | None, timeout: int, tab: str | None = N
     # connect. Capped at one retry — this must never become a silent
     # infinite loop over a genuinely persistent problem.
     if proc.returncode == 0 and _CLAUDE_MCP_CONNECTION_FAILED_RE.search(out):
-        proc = _run_claude_once(cli, task, session_args, cwd=cwd, timeout=timeout)
+        proc = _run_claude_once(
+            cli, task, session_args, cwd=cwd, timeout=timeout,
+            toolcall_log_path=toolcall_log_path,
+        )
         err = (proc.stderr or "").strip()
         out = (proc.stdout or "").strip()
     if proc.returncode != 0:
@@ -1042,6 +1079,7 @@ def run_code_task(
     cwd: str | None = None,
     timeout: int = 120,
     tab: str | None = None,
+    toolcall_log_path: str | None = None,
 ) -> str:
     """Run a coding task through the chosen backend; returns REAL output.
 
@@ -1052,6 +1090,14 @@ def run_code_task(
     backend's own per-tab session isolation (see _claude_session_key) —
     omit it only for a genuine non-UI caller (a tool, a scheduled job) that
     really does want the single shared legacy session.
+
+    ``toolcall_log_path`` (optional, "claude" backend only -- silently
+    ignored by every other backend, none of which route through the
+    dourmouse MCP bridge): a fresh, caller-owned file path. Any REAL tool
+    call this run makes through the bridge gets appended there as it
+    happens (see mcp_bridge.py's own _log_toolcall); the caller reads it
+    back after this returns. See ClaudeCliClient._create in dispatch.py
+    for the real bug this exists to let that caller fix.
     """
     task = (task or "").strip()
     if not task:
@@ -1061,7 +1107,10 @@ def run_code_task(
         # v8.31: inject real shared-memory context before the CLI ever
         # sees the task — see _inject_shared_context's own docstring for
         # why this is scoped to the CLI-shelled-out backends only.
-        return _run_claude(_inject_shared_context(task), cwd=cwd, timeout=timeout, tab=tab)
+        return _run_claude(
+            _inject_shared_context(task), cwd=cwd, timeout=timeout, tab=tab,
+            toolcall_log_path=toolcall_log_path,
+        )
     if name in ("codex", "openai_codex"):
         # v8.7: CLI first (what the CODEX status light measures), API key
         # only as a fallback — see _run_codex. v8.31: same shared-memory

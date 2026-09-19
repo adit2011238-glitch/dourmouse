@@ -36,6 +36,8 @@ import concurrent.futures
 import difflib
 import json
 import os
+import tempfile
+import uuid
 import re
 import sys
 import threading
@@ -845,6 +847,7 @@ def _stream_completion(
     # goes through harmony_filter as before, so a raw "<|...|>" leak is
     # still caught exactly as it already was.
     text_leak_filter = HarmonyLeakStreamFilter()
+    mcp_toolcall_log: list[dict[str, Any]] = []
     for chunk in stream:
         # The usage-bearing final chunk carries an EMPTY choices list, so
         # this must be read before the choices guard below skips it.
@@ -874,6 +877,12 @@ def _stream_completion(
                     acc["name"] = fn.name
                 if getattr(fn, "arguments", None):
                     acc["args"] += fn.arguments
+        # See _OllamaDelta's own comment -- real tool calls a backend like
+        # ClaudeCliClient already executed elsewhere this turn, riding
+        # along in a non-standard field no real provider ever populates.
+        mcp_uses = getattr(delta, "dourmouse_mcp_tool_uses", None)
+        if mcp_uses:
+            mcp_toolcall_log.extend(mcp_uses)
     harmony_filter.feed(text_leak_filter.flush())
     harmony_filter.finish()
     if tool_acc:
@@ -881,10 +890,12 @@ def _stream_completion(
             _OllamaTc(a["id"], a["name"], a["args"])
             for _, a in sorted(tool_acc.items())
         ]
-        return _OllamaResponse(
-            _OllamaMessage("".join(content_parts), tool_calls), usage=stream_usage
-        )
-    return _OllamaResponse(_OllamaMessage("".join(content_parts), None), usage=stream_usage)
+        final_message = _OllamaMessage("".join(content_parts), tool_calls)
+    else:
+        final_message = _OllamaMessage("".join(content_parts), None)
+    if mcp_toolcall_log:
+        final_message.dourmouse_mcp_tool_uses = mcp_toolcall_log
+    return _OllamaResponse(final_message, usage=stream_usage)
 
 
 class Permission(str, Enum):
@@ -1733,9 +1744,20 @@ class _OllamaDelta:
         content: str | None = None,
         tool_calls: list | None = None,
         thinking: str | None = None,
+        dourmouse_mcp_tool_uses: list[dict[str, Any]] | None = None,
     ) -> None:
         self.content = content
         self.tool_calls = tool_calls
+        # Sideband, not a real streaming field (no provider ever sends
+        # this): ClaudeCliClient's own streaming branch uses it to carry a
+        # real record of tool calls mcp_bridge.py's SEPARATE subprocess
+        # already executed during this turn, so _stream_completion below
+        # can fold them into the final message the normal tool_calls
+        # mechanism can't carry them through (they already ran; putting
+        # them in tool_calls would make the dispatch loop run them AGAIN).
+        # None/absent for every other backend's chunks -- always falsy,
+        # zero behavior change there.
+        self.dourmouse_mcp_tool_uses = dourmouse_mcp_tool_uses
         # v13.1: visible chain-of-thought — Ollama's native /api/chat, when
         # sent think:true, streams reasoning tokens in a SEPARATE
         # message.thinking field, never mixed into message.content. Kept as
@@ -2940,9 +2962,35 @@ class ClaudeCliClient:
             "",
         )
         prompt = _CLAUDE_ORCHESTRATOR_FRAMING + str(last_user)
+        # Real bug this closes (live-reproduced, 2026-09-19 -- Grounded Mode
+        # false positive): "Claude used MCP internally; no Dourmouse-side
+        # tool_calls" below is true of the RESULT (there is genuinely no
+        # OpenAI-shaped tool_calls list to report -- Claude calls Dourmouse's
+        # own tools over MCP INSIDE the `claude -p` subprocess, through
+        # mcp_bridge.py's own SEPARATE OS process it spawns), but it used to
+        # also mean the call was structurally indistinguishable from one
+        # that used zero tools -- _run_dispatch_loop's own tools_used counts
+        # real "tool_use" transcript entries, and nothing ever created one
+        # for a call that ran here. That made grounded-mode flag a
+        # genuinely tool-backed, correct answer as "unverified" on EVERY
+        # claude_cli-backed turn, tool used or not -- not intermittent, 100%
+        # of the time, since Claude Front Mode is this deployment's default
+        # backend. A fresh path per call (verified live: the real `claude`
+        # CLI inherits its own process env into an MCP stdio server it
+        # spawns via --mcp-config and merges the config's own "env" dict on
+        # top rather than replacing it, so this reaches mcp_bridge.py's
+        # subprocess correctly scoped to THIS one invocation without
+        # touching the cached, shared mcp-config.json at all) lets
+        # mcp_bridge.py's own _log_toolcall record what it actually ran,
+        # read back below and replayed by _run_dispatch_loop as real
+        # transcript entries.
+        log_path = os.path.join(
+            tempfile.gettempdir(), f"dourmouse-mcp-toolcalls-{uuid.uuid4().hex}.ndjson"
+        )
         try:
             text = code_backends.run_code_task(
-                "claude", prompt, cwd=self.cwd, timeout=self.timeout, tab=self.tab
+                "claude", prompt, cwd=self.cwd, timeout=self.timeout, tab=self.tab,
+                toolcall_log_path=log_path,
             )
         except RuntimeError as exc:
             # Honest failure, not a fabricated reply (Rule 2.1/2.2) — the
@@ -2950,9 +2998,33 @@ class ClaudeCliClient:
             # uses, surfaced as the model's own answer since there is no
             # tool_result slot to put it in at this layer.
             text = f"CLAUDE ORCHESTRATOR (reported honestly): {exc}"
-        message = _OllamaMessage(text, None)  # Claude used MCP internally; no Dourmouse-side tool_calls
+        mcp_toolcall_log: list[dict[str, Any]] = []
+        try:
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            mcp_toolcall_log.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+        except OSError:
+            pass
+        finally:
+            try:
+                os.remove(log_path)
+            except OSError:
+                pass
         if stream:
-            return iter([_OllamaChunk(_OllamaDelta(content=text))])
+            delta = _OllamaDelta(content=text)
+            if mcp_toolcall_log:
+                delta.dourmouse_mcp_tool_uses = mcp_toolcall_log
+            return iter([_OllamaChunk(delta)])
+        message = _OllamaMessage(text, None)  # Claude used MCP internally; no Dourmouse-side tool_calls
+        if mcp_toolcall_log:
+            message.dourmouse_mcp_tool_uses = mcp_toolcall_log
         return _OllamaResponse(message)
 
 
@@ -4723,6 +4795,40 @@ def _run_dispatch_loop(
                 client_factory=client_factory,
             )
         message = response.choices[0].message
+
+        # Real fix for a live-reproduced Grounded Mode false positive:
+        # ClaudeCliClient's own tool calls run over MCP inside a SEPARATE
+        # OS subprocess (mcp_bridge.py) and never populate message.tool_calls
+        # the normal way (see that class's own comment in this file) -- so
+        # tools_used below, which only counts real "tool_use" transcript
+        # entries, used to see 0 real tool calls on every claude_cli-backed
+        # turn regardless of what actually happened. dourmouse_mcp_tool_uses
+        # is the real record of what mcp_bridge.py actually executed this
+        # turn, riding back on the message/delta in a field no real provider
+        # populates (never as tool_calls itself: these tools already ran for
+        # real, so putting them there would make the loop below try to
+        # execute every one of them a second time). Replayed here as real
+        # transcript entries -- never appended to `messages` (there is no
+        # matching tool_call_id in this conversation's own OpenAI-shaped
+        # history) -- so every consumer keyed off transcript's "tool_use"
+        # entries (grounded-mode, the plan checkpoint, audit, experience
+        # recording) sees the truth instead of being blind to this backend.
+        for _mcp_rec in getattr(message, "dourmouse_mcp_tool_uses", None) or []:
+            _mcp_name = str(_mcp_rec.get("name") or "")
+            if not _mcp_name:
+                continue
+            _mcp_use_entry = {
+                "type": "tool_use", "name": _mcp_name,
+                "raw_arguments": _mcp_rec.get("raw_arguments", ""),
+            }
+            transcript.append(_mcp_use_entry)
+            _emit_event(event_sink, _mcp_use_entry)
+            _mcp_result_entry = {
+                "type": "tool_result", "name": _mcp_name,
+                "text": str(_mcp_rec.get("result_text") or ""),
+            }
+            transcript.append(_mcp_result_entry)
+            _emit_event(event_sink, _mcp_result_entry)
 
         # Record the call against the budget AFTER it succeeded, using real
         # request + response sizes (token estimate ~4 chars/token). The

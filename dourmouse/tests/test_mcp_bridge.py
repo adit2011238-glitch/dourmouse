@@ -364,6 +364,112 @@ class TestJsonRpcProtocol:
         assert out[0]["error"]["code"] == -32603
 
 
+class TestToolcallLogging:
+    """The real fix for a live-reproduced Grounded Mode false positive
+    (2026-09-19): a tool call executed through this bridge runs in a
+    SEPARATE OS subprocess from the dispatch() run that's checking
+    tools_used, so it was previously invisible no matter how real the
+    result was. ClaudeCliClient (dispatch.py) sets _TOOLCALL_LOG_ENV_VAR to
+    a fresh per-invocation temp path before spawning `claude -p`; this is
+    the write half of that channel -- see TestClaudeCliClient in
+    test_dispatch.py for the read half."""
+
+    def test_no_env_var_set_is_a_silent_no_op(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DOURMOUSE_MCP_TOOLCALL_LOG", raising=False)
+        registry = _registry_with(_tool("echo"))
+        server = McpBridgeServer(registry)
+        result = server._handle_tools_call({"name": "echo", "arguments": {"x": "y"}})
+        assert result["isError"] is False
+        # No log path was ever configured, so nothing should exist to check --
+        # this is really just proving _log_toolcall didn't raise.
+
+    def test_successful_call_is_logged_with_real_name_args_and_result(self, monkeypatch, tmp_path):
+        log_path = tmp_path / "toolcalls.ndjson"
+        monkeypatch.setenv("DOURMOUSE_MCP_TOOLCALL_LOG", str(log_path))
+        registry = _registry_with(_tool("do_thing", handler=lambda a: "REAL RESULT"))
+        server = McpBridgeServer(registry)
+
+        result = server._handle_tools_call({"name": "do_thing", "arguments": {"x": "y"}})
+
+        assert result["isError"] is False
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["name"] == "do_thing"
+        assert json.loads(record["raw_arguments"]) == {"x": "y"}
+        assert record["result_text"] == "REAL RESULT"
+
+    def test_a_raising_handler_is_still_logged(self, monkeypatch, tmp_path):
+        """Matches dispatch.py's own convention for its normal tool-calling
+        loop: a "tool_use" record is made the instant a call is attempted,
+        regardless of outcome -- grounded-mode cares whether the model tried
+        to ground its answer, not just whether the attempt succeeded."""
+        log_path = tmp_path / "toolcalls.ndjson"
+        monkeypatch.setenv("DOURMOUSE_MCP_TOOLCALL_LOG", str(log_path))
+
+        def boom(args):
+            raise RuntimeError("real failure")
+
+        registry = _registry_with(_tool("boom", handler=boom))
+        server = McpBridgeServer(registry)
+
+        server._handle_tools_call({"name": "boom", "arguments": {}})
+
+        record = json.loads(log_path.read_text(encoding="utf-8").strip())
+        assert record["name"] == "boom"
+        assert "ERROR" in record["result_text"]
+
+    def test_a_gated_unconfirmed_call_is_still_logged(self, monkeypatch, tmp_path):
+        log_path = tmp_path / "toolcalls.ndjson"
+        monkeypatch.setenv("DOURMOUSE_MCP_TOOLCALL_LOG", str(log_path))
+        registry = _registry_with(_tool("send_email", Permission.REQUIRES_CONFIRMATION))
+        server = McpBridgeServer(registry)
+
+        server._handle_tools_call({"name": "send_email", "arguments": {}})
+
+        record = json.loads(log_path.read_text(encoding="utf-8").strip())
+        assert record["name"] == "send_email"
+        assert "CONFIRMATION REQUIRED" in record["result_text"]
+
+    def test_unknown_tool_is_never_logged(self, monkeypatch, tmp_path):
+        """Nothing real was attempted -- there is no tool to attribute a
+        record to, and logging one could misattribute a bogus name into a
+        real transcript later."""
+        log_path = tmp_path / "toolcalls.ndjson"
+        monkeypatch.setenv("DOURMOUSE_MCP_TOOLCALL_LOG", str(log_path))
+        registry = _registry_with(_tool("echo"))
+        server = McpBridgeServer(registry)
+
+        server._handle_tools_call({"name": "does_not_exist", "arguments": {}})
+
+        assert not log_path.exists()
+
+    def test_multiple_calls_append_as_separate_ndjson_lines(self, monkeypatch, tmp_path):
+        log_path = tmp_path / "toolcalls.ndjson"
+        monkeypatch.setenv("DOURMOUSE_MCP_TOOLCALL_LOG", str(log_path))
+        registry = _registry_with(_tool("a"), _tool("b"))
+        server = McpBridgeServer(registry)
+
+        server._handle_tools_call({"name": "a", "arguments": {}})
+        server._handle_tools_call({"name": "b", "arguments": {}})
+
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+        assert [json.loads(l)["name"] for l in lines] == ["a", "b"]
+
+    def test_unwritable_log_path_never_breaks_the_real_tool_call(self, monkeypatch):
+        """An observer must never break the thing it's observing -- a log
+        directory that doesn't exist must not turn a real, successful tool
+        call into a failure."""
+        monkeypatch.setenv("DOURMOUSE_MCP_TOOLCALL_LOG", "/no/such/directory/toolcalls.ndjson")
+        registry = _registry_with(_tool("do_thing", handler=lambda a: "REAL RESULT"))
+        server = McpBridgeServer(registry)
+
+        result = server._handle_tools_call({"name": "do_thing", "arguments": {}})
+
+        assert result["isError"] is False
+        assert result["content"][0]["text"] == "REAL RESULT"
+
+
 class TestConfigFileGeneration:
     def test_config_points_at_this_interpreter_and_this_module(self, tmp_path):
         path = tmp_path / "mcp-config.json"

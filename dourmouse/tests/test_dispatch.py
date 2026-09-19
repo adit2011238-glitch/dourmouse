@@ -10,6 +10,7 @@ LLM side of the conversation, never the tools' output.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 
@@ -1907,6 +1908,77 @@ class TestGroundedMode:
         assert len(client.chat.completions.calls) == 2  # nudge still fires
         assert "Grounded Mode was on" in report["final_text"]
 
+    def test_claude_front_mode_mcp_tool_use_counts_no_false_positive(self, monkeypatch):
+        """Real bug (2026-09-19, live-reproduced end to end against a real
+        dev-preview server): ClaudeCliClient's own completions never
+        populate message.tool_calls -- Claude's real tool calls run over
+        MCP inside a SEPARATE OS subprocess (mcp_bridge.py, spawned by the
+        `claude` CLI itself) and there is genuinely no OpenAI-shaped
+        tool_calls list to report the normal way. Before the fix, that made
+        a real, verbatim, tool-backed answer ("research_mesh_status ...")
+        structurally indistinguishable from one the model just guessed --
+        tools_used saw 0 on EVERY claude_cli-backed turn, not
+        intermittently. The real fix threads the actual record back as
+        message.dourmouse_mcp_tool_uses (see ClaudeCliClient._create /
+        _run_dispatch_loop in dispatch.py), replayed here as real
+        "tool_use"/"tool_result" transcript entries -- never as
+        `tool_calls` itself, since the tool already ran for real and must
+        not be executed a second time by this loop."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = _test_registry()
+        real_args = json.dumps({"domain": "Condensed Matter & Materials (physics)", "field": "Photonics & Optoelectronics"})
+        real_result = "...: not yet started. 6 real exam paper(s) materialized, 6 pending iteration(s)."
+        message = _FakeMessage(content=real_result)
+        message.dourmouse_mcp_tool_uses = [
+            {"name": "research_mesh_status", "raw_arguments": real_args, "result_text": real_result}
+        ]
+        client = FakeClient([_FakeResponse(message)])
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "call research_mesh_status and report exactly what it returns, verbatim"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent",
+        )
+        assert report["final_text"] == real_result
+        assert "GROUNDED MODE" not in report["final_text"]
+        assert "Grounded Mode" not in report["final_text"]
+        assert len(client.chat.completions.calls) == 1  # no nudge round-trip
+        tool_uses = [e for e in report["transcript"] if e["type"] == "tool_use"]
+        assert tool_uses == [
+            {"type": "tool_use", "name": "research_mesh_status", "raw_arguments": real_args}
+        ]
+        tool_results = [e for e in report["transcript"] if e["type"] == "tool_result"]
+        assert tool_results == [
+            {"type": "tool_result", "name": "research_mesh_status", "text": real_result}
+        ]
+
+    def test_claude_front_mode_genuine_zero_tool_use_still_caveats(self, monkeypatch):
+        """The other half of the same fix: a claude_cli-backed turn that
+        genuinely used no tool (no dourmouse_mcp_tool_uses at all -- the
+        normal, unset case) must still get the real caveat. The fix must
+        not go blind for this backend; it must make tools_used accurate,
+        in both directions."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = _test_registry()
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content="first try, no tool")),
+            _FakeResponse(_FakeMessage(content="second try, still no tool")),
+        ])
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "x"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent",
+        )
+        assert "Grounded Mode was on" in report["final_text"]
+        assert "zero tool calls" in report["final_text"]
+
 
 class TestRealClientConstruction:
     def test_builds_client_from_env_config_when_none_injected(self, monkeypatch):
@@ -3490,7 +3562,7 @@ class TestClaudeCliClient:
     def test_create_calls_run_code_task_with_the_real_prompt(self, monkeypatch):
         seen = {}
 
-        def _fake_run_code_task(backend, prompt, cwd, timeout, tab=None):
+        def _fake_run_code_task(backend, prompt, cwd, timeout, tab=None, toolcall_log_path=None):
             seen["backend"] = backend
             seen["prompt"] = prompt
             seen["cwd"] = cwd
@@ -3509,7 +3581,7 @@ class TestClaudeCliClient:
         assert response.choices[0].message.tool_calls is None
 
     def test_a_real_failure_is_reported_honestly_not_fabricated(self, monkeypatch):
-        def _boom(backend, prompt, cwd, timeout, tab=None):
+        def _boom(backend, prompt, cwd, timeout, tab=None, toolcall_log_path=None):
             raise RuntimeError("NOT CONFIGURED: no CLI found")
 
         monkeypatch.setattr("dourmouse.code_backends.run_code_task", _boom)
@@ -3530,7 +3602,9 @@ class TestClaudeCliClient:
         seen = {}
         monkeypatch.setattr(
             "dourmouse.code_backends.run_code_task",
-            lambda backend, prompt, cwd, timeout, tab=None: seen.setdefault("tab", tab) or "ok",
+            lambda backend, prompt, cwd, timeout, tab=None, toolcall_log_path=None: (
+                seen.setdefault("tab", tab) or "ok"
+            ),
         )
         client = dispatch_module.ClaudeCliClient(tab="proj1-research")
         client.chat.completions.create(messages=[{"role": "user", "content": "hi"}])
@@ -3540,12 +3614,79 @@ class TestClaudeCliClient:
         seen = {}
         monkeypatch.setattr(
             "dourmouse.code_backends.run_code_task",
-            lambda backend, prompt, cwd, timeout, tab=None: seen.setdefault("tab", tab) or "ok",
+            lambda backend, prompt, cwd, timeout, tab=None, toolcall_log_path=None: (
+                seen.setdefault("tab", tab) or "ok"
+            ),
         )
         dispatch_module.ClaudeCliClient().chat.completions.create(
             messages=[{"role": "user", "content": "hi"}]
         )
         assert seen["tab"] is None
+
+    def test_mcp_toolcalls_recorded_during_the_call_are_replayed_on_the_message(self, monkeypatch):
+        """The real fix (2026-09-19): mcp_bridge.py's own subprocess writes
+        one NDJSON record per real tool call it executes to the path this
+        client hands run_code_task (see mcp_bridge.py's _log_toolcall).
+        Simulated here by having the fake run_code_task write to that SAME
+        path, exactly like the real bridge does; asserts _create() reads it
+        back onto the message it returns, and cleans the temp file up
+        afterward regardless."""
+        written_path = {}
+
+        def _fake_run_code_task(backend, prompt, cwd, timeout, tab=None, toolcall_log_path=None):
+            written_path["path"] = toolcall_log_path
+            assert toolcall_log_path, "a real path must always be handed to run_code_task"
+            with open(toolcall_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "name": "research_mesh_status",
+                    "raw_arguments": json.dumps({"domain": "physics", "field": "photonics"}),
+                    "result_text": "6 real exam paper(s) materialized",
+                }) + "\n")
+            return "the real verbatim tool result"
+
+        monkeypatch.setattr("dourmouse.code_backends.run_code_task", _fake_run_code_task)
+        client = dispatch_module.ClaudeCliClient()
+        response = client.chat.completions.create(messages=[{"role": "user", "content": "hi"}])
+        message = response.choices[0].message
+        assert message.tool_calls is None  # never re-executed via the normal tool_calls path
+        assert message.dourmouse_mcp_tool_uses == [{
+            "name": "research_mesh_status",
+            "raw_arguments": json.dumps({"domain": "physics", "field": "photonics"}),
+            "result_text": "6 real exam paper(s) materialized",
+        }]
+        assert not os.path.exists(written_path["path"]), "the temp log file must be cleaned up"
+
+    def test_mcp_toolcalls_survive_the_streaming_path_too(self, monkeypatch):
+        def _fake_run_code_task(backend, prompt, cwd, timeout, tab=None, toolcall_log_path=None):
+            with open(toolcall_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"name": "probe_tool", "raw_arguments": "{}", "result_text": "ok"}) + "\n")
+            return "streamed real text"
+
+        monkeypatch.setattr("dourmouse.code_backends.run_code_task", _fake_run_code_task)
+        client = dispatch_module.ClaudeCliClient()
+        chunks = list(client.chat.completions.create(
+            messages=[{"role": "user", "content": "hi"}], stream=True,
+        ))
+        assert len(chunks) == 1
+        delta = chunks[0].choices[0].delta
+        assert delta.content == "streamed real text"
+        assert delta.dourmouse_mcp_tool_uses == [
+            {"name": "probe_tool", "raw_arguments": "{}", "result_text": "ok"}
+        ]
+
+    def test_no_real_tool_calls_means_no_extra_attribute_set(self, monkeypatch):
+        """A claude_cli turn that genuinely used zero tools must not carry a
+        truthy dourmouse_mcp_tool_uses -- _run_dispatch_loop's own replay
+        loop treats an empty/missing list as nothing to replay, so
+        grounded-mode's zero-tool caveat still fires for a GENUINELY
+        zero-tool answer on this backend, same as any other."""
+        monkeypatch.setattr(
+            "dourmouse.code_backends.run_code_task",
+            lambda backend, prompt, cwd, timeout, tab=None, toolcall_log_path=None: "no tools needed here",
+        )
+        client = dispatch_module.ClaudeCliClient()
+        response = client.chat.completions.create(messages=[{"role": "user", "content": "hi"}])
+        assert not getattr(response.choices[0].message, "dourmouse_mcp_tool_uses", None)
 
     def test_stream_true_yields_one_chunk_with_the_real_text(self, monkeypatch):
         monkeypatch.setattr("dourmouse.code_backends.run_code_task", lambda *a, **k: "real text")
