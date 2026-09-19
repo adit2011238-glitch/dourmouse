@@ -90,7 +90,7 @@ class TestNvidiaConfigLoading:
         }
         # Case-insensitive lookup on the agent name; env override wins even
         # over the agent's own built-in default (research_info has one —
-        # see TestNvidiaAgentDefaults below — and the env value still wins).
+        # see TestNvidiaAgentDefaults below -- and the env value still wins).
         assert cfg.model_for_agent("research_info") == "nvidia/r1-70b"
         assert cfg.model_for_agent("RESEARCH_INFO") == "nvidia/r1-70b"
         assert cfg.model_for_agent("code_nvidia") == "nvidia/code-llama-70b"
@@ -157,7 +157,7 @@ class TestNvidiaConfigLoading:
 
 
 # --------------------------------------------------------------------------- #
-# world-monitor-expansion — real per-agent NVIDIA defaults +
+# world-monitor-expansion -- real per-agent NVIDIA defaults +
 # persisted orchestrator-model setting.
 # --------------------------------------------------------------------------- #
 class TestNvidiaAgentDefaults:
@@ -184,14 +184,14 @@ class TestNvidiaAgentDefaults:
         # 2026-08-29): the two old ids here ("nvidia/llama-3.3-nemotron-
         # super-49b-v1", "nvidia/code-llama-70b") were confirmed RETIRED /
         # NEVER-REAL against a live integrate.api.nvidia.com/v1/models call
-        # — see config._NVIDIA_AGENT_DEFAULTS' docstring for the full
+        # -- see config._NVIDIA_AGENT_DEFAULTS' docstring for the full
         # cross-check and replacement reasoning.
         assert cfg.model_for_agent("orchestrator") == "nvidia/nemotron-3-nano-30b-a3b"
         assert cfg.model_for_agent("research_info") == "nvidia/llama-3.1-nemotron-ultra-253b-v1"
         assert cfg.model_for_agent("dev_coding") == "meta/codellama-70b"
         for agent in ("comms", "mail", "news", "worldmonitor", "companion"):
             assert cfg.model_for_agent(agent) == "deepseek-ai/deepseek-v4-flash-0731"
-        # code_* family is NOT in the defaults dict — resolved via
+        # code_* family is NOT in the defaults dict -- resolved via
         # code_backends.py instead, so it stays on the plain default here.
         assert cfg.model_for_agent("code_nvidia") == "nvidia/one-model"
 
@@ -204,7 +204,7 @@ class TestNvidiaAgentDefaults:
 
 
 class TestOrchestratorModelSetting:
-    """Persisted (not just env) orchestrator model choice — the backend
+    """Persisted (not just env) orchestrator model choice -- the backend
     half of the Settings UI's orchestrator-model picker. See
     config.orchestrator_model_setting / save_orchestrator_model_setting."""
 
@@ -301,7 +301,7 @@ class TestOrchestratorModelSetting:
         assert cfg.model_for_agent("orchestrator") == "nvidia/env-wins"
 
     def test_persisted_setting_applies_only_to_its_own_saved_backend(self, monkeypatch, tmp_path):
-        """Each backend's persisted choice is independent — saving one
+        """Each backend's persisted choice is independent -- saving one
         does not affect, and is not affected by, the others. This is the
         corrected version of the old (buggy) "applies everywhere" test:
         that behavior is exactly the cross-backend leak this fix closes."""
@@ -322,7 +322,7 @@ class TestOrchestratorModelSetting:
 
         save_orchestrator_model_setting("omniroute/persisted-choice", backend="omniroute")
         assert load_omniroute_config().model_for_agent("orchestrator") == "omniroute/persisted-choice"
-        # The later omniroute save supersedes ollama's — only the most
+        # The later omniroute save supersedes ollama's -- only the most
         # recent backend tag is trusted, matching the single-storage-slot
         # design (one persisted choice at a time, tagged with its backend).
         assert load_ollama_config().model_for_agent("orchestrator") != "ollama/persisted-choice"
@@ -331,11 +331,11 @@ class TestOrchestratorModelSetting:
 class TestSkipPersistedOrchestratorChoice:
     """Real bug, found live this session: force_local=True was built to
     make a config fully local (is_cloud=False, api_key="", no cloud base
-    URL) — but model_for_agent("orchestrator") still unconditionally
+    URL) -- but model_for_agent("orchestrator") still unconditionally
     honored a persisted orchestrator-model choice regardless of that
     flag. On this machine the persisted choice was "gpt-oss:20b" (a
     cloud-only model, saved back when Ollama Cloud was the active
-    backend) — so a force_local config still resolved to a model that
+    backend) -- so a force_local config still resolved to a model that
     does not exist on the local daemon, and every "apps"/"mail"/etc.
     call (privacy-pinned to force_local per _LOCAL_ONLY_AGENTS) 404'd.
     Confirmed live via a real GET to http://127.0.0.1:11434/api/tags:
@@ -374,7 +374,7 @@ class TestSkipPersistedOrchestratorChoice:
     def test_non_force_local_still_honors_persisted_choice_unaffected(
         self, monkeypatch, tmp_path
     ):
-        """The fix must be scoped to force_local only — normal (cloud)
+        """The fix must be scoped to force_local only -- normal (cloud)
         configs keep today's existing, working behavior exactly."""
         self._isolate(monkeypatch, tmp_path)
         monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
@@ -388,14 +388,14 @@ class TestSkipPersistedOrchestratorChoice:
 
     def test_plain_construction_defaults_flag_to_false(self):
         """A bare OllamaConfig() (no force_local involved at all) must
-        default to the old, unconditional-honor behavior — this flag is
+        default to the old, unconditional-honor behavior -- this flag is
         opt-in, never a silent behavior change for existing callers."""
         assert OllamaConfig().skip_persisted_orchestrator_choice is False
 
     def test_flag_does_not_affect_non_orchestrator_agents(self, monkeypatch, tmp_path):
         """skip_persisted_orchestrator_choice only ever gates the
         persisted-setting lookup, which only ever applies to the
-        "orchestrator" key — a non-orchestrator agent's resolution path
+        "orchestrator" key -- a non-orchestrator agent's resolution path
         (agent_models override, then the fast-dispatch pin, then the
         plain default) must be identical either way."""
         self._isolate(monkeypatch, tmp_path)
@@ -410,10 +410,34 @@ class TestSkipPersistedOrchestratorChoice:
         # through to the plain per-config default model either way.
         assert local_cfg.model_for_agent("apps") == cloud_cfg.model_for_agent("apps")
 
+    def test_cloud_config_skips_a_stale_local_persisted_choice(self, monkeypatch, tmp_path):
+        """The mirror bug, live-caught 2026-09-20 (research_pipeline's own
+        live verification hit it): a persisted choice saved while running
+        LOCAL Ollama ("qwen2.5:7b") is tagged only "ollama", never by
+        locality. Once OLLAMA_API_KEY later makes this SAME config cloud,
+        that stale local value must never be sent to Ollama Cloud --
+        confirmed live as a real, reproducible 404 (Ollama Cloud has no
+        "qwen2.5:7b" in its catalog). Unlike the tests above, force_local
+        is never set here -- is_cloud alone must gate this, the same guard
+        _OLLAMA_FAST_DISPATCH's own pin already uses two lines below it in
+        model_for_agent."""
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.setenv("OLLAMA_API_KEY", "test-cloud-key")
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
+        from dourmouse.config import load_ollama_config, save_orchestrator_model_setting
+
+        save_orchestrator_model_setting("qwen2.5:7b", backend="ollama")
+
+        cfg = load_ollama_config(force_local=False)
+        assert cfg.is_cloud is True
+        assert cfg.model_for_agent("orchestrator") != "qwen2.5:7b"
+        assert cfg.model_for_agent("orchestrator") == cfg.model  # the real cloud default
+
 
 class TestClaudeFrontModeSetting:
     """Persisted, ON-by-default Claude-front-mode toggle (the mirror image
-    of Grounded Mode below — opt-OUT, not opt-in, per the user's explicit
+    of Grounded Mode below -- opt-OUT, not opt-in, per the user's explicit
     ask that Claude-front be the default). See
     config.claude_front_mode_enabled / save_claude_front_mode_setting."""
 
@@ -462,8 +486,8 @@ class TestClaudeFrontModeSetting:
     def test_key_is_distinct_from_orchestrator_backend_setting_key(self):
         """Real bug this guards against: this key must NEVER collide with
         ORCHESTRATOR_BACKEND_SETTING_KEY (an unrelated, already-shipped
-        setting — "which backend a persisted orchestrator MODEL belongs
-        to" — that a user picking e.g. "ollama" would have set to a value
+        setting -- "which backend a persisted orchestrator MODEL belongs
+        to" -- that a user picking e.g. "ollama" would have set to a value
         this feature doesn't recognize)."""
         from dourmouse.config import CLAUDE_FRONT_MODE_SETTING_KEY, ORCHESTRATOR_BACKEND_SETTING_KEY
 
@@ -473,10 +497,10 @@ class TestClaudeFrontModeSetting:
 class TestGoogleOAuthFullScopesSetting:
     """Real friction, live-caught (2026-09-13): turning on Gmail/Calendar/
     Drive via real Google OAuth scopes required manually editing .env
-    (GOOGLE_OAUTH_FULL_SCOPES=1) and restarting the server — undiscoverable
+    (GOOGLE_OAUTH_FULL_SCOPES=1) and restarting the server -- undiscoverable
     unless you already knew the env var existed. Same real, persisted,
     no-restart-needed toggle shape as Claude-front-mode above, but OFF by
-    default (opt-in — Google's restricted scopes 500 on an unverified
+    default (opt-in -- Google's restricted scopes 500 on an unverified
     OAuth app). See config.google_oauth_full_scopes_enabled /
     save_google_oauth_full_scopes_setting."""
 
@@ -514,7 +538,7 @@ class TestGoogleOAuthFullScopesSetting:
     def test_a_real_env_var_wins_even_when_the_persisted_setting_is_off(self, monkeypatch, tmp_path):
         """An operator who already set the raw env var directly in their
         own real .env must keep working exactly as before this toggle
-        existed — the new Settings switch is additive, never a
+        existed -- the new Settings switch is additive, never a
         regression for the existing manual path."""
         self._isolate(monkeypatch, tmp_path)
         from dourmouse.config import google_oauth_full_scopes_enabled, save_google_oauth_full_scopes_setting
@@ -556,7 +580,7 @@ class TestGoogleOAuthFullScopesSetting:
 
 
 class TestGroundedModeSetting:
-    """Persisted (not just env), off-by-default Grounded Mode toggle — the
+    """Persisted (not just env), off-by-default Grounded Mode toggle -- the
     backend half of the Settings UI's grounded-mode switch. See
     config.grounded_mode_enabled / save_grounded_mode_setting."""
 
@@ -619,7 +643,7 @@ class TestAutoApproveSetting:
     """Persisted, off-by-default "skip confirmations" toggle (2026-09-14,
     live-caught: "approval keeps failing, remove the need for approval,
     make this a toggle in settings"). Same shape as TestGroundedModeSetting
-    above, byte for byte — see config.auto_approve_enabled /
+    above, byte for byte -- see config.auto_approve_enabled /
     save_auto_approve_setting."""
 
     def _isolate(self, monkeypatch, tmp_path):
@@ -665,7 +689,7 @@ class TestAutoApproveSetting:
 class TestAppControlDryRunSetting:
     """v14 (user-directed, 2026-09-08): "Consider adding a 'dry run'
     mode where it shows what would be clicked without actually
-    clicking." Persisted (not just env), OFF-by-default toggle — same
+    clicking." Persisted (not just env), OFF-by-default toggle -- same
     exact shape as TestGroundedModeSetting above. See
     config.app_control_dry_run_enabled / save_app_control_dry_run_setting."""
 
@@ -725,7 +749,7 @@ class TestAppControlDryRunSetting:
 
 class TestByokApiKeySetting:
     """v14 (user-directed, 2026-09-12): "commercial, for other people to
-    use" — BYOK (bring your own key) Settings backend, replacing "open
+    use" -- BYOK (bring your own key) Settings backend, replacing "open
     .env in a text editor" with a real save/clear path. One generic
     pair of functions over an explicit allowlist (BYOK_API_KEY_NAMES),
     not one hand-copied function per key name."""
@@ -786,7 +810,7 @@ class TestByokApiKeySetting:
 
     def test_a_name_outside_the_allowlist_is_refused(self, monkeypatch, tmp_path):
         """Rule 2.8: never write an arbitrary env-var name a request
-        happens to name — real, deliberate scoping, not an oversight."""
+        happens to name -- real, deliberate scoping, not an oversight."""
         self._isolate(monkeypatch, tmp_path)
         from dourmouse.config import save_api_key_setting, user_env_path
 
@@ -803,7 +827,7 @@ class TestByokApiKeySetting:
 
 
 # --------------------------------------------------------------------------- #
-# v5.10 — OmniRoute free-tier gateway backend
+# v5.10 -- OmniRoute free-tier gateway backend
 # --------------------------------------------------------------------------- #
 class TestOmniRouteConfig:
     def test_defaults_are_keyless_and_local(self, monkeypatch):
@@ -851,7 +875,7 @@ class TestOmniRouteConfig:
 
     def test_load_llm_config_explicit_ollama_wins_over_auto(self, monkeypatch):
         """Explicit backend selection is honored even when another probe
-        would answer — deterministic (Rule 2.8)."""
+        would answer -- deterministic (Rule 2.8)."""
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
         cfg = load_llm_config()
         assert isinstance(cfg, OllamaConfig)
@@ -880,7 +904,7 @@ class TestOmniRouteConfig:
         assert isinstance(cfg, OmniRouteConfig)
 
     def test_load_llm_config_auto_skips_omniroute_without_optin(self, monkeypatch):
-        """auto: the third-party gateway is NEVER chosen implicitly — even
+        """auto: the third-party gateway is NEVER chosen implicitly -- even
         when it answers, without DOURMOUSE_OMNIROUTE_AUTO=1 the chain goes
         Ollama -> NVIDIA (Rule 2.6 local-first privacy)."""
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "auto")
@@ -912,7 +936,7 @@ class TestOmniRouteConfig:
 class TestBackendIdentity:
     """world-monitor-expansion (UX pass item 1): the console's per-response
     model/local indicator classifies by the config object's real TYPE —
-    never guessed from a model-name string — so these pin the contract
+    never guessed from a model-name string -- so these pin the contract
     backend_identity() promises."""
 
     def test_ollama_is_local(self):
@@ -922,7 +946,7 @@ class TestBackendIdentity:
         """Real bug found live-testing this session: every OllamaConfig
         used to report local=True unconditionally, including a real
         Ollama Cloud config (OLLAMA_API_KEY set, base_url=ollama.com,
-        is_cloud=True) — confirmed live via the server's own /api/backend
+        is_cloud=True) -- confirmed live via the server's own /api/backend
         endpoint reporting base_url="https://ollama.com/v1" while the
         brain event claimed local:true for the same request. is_cloud
         already existed on OllamaConfig specifically to answer this; it
@@ -939,7 +963,7 @@ class TestBackendIdentity:
 
     def test_omniroute_is_cloud_despite_localhost_gateway(self):
         """OmniRoute's gateway process listens on 127.0.0.1, but it exists
-        to forward requests to REMOTE free-tier providers — it must not be
+        to forward requests to REMOTE free-tier providers -- it must not be
         misclassified as local just because its own base_url looks local."""
         cfg = OmniRouteConfig()
         assert "127.0.0.1" in cfg.base_url  # the gateway really is local...
