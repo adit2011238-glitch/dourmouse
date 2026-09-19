@@ -27,6 +27,7 @@ from dourmouse.research_pipeline.stages import (
     discover_sources,
     extract_evidence,
     plan,
+    run_full_pipeline,
     synthesize,
 )
 from dourmouse.research_pipeline.store import ResearchStore
@@ -871,3 +872,109 @@ class TestDetectContradictionsStage:
         detect_contradictions(record)
         assert len(record.contradictions) == 1
         assert "[DOURMOUSE" not in record.contradictions[0].note
+
+
+class TestRunFullPipelineStage:
+    def test_requires_a_real_plan_first(self):
+        record = ResearchRecord(question="Q")
+        with pytest.raises(ValueError):
+            run_full_pipeline(record, _research_info_registry())
+
+    def test_walks_every_sub_question_and_extracts_from_its_own_new_sources(self, monkeypatch):
+        record = ResearchRecord(question="Q")
+        record.set_plan(["sub A", "sub B"])
+        import dourmouse.dispatch as dispatch_module
+
+        def _dispatch(messages, registry, **kw):
+            content = messages[0]["content"]
+            if "Research this question for real" in content and "sub A" in content:
+                return {"final_text": "ok", "transcript": [
+                    {"type": "tool_use", "name": "fetch_url",
+                     "raw_arguments": json.dumps({"url": "https://a.example/1"})},
+                ]}
+            if "Research this question for real" in content and "sub B" in content:
+                return {"final_text": "ok", "transcript": [
+                    {"type": "tool_use", "name": "fetch_url",
+                     "raw_arguments": json.dumps({"url": "https://b.example/1"})},
+                ]}
+            if "https://a.example/1" in content:
+                return {"final_text": "ok",
+                        "transcript": _fetch_transcript("https://a.example/1", "Body A content real.")}
+            if "https://b.example/1" in content:
+                return {"final_text": "ok",
+                        "transcript": _fetch_transcript("https://b.example/1", "Body B content real.")}
+            raise AssertionError(f"unexpected dispatch content: {content!r}")
+
+        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_chat_fake(monkeypatch, [
+            "CLAIM: claim A\nPASSAGE: Body A content real.\nLOCATION: whole",
+            "CLAIM: claim B\nPASSAGE: Body B content real.\nLOCATION: whole",
+        ])
+        result = run_full_pipeline(record, _research_info_registry())
+        assert result is record
+        assert set(record.sources) == {"https://a.example/1", "https://b.example/1"}
+        assert len(record.claims) == 2
+        assert {c.sub_question for c in record.claims} == {"sub A", "sub B"}
+
+    def test_caps_sources_extracted_per_sub_question(self, monkeypatch):
+        record = ResearchRecord(question="Q")
+        record.set_plan(["sub A"])
+        import dourmouse.dispatch as dispatch_module
+
+        def _dispatch(messages, registry, **kw):
+            content = messages[0]["content"]
+            if "Research this question for real" in content:
+                return {"final_text": "ok", "transcript": [
+                    {"type": "tool_use", "name": "fetch_url",
+                     "raw_arguments": json.dumps({"url": u})}
+                    for u in ("https://a.example/1", "https://a.example/2", "https://a.example/3")
+                ]}
+            return {"final_text": "ok", "transcript": _fetch_transcript(
+                next(u for u in ("https://a.example/1", "https://a.example/2", "https://a.example/3") if u in content),
+                "Body content real.",
+            )}
+
+        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_chat_fake(monkeypatch, [
+            "CLAIM: claim\nPASSAGE: Body content real.\nLOCATION: whole",
+        ])
+        run_full_pipeline(record, _research_info_registry(), max_sources_per_sub_question=1)
+        assert record.sources == ("https://a.example/1", "https://a.example/2", "https://a.example/3")
+        assert len(record.claims) == 1  # only the first real source was extracted, the cap held
+
+    def test_one_failing_source_does_not_block_the_rest_of_the_run(self, monkeypatch):
+        record = ResearchRecord(question="Q")
+        record.set_plan(["sub A", "sub B"])
+        import dourmouse.dispatch as dispatch_module
+
+        def _dispatch(messages, registry, **kw):
+            content = messages[0]["content"]
+            if "Research this question for real" in content and "sub A" in content:
+                return {"final_text": "ok", "transcript": [
+                    {"type": "tool_use", "name": "fetch_url",
+                     "raw_arguments": json.dumps({"url": "https://a.example/1"})},
+                ]}
+            if "Research this question for real" in content and "sub B" in content:
+                return {"final_text": "ok", "transcript": [
+                    {"type": "tool_use", "name": "fetch_url",
+                     "raw_arguments": json.dumps({"url": "https://b.example/1"})},
+                ]}
+            if "https://a.example/1" in content:
+                return {"final_text": "ok",
+                        "transcript": _fetch_transcript("https://a.example/1", "Body A content real.")}
+            if "https://b.example/1" in content:
+                return {"final_text": "ok",
+                        "transcript": _fetch_transcript("https://b.example/1", "Body B content real.")}
+            raise AssertionError(f"unexpected dispatch content: {content!r}")
+
+        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_chat_fake(monkeypatch, [
+            "CLAIM: claim A\nPASSAGE: this text is not in the real fetched page\nLOCATION: nowhere",
+            "CLAIM: claim B\nPASSAGE: Body B content real.\nLOCATION: whole",
+        ])
+        run_full_pipeline(record, _research_info_registry())
+        # sub A's own source was discovered but failed passage validation --
+        # sub B's own source still produced a real claim.
+        assert set(record.sources) == {"https://a.example/1", "https://b.example/1"}
+        assert len(record.claims) == 1
+        assert record.claims[0].claim == "claim B"

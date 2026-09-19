@@ -105,6 +105,17 @@ def _security_sentry_scan(_arguments: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _security_known_devices(_arguments: dict[str, Any]) -> str:
+    rows = SentryStore(_SENTRY_DB).devices_snapshot()
+    if not rows:
+        return "No real device baseline recorded yet -- run security_sentry_scan first."
+    lines = [f"{len(rows)} real known device(s) in the baseline:"]
+    for r in rows:
+        label = r["hostname"] or r["ip"]
+        lines.append(f"  {label} -- MAC {r['mac'] or 'unknown'}, IP {r['ip']}")
+    return "\n".join(lines)
+
+
 def _security_sentry_dismiss(arguments: dict[str, Any]) -> str:
     fingerprint = str(arguments.get("fingerprint") or "").strip()
     if not fingerprint:
@@ -150,6 +161,17 @@ def build_security_subagent() -> Subagent:
                 ),
                 parameters={"type": "object", "properties": {}},
                 handler=_security_sentry_scan,
+            ),
+            ToolSpec(
+                name="security_known_devices",
+                description=(
+                    "List this host's real, persisted known-device baseline (MAC/IP/"
+                    "hostname, first/last seen) built from real ARP neighbors seen "
+                    "across past security_sentry_scan runs -- the same baseline a "
+                    "genuinely new device on the LAN is compared against."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_security_known_devices,
             ),
             ToolSpec(
                 name="security_sentry_dismiss",

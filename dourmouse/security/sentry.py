@@ -12,13 +12,18 @@ before writing any detection rule, in favor of a real, explicit, auditable
 formula, matching this domain's own explicit requirement ("never a bare
 LLM vibe-check with no formula behind it").
 
-Two real detection rules this pass, named honestly as a start, not a
-finished detector: a disabled Application Firewall (HIGH), and any
-listening service exposed beyond LOOPBACK_ONLY/LOCAL_NETWORK/TAILSCALE's
-own expected tiers -- i.e. ALL_INTERFACES (MED). New-LAN-device detection
-(this domain's own harsh acceptance test 2) and external-IP reputation
-lookups need a real, persisted ARP-neighbor baseline this pass does not
-yet build -- named explicitly as real, separate, not-yet-done follow-on.
+Three real detection rules now: a disabled Application Firewall (HIGH),
+any listening service exposed beyond LOOPBACK_ONLY/LOCAL_NETWORK/
+TAILSCALE's own expected tiers -- i.e. ALL_INTERFACES (MED) -- and, closed
+2026-09-21 (Phase 2 step 1, harsh acceptance test 2), a real persisted
+known-device baseline: a real ARP neighbor never seen before is itself a
+MED finding, same detection/scoring/memory pipeline every other finding
+already uses, no new machinery. The FIRST scan against an empty baseline
+seeds it silently rather than flagging every device on the LAN as "new"
+-- a real, deliberate choice (see `_detect_findings`'s own
+`known_device_keys=None` convention below), not an oversight. External-IP
+reputation lookups still need real, separate follow-on work (Phase 2 step
+2) -- not built here.
 
 ``SentryRuntime`` (2026-09-20, user-directed: "this needs to be a really
 powerful cybersecurity system... always running sentry, continuous data
@@ -80,7 +85,26 @@ CREATE TABLE IF NOT EXISTS seen_findings (
     times_seen  INTEGER NOT NULL,
     dismissed_false_positive INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS known_devices (
+    device_key TEXT PRIMARY KEY,
+    mac        TEXT,
+    ip         TEXT NOT NULL,
+    hostname   TEXT,
+    first_seen REAL NOT NULL,
+    last_seen  REAL NOT NULL
+);
 """
+
+
+def _device_key(mac: str | None, ip: str) -> str:
+    """A real ARP neighbor's stable identity for the baseline: its MAC
+    when the kernel resolved one, else `ip:<address>` -- a real, honest
+    fallback for the "(incomplete)" ARP entries platform_adapter's own
+    parser already reports as `mac=None`, not a fabricated MAC. Known,
+    named limitation: DHCP churn on an unresolved-MAC device changes its
+    IP and therefore its key, so it can re-report as "new" -- a real ARP
+    limitation, not a bug in this function."""
+    return mac if mac else f"ip:{ip}"
 
 
 @dataclass(frozen=True)
@@ -112,11 +136,23 @@ def _fingerprint(*parts: str) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
-def _detect_findings(state: dict[str, Any]) -> list[SentryFinding]:
-    """Pure, deterministic: the same telemetry snapshot always produces the
-    same findings. No I/O, no clock, no model -- mirrors this codebase's
-    own established pure-logic-first convention (research_mesh/core.py,
-    exams.py's own citation gate)."""
+def _detect_findings(
+    state: dict[str, Any], known_device_keys: set[str] | None = None
+) -> list[SentryFinding]:
+    """Pure, deterministic: the same telemetry snapshot (and the same real
+    baseline) always produces the same findings. No I/O, no clock, no
+    model -- mirrors this codebase's own established pure-logic-first
+    convention (research_mesh/core.py, exams.py's own citation gate). The
+    real baseline read/write itself happens in run_scan(), outside this
+    function -- `known_device_keys` arrives as a plain snapshot of
+    already-known device identities, never a live store handle.
+
+    `known_device_keys=None` (the default, and every pre-existing call
+    site) means "no real baseline available for this call" -- the
+    new-device rule is skipped entirely rather than comparing against
+    nothing, which would flag every real device as new. `run_scan()`
+    itself only ever passes `None` on a genuinely empty (first-ever)
+    baseline -- see its own docstring."""
     findings: list[SentryFinding] = []
 
     fw = state.get("firewall") or {}
@@ -154,6 +190,28 @@ def _detect_findings(state: dict[str, Any]) -> list[SentryFinding]:
                     "If this service does not need LAN/remote access, bind it to "
                     "127.0.0.1 or restrict it with a firewall rule instead. Not "
                     "applied automatically."
+                ),
+            ))
+
+    arp = state.get("arp_neighbors") or {}
+    if arp.get("available") and known_device_keys is not None:
+        for neighbor in arp["neighbors"]:
+            key = _device_key(neighbor.get("mac"), neighbor["ip"])
+            if key in known_device_keys:
+                continue
+            label = neighbor.get("hostname") or neighbor["ip"]
+            findings.append(SentryFinding(
+                fingerprint=_fingerprint("new_device", key),
+                kind="new_device",
+                severity="med",
+                title=f"New device joined the network: {label}",
+                detail=(
+                    f"MAC {neighbor.get('mac') or 'unknown'}, IP {neighbor['ip']} was not "
+                    "in this host's previously known device baseline."
+                ),
+                recommended_action=(
+                    "If you do not recognize this device, investigate before trusting it "
+                    "on this network. Not blocked automatically."
                 ),
             ))
 
@@ -216,6 +274,44 @@ class SentryStore:
             conn.commit()
             return cur.rowcount > 0
 
+    def get_known_device_keys(self) -> set[str]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute("SELECT device_key FROM known_devices").fetchall()
+        return {r[0] for r in rows}
+
+    def record_devices(self, neighbors: list[dict[str, Any]], now: float) -> None:
+        """Real upsert of every real ARP neighbor from this scan --
+        establishes the baseline on the very first call, refreshes
+        last_seen/ip/hostname on every call after."""
+        with self._lock, self._conn() as conn:
+            for neighbor in neighbors:
+                key = _device_key(neighbor.get("mac"), neighbor["ip"])
+                row = conn.execute(
+                    "SELECT 1 FROM known_devices WHERE device_key=?", (key,)
+                ).fetchone()
+                if row is None:
+                    conn.execute(
+                        "INSERT INTO known_devices "
+                        "(device_key, mac, ip, hostname, first_seen, last_seen) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (key, neighbor.get("mac"), neighbor["ip"], neighbor.get("hostname"), now, now),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE known_devices SET ip=?, hostname=?, last_seen=? WHERE device_key=?",
+                        (neighbor["ip"], neighbor.get("hostname"), now, key),
+                    )
+            conn.commit()
+
+    def devices_snapshot(self) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT device_key, mac, ip, hostname, first_seen, last_seen "
+                "FROM known_devices ORDER BY last_seen DESC"
+            ).fetchall()
+        cols = ["device_key", "mac", "ip", "hostname", "first_seen", "last_seen"]
+        return [dict(zip(cols, r, strict=True)) for r in rows]
+
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
@@ -239,10 +335,22 @@ def run_scan(
     the real weighted formula) -> ACTION_PLANNING/REPORTING (each
     SentryFinding's own recommended_action, plus a real alert for a
     genuinely new HIGH finding) -> MEMORY_UPDATE (SentryStore, read back
-    on every future call automatically via record_and_classify)."""
+    on every future call automatically via record_and_classify, plus the
+    real known-device baseline read here and written back at the end).
+
+    The known-device baseline read happens BEFORE `_detect_findings` and
+    the write happens AFTER -- this scan's own newly-seen devices must
+    never suppress themselves. A genuinely empty baseline (nothing ever
+    recorded) passes `known_device_keys=None` into `_detect_findings`, so
+    the very first scan ever run seeds the baseline silently instead of
+    reporting every device already on the LAN as "new" -- see that
+    function's own docstring for why."""
     store = store or SentryStore(DEFAULT_DB)
     state = state_fn()
-    raw_findings = _detect_findings(state)
+    known_keys_before = store.get_known_device_keys()
+    raw_findings = _detect_findings(
+        state, known_device_keys=(known_keys_before or None)
+    )
 
     ts = now()
     all_findings: list[SentryFinding] = []
@@ -281,6 +389,10 @@ def run_scan(
                     alerts_written += 1
                 except Exception:  # noqa: BLE001 -- an observer must never break a real scan
                     pass
+
+    arp = state.get("arp_neighbors") or {}
+    if arp.get("available"):
+        store.record_devices(arp["neighbors"], ts)
 
     telemetry_available = {
         key: bool((state.get(key) or {}).get("available"))

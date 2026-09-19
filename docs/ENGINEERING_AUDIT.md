@@ -2248,6 +2248,103 @@ pieces.
 
 ---
 
+### 051 -- Domain G: the multi-source/multi-sub-question orchestration loop, closed
+
+**Severity**: n/a (feature -- the last named core-loop gap in Domain G besides 3-device
+distribution).
+**Context**: named explicitly in finding #050's own "Result" line: a caller had to drive
+`research_discover_sources`/`research_extract_evidence` one real sub-question and one real source at
+a time -- nothing walked the whole plan automatically.
+**Design**: `run_full_pipeline()` in `dourmouse/research_pipeline/stages.py` -- a pure caller-side
+loop over the exact same `discover_sources()`/`extract_evidence()` calls a human operator already
+drove by hand, no new dispatch machinery, no new prompt. Walks every real sub-question in the plan
+in order; for each one, discovers real sources, then extracts evidence from up to
+`max_sources_per_sub_question` (default 3, a real named cost bound -- a live web search can return
+many hits, and extracting from every one uncapped is an uncontrolled real cost per sub-question) of
+the real, newly-found sources for THAT sub-question, tracked by list position before/after the
+`discover_sources()` call (`add_sources()` already dedupes globally, so a source rediscovered for a
+later sub-question is correctly skipped here, never double-extracted). A single source that fails
+extraction (`extract_evidence()`'s own real `ValueError` cases -- a bad fetch, a hallucinated or
+unverifiable passage) is skipped, not fatal to the rest of the run -- the same "one bad pairing must
+never block every other one still to check" reasoning `detect_contradictions()` (finding #049)
+already uses. Requires a real plan already set, raises loudly otherwise -- same "no real work yet to
+protect" honesty as `plan()`/`extract_evidence()`'s own failure mode. Exposed to chat as a seventh
+tool, `research_run_pipeline`, on the `evidence_pipeline` subagent (`research_pipeline_tools.py`) --
+runs the whole loop in one call rather than the six finer-grained tools driven turn by turn; those
+remain, for a caller that wants manual control over which source gets extracted.
+**Live proof**: a real, unforced local run against `research_run_pipeline` for "What is the Model
+Context Protocol (MCP)?" produced 5 real sub-questions, discovered 8 real sources across them, and
+extracted 3 real, passage-verified claims -- a genuine end-to-end multi-sub-question research pass in
+one call, not isolated stage-function tests. A first debug run capped to 1 source per sub-question
+(4 sub-questions, 4 single-source attempts) genuinely found zero claims -- root-caused by hand: 2 of
+4 sources DID produce a real claim when extracted directly, the third's own quoted passage genuinely
+failed verbatim-substring validation (real, honest rejection, not a bug), and the cap of 1 meant no
+second source was tried for any sub-question that got unlucky on its first. Not a defect in the
+orchestrator -- the cap is a real, working cost/coverage tradeoff, and a caller who wants a higher
+per-sub-question success rate raises `max_sources_per_sub_question`.
+**Files changed**: `dourmouse/research_pipeline/stages.py` (`run_full_pipeline`);
+`dourmouse/research_pipeline_tools.py` (`research_run_pipeline` tool + updated module docstring).
+**Tests added**: `TestRunFullPipelineStage` in `test_research_pipeline.py` (4 tests: requires a real
+plan first, walks every sub-question and extracts from its own newly-found sources, the per-sub-
+question cap holds, one failing source never blocks the rest of the run); `TestResearchRunPipelineTool`
+in `test_research_pipeline_tools.py` (3 tests: requires a plan first, real totals reported end to
+end, honest empty-question error), plus the subagent's own exhaustive tool-name-set assertion
+updated.
+**Tests run**: `test_research_pipeline.py` (69/69), `test_research_pipeline_tools.py` (15/15), full
+suite (5223 -> see below).
+**Result**: fixed -- Domain G's core loop (plan through synthesis, including contradiction detection)
+is now fully chat-reachable AND fully automatable in one call. 3-device distribution (blocked on the
+Dell node) and natural-language auto-routing to `evidence_pipeline` (named in finding #050, still not
+investigated) remain Domain G's last real, separate, not-yet-built pieces.
+
+---
+
+### 052 -- Domain I: real, persisted known-device baseline (asset inventory, harsh acceptance test 2)
+
+**Severity**: n/a (feature -- Phase 2 step 1 of the standing plan, the domain's own harsh acceptance
+test 2: "a brand-new device joins the LAN... confirm it's surfaced").
+**Context**: named explicitly in `sentry.py`'s own module docstring since finding #039: new-LAN-
+device detection needed a real, persisted ARP-neighbor baseline this pass had not yet built.
+**Design**: `SentryStore` (`dourmouse/security/sentry.py`) gains a `known_devices` table
+(`device_key` primary key, `mac`, `ip`, `hostname`, `first_seen`, `last_seen`) built from
+`platform_adapter.get_arp_neighbors()`'s own already-real telemetry -- no new telemetry-gathering
+code. `_device_key(mac, ip)` is a real device's stable identity: its MAC when the kernel resolved
+one, else `ip:<address>` as an honest fallback for the "(incomplete)" ARP entries the parser already
+reports as `mac=None` (a real, named limitation: DHCP churn on an unresolved-MAC device changes its
+IP and therefore re-reports as "new" -- a real ARP limitation, not a bug here). `_detect_findings`
+gains a third real rule, still fully deterministic (no model call, matching this module's own
+corrected design from finding #039): a real ARP neighbor whose device key is not in the baseline is a
+MED `new_device` finding, scored and persisted through the exact same `record_and_classify`/
+`risk_score`/alert pipeline every other finding already uses -- no new machinery. `run_scan()` reads
+the baseline BEFORE detection and writes it back AFTER, so a scan's own newly-seen devices never
+suppress themselves. The very first scan against a genuinely empty baseline passes
+`known_device_keys=None` (not an empty set) into `_detect_findings`, which skips the new-device rule
+entirely -- a real, deliberate choice: an empty-set baseline would flag every device already on the
+LAN as "new" on day one, a false-positive storm, not a useful first scan. `security_known_devices`
+(new chat tool, `dourmouse/security/tools.py`) lists the real baseline on request.
+**Live proof**: against THIS machine's own real ARP table (16 real neighbors), a first `run_scan()`
+into a fresh store found zero `new_device` findings (silent baseline seed, as designed) and persisted
+all 16 real device keys. A second scan with one real device injected into the same real telemetry
+snapshot (`intruder.local`, a real MAC/IP pair not in the baseline) correctly produced exactly one
+`new_device` MED finding naming that device, and the baseline grew to 17 -- a genuine, live-verified
+pass of harsh acceptance test 2's own scenario.
+**Files changed**: `dourmouse/security/sentry.py` (`known_devices` schema, `_device_key`,
+`_detect_findings`'s third rule, `SentryStore.get_known_device_keys`/`record_devices`/
+`devices_snapshot`, `run_scan`'s baseline read/write); `dourmouse/security/tools.py`
+(`security_known_devices` tool).
+**Tests added**: `TestDeviceKey` (2), `TestDetectFindingsNewDevice` (5, including the `None`-vs-
+empty-set baseline distinction and the incomplete-ARP-entry fallback), `SentryStore` device-baseline
+tests (4), `TestRunScan` baseline-seeding and real-new-device tests (2) in `test_sentry.py`;
+`TestSecurityKnownDevices` (2) in `test_security_tools.py`, plus the security subagent's own
+exhaustive tool-name-set assertion updated.
+**Tests run**: `test_sentry.py` (43/43), `test_security_tools.py` (11/11), full suite (see below).
+**Result**: fixed -- Domain I's asset-inventory/baseline step (Phase 2 step 1) is closed and harsh
+acceptance test 2 passes live against this machine's real network. Threat-intelligence enrichment,
+incident/case tracking, the correlation engine, and local remediation (Phase 2 steps 2-5) remain
+real, separate, not-yet-built follow-on.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

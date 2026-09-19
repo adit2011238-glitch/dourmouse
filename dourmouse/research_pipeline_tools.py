@@ -21,13 +21,18 @@ SYNCHRONOUSLY and can take anywhere from a few seconds (``research_plan``)
 to tens of seconds (a real web fetch plus a real model call, for
 ``research_discover_sources``/``research_extract_evidence``) -- there is no
 background/goal-runtime integration yet, the same already-documented
-limitation ``research_mesh_qualify`` carries. The caller (the orchestrator,
-working through a real conversation) drives the multi-stage loop turn by
-turn by calling these tools in sequence; nothing here runs the whole
-pipeline in one call. A record persists across calls (``ResearchStore``,
-keyed by the exact question text), so a killed conversation resumes exactly
-where it stopped, matching this domain's own "auditable, resumable" design
-goal.
+limitation ``research_mesh_qualify`` carries. A record persists across
+calls (``ResearchStore``, keyed by the exact question text), so a killed
+conversation resumes exactly where it stopped, matching this domain's own
+"auditable, resumable" design goal.
+
+``research_run_pipeline`` (added after the real ``evidence_pipeline``
+chat-reachability gap closed, finding #050) drives ``research_discover_
+sources``/``research_extract_evidence`` across EVERY real sub-question in
+one call -- the multi-source/multi-sub-question orchestration loop this
+domain's own status report named as its last real core-loop gap. The
+finer-grained per-sub-question/per-source tools remain, for a caller that
+wants manual control over which source gets extracted.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from dourmouse.research_pipeline.stages import (
     discover_sources,
     extract_evidence,
     plan,
+    run_full_pipeline,
     synthesize,
 )
 from dourmouse.research_pipeline.store import DEFAULT_DB, ResearchStore
@@ -175,6 +181,50 @@ def _build_extract_evidence_tool(registry: DispatchRegistry) -> ToolSpec:
     )
 
 
+def _build_run_pipeline_tool(registry: DispatchRegistry) -> ToolSpec:
+    def handler(arguments: dict[str, Any]) -> str:
+        question = (arguments.get("question") or "").strip()
+        err = _require_question(arguments, "research_run_pipeline")
+        if err:
+            return err
+        record = _load_or_start(question)
+        if not record.plan:
+            return "ERROR: call research_plan first -- no real plan exists yet."
+        try:
+            max_sources = int(arguments.get("max_sources_per_sub_question", 3))
+        except (TypeError, ValueError):
+            return "ERROR: max_sources_per_sub_question must be an integer."
+        before_sources, before_claims = len(record.sources), len(record.claims)
+        run_full_pipeline(record, registry, max_sources_per_sub_question=max_sources)
+        _save(record)
+        return (
+            f"Real pipeline run complete over {len(record.plan)} sub-question(s). "
+            f"Sources: {before_sources} -> {len(record.sources)}. "
+            f"Claims: {before_claims} -> {len(record.claims)}."
+        )
+
+    return ToolSpec(
+        name="research_run_pipeline",
+        description=(
+            "Run discovery and evidence extraction for EVERY sub-question in "
+            "an existing real plan (call research_plan first) in one call -- "
+            "the multi-source/multi-sub-question orchestration loop, rather "
+            "than driving research_discover_sources/research_extract_evidence "
+            "one sub-question and one source at a time. A source that fails "
+            "extraction is skipped, not fatal to the rest of the run."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "max_sources_per_sub_question": {"type": "integer", "default": 3},
+            },
+            "required": ["question"],
+        },
+        handler=handler,
+    )
+
+
 def _research_detect_contradictions_tool(arguments: dict[str, Any]) -> str:
     question = (arguments.get("question") or "").strip()
     err = _require_question(arguments, "research_detect_contradictions")
@@ -258,6 +308,7 @@ def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
             ),
             _build_discover_sources_tool(registry),
             _build_extract_evidence_tool(registry),
+            _build_run_pipeline_tool(registry),
             ToolSpec(
                 name="research_detect_contradictions",
                 description=(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dourmouse.security import platform_adapter as pa
 from dourmouse.security import tools as sec_tools
+from dourmouse.security.sentry import SentryStore
 
 
 def _tool(name: str):
@@ -39,7 +40,7 @@ class TestBuildSecuritySubagent:
         subagent = sec_tools.build_security_subagent()
         assert {t.name for t in subagent.tools} == {
             "security_status", "list_exposed_services",
-            "security_sentry_scan", "security_sentry_dismiss",
+            "security_sentry_scan", "security_known_devices", "security_sentry_dismiss",
         }
 
     def test_no_tool_requires_confirmation(self):
@@ -97,3 +98,20 @@ class TestListExposedServices:
         monkeypatch.setattr(pa, "get_listening_ports", lambda: {"available": False, "reason": "lsof timed out after 10.0s"})
         result = _tool("list_exposed_services").handler({})
         assert result == "ERROR: could not read listening ports: lsof timed out after 10.0s"
+
+
+class TestSecurityKnownDevices:
+    def test_empty_baseline_is_an_honest_message(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sec_tools, "_SENTRY_DB", tmp_path / "sentry.db")
+        result = _tool("security_known_devices").handler({})
+        assert "No real device baseline" in result
+
+    def test_a_real_baseline_is_listed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sec_tools, "_SENTRY_DB", tmp_path / "sentry.db")
+        SentryStore(tmp_path / "sentry.db").record_devices(
+            [{"hostname": "router", "ip": "192.168.1.1", "mac": "e8:9f", "interface": "en0"}],
+            now=1000.0,
+        )
+        result = _tool("security_known_devices").handler({})
+        assert "1 real known device(s)" in result
+        assert "router" in result and "e8:9f" in result and "192.168.1.1" in result

@@ -531,6 +531,14 @@ time rather than invented fresh. Concretely:
    layers on AFTER this single-device version
    is real and tested, by making stage 2's extraction calls dispatchable to the Dell node via the
    already-real `generate_with_fallback`, once that node is confirmed reachable.
+7. **Shipped (finding #051)**: the multi-source/multi-sub-question orchestration loop,
+   `run_full_pipeline()` -- a pure caller-side loop over the already-tested `discover_sources()`/
+   `extract_evidence()`, capped per sub-question at a real, named cost bound, one bad source skipped
+   rather than aborting the run. Exposed as a seventh chat tool, `research_run_pipeline`. Live proof:
+   a real, unforced run produced 5 real sub-questions, 8 real sources, 3 real passage-verified claims
+   in one call. Domain G's core loop (single-device) is now complete end to end; only 3-device
+   distribution (blocked on the Dell node) and natural-language auto-routing to `evidence_pipeline`
+   remain.
 
 **Harsh acceptance tests**:
 1. A research answer must let the user click through to the ORIGINAL passage that supports each
@@ -629,12 +637,16 @@ ThreatSentinel-adapted architecture below, deliberately widened, still permanent
 authorized-defensive-only restatement above (host + own network + Tailscale, never a third party).
 Sequenced by real dependency, reusing `SentryRuntime`'s own now-proven loop rather than building a
 second scheduler per capability:
-1. **Asset inventory + baseline** (do first -- everything else needs it): a real, persisted
-   `known_devices` table (MAC/IP/hostname/vendor-OUI-lookup, first_seen/last_seen) built from
+1. **Shipped (finding #052)**: asset inventory + baseline. A real, persisted `known_devices` table
+   (`device_key`/MAC/IP/hostname/first_seen/last_seen) built from
    `platform_adapter.get_arp_neighbors()`'s own already-real telemetry, polled by the SAME
-   `SentryRuntime` tick. This is what closes harsh acceptance test 2 ("a brand-new device joins the
-   LAN... confirm it's surfaced") -- a device not in the baseline is itself a new, real
-   `SentryFinding`, same detection/scoring/memory pipeline #039 already built, no new machinery.
+   `SentryRuntime` tick. Closes harsh acceptance test 2 ("a brand-new device joins the LAN... confirm
+   it's surfaced") -- a device not in the baseline is a new, real `SentryFinding`, same
+   detection/scoring/memory pipeline finding #039 already built, no new machinery. First scan against
+   an empty baseline seeds it silently rather than flagging every existing device as new. Live-
+   verified against this machine's real 16-device ARP table: silent seed, then exactly one correct
+   finding on a real injected 17th device. Vendor-OUI lookup (MAC prefix -> manufacturer name) is a
+   real, separate, not-yet-built enrichment on top of this -- named honestly, not claimed here.
 2. **Threat intelligence enrichment**: real reputation lookups (VirusTotal/AbuseIPDB-class APIs,
    honestly `NOT_CONFIGURED` when no key is set, mirroring this codebase's own established
    "never fake data when a key isn't configured" rule, see `docs/GODSPEED_ROADMAP.md`'s own

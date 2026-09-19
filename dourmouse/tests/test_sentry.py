@@ -13,6 +13,7 @@ from dourmouse.security.sentry import (
     SentryRuntime,
     SentryStore,
     _detect_findings,
+    _device_key,
     run_scan,
     sentry_runtime_enabled,
 )
@@ -23,9 +24,14 @@ _FIREWALL_UNAVAILABLE = {"available": False, "reason": "no such binary"}
 
 _NO_PORTS = {"available": True, "listening_ports": []}
 
+_NEIGHBOR_A = {"hostname": "laptop.local", "ip": "192.168.1.10", "mac": "aa:aa:aa:aa:aa:aa", "interface": "en0"}
+_NEIGHBOR_B = {"hostname": None, "ip": "192.168.1.11", "mac": "bb:bb:bb:bb:bb:bb", "interface": "en0"}
+_NEIGHBOR_INCOMPLETE = {"hostname": None, "ip": "192.168.1.12", "mac": None, "interface": "en0"}
+_NO_NEIGHBORS = {"available": True, "neighbors": []}
 
-def _state(firewall=_FIREWALL_ON, listening_ports=_NO_PORTS):
-    return {"firewall": firewall, "listening_ports": listening_ports}
+
+def _state(firewall=_FIREWALL_ON, listening_ports=_NO_PORTS, arp_neighbors=_NO_NEIGHBORS):
+    return {"firewall": firewall, "listening_ports": listening_ports, "arp_neighbors": arp_neighbors}
 
 
 class TestDetectFindings:
@@ -71,6 +77,50 @@ class TestDetectFindings:
         assert f1.fingerprint == f2.fingerprint
 
 
+class TestDeviceKey:
+    def test_mac_is_the_key_when_present(self):
+        assert _device_key("aa:bb:cc:dd:ee:ff", "192.168.1.1") == "aa:bb:cc:dd:ee:ff"
+
+    def test_ip_prefixed_fallback_when_mac_is_none(self):
+        assert _device_key(None, "192.168.1.1") == "ip:192.168.1.1"
+
+
+class TestDetectFindingsNewDevice:
+    def test_no_baseline_means_the_rule_is_skipped_entirely(self):
+        """known_device_keys=None (this codebase's own real 'no baseline
+        yet' convention) must never be silently treated as an empty set --
+        an empty set would flag every real device as new."""
+        arp = {"available": True, "neighbors": [_NEIGHBOR_A, _NEIGHBOR_B]}
+        findings = _detect_findings(_state(arp_neighbors=arp), known_device_keys=None)
+        assert findings == []
+
+    def test_a_device_not_in_the_real_baseline_is_a_med_finding(self):
+        arp = {"available": True, "neighbors": [_NEIGHBOR_A]}
+        findings = _detect_findings(_state(arp_neighbors=arp), known_device_keys=set())
+        assert len(findings) == 1
+        assert findings[0].kind == "new_device"
+        assert findings[0].severity == "med"
+        assert "laptop.local" in findings[0].title
+
+    def test_a_device_already_in_the_real_baseline_is_no_finding(self):
+        arp = {"available": True, "neighbors": [_NEIGHBOR_A]}
+        findings = _detect_findings(
+            _state(arp_neighbors=arp), known_device_keys={_device_key("aa:aa:aa:aa:aa:aa", "192.168.1.10")}
+        )
+        assert findings == []
+
+    def test_an_incomplete_arp_entry_falls_back_to_its_ip_key(self):
+        arp = {"available": True, "neighbors": [_NEIGHBOR_INCOMPLETE]}
+        findings = _detect_findings(_state(arp_neighbors=arp), known_device_keys=set())
+        assert len(findings) == 1
+        assert "unknown" in findings[0].detail  # honest -- no real MAC to report
+
+    def test_unavailable_arp_telemetry_is_honestly_no_finding(self):
+        arp = {"available": False, "reason": "arp not found"}
+        findings = _detect_findings(_state(arp_neighbors=arp), known_device_keys=set())
+        assert findings == []
+
+
 class TestSentryStore:
     def test_first_detection_is_new(self, tmp_path):
         store = SentryStore(tmp_path / "sentry.db")
@@ -112,6 +162,34 @@ class TestSentryStore:
         finding = _detect_findings(_state(firewall=_FIREWALL_OFF))[0]
         SentryStore(path).record_and_classify(finding, now=1000.0)
         assert SentryStore(path).record_and_classify(finding, now=2000.0) == "known"
+
+    def test_get_known_device_keys_starts_empty(self, tmp_path):
+        store = SentryStore(tmp_path / "sentry.db")
+        assert store.get_known_device_keys() == set()
+
+    def test_record_devices_seeds_the_baseline(self, tmp_path):
+        store = SentryStore(tmp_path / "sentry.db")
+        store.record_devices([_NEIGHBOR_A, _NEIGHBOR_B], now=1000.0)
+        assert store.get_known_device_keys() == {
+            "aa:aa:aa:aa:aa:aa", "bb:bb:bb:bb:bb:bb",
+        }
+
+    def test_record_devices_refreshes_last_seen_not_first_seen(self, tmp_path):
+        store = SentryStore(tmp_path / "sentry.db")
+        store.record_devices([_NEIGHBOR_A], now=1000.0)
+        store.record_devices([_NEIGHBOR_A], now=2000.0)
+        rows = store.devices_snapshot()
+        assert len(rows) == 1
+        assert rows[0]["first_seen"] == 1000.0
+        assert rows[0]["last_seen"] == 2000.0
+
+    def test_devices_snapshot_reflects_real_persisted_state(self, tmp_path):
+        store = SentryStore(tmp_path / "sentry.db")
+        store.record_devices([_NEIGHBOR_A], now=1000.0)
+        rows = store.devices_snapshot()
+        assert len(rows) == 1
+        assert rows[0]["ip"] == "192.168.1.10"
+        assert rows[0]["hostname"] == "laptop.local"
 
 
 class TestRunScan:
@@ -192,6 +270,35 @@ class TestRunScan:
         )
         assert len(result.new_findings) == 1  # the real scan result is intact
         assert result.alerts_written == 0  # honest: the alert genuinely did not land
+
+    def test_first_ever_scan_seeds_the_baseline_without_flagging_any_device(self, tmp_path):
+        store = SentryStore(tmp_path / "s.db")
+        arp = {"available": True, "neighbors": [_NEIGHBOR_A, _NEIGHBOR_B]}
+        result = run_scan(
+            state_fn=lambda: _state(arp_neighbors=arp), store=store, now=lambda: 1000.0,
+        )
+        assert result.all_findings == []
+        assert store.get_known_device_keys() == {
+            "aa:aa:aa:aa:aa:aa", "bb:bb:bb:bb:bb:bb",
+        }
+
+    def test_a_real_new_device_on_a_later_scan_is_a_med_finding(self, tmp_path):
+        store = SentryStore(tmp_path / "s.db")
+        run_scan(
+            state_fn=lambda: _state(arp_neighbors={"available": True, "neighbors": [_NEIGHBOR_A]}),
+            store=store, now=lambda: 1000.0,
+        )
+        result = run_scan(
+            state_fn=lambda: _state(
+                arp_neighbors={"available": True, "neighbors": [_NEIGHBOR_A, _NEIGHBOR_B]}
+            ),
+            store=store, now=lambda: 2000.0, write_alerts=False,
+        )
+        assert len(result.new_findings) == 1
+        assert result.new_findings[0].kind == "new_device"
+        assert store.get_known_device_keys() == {
+            "aa:aa:aa:aa:aa:aa", "bb:bb:bb:bb:bb:bb",
+        }
 
     def test_telemetry_availability_is_reported_honestly(self, tmp_path):
         state = _state()

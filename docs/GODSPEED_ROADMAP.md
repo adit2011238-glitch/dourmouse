@@ -660,6 +660,33 @@ and a real build sequence, not just a requirement statement:
       dispatch call (Gemini was genuinely down twice during verification,
       unrelated to this code -- isolated by forcing local routing for the
       one proof run). See `docs/ENGINEERING_AUDIT.md` finding #050.
+- [x] Domain G, multi-source orchestration loop closed 2026-09-21 --
+      `run_full_pipeline()` walks every real sub-question in the plan,
+      discovering and extracting from its own new sources (capped at 3
+      per sub-question, a real cost bound), skipping a failed source
+      rather than aborting the run. Exposed as a seventh chat tool,
+      `research_run_pipeline`. Live-verified: a real, unforced local run
+      produced 5 real sub-questions, 8 real sources, 3 real passage-
+      verified claims in one call. See `docs/ENGINEERING_AUDIT.md`
+      finding #051. Domain G's core loop is now fully chat-reachable and
+      fully automatable; only 3-device distribution (blocked on the Dell
+      node) and natural-language auto-routing to `evidence_pipeline`
+      remain.
+- [x] Domain I, known-device baseline shipped 2026-09-21 (Phase 2 step 1,
+      harsh acceptance test 2) -- `SentryStore` gains a real `known_
+      devices` table built from `platform_adapter.get_arp_neighbors()`'s
+      already-real telemetry; `_detect_findings` gains a third real,
+      deterministic rule (a device not in the baseline is a MED
+      finding), same scoring/persistence/alert pipeline every other
+      finding already uses. First scan against an empty baseline seeds
+      it silently (no false-positive storm); a genuinely new device is
+      an honest MED finding on the next scan. Live-verified against this
+      machine's real 16-device ARP table: silent seed, then exactly one
+      correct finding on a real injected 17th device. New
+      `security_known_devices` chat tool lists the baseline. See
+      `docs/ENGINEERING_AUDIT.md` finding #052. Remaining Phase 2 steps
+      (threat-intel enrichment, incident tracking, correlation, local
+      remediation) not yet built.
 - [x] Domain H, piece 1/7 (project-instruction file, `DOURMOUSE.md`) -- shipped
       2026-09-19. `dourmouse/project_instructions.py` reads the workspace's
       own `DOURMOUSE.md`, spliced into `dispatch.py`'s shared

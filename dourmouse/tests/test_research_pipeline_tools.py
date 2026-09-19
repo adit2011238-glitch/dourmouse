@@ -146,6 +146,58 @@ class TestResearchExtractEvidenceTool:
         assert "ERROR" in out
 
 
+class TestResearchRunPipelineTool:
+    def test_requires_a_real_plan_first(self):
+        tool = rpt._build_run_pipeline_tool(_registry())
+        out = tool.handler({"question": "Is Z real?"})
+        assert "ERROR" in out
+        assert "research_plan" in out
+
+    def test_runs_every_sub_question_and_reports_the_real_totals(self, monkeypatch):
+        import dourmouse.dispatch as dispatch_module
+
+        _install_chat_fake(monkeypatch, [
+            "- sub A\n- sub B",
+            "CLAIM: claim A\nPASSAGE: Body A content real.\nLOCATION: whole",
+            "CLAIM: claim B\nPASSAGE: Body B content real.\nLOCATION: whole",
+        ])
+        rpt._research_plan_tool({"question": "Is Z real?"})
+
+        def _dispatch(messages, registry, **kw):
+            content = messages[0]["content"]
+            if "Research this question for real" in content and "sub A" in content:
+                return {"final_text": "ok", "transcript": [
+                    {"type": "tool_use", "name": "fetch_url",
+                     "raw_arguments": '{"url": "https://a.example/1"}'},
+                ]}
+            if "Research this question for real" in content and "sub B" in content:
+                return {"final_text": "ok", "transcript": [
+                    {"type": "tool_use", "name": "fetch_url",
+                     "raw_arguments": '{"url": "https://b.example/1"}'},
+                ]}
+            if "https://a.example/1" in content:
+                return {"final_text": "ok", "transcript": [
+                    {"type": "tool_result", "name": "fetch_url",
+                     "text": "FETCHED https://a.example/1 (20 chars):\nBody A content real."},
+                ]}
+            return {"final_text": "ok", "transcript": [
+                {"type": "tool_result", "name": "fetch_url",
+                 "text": "FETCHED https://b.example/1 (20 chars):\nBody B content real."},
+            ]}
+
+        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        tool = rpt._build_run_pipeline_tool(_registry())
+        out = tool.handler({"question": "Is Z real?"})
+        assert "Sources: 0 -> 2" in out
+        assert "Claims: 0 -> 2" in out
+        loaded = ResearchStore(rpt.DEFAULT_DB).load("Is Z real?")
+        assert len(loaded.claims) == 2
+
+    def test_empty_question_is_an_honest_error(self):
+        tool = rpt._build_run_pipeline_tool(_registry())
+        assert "ERROR" in tool.handler({"question": "  "})
+
+
 class TestResearchDetectContradictionsTool:
     def test_reports_zero_contradictions_honestly(self, monkeypatch):
         from dourmouse.research_pipeline.core import ResearchRecord
@@ -198,5 +250,6 @@ class TestBuildResearchPipelineSubagent:
         names = {t.name for t in sub.tools}
         assert names == {
             "research_plan", "research_discover_sources", "research_extract_evidence",
-            "research_detect_contradictions", "research_synthesize", "research_status",
+            "research_run_pipeline", "research_detect_contradictions",
+            "research_synthesize", "research_status",
         }

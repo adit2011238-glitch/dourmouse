@@ -408,6 +408,65 @@ def _claim_fingerprint(claim: Claim) -> str:
     return f"{claim.source_id}:{hashlib.sha256(claim.claim.encode('utf-8')).hexdigest()[:12]}"
 
 
+def run_full_pipeline(
+    record: ResearchRecord,
+    registry: Any,
+    *,
+    max_sources_per_sub_question: int = 3,
+    **dispatch_kwargs: Any,
+) -> ResearchRecord:
+    """The real multi-source/multi-sub-question orchestration loop -- the
+    last core-loop gap named explicitly in finding #050. A caller-side
+    loop over the exact same discover_sources()/extract_evidence() calls
+    a human operator already drives one at a time through the chat tools
+    -- no new dispatch machinery, no new prompt, nothing this domain has
+    not already proven live.
+
+    Walks every real sub-question in the plan in order, discovers real
+    sources for it, then extracts evidence from up to
+    `max_sources_per_sub_question` of the real, newly-found sources for
+    THAT sub-question (tracked by list position before/after the
+    discover_sources() call -- add_sources() already dedupes globally, so
+    a source rediscovered for a later sub-question is correctly skipped
+    here rather than double-extracted). The cap is a real, named cost
+    bound: a live web search can return many hits, and extracting from
+    every one of them uncapped is an uncontrolled real cost per
+    sub-question, not a free iteration.
+
+    A single source that fails extraction (a bad fetch, a hallucinated or
+    unverifiable passage -- extract_evidence()'s own real ValueError
+    cases) is skipped, not fatal to the rest of the run -- the same "one
+    bad pairing must never block every other one still to check"
+    reasoning detect_contradictions() already uses. A research record
+    with real partial success from N-1 sources is more honest and more
+    useful than aborting the whole pass over one source's failure.
+
+    Requires a real plan already set -- raises loudly, matching plan()'s
+    and extract_evidence()'s own "no real work yet to protect" honesty:
+    an orchestration loop with no plan to walk is not a partial failure,
+    it is a caller error."""
+    if not record.plan:
+        raise ValueError("cannot run the full pipeline before a real plan exists")
+    for sub_question_index in range(len(record.plan)):
+        before = len(record.sources)
+        discover_sources(
+            record, registry, sub_question_index=sub_question_index, **dispatch_kwargs
+        )
+        new_source_indices = list(range(before, len(record.sources)))[
+            :max_sources_per_sub_question
+        ]
+        for source_index in new_source_indices:
+            try:
+                extract_evidence(
+                    record, registry,
+                    source_index=source_index, sub_question_index=sub_question_index,
+                    **dispatch_kwargs,
+                )
+            except ValueError:
+                continue  # one bad source must never block the rest of the real run
+    return record
+
+
 def detect_contradictions(record: ResearchRecord) -> ResearchRecord:
     """Real contradiction detection (harsh acceptance test 2): groups
     active claims by the real sub-question they answered, then one real
