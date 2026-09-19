@@ -369,6 +369,16 @@ qualification against real held-out exam corpora) but was the wrong target for t
 direct user correction. **Not yet started**: no code here today distributes a research task across
 the 3 real devices; the structured research pipeline below and the 3-device distribution are two
 real, separate pieces of the same workstream, both still open.
+**Real infrastructure check, 2026-09-19**: the Dell compute node is `enabled` but NOT `configured`
+in this dev environment (`remote_server.server_url_configured()` is `False`) and a live
+`server_available(force=True)` check returned `False` -- honestly offline or unreachable from here
+right now, not a code gap. `generate_with_fallback`'s own real fallback-to-local-Ollama path is
+proven, existing infrastructure (see Domain A). The DOURMOUSE desktop's own reachability from this
+checkout is unverified today. A genuine, live 3-device (or even 2-device) proof needs this real
+infrastructure actually reachable first -- tracked honestly as a real blocker, not silently assumed
+working. Building the structured research pipeline itself (below) does not need to wait on this: it
+can be built and proven single-device first, with device distribution layered on once the Dell/
+desktop are confirmed reachable from wherever this runs.
 
 Current real capability: `web_search`/`fetch_url`/`research_info` — a search-and-summarize loop.
 AI-Scientist's real methodological contribution (not its codebase, see §0): structure research as
