@@ -1413,6 +1413,165 @@ discarding working design.
 
 ---
 
+### 034 -- `desktop.launch()` test hang: a stale fake webview seam, not a real product bug
+
+**Severity**: MEDIUM (test-suite integrity -- a genuinely hanging test blocks every future full-suite
+gate this session's own commit discipline depends on, even though the real product code was never
+broken).
+**Diagnosed and fixed by a spawned peer session** (`task_ade8f6a2`), independently re-verified here
+before committing.
+**Context**: `tests/test_desktop.py::test_launch_restores_geometry_and_returns` (and two sibling
+tests in the same file) hung indefinitely, confirmed reproducible in complete isolation with zero
+other processes running. `desktop.py`'s real `launch()` calls `webview.start(private_mode=False,
+storage_path=...)` (v13.10) -- the test's own `_FakeWebview.start(self)` (stale since 2026-08-12)
+took no keyword arguments, so the call raised `TypeError`, which `launch()`'s own broad `except
+Exception` silently routed into `_fallback_to_browser()` -> `webbrowser.open()` +
+`_wait_forever()`'s real `while True: time.sleep(3600)`, breaking only on `KeyboardInterrupt`.
+**Live proof**: confirmed via macOS `sample` on a stuck pytest pid (main thread genuinely parked in
+real `time.sleep`), plus a direct repro of the `TypeError` outside pytest. The sibling
+`dourmouse/tests/test_desktop.py` already had the correct fake signature and was never affected.
+**Fix**: `_FakeWebview.start(self, **kwargs)`; `hermetic_env` now also sets
+`DOURMOUSE_VISION_AUTOSTART=0`/`DOURMOUSE_GOAL_RUNTIME=0` (both default on in real `launch()`, both
+silently doing real work -- a real `GoalRuntime` thread + SQLite file, real tray/overlay/wakeword
+attempts -- inside what is supposed to be a hermetic test); `@pytest.mark.timeout(30)` added to all
+3 launch tests as a regression guard against this exact failure mode recurring; `pytest-timeout`
+added to `requirements-dev.txt`.
+**Files changed**: `tests/test_desktop.py`, `requirements-dev.txt`.
+**Tests run**: `tests/test_desktop.py` (9/9, 5.54s -- was: infinite hang).
+**Result**: fixed -- a real, root-caused fix, not a `--deselect` workaround.
+
+---
+
+### 035 -- A plan step completed via `delegate_task` was wrongly flagged as untouched
+
+**Severity**: MEDIUM (a real, confusing false nudge/caveat on genuinely completed work).
+**Diagnosed and fixed by a spawned peer session** (`task_d88c3f91`, while investigating finding
+#036 below and finding this real, separate bug along the way), independently re-verified here
+before committing.
+**Context**: `_missing_plan_steps()`'s own "was this step touched" check
+(`tool_owner.get(name) == step['subagent']`) only recognized a step as satisfied via a DIRECT tool
+call by name. A plan step satisfied through `delegate_task`/`delegate_parallel` instead leaves the
+parent's own transcript with only a `"delegate_task"` entry owned by `"orchestrator"` -- never the
+step's real target subagent -- so a genuinely-completed delegated step still looked untouched, and
+the plan-checkpoint nudge (or the exit-path "not executed via tools" caveat) could misfire on it.
+**Fix**: `dispatch.py` gains `_first_nonempty_str()` (alias-tolerant argument lookup, duplicated
+from `general_roster.py`'s own helper rather than imported, since `general_roster` imports FROM
+`dispatch` and the reverse would be circular) and `_delegated_targets()` (scans the transcript for
+`delegate_task`/`delegate_parallel` calls and resolves which real subagents they targeted);
+`_missing_plan_steps()` now also treats a step as touched when its subagent appears there.
+**Live proof**: fail-before/pass-after via `git stash` on the new regression test -- fails on
+pre-fix code (a spurious `plan_reminder` fires), passes with the fix.
+**Files changed**: `dourmouse/dispatch.py`, `dourmouse/tests/test_dispatch.py`.
+**Tests added**: `test_step_completed_via_delegate_task_gets_no_reminder`.
+**Tests run**: `test_dispatch.py` + `test_general_roster.py` (341/341).
+**Result**: fixed. Note: `dourmouse-commercial` (a separate worktree of this same repo) has the
+identical pre-fix code, not touched by this finding.
+
+---
+
+### 036 -- Grounded Mode false positive: every `claude_cli`-backed answer flagged "unverified"
+
+**Severity**: HIGH (a real, correct, tool-backed answer was unconditionally mislabeled as guessed,
+100% of the time, on this deployment's own default backend -- Claude Front Mode is on by default).
+**Diagnosed, designed, and implemented by a spawned peer session** (`task_d88c3f91`), independently
+reviewed line by line and verified here before committing.
+**Live-caught**: while live-verifying finding #033's own chat-reachability, a real `/api/chat` call
+asking the model to invoke `research_mesh_status` and report the exact result verbatim came back
+with the tool handler's own private string template reproduced character-for-character -- proof a
+real tool call happened -- yet still carried Grounded Mode's "this answer used zero tool calls...
+treat it as unverified" warning. Flagged as a separate task (`task_d88c3f91`) rather than guessed at.
+**Root cause**: `ClaudeCliClient._create()` (`dispatch.py`) hardcoded
+`_OllamaMessage(text, None)` unconditionally on every completion. When Claude calls a real Dourmouse
+tool, it does so over MCP *inside* the `claude -p` subprocess, through `mcp_bridge.py`'s own
+SEPARATE OS process that binary spawns as its configured MCP server -- the call is genuinely real
+and its result genuinely correct, but `_run_dispatch_loop`'s own `tools_used` count (real
+`"tool_use"` transcript entries) had no way to see it. Not intermittent: structurally 0, every time,
+for this backend.
+**Scope-checked before fixing** (so the fix doesn't over-correct): `GeminiClient._create()` has the
+identical code shape, but Gemini is never given tool/MCP access in this integration -- `tools_used
+== 0` is honestly true there, and grounded-mode firing is correct, not a bug. `ollama_cloud` reuses
+`OllamaNativeClient` (real native tool-calling, already populates `tool_calls` normally) --
+unaffected. This fix is specific to `claude_cli`.
+**Design, real not suppressed**: two options were considered -- (A) a new `opaque_tool_backend` flag
+suppressing the check specifically for `claude_cli`, small and safe but creates a real, silent
+blind spot (a genuinely zero-tool `claude_cli` turn would ALSO stop being flagged, on the deployment's
+own default backend); (B) make `tools_used` actually accurate for this backend. Chose (B) --
+consistent with this session's own standing discipline (finding #032's own reuse of a real signal
+rather than suppressing a symptom): `mcp_bridge.py`'s `_handle_tools_call` now logs every real call
+attempt (success, error, or a `REQUIRES_CONFIRMATION` refusal -- verified this already matches
+`tools_used`'s own existing semantics for every other backend, which counts a `tool_use` entry the
+instant a call is attempted, gated or not) to a fresh, per-invocation temp file. The one design
+question this rested on was verified live, not assumed: does the real `claude` CLI pass its own
+inherited environment through to an MCP stdio server it spawns? Confirmed yes (a minimal probe MCP
+server + config, a marker env var set only on the outer process, reached the child: 62 env vars
+total, full inheritance, the config's own `"env"` merges on top rather than replacing) -- so a
+per-invocation-unique env var, set only for that one `_run_claude_once` call, is enough; no
+persistent session/tab identity needed in the cached, shared `mcp-config.json` at all.
+`ClaudeCliClient._create()` reads the log back after the CLI call returns (both the streaming and
+non-streaming paths -- the top-level orchestrator loop always sets `on_delta`, so a
+non-streaming-only fix would never have fired in production) and `_run_dispatch_loop` replays it as
+real `"tool_use"`/`"tool_result"` transcript entries -- into `transcript` only, never `messages`
+(there is no real `tool_call_id` to pair it with in this conversation's own OpenAI-shaped history),
+so grounded-mode, the plan checkpoint, audit, and experience-recording all see the truth without
+risking the actual conversation history sent back to the model.
+**Live proof, real end-to-end, no mocks**: the real production registry, the real `ClaudeCliClient`,
+the exact original repro prompt through a real `claude -p` call and the real `mcp_bridge.py`
+subprocess. Result: real `tool_use`/`tool_result` transcript entries, the real correct answer, zero
+Grounded Mode disclaimer.
+**Files changed**: `dourmouse/dispatch.py`, `dourmouse/code_backends.py`, `dourmouse/mcp_bridge.py`,
+`dourmouse/tests/test_dispatch.py`, `dourmouse/tests/test_mcp_bridge.py`.
+**Tests added**: 17 new/updated -- `mcp_bridge.py` logging (success/error/gated-refusal/
+unknown-tool-never-logged/multi-call NDJSON/unwritable-path-never-breaks-the-call), `ClaudeCliClient`
+(streaming + non-streaming replay, cleanup, a genuinely-zero-tools turn still correctly caveats),
+and the dispatch-level proof test using the exact original repro shape.
+**Tests run**: fail-before/pass-after via `git stash` on the 3 core new tests; full suite.
+**Result**: fixed -- the real signal now exists, not a suppressed symptom; a genuinely tool-free
+`claude_cli` turn still correctly caveats.
+
+---
+
+### 037 -- Project-instruction file: Dourmouse's own CLAUDE.md-equivalent (Domain H, first piece)
+
+**Severity**: n/a (feature -- the smallest, first real piece of Domain H's own build plan).
+**Context**: `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain H asked, as an open question,
+whether a CLAUDE.md-equivalent project-instruction mechanism already existed anywhere in
+`dourmouse/` -- answered definitively by grep before writing any code: no, a genuine clean-slate gap.
+**Design**: `dourmouse/project_instructions.py`, one real function
+(`load_project_instructions()`), reading `<workspace>/DOURMOUSE.md` -- honest empty string (never a
+placeholder) when missing, unreadable, or whitespace-only, capped at 8,000 chars with a real
+truncation marker (same bounding discipline as `general_roster.py`'s `_DELEGATE_RESULT_CAP` and
+`research_mesh/brain.py`'s `_STUDY_CONTEXT_CAP_CHARS`). Spliced into `dispatch.py`'s own
+`system_message()` -- the single function already shared by `run_dispatch` and `chat.ChatSession`,
+so every backend and every delegation depth picks it up automatically, no second injection path --
+ALONGSIDE the base orchestrator rules, never instead of them, the exact same "alongside, not
+instead of" contract `agent_prompts.py`'s own bespoke per-agent prompts already establish for the
+identical reason (confirmation-gating and honest-failure rules must survive regardless of what a
+user's own instructions say). No file present: `system_message()` stays byte-identical to before,
+matching that function's own pre-existing stated contract.
+**Deliberately not built yet, named explicitly**: per-directory hierarchical nesting (a narrower
+file in a subfolder layering on top of the workspace-root one, matching CLAUDE.md's own
+nearest-file-wins convention) needs a real `cwd` threaded into `system_message()`'s own signature,
+touching every current caller -- a real, separate, larger piece of Domain H's own build plan, not
+bundled into this smallest-first increment.
+**Live proof, real chat, real model**: a fresh dev-preview workspace's own `DOURMOUSE.md` instructed
+"when asked what day it is, always mention the code phrase PURPLE-NARWHAL-42 verbatim." A real
+`/api/chat` call asking "What day of the week is it today?" delegated to the `system` subagent and
+the real reply contained the code phrase verbatim -- confirming the splice reaches the real model
+through the real dispatch path AND survives a real delegation hop (`system_message()` is shared, so
+the nested sub-dispatch inherited it too, not just the top-level orchestrator turn).
+**Files changed**: new `dourmouse/project_instructions.py`, `dourmouse/dispatch.py`
+(`system_message()`).
+**Tests added**: new `dourmouse/tests/test_project_instructions.py` (5 tests: honest empty on no
+file, real read-and-strip, whitespace-only is honest empty, oversized file capped with a marker,
+unreadable path -- a directory in the file's place -- is honest empty not a crash) and
+`test_dispatch.py::TestSystemMessageSplicesProjectInstructions` (2 tests: no file leaves the prompt
+byte-identical; a real file is spliced in alongside the base rules, ordered after them).
+**Tests run**: both new test files (7/7) plus `test_dispatch.py` in full (235/235).
+**Result**: fixed -- Domain H's own smallest real piece shipped, live-verified with a real model,
+including through a real delegation hop.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

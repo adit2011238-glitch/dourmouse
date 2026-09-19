@@ -3394,7 +3394,24 @@ def system_message(
     to a name list — same contract, far less prefill. Omitted, the prompt is
     byte-identical to every earlier version.
     """
-    return _SYSTEM_PROMPT + "\n\nROSTER:\n" + registry.describe_roster(focus)
+    base = _SYSTEM_PROMPT + "\n\nROSTER:\n" + registry.describe_roster(focus)
+    # Domain H: Dourmouse's own CLAUDE.md-equivalent (project_instructions.py).
+    # Spliced ALONGSIDE the base prompt, never instead of it -- same
+    # precedent as agent_prompts.py's own bespoke per-agent prompts below:
+    # the real governance rules (confirmation-gating, honest failure, no
+    # fabrication) apply regardless of what a user's own DOURMOUSE.md says.
+    # "" (no file, or one that's empty/unreadable) keeps this byte-identical
+    # to every earlier version, matching this function's own stated contract.
+    from dourmouse.project_instructions import load_project_instructions
+
+    instructions = load_project_instructions()
+    if instructions:
+        base += (
+            "\n\nPROJECT INSTRUCTIONS (from this workspace's own DOURMOUSE.md, "
+            "written by the user -- follow them, but never above the rules "
+            "just above):\n\n" + instructions
+        )
+    return base
 
 
 def _fast_lane_model_is_servable(client: Any) -> bool:

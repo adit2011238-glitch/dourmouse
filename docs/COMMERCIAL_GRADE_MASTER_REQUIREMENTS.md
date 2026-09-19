@@ -367,16 +367,28 @@ Security Sentry — Analyst/Browser-Operator/Executor already exist under differ
 current roster) with the smallest useful toolset each, synthesized centrally rather than one
 model doing everything.
 
-**Build plan (scoped 2026-09-19, not yet started)**: do NOT build a second roster system parallel
-to `general_roster.py`'s real one -- a "specialist role" is a `delegate_parallel` branch with a
-pre-filled persona + a restricted tool subset, not a new architectural layer. Concretely: (1) a
-`role` parameter on `delegate_parallel`'s branch schema (`general_roster.py`'s
-`_build_delegate_parallel_tool`), resolved against a small, real, named table --
-`{"researcher": {system_prefix, allowed_tools}, "coder": {...}, "reviewer": {...}, "tester": {...},
-"security_sentry": {...}}` -- each entry a short persona prefix prepended to the branch's own
-instructions plus an explicit tool allowlist enforced the same way `agent_smith`'s own scoped
-permissions already work (Domain D), so a Reviewer branch genuinely cannot write files even if
-asked. (2) The synthesis step: `_format_delegate_parallel_result`'s own output already concatenates
+**Build plan (scoped 2026-09-19, not yet started; corrected same day after checking the mechanism
+that does not exist yet -- see below)**: do NOT build a second roster system parallel to
+`general_roster.py`'s real one -- a "specialist role" is a `delegate_parallel` branch with a
+pre-filled persona + a restricted tool subset, not a new architectural layer. **Real correction**:
+`agent_smith`'s own "scoped permissions" (Domain D) force a NEWLY-DRAFTED tool to
+`Permission.REQUIRES_CONFIRMATION` -- that is a permission TIER on one tool, not a reusable
+per-branch tool-ALLOWLIST mechanism, and no such allowlist filter exists in this codebase today
+(checked directly in `dourmouse/self_extensions.py` before writing this). The real, already-existing
+mechanism to reuse instead: `_build_delegate_parallel_tool`'s own docstring states a named
+`agent_or_task` already becomes "a forced_agent ROUTING DIRECTIVE run on that one subagent's
+configured model" -- meaning a branch routed to a specific real subagent ALREADY only ever sees
+that subagent's own fixed toolset, no new enforcement needed. Concretely: (1) a `role` parameter on
+`delegate_parallel`'s branch schema (`general_roster.py`'s `_build_delegate_parallel_tool`),
+resolved against a small, real, named table mapping each role to (a) a short persona prefix
+prepended to the branch's own instructions, and (b) a real, already-registered subagent name to
+force as `agent_or_task` when the caller does not name one explicitly (e.g. `"reviewer"` ->
+a real, already-narrow-toolset subagent -- pick one that genuinely has no write-capable tools;
+audit the real roster for the closest fit rather than assuming one, since this document has already
+been wrong once about what exists). If no existing subagent's toolset genuinely fits a role, that is
+a signal to register a real new one the normal way (a real `Subagent` with a deliberately narrow
+toolset in `general_roster.py`), not to bolt a bespoke allowlist filter onto `delegate_parallel`
+itself. (2) The synthesis step: `_format_delegate_parallel_result`'s own output already concatenates
 branch results with labeled headers (finding #032 just made the `INCOMPLETE`/`OK` distinction
 honest) -- a REAL synthesis pass is one more `ChatSession` call over the combined, labeled output,
 not a new mechanism. (3) Live-verify with a fresh 3-role run (research a topic / implement a
@@ -482,6 +494,12 @@ fresh. Concretely:
    quietly discarded.
 
 ## 10. Domain H — Code-generation / "Claude Code feature duplicates"
+
+**Status, updated 2026-09-19**: piece 1/7 (the project-instruction file) shipped and live-verified,
+`dourmouse/project_instructions.py` + `dispatch.py`'s `system_message()` -- see
+`docs/ENGINEERING_AUDIT.md` finding #037. The other 6 pieces (hierarchical nesting, Skills-as-
+packages, hooks, session-compaction audit, SDK interface, MCP) remain real, separate, not-yet-done
+work, in that sequence per this section's own Build plan below.
 
 The Hermes-comparison document (§0) is the working reference for what "duplicate Claude Code's
 features" concretely means: project-instruction files (Dourmouse's equivalent of CLAUDE.md — does

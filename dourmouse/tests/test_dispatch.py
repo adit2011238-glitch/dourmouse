@@ -4319,6 +4319,42 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
         assert brain["backend"] == "claude_cli"
 
 
+class TestSystemMessageSplicesProjectInstructions:
+    """Domain H: Dourmouse's own CLAUDE.md-equivalent
+    (dourmouse/project_instructions.py). Same "alongside, not instead of"
+    contract agent_prompts.py's own bespoke per-agent prompts already
+    establish -- a user's own DOURMOUSE.md must never crowd out the base
+    orchestrator governance rules (confirmation-gating, honest failure)."""
+
+    def test_no_file_leaves_the_prompt_byte_identical(self, monkeypatch, tmp_path):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        registry = build_general_registry()
+        assert "PROJECT INSTRUCTIONS" not in system_message(registry)
+
+    def test_real_file_is_spliced_in_alongside_the_base_rules(self, monkeypatch, tmp_path):
+        from dourmouse.dispatch import system_message
+        from dourmouse.general_roster import build_general_registry
+        from dourmouse.project_instructions import PROJECT_INSTRUCTIONS_FILENAME
+
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        (tmp_path / PROJECT_INSTRUCTIONS_FILENAME).write_text(
+            "Always sign off with -Dourmouse."
+        )
+        text = system_message(build_general_registry())
+        assert "PROJECT INSTRUCTIONS" in text
+        assert "Always sign off with -Dourmouse." in text
+        # The base governance rules are still present, not replaced.
+        assert "CONFIRMATION REQUIRED" in text
+        assert "never invent output" in text
+        # The user's own file comes AFTER the base rules, matching the
+        # "alongside, not instead of" ordering (never above the rules
+        # above), so a later instruction can't shadow an earlier one.
+        assert text.index("CONFIRMATION REQUIRED") < text.index("Always sign off")
+
+
 class TestSystemPromptDisambiguatesSendMessageFromRealChannels:
     """v13.8 (real, live-reproduced regression): a real background /api/chat
     test against the actual running local (Ollama) backend reproduced the

@@ -549,10 +549,17 @@ and a real build sequence, not just a requirement statement:
       the Dell node is confirmed reachable (it was NOT, live-checked
       2026-09-19: `server_url_configured()` is `False`). See §9's own
       Build plan.
-- [ ] Domain H (Claude Code feature duplicates) -- 7 sub-features,
-      sequenced by real dependency/effort; the project-instruction-file
-      question is now answered (confirmed by grep: none exists yet, a
-      clean-slate gap). See §10's own Build plan.
+- [x] Domain H, piece 1/7 (project-instruction file, `DOURMOUSE.md`) -- shipped
+      2026-09-19. `dourmouse/project_instructions.py` reads the workspace's
+      own `DOURMOUSE.md`, spliced into `dispatch.py`'s shared
+      `system_message()` alongside (never instead of) the base governance
+      rules -- every backend and delegation depth picks it up automatically,
+      no second injection path. Live-verified with a real model: a real
+      `DOURMOUSE.md` instruction survived a real chat call AND a real
+      delegation hop. See `docs/ENGINEERING_AUDIT.md` finding #037.
+- [ ] Domain H, pieces 2-7 (hierarchical nesting, Skills-as-packages, hooks,
+      session-compaction audit, SDK interface, MCP) -- not yet started, still
+      sequenced by real dependency/effort. See §10's own Build plan.
 - [ ] Domain I remainder (AI security sentries) -- the real
       `InvestigationPhase` architecture, mapped onto the exact
       `research_mesh` state-machine template. See §11's own Build plan.
