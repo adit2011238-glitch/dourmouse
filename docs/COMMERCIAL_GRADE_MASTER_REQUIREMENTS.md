@@ -332,6 +332,13 @@ Three real, distinct layers, not to be conflated:
 
 ## 8. Domain F — Subagents, delegation, parallel work
 
+**Status, updated 2026-09-19**: the harsh acceptance test below was run live for the first time
+and surfaced a real reliability gap in the pre-existing `delegate_parallel` fan-out tool, now
+fixed and live-verified (`docs/ENGINEERING_AUDIT.md` finding #032) -- a branch that only ran out
+of its own turn budget was reported `OK`, indistinguishable from a branch that actually finished.
+Domain F is not yet closed: the named-specialist-role extension below remains real, separate,
+not-yet-done follow-on work.
+
 Already substantially real (`general_roster.py`'s subagent registry, `model_delegation.py`'s
 routing policy, `TestFanOut`'s concurrent-execution tests). Extend per the Hermes/Claude-Code
 comparison's own recommendation: named specialist roles (Researcher, Coder, Reviewer, Tester,
@@ -342,9 +349,26 @@ model doing everything.
 **Harsh acceptance test**: give a goal that genuinely needs 3+ specialists (research a topic,
 write code implementing a finding, review the code). Confirm real, isolated subagent context per
 specialist (not one giant shared transcript) and a real synthesized final result, not three
-disconnected fragments pasted together.
+disconnected fragments pasted together. **Partially run, 2026-09-19**: a real 3-branch fan-out was
+exercised live against the dev-preview server; it is what surfaced the `delegate_parallel`
+reliability gap above. Isolated-context and synthesis behavior confirmed sound for branches that
+finish cleanly; the specialist-role extension itself has not yet been built or re-tested against
+this acceptance test in full.
 
 ## 9. Domain G — Research capability, upgraded
+
+**Scope correction, user-directed, 2026-09-19**: the founding spec's own workstream A ("a
+Claude-Code-architecture translation for a distributed research network") is a real **3-device**
+network -- this Mac, the Dell compute node (already a real, wired backend, see Domain A's `compute`
+subagent), and the DOURMOUSE desktop (the separate Windows machine documented across prior-session
+memory: its own dourmouse server on port 8765, the live history sync between it and this Mac) --
+genuinely distributing real research/compute work across the user's own 3 real machines. This is
+explicitly **not** the 500-field jarvis qualification mesh rebuilt in finding #033
+(`dourmouse/research_mesh/`) -- that mesh is real and valuable on its own terms (field-specialist
+qualification against real held-out exam corpora) but was the wrong target for this workstream, per
+direct user correction. **Not yet started**: no code here today distributes a research task across
+the 3 real devices; the structured research pipeline below and the 3-device distribution are two
+real, separate pieces of the same workstream, both still open.
 
 Current real capability: `web_search`/`fetch_url`/`research_info` — a search-and-summarize loop.
 AI-Scientist's real methodological contribution (not its codebase, see §0): structure research as

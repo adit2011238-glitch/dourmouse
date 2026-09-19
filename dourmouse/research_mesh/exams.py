@@ -9,7 +9,7 @@ Grading design (why deterministic, why fail-closed):
   pass/fail decision.
 - Every answer also passes through the *citation gate*: each citation must
   resolve to a real file in the field's corpus (by filename or URL substring).
-  A fabricated citation fails the attempt no matter how good the prose is —
+  A fabricated citation fails the attempt no matter how good the prose is --
   this is the anti-hallucination spine of the qualification.
 - Where no key exists, exact grading is impossible; the attempt is graded by
   the citation gate plus a completeness floor, and the feedback says plainly
@@ -18,7 +18,7 @@ Grading design (why deterministic, why fail-closed):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .brain import BrainAnswer
 from .core import ExamAttempt

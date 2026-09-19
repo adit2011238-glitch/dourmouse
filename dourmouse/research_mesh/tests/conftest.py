@@ -1,9 +1,10 @@
 """Shared fixtures: a fake field corpus built from plain-text 'PDFs'.
 
 The corpus files are plain text with .pdf extensions: load_corpus() only globs
-names and MockBrain._file_text() reads non-%PDF bytes as text, so the pipeline
+names and _extract_file_text() reads non-%PDF bytes as text, so the pipeline
 mechanics (study, held-out, grading, remediation) are tested without needing
-real binary PDFs. The real corpus path is exercised separately by the pilot.
+real binary PDFs. The real corpus path is exercised separately, live, against
+the real materialized jarvis/research_mesh/fields/exams/papers corpus.
 """
 
 from __future__ import annotations

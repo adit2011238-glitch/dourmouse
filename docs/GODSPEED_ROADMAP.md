@@ -277,6 +277,45 @@ dispatch/agent system (additive, not a rewrite — reuse `dispatch.py`'s model-c
       result didn't mean the task's real objective was accomplished, even after human approval
       passed the gate -- two safeguards doing their own separate jobs correctly. See
       `docs/ENGINEERING_AUDIT.md` finding #029.
+- [x] Domain F harsh acceptance test run live (real fan-out, 3 specialist branches via
+      `delegate_parallel` against the real dev-preview server) surfaced a real reliability gap:
+      a branch that only ran out of its own `max_turns` reported `(OK, 11.39s)`, indistinguishable
+      from a branch that genuinely finished -- the same self-reported-success class finding #025
+      closed for goal-runtime tasks, now found on `delegate_parallel`'s own separate execution
+      path. Fixed by reading a real, pre-existing, previously-unused signal: `dispatch.py`'s own
+      `budget_exhausted` transcript entry, emitted unconditionally the instant `max_turns` is
+      exhausted. `_format_delegate_parallel_result` now reports `succeeded`/`incomplete`/`failed`
+      as three separate counts, marks an exhausted branch `INCOMPLETE` instead of `OK`, and keeps
+      the branch's own real partial text visible underneath an explicit warning rather than
+      discarding it. `max_turns`'s own JSON-schema description (identical in `delegate_task` and
+      `delegate_parallel`) also gained real guidance on how many turns multi-step work actually
+      needs, targeting the root behavior observed live (the model picked `max_turns: 1` for a job
+      that needed several). Live-caught, then covered by a real regression test that genuinely
+      exhausts a branch's turn budget through the real dispatch loop (`FakeClient`'s own
+      repeat-last-response mechanism, the same one proven in
+      `test_dispatch.py::test_max_turns_bounds_looping_model`), not a mocked shortcut. See
+      `docs/ENGINEERING_AUDIT.md` finding #032.
+- [x] `research_mesh` rebuilt for real (user instruction: "forget the existing one and rebuild").
+      "The existing one" turned out to be a real, concrete, already-committed package sitting
+      orphaned in this repo (`jarvis/research_mesh/agents/`, 2395 lines, its own real test suite) --
+      a field-specialist qualification mesh across 500 real academic fields (6836 real exam PDFs),
+      zero references from `dourmouse/`, no real reasoning backend, stale a month. Relocated the
+      already-correct state machine into `dourmouse/research_mesh/`, added a real `RealBrain`
+      backed by this codebase's own real model routing (the same tool-less `ChatSession` primitive
+      `goal_runtime.py`'s verification calls already use), and made it chat-reachable for the first
+      time via a new `research_mesh` subagent (`dourmouse/research_mesh_tools.py`). Live-verified
+      with a real model against the real corpus: a real held-out fail, a real remediation, a real
+      pass, and a real 3-strikes exclusion, plus a real chat call whose response matched the tool
+      handler's own private string template character-for-character. **Scope correction, same
+      day**: this is a real, valuable, standalone capability, but user correction clarified it is
+      NOT the founding spec's own "distributed research network" workstream -- that is a real
+      3-device network (this Mac, the Dell compute node, the DOURMOUSE desktop), tracked as real,
+      separate, not-yet-started work under `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` Domain G.
+      Two real, separate, out-of-scope bugs found live and flagged rather than fixed here: this
+      machine's global Claude Code CLI model override (fixed directly, user's own account setting,
+      outside this repository), and a Grounded Mode false-positive on a genuine tool call
+      (`task_d88c3f91`), plus a separately-flagged, confirmed-hanging pre-existing test
+      (`task_ade8f6a2`). See `docs/ENGINEERING_AUDIT.md` finding #033.
 
 ## Phase 3 — UI/UX redesign (Claude Desktop / Claude Code interaction quality)
 

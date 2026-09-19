@@ -877,6 +877,43 @@ class TestDelegateParallelTool:
         assert "2 of 3 requested branches REFUSED" in result["text"]
         assert jobs.count() == 1  # only the granted branch spawned a job
 
+    def test_a_branch_that_exhausts_its_turns_is_marked_incomplete_not_silently_ok(self, registry, jobs):
+        """Real, live-caught gap: a branch that runs out of its own
+        max_turns mid-research used to report OK, indistinguishable from a
+        branch that genuinely finished -- self-reported success exactly
+        like the goal-runtime gap finding #025 closed, on this different
+        execution path. dispatch.py's own real forced-synthesis mechanism
+        (v8.28) already emits a real, structured budget_exhausted
+        transcript entry when this happens; delegate_parallel simply
+        never checked it before."""
+        parent_call = _FakeToolCall(
+            "c1", "delegate_parallel",
+            json.dumps({
+                "branches": [{"agent_or_task": "echo_agent", "instructions": "loop forever"}],
+                "max_turns": 1,
+            }),
+        )
+        looping = _FakeResponse(_FakeMessage(
+            content=None,
+            tool_calls=[_FakeToolCall("call_x", "echo", json.dumps({"text": "x"}))],
+        ))
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[parent_call])),
+            looping,  # the branch's one allowed turn -- still calling tools
+            _FakeResponse(_FakeMessage(content="best effort from the branch")),  # its forced synthesis
+            _FakeResponse(_FakeMessage(content="parent done")),
+        ])
+
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+        )
+
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "1 succeeded, 1 incomplete (ran out of turns)" in result["text"] or "1 incomplete" in result["text"]
+        assert "[branch 0]" in result["text"] and "INCOMPLETE" in result["text"]
+        assert "ran out of its own turn budget" in result["text"]
+        assert "best effort from the branch" in result["text"]  # the real partial text is never discarded
+
 
 class TestDelegateParallelConcurrency:
     """Real concurrency: several nested runs genuinely in flight at once,

@@ -1,4 +1,4 @@
-"""Core lifecycle for the research-mesh qualification pipeline.
+r"""Core lifecycle for the research-mesh qualification pipeline.
 
 Every field-agent follows one deterministic lifecycle:
 
@@ -12,12 +12,12 @@ Design notes (why this shape):
   answer and grade is persisted (see store.py) so a killed pipeline resumes from
   the exact state it stopped in. No work is ever redone or double-counted.
 - Iterations are taken strictly one at a time in chronological order (oldest
-  first), so later papers stay held out longest — the anti-cheating spine of
+  first), so later papers stay held out longest -- the anti-cheating spine of
   the whole system (see study.py for how held-out papers are enforced).
 - FAILED is terminal for an attempt, but not for the agent: each failure sends
   it to REMEDIATING for a fixed focused budget, then back to TESTING on the
   *same* iteration. Only MAX_ATTEMPTS consecutive failures exclude the agent
-  (NOT_QUALIFIED) — the agent is then removed from routing and its spec flagged.
+  (NOT_QUALIFIED) -- the agent is then removed from routing and its spec flagged.
 
 This module is pure logic: no I/O, no clocks, no LLM. Everything is injectable
 so the machine can be tested exhaustively and cheaply.
@@ -25,7 +25,7 @@ so the machine can be tested exhaustively and cheaply.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
@@ -57,11 +57,11 @@ class Status(Enum):
 class StudyPhase(Enum):
     """The five timeboxed phases of the 5-hour study window."""
 
-    CURRICULUM = auto()      # 30 min  — build syllabus from field spec
-    INGESTION = auto()       # 120 min — retrieve real sources, extract concepts
-    PRACTICE = auto()        # 60 min  — self-quiz on held-out-excluded papers
-    GAP_CLOSURE = auto()     # 60 min  — re-drill the lowest-confidence concepts
-    CONSOLIDATION = auto()   # 30 min  — compile the Study Dossier + exam brief
+    CURRICULUM = auto()      # 30 min  -- build syllabus from field spec
+    INGESTION = auto()       # 120 min -- retrieve real sources, extract concepts
+    PRACTICE = auto()        # 60 min  -- self-quiz on held-out-excluded papers
+    GAP_CLOSURE = auto()     # 60 min  -- re-drill the lowest-confidence concepts
+    CONSOLIDATION = auto()   # 30 min  -- compile the Study Dossier + exam brief
 
     @property
     def budget_min(self) -> int:

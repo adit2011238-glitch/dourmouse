@@ -4,7 +4,7 @@ Why SQLite, one connection per operation:
 
 - The pipeline can be killed at any moment (power loss, crash, user interrupt)
   and must resume from the exact persisted state. SQLite with WAL gives atomic
-  single-row commits — a write either fully lands or it doesn't, so a crash
+  single-row commits -- a write either fully lands or it doesn't, so a crash
   mid-update can never leave a half-applied state transition.
 - One connection per operation (open -> commit -> close) avoids cross-thread
   connection sharing entirely, which is the classic source of SQLite

@@ -10,7 +10,7 @@ Two run modes:
 - Strict (default): study excludes every not-yet-passed paper and its key, so
   an agent can never ingest the answers to an exam it hasn't taken. A
   regurgitation-only brain therefore fails each first attempt and qualifies
-  through the remediation loop — which is exactly what the strict rule should
+  through the remediation loop -- which is exactly what the strict rule should
   do, and it exercises the fail -> remediate -> retry path for real.
 - Open-book (--open-book, demo only): study sources include the full corpus so
   a mock brain can qualify cleanly on first attempts. This exists purely to
@@ -19,10 +19,16 @@ Two run modes:
 
 CLI:
 
-    python -m research_mesh.agents.pipeline --db /tmp/q.db \\
-        --domain "Mathematics" \\
-        --field "Algebra (abstract & commutative)" --mock
-    python -m research_mesh.agents.pipeline --list --db /tmp/q.db
+    python -m dourmouse.research_mesh.pipeline \\
+        --domain "Condensed Matter & Materials (physics)" \\
+        --field "Photonics & Optoelectronics" --mock
+    python -m dourmouse.research_mesh.pipeline --list
+
+The real exam-paper corpus (~500 fields, materialized 2026-08-18 by the
+scraping tools still in jarvis/tools/) predates this rebuild and is 2.2GB --
+left in place rather than moved; PAPERS_ROOT below points at it explicitly.
+See dourmouse/research_mesh/__init__.py for why this module exists here now
+instead of in the old, orphaned jarvis/research_mesh/agents package.
 """
 
 from __future__ import annotations
@@ -32,7 +38,9 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
+
+from dourmouse.config import workspace_dir
 
 from .brain import Brain, BrainNotConfigured, MockBrain, NotConfiguredBrain
 from .core import MAX_ATTEMPTS, AgentRecord, Status
@@ -40,10 +48,10 @@ from .exams import pending_iterations, take_exam
 from .store import AgentStore
 from .study import FieldCorpus, StudyEngine, load_corpus
 
-# Papers root: jarvis/research_mesh/fields/exams/papers
-PAPERS_ROOT = Path(__file__).resolve().parent.parent.parent / "research_mesh" / "fields" / "exams" / "papers"
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+PAPERS_ROOT = _REPO_ROOT / "jarvis" / "research_mesh" / "fields" / "exams" / "papers"
 
-DEFAULT_DB = PAPERS_ROOT / "qualification.db"
+DEFAULT_DB = workspace_dir() / "research_mesh" / "qualification.db"
 
 
 class QualificationPipeline:
@@ -154,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--field")
     ap.add_argument("--mock", action="store_true",
                     help="use the deterministic MockBrain (no LLM needed)")
+    ap.add_argument("--real", action="store_true",
+                    help="use RealBrain (this codebase's own real model routing)")
     ap.add_argument("--open-book", action="store_true",
                     help="demo: let study include the full corpus")
     ap.add_argument("--list", action="store_true", help="list all fields")
@@ -167,7 +177,13 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--domain and --field are required (or --list)")
 
     store = AgentStore(args.db)
-    brain: Brain = MockBrain() if args.mock else NotConfiguredBrain()
+    if args.mock:
+        brain: Brain = MockBrain()
+    elif args.real:
+        from .brain import RealBrain
+        brain = RealBrain()
+    else:
+        brain = NotConfiguredBrain()
     corpus = load_corpus(PAPERS_ROOT, args.domain, args.field)
     if not corpus.papers and not corpus.landing_pages:
         print(f"no corpus for {args.domain} / {args.field} "
@@ -181,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         final = pipe.run(record)
     except BrainNotConfigured as exc:
         print(f"NOT CONFIGURED: {exc}")
-        print("run with --mock for an offline dry-run, or subclass Brain for a real backend")
+        print("run with --mock for an offline dry-run, --real for a genuine model-backed run")
         return 2
 
     print(f"\n=== {args.domain} / {args.field} ===")

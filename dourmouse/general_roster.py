@@ -62,6 +62,7 @@ from dourmouse.dispatch import (
     system_message,
 )
 from dourmouse.goal_tools import build_goals_subagent
+from dourmouse.research_mesh_tools import build_research_mesh_subagent
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.security.tools import build_security_subagent
 from dourmouse.system_access import build_system_subagent
@@ -2645,7 +2646,18 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
             "properties": {
                 "task": {"type": "string"},
                 "subagent": {"type": "string", "default": ""},
-                "max_turns": {"type": "integer", "default": 5},
+                "max_turns": {
+                    "type": "integer", "default": 5,
+                    "description": (
+                        "How many tool-call turns this nested run gets before it is forced to "
+                        "answer with whatever it has. 1 is enough ONLY for a single lookup "
+                        "(one web_search, one file read). Anything needing multiple steps "
+                        "(write code AND run it, search AND then fetch a page, multi-part "
+                        "research) needs 3-5 or it will be cut off mid-work and fall back to "
+                        "a best-effort partial answer rather than a real result -- when in "
+                        "doubt, leave the default."
+                    ),
+                },
             },
             "required": ["task"],
         },
@@ -2889,8 +2901,8 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                 result = {
                     "index": index, "agent": target or "any", "job_id": job_id,
                     "model": reported_model, "backend": reported_backend,
-                    "local": reported_local, "ok": False, "text": "",
-                    "error": str(exc),
+                    "local": reported_local, "ok": False, "incomplete": False,
+                    "text": "", "error": str(exc),
                     "elapsed_s": round(time.perf_counter() - started, 2),
                 }
                 _safe_emit(ctx.event_sink, {
@@ -2902,11 +2914,27 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
             final_text = (report.get("final_text") or "").strip()
             if ctx.jobs is not None and job_id:
                 ctx.jobs.finish(job_id, result=final_text)
+            # Real, live-caught gap: "ok" used to mean only "the dispatch
+            # call did not raise" -- a branch that ran out of its own
+            # max_turns mid-research and fell back to dispatch.py's own
+            # forced, tool-free synthesis (a real, structured
+            # "budget_exhausted" transcript entry that mechanism already
+            # emits) still reported OK, indistinguishable from a branch
+            # that genuinely finished. Observed live: a delegate_parallel
+            # branch given max_turns=1 for a task needing to write AND run
+            # code came back "OK" with final_text that was literally "I
+            # wasn't able to reach a complete answer" -- self-reported
+            # success exactly like the goal-runtime gap finding #025
+            # closed, just on this different execution path. `ok` still
+            # means "no exception" (a hard, unambiguous signal); this new
+            # flag names the softer, real distinction separately rather
+            # than overloading `ok` to mean two different things.
+            incomplete = any(e.get("type") == "budget_exhausted" for e in report.get("transcript") or [])
             result = {
                 "index": index, "agent": target or "any", "job_id": job_id,
                 "model": reported_model, "backend": reported_backend,
-                "local": reported_local, "ok": True, "text": final_text,
-                "error": "",
+                "local": reported_local, "ok": True, "incomplete": incomplete,
+                "text": final_text, "error": "",
                 "elapsed_s": round(time.perf_counter() - started, 2),
             }
             _safe_emit(ctx.event_sink, {
@@ -2959,7 +2987,18 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                         "required": ["instructions"],
                     },
                 },
-                "max_turns": {"type": "integer", "default": 5},
+                "max_turns": {
+                    "type": "integer", "default": 5,
+                    "description": (
+                        "How many tool-call turns this nested run gets before it is forced to "
+                        "answer with whatever it has. 1 is enough ONLY for a single lookup "
+                        "(one web_search, one file read). Anything needing multiple steps "
+                        "(write code AND run it, search AND then fetch a page, multi-part "
+                        "research) needs 3-5 or it will be cut off mid-work and fall back to "
+                        "a best-effort partial answer rather than a real result -- when in "
+                        "doubt, leave the default."
+                    ),
+                },
             },
             "required": ["branches"],
         },
@@ -2976,10 +3015,14 @@ def _format_delegate_parallel_result(
     said what into one anonymous blob), in the SAME order the branches
     were requested (not completion order, which is nondeterministic run
     to run)."""
+    succeeded = sum(1 for r in results if r and r["ok"] and not r.get("incomplete"))
+    incomplete = sum(1 for r in results if r and r["ok"] and r.get("incomplete"))
+    failed = sum(1 for r in results if r and not r["ok"])
     lines = [
         f"DELEGATED PARALLEL — {len(results)} branch(es) ran "
-        f"({sum(1 for r in results if r and r['ok'])} succeeded, "
-        f"{sum(1 for r in results if r and not r['ok'])} failed)"
+        f"({succeeded} succeeded"
+        + (f", {incomplete} incomplete (ran out of turns)" if incomplete else "")
+        + f", {failed} failed)"
         + (f", {refused_count} of {requested_count} requested branches "
            "REFUSED (delegate budget exhausted)" if refused_count else "")
         + ":"
@@ -2987,15 +3030,18 @@ def _format_delegate_parallel_result(
     for r in results:
         if r is None:
             continue
+        status = "OK" if r["ok"] and not r.get("incomplete") else ("INCOMPLETE" if r["ok"] else "ERROR")
         header = (
             f"[branch {r['index']}] agent={r['agent']} model={r['model']} "
             f"job={r['job_id'] or '(untracked)'} "
-            f"({'OK' if r['ok'] else 'ERROR'}, {r['elapsed_s']}s)"
+            f"({status}, {r['elapsed_s']}s)"
         )
         if r["ok"]:
             body = r["text"][-_DELEGATE_RESULT_CAP:] or "(no final text — see job for transcript)"
             if len(r["text"]) > _DELEGATE_RESULT_CAP:
                 body += "\n[result truncated]"
+            if r.get("incomplete"):
+                body += "\n[this branch ran out of its own turn budget before finishing cleanly -- treat it as a best-effort partial answer, not a confirmed result]"
         else:
             body = f"ERROR: {r['error']}"
         lines.append(header + "\n" + body)
@@ -4095,6 +4141,8 @@ def build_general_registry() -> DispatchRegistry:
     registry.register_subagent(build_system_subagent())
 
     registry.register_subagent(build_goals_subagent())
+
+    registry.register_subagent(build_research_mesh_subagent())
 
     registry.register_subagent(build_security_subagent())
 

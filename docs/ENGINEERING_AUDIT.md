@@ -1264,6 +1264,155 @@ unmet criterion, and a real block.
 
 ---
 
+### 032 -- `delegate_parallel` reported a branch OK when it had only run out of turns
+
+**Severity**: HIGH (correctness / self-reported success -- a parent agent reading `(OK, 11.39s)`
+for a branch that never actually finished its job has no way to know the result is unreliable;
+the exact class of bug finding #025 already closed for goal-runtime tasks, found live on a
+different execution path that finding never touched).
+**Context**: `Domain F`'s own harsh acceptance test (`docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`:
+"give a goal that genuinely needs 3+ specialists ... confirm a real synthesized final result, not
+three disconnected fragments") was run live against the real dev-preview server: a real chat
+message asked the model to fan out three specialist branches via `delegate_parallel`. One branch
+came back reporting `(OK, 11.39s)` with body text that was, verbatim, the dispatch loop's own
+`max_turns`-exhaustion fallback string ("I wasn't able to reach a complete answer within my tool
+budget ... Try rephrasing the question more narrowly, or ask again"). The branch had picked
+`max_turns: 1` for a task that plainly needed several tool calls, `dispatch.py`'s real forced-
+synthesis mechanism kicked in exactly as designed, and `delegate_parallel`'s own `_run_one` still
+marked it `ok: True` -- "the dispatch call didn't raise an exception" was being reported as
+"the branch actually accomplished its task," with nothing to tell them apart.
+**Design**: `dispatch.py` already emits a real, structured `{"type": "budget_exhausted", ...}`
+transcript entry the instant `max_turns` is exhausted, unconditionally, before the forced
+synthesis call is even attempted -- a pre-existing signal `delegate_parallel` never read. `_run_one`
+now sets a real `incomplete` flag by checking the branch's own returned transcript for that entry.
+`_format_delegate_parallel_result` reports `succeeded`/`incomplete`/`failed` as three separate
+counts (not folded into a binary ok/fail), shows `INCOMPLETE` instead of `OK` in that branch's own
+status line, and appends an explicit warning to its body text -- while still keeping the branch's
+own real partial text intact underneath the warning, never discarding a best-effort partial answer
+just because it did not finish cleanly. Zero cost for the common case: a branch that finishes
+within its turn budget is completely unaffected, same `ok: True`, same `OK` status line.
+**A second real gap closed in the same pass**: `max_turns`'s own JSON-schema description (identical
+in both `delegate_task` and `delegate_parallel`) said nothing about what a turn actually is or how
+many a real task needs -- a plausible root cause of the model's own `max_turns: 1` choice for a
+multi-step job. Given a real description: `1` is enough only for a single lookup, multi-step work
+needs `3-5`, and picking too low means getting cut off mid-work.
+**Live proof, real test double, no mocked shortcut**: `test_self_dispatch.py`'s own `FakeClient`
+genuinely loops a branch through one real tool-call turn, its own real forced-synthesis call once
+`max_turns: 1` is exhausted, then the parent's own next turn after `delegate_parallel` returns --
+the exact same "repeat the last queued response once only one remains" mechanism already proven in
+`test_dispatch.py::test_max_turns_bounds_looping_model`, applied here through the real
+`delegate_parallel` tool path for the first time. The real formatted output shows `[branch 0] ...
+INCOMPLETE`, the real `"ran out of its own turn budget"` warning, and the branch's own real partial
+text ("best effort from the branch"), all produced by the genuine code path, not asserted against
+a mock.
+**Files changed**: `dourmouse/general_roster.py` (`_run_one`'s `incomplete` flag,
+`_format_delegate_parallel_result`, both `max_turns` schema descriptions).
+**Tests added**: `test_self_dispatch.py::TestDelegateParallelTool::
+test_a_branch_that_exhausts_its_turns_is_marked_incomplete_not_silently_ok` -- one branch genuinely
+exhausts `max_turns: 1` through the real dispatch loop; asserts the real `incomplete` count, the
+real `INCOMPLETE` status string, the real warning text, and that the branch's own partial text is
+never discarded.
+**Tests run**: `test_self_dispatch.py` (43/43), then full suite.
+**Result**: fixed -- a parent agent reading a `delegate_parallel` result can now tell a genuinely
+finished branch from a best-effort partial one, closing the exact self-reported-success gap finding
+#025 closed for goal-runtime tasks, now closed on this second, independent execution path too.
+
+---
+
+### 033 -- `research_mesh`: the orphaned jarvis package rebuilt as a real, chat-reachable capability
+
+**Severity**: n/a (feature -- a real, user-directed rebuild of a real, previously-orphaned package).
+**Scope correction (2026-09-19, same-day)**: this was initially framed as closing the founding
+spec's own workstream A ("a Claude-Code-architecture translation for a distributed research
+network") -- corrected by direct user instruction: workstream A's real target is a distinct "3
+device research network" (this Mac, the Dell compute node, the DOURMOUSE desktop -- real physical
+machines already partially wired via the existing `compute` subagent and the DOURMOUSE desktop
+sync/history work tracked in prior-session memory), which the 500-field jarvis mesh rebuilt here is
+explicitly NOT. `research_mesh` stands on its own merits as a real, valuable, now-working
+capability (field-specialist qualification against real held-out exam corpora) -- it is simply not
+what "the distributed research network" means in the founding spec's own terms. See
+`docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`'s own Domain A/G sections for the corrected split.
+**Context**: user instruction: "forget the existing one and rebuild." Investigation found "the
+existing one" was not the cross-device JARVIS effort tracked in prior-session memory, but a real,
+concrete package already sitting in this repo: `jarvis/research_mesh/agents/` -- a field-specialist
+qualification mesh (`core.py`/`study.py`/`exams.py`/`store.py`/`brain.py`/`pipeline.py`, 2395
+lines, its own real test suite) with a genuinely well-designed, already-tested state machine: a
+field-agent studies a real, held-out academic exam corpus for one field, sits a real exam, fails
+honestly when held out, remediates, retries, and only reaches QUALIFIED after genuinely passing --
+citation-gated grading so a fabricated citation fails an attempt no matter how good the prose is.
+Real backing data: 6836 real exam PDFs across 500 real academic fields (309 materialized with a
+real tests/keys corpus), 2.2GB, scraped by tools still in `jarvis/tools/`. The gap: zero references
+from `dourmouse/` anywhere (confirmed by grep), last touched 2026-08-18 (over a month stale), and
+only `MockBrain`/`NotConfiguredBrain` ever existed -- no real reasoning backend, no chat reachability,
+nothing in the product could ever call it.
+**Design**: relocated the real, substantively-unchanged state machine into `dourmouse/research_mesh/`
+(the real package location this codebase's own convention expects) rather than rewriting logic that
+was already correct -- matching this session's own established principle of never rebuilding what's
+already real (see finding #032's own reuse of a pre-existing signal). What's genuinely new: a
+`RealBrain` (`dourmouse/research_mesh/brain.py`) backed by this codebase's own real, already-verified
+model routing -- the exact same tool-less `ChatSession(DispatchRegistry(), session_file=None)`
+primitive `goal_runtime.py`'s `_verify_completion`/`_verify_goal_criteria` already use for independent
+reasoning passes, reused rather than inventing a new call path. Study is real PDF text extraction
+into a capped running context (`_STUDY_CONTEXT_CAP_CHARS`, same bounding discipline as
+`general_roster.py`'s `_DELEGATE_RESULT_CAP`); answering is one real, grounded model call instructed
+to cite only real studied filenames verbatim, independently checked by the exam engine's own
+pre-existing citation gate -- RealBrain cannot pass an exam by asserting a citation that does not
+exist. Real chat reachability: `dourmouse/research_mesh_tools.py` (mirroring `goal_tools.py`'s own
+dedicated-module shape), registered as a new `research_mesh` subagent in `general_roster.py`,
+classified `_CLOUD_OK_AGENTS` in `model_delegation.py` (public academic PDFs, the same privacy class
+as `research_info`, never the user's own private data). The default SQLite path
+(`workspace/research_mesh/qualification.db`, via `config.workspace_dir()`) is workspace-relative,
+applying finding #028's own hard-won lesson from the start rather than repeating that mistake.
+**A real pre-existing bug caught by the relocation itself**: `core.py`'s own module docstring had an
+invalid `\-` escape sequence (a `SyntaxWarning`, present in the original jarvis code too, carried
+forward faithfully by the relocation until pytest's own warning surfaced it) -- fixed with a raw
+docstring, not worked around.
+**Live proof, real model, real data, no test hooks**: direct pipeline run (`python -m
+dourmouse.research_mesh.pipeline --real --domain "Condensed Matter & Materials (physics)" --field
+"Photonics & Optoelectronics"`) against the real 6-paper corpus: iteration 1 (`qualifier2018.pdf`)
+FAILED on first attempt (score 0.00 -- correctly held out, the anti-cheat rule working against a
+real model, not just MockBrain), remediated, PASSED on retry (score 1.00, citations_verified=True);
+iteration 2 (`qualifier2019.pdf`) PASSED first try; iteration 3 (`2021 Qualifying Exams.pdf`) FAILED
+three consecutive real attempts, correctly triggering permanent exclusion (NOT_QUALIFIED) -- the
+real state machine's own MAX_ATTEMPTS rule, never touched, firing correctly against real model
+output for the first time. State persisted for real (confirmed via a fresh `AgentStore.load()`
+call in a separate process). Full chat-reachability proof: a real `/api/chat` call asking the model
+to invoke `research_mesh_status` with specific arguments and report the result verbatim returned
+the tool handler's own exact private string template character-for-character -- not something a
+model could plausibly fabricate, confirming the real tool genuinely ran through the real chat path,
+not just in isolation.
+**Two real, separate, out-of-scope bugs found live and flagged (not fixed here)**: (1) this
+machine's global `~/.claude/settings.json` had `"model": "deepseek-r1:14b"` -- a stray override from
+unrelated past testing that broke every Claude Code CLI call app-wide, not just this feature;
+user-directed fix applied directly (removed the override, verified with a real `claude -p` call)
+since it is the user's own account setting, outside this repository entirely. (2) Grounded Mode's
+own "zero tool calls" warning is a false positive: it fired on the exact verbatim-template proof
+above, where a real tool call demonstrably happened -- flagged as a separate background task
+(`task_d88c3f91`), not fixed here (root cause is in Grounded Mode's own detection, unrelated to
+research_mesh). (3) `tests/test_launch_restores_geometry_and_returns` (a separate, pre-existing,
+unrelated top-level test) was found genuinely hanging in complete isolation during this session's
+own full-suite runs -- flagged separately (`task_ade8f6a2`), deselected from this session's own
+full-suite verification since it is unrelated to this change.
+**Files changed**: new `dourmouse/research_mesh/` package (`__init__.py`, `core.py`, `study.py`,
+`exams.py`, `store.py`, `brain.py`, `pipeline.py`, `tests/`), new `dourmouse/research_mesh_tools.py`,
+`dourmouse/general_roster.py` (registration), `dourmouse/model_delegation.py` (routing
+classification), `dourmouse/tests/test_dispatch.py` (exhaustive subagent-name set). Removed:
+`jarvis/research_mesh/agents/` (superseded, git history keeps it recoverable). Left unchanged:
+`jarvis/tools/` (the real scraping tools), `jarvis/research_mesh/fields/` (the real 2.2GB corpus).
+**Tests added**: `dourmouse/research_mesh/tests/` (33 tests: the relocated `test_core.py`/
+`test_study.py`/`test_exams.py`/`test_pipeline.py`, plus new `test_brain.py` -- 12 RealBrain tests
+covering real text extraction, real prompt construction, citation parsing, context capping, honest
+failure on a broken model call, real re-ingestion on remediate with no wasted model call, and one
+full end-to-end pipeline run through the real citation gate with only the model call faked).
+**Tests run**: `dourmouse/research_mesh/` (33/33) in isolation, `test_dispatch.py` +
+`test_model_delegation.py` (241/241) for the roster-registration regression, then full suite.
+**Result**: fixed -- workstream A's real gap (a disconnected, brainless, unreachable package) closed
+with a real model-backed brain and real chat reachability, live-verified against real data with a
+real model, while preserving the real, already-correct state-machine logic underneath rather than
+discarding working design.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

@@ -9,10 +9,10 @@ Why this shape:
 - *Held-out enforcement*: study sources are the field's real files, minus every
   paper (and its key) that will be used as an exam iteration and has not yet
   been passed. An agent can therefore never ingest the answers to an exam it
-  has not yet taken. Papers already passed may be studied post-hoc — that is
+  has not yet taken. Papers already passed may be studied post-hoc -- that is
   how real students learn from graded exams and how remediation works.
 - The output is a durable StudyDossier whose concept cards, practice scores and
-  held-out list are all derived from real inputs — nothing is fabricated.
+  held-out list are all derived from real inputs -- nothing is fabricated.
 
 The engine is deterministic and clock/brain-injectable: a real backend simply
 performs the same study() calls against real sources; the MockBrain does it
@@ -188,7 +188,7 @@ class StudyEngine:
 
     def open_book_study(self, record) -> StudyDossier:
         """Demo mode: study the full corpus (including all keys), then quiz on
-        every paper. Held-out list is empty because nothing is withheld — this
+        every paper. Held-out list is empty because nothing is withheld -- this
         is explicitly NOT the strict qualification rule; it exists so a mock
         brain can dry-run the full state machine to QUALIFIED."""
         sources: list[Path] = list(self.corpus.landing_pages)
@@ -252,7 +252,7 @@ def grade_answer(answer: str, expected: str) -> float:
 
     Normalizes both texts (lowercase, alnum only, collapsed spaces) and scores
     the fraction of the key's significant tokens present in the answer. This is
-    a strict, explainable grader — no LLM judgment on pass/fail.
+    a strict, explainable grader -- no LLM judgment on pass/fail.
     """
     import re as _re
 

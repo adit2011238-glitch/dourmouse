@@ -131,6 +131,11 @@ _CLOUD_OK_AGENTS = frozenset({
     # is not the personal/financial data class _LOCAL_ONLY_AGENTS exists
     # to protect.
     "media",
+    # 2026-09-19: field-specialist qualification (research_mesh_tools.py).
+    # The real corpus is public academic exam papers scraped from public
+    # university archive pages, same public-web class as research_info --
+    # never the user's own private data.
+    "research_mesh",
 })
 
 LOCAL = "ollama"

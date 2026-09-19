@@ -2004,6 +2004,10 @@ class TestEndToEndThroughGeneralRoster:
                              # on purpose -- it only registers once at
                              # least one extension has actually been
                              # approved, empty in this hermetic test.
+            "research_mesh",  # 2026-09-19: rebuilt from the orphaned
+                               # jarvis/research_mesh/agents package -- real
+                               # field-specialist qualification, now backed
+                               # by RealBrain and reachable from chat.
         }
 
     def test_trading_subagent_added_later_dispatchable(self):
