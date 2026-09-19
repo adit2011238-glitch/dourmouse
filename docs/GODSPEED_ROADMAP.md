@@ -556,7 +556,7 @@ and a real build sequence, not just a requirement statement:
       resolved `researcher` -> `research_info` and `security_sentry` ->
       `security`, the latter returning genuinely real host/network
       telemetry. See `docs/ENGINEERING_AUDIT.md` finding #038.
-- [ ] Domain G, piece 1 shipped 2026-09-20 -- the real data model and
+- [x] Domain G, piece 1 shipped 2026-09-20 -- the real data model and
       persisted store (`dourmouse/research_pipeline/`), mirroring
       `research_mesh/store.py`'s own proven shape. Real bug caught by its
       own test and fixed before commit (a source-dedup loop that missed
@@ -567,6 +567,62 @@ and a real build sequence, not just a requirement statement:
       confirmed reachable (it was NOT, live-checked 2026-09-19:
       `server_url_configured()` is `False`). See §9's own Build plan and
       `docs/ENGINEERING_AUDIT.md` finding #042.
+- [x] Domain G, piece 2 shipped 2026-09-20 -- real `plan()` and
+      `discover_sources()` stage functions (`dourmouse/research_pipeline/
+      stages.py`), live-verified with a real model and the real live web,
+      zero mocks: `plan()` decomposed a real question into 5 real, distinct
+      sub-questions; `discover_sources()`, run through the real production
+      registry, advanced a real record to `SOURCES_DISCOVERED` with 6 real
+      MCP documentation/spec URLs a real `research_info` agent actually
+      found and fetched. Evidence extraction (real per-source `Claim`s with
+      real citations), contradiction detection, and synthesis are next,
+      same incremental pattern. See `docs/ENGINEERING_AUDIT.md` finding
+      #043.
+- [x] Cross-cutting infra fix 2026-09-20 -- a stale LOCAL-tagged persisted
+      orchestrator model ("qwen2.5:7b") was leaking into Ollama Cloud on
+      every non-escalated orchestrator turn, a real 404 on this machine
+      right now, live-caught while verifying Domain G piece 3 below (not
+      scoped to Domain G -- affects the main chat orchestrator too).
+      `OllamaConfig.model_for_agent` now skips the persisted choice
+      entirely once `is_cloud`, symmetric with the fast-dispatch pin's own
+      existing guard. See `docs/ENGINEERING_AUDIT.md` finding #044.
+- [x] Domain G, piece 3 shipped 2026-09-20 -- real `extract_evidence()`
+      (`dourmouse/research_pipeline/stages.py`), live-verified end to end
+      (`plan -> discover_sources -> extract_evidence`) with a real model,
+      real web fetch, and zero mocks. The model's quoted `PASSAGE` is
+      validated as a real substring of the real fetched text before a
+      `Claim` is ever built -- harsh acceptance test 1 enforced in code,
+      not just requested in a prompt. `document_hash` is a real
+      `hashlib.sha256` of the real fetched content. Contradiction
+      detection and synthesis are next, same incremental pattern. See
+      `docs/ENGINEERING_AUDIT.md` finding #045.
+- [x] Domain G, piece 4 shipped 2026-09-20 -- real `synthesize()`, the
+      final stage the current state machine supports, built ONLY from
+      `record.active_claims()` so it cannot cite anything no real `Claim`
+      supports; zero active claims skips the model call entirely rather
+      than inviting fabrication. Live-verifying it end to end caught a
+      real, separate bug: `dispatch.py`'s own plan-reminder loop leaked a
+      "[DOURMOUSE: plan step(s) not executed via tools ...]" UI-only
+      caveat into the stored synthesis text (and, latently, could have
+      contaminated `extract_evidence()`'s `location` field too) -- fixed
+      with a new `_strip_internal_diagnostics()` helper applied at every
+      point these stage functions consume model text as data. Domain G's
+      core single-source loop (plan/discover/extract/synthesize) is now
+      fully real and live-verified end to end; contradiction detection
+      remains the one real, separate, not-yet-built piece. See
+      `docs/ENGINEERING_AUDIT.md` finding #046.
+- [x] Domain G, workspace + document cache closed 2026-09-20 -- two real
+      gaps named explicitly in this session's own status report to the
+      user, closed the same day: `ResearchStore` now has a real
+      workspace-relative default (`DEFAULT_DB`, matching `sentry.py`'s own
+      convention), and `extract_evidence()` now caches a fetched source's
+      real text to disk before the model ever sees it, keyed by a hash of
+      the URL -- a repeated source costs one real fetch, not one per call,
+      and `document_hash` stops fingerprinting content that no longer
+      exists anywhere. Live-verified: a real fetch against
+      `modelcontextprotocol.io` wrote a real cache file; a second call
+      against the same URL made zero further network calls. See
+      `docs/ENGINEERING_AUDIT.md` finding #047.
 - [x] Domain H, piece 1/7 (project-instruction file, `DOURMOUSE.md`) -- shipped
       2026-09-19. `dourmouse/project_instructions.py` reads the workspace's
       own `DOURMOUSE.md`, spliced into `dispatch.py`'s shared

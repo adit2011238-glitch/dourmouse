@@ -1809,6 +1809,275 @@ pipeline (plan/discover/extract/synthesize) builds on top of it next.
 
 ---
 
+### 043 -- Domain G: real stage functions (plan + discover_sources)
+
+**Severity**: n/a (feature -- the second real piece of Domain G's own build plan, directly on top
+of finding #042's data model, same "smallest lift next" sequencing).
+**Context**: finding #042 built the data model and store with zero model calls and zero chat
+reachability. This finding adds the first two real stage FUNCTIONS named as follow-on there:
+`plan()` and `discover_sources()`, both reusing already-proven call paths rather than inventing
+new ones.
+**Design**: `dourmouse/research_pipeline/stages.py`. `plan()` is the fifth reuse this session of
+the tool-less `ChatSession(DispatchRegistry(), session_file=None)` primitive (after
+`_verify_completion`, `_verify_goal_criteria`, `RealBrain.answer`) -- decomposing a question into
+real sub-questions is pure reasoning, no tools needed. Unlike `RealBrain.answer` (which must stay
+honest-uncertain mid-exam so a broken checker never destroys real completed work), a broken
+`plan()` call has produced no real work yet to protect, so it raises loudly instead of swallowing
+the error. `discover_sources()` reuses `run_dispatch_messages(..., forced_agent="research_info",
+...)` directly -- the same forced-agent mechanism `delegate_task`/`delegate_parallel` already use
+internally -- to force one real nested dispatch run onto the already-real `research_info`
+subagent, then reads back which real URLs it actually touched via
+`_extract_urls_from_transcript()`. That helper has two real, ranked sources: `fetch_url`
+tool_call's own `raw_arguments` JSON (clean, exact, primary) and a best-effort regex scan of
+`web_search` tool_result text (secondary, honestly incomplete for the Wikipedia-fallback engine,
+which carries no URLs in its own output shape at all -- named, not silently assumed complete).
+**Live proof, real model, real web, zero mocks**: ran both stages back to back with no mocking --
+`plan()` against "What is the Model Context Protocol (MCP) and why does it matter for AI agents?"
+returned 5 real, genuinely distinct sub-questions (not vague restatements) decomposing the
+question. `discover_sources()` against "What are the core components and structure of the Model
+Context Protocol (MCP)?", using the real production `build_general_registry()` (not the test-only
+fake registry), advanced the record to `Stage.SOURCES_DISCOVERED` and returned 6 real,
+deduplicated URLs a real `research_info` agent actually found and fetched:
+`modelcontextprotocol.io/introduction`, `modelcontextprotocol.io/docs/learn/architecture`, and
+four raw GitHub spec/README URLs -- read back through the real transcript with no fabrication.
+**Files changed**: new `dourmouse/research_pipeline/stages.py`.
+**Tests added**: `dourmouse/tests/test_research_pipeline.py` grew from 17 to 30 (13 new:
+`TestPlanStage`, `TestExtractUrlsFromTranscript`, `TestDiscoverSourcesStage`), with local
+test-double reconstructions matching `test_dispatch.py`'s own `FakeClient`/`_FakeToolCall`/
+`_FakeMessage` shapes and `research_mesh/tests/test_brain.py`'s own `_FakeSession` shape,
+following this codebase's own convention of not importing test internals across files. Two real
+em dashes in this file's own new mock search-result fixture text (mimicking `_brave_search`'s
+real format) and one unused `Permission` import were caught and fixed before commit (ruff plus
+the standing no-em-dash self-check).
+**Tests run**: `test_research_pipeline.py` in full (30/30).
+**Result**: fixed -- Domain G now has a real plan stage and a real source-discovery stage, both
+live-verified against a real model and the real live web, not just unit-tested against fakes.
+Evidence extraction (real per-source `Claim` generation with real citations), contradiction
+detection, and synthesis remain real, separate, not-yet-built follow-on, same as finding #042
+already named.
+
+---
+
+### 044 -- Cross-cutting: a stale LOCAL persisted orchestrator model leaked into Ollama Cloud
+
+**Severity**: HIGH (every non-escalated orchestrator turn on a machine with a stale local-tagged
+persisted choice and an active Ollama Cloud key 404'd -- not scoped to Domain G at all).
+**Context**: live-caught while verifying Domain G's `extract_evidence()` against the real
+production registry (finding #045, same session) -- the second real model call inside that stage
+(the CLAIM/PASSAGE extraction pass) raised an unhandled `urllib.error.HTTPError: 404` reaching
+`https://ollama.com/api/chat` with body `{"error": "model 'qwen2.5:7b' not found"}`. `plan()`'s
+own earlier call in the exact same run succeeded, so this was not a blanket outage -- isolating it
+(a direct `ChatSession(...).ask()` call with no research_pipeline code involved at all) reproduced
+the identical 404, proving this was never a bug in the new Domain G code, only exposed by it being
+the first caller this session to exercise the tool-less `ChatSession(DispatchRegistry(), session_
+file=None)` primitive from a machine actually running Ollama Cloud.
+**Root cause**: `OllamaConfig.model_for_agent("orchestrator")` (`dourmouse/config.py`) checks a
+persisted orchestrator-model choice (`_persisted_model_for_backend("ollama")`) BEFORE checking
+`is_cloud` -- and that persisted value is tagged only by backend NAME ("ollama"), never by
+locality. This machine's real persisted choice was "qwen2.5:7b", saved back when this backend was
+genuinely local; once `OLLAMA_API_KEY` later made the SAME "ollama" config cloud, the stale local
+value was still trusted and sent to Ollama Cloud, which has no such catalog entry. This is the
+exact mirror of the bug `skip_persisted_orchestrator_choice` already exists to prevent (a
+CLOUD-saved persisted value leaking into a `force_local=True` config, fixed 2026-09-13) -- that
+fix only ever closed ONE direction. Confirmed live: `orchestrator_model_setting()` returned
+`"qwen2.5:7b"` / `orchestrator_backend_setting()` returned `"ollama"` on this machine right now,
+while `load_ollama_config().model` (the real, correctly-resolved cloud default) is `"gpt-oss:20b"`.
+**Design**: rather than guess which locality an "ollama"-tagged value was actually saved under (the
+stored tag genuinely cannot say -- expanding the schema to tag locality too, e.g. "ollama_cloud" vs
+"ollama", would be the fully general fix but touches the Settings save endpoint's own request shape
+as well), this follows the same rule this file already uses elsewhere in this exact function (the
+untagged-model-id case, `webui.py`'s own comment: "an untagged value is never auto-applied"): an
+ambiguous persisted value is skipped, not guessed. Added `and not self.is_cloud` to the persisted-
+choice branch's condition, symmetric with the very next check in the same function
+(`_OLLAMA_FAST_DISPATCH`'s own pin already reads `if not self.is_cloud and ...`). Once cloud is
+active, the persisted choice is skipped entirely and the real, known-correct cloud default
+(`self.model`, resolved by `load_ollama_config` from `OLLAMA_CLOUD_MODEL`/`_OLLAMA_CLOUD_DEFAULT_
+MODEL`) is used instead.
+**Deliberately not built, named explicitly**: a user's deliberately-chosen CLOUD model saved
+through the Settings picker (while already on cloud) is now also skipped by this same guard, since
+the storage tag cannot currently distinguish "saved while cloud" from "saved while local" -- it
+always reads back as plain "ollama" either way. Fixing that for real needs the Settings save
+endpoint (`webui.py`'s `_handle_orchestrator_model_post`) to tag locality at save time, a real,
+separate, not-yet-built follow-on. Correctness (never send an unservable model name to a real paid
+API) was judged the higher priority over preserving a rare, currently-broken-anyway convenience.
+**Live proof**: reproduced the real 404 in isolation (a bare `ChatSession(...).ask()` call, no
+research_pipeline involved), confirmed the exact root cause via direct calls to
+`orchestrator_model_setting()`/`load_ollama_config()`, applied the fix, re-ran `load_ollama_config()`
+and confirmed `model_for_agent("orchestrator")` now returns `"gpt-oss:20b"` (matches `self.model`)
+instead of the stale `"qwen2.5:7b"`, then re-ran Domain G's full `plan -> discover_sources ->
+extract_evidence` live chain end to end against the real production registry -- zero errors, a real
+validated `Claim` produced (see finding #045).
+**Files changed**: `dourmouse/config.py` (`OllamaConfig.model_for_agent`).
+**Tests added**: `dourmouse/tests/test_config.py::TestSkipPersistedOrchestratorChoice::
+test_cloud_config_skips_a_stale_local_persisted_choice` -- saves a local-shaped persisted choice,
+forces `OLLAMA_API_KEY` (cloud) via `monkeypatch.setenv`, confirms `model_for_agent("orchestrator")`
+never returns the stale local value and instead matches the real cloud default.
+**Tests run**: `test_config.py` in full (85/85, includes the 84 pre-existing).
+**Result**: fixed -- confirmed no longer 404s live; the full existing config suite still passes
+unchanged, proving this closes only the specific cloud/local gap without disturbing any of the
+already-tested cross-backend or force-local behavior.
+
+---
+
+### 045 -- Domain G: real evidence extraction with verbatim-validated citations (third piece)
+
+**Severity**: n/a (feature -- the third real piece of Domain G's own build plan, directly on top
+of findings #042/#043, same incremental sequencing).
+**Context**: findings #042/#043 built the data model, store, `plan()`, and `discover_sources()`.
+This finding adds `extract_evidence()` -- the piece this domain's own harsh acceptance test 1 ("a
+research answer must let the user click through to the ORIGINAL passage that supports each real
+claim") actually depends on, and the piece finding #042 itself named as "the most complex remaining
+piece."
+**Design**: `dourmouse/research_pipeline/stages.py::extract_evidence()`. Two real calls, both
+reusing already-proven machinery, no new call path invented: (1) a forced fetch of one real source
+through `run_dispatch_messages(forced_agent="research_info")` (the same mechanism
+`discover_sources` already uses), reading the real fetched body back from the transcript's own
+`fetch_url` tool_result via a new `_extract_fetched_text()` helper matched by exact `f"FETCHED
+{url} ("` prefix (so a model that fetches a DIFFERENT url mid-transcript is never mistaken for the
+one this call asked for); (2) a real tool-less `ChatSession` call (same primitive as `plan()`) asked
+to reply with a `CLAIM:`/`PASSAGE:`/`LOCATION:` triple. The `PASSAGE` is never trusted on the
+model's word alone: it is checked as a real, whitespace-normalized substring of the real fetched
+text (`_normalize_whitespace`, tolerating only formatting differences from `fetch_url`'s own HTML-
+stripping, never paraphrase) before a `Claim` is built -- a genuinely enforced guarantee, not a
+prompt request. `document_hash` is a real `hashlib.sha256` of the actual fetched text (never a
+placeholder, closing the one gap finding #042's own build plan had explicitly left as "the caller's
+responsibility"). `source_id` is a new deterministic `_source_id_for_url()` (sha256 of the url,
+truncated) so repeated claims from the same source share one id. Raises loudly (no `Claim` added)
+on a genuinely failed fetch, a malformed model reply, or a passage that fails verbatim validation --
+same "no real work yet to protect" honesty as `plan()`'s own failure mode.
+**Live proof, real model, real web, zero mocks**: ran the full real chain `plan -> discover_sources
+-> extract_evidence` against "What is the Model Context Protocol (MCP) and what are its core
+components?" using the real production `build_general_registry()`. Real sources discovered
+(`modelcontextprotocol.io/docs/learn/architecture` among them); `extract_evidence()` fetched it for
+real, and the model's returned `PASSAGE` passed real verbatim validation against the real fetched
+text on the first attempt -- a real `Claim` was produced with a real `document_hash`, a real
+`source_id`, and `retrieved_at` a real timestamp. Honest note, not glossed over: the produced claim
+itself ("the fetched text does not contain an official definition of MCP") is a weak result content-
+wise, because the real first-discovered source happened to be a documentation-index redirect page
+with little substantive text on it -- exactly the kind of real-data variability a live test is
+supposed to surface, and arguably the CORRECT behavior (the model did not fabricate a confident
+definition it had no real material for). A caller iterating `source_index` across `record.sources`
+until a substantive claim is found is real, separate follow-on, not built here.
+**Files changed**: `dourmouse/research_pipeline/stages.py` (`extract_evidence`,
+`_extract_fetched_text`, `_normalize_whitespace`, `_source_id_for_url`).
+**Tests added**: `dourmouse/tests/test_research_pipeline.py` grew from 30 to 43 (13 new:
+`TestExtractFetchedText` and `TestExtractEvidenceStage`, covering the happy path with exact-field
+assertions including a real `hashlib.sha256` comparison, fetch failure, a malformed model reply, a
+hallucinated/non-substring passage, a whitespace-only-difference passage still validating, and
+`source_index` selection).
+**Tests run**: `test_research_pipeline.py` in full (43/43).
+**Result**: fixed -- Domain G's evidence stage is real, live-verified, and enforces its own harshest
+acceptance test in code rather than trusting the model's word. Contradiction detection and synthesis
+remain real, separate, not-yet-built follow-on.
+
+---
+
+### 046 -- Domain G: real synthesis (fourth piece), plus a leaked internal-diagnostic bug it exposed
+
+**Severity**: n/a for the synthesis stage itself (feature, fourth real piece of Domain G's build
+plan, on top of findings #042/#043/#045); MEDIUM for the diagnostic-leak half (real, user-visible
+data contamination, not a crash).
+**Context**: `synthesize()` is the final stage the current `ResearchRecord` state machine supports
+(`EVIDENCE_EXTRACTED -> SYNTHESIZED`) -- hypothesis generation and a dedicated criticism/revision
+pass are named in the master requirements doc's own build plan but have no corresponding state in
+`core.py` (finding #042's own docstring already says so), so they stay real, separate, not-yet-built
+follow-on rather than being forced into this piece.
+**Design**: the sixth reuse this session of the tool-less `ChatSession(DispatchRegistry(), session_
+file=None)` primitive. The prompt is built from `record.active_claims()` ONLY -- never the raw
+fetched text -- so the synthesis literally cannot cite anything no `Claim` supports. A record with
+zero active claims (every claim rejected, or none ever added -- a real, reachable state per harsh
+acceptance test 3, "a rejected hypothesis must remain visible") skips the model call entirely: there
+is nothing real to synthesize, and asking a model to summarize an empty claim list only invites
+fabrication, so a fixed, honest string is used instead, deterministically. A genuinely empty model
+reply -- unlike `plan()`'s "nothing real yet to protect" case -- degrades to an honest placeholder
+rather than raising, since real `Claim`s already exist here and must never be destroyed over a
+downstream formatting hiccup (same reasoning as `RealBrain.answer`'s own honest-uncertain fallback).
+**A real bug caught live, not by a unit test**: live-verifying `synthesize()` end to end (`plan ->
+discover_sources -> extract_evidence -> synthesize`, real model, real web, zero mocks) produced a
+synthesis text ending in a literal `"[DOURMOUSE: plan step(s) not executed via tools -- STEP 1/2
+(orchestrator): ...; STEP 2/2 (orchestrator): ...]"` block -- `dispatch.py`'s own plan-reminder loop
+(the fabrication guard that flags a claimed-but-untool-executed step, see its own extensive
+commentary around line 4930) misread part of the long, multi-instruction synthesis prompt as a
+declared multi-step plan. With zero tools registered (`force_plain_dispatch`'s tool-less primitive,
+by design), no step can ever be satisfied, so after the reminder budget was spent the loop appended
+its honest caveat -- real and correct for a live chat UI's own event feed (`webui.py`'s
+`incomplete_plan` notice), never for a stored data field. Fixed with a new `_strip_internal_
+diagnostics()` helper (a `\n\n[DOURMOUSE:...]\s*\Z`-anchored regex, so it only ever strips a
+genuinely trailing diagnostic block, never touches a `[DOURMOUSE: ...]`-shaped string that happens
+to appear mid-text) applied at every point this session's stage functions consume `final_text` as
+data: `plan()` (naturally near-immune already, since it only keeps dash-prefixed lines, but fixed
+for defense-in-depth and consistency), `extract_evidence()` (a real, latent contamination risk --
+the `LOCATION` regex group is unanchored-to-end, so an undetected leak here would have silently
+appended garbage onto a real claim's `location` field), and `synthesize()` (the confirmed, observed
+case). Deliberately fixed at this call-site level rather than inside `dispatch.py`'s own
+plan-reminder loop, to avoid touching that shared, considerably more delicate, heavily-commented
+machinery for a symptom only ever observed from research_pipeline's own long, multi-instruction
+prompts.
+**Live proof**: re-ran the full live chain after the fix -- a real claim extracted, a real synthesis
+produced, `"[DOURMOUSE" not in record.synthesis` confirmed true. Honest note on content quality, not
+glossed over: live extraction across three separate runs this session consistently produced
+claims/syntheses admitting the fetched sources did not contain a strong direct answer to the
+question -- real, live-data variability (thin documentation-index pages, a getting-started page with
+little substantive prose), and arguably correct behavior (the model did not fabricate confidence it
+had no real material for) rather than a bug. A caller iterating `source_index` until a substantive
+claim accumulates (already named in finding #045) is the real fix for weak content, not this stage.
+**Files changed**: `dourmouse/research_pipeline/stages.py` (`synthesize`, `_strip_internal_
+diagnostics`, `_DIAGNOSTIC_SUFFIX_RE`, plus the two call-site fixes in `plan()`/`extract_evidence()`).
+**Tests added**: `dourmouse/tests/test_research_pipeline.py` grew from 43 to 54 (11 new:
+`TestSynthesizeStage` -- real model reply becomes synthesis, active claims reach the prompt,
+rejected claims excluded from the prompt, zero-active-claims skips the model call entirely with a
+fixed string, an empty model reply degrades to a placeholder instead of raising, the stage guard --
+plus `TestStripInternalDiagnostics`, `TestSynthesizeStripsLeakedDiagnostics`, and
+`TestExtractEvidenceStripsLeakedDiagnostics` proving the leak fix directly, including that a
+`[DOURMOUSE: ...]`-shaped string mid-text is correctly left alone).
+**Tests run**: `test_research_pipeline.py` in full (54/54); full suite (5189 passed, 10 skipped, 5
+pre-existing deselected, 0 failed).
+**Result**: fixed -- Domain G now has a real, live-verified synthesis stage, and a real, live-caught
+data-contamination bug (not scoped to synthesis alone) is closed everywhere this session's stage
+functions could have been exposed to it. Contradiction detection remains the one real, separate,
+not-yet-built piece of Domain G's own core loop.
+
+---
+
+### 047 -- Domain G: a real workspace default and an on-disk document cache
+
+**Severity**: n/a (feature/gap-closure -- named explicitly as a real, honest gap in this session's own
+standing status report before being closed here).
+**Context**: every other domain's own store resolves a workspace-relative default the same way
+(`security/sentry.py`'s own `DEFAULT_DB = workspace_dir() / "security" / "sentry.db"`) -- Domain G's
+`ResearchStore` had no such default, so nothing persisted anywhere unless a caller built its own path
+by hand, and this session's own live tests never exercised persistence at all as a result. Worse: a
+fetched source page lived only in memory for the duration of one `extract_evidence()` call --
+`document_hash` fingerprinted content that no longer existed anywhere the instant the function
+returned, and a research run revisiting the same URL re-fetched it from the real network every time.
+**Design**: `dourmouse/research_pipeline/store.py` gains `DEFAULT_DB = workspace_dir() / "research_
+pipeline" / "research.db"`, computed once at import time, matching `sentry.py`'s own exact
+convention (tests that need isolation build their own `ResearchStore(tmp_path)` explicitly, same as
+sentry's tests already do). `extract_evidence()` (`stages.py`) now checks a real on-disk cache before
+fetching -- `config.workspace_dir() / "research_pipeline" / "documents" / f"{_source_id_for_url(url)}
+.txt"` -- reusing the already-real `_source_id_for_url()` hash rather than inventing a second one.
+On a cache miss, the real fetched text is written to that path immediately after a successful fetch,
+before the model ever sees it, so the artifact survives even if the later extraction/validation step
+fails. On a cache hit, `run_dispatch_messages` (the real network fetch) is never called at all.
+**Live proof**: a real live run against `modelcontextprotocol.io/introduction` wrote a real cache
+file (`0668b361cac37fb4.txt`) after its first real fetch; a second call against the same URL, in a
+fresh `ResearchRecord`, read the cached file with zero additional `run_dispatch_messages` calls --
+confirmed both by the cache file's real presence and by three new hermetic tests that count real
+fetch invocations directly (not inferred from timing, which is dominated by the model call, not the
+fetch).
+**Files changed**: `dourmouse/research_pipeline/store.py` (`DEFAULT_DB`), `dourmouse/research_
+pipeline/stages.py` (`extract_evidence`'s cache-check/write).
+**Tests added**: `dourmouse/tests/test_research_pipeline.py`'s new `TestExtractEvidenceDocumentCache`
+(3 tests: a second extraction against the same URL never re-fetches, the cache file exists on disk
+with the exact real fetched text, two different URLs never collide in the cache).
+**Tests run**: `test_research_pipeline.py` in full (57/57).
+**Result**: fixed -- Domain G's persistence and document-caching gaps, both named explicitly in this
+session's own status report to the user, are closed. Contradiction detection, the multi-source/
+multi-sub-question orchestration loop, and chat reachability remain the real, separate, not-yet-built
+pieces of Domain G's own core loop.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

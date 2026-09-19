@@ -15,7 +15,19 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
+from dourmouse.config import workspace_dir
+
 from .core import Claim, Contradiction, ResearchRecord, Stage
+
+# Real gap closed (2026-09-20, named in the standing status report): every
+# other domain's own store resolves a workspace-relative default the same
+# way (security/sentry.py's own DEFAULT_DB) -- this pipeline's ResearchStore
+# previously had no such default, so nothing persisted anywhere unless a
+# caller built its own path by hand. Computed once at import time, same as
+# sentry.py's own DEFAULT_DB -- callers that need per-test isolation build
+# their own ResearchStore(tmp_path) explicitly, same convention already
+# established there.
+DEFAULT_DB = workspace_dir() / "research_pipeline" / "research.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS research_records (

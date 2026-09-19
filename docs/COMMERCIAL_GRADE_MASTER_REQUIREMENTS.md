@@ -424,7 +424,25 @@ into a specific device). This is explicitly **not** the 500-field jarvis qualifi
 in finding #033 (`dourmouse/research_mesh/`) -- that mesh is real and valuable on its own terms
 (field-specialist qualification against real held-out exam corpora) but was the wrong target for
 this workstream, per direct user correction. **Piece 1 shipped 2026-09-20** (finding #042): the
-real data model and persisted store. The actual pipeline stage functions and the 3-device
+real data model and persisted store. **Piece 2 shipped 2026-09-20** (finding #043): the real
+`plan()` and `discover_sources()` stage functions, live-verified against a real model and the real
+live web. **Piece 3 shipped 2026-09-20** (finding #045): real `extract_evidence()`, its quoted
+passage validated as a real substring of the real fetched text before any `Claim` is built --
+harsh acceptance test 1 enforced in code. Live-verifying it surfaced a real, cross-cutting
+model-routing bug (a stale locally-tagged persisted orchestrator model leaking into Ollama Cloud,
+unrelated to Domain G itself), fixed separately as finding #044. **Piece 4 shipped 2026-09-20**
+(finding #046): real `synthesize()`, built only from `record.active_claims()` so it cannot cite
+anything no real `Claim` supports; live-verifying it caught a second real, cross-cutting bug (a
+UI-only diagnostic caveat leaking into stored data through every stage function's own `final_text`
+consumption), fixed at the call-site level. Domain G's core single-source loop (plan, discover,
+extract, synthesize) is now fully real and live-verified end to end. **Two more real gaps closed
+2026-09-20** (finding #047), both named explicitly to the user in this session's own standing status
+report before being fixed the same day: `ResearchStore` had no workspace-relative default (every
+other domain's own store does), and no fetched source's real text ever survived past the one
+function call that fetched it -- `document_hash` fingerprinted content already gone. Both closed:
+`store.py`'s new `DEFAULT_DB` matches `sentry.py`'s own convention, and `extract_evidence()` now
+caches a fetched document to disk (keyed by a hash of its URL) before the model ever sees it, so a
+repeated source costs one real fetch, not one per call. Contradiction detection and the 3-device
 distribution are still open, real, separate pieces of the same workstream.
 **Real infrastructure check, 2026-09-19**: the Dell compute node is `enabled` but NOT `configured`
 in this dev environment (`remote_server.server_url_configured()` is `False`) and a live
@@ -446,31 +464,40 @@ founding spec's own "research network" workstream, §0/A — the two sources agr
 should carry real provenance: `{claim, source_id, url, document_hash, location, passage,
 retrieved_at, agent}` — never a bare assertion with no traceable source.
 
-**Build plan (scoped 2026-09-19, not yet started)**: single device first (per the infrastructure
-note above), real persisted stage-by-stage state so a killed run resumes -- the exact
-`step()`-per-transition, one-row-per-record SQLite shape `research_mesh/store.py` (finding #033)
-and `goals.py` both already prove out in this codebase, reused a third time rather than invented
-fresh. Concretely:
-1. `dourmouse/research_pipeline.py`: a real `Claim` dataclass matching the spec's own field list
-   verbatim (`claim, source_id, url, document_hash, location, passage, retrieved_at, agent`) --
-   `document_hash` is a real `hashlib.sha256` of the fetched content (already a pattern in this
-   codebase, see `jarvis/research_mesh/fields/exams/papers/MANIFEST.json`'s own `sha256` field from
-   the crawl tooling), never a placeholder. A `ResearchRecord` (question, plan, claims, hypotheses,
-   status) persisted the same one-row-JSON-body way `research_mesh/store.py::AgentStore` already
-   does -- copy that store's shape almost directly, it is already the right design for "resumable,
-   auditable, one atomic transition at a time."
+**Build plan (scoped 2026-09-19; pieces 1-4 shipped 2026-09-20, findings #042/#043/#045/#046)**: single device
+first (per the infrastructure note above), real persisted stage-by-stage state so a killed run
+resumes -- the exact `step()`-per-transition, one-row-per-record SQLite shape `research_mesh/
+store.py` (finding #033) and `goals.py` both already prove out in this codebase, reused a third
+time rather than invented fresh. Concretely:
+1. **Shipped (finding #042)** as the `dourmouse/research_pipeline/` package (`core.py` + `store.py`,
+   a package rather than the single file originally sketched here, to keep the data model and its
+   persistence separately testable): a real `Claim` dataclass matching the spec's own field list
+   verbatim (`claim, source_id, url, document_hash, location, passage, retrieved_at, agent`) -- real
+   `document_hash`/`retrieved_at` are the caller's responsibility to populate from a real fetch, not
+   fabricated inside the dataclass itself. A `ResearchRecord` (question, plan, sources, claims,
+   contradictions, stage) persisted the same one-row-JSON-body way `research_mesh/store.py::
+   AgentStore` already does.
 2. Stage-by-stage, each a real, separate, independently-testable function -- NOT one giant prompt
    asked to do all eleven stages in one shot (that would be exactly the un-auditable, un-resumable
-   anti-pattern this domain exists to replace): **plan** (one real `ChatSession` call, tool-less,
-   decomposing the question into sub-questions -- same primitive as `RealBrain`/`_verify_completion`
-   a fourth time now), **source discovery** (the ALREADY-real `research_info` tools --
-   `web_search`/`fetch_url` -- no new fetch mechanism), **evidence extraction** (a real per-source
-   `ChatSession` call producing `Claim` objects with real `location`/`passage` quoted directly from
-   the fetched text, never paraphrased into an unverifiable summary), **hypothesis generation**,
-   **criticism/revision** (a real second-pass `ChatSession` call reviewing the FIRST pass's own
-   claims -- same "independent reasoning pass over real evidence" shape as `_verify_completion`),
-   **synthesis** (the final real `ChatSession` call, given every surviving `Claim` with its real
-   citation, explicitly instructed never to state a claim the record does not contain a `Claim` for).
+   anti-pattern this domain exists to replace). **Shipped (finding #043)**, in `dourmouse/
+   research_pipeline/stages.py`, live-verified against a real model and the real live web: **plan**
+   (one real `ChatSession` call, tool-less, decomposing the question into sub-questions -- same
+   primitive as `RealBrain`/`_verify_completion` a fifth time now) and **source discovery** (the
+   ALREADY-real `research_info` tools -- `web_search`/`fetch_url`, reached via
+   `run_dispatch_messages(forced_agent="research_info")` -- no new fetch mechanism) and, **shipped
+   (finding #045)**, **evidence extraction**: a real forced fetch of one source plus a real per-source
+   `ChatSession` call producing a `Claim` whose `location`/`passage` are quoted directly from the
+   fetched text -- validated as a real (whitespace-normalized) substring of that text before the
+   `Claim` is built, never trusted on the model's word alone, so a paraphrase is rejected rather than
+   silently accepted. `document_hash` is a real `hashlib.sha256` of the real fetched content. And,
+   **shipped (finding #046)**, **synthesis**: the final real `ChatSession` call, given every
+   surviving active `Claim` with its real citation and nothing else, explicitly instructed never to
+   state anything the record does not contain a `Claim` for; a zero-active-claims record skips the
+   model call and uses a fixed honest string instead, deterministically. Still open, not yet built:
+   **hypothesis generation** and **criticism/revision** (a real second-pass `ChatSession` call
+   reviewing the FIRST pass's own claims -- same "independent reasoning pass over real evidence"
+   shape as `_verify_completion`) -- the current state machine (`core.py`) has no dedicated stage for
+   either, so they stay named, real, separate follow-on rather than forced into `SYNTHESIZED`.
 3. **Contradiction detection (harsh acceptance test 2)**: an explicit, separate step, not an
    emergent hope -- when two `Claim`s answer the same sub-question with incompatible `claim` text,
    a real `ChatSession` call judges "same question, different answer" and the record stores a real
