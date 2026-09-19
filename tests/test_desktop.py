@@ -69,7 +69,7 @@ class _FakeWebview:
         self.windows.append(win)
         return win
 
-    def start(self):
+    def start(self, **kwargs):
         return None
 
 
@@ -205,10 +205,18 @@ def hermetic_env(monkeypatch, tmp_path):
     monkeypatch.setenv("DOURMOUSE_LIVE", "0")
     monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
     monkeypatch.setenv("DOURMOUSE_DESKTOP_NOTIFICATIONS", "1")
+    # Both default ON since this fixture was last written (2026-08-12) --
+    # without these, launch() starts a REAL tray/overlay/wakeword helper
+    # and a REAL GoalRuntime worker thread (backed by a process-wide
+    # singleton store) as side effects of what is supposed to be a
+    # hermetic test. Same rationale as LEARN/LIVE above.
+    monkeypatch.setenv("DOURMOUSE_VISION_AUTOSTART", "0")
+    monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "0")
     monkeypatch.setattr("dourmouse.webui._resolve_server_config", lambda _c: None)
     return tmp_path
 
 
+@pytest.mark.timeout(30)
 def test_launch_restores_geometry_and_returns(hermetic_env, tmp_path):
     # launch() mounts the DEFAULT state store (<workspace>/state/dourmouse.db),
     # so the saved geometry must be written there before the window opens.
@@ -231,6 +239,7 @@ def test_launch_restores_geometry_and_returns(hermetic_env, tmp_path):
     assert main.url.startswith("http://127.0.0.1:")
 
 
+@pytest.mark.timeout(30)
 def test_launch_deep_link_loads_validated_route(hermetic_env):
     fake = _FakeWebview()
     code = desktop.launch(
@@ -246,6 +255,7 @@ def test_launch_deep_link_loads_validated_route(hermetic_env):
     assert main.url.endswith("#/atlas/research")
 
 
+@pytest.mark.timeout(30)
 def test_launch_ignores_hostile_deep_link(hermetic_env):
     fake = _FakeWebview()
     code = desktop.launch(
