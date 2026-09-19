@@ -442,8 +442,16 @@ other domain's own store does), and no fetched source's real text ever survived 
 function call that fetched it -- `document_hash` fingerprinted content already gone. Both closed:
 `store.py`'s new `DEFAULT_DB` matches `sentry.py`'s own convention, and `extract_evidence()` now
 caches a fetched document to disk (keyed by a hash of its URL) before the model ever sees it, so a
-repeated source costs one real fetch, not one per call. Contradiction detection and the 3-device
-distribution are still open, real, separate pieces of the same workstream.
+repeated source costs one real fetch, not one per call. **Harsh acceptance test 2 closed 2026-09-20**
+(finding #049): `detect_contradictions()`, built on a new real `Claim.sub_question` field (a
+necessary schema gap this stage exposed -- nothing previously recorded which sub-question a claim
+answered). Live-caught bug: the first live run against a seeded contradiction found zero -- the
+model correctly said "yes" but skipped the exact "NOTE:" label the prompt asked for, and the strict
+parser discarded a correct verdict over the formatting miss; fixed with a lenient parser requiring
+only the verdict marker. Re-verified live: the same seeded contradiction correctly detected with a
+real note, and a real compatible-claims control case correctly found none. The multi-source/
+multi-sub-question orchestration loop, chat reachability, and the 3-device distribution are still
+open, real, separate pieces of the same workstream.
 **Real infrastructure check, 2026-09-19**: the Dell compute node is `enabled` but NOT `configured`
 in this dev environment (`remote_server.server_url_configured()` is `False`) and a live
 `server_available(force=True)` check returned `False` -- honestly offline or unreachable from here

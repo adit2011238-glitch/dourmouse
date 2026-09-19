@@ -48,6 +48,13 @@ class Claim:
     # superseded -- it is never deleted, only marked, so the record stays
     # honest about what was once believed and why it changed.
     status: str = "ACTIVE"  # "ACTIVE" | "REJECTED"
+    # Real gap closed (2026-09-20): contradiction detection (harsh
+    # acceptance test 2) needs to compare claims answering the SAME real
+    # sub-question -- this was never recorded on the Claim itself, only
+    # passed as an ephemeral index into extract_evidence(). Defaults to ""
+    # so every pre-existing call site (tests, `reject_claim`'s own copy
+    # below) keeps working unchanged; real callers set it going forward.
+    sub_question: str = ""
 
 
 @dataclass(frozen=True)
@@ -108,7 +115,7 @@ class ResearchRecord:
             claim=old.claim, source_id=old.source_id, url=old.url,
             document_hash=old.document_hash, location=old.location,
             passage=old.passage, retrieved_at=old.retrieved_at,
-            agent=old.agent, status="REJECTED",
+            agent=old.agent, status="REJECTED", sub_question=old.sub_question,
         )
         self.claims = self.claims[:index] + (rejected,) + self.claims[index + 1:]
 

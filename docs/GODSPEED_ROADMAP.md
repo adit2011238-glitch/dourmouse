@@ -632,6 +632,20 @@ and a real build sequence, not just a requirement statement:
       `modelcontextprotocol.io` wrote a real cache file; a second call
       against the same URL made zero further network calls. See
       `docs/ENGINEERING_AUDIT.md` finding #047.
+- [x] Domain G, contradiction detection closed 2026-09-20 -- harsh
+      acceptance test 2. Added the real `Claim.sub_question` field this
+      needed (a real, necessary schema gap: nothing recorded which
+      sub-question a claim answered), then `detect_contradictions()`:
+      groups active claims by sub-question, one real model call per pair
+      judges genuine disagreement. Live-caught bug: the first live run
+      against a seeded contradiction (two different completion years for
+      the Eiffel Tower) found zero -- the model said "yes" but skipped the
+      literal "NOTE:" label the prompt asked for, and the strict parser
+      discarded a correct verdict over the formatting miss. Fixed with a
+      lenient parser (only the verdict marker is required). Re-verified
+      live: the same seeded contradiction now correctly detected with a
+      real note; a real compatible-claims control case correctly found
+      none. See `docs/ENGINEERING_AUDIT.md` finding #049.
 - [x] Domain H, piece 1/7 (project-instruction file, `DOURMOUSE.md`) -- shipped
       2026-09-19. `dourmouse/project_instructions.py` reads the workspace's
       own `DOURMOUSE.md`, spliced into `dispatch.py`'s shared

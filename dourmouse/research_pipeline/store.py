@@ -107,7 +107,7 @@ def _claim_to_dict(c: Claim) -> dict[str, Any]:
         "claim": c.claim, "source_id": c.source_id, "url": c.url,
         "document_hash": c.document_hash, "location": c.location,
         "passage": c.passage, "retrieved_at": c.retrieved_at,
-        "agent": c.agent, "status": c.status,
+        "agent": c.agent, "status": c.status, "sub_question": c.sub_question,
     }
 
 
@@ -117,6 +117,7 @@ def _claim_from_dict(d: dict[str, Any]) -> Claim:
         document_hash=d["document_hash"], location=d["location"],
         passage=d["passage"], retrieved_at=d["retrieved_at"],
         agent=d["agent"], status=d.get("status", "ACTIVE"),
+        sub_question=d.get("sub_question", ""),
     )
 
 

@@ -2137,6 +2137,58 @@ now be run in full with a genuine reviewer branch rather than two specialists st
 
 ---
 
+### 049 -- Domain G: real contradiction detection (harsh acceptance test 2, closed)
+
+**Severity**: n/a (feature -- the last real piece of Domain G's own core loop besides the multi-
+source orchestration loop and chat reachability).
+**Context**: this domain's own harsh acceptance test 2 requires that two contradicting sources on the
+same question surface as a real contradiction, never silently merged into one confident-sounding
+synthesis. `core.py`'s `Contradiction` dataclass and `add_contradiction()` existed since finding #042;
+nothing ever called them.
+**A real, necessary schema gap closed first**: comparing "claims answering the same sub-question"
+required knowing WHICH sub-question each claim answered, and `Claim` never recorded it --
+`extract_evidence()` only ever used `sub_question_index` as an ephemeral local variable. Added a real
+`sub_question: str = ""` field to `Claim` (default-empty so every pre-existing call site keeps
+working unchanged), populated it in `extract_evidence()`, threaded it through `reject_claim()`'s own
+never-delete copy, and through `store.py`'s serialization.
+**Design**: `detect_contradictions()` (seventh reuse of the tool-less `ChatSession` primitive this
+session). Groups `active_claims()` by real `sub_question`; a group with fewer than two claims costs
+no model call at all (same "don't invite fabrication over nothing" discipline as `synthesize()`'s own
+zero-claims case). For every real pair within a group (`itertools.combinations`), one real
+`ChatSession` call judges genuine disagreement versus merely different/complementary information. A
+real `Contradiction` row is added only on an explicit "yes," fingerprinted via a new
+`_claim_fingerprint()` (`source_id` + a real hash of the claim text, matching `core.py`'s own
+`Contradiction` docstring verbatim). `_strip_internal_diagnostics()` (finding #046) is applied here
+too, closing the same leak class for a third stage function.
+**A real bug caught by live verification, not by any unit test**: the first live run against a
+genuinely seeded contradiction (two claims giving different completion years for the Eiffel Tower)
+returned zero contradictions found -- the real model correctly judged "CONTRADICTION: yes" but never
+emitted the literal "NOTE:" label the prompt asked for, continuing straight into its own explanation
+instead. The original strict regex required both labels together and silently discarded a real,
+correct verdict over a formatting miss -- the same class of over-strict parsing this session already
+fixed once for `plan()`'s own dash-line fallback. Fixed with `_parse_contradiction_reply()`: only the
+verdict marker (`CONTRADICTION: yes|no`) is required; everything after it becomes the note, with a
+leading `NOTE:` label stripped if the model does include it.
+**Live proof**: after the fix, the SAME seeded contradiction was correctly detected and recorded with
+a real, sensible note ("The statements give different completion years, so they cannot both be
+correct."). A real control case (two genuinely compatible MCP claims -- one about tools, one about
+resources) correctly produced zero contradictions.
+**Files changed**: `dourmouse/research_pipeline/core.py` (`Claim.sub_question`, `reject_claim`),
+`dourmouse/research_pipeline/store.py` (serialization), `dourmouse/research_pipeline/stages.py`
+(`detect_contradictions`, `_parse_contradiction_reply`, `_claim_fingerprint`).
+**Tests added**: `dourmouse/tests/test_research_pipeline.py` grew from 57 to 65 (8 new:
+`TestDetectContradictionsStage` -- zero/one claim skips the model call entirely, claims from
+different sub-questions never compared, a real contradiction recorded with the right fingerprint and
+note, a real non-contradiction correctly not recorded, a malformed reply skipped rather than raised,
+only active (never rejected) claims compared, a three-way group checks every real pair (`C(3,2) = 3`
+calls), and a leaked diagnostic never contaminates the note field).
+**Tests run**: `test_research_pipeline.py` in full (65/65).
+**Result**: fixed -- Domain G's harsh acceptance test 2 is now real and enforced in code. The
+multi-source/multi-sub-question orchestration loop and chat reachability remain the last real,
+separate, not-yet-built pieces of Domain G's own core loop.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

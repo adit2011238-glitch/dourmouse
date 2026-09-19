@@ -18,10 +18,12 @@ import dourmouse.chat as chat_module
 from dourmouse.dispatch import Subagent, ToolSpec
 from dourmouse.research_pipeline.core import Claim, Contradiction, ResearchRecord, Stage
 from dourmouse.research_pipeline.stages import (
+    _claim_fingerprint,
     _extract_fetched_text,
     _extract_urls_from_transcript,
     _source_id_for_url,
     _strip_internal_diagnostics,
+    detect_contradictions,
     discover_sources,
     extract_evidence,
     plan,
@@ -30,11 +32,12 @@ from dourmouse.research_pipeline.stages import (
 from dourmouse.research_pipeline.store import ResearchStore
 
 
-def _claim(text="water is wet", source="src1", claim_status="ACTIVE") -> Claim:
+def _claim(text="water is wet", source="src1", claim_status="ACTIVE", sub_question="") -> Claim:
     return Claim(
         claim=text, source_id=source, url=f"https://example.com/{source}",
         document_hash="abc123", location="p.1", passage="Water is wet.",
         retrieved_at=1000.0, agent="research_info", status=claim_status,
+        sub_question=sub_question,
     )
 
 
@@ -139,8 +142,8 @@ class TestResearchStore:
         r = ResearchRecord(question="Is water wet?")
         r.set_plan(["sub-question one", "sub-question two"])
         r.add_sources(["https://a.com", "https://b.com"])
-        r.add_claim(_claim("claim A"))
-        r.add_claim(_claim("claim B", source="src2"))
+        r.add_claim(_claim("claim A", sub_question="sub-question one"))
+        r.add_claim(_claim("claim B", source="src2", sub_question="sub-question one"))
         r.reject_claim(0, "superseded")
         r.add_contradiction(Contradiction(claim_a_id="x", claim_b_id="y", sub_question="q"))
         r.set_synthesis("Real synthesis text.")
@@ -153,6 +156,7 @@ class TestResearchStore:
         assert loaded.sources == r.sources
         assert len(loaded.claims) == 2
         assert loaded.claims[0].status == "REJECTED"
+        assert loaded.claims[0].sub_question == "sub-question one"
         assert loaded.claims[1].status == "ACTIVE"
         assert loaded.contradictions == r.contradictions
         assert loaded.synthesis == "Real synthesis text."
@@ -762,3 +766,108 @@ class TestExtractEvidenceDocumentCache:
         docs_dir = tmp_path / "research_pipeline" / "documents"
         assert (docs_dir / f"{_source_id_for_url('https://example.com/a')}.txt").read_text() == "Body A."
         assert (docs_dir / f"{_source_id_for_url('https://example.com/b')}.txt").read_text() == "Body B."
+
+
+class TestDetectContradictionsStage:
+    def _record_with_claims(self, *specs) -> ResearchRecord:
+        """specs: list of (claim_text, sub_question) tuples."""
+        record = ResearchRecord(question="Is water wet?")
+        record.set_plan(["sub-question one", "sub-question two"])
+        record.add_sources(["https://a.com"])
+        for i, (text, sub_question) in enumerate(specs):
+            record.add_claim(_claim(text, source=f"src{i}", sub_question=sub_question))
+        return record
+
+    def test_zero_or_one_claim_per_sub_question_skips_the_model_call_entirely(self, monkeypatch):
+        record = self._record_with_claims(("only claim", "sub-question one"))
+        _install_chat_fake(monkeypatch, ["should never be used"])
+        result = detect_contradictions(record)
+        assert result is record
+        assert record.contradictions == ()
+        assert _FakeSession.calls == []
+
+    def test_claims_from_different_sub_questions_are_never_compared(self, monkeypatch):
+        record = self._record_with_claims(
+            ("claim A", "sub-question one"), ("claim B", "sub-question two"),
+        )
+        _install_chat_fake(monkeypatch, ["should never be used"])
+        detect_contradictions(record)
+        assert record.contradictions == ()
+        assert _FakeSession.calls == []
+
+    def test_a_real_contradiction_is_recorded(self, monkeypatch):
+        record = self._record_with_claims(
+            ("The sky is blue", "what color is the sky"),
+            ("The sky is green", "what color is the sky"),
+        )
+        _install_chat_fake(monkeypatch, [
+            "CONTRADICTION: yes\nNOTE: one claim says blue, the other says green.",
+        ])
+        detect_contradictions(record)
+        assert len(record.contradictions) == 1
+        c = record.contradictions[0]
+        assert c.sub_question == "what color is the sky"
+        assert c.note == "one claim says blue, the other says green."
+        assert c.claim_a_id == _claim_fingerprint(record.claims[0])
+        assert c.claim_b_id == _claim_fingerprint(record.claims[1])
+
+    def test_a_real_non_contradiction_is_not_recorded(self, monkeypatch):
+        record = self._record_with_claims(
+            ("MCP defines tools", "what is MCP"),
+            ("MCP defines resources", "what is MCP"),
+        )
+        _install_chat_fake(monkeypatch, [
+            "CONTRADICTION: no\nNOTE: these describe different, compatible parts of MCP.",
+        ])
+        detect_contradictions(record)
+        assert record.contradictions == ()
+
+    def test_malformed_model_reply_is_skipped_never_raised(self, monkeypatch):
+        record = self._record_with_claims(
+            ("claim A", "same question"), ("claim B", "same question"),
+        )
+        _install_chat_fake(monkeypatch, ["I'm not sure how to answer that."])
+        result = detect_contradictions(record)  # must not raise
+        assert result is record
+        assert record.contradictions == ()
+
+    def test_only_active_claims_are_compared_rejected_ones_excluded(self, monkeypatch):
+        record = self._record_with_claims(
+            ("claim A", "same question"),
+            ("claim B", "same question"),
+            ("claim C", "same question"),
+        )
+        record.reject_claim(1, "unsupported")  # claim B now REJECTED
+        _install_chat_fake(monkeypatch, [
+            "CONTRADICTION: no\nNOTE: no real disagreement.",
+        ])
+        detect_contradictions(record)
+        # Only claim A vs claim C remain active -- exactly one real pair,
+        # exactly one real model call.
+        assert len(_FakeSession.calls) == 1
+
+    def test_three_way_group_checks_every_real_pair(self, monkeypatch):
+        record = self._record_with_claims(
+            ("claim A", "same question"),
+            ("claim B", "same question"),
+            ("claim C", "same question"),
+        )
+        _install_chat_fake(monkeypatch, [
+            "CONTRADICTION: no\nNOTE: fine.",
+            "CONTRADICTION: no\nNOTE: fine.",
+            "CONTRADICTION: no\nNOTE: fine.",
+        ])
+        detect_contradictions(record)
+        # 3 claims -> C(3,2) = 3 real pairs, 3 real model calls.
+        assert len(_FakeSession.calls) == 3
+
+    def test_leaked_diagnostic_never_breaks_the_contradiction_parse(self, monkeypatch):
+        record = self._record_with_claims(
+            ("claim A", "same question"), ("claim B", "same question"),
+        )
+        _install_chat_fake(monkeypatch, [
+            "CONTRADICTION: yes\nNOTE: real disagreement." + _REAL_PLAN_STEP_DIAGNOSTIC,
+        ])
+        detect_contradictions(record)
+        assert len(record.contradictions) == 1
+        assert "[DOURMOUSE" not in record.contradictions[0].note

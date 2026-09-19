@@ -24,13 +24,19 @@ path invented:
   is handled without a model call at all -- there is nothing real to
   synthesize, and a model asked to summarize an empty claim list is
   exactly the kind of prompt that invites confident fabrication.
+- detect_contradictions(): the seventh reuse. Groups active claims by the
+  real sub-question they answered (a real Claim.sub_question field,
+  added the same day this stage was built -- see the standing status
+  report), then one real ChatSession call per pair within a group judges
+  whether the two genuinely disagree, never an emergent hope that
+  synthesis will notice on its own (harsh acceptance test 2).
 
-Hypothesis generation, a dedicated criticism/revision pass, and
-contradiction detection are real, separate, not-yet-built follow-on --
-named explicitly, not silently skipped, matching every other incremental
-piece this session. The state machine in core.py has no separate stage
-for them (finding #042's own docstring already says so); they are not
-silently folded into SYNTHESIZED either.
+Hypothesis generation and a dedicated criticism/revision pass are real,
+separate, not-yet-built follow-on -- named explicitly, not silently
+skipped, matching every other incremental piece this session. The state
+machine in core.py has no separate stage for either (finding #042's own
+docstring already says so); they are not silently folded into
+SYNTHESIZED either.
 """
 
 from __future__ import annotations
@@ -39,9 +45,10 @@ import hashlib
 import json
 import re
 import time
+from itertools import combinations
 from typing import Any
 
-from .core import Claim, ResearchRecord
+from .core import Claim, Contradiction, ResearchRecord
 
 _URL_RE = re.compile(r"https?://[^\s)\]>\"']+")
 _CLAIM_RE = re.compile(r"CLAIM:\s*(.*?)\s*PASSAGE:\s*(.*?)\s*LOCATION:\s*(.*)", re.DOTALL)
@@ -100,6 +107,22 @@ _NO_EVIDENCE_SYNTHESIS = (
     "No claims currently survive review for this question -- evidence "
     "extraction has not yet produced a supported answer."
 )
+
+_CONTRADICTION_PROMPT = (
+    "Two real claims below both attempt to answer the same real research "
+    "sub-question. Judge whether they genuinely CONTRADICT each other -- "
+    "state incompatible facts -- as opposed to being merely different, "
+    "complementary, or partial information that could both be true at "
+    "once.\n\n"
+    "SUB-QUESTION: {sub_question}\n\n"
+    "CLAIM A: {claim_a}\n\n"
+    "CLAIM B: {claim_b}\n\n"
+    "Reply with exactly two lines, nothing else:\n"
+    "CONTRADICTION: yes or no\n"
+    "NOTE: one short real sentence explaining the judgment"
+)
+
+_CONTRADICTION_VERDICT_RE = re.compile(r"CONTRADICTION:\s*(yes|no)\b", re.IGNORECASE)
 
 _EXTRACT_PROMPT = (
     "You are extracting one real, sourced claim from a real fetched web page to "
@@ -315,6 +338,7 @@ def extract_evidence(
         passage=passage,
         retrieved_at=time.time(),
         agent="research_info",
+        sub_question=sub_question,
     )
     record.add_claim(claim)
     return record
@@ -355,4 +379,84 @@ def synthesize(record: ResearchRecord) -> ResearchRecord:
             f"{len(active)} real claim(s) remain on record for direct review."
         )
     record.set_synthesis(text)
+    return record
+
+
+def _parse_contradiction_reply(reply: str) -> tuple[str, str] | None:
+    """Live-caught (2026-09-20): a real model correctly judged a genuine,
+    seeded contradiction as "yes" but never emitted the literal "NOTE:"
+    label the prompt asked for -- it just continued straight into its own
+    explanation. Requiring that exact label lost a real, correct verdict
+    to a formatting miss, the same class of over-strict parsing this
+    session has already fixed once for plan()'s own dash-line fallback.
+    Only the verdict marker is required; everything after it becomes the
+    note, with a leading "NOTE:" label stripped if the model DOES include
+    it. Returns None only when no real verdict marker is found at all."""
+    match = _CONTRADICTION_VERDICT_RE.search(reply)
+    if not match:
+        return None
+    verdict = match.group(1).lower()
+    note = re.sub(r"^NOTE:\s*", "", reply[match.end():].strip(), flags=re.IGNORECASE).strip()
+    return verdict, note
+
+
+def _claim_fingerprint(claim: Claim) -> str:
+    """core.py's own Contradiction docstring names this exact shape:
+    Claim.source_id + a real hash of the claim text -- stable across
+    save/load (unlike a claim's own list index, which shifts if an
+    earlier claim is ever inserted)."""
+    return f"{claim.source_id}:{hashlib.sha256(claim.claim.encode('utf-8')).hexdigest()[:12]}"
+
+
+def detect_contradictions(record: ResearchRecord) -> ResearchRecord:
+    """Real contradiction detection (harsh acceptance test 2): groups
+    active claims by the real sub-question they answered, then one real
+    tool-less ChatSession call per PAIR within a group judges whether the
+    two genuinely disagree -- never an emergent hope that synthesis will
+    notice on its own. A sub-question with fewer than two active claims
+    has nothing to compare and costs no model call, same "don't invite
+    fabrication over nothing" discipline as synthesize()'s own
+    zero-active-claims case. A malformed model reply is skipped, not
+    raised -- same reasoning as synthesize()'s own honest-degrade: real
+    claims already exist here, and a single bad judgment on one pair must
+    never block every other pair still to be checked."""
+    groups: dict[str, list[Claim]] = {}
+    for c in record.active_claims():
+        if c.sub_question:
+            groups.setdefault(c.sub_question, []).append(c)
+
+    pairs_to_check = [
+        (sub_question, a, b)
+        for sub_question, claims in groups.items()
+        if len(claims) >= 2
+        for a, b in combinations(claims, 2)
+    ]
+    if not pairs_to_check:
+        return record
+
+    from dourmouse.chat import ChatSession
+    from dourmouse.dispatch import DispatchRegistry
+
+    for sub_question, a, b in pairs_to_check:
+        session = ChatSession(DispatchRegistry(), session_file=None)
+        result = session.ask(
+            _CONTRADICTION_PROMPT.format(
+                sub_question=sub_question, claim_a=a.claim, claim_b=b.claim
+            ),
+            force_plain_dispatch=True,
+        )
+        reply = _strip_internal_diagnostics((result.get("final_text") or "").strip())
+        parsed = _parse_contradiction_reply(reply)
+        if parsed is None:
+            continue  # no real verdict marker found -- skip this pair, never raise
+        verdict, note = parsed
+        if verdict == "yes":
+            record.add_contradiction(
+                Contradiction(
+                    claim_a_id=_claim_fingerprint(a),
+                    claim_b_id=_claim_fingerprint(b),
+                    sub_question=sub_question,
+                    note=note,
+                )
+            )
     return record
