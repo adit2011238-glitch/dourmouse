@@ -318,6 +318,27 @@ Three real, distinct layers, not to be conflated:
    this document treats the wiki as an EXTENSION of that already-specified agent: the file-manager
    organizes; the wiki explains and cross-references what it organized.
 
+**Build plan (scoped 2026-09-19, not yet started -- blocked, see below)**: mirror the exact
+sequence `research_mesh` (finding #033) just proved out, since the shape is the same problem
+(real files -> real per-item summary via a real model -> real persisted, queryable state -> real
+UI): (1) a pure-logic `WikiEntry`/`WikiStore` pair first, no model, no I/O beyond a given file list
+-- fully unit-testable; (2) a real SQLite store, workspace-relative
+(`config.workspace_dir() / "device_wiki" / "wiki.db"`, applying finding #028's own lesson from the
+start, not retrofitted); (3) the real summarizer, reusing the SAME tool-less
+`ChatSession(DispatchRegistry(), session_file=None)` primitive proven three times now
+(`_verify_completion`, `_verify_goal_criteria`, `RealBrain.answer`) -- no new call path to invent;
+(4) a real walker with an explicit, user-configured root-folder allowlist (never silently the whole
+filesystem, matching the requirement above literally); (5) a real chat-reachable tool
+(`device_wiki_tools.py`, mirroring `research_mesh_tools.py`'s own dedicated-module shape) plus a
+UI page (mirroring the GOALS screen's own polled-list pattern from finding #026); (6) live proof on
+one real folder with a real model, exactly like `research_mesh`'s own live proof today. Cross-link
+generation (harsh acceptance test 4 below) is real, separate follow-on work layered on AFTER
+per-file summaries are proven -- do not build it first.
+**Blocked, re-check before starting**: this domain's own real folders overlap `~/Documents/`, which
+prior-session memory flags as off-limits while a separate, concurrent Claude Code session
+(`ps aux | grep -i "claude.*Documents/dourmouse"`) is still touching that tree. Verify that session
+has actually ended before writing a single file here, not just before the live-proof step.
+
 **Harsh acceptance tests**:
 1. Point the wiki at a real folder with 50+ mixed files. Confirm every file gets a real,
    non-fabricated summary or an honest "could not summarize" marker — never silence, never a
@@ -345,6 +366,25 @@ comparison's own recommendation: named specialist roles (Researcher, Coder, Revi
 Security Sentry — Analyst/Browser-Operator/Executor already exist under different names in the
 current roster) with the smallest useful toolset each, synthesized centrally rather than one
 model doing everything.
+
+**Build plan (scoped 2026-09-19, not yet started)**: do NOT build a second roster system parallel
+to `general_roster.py`'s real one -- a "specialist role" is a `delegate_parallel` branch with a
+pre-filled persona + a restricted tool subset, not a new architectural layer. Concretely: (1) a
+`role` parameter on `delegate_parallel`'s branch schema (`general_roster.py`'s
+`_build_delegate_parallel_tool`), resolved against a small, real, named table --
+`{"researcher": {system_prefix, allowed_tools}, "coder": {...}, "reviewer": {...}, "tester": {...},
+"security_sentry": {...}}` -- each entry a short persona prefix prepended to the branch's own
+instructions plus an explicit tool allowlist enforced the same way `agent_smith`'s own scoped
+permissions already work (Domain D), so a Reviewer branch genuinely cannot write files even if
+asked. (2) The synthesis step: `_format_delegate_parallel_result`'s own output already concatenates
+branch results with labeled headers (finding #032 just made the `INCOMPLETE`/`OK` distinction
+honest) -- a REAL synthesis pass is one more `ChatSession` call over the combined, labeled output,
+not a new mechanism. (3) Live-verify with a fresh 3-role run (research a topic / implement a
+finding / review the code) using named roles this time, confirming per-role tool restriction is
+real (a Reviewer branch's own transcript shows a refused write attempt, not just an unused one).
+**Real infrastructure note**: yesterday's own partial run already confirms the underlying fan-out
+mechanics are sound; this build plan is scoped narrowly to the role-table + synthesis addition,
+not a rebuild.
 
 **Harsh acceptance test**: give a goal that genuinely needs 3+ specialists (research a topic,
 write code implementing a finding, review the code). Confirm real, isolated subagent context per
@@ -389,6 +429,50 @@ founding spec's own "research network" workstream, §0/A — the two sources agr
 should carry real provenance: `{claim, source_id, url, document_hash, location, passage,
 retrieved_at, agent}` — never a bare assertion with no traceable source.
 
+**Build plan (scoped 2026-09-19, not yet started)**: single device first (per the infrastructure
+note above), real persisted stage-by-stage state so a killed run resumes -- the exact
+`step()`-per-transition, one-row-per-record SQLite shape `research_mesh/store.py` (finding #033)
+and `goals.py` both already prove out in this codebase, reused a third time rather than invented
+fresh. Concretely:
+1. `dourmouse/research_pipeline.py`: a real `Claim` dataclass matching the spec's own field list
+   verbatim (`claim, source_id, url, document_hash, location, passage, retrieved_at, agent`) --
+   `document_hash` is a real `hashlib.sha256` of the fetched content (already a pattern in this
+   codebase, see `jarvis/research_mesh/fields/exams/papers/MANIFEST.json`'s own `sha256` field from
+   the crawl tooling), never a placeholder. A `ResearchRecord` (question, plan, claims, hypotheses,
+   status) persisted the same one-row-JSON-body way `research_mesh/store.py::AgentStore` already
+   does -- copy that store's shape almost directly, it is already the right design for "resumable,
+   auditable, one atomic transition at a time."
+2. Stage-by-stage, each a real, separate, independently-testable function -- NOT one giant prompt
+   asked to do all eleven stages in one shot (that would be exactly the un-auditable, un-resumable
+   anti-pattern this domain exists to replace): **plan** (one real `ChatSession` call, tool-less,
+   decomposing the question into sub-questions -- same primitive as `RealBrain`/`_verify_completion`
+   a fourth time now), **source discovery** (the ALREADY-real `research_info` tools --
+   `web_search`/`fetch_url` -- no new fetch mechanism), **evidence extraction** (a real per-source
+   `ChatSession` call producing `Claim` objects with real `location`/`passage` quoted directly from
+   the fetched text, never paraphrased into an unverifiable summary), **hypothesis generation**,
+   **criticism/revision** (a real second-pass `ChatSession` call reviewing the FIRST pass's own
+   claims -- same "independent reasoning pass over real evidence" shape as `_verify_completion`),
+   **synthesis** (the final real `ChatSession` call, given every surviving `Claim` with its real
+   citation, explicitly instructed never to state a claim the record does not contain a `Claim` for).
+3. **Contradiction detection (harsh acceptance test 2)**: an explicit, separate step, not an
+   emergent hope -- when two `Claim`s answer the same sub-question with incompatible `claim` text,
+   a real `ChatSession` call judges "same question, different answer" and the record stores a real
+   `Contradiction {claim_a_id, claim_b_id, sub_question}` row, surfaced in synthesis rather than one
+   side being silently dropped.
+4. **Never delete (harsh acceptance test 3)**: a rejected hypothesis gets `status=REJECTED`, kept in
+   the record forever, the same terminal-but-visible pattern `research_mesh`'s own `NOT_QUALIFIED`
+   and `goal_runtime.py`'s own `BLOCKED` already establish in this codebase -- do not `DELETE` a row,
+   ever.
+5. Chat reachability: `dourmouse/research_pipeline_tools.py` (the now-three-times-proven dedicated-
+   module-plus-`build_X_subagent()`-factory shape), a `research` subagent (name TBD to avoid
+   colliding with the existing `research_info`/`rnd` names -- check `general_roster.py`'s real
+   roster before picking one).
+6. Live proof: a real multi-source question with a genuine contradiction seeded in (two real pages
+   that actually disagree), confirming the record surfaces both sides rather than picking a winner
+   silently. Device distribution (Domain G's other half) layers on AFTER this single-device version
+   is real and tested, by making stage 2's extraction calls dispatchable to the Dell node via the
+   already-real `generate_with_fallback`, once that node is confirmed reachable.
+
 **Harsh acceptance tests**:
 1. A research answer must let the user click through to the ORIGINAL passage that supports each
    real claim, not just a source list.
@@ -409,6 +493,43 @@ stop/session, matching the founding spec's own explicit hook-type breakdown), MC
 management with real context compaction (not "summarize everything," preserve structured state
 separately per the founding spec's own explicit warning), and a programmable SDK-style interface
 for headless/scripted use.
+
+**Build plan (scoped 2026-09-19, not yet started)**: seven real sub-features, sequenced by real
+dependency and effort, not the order listed above. **Answering this section's own open question,
+confirmed by grep, not assumed**: no CLAUDE.md-equivalent project-instruction file exists anywhere
+in `dourmouse/` today -- this is a real, clean-slate gap, not an unknown.
+1. **Isolated subagents with their own tool/permission scope**: already substantially real (Domain
+   F, `general_roster.py`). Nothing new needed here beyond Domain F's own named-role build plan.
+2. **Project-instruction file** (the CLAUDE.md-equivalent, smallest real lift, do first): a
+   `DOURMOUSE.md` (or `.dourmouse/instructions.md`) read at session/workspace start, injected into
+   the orchestrator's own system context alongside the existing capability preamble
+   (`code_backends.py`'s own comment already names this exact preamble mechanism -- extend it, do
+   not build a second injection path). Hierarchical: workspace-root file first, a narrower one in a
+   subfolder (matching CLAUDE.md's own nearest-file-wins convention) layers on top, never replaces.
+3. **Skills-as-modular-capability-packages**: a new `dourmouse/skills/<name>/SKILL.md` convention,
+   loaded ONLY when `model_delegation.py`-style routing decides a turn is relevant to it (reuse that
+   module's own real classified/unclassified split mechanism rather than inventing a second
+   relevance-scoring system) -- never concatenated into one giant system prompt. A skill's own
+   `SKILL.md` is real, human-authorable documentation; the harsh acceptance test below is the real
+   bar (an external developer writes one from the doc alone).
+4. **Deterministic hooks (pre-tool/post-tool/stop/session)**: `dispatch.py` already has one central
+   call site where every real tool handler is invoked (`_execute_tool`, confirmed real in
+   `test_general_roster.py::TestToolExecution`) -- pre/post-tool hooks are real callables registered
+   against THAT call site, not a new dispatch layer. Session/stop hooks fire from `chat.py`'s own
+   `ChatSession` lifecycle boundaries. Real, minimal risk: a broken hook must never take down a real
+   tool call (wrap in the same `except Exception` fail-open discipline finding #002 already
+   established for this codebase's other best-effort call sites).
+5. **Session management with real context compaction**: audit what `chat.py`/session-file handling
+   already does today before building anything -- this may already be partially real (this
+   codebase's own session `.jsonl`/`.messages.json` files, referenced throughout `history_sync.py`
+   and `history_import.py`, already look like structured state, not a raw transcript dump). Confirm
+   or refute with a real read before writing new code.
+6. **A programmable SDK-style headless interface**: `research_mesh/pipeline.py`'s own `main()` CLI
+   (finding #033) is the first real instance of this shape in the codebase -- generalize its pattern
+   (`ChatSession`/`DispatchRegistry` wrapped in a scriptable, non-UI entry point) rather than
+   designing a new one from scratch.
+7. **MCP**: the largest, most externally-facing piece (a real protocol implementation, not an
+   internal refactor) -- scope as its own dedicated pass once 1-6 are real, not bundled in.
 
 **Harsh acceptance test**: an external developer should be able to write a new Dourmouse Skill
 using only its own documentation, without reading Dourmouse's source code, the same way a Claude
@@ -453,6 +574,35 @@ why this repo, not a vendored copy):
   — the practical, toned-down version of the orbital/sphere visualization already referenced from
   the user's own design images, per `docs/DESIGN_SYSTEM.md`.
 
+**Build plan (scoped 2026-09-19, not yet started)**: the `InvestigationPhase` enum above is
+structurally the SAME state-machine shape `research_mesh/core.py` (finding #033) already proves out
+end to end -- one real, resumable, persisted record stepping through named phases, exactly matching
+`UNLEARNED -> STUDYING -> READY -> TESTING -> ...`. Reuse that template directly rather than
+designing security-specific state-machine plumbing from scratch:
+1. `dourmouse/security/sentry.py`: a real `SentryRecord` (event, phase, findings, risk_score,
+   status) persisted the same one-row-JSON-body SQLite way `research_mesh/store.py::AgentStore`
+   already does, workspace-relative from the start (`config.workspace_dir() / "security" /
+   "sentry.db"`).
+2. `INITIAL_ASSESSMENT`/`INTELLIGENCE_GATHERING`: pure, already-real telemetry reads from
+   `platform_adapter.py` -- no model call needed for this half, matching that module's own
+   already-tested, deterministic shape.
+3. `RISK_ANALYSIS`: one real `ChatSession` call (the same tool-less primitive used a fourth time in
+   this document alone now -- `_verify_completion`, `_verify_goal_criteria`, `RealBrain.answer`,
+   research pipeline's own plan/extract/synthesize calls) scoring the gathered telemetry against the
+   real weighted formula, never a bare LLM vibe-check with no formula behind it.
+4. `ACTION_PLANNING`/`REPORTING`: routes through the SAME real approval-gate mechanism Domain D's
+   self-extension and finding #029's resumable-ticket system already built and live-verified --
+   do not build a second confirmation system for security actions specifically.
+5. `MEMORY_UPDATE`: a real row in the sentry's own store marking a finding as a confirmed false
+   positive when the user declines the suggested action, read back into future `RISK_ANALYSIS`
+   passes as real pattern history -- not a vague "it learns" claim.
+6. Live proof, cheapest first: re-run this exact domain's own harsh acceptance test 1 below (the
+   Application Firewall's real current state on this machine was ALREADY found disabled once,
+   live, by the foundation work alone -- confirm the new sentry catches it for real, unprompted,
+   end to end, not just that the underlying telemetry can see it).
+7. Dashboard UI last, after the sentry itself is real and tested -- do not build the visualization
+   before there is real data for it to show.
+
 **Harsh acceptance tests**:
 1. Turn the Application Firewall off on a real test machine. Confirm the sentry notices and
    alerts, unprompted, within a bounded real time window — not "eventually," a stated number.
@@ -481,6 +631,25 @@ The em-dash/decorative-separator UI-copy sweep (`docs/ENGINEERING_AUDIT.md` find
 2026-09-17, `console.html`/`login.html`/`setup.html` done; `index.html`/`workspace.html`/16 other
 files tracked as remaining work in `docs/GODSPEED_ROADMAP.md` Phase 3) is part of this same
 "sleek, professional, no special characters" instruction and stays in scope here.
+
+**Build plan, mechanical, ready the moment the images arrive (scoped 2026-09-19)**: this is the
+ONE domain in this document whose blocker is a real external input, not scope or infrastructure --
+the plan below should make execution near-instant once unblocked, not something to re-derive later.
+1. From the real Hermes screenshots/exports: read off the actual `font-family` (check for a
+   `@font-face`/Google Fonts link in any exported HTML/CSS, don't guess from a screenshot's look
+   alone) and the actual hex values for its primary/accent/surface colors (sample real pixels, not
+   an approximate read).
+2. Map those to `ui/assets/dourmouse-ui.css`'s EXISTING token names one-for-one (`--dm-canvas`,
+   `--dm-layer`, `--dm-active`, `--dm-ok`, `--dm-error`, plus whatever font-family variable already
+   backs the current typography) -- a pure value swap on already-existing tokens, zero new
+   selectors, zero structural CSS changes. This is what makes it "a token-level change, never a
+   wholesale redesign" concrete rather than aspirational.
+3. Live-verify in the browser pane exactly like every UI change this session: load a real screen
+   (console.html), confirm computed CSS values match the new tokens, screenshot for the harsh
+   acceptance test's own side-by-side comparison.
+4. Do the em-dash/decorative-separator sweep on the remaining 16 UI files (already-proven tokenizer
+   script, see `docs/GODSPEED_ROADMAP.md`'s own remaining-files list) in the same pass, since it is
+   already scoped as part of this same "sleek, professional" instruction.
 
 **Harsh acceptance test**: put a Hermes screenshot and a Dourmouse screenshot side by side. A
 neutral reviewer should say "these clearly share a visual language" without being told to look for

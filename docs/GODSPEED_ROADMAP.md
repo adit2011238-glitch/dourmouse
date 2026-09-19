@@ -523,6 +523,43 @@ Concrete visual direction on top of `docs/DESIGN_SYSTEM.md`/`UI_DESIGN_REFERENCE
   (nodes arranged on a ring or sphere-projection around the host), not a
   decoration.
 
+## Phase 5 -- Domains E-J, scoped 2026-09-19, not yet started
+
+Every remaining domain now has a concrete **Build plan** subsection in
+`docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` (added the same day as
+finding #033, so a future session can start executing directly instead of
+re-deriving architecture from scratch) -- real modules named, real existing
+infrastructure identified for reuse (the `ChatSession(DispatchRegistry(),
+session_file=None)` tool-less primitive now has FOUR real precedents to
+copy: `_verify_completion`, `_verify_goal_criteria`, `RealBrain.answer`,
+and the research pipeline's own plan/extract/synthesize calls; the
+one-row-JSON-body resumable SQLite store shape now has THREE:
+`goals.py`, `research_mesh/store.py`, the proposed security sentry store),
+and a real build sequence, not just a requirement statement:
+
+- [ ] Domain E (device wiki) -- **blocked**, re-check
+      `ps aux | grep -i "claude.*Documents/dourmouse"` before writing a
+      single file, not just before the live-proof step. See §7's own Build
+      plan.
+- [ ] Domain F remainder (named specialist roles) -- a `role` table on
+      `delegate_parallel` branches, not a second roster system. See §8's
+      own Build plan.
+- [ ] Domain G (structured research pipeline + 3-device network) --
+      single-device pipeline first, device distribution layered on once
+      the Dell node is confirmed reachable (it was NOT, live-checked
+      2026-09-19: `server_url_configured()` is `False`). See §9's own
+      Build plan.
+- [ ] Domain H (Claude Code feature duplicates) -- 7 sub-features,
+      sequenced by real dependency/effort; the project-instruction-file
+      question is now answered (confirmed by grep: none exists yet, a
+      clean-slate gap). See §10's own Build plan.
+- [ ] Domain I remainder (AI security sentries) -- the real
+      `InvestigationPhase` architecture, mapped onto the exact
+      `research_mesh` state-machine template. See §11's own Build plan.
+- [ ] Domain J (Hermes UI) -- **blocked** on the user's own reference
+      images; the mechanical token-swap plan is ready so execution is
+      near-instant once unblocked. See §12's own Build plan.
+
 ## Notes / decisions log
 
 - 2026-09-16: Chose audit → runtime → UI → security ordering. Runtime is the highest product

@@ -278,6 +278,10 @@ class TestRosterShape:
                              # purpose -- it only registers when at least
                              # one extension has actually been approved,
                              # empty in every hermetic test environment.
+            "research_mesh",  # 2026-09-19: rebuilt from the orphaned
+                               # jarvis/research_mesh/agents package -- real
+                               # field-specialist qualification, now backed
+                               # by RealBrain and reachable from chat.
         }
 
     def test_orchestrator_exposes_delegate_task(self):
