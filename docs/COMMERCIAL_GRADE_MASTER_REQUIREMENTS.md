@@ -572,9 +572,58 @@ detection rule, see `docs/ENGINEERING_AUDIT.md` finding #039), real persisted fa
 and real alerting for a genuinely new HIGH finding, reachable now via `security_sentry_scan`. The
 disabled-firewall/all-interfaces finding this section itself named as a real, live example was used
 as the sentry's own live proof: it correctly detected, scored, and alerted on this machine's own
-real, still-current instance of exactly that condition. Baselines beyond firewall/exposed-ports,
-new-LAN-device detection, a continuously-running background scheduler, the live SSE push, the
-dashboard UI, and remediation actions are still NOT built -- real, separate, named follow-on.
+real, still-current instance of exactly that condition. The sentry is now also genuinely continuous
+-- `SentryRuntime` (finding #041), same real daemon-thread shape as `GoalRuntime`, started at server
+boot, default ON, live-verified completing a real scan and writing a real alert before any chat
+interaction. Baselines beyond firewall/exposed-ports, new-LAN-device detection, the live SSE push,
+the dashboard UI, and remediation actions are still NOT built -- real, separate, named follow-on.
+
+**Scale-out plan, user-directed 2026-09-20** ("this needs to be a really powerful cybersecurity
+system... go crazy, replicate what corporate companies [do]"): real corporate SOCs run on a small
+number of real, repeatable disciplines, not one clever model call -- this is the same
+ThreatSentinel-adapted architecture below, deliberately widened, still permanently bounded by the
+authorized-defensive-only restatement above (host + own network + Tailscale, never a third party).
+Sequenced by real dependency, reusing `SentryRuntime`'s own now-proven loop rather than building a
+second scheduler per capability:
+1. **Asset inventory + baseline** (do first -- everything else needs it): a real, persisted
+   `known_devices` table (MAC/IP/hostname/vendor-OUI-lookup, first_seen/last_seen) built from
+   `platform_adapter.get_arp_neighbors()`'s own already-real telemetry, polled by the SAME
+   `SentryRuntime` tick. This is what closes harsh acceptance test 2 ("a brand-new device joins the
+   LAN... confirm it's surfaced") -- a device not in the baseline is itself a new, real
+   `SentryFinding`, same detection/scoring/memory pipeline #039 already built, no new machinery.
+2. **Threat intelligence enrichment**: real reputation lookups (VirusTotal/AbuseIPDB-class APIs,
+   honestly `NOT_CONFIGURED` when no key is set, mirroring this codebase's own established
+   "never fake data when a key isn't configured" rule, see `docs/GODSPEED_ROADMAP.md`'s own
+   ThreatSentinel-adapted architecture note) for an external IP genuinely seen talking to the host
+   -- asking a reputation API about a real observed peer, never scanning or acting against it.
+3. **Incident/case tracking**: a real `SentryStore` already exists as the foundation -- extend it
+   with a genuine incident lifecycle (`OPEN -> INVESTIGATING -> RESOLVED/ACCEPTED_RISK`), not just a
+   flat findings table, so a real security operator workflow (triage, note, close) exists, mirroring
+   `goals.py`'s own real state-machine precedent rather than inventing new status semantics.
+4. **Correlation, not just isolated findings**: a real SOC's own value-add over point checks is
+   noticing multiple weak signals together (e.g., a new LAN device AND an exposed port opening in
+   the same real time window) -- a real, explicit correlation rule set over `SentryStore`'s own
+   persisted history, evaluated on each `SentryRuntime` tick, not a vague "AI notices patterns"
+   claim.
+5. **Local remediation actions, always suggest-then-confirm**: routes through the SAME real
+   approval-gate mechanism Domain D's self-extension and finding #029's resumable-ticket system
+   already built -- a suggested `pf` rule change or revoking a Tailscale node's access is composed
+   as real, specific text, never auto-applied, matching this section's own permanently-binding scope
+   restatement.
+6. **Dashboard UI**: real exposure/findings/incident-status surface, last (per this domain's own
+   original build plan: "after the sentry itself is real and tested") -- the practical, calm,
+   non-decorative version of the orbital/sphere concept already referenced in `docs/DESIGN_SYSTEM.md`.
+7. **Windows/cross-device coverage**: `platform_adapter.py` is macOS-only today (its own real,
+   already-stated scope) -- the DOURMOUSE desktop (a real second, Windows machine, per prior-session
+   memory) is a genuinely different OS with different real telemetry commands (`netsh`, `Get-
+   NetTCPConnection`, Windows Defender Firewall's own real state, not `socketfilterfw`) -- a real,
+   separate platform-adapter implementation, not a shared code path pretending macOS commands work
+   there.
+"Go crazy" bounded honestly: replicating a corporate SOC's real DISCIPLINE (continuous monitoring,
+baselining, correlation, incident tracking, suggest-not-auto-act) is real, valuable, and squarely
+inside this domain's own scope -- replicating a corporate SOC's OFFENSIVE tooling (penetration
+testing another network, exploit development against a third party) is explicitly, permanently
+out of scope regardless of this instruction's own enthusiasm, per the restated boundary above.
 
 **ThreatSentinel-adapted architecture for the AI sentry** (the real, concrete plan — see §0 for
 why this repo, not a vendored copy):
@@ -640,6 +689,15 @@ designing security-specific state-machine plumbing from scratch:
    code path (the approval gate + the scope boundary), not a policy statement in a prompt.
 
 ## 12. Domain J — UI/UX: Hermes visual language, applied honestly
+
+**Status, updated 2026-09-20**: unblocked -- the user supplied the real Hermes reference
+screenshot. Real pixel colors extracted programmatically (Python/PIL, not eyeballed) and applied as
+a token-level retone to the primary/default screen (`console.html`'s "Terminal Core" theme +
+`dourmouse-ui.css`'s shared tokens), live-verified in the browser. See `docs/ENGINEERING_AUDIT.md`
+finding #040 for exactly which tokens moved and which were deliberately left alone (font family
+could not be extracted with confidence from a raster image). Real remaining gap: the other 15 files
+that link the shared stylesheet are not yet individually audited for the same local-override issue
+`workspace.html` was found to have.
 
 The user explicitly wants Hermes' fonts and color scheme. Dourmouse already has a real,
 established, documented dark-terminal design system (`docs/DESIGN_SYSTEM.md`,

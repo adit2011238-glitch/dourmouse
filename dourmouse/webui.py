@@ -7223,6 +7223,18 @@ def run_server(
             state_store=server.state, events_broadcast=server.events_broadcast,
         )
         server.goal_runtime.start()
+    # Domain I (docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md): the
+    # continuously-running security sentry -- same real daemon-thread shape
+    # as GoalRuntime just above, same default-ON/opt-out convention. Real
+    # telemetry, real deterministic scoring, a real persisted alert on a
+    # genuinely new HIGH finding, every real interval, with zero user action
+    # needed -- not a chat-only, ask-and-it-checks tool.
+    from dourmouse.security.sentry import SentryRuntime, sentry_runtime_enabled
+
+    server.security_sentry: SentryRuntime | None = None
+    if sentry_runtime_enabled():
+        server.security_sentry = SentryRuntime()
+        server.security_sentry.start()
     # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
     # HUD and the dedicated window listen to (live per-brain cards).
     from dourmouse import all_hands

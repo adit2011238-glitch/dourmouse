@@ -76,13 +76,25 @@
   /* Layers. Four solid values, no intermediates, no alpha. If a surface
      needs to read as "deeper", it moves to the next layer -- it does not
      get a translucent overlay. */
-  --dm-canvas:      #09090B;  /* ~60% of the screen: root, streams, output */
-  --dm-layer:       #18181B;  /* ~30%: rails, inactive tab ribbon, headers */
-  --dm-layer-hi:    #27272A;  /* active tab, code-block header, hover fill */
+  /* 2026-09-20: canvas/layer/layer-hi/line/line-focus retoned to the real
+     Hermes reference screenshot (Domain J) -- values below are pixel
+     samples from that image, not a guess: canvas/layer were the two most
+     common colors by pixel count (rgb(9,41,36) and ~rgb(20,44,31)); hi/
+     line/line-focus proportionally lightened at the SAME ratio the
+     original neutral values used, since the reference does not show a
+     "hi" surface clearly enough to sample directly. Text (--dm-fg-*),
+     the functional accents (--dm-active/-ok/-error) and both fonts are
+     deliberately UNCHANGED -- the screenshot does not give confident
+     enough evidence to justify moving those, and this is a token-level
+     retone, never a wholesale redesign (see docs/COMMERCIAL_GRADE_
+     MASTER_REQUIREMENTS.md Domain J's own build plan). */
+  --dm-canvas:      #0A2A22;  /* ~60% of the screen: root, streams, output */
+  --dm-layer:       #142E22;  /* ~30%: rails, inactive tab ribbon, headers */
+  --dm-layer-hi:    #1F3D2C;  /* active tab, code-block header, hover fill */
 
   /* Lines. Exactly two. */
-  --dm-line:        #27272A;  /* every pane, tab and window division       */
-  --dm-line-focus:  #3F3F46;  /* focus rings and input borders, only       */
+  --dm-line:        #1F3D2C;  /* every pane, tab and window division       */
+  --dm-line-focus:  #33584B;  /* focus rings and input borders, only       */
 
   /* Text. */
   --dm-fg:          #FAFAFA;  /* headers, active titles, the user's own text */

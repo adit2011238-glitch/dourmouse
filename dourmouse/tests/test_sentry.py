@@ -6,11 +6,15 @@ plain, hermetic, real-store test -- no fakes needed."""
 
 from __future__ import annotations
 
+import time
+
 from dourmouse.security.sentry import (
     SentryFinding,
+    SentryRuntime,
     SentryStore,
     _detect_findings,
     run_scan,
+    sentry_runtime_enabled,
 )
 
 _FIREWALL_OFF = {"available": True, "enabled": False}
@@ -197,3 +201,96 @@ class TestRunScan:
         )
         assert result.telemetry_available["firewall"] is True
         assert result.telemetry_available.get("dns", True) is False
+
+
+class TestSentryRuntimeEnabled:
+    def test_default_on(self, monkeypatch):
+        monkeypatch.delenv("DOURMOUSE_SECURITY_SENTRY_LOOP", raising=False)
+        assert sentry_runtime_enabled() is True
+
+    def test_explicit_off(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_SECURITY_SENTRY_LOOP", "0")
+        assert sentry_runtime_enabled() is False
+
+    def test_any_other_value_is_on(self, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_SECURITY_SENTRY_LOOP", "1")
+        assert sentry_runtime_enabled() is True
+
+
+class TestSentryRuntime:
+    def test_interval_is_never_faster_than_one_minute(self, tmp_path):
+        rt = SentryRuntime(interval_seconds=1.0, store=SentryStore(tmp_path / "s.db"))
+        assert rt._interval == 60.0
+
+    def test_requested_interval_above_the_floor_is_kept(self, tmp_path):
+        rt = SentryRuntime(interval_seconds=300.0, store=SentryStore(tmp_path / "s.db"))
+        assert rt._interval == 300.0
+
+    def test_run_one_tick_now_is_real_and_synchronous(self, tmp_path):
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        assert rt.last_result is None
+        assert rt.tick_count == 0
+        result = rt.run_one_tick_now()
+        assert rt.last_result is result
+        assert rt.last_scan_at is not None
+        assert rt.tick_count == 1
+        # A real result, same shape run_scan itself returns.
+        assert hasattr(result, "risk_score")
+
+    def test_start_runs_at_least_one_real_tick_before_the_first_wait(self, tmp_path):
+        """The loop calls run_one_tick_now() BEFORE its first
+        threading.Event.wait(), so even a long real interval does not
+        delay the first real scan -- a genuinely "always running" sentry
+        must not wait 5 minutes to say anything for the first time."""
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        rt.start()
+        try:
+            deadline = time.time() + 5.0
+            while rt.tick_count == 0 and time.time() < deadline:
+                time.sleep(0.05)
+            assert rt.tick_count >= 1
+            assert rt.last_result is not None
+        finally:
+            rt.stop()
+
+    def test_start_is_idempotent(self, tmp_path):
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        rt.start()
+        try:
+            first_thread = rt._thread
+            rt.start()  # a second call must not spawn a second thread
+            assert rt._thread is first_thread
+        finally:
+            rt.stop()
+
+    def test_stop_lets_the_daemon_thread_exit_promptly(self, tmp_path):
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        rt.start()
+        thread = rt._thread
+        rt.stop()
+        thread.join(timeout=5.0)
+        assert not thread.is_alive()
+
+    def test_a_broken_tick_never_kills_the_runtime(self, tmp_path, monkeypatch):
+        """Same discipline as GoalRuntime._loop: a bug in one tick must
+        never stop future ticks from happening."""
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        calls = []
+
+        def _flaky_tick():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("simulated real scan failure")
+            rt.tick_count += 1
+            rt.last_scan_at = time.time()
+
+        monkeypatch.setattr(rt, "run_one_tick_now", _flaky_tick)
+        rt._interval = 0.05  # bypass the 60s floor for this one test only, post-construction
+        rt.start()
+        try:
+            deadline = time.time() + 5.0
+            while len(calls) < 2 and time.time() < deadline:
+                time.sleep(0.05)
+            assert len(calls) >= 2  # the loop survived the first tick's exception
+        finally:
+            rt.stop()

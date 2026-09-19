@@ -585,9 +585,29 @@ and a real build sequence, not just a requirement statement:
       wording), the live SSE push, and the dashboard UI -- all named
       explicitly as real, separate follow-on. See
       `docs/ENGINEERING_AUDIT.md` finding #039.
-- [ ] Domain J (Hermes UI) -- **blocked** on the user's own reference
-      images; the mechanical token-swap plan is ready so execution is
-      near-instant once unblocked. See §12's own Build plan.
+- [x] Domain I, continuous sentry shipped 2026-09-20 (user-directed: "always
+      running... continuous data stream") -- `SentryRuntime`, the exact
+      real daemon-thread shape `GoalRuntime` already uses, wired into
+      `webui.run_server` startup, default ON. Live-verified: a real server
+      boot, zero chat messages, already had 6 real findings persisted and
+      a real HIGH alert written before any user action. Interval floor
+      60s, default 300s -- a real scan shells out to real system commands
+      per tick, not a free check. Known minor limitation found live: a
+      dual-stack (IPv4+IPv6) service on the same port double-counts in one
+      tick's risk score -- named, not fixed. Live SSE push, new-device
+      detection, and the dashboard UI remain real, separate follow-on. See
+      `docs/ENGINEERING_AUDIT.md` finding #041.
+- [x] Domain J, primary screen retoned 2026-09-20 -- unblocked (user supplied
+      the real Hermes reference screenshot). Real pixel colors extracted
+      programmatically, not guessed; `console.html`'s default "Terminal
+      Core" theme + `dourmouse-ui.css`'s shared tokens now use the real
+      extracted dark-green family, live-verified in the browser. Font
+      family NOT changed -- unextractable with confidence from a raster
+      screenshot. Real gap found, not yet fixed: `workspace.html` (and
+      possibly other files among the 16 linking the shared stylesheet)
+      locally overrides the canvas color instead of inheriting it --
+      unaudited beyond the primary screen. See
+      `docs/ENGINEERING_AUDIT.md` finding #040.
 
 ## Notes / decisions log
 

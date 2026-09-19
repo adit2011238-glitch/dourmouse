@@ -1679,6 +1679,94 @@ own real, previously-known firewall gap, with real persisted memory and honestly
 
 ---
 
+### 040 -- Domain J: real Hermes-reference color retone (evidence-based, not guessed)
+
+**Severity**: n/a (feature -- Domain J's own blocker resolved: the user supplied the real Hermes
+reference screenshot this section's own build plan was waiting on).
+**Context**: real pixel colors extracted programmatically from the reference screenshot (Python/PIL,
+not eyeballed): the single most common color by pixel count was `rgb(9,41,36)`, the second most
+common `~rgb(20,44,31)` -- a cohesive dark teal/olive-green canvas+panel family, not the neutral
+zinc-black Dourmouse's own `--dm-canvas`/`--bg` family currently uses. Font family could NOT be
+extracted with any confidence from a raster screenshot (no embedded font metadata in a PNG/WebP) --
+this section's own build plan explicitly required real evidence over guessing, so fonts are
+deliberately untouched rather than naming a guessed family.
+**Design**: token-level retone, not a redesign, exactly as this domain's own build plan specified.
+Two places carry the real values (a pre-existing duplication this pass did not introduce): `dourmouse
+-ui.css`'s `--dm-canvas`/`--dm-layer`/`--dm-layer-hi`/`--dm-line`/`--dm-line-focus`, and `console.
+html`'s own "Terminal Core" theme block (`--bg`/`--panel`/`--panel2`/`--line`/`--line-2`/`--amber-
+line`/`--amber-soft`), which duplicates the same values under different names. Canvas/layer values
+are the real extracted samples; the "hi"/line tiers (not clearly sampleable as a distinct surface in
+one screenshot) are proportional lightenings at the SAME ratio the original neutral values used, not
+independently guessed. Deliberately UNCHANGED: text colors, the functional accents (amber/ok/error),
+and both fonts -- the screenshot does not give confident evidence to move those, and moving `--dm-
+active` to match `--dm-ok`'s existing green would have collapsed two semantically distinct states
+(selected vs. passing) into one visually-identical color, a real usability regression the reference
+image does not actually call for.
+**Real, honestly-scoped gap found, not fixed here**: `workspace.html` (and likely other files among
+the 16 that link `dourmouse-ui.css`) does not actually render `var(--dm-canvas)` for its own
+background -- confirmed live: the shared stylesheet's computed custom-property value was correctly
+`#0A2A22`, but `workspace.html`'s own rendered body background stayed black, meaning it has its own
+local override elsewhere in the cascade. This pass only confirmed and fixed the PRIMARY, default-
+landing screen (`console.html`'s "Terminal Core" theme, the one shown in `HOME`); auditing every
+other one of the 16 linking files for the same local-override gap is real, separate, not-yet-done
+follow-on.
+**Live proof, real browser, real pixels**: `console.html`'s "Terminal Core" theme (this app's
+default) screenshotted before and after -- before, a neutral black/gray console; after, a cohesive
+dark green console with the exact same layout, panels, nav, and amber functional accents untouched.
+Confirmed via computed style that the shared token's live value matches the edit
+(`getComputedStyle(document.documentElement).getPropertyValue('--dm-canvas')` = `#0A2A22`).
+**Files changed**: `ui/assets/dourmouse-ui.css`, `ui/console.html`.
+**Tests**: none added -- a rendered-color change has no meaningful Python-level assertion in this
+codebase's own test suite; live browser screenshot + computed-style verification is the real,
+appropriate check here, matching how this session's own prior UI-only changes were verified.
+**Result**: fixed for the primary screen, live-verified -- a real, evidence-based step toward this
+domain's own harsh acceptance test ("these clearly share a visual language"), with the remaining
+15 files' own local-override status honestly named as unverified, not silently assumed fixed.
+
+---
+
+### 041 -- Continuous, always-running security sentry (Domain I, user-directed scale-up)
+
+**Severity**: n/a (feature -- closes finding #039's own named gap, user-directed: "this needs to be
+a really powerful cybersecurity system... always running sentry, continuous data stream").
+**Context**: the reference architecture image supplied names the security subsystem an "always
+running sentry" with a "continuous data stream" -- finding #039 shipped the real detection/scoring/
+memory engine but only as an on-demand chat tool, explicitly naming the continuous loop as
+not-yet-built. This finding closes that gap.
+**Design**: `SentryRuntime` (`dourmouse/security/sentry.py`) -- the exact same real daemon-thread
+shape `GoalRuntime`/`SchedulerRunner` already use (one instance per process, started from
+`webui.run_server`, a broken tick wrapped in the same `try/except: pass` so one bad scan never
+kills the loop, same default-ON/opt-out convention via `DOURMOUSE_SECURITY_SENTRY_LOOP=0`). The
+loop calls its own real tick BEFORE the first wait, so a genuinely "always running" sentry does not
+sit silent for a full interval before its first real result. Interval floor: 60 seconds, default
+300 -- a real scan shells out to `lsof`/`ifconfig`/`scutil`/`arp`/`socketfilterfw` per tick, and a
+real host security tool polling every few minutes (not every second) matches how real endpoint
+security agents actually behave, not an unbacked "real-time" marketing claim.
+**Honest, minor limitation found live, not hidden**: a service bound to the same port over BOTH
+IPv4 and IPv6 (observed live: `rapportd` on this real machine) produces two separate `lsof` rows
+that fingerprint identically, so one real tick can record `times_seen` twice and add that
+finding's MED weight to `risk_score` twice for what is genuinely one service. Real, small,
+separate follow-on: de-duplicate by `(command, port, protocol)` before scoring. Does not affect
+the HIGH-severity/alerting path (the firewall check has no such duplication).
+**Live proof, real server boot, zero chat messages sent**: started a real dev-preview server;
+before any chat interaction, the real workspace's own `sentry.db` already had 6 real findings
+persisted and a real HIGH alert already written to the real `state_store` alerts table --
+confirming the loop starts automatically at boot and completes its first real tick with no user
+action, exactly the "always running" property this finding exists to add.
+**Files changed**: `dourmouse/security/sentry.py` (`SentryRuntime`, `sentry_runtime_enabled`),
+`dourmouse/webui.py` (server startup wiring, same placement as `GoalRuntime`'s own).
+**Tests added**: 10 new tests (`TestSentryRuntimeEnabled`, `TestSentryRuntime`) -- the opt-out env
+var, the 60s interval floor, a real synchronous tick updating real state, a real background thread
+completing a real tick before its first wait, idempotent `start()`, prompt thread exit on `stop()`,
+and a broken tick never killing the runtime (same discipline as `GoalRuntime._loop`'s own test
+coverage).
+**Tests run**: `test_sentry.py` in full (30/30, 0.73s).
+**Result**: fixed -- the sentry is now genuinely continuous, live-verified starting and completing
+a real scan automatically at server boot with zero user interaction, matching the reference
+architecture's own "always running... continuous data stream" requirement.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

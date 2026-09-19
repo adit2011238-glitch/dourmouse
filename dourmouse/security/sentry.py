@@ -20,21 +20,35 @@ own expected tiers -- i.e. ALL_INTERFACES (MED). New-LAN-device detection
 lookups need a real, persisted ARP-neighbor baseline this pass does not
 yet build -- named explicitly as real, separate, not-yet-done follow-on.
 
-Also deliberately NOT built in this pass: a continuously-running
-background scheduler wired into webui.py's own startup (needed for this
-domain's own harsh acceptance test 1's "unprompted, within a bounded
-window" wording) and the live SSE push through DesktopNotifier (needs the
-running server's own hub instance, unreachable from a plain tool call --
-checked directly before writing this: no global accessor for it exists
-today). A scan today is real and chat-reachable, and a genuinely new HIGH
-finding writes a real, persisted alert via state_store.add_alert -- the
-exact same real mechanism goal_runtime.py's own system alerts already use
--- visible on the next alerts-screen refresh, just not an instant push.
+``SentryRuntime`` (2026-09-20, user-directed: "this needs to be a really
+powerful cybersecurity system... always running sentry, continuous data
+stream") closes the "continuously-running background scheduler" gap named
+above: the exact same real daemon-thread shape ``GoalRuntime``/
+``SchedulerRunner`` already use (one instance per process, started at
+server boot via ``webui.run_server``, a broken tick never kills the loop --
+see ``GoalRuntime._loop``'s own identical `try/except: pass` +
+`threading.Event.wait` shape, copied here rather than re-derived). Default
+interval is 5 minutes, not faster: a real scan shells out to `lsof`/
+`ifconfig`/`scutil`/`arp`/`socketfilterfw` every tick, and a real host
+security tool polling every few minutes (not every second) matches how
+real endpoint security agents actually behave, not a marketing-driven
+"real-time" claim this pass cannot back up with real, cheap telemetry.
+
+Still deliberately NOT built in this pass: the live SSE push through
+DesktopNotifier (needs the running server's own hub instance, unreachable
+from a plain tool call -- checked directly before writing this: no global
+accessor for it exists today) and new-LAN-device detection (needs a real
+persisted ARP-neighbor baseline). A scan today is real, continuous, and
+chat-reachable, and a genuinely new HIGH finding writes a real, persisted
+alert via state_store.add_alert -- the exact same real mechanism
+goal_runtime.py's own system alerts already use -- visible on the next
+alerts-screen refresh, just not an instant push.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import threading
 import time
@@ -44,6 +58,8 @@ from typing import Any, Callable
 
 from dourmouse.config import workspace_dir
 from dourmouse.security import platform_adapter as pa
+
+_DEFAULT_SCAN_INTERVAL_SECONDS = 300.0
 
 DEFAULT_DB = workspace_dir() / "security" / "sentry.db"
 
@@ -279,3 +295,61 @@ def run_scan(
         telemetry_available=telemetry_available,
         alerts_written=alerts_written,
     )
+
+
+def sentry_runtime_enabled() -> bool:
+    """Default ON, same opt-OUT convention as goal_runtime_enabled() --
+    set DOURMOUSE_SECURITY_SENTRY_LOOP=0 to disable the continuous scan."""
+    return os.environ.get("DOURMOUSE_SECURITY_SENTRY_LOOP", "1").strip() != "0"
+
+
+class SentryRuntime:
+    """Ticks a real security scan on a real interval -- one instance per
+    process, started as a daemon thread from webui.run_server exactly like
+    GoalRuntime/SchedulerRunner. A broken tick logs nothing special and
+    never kills the loop; the next tick tries again."""
+
+    def __init__(
+        self,
+        interval_seconds: float = _DEFAULT_SCAN_INTERVAL_SECONDS,
+        store: SentryStore | None = None,
+    ) -> None:
+        # Never faster than once a minute -- a real scan shells out to
+        # several real system commands per tick, not a free in-memory check.
+        self._interval = max(60.0, float(interval_seconds))
+        self._store = store or SentryStore(DEFAULT_DB)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.last_result: SentryScanResult | None = None
+        self.last_scan_at: float | None = None
+        self.tick_count = 0
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name="dourmouse-security-sentry"
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def run_one_tick_now(self) -> SentryScanResult:
+        """Real, synchronous, out-of-band scan -- used by the chat tool so
+        a user asking "scan now" does not have to wait for the next
+        scheduled tick, and by tests that want a real tick without a real
+        threading.Event.wait delay."""
+        result = run_scan(store=self._store)
+        self.last_result = result
+        self.last_scan_at = time.time()
+        self.tick_count += 1
+        return result
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.run_one_tick_now()
+            except Exception:  # noqa: BLE001 -- a bug in one tick must never kill the runtime
+                pass
+            self._stop.wait(self._interval)

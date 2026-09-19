@@ -88,7 +88,13 @@
      own code-template reply. Never theme-dependent, on purpose: paired
      with a background that also never changes per theme.  */
   --on-dark-code:#cfe3f2;
-  --bg:#09090B; --panel:#18181B; --panel2:#27272A;
+  /* 2026-09-20: retoned to the real Hermes reference screenshot (Domain J),
+     same real pixel-sampled values as dourmouse-ui.css's --dm-canvas/
+     -layer/-layer-hi (this theme duplicates that file's token VALUES
+     under its own names -- keeping both in sync rather than only fixing
+     one). --amber/--ok/--warn/--bad and both fonts deliberately
+     unchanged -- see that file's own comment for why. */
+  --bg:#0A2A22; --panel:#142E22; --panel2:#1F3D2C;
   --amber:#F59E0B; --amber-hi:#FAFAFA; --amber-ink:#09090B;
   /* --blue-dim was #71717A (zinc-500): 3.08:1 on --panel2, 3.67:1 on
      --panel, 4.12:1 on --bg -- fails WCAG AA (4.5:1) on all three grounds
@@ -98,8 +104,8 @@
      reason -- reusing an existing token value already in this file
      (--blue), not a new color. */
   --blue:#A1A1AA; --blue-dim:#A1A1AA; --blue-hi:#FAFAFA; --blue-deep:#52525B;
-  --line:#27272A; --line-2:#3F3F46;
-  --amber-line:#3F3F46; --amber-soft:#27272A;
+  --line:#1F3D2C; --line-2:#33584B;
+  --amber-line:#33584B; --amber-soft:#1F3D2C;
   --ok:#10B981; --warn:#F59E0B; --bad:#EF4444;
   --mono:'Berkeley Mono','Monaspace Neon','JetBrains Mono NL','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --display:'Departure Mono','Commit Mono','Intel One Mono',ui-monospace,monospace;
