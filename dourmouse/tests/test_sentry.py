@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from dourmouse.security.sentry import (
     SentryFinding,
     SentryRuntime,
     SentryStore,
+    _detect_correlations,
     _detect_findings,
     _device_key,
     run_scan,
@@ -121,6 +124,48 @@ class TestDetectFindingsNewDevice:
         assert findings == []
 
 
+_NEW_DEVICE_FINDING = SentryFinding(
+    fingerprint="fp_device", kind="new_device", severity="med",
+    title="New device joined the network: intruder.local",
+    detail="detail", recommended_action="investigate",
+)
+_EXPOSED_PORT_FINDING = SentryFinding(
+    fingerprint="fp_port", kind="exposed_port", severity="med",
+    title="sshd listens on all interfaces",
+    detail="detail", recommended_action="restrict it",
+)
+_FIREWALL_FINDING = SentryFinding(
+    fingerprint="fp_fw", kind="firewall_disabled", severity="high",
+    title="Application Firewall is disabled",
+    detail="detail", recommended_action="enable it",
+)
+
+
+class TestDetectCorrelations:
+    def test_no_correlation_with_only_one_signal(self):
+        assert _detect_correlations([_NEW_DEVICE_FINDING]) == []
+        assert _detect_correlations([_EXPOSED_PORT_FINDING]) == []
+
+    def test_no_correlation_with_unrelated_signals(self):
+        assert _detect_correlations([_NEW_DEVICE_FINDING, _FIREWALL_FINDING]) == []
+
+    def test_both_signals_together_is_a_real_high_correlation(self):
+        correlations = _detect_correlations([_NEW_DEVICE_FINDING, _EXPOSED_PORT_FINDING])
+        assert len(correlations) == 1
+        assert correlations[0].severity == "high"
+        assert correlations[0].kind == "correlated_new_device_and_exposed_port"
+        assert "intruder.local" in correlations[0].detail
+        assert "sshd" in correlations[0].detail
+
+    def test_correlation_fingerprint_is_stable_for_the_same_pair(self):
+        c1 = _detect_correlations([_NEW_DEVICE_FINDING, _EXPOSED_PORT_FINDING])[0]
+        c2 = _detect_correlations([_NEW_DEVICE_FINDING, _EXPOSED_PORT_FINDING])[0]
+        assert c1.fingerprint == c2.fingerprint
+
+    def test_empty_new_findings_is_no_correlation(self):
+        assert _detect_correlations([]) == []
+
+
 class TestSentryStore:
     def test_first_detection_is_new(self, tmp_path):
         store = SentryStore(tmp_path / "sentry.db")
@@ -190,6 +235,94 @@ class TestSentryStore:
         assert len(rows) == 1
         assert rows[0]["ip"] == "192.168.1.10"
         assert rows[0]["hostname"] == "laptop.local"
+
+
+class TestSentryStoreIncidents:
+    def _seeded_store(self, tmp_path):
+        store = SentryStore(tmp_path / "sentry.db")
+        finding = _detect_findings(_state(firewall=_FIREWALL_OFF))[0]
+        store.record_and_classify(finding, now=1000.0)
+        return store, finding.fingerprint
+
+    def test_opening_an_incident_for_an_unknown_fingerprint_is_honest(self, tmp_path):
+        store = SentryStore(tmp_path / "sentry.db")
+        assert store.open_incident("never-seen", "note", now=1000.0) == "unknown_fingerprint"
+
+    def test_opening_a_real_incident_succeeds(self, tmp_path):
+        store, fp = self._seeded_store(tmp_path)
+        assert store.open_incident(fp, "investigating", now=1000.0) == "opened"
+        incident = store.get_incident(fp)
+        assert incident["status"] == "OPEN"
+        assert incident["notes"] == [{"at": 1000.0, "text": "investigating"}]
+
+    def test_opening_an_already_open_incident_is_idempotent(self, tmp_path):
+        store, fp = self._seeded_store(tmp_path)
+        store.open_incident(fp, "", now=1000.0)
+        assert store.open_incident(fp, "", now=2000.0) == "already_open"
+
+    def test_updating_an_unknown_incident_is_honest(self, tmp_path):
+        store, _fp = self._seeded_store(tmp_path)
+        assert store.update_incident("never-opened", "INVESTIGATING", None, now=1000.0) == "not_found"
+
+    def test_an_invalid_status_raises(self, tmp_path):
+        store, fp = self._seeded_store(tmp_path)
+        store.open_incident(fp, "", now=1000.0)
+        with pytest.raises(ValueError):
+            store.update_incident(fp, "NOT_A_REAL_STATUS", None, now=2000.0)
+
+    def test_a_real_status_transition_and_note_are_recorded(self, tmp_path):
+        store, fp = self._seeded_store(tmp_path)
+        store.open_incident(fp, "", now=1000.0)
+        assert store.update_incident(fp, "INVESTIGATING", "looked into it", now=2000.0) == "updated"
+        incident = store.get_incident(fp)
+        assert incident["status"] == "INVESTIGATING"
+        assert incident["notes"] == [{"at": 2000.0, "text": "looked into it"}]
+
+    def test_a_note_only_update_does_not_change_status(self, tmp_path):
+        store, fp = self._seeded_store(tmp_path)
+        store.open_incident(fp, "", now=1000.0)
+        store.update_incident(fp, "INVESTIGATING", None, now=2000.0)
+        store.update_incident(fp, None, "still working on it", now=3000.0)
+        incident = store.get_incident(fp)
+        assert incident["status"] == "INVESTIGATING"
+        assert len(incident["notes"]) == 1
+
+    def test_a_terminal_incident_never_silently_reopens(self, tmp_path):
+        store, fp = self._seeded_store(tmp_path)
+        store.open_incident(fp, "", now=1000.0)
+        store.update_incident(fp, "RESOLVED", "fixed", now=2000.0)
+        assert store.update_incident(fp, "OPEN", "wait actually", now=3000.0) == "terminal"
+        assert store.get_incident(fp)["status"] == "RESOLVED"
+
+    def test_a_terminal_incident_can_still_be_re_set_to_the_same_terminal_status(self, tmp_path):
+        """A note-only update or a no-op re-confirmation of the SAME
+        terminal status must not be refused -- only an attempt to change
+        AWAY from a terminal status is."""
+        store, fp = self._seeded_store(tmp_path)
+        store.open_incident(fp, "", now=1000.0)
+        store.update_incident(fp, "RESOLVED", "fixed", now=2000.0)
+        assert store.update_incident(fp, "RESOLVED", "confirmed still fixed", now=3000.0) == "updated"
+
+    def test_get_incident_for_a_never_opened_fingerprint_is_none(self, tmp_path):
+        store, _fp = self._seeded_store(tmp_path)
+        assert store.get_incident("never-opened") is None
+
+    def test_list_incidents_filters_by_status(self, tmp_path):
+        store = SentryStore(tmp_path / "sentry.db")
+        f1 = _detect_findings(_state(firewall=_FIREWALL_OFF))[0]
+        ports = {"available": True, "listening_ports": [
+            {"command": "sshd", "pid": 1, "protocol": "TCP", "port": 22,
+             "bind_address": "*", "exposure": "ALL_INTERFACES"},
+        ]}
+        f2 = _detect_findings(_state(listening_ports=ports))[0]
+        store.record_and_classify(f1, now=1000.0)
+        store.record_and_classify(f2, now=1000.0)
+        store.open_incident(f1.fingerprint, "", now=1000.0)
+        store.open_incident(f2.fingerprint, "", now=1000.0)
+        store.update_incident(f2.fingerprint, "RESOLVED", "closed", now=2000.0)
+        assert {i["fingerprint"] for i in store.list_incidents("OPEN")} == {f1.fingerprint}
+        assert {i["fingerprint"] for i in store.list_incidents("RESOLVED")} == {f2.fingerprint}
+        assert len(store.list_incidents()) == 2
 
 
 class TestRunScan:
@@ -299,6 +432,53 @@ class TestRunScan:
         assert store.get_known_device_keys() == {
             "aa:aa:aa:aa:aa:aa", "bb:bb:bb:bb:bb:bb",
         }
+
+    def test_a_new_device_and_exposed_port_in_the_same_scan_correlate(self, tmp_path, monkeypatch):
+        written = []
+        monkeypatch.setattr(
+            "dourmouse.state_store.default_store",
+            lambda: type("S", (), {"add_alert": lambda self, **kw: written.append(kw)})(),
+        )
+        store = SentryStore(tmp_path / "s.db")
+        ports = {"available": True, "listening_ports": [
+            {"command": "sshd", "pid": 1, "protocol": "TCP", "port": 22,
+             "bind_address": "*", "exposure": "ALL_INTERFACES"},
+        ]}
+        # Seed the device baseline with a REAL already-known device first
+        # (an empty baseline is treated as "never scanned", not "zero
+        # devices" -- see run_scan's own docstring) -- the correlation
+        # needs a genuine new-device finding on the SECOND scan.
+        run_scan(
+            state_fn=lambda: _state(listening_ports=_NO_PORTS, arp_neighbors={"available": True, "neighbors": [_NEIGHBOR_A]}),
+            store=store, now=lambda: 1000.0, write_alerts=False,
+        )
+        result = run_scan(
+            state_fn=lambda: _state(
+                listening_ports=ports,
+                arp_neighbors={"available": True, "neighbors": [_NEIGHBOR_A, _NEIGHBOR_B]},
+            ),
+            store=store, now=lambda: 2000.0,
+        )
+        correlations = [f for f in result.new_findings if f.kind == "correlated_new_device_and_exposed_port"]
+        assert len(correlations) == 1
+        assert correlations[0].severity == "high"
+        # The real, separate underlying findings are still reported too.
+        assert any(f.kind == "new_device" for f in result.new_findings)
+        assert any(f.kind == "exposed_port" for f in result.new_findings)
+        # A real alert was written for the correlation (HIGH severity).
+        assert any("same scan" in w["title"] for w in written)
+
+    def test_a_lone_new_device_never_correlates(self, tmp_path):
+        store = SentryStore(tmp_path / "s.db")
+        run_scan(
+            state_fn=lambda: _state(arp_neighbors={"available": True, "neighbors": []}),
+            store=store, now=lambda: 1000.0, write_alerts=False,
+        )
+        result = run_scan(
+            state_fn=lambda: _state(arp_neighbors={"available": True, "neighbors": [_NEIGHBOR_A]}),
+            store=store, now=lambda: 2000.0, write_alerts=False,
+        )
+        assert not any(f.kind == "correlated_new_device_and_exposed_port" for f in result.new_findings)
 
     def test_telemetry_availability_is_reported_honestly(self, tmp_path):
         state = _state()

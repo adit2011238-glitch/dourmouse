@@ -1,22 +1,26 @@
 """The ``security`` subagent — read-only inspection tools over
-``platform_adapter``'s real telemetry (Phase 4, docs/GODSPEED_ROADMAP.md).
+``platform_adapter``'s real telemetry (Phase 4, docs/GODSPEED_ROADMAP.md),
+plus the sentry's own bookkeeping (false-positive dismissal, incident
+lifecycle -- Phase 2 step 3).
 
-Deliberately read-only in this pass: every tool here observes, none of
-them changes firewall rules, disconnects anything, or otherwise acts.
-Real remediation tools are separate, later work, and per the spec's own
-policy default ("ask before changing anything") will need
-REQUIRES_CONFIRMATION when they exist — nothing here needs it, since
-reading your own host's network state is a REGULAR, safe operation
-(matches ``goal_tools.py``'s identical reasoning for its own bookkeeping
-tools).
+Deliberately read-only with respect to the HOST in this pass: no tool here
+changes firewall rules, disconnects anything, or otherwise acts on the
+machine or network. The incident tools mutate this subsystem's OWN
+persisted record-keeping (``SentryStore``'s ``incidents`` table), the same
+REGULAR-permission bookkeeping ``goal_tools.py`` already establishes for
+its own store. Real remediation tools that act on the host are separate,
+later work, and per the spec's own policy default ("ask before changing
+anything") will need REQUIRES_CONFIRMATION when they exist.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from dourmouse.dispatch import Subagent, ToolSpec
 from dourmouse.security import platform_adapter as pa
+from dourmouse.security import reputation as rep
 from dourmouse.security.sentry import DEFAULT_DB as _SENTRY_DB
 from dourmouse.security.sentry import SentryStore, run_scan
 
@@ -105,6 +109,37 @@ def _security_sentry_scan(_arguments: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _security_external_peers(_arguments: dict[str, Any]) -> str:
+    result = pa.get_established_connections()
+    if not result["available"]:
+        return f"ERROR: could not read established connections: {result['reason']}"
+    peers: dict[str, list[str]] = {}
+    for c in result["connections"]:
+        if rep._reject_non_public(c["remote_address"]) is not None:
+            continue  # real LAN/loopback/Tailscale peer -- not an external one
+        peers.setdefault(c["remote_address"], []).append(f"{c['command']} (pid {c['pid']})")
+    if not peers:
+        return "No real external (public-internet) peers currently connected."
+    lines = [f"{len(peers)} real external peer(s) currently connected:"]
+    for ip, commands in peers.items():
+        lines.append(f"  {ip} -- {', '.join(sorted(set(commands)))}")
+    return "\n".join(lines)
+
+
+def _security_check_reputation(arguments: dict[str, Any]) -> str:
+    ip = str(arguments.get("ip") or "").strip()
+    if not ip:
+        return "ERROR: security_check_reputation requires a non-empty 'ip'."
+    result = rep.check_ip_reputation(ip)
+    if not result["available"]:
+        return f"ERROR: {result['reason']}"
+    return (
+        f"{result['ip']}: abuse confidence {result['abuse_confidence_score']}/100, "
+        f"{result['total_reports']} real report(s), country {result['country_code']}, "
+        f"ISP {result['isp']}, Tor exit node: {result['is_tor']}"
+    )
+
+
 def _security_known_devices(_arguments: dict[str, Any]) -> str:
     rows = SentryStore(_SENTRY_DB).devices_snapshot()
     if not rows:
@@ -113,6 +148,48 @@ def _security_known_devices(_arguments: dict[str, Any]) -> str:
     for r in rows:
         label = r["hostname"] or r["ip"]
         lines.append(f"  {label} -- MAC {r['mac'] or 'unknown'}, IP {r['ip']}")
+    return "\n".join(lines)
+
+
+def _security_incident_open(arguments: dict[str, Any]) -> str:
+    fingerprint = str(arguments.get("fingerprint") or "").strip()
+    if not fingerprint:
+        return "ERROR: security_incident_open requires a non-empty 'fingerprint'."
+    note = str(arguments.get("note") or "").strip()
+    result = SentryStore(_SENTRY_DB).open_incident(fingerprint, note, now=time.time())
+    if result == "unknown_fingerprint":
+        return f"ERROR: no known finding with fingerprint {fingerprint!r} (run security_sentry_scan first)."
+    if result == "already_open":
+        return f"Incident for {fingerprint} is already open -- no new case created."
+    return f"Real incident opened for {fingerprint} (status OPEN)."
+
+
+def _security_incident_update(arguments: dict[str, Any]) -> str:
+    fingerprint = str(arguments.get("fingerprint") or "").strip()
+    if not fingerprint:
+        return "ERROR: security_incident_update requires a non-empty 'fingerprint'."
+    status = str(arguments.get("status") or "").strip().upper() or None
+    note = str(arguments.get("note") or "").strip() or None
+    try:
+        result = SentryStore(_SENTRY_DB).update_incident(fingerprint, status, note, now=time.time())
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    if result == "not_found":
+        return f"ERROR: no open incident for {fingerprint} (run security_incident_open first)."
+    if result == "terminal":
+        return f"ERROR: incident {fingerprint} is already closed -- open a new incident for a recurrence."
+    incident = SentryStore(_SENTRY_DB).get_incident(fingerprint)
+    return f"Incident {fingerprint} updated: status={incident['status']}, {len(incident['notes'])} note(s)."
+
+
+def _security_incidents(arguments: dict[str, Any]) -> str:
+    status = str(arguments.get("status") or "").strip().upper() or None
+    rows = SentryStore(_SENTRY_DB).list_incidents(status)
+    if not rows:
+        return "No real incidents" + (f" with status {status}" if status else "") + "."
+    lines = [f"{len(rows)} real incident(s):"]
+    for r in rows:
+        lines.append(f"  {r['fingerprint']} -- {r['status']} ({len(r['notes'])} note(s))")
     return "\n".join(lines)
 
 
@@ -163,6 +240,31 @@ def build_security_subagent() -> Subagent:
                 handler=_security_sentry_scan,
             ),
             ToolSpec(
+                name="security_external_peers",
+                description=(
+                    "List real, currently-established outbound connections to public-"
+                    "internet peers (excludes LAN/loopback/Tailscale addresses) -- the "
+                    "real candidates for security_check_reputation, never a scan target."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_security_external_peers,
+            ),
+            ToolSpec(
+                name="security_check_reputation",
+                description=(
+                    "Real AbuseIPDB reputation lookup for one real public IP address "
+                    "this host has genuinely been observed connecting to (see "
+                    "security_external_peers). Honestly reports NOT CONFIGURED if no "
+                    "ABUSEIPDB_API_KEY is set, and refuses private/LAN addresses."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"ip": {"type": "string"}},
+                    "required": ["ip"],
+                },
+                handler=_security_check_reputation,
+            ),
+            ToolSpec(
                 name="security_known_devices",
                 description=(
                     "List this host's real, persisted known-device baseline (MAC/IP/"
@@ -185,6 +287,46 @@ def build_security_subagent() -> Subagent:
                     "required": ["fingerprint"],
                 },
                 handler=_security_sentry_dismiss,
+            ),
+            ToolSpec(
+                name="security_incident_open",
+                description=(
+                    "Open a real, tracked incident/case for an existing security_sentry_scan "
+                    "finding (by its fingerprint), with an optional initial note -- a real "
+                    "OPEN -> INVESTIGATING -> RESOLVED/ACCEPTED_RISK operator workflow, not "
+                    "just a flat findings list."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"fingerprint": {"type": "string"}, "note": {"type": "string", "default": ""}},
+                    "required": ["fingerprint"],
+                },
+                handler=_security_incident_open,
+            ),
+            ToolSpec(
+                name="security_incident_update",
+                description=(
+                    "Move an open incident to a new status (OPEN, INVESTIGATING, RESOLVED, "
+                    "ACCEPTED_RISK) and/or append a real note. A RESOLVED/ACCEPTED_RISK "
+                    "incident never silently reopens -- open a new incident for a real "
+                    "recurrence instead."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "fingerprint": {"type": "string"},
+                        "status": {"type": "string", "default": ""},
+                        "note": {"type": "string", "default": ""},
+                    },
+                    "required": ["fingerprint"],
+                },
+                handler=_security_incident_update,
+            ),
+            ToolSpec(
+                name="security_incidents",
+                description="List real tracked incidents, optionally filtered by status.",
+                parameters={"type": "object", "properties": {"status": {"type": "string", "default": ""}}},
+                handler=_security_incidents,
             ),
         ),
     )

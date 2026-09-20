@@ -250,6 +250,44 @@ def get_listening_ports() -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Established connections (real outbound peers this host is genuinely
+# talking to right now -- distinct from get_listening_ports's own LISTEN-
+# state view. This is the real telemetry Phase 2 step 2 (threat-
+# intelligence enrichment) enriches: a reputation lookup only makes sense
+# against an IP this host is ACTUALLY connected to, never a scan target.
+# --------------------------------------------------------------------------- #
+
+_LSOF_ESTABLISHED_RE = re.compile(
+    r"^(\S+)\s+(\d+)\s+(\S+)\s+\S+\s+(IPv4|IPv6)\s+\S+\s+\S*\s+(TCP)\s+"
+    r"(.+?):(\d+)->(.+?):(\d+)\s*\(ESTABLISHED\)$"
+)
+
+
+def get_established_connections() -> dict[str, Any]:
+    ok, out = _run(["lsof", "-iTCP", "-sTCP:ESTABLISHED", "-n", "-P"], timeout=10.0)
+    if not ok:
+        return _unavailable(out)
+    connections = []
+    for line in out.splitlines()[1:]:  # skip the header row
+        m = _LSOF_ESTABLISHED_RE.match(line.strip())
+        if not m:
+            continue
+        command, pid, user, family, proto, local_addr, local_port, remote_addr, remote_port = m.groups()
+        connections.append({
+            "command": command,
+            "pid": int(pid),
+            "user": user,
+            "family": family,
+            "protocol": proto,
+            "local_address": local_addr.strip("[]"),
+            "local_port": int(local_port),
+            "remote_address": remote_addr.strip("[]"),
+            "remote_port": int(remote_port),
+        })
+    return {"available": True, "connections": connections}
+
+
+# --------------------------------------------------------------------------- #
 # Firewall
 # --------------------------------------------------------------------------- #
 
@@ -274,5 +312,6 @@ def get_system_security_state() -> dict[str, Any]:
         "dns": get_dns_configuration(),
         "arp_neighbors": get_arp_neighbors(),
         "listening_ports": get_listening_ports(),
+        "established_connections": get_established_connections(),
         "firewall": get_firewall_status(),
     }

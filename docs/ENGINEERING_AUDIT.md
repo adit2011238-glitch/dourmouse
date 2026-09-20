@@ -2345,6 +2345,141 @@ real, separate, not-yet-built follow-on.
 
 ---
 
+### 053 -- Domain I: threat-intelligence enrichment for real external peers
+
+**Severity**: n/a (feature -- Phase 2 step 2 of the standing plan).
+**Context**: named explicitly in `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`'s own scale-out plan
+(§11, step 2): real reputation lookups for an external IP genuinely seen talking to the host, honestly
+`NOT_CONFIGURED` when no key is set. No telemetry existed yet for which external IPs the host is
+actually connected to -- `platform_adapter.py` only had `get_listening_ports()` (LISTEN state).
+**Design**: `platform_adapter.get_established_connections()` (new), real `lsof -iTCP -sTCP:ESTABLISHED
+-n -P` parsing (same argument-list-only, bounded-timeout discipline as every other `_run()` call in
+this module), capturing local/remote address:port pairs for both IPv4 and bracketed IPv6, added to
+`get_system_security_state()`'s own bundled snapshot. `dourmouse/security/reputation.py` (new): a
+real, keyed AbuseIPDB `check()` call, honestly `NOT CONFIGURED` without `ABUSEIPDB_API_KEY` set (the
+exact same convention `worldmonitor.py`'s own `WORLDMONITOR_API_KEY` already established), and refuses
+private/loopback/link-local/reserved/multicast targets before any network call -- reusing
+`general_roster.py`'s own `_refuse_private_fetch_target` classification logic rather than
+re-deriving it (asking a public reputation API about a LAN address is meaningless, and would leak the
+user's own internal topology to a third party for no reason). Two new chat tools on the `security`
+subagent: `security_external_peers` (lists real, currently-established outbound connections to
+public-internet peers only, excluding LAN/loopback/Tailscale) and `security_check_reputation` (the
+real AbuseIPDB lookup for one IP from that list) -- never a scan target, only IPs the host has
+genuinely been observed connecting to.
+**Live proof**: against this real machine's real network state, `security_external_peers` correctly
+listed 15 real distinct external peers (Google, Spotify, Claude, AvidLink) with their real owning
+processes, correctly excluding LAN/Tailscale/loopback addresses; `security_check_reputation` correctly
+refused a real private IP (`192.168.1.1`) before any network call, and correctly reported honest
+`NOT CONFIGURED` for a real public IP (`8.8.8.8`) since no `ABUSEIPDB_API_KEY` is set on this machine
+-- exactly the Rule 2.2 behavior this feature is required to have, not a fabricated score.
+**Files changed**: `dourmouse/security/platform_adapter.py` (`get_established_connections`,
+`get_system_security_state`); new `dourmouse/security/reputation.py`; `dourmouse/security/tools.py`
+(`security_external_peers`, `security_check_reputation`).
+**Tests added**: `TestEstablishedConnections` (4) in `test_security_platform_adapter.py` against real
+captured `lsof ESTABLISHED` output (IPv4 and bracketed IPv6), plus the snapshot-shape tests updated
+for the new key; new `test_security_reputation.py` (17 tests: key detection, private/public
+classification, and every real `check_ip_reputation` outcome -- not configured, success, HTTP error,
+network error, malformed JSON, missing score field); `TestSecurityExternalPeers` (3) and
+`TestSecurityCheckReputation` (3) in `test_security_tools.py`, plus the subagent's own exhaustive
+tool-name-set assertion updated.
+**Tests run**: `test_security_platform_adapter.py` (39/39), `test_security_reputation.py` (17/17),
+`test_security_tools.py` (17/17), full suite (see commit).
+**Result**: fixed -- Domain I Phase 2 step 2 is closed. Incident/case tracking, the correlation
+engine, and local remediation (Phase 2 steps 3-5) remain real, separate, not-yet-built follow-on.
+
+---
+
+### 054 -- Domain I: real incident/case tracking (Phase 2 step 3)
+
+**Severity**: n/a (feature -- Phase 2 step 3 of the standing plan).
+**Context**: named explicitly in `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`'s own scale-out plan
+(§11, step 3): a real `SentryStore` already existed as the foundation, but only a flat findings table
+-- no real operator workflow (triage, note, close) existed, unlike `goals.py`'s own real state-machine
+precedent for a comparable lifecycle.
+**Design**: a new `incidents` table on `SentryStore` (`dourmouse/security/sentry.py`):
+`fingerprint` (references an existing `seen_findings` row), `status` (`OPEN` / `INVESTIGATING` /
+`RESOLVED` / `ACCEPTED_RISK`, `INCIDENT_STATES`/`INCIDENT_TERMINAL_STATES` module constants mirroring
+`goals.py`'s own `GOAL_TERMINAL_STATES` "never silently reopen" discipline rather than inventing new
+status semantics), a JSON `notes` list (`{at, text}` per entry, append-only), `opened_at`/`updated_at`.
+`open_incident()` refuses an unknown fingerprint (a real, honest error -- an incident must reference a
+real, already-detected finding, never an arbitrary string) and is idempotent (`already_open` on a
+second call, never a duplicate case). `update_incident()` refuses to move a RESOLVED/ACCEPTED_RISK
+incident to any OTHER status (`"terminal"`) but still accepts a note-only update or a re-confirmation
+of the SAME terminal status -- a closing confirmation is not a reopen. Three new chat tools on the
+`security` subagent: `security_incident_open`, `security_incident_update`, `security_incidents`
+(list, optionally filtered by status).
+**Live proof**: against this real machine's own real, currently-active `security_sentry_scan` finding
+(the real disabled-Application-Firewall HIGH finding this codebase has used as its own live example
+since finding #039), a real incident was opened, transitioned to `INVESTIGATING` with a real note,
+closed as `ACCEPTED_RISK` with a second real note, correctly refused a subsequent attempt to reopen it
+to `OPEN`, and correctly listed under a status filter -- a genuine end-to-end SOC-style case lifecycle
+against a real, currently-true finding on this host, not a synthetic fixture.
+**Files changed**: `dourmouse/security/sentry.py` (`incidents` schema, `INCIDENT_STATES`/
+`INCIDENT_TERMINAL_STATES`, `SentryStore.open_incident`/`update_incident`/`get_incident`/
+`list_incidents`); `dourmouse/security/tools.py` (`security_incident_open`/`security_incident_update`/
+`security_incidents`, updated module docstring distinguishing host-mutation from own-bookkeeping
+mutation).
+**Tests added**: `TestSentryStoreIncidents` (12 tests: unknown-fingerprint refusal, open/idempotent-
+reopen, unknown-incident update, invalid status, real transition + note, note-only update leaves
+status unchanged, terminal refuses to change status, terminal accepts a same-status re-confirmation,
+`get_incident` on a never-opened fingerprint, status-filtered listing) in `test_sentry.py`;
+`TestSecurityIncidentTools` (9 tests covering every tool's happy path and honest-refusal path) in
+`test_security_tools.py`, plus the subagent's own exhaustive tool-name-set assertion updated.
+**Tests run**: `test_sentry.py` (66/66), `test_security_tools.py` (35/35), full suite (see commit).
+**Result**: fixed -- Domain I Phase 2 step 3 is closed. The correlation engine and local remediation
+(Phase 2 steps 4-5) remain real, separate, not-yet-built follow-on -- the last two pieces of the
+Phase 2 scale-out plan.
+
+---
+
+### 055 -- Domain I: correlation engine and specific remediation text (Phase 2 steps 4-5)
+
+**Severity**: n/a (feature -- the last two steps of the standing Phase 2 scale-out plan).
+**Context**: named explicitly in `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md`'s own scale-out plan
+(§11, steps 4-5): a real SOC's own value-add over isolated point checks is noticing multiple weak
+signals together, and local remediation should compose real, specific text rather than a vague
+suggestion, never auto-applied.
+**Design (correlation, step 4)**: `_detect_correlations(new_findings)` (`dourmouse/security/
+sentry.py`) -- one explicit, deterministic rule, the spec's own named example verbatim: a real
+`new_device` finding AND a real `exposed_port` finding BOTH appearing in the SAME scan's own
+`new_findings` (never the persisted, still-open condition list) produce one HIGH
+`correlated_new_device_and_exposed_port` finding. Checking `new_findings` rather than all currently-
+open findings is the real design choice that makes this a genuine same-window COINCIDENCE rule: it
+fires exactly once, on the scan where both first appear together, and correctly never re-fires on a
+later scan where either condition was already known (since an already-known finding never lands in
+`new_findings` again). Deliberately never persisted through `SentryStore.record_and_classify` -- a
+stable fingerprint for a coincidence has nothing meaningful to deduplicate against on a later,
+unrelated scan. Wired into `run_scan()` right after the ordinary findings loop, sharing the exact same
+scoring/alert-writing path (`_write_alert()`, extracted as a small shared helper from the pre-existing
+inline alert-write code so both paths use one real mechanism).
+**Design (remediation text, step 5)**: every existing detection rule's `recommended_action` upgraded
+from a generic suggestion to real, specific, copy-pasteable text: `firewall_disabled` now gives the
+exact real `socketfilterfw --setglobalstate on` command; `exposed_port` now composes the exact real
+`pf` rule for that specific command/port/protocol; `new_device` now names the specific real MAC/IP to
+block at the router; the correlation finding's own `recommended_action` concatenates both underlying
+findings' real, specific text. Deliberately text-only -- nothing here executes a command, changes a
+firewall rule, or touches the network; matches the master doc's own "never auto-applied" wording more
+strictly than a suggest-then-confirm execution gate would, and avoids introducing any new
+execution/privilege-escalation surface into a defensive-only subsystem.
+**Live proof**: against this real machine's real telemetry, a synthetic injected new device (`intruder
+.local`) AND a synthetic injected exposed service (`backdoor` on port 4444, `ALL_INTERFACES`) in the
+SAME scan correctly produced all three real findings together -- the two underlying MED findings plus
+one HIGH `correlated_new_device_and_exposed_port` finding naming both by their real titles.
+**Files changed**: `dourmouse/security/sentry.py` (`_detect_correlations`, `_write_alert` helper,
+`run_scan`'s wiring, four `recommended_action` upgrades).
+**Tests added**: `TestDetectCorrelations` (5 tests: no correlation with one signal, no correlation
+with unrelated signals, a real HIGH correlation with both, stable fingerprint, empty input) and two
+`TestRunScan` integration tests (a real coincident new-device+exposed-port scan correlates and alerts;
+a lone new device never correlates) in `test_sentry.py`.
+**Tests run**: `test_sentry.py` (61/61), `test_security_tools.py` + `test_webui.py` (unaffected by the
+text-only `recommended_action` changes, confirmed passing), full suite (see commit).
+**Result**: fixed -- Domain I's Phase 2 scale-out plan (asset inventory, threat intel, incident
+tracking, correlation, remediation text) is now fully closed. Remaining Domain I work: the dashboard
+UI and Windows/cross-device platform coverage (Phase 2 items 6-7), and the much larger ~40-item balance
+of the founding spec's own 54-item cybersecurity build list.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

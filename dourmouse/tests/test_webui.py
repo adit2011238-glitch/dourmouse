@@ -382,7 +382,8 @@ class TestSecurityEndpoint:
         assert resp.status == 200
         data = json.loads(resp.read())
         assert set(data.keys()) == {
-            "interfaces", "default_gateway", "dns", "arp_neighbors", "listening_ports", "firewall",
+            "interfaces", "default_gateway", "dns", "arp_neighbors",
+            "listening_ports", "established_connections", "firewall",
         }
         for section in data.values():
             assert "available" in section

@@ -90,6 +90,14 @@ Python     7502 aditagrawal    4u  IPv6 0x292a19ea9d056b40      0t0  TCP *:8793 
 Python    49695 aditagrawal    7u  IPv4  0x87347fca5926d71      0t0  TCP 127.0.0.1:8765 (LISTEN)
 """
 
+_REAL_LSOF_ESTABLISHED = """\
+COMMAND     PID        USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+AvidLink  47756 aditagrawal   49u  IPv4  0xe0400ce4f276ad1      0t0  TCP 192.168.1.95:65445->104.109.251.234:80 (ESTABLISHED)
+AvidLink  47756 aditagrawal   50u  IPv4 0xa989e4c0c191a8c4      0t0  TCP 192.168.1.95:65449->104.18.42.13:443 (ESTABLISHED)
+Tailscale 47779 aditagrawal    3u  IPv4 0x1d6453c9c1b20cf4      0t0  TCP 127.0.0.1:53629->127.0.0.1:53624 (ESTABLISHED)
+rapportd  47492 aditagrawal   18u  IPv6 0xe1a4174fbc096fde      0t0  TCP [fe80:b::8ab:c8a5:2cbf:5005]:53442->[fe80:b::1488:95ef:9ff3:ef56]:52664 (ESTABLISHED)
+"""
+
 _REAL_FIREWALL_DISABLED = "Firewall is disabled. (State = 0)\n"
 _REAL_FIREWALL_ENABLED = "Firewall is enabled. (State = 1)\n"
 
@@ -260,6 +268,36 @@ class TestListeningPortsAndExposure:
         assert rapportd["protocol"] == "TCP"
 
 
+class TestEstablishedConnections:
+    def test_parses_every_real_connection(self, monkeypatch):
+        monkeypatch.setattr(pa, "_run", lambda cmd, timeout=pa._DEFAULT_TIMEOUT_S: (True, _REAL_LSOF_ESTABLISHED))
+        result = pa.get_established_connections()
+        assert result["available"] is True
+        assert len(result["connections"]) == 4
+
+    def test_real_ipv4_remote_peer_is_captured(self, monkeypatch):
+        monkeypatch.setattr(pa, "_run", lambda cmd, timeout=pa._DEFAULT_TIMEOUT_S: (True, _REAL_LSOF_ESTABLISHED))
+        conns = pa.get_established_connections()["connections"]
+        avidlink = next(c for c in conns if c["command"] == "AvidLink" and c["remote_port"] == 443)
+        assert avidlink["remote_address"] == "104.18.42.13"
+        assert avidlink["local_address"] == "192.168.1.95"
+        assert avidlink["local_port"] == 65449
+        assert avidlink["pid"] == 47756
+        assert avidlink["protocol"] == "TCP"
+
+    def test_real_ipv6_bracketed_addresses_are_stripped(self, monkeypatch):
+        monkeypatch.setattr(pa, "_run", lambda cmd, timeout=pa._DEFAULT_TIMEOUT_S: (True, _REAL_LSOF_ESTABLISHED))
+        conns = pa.get_established_connections()["connections"]
+        rapportd = next(c for c in conns if c["command"] == "rapportd")
+        assert rapportd["remote_address"] == "fe80:b::1488:95ef:9ff3:ef56"
+        assert "[" not in rapportd["remote_address"]
+
+    def test_unavailable_lsof_is_honest(self, monkeypatch):
+        monkeypatch.setattr(pa, "_run", lambda cmd, timeout=pa._DEFAULT_TIMEOUT_S: (False, "lsof timed out after 10.0s"))
+        result = pa.get_established_connections()
+        assert result == {"available": False, "reason": "lsof timed out after 10.0s"}
+
+
 class TestExposureClassifier:
     def test_loopback_variants(self):
         assert pa._classify_exposure("127.0.0.1") == "LOOPBACK_ONLY"
@@ -299,9 +337,13 @@ class TestSystemSecurityStateSnapshot:
         monkeypatch.setattr(pa, "get_dns_configuration", lambda: {"available": True, "resolvers": []})
         monkeypatch.setattr(pa, "get_arp_neighbors", lambda: {"available": True, "neighbors": []})
         monkeypatch.setattr(pa, "get_listening_ports", lambda: {"available": True, "listening_ports": []})
+        monkeypatch.setattr(pa, "get_established_connections", lambda: {"available": True, "connections": []})
         monkeypatch.setattr(pa, "get_firewall_status", lambda: {"available": True, "enabled": False, "raw": ""})
         snap = pa.get_system_security_state()
-        assert set(snap.keys()) == {"interfaces", "default_gateway", "dns", "arp_neighbors", "listening_ports", "firewall"}
+        assert set(snap.keys()) == {
+            "interfaces", "default_gateway", "dns", "arp_neighbors",
+            "listening_ports", "established_connections", "firewall",
+        }
 
     def test_one_unavailable_signal_never_blanks_the_others(self, monkeypatch):
         """Real resilience property: a missing/failed tool for ONE
@@ -311,6 +353,7 @@ class TestSystemSecurityStateSnapshot:
         monkeypatch.setattr(pa, "get_dns_configuration", lambda: {"available": True, "resolvers": []})
         monkeypatch.setattr(pa, "get_arp_neighbors", lambda: {"available": True, "neighbors": []})
         monkeypatch.setattr(pa, "get_listening_ports", lambda: {"available": True, "listening_ports": []})
+        monkeypatch.setattr(pa, "get_established_connections", lambda: {"available": True, "connections": []})
         monkeypatch.setattr(pa, "get_firewall_status", lambda: {"available": True, "enabled": False, "raw": ""})
         snap = pa.get_system_security_state()
         assert snap["interfaces"]["available"] is False

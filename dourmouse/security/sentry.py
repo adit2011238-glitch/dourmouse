@@ -12,7 +12,7 @@ before writing any detection rule, in favor of a real, explicit, auditable
 formula, matching this domain's own explicit requirement ("never a bare
 LLM vibe-check with no formula behind it").
 
-Three real detection rules now: a disabled Application Firewall (HIGH),
+Three real detection rules now, plus a real correlation rule on top: a disabled Application Firewall (HIGH),
 any listening service exposed beyond LOOPBACK_ONLY/LOCAL_NETWORK/
 TAILSCALE's own expected tiers -- i.e. ALL_INTERFACES (MED) -- and, closed
 2026-09-21 (Phase 2 step 1, harsh acceptance test 2), a real persisted
@@ -42,17 +42,30 @@ real endpoint security agents actually behave, not a marketing-driven
 Still deliberately NOT built in this pass: the live SSE push through
 DesktopNotifier (needs the running server's own hub instance, unreachable
 from a plain tool call -- checked directly before writing this: no global
-accessor for it exists today) and new-LAN-device detection (needs a real
-persisted ARP-neighbor baseline). A scan today is real, continuous, and
+accessor for it exists today). A scan today is real, continuous, and
 chat-reachable, and a genuinely new HIGH finding writes a real, persisted
 alert via state_store.add_alert -- the exact same real mechanism
 goal_runtime.py's own system alerts already use -- visible on the next
 alerts-screen refresh, just not an instant push.
+
+**Incident/case tracking** (2026-09-21, Phase 2 step 3): `SentryStore`
+gains a real `incidents` table -- `OPEN -> INVESTIGATING ->
+RESOLVED/ACCEPTED_RISK`, mirroring `goals.py`'s own "terminal states never
+silently reopen" discipline (`GOAL_TERMINAL_STATES`) rather than inventing
+new status semantics. An incident references a real, already-detected
+finding by fingerprint (an unknown fingerprint is a real, honest refusal,
+never a silently-created orphan case); a RESOLVED/ACCEPTED_RISK incident
+refuses to transition to any OTHER status (a real analyst opens a NEW
+incident for a genuine recurrence instead) but CAN still receive a
+note-only update or be re-set to the SAME terminal status (a closing
+confirmation, not a reopen). A real SOC operator workflow -- triage, note,
+close -- on top of what was previously just a flat findings table.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sqlite3
 import threading
@@ -67,6 +80,14 @@ from dourmouse.security import platform_adapter as pa
 _DEFAULT_SCAN_INTERVAL_SECONDS = 300.0
 
 DEFAULT_DB = workspace_dir() / "security" / "sentry.db"
+
+#: Real incident lifecycle (Phase 2 step 3) -- mirrors goals.py's own
+#: "terminal states never silently reopen" discipline (GOAL_TERMINAL_
+#: STATES) rather than inventing new status semantics: RESOLVED and
+#: ACCEPTED_RISK are terminal, a genuine operator workflow (triage, note,
+#: close), never just a flat findings table.
+INCIDENT_STATES = frozenset({"OPEN", "INVESTIGATING", "RESOLVED", "ACCEPTED_RISK"})
+INCIDENT_TERMINAL_STATES = frozenset({"RESOLVED", "ACCEPTED_RISK"})
 
 # Real, explicit, auditable weights -- adapted from ThreatSentinel's own
 # "weighted base severity" component. Historical pattern match (the other
@@ -92,6 +113,13 @@ CREATE TABLE IF NOT EXISTS known_devices (
     hostname   TEXT,
     first_seen REAL NOT NULL,
     last_seen  REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS incidents (
+    fingerprint TEXT PRIMARY KEY,
+    status      TEXT NOT NULL,
+    notes       TEXT NOT NULL DEFAULT '[]',
+    opened_at   REAL NOT NULL,
+    updated_at  REAL NOT NULL
 );
 """
 
@@ -164,9 +192,12 @@ def _detect_findings(
             title="Application Firewall is disabled",
             detail="macOS Application Firewall is currently OFF -- every listening "
                    "service on this machine accepts unsolicited inbound connections.",
-            recommended_action="Enable it: System Settings -> Network -> Firewall. "
-                                "Not applied automatically -- this is a suggestion, "
-                                "never a silent change.",
+            recommended_action=(
+                "Enable it via System Settings -> Network -> Firewall, or run this "
+                "exact real command yourself: "
+                "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on "
+                "-- never applied automatically, this is a suggestion only (Phase 2 step 5)."
+            ),
         ))
 
     lp = state.get("listening_ports") or {}
@@ -187,9 +218,13 @@ def _detect_findings(
                     "host is on, not just this machine."
                 ),
                 recommended_action=(
-                    "If this service does not need LAN/remote access, bind it to "
-                    "127.0.0.1 or restrict it with a firewall rule instead. Not "
-                    "applied automatically."
+                    f"If {port['command']} does not need LAN/remote access, reconfigure it "
+                    f"to bind to 127.0.0.1 instead of {port['bind_address']}, or add this "
+                    f"exact real pf rule yourself (in /etc/pf.conf, then "
+                    f"`sudo pfctl -f /etc/pf.conf`): "
+                    f"block in on en0 proto {port['protocol'].lower()} from any to any "
+                    f"port {port['port']} -- never applied automatically, this is a "
+                    "suggestion only (Phase 2 step 5)."
                 ),
             ))
 
@@ -210,12 +245,52 @@ def _detect_findings(
                     "in this host's previously known device baseline."
                 ),
                 recommended_action=(
-                    "If you do not recognize this device, investigate before trusting it "
-                    "on this network. Not blocked automatically."
+                    f"If you do not recognize this device, block it at your router's admin "
+                    f"page (by MAC {neighbor.get('mac') or 'unknown, use IP ' + neighbor['ip']}), "
+                    "or investigate it directly first. Never blocked automatically -- this is "
+                    "a suggestion only (Phase 2 step 5)."
                 ),
             ))
 
     return findings
+
+
+def _detect_correlations(new_findings: list[SentryFinding]) -> list[SentryFinding]:
+    """Real correlation over THIS scan's own genuinely new findings (Phase
+    2 step 4): a real SOC's own value-add over isolated point checks is
+    noticing multiple weak signals together, not a vague "AI notices
+    patterns" claim -- one explicit, deterministic rule this pass: a new
+    LAN device AND a newly-exposed service appearing in the SAME scan (the
+    spec's own named example verbatim). Deliberately checks `new_findings`
+    (not the persisted, still-open condition list) -- the correlation is
+    about a same-window COINCIDENCE, so it fires exactly once, on the scan
+    where both first appear together; a scan where either condition was
+    already known from a prior scan correctly does not re-fire, since
+    `new_findings` never contains an already-known finding. Never
+    persisted through `SentryStore.record_and_classify` (a stable
+    fingerprint for a coincidence has nothing meaningful to deduplicate
+    against on a later, unrelated scan)."""
+    kinds = {f.kind for f in new_findings}
+    if "new_device" not in kinds or "exposed_port" not in kinds:
+        return []
+    device = next(f for f in new_findings if f.kind == "new_device")
+    port = next(f for f in new_findings if f.kind == "exposed_port")
+    return [SentryFinding(
+        fingerprint=_fingerprint("correlation", device.fingerprint, port.fingerprint),
+        kind="correlated_new_device_and_exposed_port",
+        severity="high",
+        title="New device and a newly-exposed service appeared in the same scan",
+        detail=(
+            f"{device.title} AND {port.title} were BOTH first detected in this same scan -- "
+            "individually each is a real, separate finding, but the same-window coincidence "
+            "raises the real risk this is a coordinated event, not two unrelated background "
+            "changes."
+        ),
+        recommended_action=(
+            f"Investigate both together before trusting either: {device.recommended_action} "
+            f"{port.recommended_action}"
+        ),
+    )]
 
 
 class SentryStore:
@@ -312,6 +387,91 @@ class SentryStore:
         cols = ["device_key", "mac", "ip", "hostname", "first_seen", "last_seen"]
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
+    def open_incident(self, fingerprint: str, note: str, now: float) -> str:
+        """Real, idempotent case open. Returns "opened", "already_open"
+        (never silently re-creates a real case), or "unknown_fingerprint"
+        (a real, honest refusal -- an incident must reference a real,
+        already-detected finding, never an arbitrary string)."""
+        with self._lock, self._conn() as conn:
+            known = conn.execute(
+                "SELECT 1 FROM seen_findings WHERE fingerprint=?", (fingerprint,)
+            ).fetchone()
+            if known is None:
+                return "unknown_fingerprint"
+            existing = conn.execute(
+                "SELECT 1 FROM incidents WHERE fingerprint=?", (fingerprint,)
+            ).fetchone()
+            if existing is not None:
+                return "already_open"
+            notes = [{"at": now, "text": note}] if note else []
+            conn.execute(
+                "INSERT INTO incidents (fingerprint, status, notes, opened_at, updated_at) "
+                "VALUES (?, 'OPEN', ?, ?, ?)",
+                (fingerprint, json.dumps(notes), now, now),
+            )
+            conn.commit()
+            return "opened"
+
+    def update_incident(
+        self, fingerprint: str, status: str | None, note: str | None, now: float
+    ) -> str:
+        """Real case transition/note. Returns "updated", "not_found", or
+        "terminal" (a genuine, honest refusal -- RESOLVED/ACCEPTED_RISK
+        never silently reopen; a real analyst must open a NEW incident for
+        a recurrence, same "never quietly resurrect a closed record"
+        discipline as `goals.py`'s own terminal states)."""
+        if status is not None and status not in INCIDENT_STATES:
+            raise ValueError(f"unknown incident status: {status!r}")
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT status, notes FROM incidents WHERE fingerprint=?", (fingerprint,)
+            ).fetchone()
+            if row is None:
+                return "not_found"
+            current_status, notes_json = row
+            if current_status in INCIDENT_TERMINAL_STATES and status is not None and status != current_status:
+                return "terminal"
+            notes = json.loads(notes_json)
+            if note:
+                notes.append({"at": now, "text": note})
+            conn.execute(
+                "UPDATE incidents SET status=?, notes=?, updated_at=? WHERE fingerprint=?",
+                (status or current_status, json.dumps(notes), now, fingerprint),
+            )
+            conn.commit()
+            return "updated"
+
+    def get_incident(self, fingerprint: str) -> dict[str, Any] | None:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT fingerprint, status, notes, opened_at, updated_at FROM incidents "
+                "WHERE fingerprint=?", (fingerprint,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "fingerprint": row[0], "status": row[1], "notes": json.loads(row[2]),
+            "opened_at": row[3], "updated_at": row[4],
+        }
+
+    def list_incidents(self, status: str | None = None) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            if status is None:
+                rows = conn.execute(
+                    "SELECT fingerprint, status, notes, opened_at, updated_at FROM incidents "
+                    "ORDER BY updated_at DESC"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT fingerprint, status, notes, opened_at, updated_at FROM incidents "
+                    "WHERE status=? ORDER BY updated_at DESC", (status,),
+                ).fetchall()
+        return [
+            {"fingerprint": r[0], "status": r[1], "notes": json.loads(r[2]),
+             "opened_at": r[3], "updated_at": r[4]}
+            for r in rows
+        ]
+
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
@@ -324,6 +484,27 @@ class SentryStore:
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
 
+def _write_alert(finding: SentryFinding) -> bool:
+    """Real, best-effort alert write -- shared by the ordinary HIGH-
+    finding path and the correlation path so both go through the exact
+    same real mechanism (`state_store.default_store().add_alert`).
+    Returns whether a real alert genuinely landed; never raises, matching
+    this scan's own "an observer must never break a real scan" rule."""
+    try:
+        from dourmouse.state_store import default_store
+
+        default_store().add_alert(
+            kind="system",
+            title=f"Security: {finding.title}"[:160],
+            detail=finding.detail[:400],
+            severity="high",
+            link="#/security",
+        )
+        return True
+    except Exception:  # noqa: BLE001 -- an observer must never break a real scan
+        return False
+
+
 def run_scan(
     state_fn: Callable[[], dict[str, Any]] = pa.get_system_security_state,
     store: SentryStore | None = None,
@@ -332,11 +513,13 @@ def run_scan(
 ) -> SentryScanResult:
     """INITIAL_ASSESSMENT (trivial, this call itself) ->
     INTELLIGENCE_GATHERING (state_fn) -> RISK_ANALYSIS (_detect_findings +
-    the real weighted formula) -> ACTION_PLANNING/REPORTING (each
-    SentryFinding's own recommended_action, plus a real alert for a
-    genuinely new HIGH finding) -> MEMORY_UPDATE (SentryStore, read back
-    on every future call automatically via record_and_classify, plus the
-    real known-device baseline read here and written back at the end).
+    the real weighted formula + _detect_correlations over this scan's own
+    genuinely new findings, Phase 2 step 4) -> ACTION_PLANNING/REPORTING
+    (each SentryFinding's own recommended_action, plus a real alert for a
+    genuinely new HIGH finding or a real correlation) -> MEMORY_UPDATE
+    (SentryStore, read back on every future call automatically via
+    record_and_classify, plus the real known-device baseline read here and
+    written back at the end).
 
     The known-device baseline read happens BEFORE `_detect_findings` and
     the write happens AFTER -- this scan's own newly-seen devices must
@@ -375,20 +558,15 @@ def run_scan(
             # a user ever scans would be noise, not signal. Still reported
             # in the real scan text either way -- never hidden, just not
             # proactively pushed as an alert.
-            if write_alerts and finding.severity == "high":
-                try:
-                    from dourmouse.state_store import default_store
+            if write_alerts and finding.severity == "high" and _write_alert(finding):
+                alerts_written += 1
 
-                    default_store().add_alert(
-                        kind="system",
-                        title=f"Security: {finding.title}"[:160],
-                        detail=finding.detail[:400],
-                        severity="high",
-                        link="#/security",
-                    )
-                    alerts_written += 1
-                except Exception:  # noqa: BLE001 -- an observer must never break a real scan
-                    pass
+    for correlation in _detect_correlations(new_findings):
+        all_findings.append(correlation)
+        new_findings.append(correlation)
+        risk_score += _SEVERITY_WEIGHT.get(correlation.severity, 0.0)
+        if write_alerts and _write_alert(correlation):
+            alerts_written += 1
 
     arp = state.get("arp_neighbors") or {}
     if arp.get("available"):

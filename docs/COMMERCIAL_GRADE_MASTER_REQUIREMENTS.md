@@ -647,25 +647,36 @@ second scheduler per capability:
    verified against this machine's real 16-device ARP table: silent seed, then exactly one correct
    finding on a real injected 17th device. Vendor-OUI lookup (MAC prefix -> manufacturer name) is a
    real, separate, not-yet-built enrichment on top of this -- named honestly, not claimed here.
-2. **Threat intelligence enrichment**: real reputation lookups (VirusTotal/AbuseIPDB-class APIs,
-   honestly `NOT_CONFIGURED` when no key is set, mirroring this codebase's own established
-   "never fake data when a key isn't configured" rule, see `docs/GODSPEED_ROADMAP.md`'s own
-   ThreatSentinel-adapted architecture note) for an external IP genuinely seen talking to the host
-   -- asking a reputation API about a real observed peer, never scanning or acting against it.
-3. **Incident/case tracking**: a real `SentryStore` already exists as the foundation -- extend it
-   with a genuine incident lifecycle (`OPEN -> INVESTIGATING -> RESOLVED/ACCEPTED_RISK`), not just a
-   flat findings table, so a real security operator workflow (triage, note, close) exists, mirroring
-   `goals.py`'s own real state-machine precedent rather than inventing new status semantics.
-4. **Correlation, not just isolated findings**: a real SOC's own value-add over point checks is
-   noticing multiple weak signals together (e.g., a new LAN device AND an exposed port opening in
-   the same real time window) -- a real, explicit correlation rule set over `SentryStore`'s own
-   persisted history, evaluated on each `SentryRuntime` tick, not a vague "AI notices patterns"
-   claim.
-5. **Local remediation actions, always suggest-then-confirm**: routes through the SAME real
-   approval-gate mechanism Domain D's self-extension and finding #029's resumable-ticket system
-   already built -- a suggested `pf` rule change or revoking a Tailscale node's access is composed
-   as real, specific text, never auto-applied, matching this section's own permanently-binding scope
-   restatement.
+2. **Shipped (finding #053)**: threat intelligence enrichment. `platform_adapter.
+   get_established_connections()` (new real `lsof -sTCP:ESTABLISHED` telemetry) identifies real
+   external peers the host is genuinely connected to; `security/reputation.py` is a real, keyed
+   AbuseIPDB lookup, honestly `NOT_CONFIGURED` when no key is set (mirroring this codebase's own
+   established "never fake data when a key isn't configured" rule, same convention as
+   `worldmonitor.py`'s own `WORLDMONITOR_API_KEY`), and refuses private/LAN targets before any
+   network call. `security_external_peers`/`security_check_reputation` chat tools -- asking a
+   reputation API about a real observed peer, never scanning or acting against it. Live-verified
+   against this machine's real network: 15 real external peers correctly listed, a real private IP
+   refused, a real public IP honestly reported NOT CONFIGURED (no key set here).
+3. **Shipped (finding #054)**: incident/case tracking. `SentryStore` gains a real `incidents` table
+   with a genuine lifecycle (`OPEN -> INVESTIGATING -> RESOLVED/ACCEPTED_RISK`), not just a flat
+   findings table, mirroring `goals.py`'s own real terminal-states precedent rather than inventing new
+   status semantics -- an unknown fingerprint is honestly refused, and a terminal incident refuses to
+   change status (but still accepts a note or a same-status re-confirmation). `security_incident_
+   open`/`security_incident_update`/`security_incidents` chat tools. Live-verified against this
+   machine's own real, currently-true disabled-firewall finding: opened, investigated with a real
+   note, closed ACCEPTED_RISK, correctly refused to reopen -- a genuine SOC-style case lifecycle
+   against a real finding, not a fixture.
+4. **Shipped (finding #055)**: correlation. `_detect_correlations()` fires one real HIGH finding
+   when a real `new_device` finding AND a real `exposed_port` finding both appear in the SAME scan's
+   own newly-detected findings -- a genuine same-window coincidence rule (not a vague "AI notices
+   patterns" claim), evaluated on every `SentryRuntime` tick, correctly firing exactly once per real
+   coincidence and never re-firing once either underlying condition is already known.
+5. **Shipped (finding #055)**: local remediation text. Every detection rule's `recommended_action`
+   composes real, specific, copy-pasteable text -- the exact `socketfilterfw`/`pf` commands, the
+   specific MAC/IP to block at the router -- never auto-applied, matching this section's own
+   permanently-binding scope restatement. Deliberately text-only: no execution path exists, which is
+   a stricter reading of "never auto-applied" than a suggest-then-confirm execution gate would be, and
+   avoids adding any privilege-escalation surface to a defensive-only subsystem.
 6. **Dashboard UI**: real exposure/findings/incident-status surface, last (per this domain's own
    original build plan: "after the sentry itself is real and tested") -- the practical, calm,
    non-decorative version of the orbital/sphere concept already referenced in `docs/DESIGN_SYSTEM.md`.

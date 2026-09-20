@@ -687,6 +687,47 @@ and a real build sequence, not just a requirement statement:
       `docs/ENGINEERING_AUDIT.md` finding #052. Remaining Phase 2 steps
       (threat-intel enrichment, incident tracking, correlation, local
       remediation) not yet built.
+- [x] Domain I, threat-intelligence enrichment shipped 2026-09-21 (Phase
+      2 step 2) -- `platform_adapter.get_established_connections()` (new
+      real `lsof -sTCP:ESTABLISHED` telemetry) plus `security/
+      reputation.py`, a real keyed AbuseIPDB lookup, honestly `NOT
+      CONFIGURED` without `ABUSEIPDB_API_KEY` (same convention as
+      `worldmonitor.py`'s own key), refusing private/LAN targets before
+      any network call. New `security_external_peers`/
+      `security_check_reputation` chat tools. Live-verified against this
+      machine's real network: 15 real external peers listed correctly,
+      a real private IP refused, a real public IP honestly reported
+      NOT CONFIGURED (no key on this machine). See
+      `docs/ENGINEERING_AUDIT.md` finding #053. Remaining Phase 2 steps
+      (incident tracking, correlation, local remediation) not yet built.
+- [x] Domain I, incident/case tracking shipped 2026-09-21 (Phase 2 step
+      3) -- `SentryStore` gains a real `incidents` table
+      (`OPEN -> INVESTIGATING -> RESOLVED/ACCEPTED_RISK`, mirroring
+      `goals.py`'s own terminal-states discipline). An unknown
+      fingerprint is honestly refused; a terminal incident refuses to
+      change status but still accepts a note or a same-status
+      re-confirmation. New `security_incident_open`/
+      `security_incident_update`/`security_incidents` chat tools.
+      Live-verified against this machine's own real, currently-true
+      disabled-firewall finding: opened, moved to INVESTIGATING with a
+      real note, closed ACCEPTED_RISK, correctly refused to reopen. See
+      `docs/ENGINEERING_AUDIT.md` finding #054.
+- [x] Domain I, correlation engine + specific remediation text shipped
+      2026-09-21 (Phase 2 steps 4-5, closing the scale-out plan) --
+      `_detect_correlations()` fires one real HIGH finding when a real
+      new-device AND a real exposed-port finding both appear in the SAME
+      scan (a same-window coincidence rule, never re-fires once either
+      condition is already known). Every detection rule's
+      `recommended_action` upgraded to real, specific, copy-pasteable
+      text (the exact `socketfilterfw`/`pf` commands, the specific
+      MAC/IP to block) -- text-only, nothing here executes anything.
+      Live-verified: a synthetic injected new device AND exposed port in
+      the same real scan correctly produced both underlying findings
+      plus the HIGH correlation. See `docs/ENGINEERING_AUDIT.md` finding
+      #055. Domain I's Phase 2 scale-out plan is now fully closed;
+      remaining Domain I work is the dashboard UI, Windows/cross-device
+      coverage, and the much larger balance of the founding spec's
+      54-item cybersecurity build list.
 - [x] Domain H, piece 1/7 (project-instruction file, `DOURMOUSE.md`) -- shipped
       2026-09-19. `dourmouse/project_instructions.py` reads the workspace's
       own `DOURMOUSE.md`, spliced into `dispatch.py`'s shared
