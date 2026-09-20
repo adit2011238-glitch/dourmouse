@@ -2559,6 +2559,15 @@ def _execute_tool(
             f"REFUSED: tool '{spec.name}' is prohibited by policy and will "
             "never execute."
         )
+    # Domain H piece 4 (deterministic hooks): a pre-tool hook can genuinely
+    # block, same shape as Claude Code's own PreToolUse "deny" outcome --
+    # checked here, before required-argument validation or confirmation
+    # gating, so a hook's policy applies to every real call attempt alike.
+    from dourmouse.hooks import run_post_tool_hooks, run_pre_tool_hooks
+
+    denial = run_pre_tool_hooks(spec.name, arguments)
+    if denial:
+        return f"BLOCKED BY HOOK: {denial}"
     # Real, live-found gap (commercial-grade reliability pass, 2026-09-12):
     # calling a REQUIRES_CONFIRMATION tool with a required argument missing
     # (or explicitly null) built a confirm_prompt from a hole in its own
@@ -2672,10 +2681,12 @@ def _execute_tool(
         # and the DLP boundary below key off an ERROR prefix, and the model
         # is trained on it. What changes is the tail: transport noise is
         # replaced by a sentence, while a genuine diagnostic survives.
-        return (
+        error_result = (
             f"ERROR: tool '{spec.name}' failed: "
             + net_errors.friendly(exc, what=f"a result from {spec.name}")
         )
+        run_post_tool_hooks(spec.name, arguments, error_result)
+        return error_result
     obs_duration_ms = (time.perf_counter() - start) * 1000.0
     try:
         from dourmouse import obs
@@ -2698,6 +2709,7 @@ def _execute_tool(
             violation = validate_against_schema(parsed, spec.output_schema)
             if violation is not None:
                 result += f"\n[OUTPUT CONTRACT VIOLATION: {violation}]"
+    run_post_tool_hooks(spec.name, arguments, result)
     return result
 
 

@@ -59,6 +59,107 @@ def vault(tmp_path, monkeypatch):
     return v
 
 
+class TestExecuteToolRunsRealHooks:
+    """Domain H piece 4: _execute_tool is the ONE real call site pre-tool/
+    post-tool hooks are wired against. These exercise that wiring through
+    the real function, not the hooks module in isolation (see
+    test_hooks.py for that)."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_hooks(self):
+        from dourmouse import hooks
+
+        hooks.clear_hooks()
+        yield
+        hooks.clear_hooks()
+
+    def test_pre_tool_hook_blocks_before_the_handler_ever_runs(self):
+        from dourmouse import hooks
+
+        handler_ran = []
+        spec = ToolSpec(
+            name="_test_hooked_tool", description="test",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda a: handler_ran.append(True) or "did the thing",
+        )
+        hooks.register_pre_tool_hook(lambda name, args: "policy says no" if name == "_test_hooked_tool" else None)
+        result = _execute_tool(spec, {}, confirmation_gate=None)
+        assert result == "BLOCKED BY HOOK: policy says no"
+        assert handler_ran == []
+
+    def test_pre_tool_hook_allowing_lets_the_real_handler_run(self):
+        from dourmouse import hooks
+
+        spec = ToolSpec(
+            name="_test_hooked_tool", description="test",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda a: "did the thing",
+        )
+        hooks.register_pre_tool_hook(lambda name, args: None)
+        assert _execute_tool(spec, {}, confirmation_gate=None) == "did the thing"
+
+    def test_post_tool_hook_sees_the_real_successful_result(self):
+        from dourmouse import hooks
+
+        seen = []
+        spec = ToolSpec(
+            name="_test_hooked_tool", description="test",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda a: "did the thing",
+        )
+        hooks.register_post_tool_hook(lambda name, args, result: seen.append((name, result)))
+        _execute_tool(spec, {}, confirmation_gate=None)
+        assert seen == [("_test_hooked_tool", "did the thing")]
+
+    def test_post_tool_hook_sees_the_real_error_result(self):
+        from dourmouse import hooks
+
+        seen = []
+
+        def broken_handler(a):
+            raise RuntimeError("real failure")
+
+        spec = ToolSpec(
+            name="_test_hooked_tool", description="test",
+            parameters={"type": "object", "properties": {}},
+            handler=broken_handler,
+        )
+        hooks.register_post_tool_hook(lambda name, args, result: seen.append(result))
+        result = _execute_tool(spec, {}, confirmation_gate=None)
+        assert result.startswith("ERROR: tool '_test_hooked_tool' failed:")
+        assert seen == [result]
+
+    def test_a_raising_pre_tool_hook_never_blocks_a_real_call(self):
+        from dourmouse import hooks
+
+        spec = ToolSpec(
+            name="_test_hooked_tool", description="test",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda a: "did the thing",
+        )
+
+        def broken(name, args):
+            raise RuntimeError("boom")
+
+        hooks.register_pre_tool_hook(broken)
+        assert _execute_tool(spec, {}, confirmation_gate=None) == "did the thing"
+
+    def test_pre_tool_hook_never_runs_for_a_prohibited_tool(self):
+        from dourmouse import hooks
+
+        called = []
+        spec = ToolSpec(
+            name="_test_prohibited_tool", description="test",
+            parameters={"type": "object", "properties": {}},
+            permission=Permission.PROHIBITED,
+            handler=lambda a: "should never run",
+        )
+        hooks.register_pre_tool_hook(lambda name, args: called.append(name) or None)
+        result = _execute_tool(spec, {}, confirmation_gate=None)
+        assert "prohibited" in result.lower()
+        assert called == []
+
+
 class TestAdditionalPropertiesEnforcement:
     """Real, live-reproduced bug (full-day feature sweep, 2026-09-12): a
     model call supplied fabricated extra fields (price/day_range/timestamp)

@@ -82,6 +82,99 @@ def _registry() -> DispatchRegistry:
     return r
 
 
+class TestSessionAndStopHooks:
+    """Domain H piece 4: ChatSession fires the session-start hook on
+    construction, the stop hook after every completed ask(), and the
+    session-stop hook from close()."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_hooks(self):
+        from dourmouse import hooks
+
+        hooks.clear_hooks()
+        yield
+        hooks.clear_hooks()
+
+    def test_construction_fires_session_start_with_the_real_session_id(self, tmp_path):
+        from dourmouse import hooks
+
+        seen = []
+        hooks.register_session_start_hook(seen.append)
+        session_file = tmp_path / "hookstart.jsonl"
+        ChatSession(_registry(), client=FakeClient([]), session_file=session_file)
+        assert seen == [session_file.stem]
+
+    def test_ask_fires_the_stop_hook_with_the_real_report(self, tmp_path):
+        from dourmouse import hooks
+
+        seen = []
+        hooks.register_stop_hook(seen.append)
+        client = FakeClient([_FakeResponse(_FakeMessage(content="the answer"))])
+        session = ChatSession(_registry(), client=client, session_file=tmp_path / "hookstop.jsonl")
+        session.ask("hello")
+        assert len(seen) == 1
+        assert seen[0]["final_text"] == "the answer"
+
+    def test_close_fires_session_stop_with_the_real_session_id(self, tmp_path):
+        from dourmouse import hooks
+
+        seen = []
+        hooks.register_session_stop_hook(seen.append)
+        session_file = tmp_path / "hookclose.jsonl"
+        session = ChatSession(_registry(), client=FakeClient([]), session_file=session_file)
+        assert seen == []  # not fired just by construction
+        session.close()
+        assert seen == [session_file.stem]
+
+    def test_a_raising_session_hook_never_breaks_construction_or_ask(self, tmp_path):
+        from dourmouse import hooks
+
+        hooks.register_session_start_hook(lambda s: (_ for _ in ()).throw(RuntimeError("boom")))
+        hooks.register_stop_hook(lambda r: (_ for _ in ()).throw(RuntimeError("boom")))
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        session = ChatSession(_registry(), client=client, session_file=tmp_path / "hookbroken.jsonl")
+        report = session.ask("hello")  # must not raise
+        assert report["final_text"] == "ok"
+
+
+class TestSkillContextInjection:
+    """Domain H piece 3: ask() splices a relevant skill's real content in as
+    its own trailing system message (same pattern the memory recall block
+    already uses), and never touches messages[0] or injects anything for an
+    irrelevant turn."""
+
+    def test_relevant_skill_is_spliced_in_as_a_trailing_system_message(self, tmp_path, monkeypatch):
+        from dourmouse.skills import Skill
+
+        skill = Skill(name="pdf-forms", description="", keywords=("pdf",), body="Fill PDF forms like this.", path=None)
+        monkeypatch.setattr("dourmouse.skills.load_skills", lambda *a, **k: [skill])
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        session = ChatSession(_registry(), client=client, session_file=tmp_path / "skill1.jsonl")
+        session.ask("help me fill out a pdf")
+        injected = [m for m in session.messages if m["role"] == "system" and "[SKILL: pdf-forms]" in m["content"]]
+        assert len(injected) == 1
+        assert "Fill PDF forms like this." in injected[0]["content"]
+        assert session.messages[0]["content"] == session._base_system  # base prompt never touched
+
+    def test_irrelevant_turn_injects_nothing(self, tmp_path, monkeypatch):
+        from dourmouse.skills import Skill
+
+        skill = Skill(name="pdf-forms", description="", keywords=("pdf",), body="Fill PDF forms like this.", path=None)
+        monkeypatch.setattr("dourmouse.skills.load_skills", lambda *a, **k: [skill])
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        session = ChatSession(_registry(), client=client, session_file=tmp_path / "skill2.jsonl")
+        session.ask("what's the weather today")
+        injected = [m for m in session.messages if m["role"] == "system" and "SKILL" in m["content"]]
+        assert injected == []
+
+    def test_no_skills_shipped_never_breaks_a_turn(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("dourmouse.skills.load_skills", lambda *a, **k: [])
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        session = ChatSession(_registry(), client=client, session_file=tmp_path / "skill3.jsonl")
+        report = session.ask("anything at all")
+        assert report["final_text"] == "ok"
+
+
 class TestMultiTurnMemory:
     def test_history_grows_across_turns(self, tmp_path):
         client = FakeClient(

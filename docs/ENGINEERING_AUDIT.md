@@ -2950,6 +2950,152 @@ concurrent-calls scenario at the store level).
 
 ---
 
+### 068 -- Domain H, piece 4/7: deterministic hooks (pre-tool/post-tool/stop/session)
+
+**Severity**: n/a (feature -- Domain H's own build plan, §10 of `docs/COMMERCIAL_GRADE_MASTER_
+REQUIREMENTS.md`, sequenced this right after piece 2, the project-instruction file already shipped
+as finding #037).
+**Context**: the founding spec names four real hook types (matching Claude Code's own PreToolUse/
+PostToolUse/Stop/SessionStart shape). The plan itself named exactly where to wire each: pre/post-
+tool hooks against `dispatch.py`'s one real call site for every tool invocation (`_execute_tool`,
+confirmed by grep to be `spec.handler(...)`'s ONLY caller, matching the plan's own claim rather than
+assuming it); stop/session hooks against `chat.py`'s `ChatSession` lifecycle.
+**Design**: new `dourmouse/hooks.py` -- five real registries (`pre_tool`, `post_tool`, `stop`,
+`session_start`, `session_stop`), each a plain module-level list with a `register_*`/`run_*`
+function pair, plus `clear_hooks()` for test isolation (same convention as `message_bus.set_message_
+bus(None)`). Pre-tool hooks are the one type that can genuinely BLOCK (a non-empty string return is
+a real denial, short-circuiting further hooks, surfaced to the model as `BLOCKED BY HOOK: <reason>`)
+-- every other type is a pure observer, matching this codebase's own established discipline
+(`message_bus.on_post`, `ActivityTracker.on_event`, `office_logger.on_event`: can watch, never
+alter or abort). A raising hook of any type is swallowed and treated as "no opinion" -- never a
+block, never a crash.
+**Wiring**: `_execute_tool` calls `run_pre_tool_hooks` right after the `PROHIBITED` short-circuit
+(so policy-prohibited tools never even reach a hook) and before required-argument validation or
+confirmation gating (a hook's policy applies to every real call attempt alike); `run_post_tool_hooks`
+fires at both real exit points -- the exception-path `ERROR:` text and the normal-path successful
+result. `ChatSession.__init__` fires `run_session_start_hooks` unconditionally (every session,
+resumed or fresh, is a real start from this process's point of view); `ask()` fires `run_stop_hooks`
+with the real dispatch report once a turn completes; a new `ChatSession.close()` fires `run_session_
+stop_hooks`, wired into all three of the REPL's real exit paths (`python -m dourmouse.chat`'s
+one-shot mode, `exit`/`quit`, and `EOFError`/`KeyboardInterrupt`).
+**Honest, named limitation**: `webui.py`'s server path keeps ONE `ChatSession` alive for the whole
+process's lifetime (many HTTP turns share it), so nothing there calls `close()` today -- process
+exit IS that session's real end, with no real hook point to attach to yet. Named in `close()`'s own
+docstring, not silently skipped.
+**Files changed**: `dourmouse/hooks.py` (new), `dourmouse/dispatch.py` (`_execute_tool`'s pre/post
+wiring), `dourmouse/chat.py` (`ChatSession.__init__`/`ask`/new `close()`, three REPL call sites in
+`main()`).
+**Tests added**: `dourmouse/tests/test_hooks.py` (the module in isolation -- allow/block, short-
+circuit on first block, raising hooks never block/crash, `clear_hooks()`);
+`dourmouse/tests/test_general_roster.py::TestExecuteToolRunsRealHooks` (through the real
+`_execute_tool`: a blocking hook prevents the real handler from ever running, an allowing hook lets
+it run, post-tool sees the real success/error result, a raising pre-tool hook never blocks a real
+call, a hook never runs at all for a `PROHIBITED` tool);
+`dourmouse/tests/test_chat.py::TestSessionAndStopHooks` (construction fires session-start with the
+real session id, `ask()` fires stop with the real report, `close()` fires session-stop, a raising
+session/stop hook never breaks construction or a turn).
+**Result**: fixed (shipped). Full suite green.
+
+---
+
+### 069 -- Domain H, piece 5/7: context compaction (audited, found already real, not rebuilt)
+
+**Severity**: n/a (audit, not a new feature -- Domain H's own build plan explicitly said "audit
+what `chat.py`/session-file handling already does today before building anything... confirm or
+refute with a real read before writing new code").
+**Context**: the founding spec's own explicit warning is that session management needs REAL context
+compaction, not "summarize everything" (a lossy, un-auditable pattern this codebase's own Rule 2.1/
+2.2 discipline would reject) -- structured state must be preserved separately.
+**Finding, by real read, not assumption**: this already exists, on both halves the spec asks for,
+and was simply never marked closed against Domain H:
+1. **Structured state, never lossy-summarized**: `ChatSession` persists every real turn as an
+   immutable JSONL audit record (`<workspace>/sessions/session_<ts>.jsonl`) plus a full
+   `.messages.json` snapshot for resume -- the complete real history, untouched, forever.
+2. **Real, deterministic, structured compaction at the LLM API boundary**: `dispatch.py`'s
+   `_bounded_context()` (pre-existing, `v13.7`/`v13.9` per its own docstring, thoroughly tested in
+   `TestBoundedContext`) builds a BOUNDED COPY for the actual API call -- never touching the real
+   stored history above. It always keeps the leading system-message block and the entire in-flight
+   exchange (from the most recent `user` message onward) intact, adds older complete exchanges
+   most-recent-first while a real token budget allows, drops anything beyond that budget at a clean
+   `user` boundary (never mid-exchange, which some backends reject outright), and truncates
+   tool-result messages OLDER than the in-flight exchange to a real character cap (already seen in
+   full when produced; later turns only need the gist). This is structured, rule-based compaction --
+   exactly what the spec asked for instead of an LLM-summarization pass that could silently drop or
+   distort a real fact.
+**Result**: no new code. Domain H piece 5 is closed as a documentation/audit finding: the real
+mechanism already exists, is already tested, and already matches the spec's own explicit
+requirement. Named for completeness, not a gap: `_bounded_context` bounds what the MODEL sees per
+call, not the on-disk ledger size over a very long-lived session -- an unbounded `.messages.json` for
+a session that runs for months is a real, separate, much narrower future concern (disk, not
+correctness), not attempted here.
+
+---
+
+### 070 -- Domain H, piece 3/7: Skills-as-modular-capability-packages
+
+**Severity**: n/a (feature -- §10's own build plan, sequenced after the hooks piece).
+**Context**: the founding spec calls for skills as real, human-authorable documentation packages
+(`SKILL.md` + resources) loaded only when relevant to a turn, never concatenated into one giant
+always-on system prompt -- and to reuse an existing real relevance-routing mechanism rather than
+invent a second one.
+**Design**: new `dourmouse/skills.py` -- a `dourmouse/skills/<name>/SKILL.md` convention (minimal
+frontmatter: `name`/`description`/`keywords`, no YAML dependency added, this codebase has none
+today and the format is simple enough not to need one), `load_skills()` (real directory scan,
+malformed or nameless skill files skipped rather than guessed at), and `relevant_skills()`/
+`skill_context_block()` -- deterministic keyword-overlap matching (Rule 2.8: no LLM judgment in the
+lookup path), the same discipline `planner.find_agents_for_query` already established for routing a
+turn to the right SUBAGENT, applied here to a capability PACKAGE instead. A skill is relevant only
+when one of its own declared keywords appears as a whole token in the turn's text (no substring
+false positives -- checked explicitly: "pdfs" does not falsely match a "pdf" keyword).
+**Wiring**: `ChatSession.ask()` splices a matched skill's real body in as its own trailing system
+message, the SAME established pattern the memory recall block (`recall_block`) already uses and for
+the same reason (KV-cache stability: `messages[0]`, the immutable base prompt, is never touched).
+Empty when nothing is relevant -- never a standing cost on every turn.
+**Honest scope**: this ships the real infrastructure (format, loader, matcher, wiring) -- it does
+not ship any actual skill content under `dourmouse/skills/`; populating the library is real,
+separate, ongoing work, not part of this piece.
+**Files changed**: `dourmouse/skills.py` (new), `dourmouse/chat.py` (`ask()`'s new splice, mirroring
+the existing memory-recall splice immediately above it).
+**Tests added**: `dourmouse/tests/test_skills.py` (frontmatter parsing incl. malformed/nameless
+files, missing-directory handling, deterministic sort, keyword-overlap relevance incl. the
+substring-false-positive case, multi-skill inclusion); `dourmouse/tests/test_chat.py::
+TestSkillContextInjection` (a relevant skill's real body is spliced in, an irrelevant turn injects
+nothing, zero shipped skills never breaks a turn).
+**Result**: fixed (shipped). Full suite green.
+
+---
+
+### 071 -- Domain H, piece 6/7: a programmable SDK-style headless interface
+
+**Severity**: n/a (feature -- §10's own build plan explicitly named generalizing the one existing
+real instance of this shape, `research_mesh/pipeline.py`'s `main()` CLI, rather than designing a new
+pattern).
+**Context**: `ChatSession`/`DispatchRegistry` already self-resolve a real backend with zero
+arguments (`client=None`/`config=None` already fall through to `load_llm_config_with_fallback`/
+`_build_client` inside `dispatch.py` -- confirmed by reading the actual call site, not assumed), so
+the real gap was never the engine -- it was that a script author had to know that internal shape at
+all (`build_general_registry()`, `ChatSession(...)`'s constructor) to drive Dourmouse headlessly, and
+`chat.py`'s existing one-shot mode prints human-formatted text, not something a second program can
+parse.
+**Design**: new `dourmouse/sdk.py` -- a thin `Dourmouse` facade (constructor resolves `registry`
+automatically when omitted; every other keyword passes straight through to the real `ChatSession`
+constructor, no new parameters invented) exposing `ask()` (returns the SAME real report dict
+`ChatSession.ask()` returns, unmodified) and `close()`/context-manager support (`close()` fires the
+real session-stop hook from finding #068). A CLI (`python -m dourmouse.sdk "prompt" [--json]
+[--forced-agent X]`) for scripting/piping, distinct from `python -m dourmouse.chat`'s interactive-
+first REPL -- `--json` prints the real report as machine-parseable JSON instead of a human-formatted
+line.
+**Files changed**: `dourmouse/sdk.py` (new).
+**Tests added**: `dourmouse/tests/test_sdk.py` -- the facade (real report returned unmodified,
+registry auto-resolution, `close()`/context-manager firing the real hook, `forced_agent` passthrough
+verified against the real `run_dispatch_messages` call via a spy) and the CLI (plain-text output,
+`--json` output is real parseable JSON containing `final_text`, and a real subprocess smoke test
+confirming `python -m dourmouse.sdk --help` is genuinely invocable, not just importable).
+**Result**: fixed (shipped). Full suite green. Domain H is now 6/7 pieces done (1, 2, 3, 4, 5, 6 --
+only MCP, piece 7, explicitly scoped as its own dedicated pass, remains).
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

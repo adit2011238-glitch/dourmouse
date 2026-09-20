@@ -855,9 +855,38 @@ and a real build sequence, not just a requirement statement:
       no second injection path. Live-verified with a real model: a real
       `DOURMOUSE.md` instruction survived a real chat call AND a real
       delegation hop. See `docs/ENGINEERING_AUDIT.md` finding #037.
-- [ ] Domain H, pieces 2-7 (hierarchical nesting, Skills-as-packages, hooks,
-      session-compaction audit, SDK interface, MCP) -- not yet started, still
-      sequenced by real dependency/effort. See §10's own Build plan.
+- [x] Domain H, piece 4/7 (deterministic hooks: pre-tool/post-tool/stop/session) shipped
+      2026-09-20. New `dourmouse/hooks.py`: pre-tool hooks can genuinely block (a real
+      denial, short-circuiting), every other type is a pure observer matching this
+      codebase's existing `on_post`/`on_event` discipline; a raising hook is always
+      swallowed as "no opinion." Wired at the ONE real call sites the plan itself named:
+      `_execute_tool` (pre/post-tool) and `ChatSession`'s lifecycle (`__init__`/`ask`/new
+      `close()`, plus all 3 real REPL exit paths). Honest limitation: `webui.py`'s
+      long-lived server-side session never calls `close()` (process exit is its real end,
+      no hook point yet). See `docs/ENGINEERING_AUDIT.md` finding #068.
+- [x] Domain H, piece 5/7 (session-compaction audit) closed 2026-09-20 -- audited before
+      building anything, per this section's own instruction: real, structured context
+      compaction already existed (`dispatch.py`'s pre-existing, already-tested
+      `_bounded_context()`) alongside the real, never-lossy `ChatSession` JSONL/
+      `.messages.json` persistence. No new code; closed as a documentation finding. See
+      `docs/ENGINEERING_AUDIT.md` finding #069.
+- [x] Domain H, piece 3/7 (Skills-as-modular-capability-packages) shipped 2026-09-20. New
+      `dourmouse/skills.py`: a `dourmouse/skills/<name>/SKILL.md` convention (minimal
+      frontmatter, no new dependency), loaded ONLY when a turn's own text overlaps a
+      skill's declared keywords -- the same deterministic, no-LLM-judgment discipline
+      `planner.find_agents_for_query` already established for subagent routing, applied
+      to capability packages instead. Spliced into `ChatSession.ask()` as a trailing
+      system message (never touching the immutable base prompt), same pattern the memory
+      recall block already uses. Ships the infrastructure only; the skill library itself
+      is real, separate, ongoing work. See `docs/ENGINEERING_AUDIT.md` finding #070.
+- [x] Domain H, piece 6/7 (programmable SDK-style headless interface) shipped 2026-09-20.
+      New `dourmouse/sdk.py`: a thin `Dourmouse` facade generalizing the one existing real
+      instance of this shape (`research_mesh/pipeline.py`'s own CLI) rather than a new
+      pattern -- `ask()` returns the real `ChatSession` report unmodified, `close()`/
+      context-manager fires the real session-stop hook from piece 4. New scriptable CLI
+      (`python -m dourmouse.sdk "prompt" --json`) distinct from `python -m dourmouse.chat`'s
+      interactive REPL. See `docs/ENGINEERING_AUDIT.md` finding #071. Domain H is now 6/7
+      pieces done; only MCP (piece 7, explicitly scoped as its own dedicated pass) remains.
 - [x] Domain I, real sentry shipped 2026-09-19 -- `dourmouse/security/sentry.py`,
       a fully deterministic scan (corrected away from the original plan's
       LLM-scored design before writing any rule -- a security finding must

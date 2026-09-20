@@ -131,6 +131,30 @@ class ChatSession:
         self._turn_count = 0
         self._load_state()
         self._prev_hash = _last_record_hash(self.session_file)
+        # Domain H piece 4 (deterministic hooks): the "session" hook pair.
+        # Start fires here, unconditionally -- every ChatSession, resumed or
+        # fresh, is a real session starting from this process's point of
+        # view. See close()'s own docstring for the honest limitation on
+        # the stop half.
+        from dourmouse.hooks import run_session_start_hooks
+
+        run_session_start_hooks(self.session_file.stem)
+
+    def close(self) -> None:
+        """Fire the session-stop hook (Domain H piece 4).
+
+        Honest limitation, named not hidden: webui.py's server path keeps
+        ONE ``ChatSession`` alive for the whole process's lifetime (many
+        HTTP turns share it, not one session per request), so nothing there
+        calls this today -- process exit IS that session's real end, with
+        no hook point to attach to. The REPL (``python -m dourmouse.chat``)
+        is the one real caller, in its own shutdown path. Safe to call more
+        than once (each call just re-fires the stop hooks); safe to never
+        call at all (matches every existing caller's current behavior).
+        """
+        from dourmouse.hooks import run_session_stop_hooks
+
+        run_session_stop_hooks(self.session_file.stem)
 
     # ------------------------------------------------------------------ #
     # Conversation
@@ -233,6 +257,18 @@ class ChatSession:
                 # the new directive — the model reads it as context, and the
                 # bounded window in dispatch.py always keeps it.
                 self.messages.insert(-1, {"role": "system", "content": block})
+        # Domain H piece 3 (Skills-as-modular-capability-packages): same
+        # trailing-system-message pattern as the memory recall block just
+        # above, for the same reason (KV-cache stability: messages[0] never
+        # changes). A skill is spliced in ONLY when this turn's own text is
+        # relevant to it (dourmouse.skills.skill_context_block's real
+        # keyword-overlap check) -- never concatenated into the always-on
+        # system prompt, which is the whole point of this piece.
+        from dourmouse.skills import skill_context_block
+
+        skill_block = skill_context_block(prompt)
+        if skill_block:
+            self.messages.insert(-1, {"role": "system", "content": skill_block})
         started = time.monotonic()
         report: dict[str, Any] = {"final_text": "", "transcript": []}
         try:
@@ -286,6 +322,13 @@ class ChatSession:
                     self.memory.ingest_session_file(self.session_file)
                 except Exception:
                     pass  # a broken store must never break the conversation
+        # Domain H piece 4 (deterministic hooks): the "Stop" hook -- fires
+        # once this turn genuinely produced a report, mirroring Claude
+        # Code's own Stop hook (the agent finished responding). Pure
+        # observer, same fail-open discipline as every other hook here.
+        from dourmouse.hooks import run_stop_hooks
+
+        run_stop_hooks(report)
         return report
 
     # ------------------------------------------------------------------ #
@@ -668,6 +711,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.prompt:
         report = session.ask(" ".join(args.prompt))
         _print_turn(report)
+        session.close()
         return 0
 
     print("\nType a request, or: exit/quit to leave.")
@@ -676,9 +720,11 @@ def main(argv: list[str] | None = None) -> int:
             user_input = input("\nyou> ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nbye")
+            session.close()
             return 0
         if user_input.lower() in {"exit", "quit"}:
             print("bye")
+            session.close()
             return 0
         if not user_input:
             continue
