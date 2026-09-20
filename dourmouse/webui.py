@@ -358,6 +358,14 @@ class ActivityTracker:
         self._feed: dict[str, list[dict[str, Any]]] = {
             sub.name: [] for sub in registry.all_subagents()
         }
+        # Finding #067/#073: real per-call_id activity, closing the known,
+        # named gap ("ActivityTracker's live status collision for two
+        # independent delegate_task calls to the same agent") -- see
+        # _record's own comment at the tool_use/tool_result branches and
+        # concurrent_call_ids' docstring for the honest scope of this fix.
+        self._active_call_ids: dict[str, dict[str, float]] = {
+            sub.name: {} for sub in registry.all_subagents()
+        }
         # Phase 4 (live orchestration view): delegate_parallel's own
         # per-branch progress, keyed by run_id (general_roster.py's
         # _build_delegate_parallel_tool generates one per top-level call).
@@ -495,19 +503,29 @@ class ActivityTracker:
                 if agent is None:
                     return changed
                 changed.add(agent)
+                call_id = entry.get("call_id")
                 self._status[agent] = "computing"
                 self._last[agent] = {
                     "tool": entry.get("name"),
                     "args": (entry.get("raw_arguments") or "")[:400],
                     "result": "",
                     "at": datetime.now().isoformat(timespec="seconds"),
+                    # Finding #073: the real per-run identity (finding #067)
+                    # this "last" snapshot belongs to -- what makes the
+                    # tool_result branch below able to tell a genuinely
+                    # concurrent second call apart from this one, instead
+                    # of silently overwriting/misattributing its result.
+                    "call_id": call_id,
                 }
+                if call_id:
+                    self._active_call_ids[agent][call_id] = time.time()
                 self._feed[agent].append(
                     {
                         "type": "tool_use",
                         "tool": entry.get("name"),
                         "args": (entry.get("raw_arguments") or "")[:400],
                         "at": datetime.now().isoformat(timespec="seconds"),
+                        "call_id": call_id,
                     }
                 )
                 self._trim(agent)
@@ -516,14 +534,31 @@ class ActivityTracker:
                 if agent is None:
                     return changed
                 changed.add(agent)
-                if self._last[agent] is not None:
-                    self._last[agent]["result"] = (entry.get("text") or "")[:400]
+                call_id = entry.get("call_id")
+                if call_id:
+                    self._active_call_ids[agent][call_id] = time.time()
+                last = self._last[agent]
+                # Finding #073 (the real fix for the known flaw: two
+                # independent delegate_task calls to the same agent running
+                # concurrently used to stomp each other's shared "last"
+                # entry): only attribute this result to "last" when it
+                # genuinely belongs to the call currently occupying that
+                # slot. A tool_result with no call_id at all (an untagged
+                # emitter, kept for backward compatibility) still applies
+                # unconditionally, same as before this fix. A result for a
+                # call_id that has since been superseded by a newer one in
+                # the slot is real, correct data -- it still reaches the
+                # feed below -- just no longer misrepresented as this
+                # agent's CURRENT activity.
+                if last is not None and (not call_id or last.get("call_id") == call_id):
+                    last["result"] = (entry.get("text") or "")[:400]
                 self._feed[agent].append(
                     {
                         "type": "tool_result",
                         "tool": entry.get("name"),
                         "text": (entry.get("text") or "")[:400],
                         "at": datetime.now().isoformat(timespec="seconds"),
+                        "call_id": call_id,
                     }
                 )
                 self._trim(agent)
@@ -585,6 +620,39 @@ class ActivityTracker:
         if len(feed) > self._MAX_FEED:
             del feed[: len(feed) - self._MAX_FEED]
 
+    #: How long a call_id counts as "still probably active" once its last
+    #: real tool_use/tool_result was seen (finding #073). A heuristic, not
+    #: a precise lifecycle signal -- this codebase has no reliable
+    #: per-call_id "this run just finished" event today (the "done"/"error"
+    #: branch above only fires for a whole top-level run, not one branch),
+    #: so recency is what stands in for it. Named honestly, not claimed
+    #: exact.
+    _CONCURRENT_WINDOW_S = 60.0
+
+    def _prune_call_ids_locked(self, agent: str) -> list[str]:
+        """Real call_ids that have touched ``agent`` within the last
+        ``_CONCURRENT_WINDOW_S`` seconds -- 0 or 1 is the normal case; 2+
+        means genuinely concurrent activity on the same agent (the exact
+        scenario the known flaw named: two independent delegate_task calls
+        to the same agent at once). Prunes stale entries as a side effect,
+        same as this codebase's other read-time-pruned stores. Caller must
+        already hold ``self._lock`` (``self._lock`` is a plain, non-
+        reentrant ``threading.Lock``)."""
+        now = time.time()
+        ids = self._active_call_ids.get(agent)
+        if not ids:
+            return []
+        stale = [cid for cid, seen in ids.items() if now - seen > self._CONCURRENT_WINDOW_S]
+        for cid in stale:
+            del ids[cid]
+        return list(ids)
+
+    def concurrent_call_ids(self, agent: str) -> list[str]:
+        """Public, lock-acquiring wrapper around ``_prune_call_ids_locked``
+        for callers outside this class."""
+        with self._lock:
+            return self._prune_call_ids_locked(agent)
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {
@@ -593,6 +661,7 @@ class ActivityTracker:
                         "status": self._status[name],
                         "last": self._last[name],
                         "feed": list(self._feed[name]),
+                        "concurrent_call_ids": self._prune_call_ids_locked(name),
                     }
                     for name in self._status
                 },

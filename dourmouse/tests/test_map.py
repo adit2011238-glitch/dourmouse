@@ -253,6 +253,75 @@ class TestActivityTracker:
         assert len(data["agents"]) == len(build_general_registry().subagent_names)
 
 
+class TestActivityTrackerConcurrentCallIds:
+    """Finding #073, the real fix for the flaw finding #066 named: two
+    independent delegate_task calls to the same agent running concurrently
+    used to silently stomp each other's shared `last` entry. Real per-run
+    call_id tagging (finding #067) is what makes this fixable at all."""
+
+    @pytest.fixture
+    def tracker(self):
+        return ActivityTracker(build_general_registry())
+
+    def test_snapshot_reports_no_concurrent_calls_by_default(self, tracker):
+        state = tracker.snapshot()["agents"]["research_info"]
+        assert state["concurrent_call_ids"] == []
+
+    def test_single_call_is_recorded_and_tagged(self, tracker):
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}", "call_id": "call-A"})
+        state = tracker.snapshot()["agents"]["research_info"]
+        assert state["last"]["call_id"] == "call-A"
+        assert state["feed"][-1]["call_id"] == "call-A"
+        assert state["concurrent_call_ids"] == ["call-A"]
+
+    def test_two_concurrent_calls_are_both_tracked(self, tracker):
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}", "call_id": "call-A"})
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}", "call_id": "call-B"})
+        state = tracker.snapshot()["agents"]["research_info"]
+        assert set(state["concurrent_call_ids"]) == {"call-A", "call-B"}
+
+    def test_a_result_only_updates_last_when_it_matches_the_current_call(self, tracker):
+        # call A claims the slot, then call B claims it (a real second,
+        # concurrent delegate_task to the same agent) -- A's own late
+        # result must not silently overwrite B's now-current snapshot.
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}", "call_id": "call-A"})
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}", "call_id": "call-B"})
+        tracker.on_event({"type": "tool_result", "name": "web_search", "text": "A's real result", "call_id": "call-A"})
+        state = tracker.snapshot()["agents"]["research_info"]
+        assert state["last"]["call_id"] == "call-B"
+        assert state["last"]["result"] == ""  # A's result correctly did NOT land here
+        # A's real result still reaches the feed -- never dropped, just not misattributed.
+        assert any(e.get("call_id") == "call-A" and e.get("text") == "A's real result" for e in state["feed"])
+
+    def test_a_result_for_the_current_call_does_update_last(self, tracker):
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}", "call_id": "call-A"})
+        tracker.on_event({"type": "tool_result", "name": "web_search", "text": "the real answer", "call_id": "call-A"})
+        state = tracker.snapshot()["agents"]["research_info"]
+        assert state["last"]["result"] == "the real answer"
+
+    def test_untagged_events_keep_the_pre_existing_unconditional_behavior(self, tracker):
+        # No call_id at all -- backward compatible with any caller that
+        # never wired finding #067's tagging through.
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}"})
+        tracker.on_event({"type": "tool_result", "name": "web_search", "text": "untagged result"})
+        state = tracker.snapshot()["agents"]["research_info"]
+        assert state["last"]["result"] == "untagged result"
+        assert state["concurrent_call_ids"] == []  # no real call_id to track
+
+    def test_concurrent_call_ids_public_method_matches_snapshot(self, tracker):
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}", "call_id": "call-A"})
+        assert tracker.concurrent_call_ids("research_info") == ["call-A"]
+
+    def test_stale_call_ids_are_pruned_after_the_window(self, tracker, monkeypatch):
+        import time as time_mod
+
+        real_time = time_mod.time
+        monkeypatch.setattr(time_mod, "time", lambda: real_time() - 3600)
+        tracker.on_event({"type": "tool_use", "name": "web_search", "raw_arguments": "{}", "call_id": "call-old"})
+        monkeypatch.setattr(time_mod, "time", real_time)
+        assert tracker.concurrent_call_ids("research_info") == []
+
+
 class TestFocusAgent:
     def test_focus_agent_rejects_unknown_name(self, server):
         _, port = server

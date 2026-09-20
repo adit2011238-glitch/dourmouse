@@ -660,6 +660,29 @@ and a real build sequence, not just a requirement statement:
       named honestly: assembling several concurrent `call_id`s from one meeting into a single
       merged conversation view is a read-side/UI concern layered on top, not yet done. See
       `docs/ENGINEERING_AUDIT.md` finding #067.
+- [x] Agent ecosystem hardening, round 4, shipped 2026-09-20 -- the real fix for flaw #4 itself
+      (round 3/#067 fixed the event-identity groundwork; this uses it). `ActivityTracker._record`
+      now stores each `tool_use`'s real `call_id` alongside `last`, and only applies a `tool_
+      result` to that slot when it genuinely belongs to the call currently occupying it -- a
+      result for a superseded call still reaches the feed (never dropped) but no longer
+      silently overwrites the wrong call's snapshot. New `concurrent_call_ids(agent)` /
+      `GET /api/activity`'s new `concurrent_call_ids` field surfaces real concurrent activity
+      (a 60s recency heuristic, named as such). Backward compatible with untagged events.
+      UI work to actually render "2 active" on the office desk is real, separate, not attempted.
+      See `docs/ENGINEERING_AUDIT.md` finding #073.
+- [x] Agent ecosystem hardening, round 5, shipped 2026-09-20 -- the real fix for flaw #5, the local
+      backend concurrency ceiling named in round 1/#066 (a real, live-observed HTTP 400 from two
+      simultaneous local Ollama calls). A real process-wide semaphore gates the one real network-
+      call boundary (`_call_with_retry_inner`) whenever `backend_identity(config)` says the call is
+      local -- default fully serial, every other backend unaffected, a real
+      `DOURMOUSE_LOCAL_MODEL_MAX_CONCURRENT` env var raises it. Live-proved with real threads and
+      real wall-clock timing: local calls never overlap and take additive time; cloud calls DO
+      overlap and take roughly one call's time, unaffected. Named limitation: this bounds local
+      concurrency, it does not add cloud burst capacity (the other half of the originally-named fix
+      direction) -- real, separate, not attempted. This closes both agent-ecosystem flaws #4 and #5
+      from the original design review; only the read-side transcript-assembly UI (merging several
+      concurrent `call_id`s from one meeting into one view) remains from that list. See
+      `docs/ENGINEERING_AUDIT.md` finding #074.
 - [x] Domain F remainder (named specialist roles) -- shipped 2026-09-19.
       `general_roster.py`'s `_DELEGATE_ROLE_PRESETS`: `researcher`, `coder`,
       `tester`, `security_sentry` each map to a real, already-registered

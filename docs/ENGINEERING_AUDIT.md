@@ -3147,6 +3147,86 @@ the actual `dourmouse.mcp_bridge` server.
 
 ---
 
+### 073 -- agent ecosystem flaw #4: `ActivityTracker`'s live status collision, fixed
+
+**Severity**: real, correctness (silent data corruption in the live view, not a crash).
+**Context**: named in finding #066 as flaw #4 -- `ActivityTracker._status[name]`/`_last[name]`/
+`_feed[name]` are keyed by AGENT NAME only. Two independent `delegate_task` calls to the same agent
+running concurrently (outside a `delegate_parallel` fan-out, which IS index-safe -- see finding
+#066's own distinction) shared one `_last[agent]` slot: whichever call's `tool_use` landed most
+recently owned the slot, and a `tool_result` for the OTHER, now-superseded call could silently
+attach its result text to the wrong call's snapshot, with no way to tell after the fact that this
+had happened.
+**Fix**: finding #067's real per-run `call_id` tagging is what makes this fixable at all --
+`tool_use`/`tool_result` entries now carry a real `call_id`. `ActivityTracker._record` stores that
+`call_id` alongside `_last[agent]`'s existing fields and only applies a `tool_result` to `_last
+[agent]["result"]` when it genuinely belongs to the call currently occupying the slot (`last.get
+("call_id") == call_id`); a result for a call_id no longer in the slot still reaches the feed (real
+data, never dropped) but is no longer misrepresented as the agent's current activity. A new
+`concurrent_call_ids(agent)` (and a `concurrent_call_ids` key added to every agent in
+`snapshot()`/`GET /api/activity`) surfaces real call_ids seen within a 60s recency window --
+0-or-1 is the normal case, 2+ is genuinely concurrent activity on the same agent, the exact scenario
+this flaw named. Backward compatible: an untagged event (no `call_id` at all) keeps the pre-existing
+unconditional-overwrite behavior exactly as before this fix.
+**Honest, named scope limit**: this fixes the DATA CORRECTNESS problem (no more silent
+misattribution, and concurrency is now visible) but does not redesign the single-slot live view
+itself -- the Agent Map / office desk UI still shows one status per agent, not two simultaneous
+activities rendered side by side. `concurrent_call_ids` gives the UI a real signal to build on (e.g.
+a "2 active" badge); that UI work is real, separate, not attempted here. The 60s recency window is
+a heuristic (this codebase has no reliable per-call_id "this run just finished" event today, only a
+whole-top-level-run "done"/"error" signal), named as such, not claimed to be a precise lifecycle.
+**Files changed**: `dourmouse/webui.py` (`ActivityTracker.__init__`'s new `_active_call_ids`,
+`_record`'s `tool_use`/`tool_result` branches, new `_prune_call_ids_locked`/`concurrent_call_ids`,
+`snapshot()`'s new field).
+**Tests added**: `dourmouse/tests/test_map.py::TestActivityTrackerConcurrentCallIds` -- single and
+concurrent call tracking, a result only updating `last` when it matches the current call (the exact
+corruption scenario, reproduced and proven fixed), untagged-event backward compatibility, the public
+method matching `snapshot()`, and stale-entry pruning after the recency window.
+**Result**: fixed. Full suite green.
+
+---
+
+### 074 -- agent ecosystem flaw #5: real local backend concurrency ceiling, fixed
+
+**Severity**: real, reliability (a genuine error under real concurrent local load, not a crash of the whole
+process, but a failed turn for whichever branch lost the race).
+**Context**: named in finding #066 as flaw #5 -- two simultaneous real calls against local Ollama threw a
+genuine `HTTP Error 400: Bad Request` (live-observed during the design review's own verification pass),
+root-caused as the local model server's own real capacity limit, not a Dourmouse bug (`dispatch.py`'s own
+thread-local `_registry_ctx_stack` invariant comment confirms concurrent branches on separate threads are
+BY DESIGN). Named fix direction at the time: "either cloud burst capacity or a real queue that degrades to
+serial instead of erroring."
+**Fix**: a real, process-wide `threading.Semaphore` gates the one real network-call boundary
+(`_call_with_retry_inner`, renamed to a thin wrapper; the actual retry/fallback logic moved unchanged into
+a new `_call_with_retry_inner_impl`) whenever `backend_identity(config)` identifies the call as genuinely
+local -- every other backend (NVIDIA, cloud Ollama, Gemini, Claude CLI) is completely unaffected, no gate,
+no wait, byte-for-byte the same as before this fix. Default concurrency is 1 (fully serial), matching the
+flaw's own named fix direction exactly; a real env var, `DOURMOUSE_LOCAL_MODEL_MAX_CONCURRENT`, lets an
+operator whose local setup genuinely handles more (e.g. a deliberately raised `OLLAMA_NUM_PARALLEL`) raise
+it. The semaphore is lazily built once and deliberately NOT rebuilt on every read of the env var (a
+semaphore's permit count is live state; recreating it while another thread holds a permit on the old
+object would silently double the real limit) -- `reset_local_model_semaphore()` is the real test-isolation
+seam, same convention as `message_bus.set_message_bus(None)`.
+**Live proof, real threads and real timing, not mocked**: two real local (`OllamaConfig`) calls through a
+slow fake client never overlap in wall-clock time and take roughly additive total time (serialized, proven
+by real timestamps); two real cloud (`NvidiaConfig`) calls through the same fake client DO overlap and
+take roughly one call's worth of total time (unaffected, also proven by real timestamps, not asserted on
+faith); raising the env var to 2 lets two local calls genuinely overlap; the semaphore releases even when
+the call raises (a second call never hangs behind a permit an exception failed to release).
+**Honest, named limitation**: this bounds concurrent LOCAL calls to a safe default; it does not add cloud
+burst capacity (the other half of the originally-named fix direction) -- a `delegate_parallel` fan-out
+that would benefit from more real parallelism than one local model can serve still runs serially rather
+than bursting to the cloud. Real, separate, not attempted here.
+**Files changed**: `dourmouse/dispatch.py` (`_local_model_max_concurrent`, `_get_local_model_semaphore`,
+`reset_local_model_semaphore`, `_is_local_backend`, the `_call_with_retry_inner` wrapper/`_impl` split).
+**Tests added**: `dourmouse/tests/test_local_model_concurrency.py` -- backend-locality detection, env var
+parsing (default/override/invalid), the real serialization-vs-concurrency proof described above via real
+threads and real wall-clock windows, the raised-limit case, and semaphore release-on-exception.
+**Result**: fixed. Full suite green (5486 passed, same 5 pre-existing unrelated failures as every prior
+commit this session -- `google_auth`/`deeplink` env leakage).
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

@@ -395,6 +395,60 @@ def _context_budget(config: Any) -> int:
     return _MAX_LLM_TOKENS
 
 
+#: Finding #066 flaw #5 / #074: real, live-observed local backend
+#: concurrency ceiling -- two simultaneous real calls against local Ollama
+#: threw a genuine HTTP 400 (the local server's own real capacity limit,
+#: not a Dourmouse bug -- confirmed by reading dispatch.py's own
+#: thread-local _registry_ctx_stack invariant comment: concurrent branches
+#: on separate threads are BY DESIGN). Default 1 (fully serial) matches
+#: the flaw's own named fix direction: "degrade to serial instead of
+#: erroring." An operator whose local setup genuinely handles more (e.g. a
+#: real, deliberately raised OLLAMA_NUM_PARALLEL) can raise this.
+_LOCAL_MODEL_CONCURRENCY_ENV = "DOURMOUSE_LOCAL_MODEL_MAX_CONCURRENT"
+_local_model_semaphore_lock = threading.Lock()
+_local_model_semaphore: threading.Semaphore | None = None
+
+
+def _local_model_max_concurrent() -> int:
+    raw = os.environ.get(_LOCAL_MODEL_CONCURRENCY_ENV, "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return 1
+
+
+def _get_local_model_semaphore() -> threading.Semaphore:
+    """Process-wide, lazily-built on first use. Deliberately NOT rebuilt on
+    every call even if the env var changes later (a semaphore's permit
+    count is live state -- recreating it while another thread holds a
+    permit on the OLD object would silently double the real limit). See
+    ``reset_local_model_semaphore`` for the real test-isolation seam."""
+    global _local_model_semaphore
+    with _local_model_semaphore_lock:
+        if _local_model_semaphore is None:
+            _local_model_semaphore = threading.Semaphore(_local_model_max_concurrent())
+        return _local_model_semaphore
+
+
+def reset_local_model_semaphore() -> None:
+    """Test isolation (same convention as ``message_bus.set_message_bus
+    (None)``): force the next real call to rebuild the semaphore against
+    whatever ``DOURMOUSE_LOCAL_MODEL_MAX_CONCURRENT`` is set to now."""
+    global _local_model_semaphore
+    with _local_model_semaphore_lock:
+        _local_model_semaphore = None
+
+
+def _is_local_backend(config: Any) -> bool:
+    try:
+        _name, is_local = backend_identity(config)
+    except Exception:  # noqa: BLE001 - a broken/unset config must never crash dispatch
+        return False
+    return is_local
+
+
 def _est_tokens(message: dict[str, Any]) -> int:
     """Rough per-message token estimate (repo convention ~4 chars/token)."""
     content = message.get("content") or ""
@@ -682,6 +736,48 @@ def _call_with_retry(
 
 
 def _call_with_retry_inner(
+    client: Any,
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    config: NvidiaConfig | None,
+    call_log: list[dict[str, Any]] | None = None,
+    on_delta: Callable[[str], None] | None = None,
+    on_thinking: Callable[[str], None] | None = None,
+    client_factory: Callable[[], tuple[Any, str] | None] | None = None,
+) -> Any:
+    """Real network call, gated by the local-model concurrency semaphore
+    (finding #074) when ``config`` identifies a genuinely local backend --
+    every other backend is unaffected (no gate, no wait, byte-for-byte the
+    same as before this fix). See ``_get_local_model_semaphore``'s own
+    docstring for why local calls are serialized by default: a real,
+    live-observed HTTP 400 from running two simultaneous local Ollama
+    calls at once, which is the local server's own real capacity limit,
+    not something retrying differently here could paper over. The actual
+    retry/fallback logic is unchanged, in ``_call_with_retry_inner_impl``
+    below -- this wrapper only decides whether to hold that one real
+    network attempt behind the gate.
+    """
+    if _is_local_backend(config):
+        semaphore = _get_local_model_semaphore()
+        semaphore.acquire()
+        try:
+            return _call_with_retry_inner_impl(
+                client, model=model, messages=messages, tools=tools, config=config,
+                call_log=call_log, on_delta=on_delta, on_thinking=on_thinking,
+                client_factory=client_factory,
+            )
+        finally:
+            semaphore.release()
+    return _call_with_retry_inner_impl(
+        client, model=model, messages=messages, tools=tools, config=config,
+        call_log=call_log, on_delta=on_delta, on_thinking=on_thinking,
+        client_factory=client_factory,
+    )
+
+
+def _call_with_retry_inner_impl(
     client: Any,
     *,
     model: str,
