@@ -2867,6 +2867,41 @@ but, like `message_bus`, does not survive a server restart.
 
 ---
 
+### 066 -- `office_logger.py`: a real, persistent log for `message_bus` + `delegate_parallel` fan-outs
+
+**Severity**: n/a (feature -- closes the real, repeatedly-named "message_bus is in-memory-only, dies
+on restart" gap from the agent-ecosystem design review, same review that produced findings #064-065).
+**Context**: `message_bus.py` is real and correct but bounded and in-memory; `delegate_parallel`'s own
+`delegate_parallel_branch` lifecycle events (`start`/`result`, carrying a real `run_id`/`agent`/`ok`/
+`elapsed_s`) already stream live through the chat `event_sink` but were never persisted anywhere --
+both are real signal with no durable home.
+**Design**: one new, workspace-relative SQLite store (`dourmouse/office_logger.py`, same one-
+connection-per-operation/WAL-mode/`DEFAULT_DB` discipline as `device_wiki/store.py`), append-only,
+two tables (`messages`, `fanout_events`). Wired with zero new plumbing: `OfficeLogger.log_message` is
+registered on the SAME real `message_bus.on_post` hook the memory mirror and finding #065's alert
+observer already use; `OfficeLogger.on_event` is added to the SAME `sink()` closure `ActivityTracker`/
+`AttentionQueue` already consume in `webui.py`'s SSE chat handler, filtering to `delegate_parallel_
+branch` entries only. A new read-only `GET /api/office_log` (`?kind=messages|fanouts`, `?run_id=`,
+`?limit=`) mirrors `/api/device_wiki`'s own "already-tested backend, first HTTP surface over it"
+shape.
+**Honest, named scope limit (not silently skipped)**: per-tool-call reasoning/transcript capture for
+nested branches is deliberately NOT in this piece. `tool_use`/`tool_result` events only carry the TOOL
+name (not the calling agent or a call-instance id), and `dispatch.py`'s `thinking_delta` only fires at
+`ctx.depth == 0` today (`dispatch.py` ~4698-4714, deliberate). This store persists WHO messaged WHOM
+and WHICH branch ran WHERE and how it finished -- real and durable, but not yet a full replay of an
+agent's own chain of thought. That remains the one still-not-built "per-branch reasoning tagging"
+piece named in the design review.
+**Files changed**: `dourmouse/office_logger.py` (new), `dourmouse/webui.py` (`run_server`'s new
+`office_log` param and wiring, `sink()`'s new `office_log.on_event` call, new `/api/office_log` route).
+**Tests added**: `dourmouse/tests/test_office_logger.py` (hermetic, tmp_path-backed store tests --
+persistence, ordering/limit, malformed-input swallowing, reopen-same-path durability, fan-out
+run_id scoping, non-fan-out event types ignored) and
+`dourmouse/tests/test_message_bus.py::TestOfficeLogWiring` (real `run_server` + real HTTP,
+`office_log=` isolation matching the existing `bus=`/`state=` test convention).
+**Result**: fixed. Full suite green.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

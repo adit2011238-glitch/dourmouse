@@ -634,6 +634,17 @@ and a real build sequence, not just a requirement statement:
       plane traffic, never surfaced as if it were urgent. Both changes
       are additive to the real backend; no mockup/artifact code touched.
       See `docs/ENGINEERING_AUDIT.md` finding #065.
+- [x] Agent ecosystem hardening, round 2, shipped 2026-09-20 -- `office_logger.py`, a new,
+      workspace-relative SQLite store closing the "message_bus is in-memory-only, dies on
+      restart" gap named in the same design review: append-only `messages` + `fanout_events`
+      tables, wired with zero new plumbing onto the SAME `message_bus.on_post` hook and the SAME
+      chat `event_sink` `ActivityTracker` already consumes, plus a new read-only
+      `GET /api/office_log`. Deliberately does NOT capture per-branch reasoning/tool-call
+      transcripts yet (named, separate, still-not-built: `tool_use`/`tool_result` events don't
+      carry a calling-agent or call-instance id, and `thinking_delta` only fires at
+      `ctx.depth == 0` today) -- this persists who messaged whom and which fan-out branch ran
+      where, real and durable, not yet a full chain-of-thought replay. See
+      `docs/ENGINEERING_AUDIT.md` finding #066.
 - [x] Domain F remainder (named specialist roles) -- shipped 2026-09-19.
       `general_roster.py`'s `_DELEGATE_ROLE_PRESETS`: `researcher`, `coder`,
       `tester`, `security_sentry` each map to a real, already-registered

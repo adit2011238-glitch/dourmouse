@@ -392,6 +392,62 @@ class TestDirectMessageNotifications:
             srv.server_close()
 
 
+class TestOfficeLogWiring:
+    """Finding #066: message_bus posts and delegate_parallel fan-out events
+    reach the real, persistent OfficeLogger through run_server's own wiring
+    -- not just the standalone store tests in test_office_logger.py."""
+
+    def test_bus_post_reaches_office_log_via_http(self, tmp_path):
+        from dourmouse.office_logger import OfficeLogger
+
+        bus = MessageBus()
+        office_log = OfficeLogger(tmp_path / "office.db")
+        srv = run_server(_echo_registry(), port=0, client=None, config=None, bus=bus, office_log=office_log)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            import http.client
+
+            bus.post("research_info", "markets", "catalyst", "NVDA spiked")
+            conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+            conn.request("GET", "/api/office_log")
+            resp = conn.getresponse()
+            data = json.loads(resp.read().decode())
+            conn.close()
+            assert resp.status == 200
+            assert len(data["messages"]) == 1
+            assert data["messages"][0]["from"] == "research_info"
+            assert data["messages"][0]["body"] == "NVDA spiked"
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
+    def test_fanout_events_query_scoped_by_run_id(self, tmp_path):
+        from dourmouse.office_logger import OfficeLogger
+
+        office_log = OfficeLogger(tmp_path / "office.db")
+        office_log.on_event({"type": "delegate_parallel_branch", "phase": "start", "run_id": "run-1", "agent": "reviewer"})
+        srv = run_server(_echo_registry(), port=0, client=None, config=None, office_log=office_log)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            import http.client
+
+            conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+            conn.request("GET", "/api/office_log?kind=fanouts&run_id=run-1")
+            resp = conn.getresponse()
+            data = json.loads(resp.read().decode())
+            conn.close()
+            assert resp.status == 200
+            assert len(data["fanout_events"]) == 1
+            assert data["fanout_events"][0]["agent"] == "reviewer"
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
+
 class TestMessagesApi:
     def test_messages_endpoint_returns_bus_traffic(self):
         bus = MessageBus()

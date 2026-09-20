@@ -2751,6 +2751,29 @@ class _Handler(BaseHTTPRequestHandler):
                 "entries": [vars(e) for e in entries],
                 "configured_roots": [str(r) for r in configured_roots()],
             })
+        elif path == "/api/office_log":
+            # Finding #066: read-only inspection of the real, persistent
+            # message_bus + delegate_parallel fan-out log -- the durable
+            # backing for an on-demand activity/transcript view that
+            # survives a server restart (message_bus itself does not).
+            # ?kind=messages (default) or ?kind=fanouts; ?run_id=<id>
+            # scopes fanout events to one delegate_parallel run;
+            # ?limit=<n> (default 100, capped at 1000).
+            office_log = getattr(self.server, "office_log", None)
+            if office_log is None:
+                self._send_json({"error": "office_log not configured"}, status=404)
+                return
+            qs = urllib.parse.parse_qs(parsed.query)
+            kind = (qs.get("kind") or ["messages"])[0].strip().lower()
+            try:
+                limit = int(qs.get("limit", ["100"])[0])
+            except ValueError:
+                limit = 100
+            if kind == "fanouts":
+                run_id = (qs.get("run_id") or [""])[0].strip() or None
+                self._send_json({"fanout_events": office_log.recent_fanout_events(limit=limit, run_id=run_id)})
+            else:
+                self._send_json({"messages": office_log.recent_messages(limit=limit)})
         elif path == "/api/audit":
             # 2026-09-18: the founding spec's own explicit audit-trail
             # requirement ("the user should be able to inspect what the
@@ -4522,6 +4545,9 @@ class _Handler(BaseHTTPRequestHandler):
             stream.emit(entry)
             self.server.tracker.on_event(entry)
             self.server.attention.on_event(entry, screen=screen)
+            office_log = getattr(self.server, "office_log", None)
+            if office_log is not None:
+                office_log.on_event(entry)
 
         # ONE shared gate per server (or, with a real tab_id, one per tab —
         # see _session_gate_lock_for_tab). The wiring (emit swap + resolver)
@@ -6861,6 +6887,7 @@ def run_server(
     auth=None,
     session_file: Path | str | None = None,
     browser_pane_requests: Any | None = None,
+    office_log: Any | None = None,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns the running ThreadingHTTPServer.
 
@@ -7141,6 +7168,19 @@ def run_server(
                 pass  # a broken memory mirror never breaks the bus
 
         server.bus.on_post(_mirror_to_memory)
+
+    # Finding #066: a real, persistent, workspace-relative log of message_bus
+    # traffic and delegate_parallel fan-out lifecycle events -- closes the
+    # "message_bus dies on restart" gap. Defaults to the process-wide
+    # DEFAULT_DB like every other real store here; tests pass an isolated
+    # instance the same way they already do for bus/state.
+    if office_log is None:
+        from dourmouse.office_logger import DEFAULT_DB as _OFFICE_LOG_DB
+        from dourmouse.office_logger import OfficeLogger
+
+        office_log = OfficeLogger(_OFFICE_LOG_DB)
+    server.office_log = office_log
+    server.bus.on_post(server.office_log.log_message)
 
     def _notify_direct_message(msg: dict) -> None:
         """Finding #065 (notification gap): message_bus had no proactive
