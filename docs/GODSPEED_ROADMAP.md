@@ -885,8 +885,18 @@ and a real build sequence, not just a requirement statement:
       pattern -- `ask()` returns the real `ChatSession` report unmodified, `close()`/
       context-manager fires the real session-stop hook from piece 4. New scriptable CLI
       (`python -m dourmouse.sdk "prompt" --json`) distinct from `python -m dourmouse.chat`'s
-      interactive REPL. See `docs/ENGINEERING_AUDIT.md` finding #071. Domain H is now 6/7
-      pieces done; only MCP (piece 7, explicitly scoped as its own dedicated pass) remains.
+      interactive REPL. See `docs/ENGINEERING_AUDIT.md` finding #071.
+- [x] Domain H, piece 7/7 (MCP, second half: Dourmouse as an MCP client) shipped 2026-09-20 --
+      DOMAIN H NOW FULLY CLOSED. Found first that the SERVER half already existed
+      (`dourmouse/mcp_bridge.py`, built earlier under a different initiative, never marked
+      against this checklist -- same situation piece 5 found). New `dourmouse/mcp_client.py`:
+      a real stdio JSON-RPC 2.0 client, same config shape (`mcpServers`) Claude Code's own
+      `.mcp.json` uses, real tools wrapped as `mcp__<server>__<tool>` under a new opt-in
+      `mcp_tools` subagent (never a standing empty one). One bad server never blocks another
+      or breaks `build_general_registry()`. Real end-to-end test connects a real `McpClient`
+      to a real `dourmouse.mcp_bridge` subprocess -- this codebase's own client and server
+      halves proven to interoperate, not two isolated mocks. See
+      `docs/ENGINEERING_AUDIT.md` finding #072.
 - [x] Domain I, real sentry shipped 2026-09-19 -- `dourmouse/security/sentry.py`,
       a fully deterministic scan (corrected away from the original plan's
       LLM-scored design before writing any rule -- a security finding must

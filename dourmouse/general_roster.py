@@ -6273,6 +6273,18 @@ def build_general_registry() -> DispatchRegistry:
             )
         )
 
+    # -- External MCP servers (Domain H piece 7, second half: Dourmouse AS
+    # an MCP CLIENT) -- the user's own configured mcp_servers.json, same
+    # opt-in-only, one-bad-entry-must-never-break-startup discipline as
+    # self_extended just above. Empty/missing config (the common case) or
+    # every server unreachable both mean no subagent is registered at
+    # all -- never a standing empty one. See dourmouse/mcp_client.py.
+    from dourmouse.mcp_client import build_external_mcp_subagent
+
+    _mcp_subagent, _mcp_clients = build_external_mcp_subagent()
+    if _mcp_subagent is not None:
+        registry.register_subagent(_mcp_subagent)
+
     # -- 3D & UI Design agent ------------------------------------------ #
     # Real spec-generation + cataloguing tools for the desktop
     # spatial_ai_library scaffold (ui_components/ui_manifest.json,

@@ -3096,6 +3096,57 @@ only MCP, piece 7, explicitly scoped as its own dedicated pass, remains).
 
 ---
 
+### 072 -- Domain H, piece 7/7: MCP, second half (Dourmouse as an MCP client)
+
+**Severity**: n/a (feature -- the last piece of Domain H's own build plan, explicitly scoped as
+"its own dedicated pass" once pieces 1-6 landed).
+**Context, found by real read, not assumed**: `dourmouse/mcp_bridge.py` already made Dourmouse a
+real, tested MCP SERVER (JSON-RPC 2.0 over stdio, `initialize`/`tools/list`/`tools/call`,
+confirmation-gate-aware) so external CLIs (Claude Code, Codex) can call Dourmouse's own tools --
+built earlier under a different initiative name, never marked against this Domain H checklist item,
+the same situation piece 5's context-compaction audit found. What did NOT exist: the other, more
+central half of Claude Code's own MCP feature -- the user configuring an EXTERNAL MCP server and
+Dourmouse connecting to it AS A CLIENT to gain its tools, the way Claude Code's own `.mcp.json`
+works. Confirmed by grep across the codebase before writing anything: no MCP client of any kind
+existed.
+**Design**: new `dourmouse/mcp_client.py` -- a real, stdlib-only, hand-rolled stdio JSON-RPC 2.0
+client (`McpClient`: spawns the configured server as a subprocess, performs a real `initialize`
+handshake, sends `notifications/initialized`, fetches the real `tools/list`, and `call_tool()`s
+against it), speaking the exact same protocol subset `mcp_bridge.py`'s own server implements --
+proven by a real end-to-end test connecting a real `McpClient` to a real `dourmouse.mcp_bridge`
+subprocess and listing/using its real tools, not two isolated mocks. Config format
+(`workspace/mcp_servers.json`, `{"mcpServers": {...}}`) is the SAME shape `mcp_bridge.build_mcp_
+config_file` already writes for Claude Code and Claude Code's own `.mcp.json` uses, so an existing
+Claude Code MCP server config can be pointed at directly rather than needing a second bespoke
+format. Every external tool is wrapped into a real `ToolSpec` named `mcp__<server>__<tool>` -- the
+exact naming convention this codebase already documented elsewhere (`code_backends.py`'s own
+`--allowedTools "mcp__dourmouse__*"` comment) -- and registered under a new `mcp_tools` subagent,
+built only when at least one server configures at least one real tool (never a standing empty
+subagent; the common zero-config case returns instantly with no subprocess spawned at all).
+**Failure discipline**: one misconfigured or unreachable server (a bad `command`, a real
+`subprocess.Popen` `OSError`, a bad handshake) is caught per-server and recorded honestly on the
+subagent's own description -- never raised, never blocking any other configured server or
+`build_general_registry()` itself. Verified: a real, guaranteed-nonexistent binary path never
+crashes the build; a mix of one working and one broken server still yields a working subagent for
+the one that connected.
+**Honest, named limitation**: `_readline`'s `timeout` parameter is accepted for interface symmetry
+but not enforced on the real subprocess path (no portable non-blocking read-with-timeout without
+extra machinery this codebase doesn't otherwise use) -- a genuinely hung external server blocks the
+calling thread, same as this codebase's other synchronous subprocess calls (`code_backends.py`'s own
+CLI invocations). Named as real, separate follow-on if ever observed in practice, not hidden.
+**Files changed**: `dourmouse/mcp_client.py` (new), `dourmouse/general_roster.py`
+(`build_general_registry()`'s new opt-in `mcp_tools` subagent registration, mirroring the
+`self_extended` block's own guarded-registration pattern immediately above it).
+**Tests added**: `dourmouse/tests/test_mcp_client.py` -- handshake (real protocol version/client
+info sent, tools/list parsed, server-error and empty-response handling), `call_tool` (real text
+result, honest error surfacing, transport failure never raises), config loading (missing/malformed/
+valid), subagent building (no servers, no command, unreachable command, one failing server never
+blocking a working one, real tool-name prefixing), and the real end-to-end subprocess test against
+the actual `dourmouse.mcp_bridge` server.
+**Result**: fixed (shipped). Domain H is now 7/7 pieces done -- fully closed. Full suite green.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified
