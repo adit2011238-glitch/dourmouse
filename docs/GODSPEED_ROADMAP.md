@@ -610,6 +610,30 @@ and a real build sequence, not just a requirement statement:
       3D/pixel-office asset work (real sprites, a full floor plan,
       deploy/blocked-streak-triggered flavor animations) is real,
       separate, not-yet-built follow-on.
+- [x] Agent ecosystem hardening, round 1, shipped 2026-09-20 -- two real
+      flaws found during a design-phase review of the (not-yet-built)
+      multi-floor agent office concept, fixed against the real, already-
+      shipped backend (`message_bus.py`/`send_message`), not the mockup:
+      (1) `send_message`'s `from_agent` used to come straight from the
+      model's own tool-call arguments, checked only against "is this a
+      real roster name" -- any agent (or the untargeted top-level
+      orchestrator turn) could forge a message as `security` or
+      `orchestrator`. Fixed by reading the real caller identity off
+      `current_dispatch_context(registry).forced_agent` (the same real
+      hard-scoping `delegate_task`/`delegate_parallel` already use) and
+      refusing loudly, never silently overriding, on any mismatch or on
+      an untargeted caller. See `docs/ENGINEERING_AUDIT.md` finding
+      #064. (2) `message_bus` had no proactive notification path -- a
+      direct message sat until something explicitly called
+      `read_agent_inbox`. Fixed by wiring `message_bus.on_post` to a new
+      `"agent"` alert kind on the real, already-existing
+      `StateStore.add_alert`/SSE `state_change` path (the same one ATLAS
+      run-started alerts already use, which the desktop app's
+      `DesktopNotifier` already watches) -- filtered to DIRECT messages
+      only, since a broadcast (e.g. news's live feed) is routine data-
+      plane traffic, never surfaced as if it were urgent. Both changes
+      are additive to the real backend; no mockup/artifact code touched.
+      See `docs/ENGINEERING_AUDIT.md` finding #065.
 - [x] Domain F remainder (named specialist roles) -- shipped 2026-09-19.
       `general_roster.py`'s `_DELEGATE_ROLE_PRESETS`: `researcher`, `coder`,
       `tester`, `security_sentry` each map to a real, already-registered

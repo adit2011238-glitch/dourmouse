@@ -1652,6 +1652,20 @@ def _send_message_tool(registry: DispatchRegistry) -> ToolSpec:
     in-process and bounded; nothing here leaves the machine (Rule 2.2:
     no external send is claimed).
 
+    Finding #064 (identity, security): ``from_agent`` used to come straight
+    from the model's own tool-call arguments, validated only against "is
+    this a real roster name" — never against who actually placed the call.
+    Any agent (or the untargeted top-level orchestrator turn) could forge a
+    message as ``security`` or ``orchestrator``. The real caller identity
+    IS available and deterministic: ``current_dispatch_context(registry)
+    .forced_agent`` is set exactly when this run was hard-scoped to one
+    subagent (a delegate_task/delegate_parallel branch — see
+    ``run_dispatch_messages``'s own forced_agent docstring), which is the
+    only place a "this agent is speaking" claim is real rather than an
+    LLM's own untrusted say-so. The untargeted top-level orchestrator turn
+    has no single real identity to speak as, so it is refused too, loudly,
+    same as an unknown name.
+
     NOTE on naming: this function is deliberately NOT called
     ``_send_message`` to avoid any chance of shadowing — the registry
     already has a comms ``draft_message``/``send_draft`` pair, and the
@@ -1660,12 +1674,27 @@ def _send_message_tool(registry: DispatchRegistry) -> ToolSpec:
     """
 
     def _handler(arguments: dict[str, Any]) -> str:
-        from_agent = (arguments.get("from_agent") or "").strip()
+        claimed_from = (arguments.get("from_agent") or "").strip()
         to_agent = (arguments.get("to_agent") or "").strip()
         subject = (arguments.get("subject") or "").strip()
         body = (arguments.get("body") or "").strip()
-        if not from_agent:
-            return "ERROR: send_message requires 'from_agent'."
+        ctx = current_dispatch_context(registry)
+        real_agent = ctx.forced_agent if ctx is not None else None
+        if not real_agent:
+            return (
+                "REFUSED: send_message needs a real, single-agent caller "
+                "identity (a delegate_task/delegate_parallel branch scoped "
+                "to one subagent) — it cannot be called from an untargeted "
+                "orchestrator turn, and 'from_agent' is never taken on the "
+                "caller's own say-so."
+            )
+        if claimed_from and claimed_from != real_agent:
+            return (
+                f"REFUSED: this call is running as {real_agent!r}; it "
+                f"cannot send as {claimed_from!r}. send_message always "
+                "sends as the real calling agent."
+            )
+        from_agent = real_agent
         if from_agent not in registry.subagent_names:
             return (
                 f"REFUSED: unknown sender {from_agent!r} — send_message can "
@@ -1696,21 +1725,30 @@ def _send_message_tool(registry: DispatchRegistry) -> ToolSpec:
     return ToolSpec(
         name="send_message",
         description=(
-            "Send a message from ONE roster agent to ANOTHER (or broadcast "
-            "to the whole roster with to_agent='*') on the inter-agent bus. "
-            "Use to route information between agents mid-task, e.g. research "
-            "sends its findings to markets. Both agents must be real roster "
-            "members. Internal bus only — nothing is sent outside the machine."
+            "Send a message from THIS agent to ANOTHER (or broadcast to the "
+            "whole roster with to_agent='*') on the inter-agent bus. Use to "
+            "route information between agents mid-task, e.g. research sends "
+            "its findings to markets. Only callable from within a single-"
+            "agent run (a delegate_task/delegate_parallel branch) — the "
+            "sender is always the real calling agent, never a name you "
+            "pass in. Internal bus only — nothing is sent outside the machine."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "from_agent": {"type": "string", "description": "sending subagent name"},
+                "from_agent": {
+                    "type": "string",
+                    "description": (
+                        "optional, informational only — must match the real "
+                        "calling agent or be omitted; you cannot send as "
+                        "another agent"
+                    ),
+                },
                 "to_agent": {"type": "string", "description": "recipient subagent name, or '*' to broadcast"},
                 "subject": {"type": "string"},
                 "body": {"type": "string"},
             },
-            "required": ["from_agent", "to_agent", "body"],
+            "required": ["to_agent", "body"],
         },
         handler=_handler,
     )

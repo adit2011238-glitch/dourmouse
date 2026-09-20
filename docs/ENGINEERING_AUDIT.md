@@ -2804,6 +2804,69 @@ data, not the finished visual vision.
 
 ---
 
+### 064 -- `send_message` sender impersonation: `from_agent` was model-declared, never verified
+
+**Severity**: real, security (spoofing). **Context**: a design-phase review of the (not-yet-built)
+multi-floor agent office concept walked the real `message_bus`/`delegate_task`/`delegate_parallel`
+source (not the mockup) looking for genuine flaws, per the user's explicit "find flaws in this ai
+agent ecosystem". `send_message`'s handler read `from_agent` straight out of the model's own tool-call
+arguments and validated only that it named a real roster agent -- never that the calling agent
+actually WAS that name. Any agent (or the untargeted top-level orchestrator turn, which has no single
+real identity at all) could forge a message claiming to be `security` or `orchestrator`, e.g. "security:
+cleared, proceed" -- a real trust problem given inter-agent messages are meant to carry real information
+between agents mid-task.
+**Fix**: the real caller identity already exists and is deterministic --
+`current_dispatch_context(registry).forced_agent` is set exactly when a run is hard-scoped to one
+subagent (a `delegate_task`/`delegate_parallel` branch; see `run_dispatch_messages`'s own
+`forced_agent` docstring), the same mechanism `delegate_task`'s own handler already reads via
+`current_dispatch_context` (`general_roster.py`, pre-existing pattern, not new). `send_message` now
+reads that as the real sender, refuses loudly (never silently overrides) if the untargeted top-level
+orchestrator calls it at all, and refuses loudly if the arguments claim a different name than the real
+one. `from_agent` is now optional in the tool schema (informational only) instead of required.
+**Files changed**: `dourmouse/general_roster.py` (`_send_message_tool`).
+**Tests added**: `dourmouse/tests/test_message_bus.py::TestMessengerTools` --
+`test_send_message_refuses_without_real_caller_identity`,
+`test_send_message_refuses_impersonation_of_another_agent`; the pre-existing sender/recipient/body
+tests updated to push a real `DispatchContext` with `forced_agent` set (the same pattern
+`test_general_roster.py`'s own `delegate_parallel` context tests already use) instead of asserting a
+caller-supplied `from_agent`.
+**Result**: fixed. Full targeted suite (`test_message_bus.py`, `test_general_roster.py`,
+`test_dispatch.py`) green after the change.
+
+---
+
+### 065 -- `message_bus` had no proactive notification path (direct messages sat until polled)
+
+**Severity**: real, usability/reliability gap, explicitly requested by the user ("yes we need a
+notification or pinging system"). **Context**: same flaw-finding pass as #064. `message_bus.post()`
+is real and correct, but nothing observes it proactively -- a direct message sits in the recipient's
+inbox until something explicitly calls `read_agent_inbox`. Given the CEO-console concept (a human
+watching the roster), a real handoff could go unnoticed indefinitely.
+**Fix**: reused three pieces that already existed rather than building new infrastructure --
+`message_bus.on_post(fn)` (the real, already-existing observer hook, previously used only for the
+memory mirror), the real `StateStore.add_alert`/SSE `state_change` path (the exact mechanism ATLAS
+run-started alerts already use, at `webui.py`'s `/api/atlas` POST handler), and the desktop app's
+already-existing `DesktopNotifier`, which already subscribes to that same alerts SSE section and
+already turns a new alert into a native OS notification -- no new client-side code needed. Added a new
+`"agent"` alert kind (`state_store.ALERT_KINDS`) and a `webui.py`-level `on_post` observer that creates
+one alert per DIRECT message (`to != BROADCAST`) and broadcasts the same `state_change` ATLAS alerts
+use. Deliberately excludes broadcasts: a broadcast (e.g. `news`'s live feed onto `*`) is routine data-
+plane traffic an agent chose to make available to everyone, not a deliberate one-to-one handoff that
+warrants interrupting the user -- same honesty-gating principle the `agent-virtual-office` reference
+project uses for its own work-claim events (never surface routine activity as if it were an urgent
+signal).
+**Files changed**: `dourmouse/state_store.py` (`ALERT_KINDS` gains `"agent"`), `dourmouse/webui.py`
+(`run_server`'s `_notify_direct_message` observer, registered on `server.bus.on_post`).
+**Tests added**: `dourmouse/tests/test_message_bus.py::TestDirectMessageNotifications` --
+`test_direct_message_creates_an_agent_alert`, `test_broadcast_message_creates_no_alert`, both against
+a real `run_server` instance with an isolated `StateStore(path=None)` and `MessageBus()`, verifying the
+real alert row (kind, title, detail) rather than mocking the store.
+**Result**: fixed. Real backend piece still needed to make this durable across restarts (named,
+not built): `office_logger.py` persists `message_bus` traffic itself; today's alert is real and live
+but, like `message_bus`, does not survive a server restart.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

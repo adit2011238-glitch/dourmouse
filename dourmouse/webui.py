@@ -7141,6 +7141,42 @@ def run_server(
                 pass  # a broken memory mirror never breaks the bus
 
         server.bus.on_post(_mirror_to_memory)
+
+    def _notify_direct_message(msg: dict) -> None:
+        """Finding #065 (notification gap): message_bus had no proactive
+        surface -- a direct message sat until something explicitly called
+        read_agent_inbox. Real signal only (honesty-gating, same principle
+        as the reference office project's work-claim gate): a DIRECT
+        message is a deliberate one-to-one handoff an agent chose to send,
+        so it becomes a real DOURMOUSE alert (SSE-broadcast live, same path
+        ATLAS run-started alerts use, which is what the desktop app's
+        DesktopNotifier already watches). A BROADCAST is routine data-plane
+        traffic (e.g. news's live feed) and is never surfaced as if it were
+        urgent.
+        """
+        if msg.get("to") == BROADCAST:
+            return
+        store = getattr(server, "state", None)
+        if store is None:
+            return
+        try:
+            from dourmouse.state_store import SHARED_OWNER
+
+            store.add_alert(
+                kind="agent",
+                title=f"{msg.get('from', '?')} -> {msg.get('to', '?')}: "
+                      f"{msg.get('subject', '') or '(no subject)'}",
+                detail=msg.get("body", ""),
+                link="#/office",
+                owner=SHARED_OWNER,
+            )
+            hub = getattr(server, "events_broadcast", None)
+            if hub is not None:
+                hub.broadcast({"type": "state_change", "section": "alerts", "owner": SHARED_OWNER})
+        except Exception:
+            pass  # an observer must never break the bus (see on_post)
+
+    server.bus.on_post(_notify_direct_message)
     server.list_sessions = _list_sessions
     server.list_recent_sessions = _list_recent_sessions
     server.get_session_transcript = _get_session_transcript

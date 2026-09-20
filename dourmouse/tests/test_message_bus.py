@@ -231,15 +231,37 @@ class TestMessengerTools:
     def _registry(self):
         return build_general_registry()
 
-    def _call(self, name: str, arguments: dict):
-        spec = self._registry().lookup(name)
+    def _call(self, name: str, arguments: dict, *, forced_agent: str | None = None):
+        """Call a registered tool's handler with a real single-agent
+        DispatchContext pushed onto ITS OWN registry's thread-local stack --
+        the same mechanism run_dispatch_messages uses, and the only way
+        send_message (finding #064) will accept a caller identity at all.
+        ``forced_agent=None`` deliberately leaves no context pushed, to
+        exercise the untargeted-caller refusal path.
+        """
+        from dourmouse.dispatch import DispatchContext, _registry_ctx_stack
+
+        registry = self._registry()
+        spec = registry.lookup(name)
         assert spec is not None, f"{name} not registered"
-        return spec.handler(arguments)
+        if forced_agent is None:
+            return spec.handler(arguments)
+        ctx = DispatchContext(
+            registry=registry, client=None, config=None,
+            confirmation_gate=None, event_sink=None, forced_agent=forced_agent,
+        )
+        stack = _registry_ctx_stack(registry)
+        stack.append(ctx)
+        try:
+            return spec.handler(arguments)
+        finally:
+            stack.pop()
 
     def test_send_message_posts_to_bus(self):
         out = self._call(
             "send_message",
-            {"from_agent": "research_info", "to_agent": "markets", "subject": "catalyst", "body": "NVDA spiked on news"},
+            {"to_agent": "markets", "subject": "catalyst", "body": "NVDA spiked on news"},
+            forced_agent="research_info",
         )
         assert "MESSAGE SENT" in out
         assert "research_info" in out and "markets" in out
@@ -247,22 +269,44 @@ class TestMessengerTools:
         assert rows and rows[0]["subject"] == "catalyst"
 
     def test_send_message_broadcast(self):
-        out = self._call("send_message", {"from_agent": "news", "to_agent": "*", "subject": "flash", "body": "breaking"})
+        out = self._call(
+            "send_message", {"to_agent": "*", "subject": "flash", "body": "breaking"}, forced_agent="news"
+        )
         assert "broadcast" in out
         assert mb.get_message_bus().inbox("rnd")
 
+    def test_send_message_refuses_without_real_caller_identity(self):
+        # No DispatchContext pushed at all -- an untargeted orchestrator
+        # turn has no single real identity to speak as (finding #064).
+        out = self._call(
+            "send_message", {"from_agent": "orchestrator", "to_agent": "markets", "body": "b"}, forced_agent=None
+        )
+        assert out.startswith("REFUSED")
+        assert "real, single-agent caller identity" in out
+
+    def test_send_message_refuses_impersonation_of_another_agent(self):
+        # Running as 'news' but the arguments claim to be 'security'.
+        out = self._call(
+            "send_message", {"from_agent": "security", "to_agent": "markets", "body": "b"}, forced_agent="news"
+        )
+        assert out.startswith("REFUSED")
+        assert "cannot send as" in out
+
     def test_send_message_refuses_unknown_sender(self):
-        out = self._call("send_message", {"from_agent": "ghost", "to_agent": "markets", "subject": "s", "body": "b"})
+        # forced_agent itself is not a real roster name (should not happen
+        # via the real dispatch path, but the handler must still refuse
+        # loudly rather than post as a fabricated sender).
+        out = self._call("send_message", {"to_agent": "markets", "body": "b"}, forced_agent="ghost")
         assert out.startswith("REFUSED")
         assert "unknown sender" in out
 
     def test_send_message_refuses_unknown_recipient(self):
-        out = self._call("send_message", {"from_agent": "news", "to_agent": "ghost", "subject": "s", "body": "b"})
+        out = self._call("send_message", {"to_agent": "ghost", "body": "b"}, forced_agent="news")
         assert out.startswith("REFUSED")
         assert "unknown recipient" in out
 
     def test_send_message_requires_body(self):
-        out = self._call("send_message", {"from_agent": "news", "to_agent": "markets", "subject": "s"})
+        out = self._call("send_message", {"to_agent": "markets", "subject": "s"}, forced_agent="news")
         assert "non-empty 'body'" in out
 
     def test_read_agent_inbox_returns_real_messages(self):
@@ -311,6 +355,42 @@ class TestMessengerTools:
 # --------------------------------------------------------------------------- #
 # HTTP — /api/messages + /api/agent/<name> inbox
 # --------------------------------------------------------------------------- #
+
+class TestDirectMessageNotifications:
+    """Finding #065: a direct message.bus post becomes a real DOURMOUSE
+    alert (the same store/SSE path ATLAS run-started alerts already use,
+    which the desktop app's DesktopNotifier already watches) -- a broadcast
+    never does, since it is routine data-plane traffic, not a deliberate
+    one-to-one handoff."""
+
+    def test_direct_message_creates_an_agent_alert(self):
+        from dourmouse.state_store import SHARED_OWNER, StateStore
+
+        bus = MessageBus()
+        state = StateStore(path=None)
+        srv = run_server(_echo_registry(), port=0, client=None, config=None, bus=bus, state=state)
+        try:
+            bus.post("research_info", "markets", "catalyst", "NVDA spiked")
+            alerts = state.alerts(SHARED_OWNER)
+            assert len(alerts) == 1
+            assert alerts[0]["kind"] == "agent"
+            assert "research_info" in alerts[0]["title"] and "markets" in alerts[0]["title"]
+            assert alerts[0]["detail"] == "NVDA spiked"
+        finally:
+            srv.server_close()
+
+    def test_broadcast_message_creates_no_alert(self):
+        from dourmouse.state_store import SHARED_OWNER, StateStore
+
+        bus = MessageBus()
+        state = StateStore(path=None)
+        srv = run_server(_echo_registry(), port=0, client=None, config=None, bus=bus, state=state)
+        try:
+            bus.post("news", BROADCAST, "flash", "breaking headline")
+            assert state.alerts(SHARED_OWNER) == []
+        finally:
+            srv.server_close()
+
 
 class TestMessagesApi:
     def test_messages_endpoint_returns_bus_traffic(self):
