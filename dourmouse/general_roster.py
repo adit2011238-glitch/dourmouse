@@ -63,6 +63,7 @@ from dourmouse.dispatch import (
 )
 from dourmouse.goal_tools import build_goals_subagent
 from dourmouse.research_mesh_tools import build_research_mesh_subagent
+from dourmouse.device_wiki_tools import build_device_wiki_subagent
 from dourmouse.research_pipeline_tools import build_research_pipeline_subagent
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.security.tools import build_security_subagent
@@ -4305,6 +4306,7 @@ def build_general_registry() -> DispatchRegistry:
     registry.register_subagent(build_research_mesh_subagent())
 
     registry.register_subagent(build_research_pipeline_subagent(registry))
+    registry.register_subagent(build_device_wiki_subagent())
 
     registry.register_subagent(build_security_subagent())
 

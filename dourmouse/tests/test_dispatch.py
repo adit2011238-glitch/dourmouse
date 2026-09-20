@@ -2087,6 +2087,9 @@ class TestEndToEndThroughGeneralRoster:
             "evidence_pipeline",  # 2026-09-20: Domain G's chat-reachable
                                    # wiring over research_pipeline/'s own
                                    # stage functions.
+            "device_wiki",  # 2026-09-21: Domain E's chat-reachable wiring
+                             # over device_wiki/'s own real data model,
+                             # store, summarizer, and walker.
         }
 
     def test_trading_subagent_added_later_dispatchable(self):

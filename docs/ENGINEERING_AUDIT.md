@@ -2480,6 +2480,330 @@ of the founding spec's own 54-item cybersecurity build list.
 
 ---
 
+### 056 -- Domain E: the device wiki's pure data model (first piece)
+
+**Severity**: n/a (feature -- Domain E's own first-scoped build-plan step).
+**Context**: Domain E (the device wiki) was previously blocked pending confirmation that a prior
+concurrent session's own conflicting access to `~/Documents/` had ended. Re-checked before writing
+any file here: `ps aux | grep -i "claude.*Documents/dourmouse"` shows no matching process, and
+`~/Documents/` contains only this session's own prior deliverables (the status report, the
+already-archived `DOURMOUSE_DO_NOT_TOUCH.tar.gz`) -- clear to proceed.
+**Design**: `dourmouse/device_wiki/core.py`, mirroring `research_pipeline/core.py`'s own pure-logic-
+first shape exactly (finding #042's own precedent): a real `WikiEntry` (path, content_hash, size_bytes,
+status, summary, summarized_at, last_seen), three real statuses (`UNSUMMARIZED`/`SUMMARIZED`/
+`MISSING`), and pure transition functions (`with_new_entry`, `with_summary`, `with_failed_summary`,
+`mark_missing`) plus the real reconciliation function the whole domain's harsh acceptance test 2
+depends on: `reconcile(existing, found, now)` -- given the wiki's current entries and what a real
+walker (step 4, not yet built) actually found on disk this scan, produces the new real state: a new
+path is added `UNSUMMARIZED`; an unchanged path only advances `last_seen`; a path whose real content
+hash changed reverts to a fresh `UNSUMMARIZED` entry (a stale summary of content that no longer exists
+is never silently kept, matching harsh acceptance test 1's "never fabricate" spirit one layer over); a
+path no longer found on disk is `mark_missing`'d, never dropped from the result (harsh acceptance test
+2, literally). A previously-`MISSING` file that reappears with unchanged content self-heals back to
+`SUMMARIZED` (its real prior summary, preserved through `mark_missing`, is still honest and valid) or
+`UNSUMMARIZED`, derived from whether a real summary is actually present rather than trusting the stale
+`MISSING` status itself -- a real edge case worked through by hand while writing the tests, not
+originally in the build plan's own one-line description. No I/O, no clock read internally (the caller
+always passes `now`), no model call -- fully unit-testable, matching `research_pipeline/core.py`'s own
+established discipline.
+**Files changed**: new `dourmouse/device_wiki/__init__.py`, `dourmouse/device_wiki/core.py`.
+**Tests added**: new `dourmouse/tests/test_device_wiki_core.py` (16 tests: entry validation, every
+transition function's real behavior, and 8 `reconcile()` cases including the missing-file-reappears
+self-heal for both a summarized and an unsummarized prior entry).
+**Tests run**: `test_device_wiki_core.py` (16/16), full suite (see commit).
+**Result**: fixed -- Domain E's own build plan step 1 (the pure data model) is closed. Steps 2-6 (the
+real SQLite store, the summarizer, the walker with its explicit root-folder allowlist, the chat tool,
+the UI page) remain real, separate, not-yet-built follow-on, in that sequence.
+
+---
+
+### 057 -- Domain E: the device wiki's real SQLite store (second piece)
+
+**Severity**: n/a (feature -- Domain E's own build plan step 2).
+**Context**: finding #056 built the pure `WikiEntry`/`reconcile()` data model with no persistence.
+**Design**: `dourmouse/device_wiki/store.py`, workspace-relative `DEFAULT_DB` applied from the start
+(`config.workspace_dir() / "device_wiki" / "wiki.db"`, finding #028's own lesson, not retrofitted).
+Unlike `research_pipeline/store.py`'s own one-row-per-question JSON-body shape, this store is one row
+PER REAL FILE (`wiki_entries` table, `path` primary key) -- a device wiki can hold thousands of
+entries, and updating/querying one file's own row is the natural, efficient shape here, not a single
+mega-JSON blob for the whole wiki. `save_all()` batches a whole `reconcile()` result into one
+transaction rather than one commit per file; `all_as_dict()` returns the exact shape `reconcile()`'s
+own `existing` parameter expects, closing the real read-modify-write loop a walker (step 4) will drive
+on every scan: `WikiStore.all_as_dict()` -> `reconcile(existing, found, now)` -> `WikiStore.save_all(result)`.
+**Files changed**: new `dourmouse/device_wiki/store.py`; `dourmouse/device_wiki/__init__.py` (export
+`WikiStore`/`DEFAULT_DB`).
+**Tests added**: new `dourmouse/tests/test_device_wiki_store.py` (8 tests: round-trip, unknown-path
+honesty, upsert-not-duplicate, batch save, status filtering, a MISSING entry's status persists,
+`all_as_dict()`'s shape, cross-instance persistence).
+**Tests run**: `test_device_wiki_store.py` (8/8), full suite (see commit).
+**Result**: fixed -- Domain E's build plan step 2 is closed. Step 3 (the real summarizer, reusing the
+tool-less `ChatSession` primitive) is next.
+
+---
+
+### 058 -- Domain E: the device wiki's real per-file summarizer (third piece, harsh acceptance test 1)
+
+**Severity**: n/a (feature -- Domain E's own build plan step 3).
+**Context**: findings #056-#057 built the pure data model and its persistence with no real content or
+model call yet.
+**Design**: `dourmouse/device_wiki/stages.py`. `read_file_for_summary(path)` is the real, honest file
+read: returns `None` (never raises) for a missing/unreadable file, a real binary file (a null byte in
+the first 8000 real sniffed bytes, the standard cheap real-world heuristic), or a file with zero real
+readable content after stripping whitespace -- truncates to a real, named 8000-character cost bound
+otherwise (the same "an unbounded call is an uncontrolled real cost" reasoning `research_pipeline`'s
+own `max_sources_per_sub_question` cap already established). `summarize_entry(entry, content, now)` is
+the sixth reuse of the tool-less `ChatSession(DispatchRegistry(), session_file=None)` primitive,
+stripping the same leaked `[DOURMOUSE: ...]` dispatch diagnostic finding #046 first caught (a local
+copy of `_strip_internal_diagnostics`, matching this codebase's own established per-domain
+reconstruction convention rather than a cross-domain import) and degrading a genuinely empty model
+reply to `with_failed_summary` rather than raising. `summarize_file(entry, now)` composes both: a
+binary or unreadable file gets an honest `with_failed_summary` WITHOUT ever reaching the model --
+harsh acceptance test 1 ("every file gets a real, non-fabricated summary or an honest 'could not
+summarize' marker -- never silence, never a made-up description") enforced in code, not just hoped for
+in a prompt.
+**Live proof**: a real, unforced call against this session's own `dourmouse/device_wiki/core.py`
+produced a real, accurate summary describing the file's actual `WikiEntry` dataclass, its three real
+statuses, and its transition/reconciliation functions -- not a fabricated or generic description.
+**Files changed**: new `dourmouse/device_wiki/stages.py`.
+**Tests added**: new `dourmouse/tests/test_device_wiki_stages.py` (16 tests: real file reads against
+real temp files -- text, missing, directory, binary, empty, whitespace-only, truncation to the cost
+bound -- plus the mocked-model summarize_entry/summarize_file paths including the leaked-diagnostic
+strip and the binary/deleted-file-never-reaches-the-model guarantees).
+**Tests run**: `test_device_wiki_stages.py` (16/16), full suite (see commit).
+**Result**: fixed -- Domain E's build plan step 3 is closed, and harsh acceptance test 1 is a real,
+enforced code guarantee. Step 4 (the real walker with its explicit root-folder allowlist) is next.
+
+---
+
+### 059 -- Domain E: the device wiki's real walker with an explicit root-folder allowlist (fourth piece)
+
+**Severity**: n/a (feature -- Domain E's own build plan step 4).
+**Context**: findings #056-#058 built the data model, persistence, and summarizer; nothing yet
+actually walked a real folder. Domain E's own requirement is explicit and literal: "walks a
+user-configured set of real root folders (Documents, Desktop, code repos -- never silently the whole
+filesystem)".
+**Design**: `dourmouse/device_wiki/walker.py`. `configured_roots()` reads a real, explicit
+`DOURMOUSE_WIKI_ROOTS` allowlist (`os.pathsep`-separated real absolute paths); unset or empty is an
+honest empty list, NEVER a fallback to walking the whole filesystem -- the literal requirement enforced
+in code, not just documented. A configured path that no longer exists is silently excluded (config
+drift, e.g. a renamed folder, must not break every other configured root). `walk_roots()` is a real
+`os.walk` over the allowed roots, skipping known system/cache/build directory names plus any
+dotfile-convention directory (`.git`, `.venv`, etc. -- matches the founding spec's own literal "skip
+system/cache/build files" wording), skipping a file over a real 5&nbsp;MB cost bound entirely (an
+honest, complete skip, never a silent partial/truncated hash), and skipping a file this process cannot
+read (permission error, a broken symlink) as an honest omission rather than a crash. `scan(store,
+roots, now)` is the real, complete cycle: read the store's current state, walk, `reconcile()`, persist
+-- the exact loop a chat tool (step 5) will drive on every real scan.
+**Live proof**: (see the full-suite regression below; no separate live proof needed beyond the real
+temp-directory tests themselves, since this stage function does real, unmocked filesystem I/O against
+real files in every test -- the same "real data, not fabricated samples" discipline `test_security_
+platform_adapter.py` already established, adapted to real local files instead of captured command
+output.)
+**Files changed**: new `dourmouse/device_wiki/walker.py`; `dourmouse/device_wiki/__init__.py`
+(exports).
+**Tests added**: new `dourmouse/tests/test_device_wiki_walker.py` (16 tests, all against real temp
+directories and real files: root-allowlist parsing including config drift, real SHA-256 content
+hashing, real file-size reporting, skip-directory behavior, the oversized-file cost bound, multiple
+roots, nested subdirectories, and three real end-to-end `scan()` cycles proving harsh acceptance test 2
+-- a real deletion and a real content change both correctly reflected on the next real scan through the
+real store).
+**Tests run**: `test_device_wiki_walker.py` (16/16), full suite (see commit).
+**Result**: fixed -- Domain E's build plan step 4 is closed. Step 5 (the chat-reachable tool) is next,
+then step 6 (the UI page) and live proof against one real folder end to end.
+
+---
+
+### 060 -- Domain E: chat reachability for the device wiki (fifth piece)
+
+**Severity**: n/a (feature -- Domain E's own build plan step 5).
+**Context**: findings #056-#059 built the data model, store, summarizer, and walker; nothing yet was
+reachable from chat.
+**Design**: `dourmouse/device_wiki_tools.py`, the fourth reuse of the dedicated-module-plus-
+`build_X_subagent()`-factory shape (`research_mesh_tools.py`, `research_pipeline_tools.py`, `security/
+tools.py`, now this). Three real tools on a new `device_wiki` subagent: `device_wiki_scan` (the real,
+complete cycle -- walk the configured roots, reconcile, summarize up to `max_files_to_summarize`
+newly-discovered-or-changed files, a real named cost bound so a huge first scan does not run
+unboundedly), `device_wiki_status` (real SUMMARIZED/UNSUMMARIZED/MISSING counts), `device_wiki_get`
+(one real file's current entry by exact path). `device_wiki_scan` honestly refuses with no configured
+`DOURMOUSE_WIKI_ROOTS` rather than falling back to any default. Registered in `general_roster.py`;
+added to `model_delegation.py`'s `_LOCAL_ONLY_AGENTS` (personal file content, same privacy class as
+`docs`/`memory`). Checked for the same name/description substring-collision risk that bit
+`deep_research` (finding #050) before committing: `device_wiki` and its description contain no token
+`test_planner.py` uses to mean something else -- confirmed by grep, not assumed.
+**A real bug caught before any test ran**: the first draft of `_device_wiki_scan_tool` called
+`summarize_file()` twice per newly-discovered file (a leftover duplicate line from editing) -- would
+have doubled every real model call's cost with no functional effect visible in the tool's own output
+(the first call's result was simply discarded). Caught by re-reading the diff before running tests,
+fixed by keeping only the one real call and threading its result back into the in-memory `result` dict
+so the reported UNSUMMARIZED/MISSING counts stay accurate.
+**Live proof**: a real scan against two real files in a real temp folder (a meeting-notes text file, a
+project README) produced two real, accurate summaries via `device_wiki_scan`, correctly reported by
+`device_wiki_status` (2 SUMMARIZED) and individually retrievable via `device_wiki_get` for each real
+path -- an end-to-end real pass, not isolated stage-function tests.
+**Files changed**: new `dourmouse/device_wiki_tools.py`; `dourmouse/general_roster.py` (import +
+registration); `dourmouse/model_delegation.py` (`_LOCAL_ONLY_AGENTS`).
+**Tests added**: new `dourmouse/tests/test_device_wiki_tools.py` (12 tests covering every tool's happy
+path and honest-refusal path, the `max_files_to_summarize` cost-bound cap, a real deletion reported as
+missing, and harsh acceptance test 3 enforced directly -- a source-inspection test asserting no tool
+handler contains `unlink`/`os.remove`/`shutil.move`/`write_text`/`write_bytes`), plus the two exhaustive
+real-subagent-name assertions (`test_dispatch.py`, `test_general_roster.py`) updated together.
+**Tests run**: `test_device_wiki_tools.py` (12/12), `test_dispatch.py` + `test_general_roster.py` +
+`test_model_delegation.py` + `test_planner.py` (413/413), full suite (see commit).
+**Result**: fixed -- Domain E is now chat-reachable end to end. Step 6 (the UI page) is the last
+remaining build-plan step; cross-link generation (harsh acceptance test 4) is real, separate follow-on
+layered on after, per the domain's own build plan.
+
+---
+
+### 061 -- Domain E: the device wiki's real browsable UI page (sixth and final piece)
+
+**Severity**: n/a (feature -- Domain E's own build plan step 6, the last step).
+**Context**: findings #056-#060 built a fully chat-reachable device wiki with no UI surface. Domain
+E's own explicit requirement (section 7) names "a searchable structure the assistant (and the user,
+via a real UI) can browse" -- a tool the model can query silently is not sufficient on its own,
+matching the exact same gap the GOALS screen closed for the Goal/Task runtime (finding #026).
+**Design**: `GET /api/device_wiki` (`dourmouse/webui.py`), mirroring `/api/goals`'s own "already-tested
+backend, first HTTP surface over it, nothing new logically" shape -- `?status=` filters,
+`?path=<exact real path>` returns one entry (a real 404 for an unknown path, never a fabricated empty
+entry), and the response includes `configured_roots` so the UI can distinguish "nothing configured
+yet" from "configured but nothing scanned yet" honestly. Deliberately read-only: a real scan runs
+through the `device_wiki_scan` chat tool, never a button on this route, since a real scan can take
+minutes (one real model call per file needing a summary) and should be a deliberate chat action, not
+something that blocks a screen. A new WIKI screen in `ui/console.html` (added to `SCREENS`, auto-
+appearing under the console's own overflow "MORE" menu since the row was already full), polling every
+5s while active (same accepted tradeoff as GOALS/TIMETABLE/AGENTSMITH), grouping real entries by
+SUMMARIZED/UNSUMMARIZED/MISSING with a real per-file summary shown inline.
+**Live proof**: a real dev server booted against a real temp folder (`DOURMOUSE_WIKI_ROOTS` pointed at
+one real file), a real `device_wiki_scan` chat-tool call produced one real, accurate summary, and the
+WIKI screen -- reached through the console's real "MORE" overflow menu, screen 18/18 -- correctly
+rendered the real file's status, path, and summary text with a live-green status dot, confirmed by
+screenshot in the browser pane. The empty (no roots configured) state was also confirmed honest before
+any root was set.
+**Files changed**: `dourmouse/webui.py` (`GET /api/device_wiki`); `ui/console.html` (`SCREENS` array,
+the WIKI pane, `loadWiki`/`paintWiki`/`wikiRowHtml`/`wikiStatusDot`, the 5s poll).
+**Tests added**: `TestDeviceWikiEndpoint` in `test_webui.py` (7 tests: empty state, listing a real
+entry, one-entry-by-path lookup, a real 404 for an unknown path, status filtering, configured-roots
+reporting). Caught and fixed a real test-authoring mistake before running anything: the new class was
+first inserted in the middle of the pre-existing `TestGoalsEndpoint` class's own method list, silently
+re-parenting four unrelated tests (`test_sessions_recent_endpoint_with_real_summaries` and three
+others) onto the new class -- found by re-reading the class-boundary grep output before trusting the
+edit, fixed by moving the whole new class to sit cleanly after `TestGoalsEndpoint`'s real closing
+brace.
+**Tests run**: `test_webui.py` (`TestDeviceWikiEndpoint`, `TestGoalsEndpoint`, `TestSecurityEndpoint`
+together, 16/16, confirming the re-parented tests are back where they belong and still pass), full
+suite (see commit).
+**Result**: fixed -- Domain E's full build plan (steps 1-6) is closed. Cross-link generation (harsh
+acceptance test 4) is the one real, separate piece of this domain's own scope layered on AFTER
+per-file summaries, per the domain's own build plan -- not yet built, named honestly.
+
+---
+
+### 062 -- Domain I: the real security dashboard UI (user-directed, "more visual... dashboard")
+
+**Severity**: n/a (feature -- Domain I item 6, "the practical, calm, non-decorative version" this
+section's own build plan named last, "after the sentry itself is real and tested").
+**Context**: user asked mid-session for the cybersecurity UI to be "more visual with circles task
+bars more of a dashboard" -- the sentry (findings #039-#055) had real, live, continuously-updated
+risk/finding/incident/device data with zero visual surface: `security_sentry_scan` returned plain
+text, and no screen anywhere referenced it.
+**Design**: `GET /api/security_dashboard` (`dourmouse/webui.py`), mirroring `/api/goals`'s own
+"already-tested backend, first HTTP surface over it" shape -- reads the REAL, already-computed state
+the server's own background `SentryRuntime` tick produced (`server.security_sentry.last_result`),
+never triggers a fresh scan itself (a real scan shells out to several real system commands per call).
+Reports `scanned` honestly `false` when no tick has landed yet (server just started, or
+`DOURMOUSE_SECURITY_SENTRY_LOOP=0`) rather than fabricating a zero-risk snapshot. A new SECURITY
+screen in `ui/console.html`: a real circular risk gauge (plain SVG `stroke-dasharray`, no chart
+library -- a fixed visual scaling ceiling of 40 controls only how full the ring looks, never the real
+`risk_score` itself, which is always shown verbatim in the center label), color-coded green/amber/red
+by score, plus real horizontal bars for findings-by-severity and incidents-by-status, a known-device
+count, and the real findings list with a pulsing dot on genuinely NEW findings.
+**A real bug caught before any test ran**: the first draft used `var(--no)` and `var(--dim)` for
+colors -- neither CSS custom property exists anywhere in this stylesheet (confirmed by grep before
+assuming otherwise); the real severity/status color and the real established theme text color are
+`var(--bad)` and `var(--blue-deep)` respectively (the existing `.dot.no{background:var(--bad)}` rule
+and `.row .d{color:var(--blue-deep)}` rule were the real, already-established precedent). Fixed with a
+global find/replace across the file before any browser check, confirmed by a repeat grep finding zero
+remaining occurrences.
+**Live proof**: a real dev server, real `SentryRuntime` tick against this machine's own real telemetry
+(risk score 21.0, 1 real HIGH + 3 real MED findings, 5 real known devices) rendered correctly in the
+browser: the gauge, both bar sections, the device count, and all four real findings with their real
+titles/detail text, confirmed by screenshot.
+**Files changed**: `dourmouse/webui.py` (`GET /api/security_dashboard`); `ui/console.html` (`SCREENS`
+array, the SECURITY pane, gauge/bar rendering functions, the 5s poll).
+**Tests added**: `TestSecurityDashboardEndpoint` in `test_webui.py` (5 tests: honest no-scan-yet state,
+a real scan result reported with correct severity/is_new breakdown, known-device count, incidents-by-
+status counts).
+**Tests run**: `test_webui.py` (219/219, full file), full suite (see commit).
+**Result**: fixed -- Domain I's dashboard UI (item 6) is closed. Windows/cross-device platform coverage
+(item 7) and the much larger balance of the founding spec's own 54-item cybersecurity build list remain
+the last real Domain I work.
+
+---
+
+### 063 -- Domain, agent ecosystem visual monitor: static tiles, then real movement (user-directed)
+
+**Severity**: n/a (feature -- Phase 7 of the standing plan, closing the one gap named explicitly in
+this session's own status report: no visual per-agent status board of any kind existed).
+**Context**: user asked for the AI corporate ecosystem to look like a pixelated 3D office, referencing
+`github.com/KbWen/agent-virtual-office` (verified via browser fetch: a real, MIT-licensed, pixel-art
+office visualizing real coding-session status as costumed characters). A first pass shipped a static
+grid of pixel-art desk tiles, fully rebuilt via `innerHTML` on every update. The user pushed back
+immediately: "I don't like the ui... I want the visual 3d office where u can see them move interact
+discuss ... exactly like the GitHub repo I shared" -- a real, specific correction, not a style
+preference to defer.
+**Design (v2, the real fix)**: fetched the reference repo's own `package.json` (not assumed) --
+"Pure SVG, zero backend" -- confirming a persistent SVG scene with CSS-transitioned movement is the
+right-shaped native reimplementation, not a canvas/WebGL rebuild. The scene is now built ONCE per
+real agent roster (`officeBuildScene`) and every subsequent update PATCHES existing DOM nodes in place
+(`officeUpdateSprite`: `.style.transform`, `.style.color`, text content) rather than replacing
+`innerHTML` -- the real reason v1 could never animate: CSS transitions cannot interpolate between two
+states of a node that no longer exists after a full re-render. `.office-sprite{transition:transform
+1.1s ease-in-out}` now genuinely animates a sprite walking between its home desk and a real meeting-
+room seat. Movement is still driven ONLY by real signals: `officeMeetingAssignments()` reads
+`_orchFanouts` (the SAME real, already-proven fan-out broadcast `orchFanoutRowHtml` already renders as
+text) and assigns any agent with a real branch still `phase !== "result"` to a real meeting-room seat;
+the sprite walks back to its desk the instant that branch reports `phase === "result"`, both purely
+because `_orchFanouts`/`_orchAgents` changed, never a timer. A "computing" agent gets a real CSS-
+keyframe typing bob (`officeBob`) at its own desk. A real per-agent speech bubble shows the last real
+tool name for 3 real seconds on each new activity event, then fades -- real data, never fabricated
+chatter.
+**A real regression this change fixed, caught by the full suite, not found by inspection**: the v1
+draft's `officeMeetingRoomHtml` contained `const busy = b.phase !== "result";` -- a bare `busy`
+identifier, exactly the anti-pattern `test_console_per_screen_busy_state.py`'s own regression guard
+exists to catch (a real, previously-shipped bug class: a single shared `busy` flag conflated state
+across screens). The guard test failed on the very next full-suite run; the v2 rewrite deleted that
+function entirely (replaced by `officeMeetingAssignments`/`officeUpdateSprite`), which incidentally
+removed the violation -- confirmed by rerunning the specific guard test file, not assumed.
+**Live proof**: a real dev server's OFFICE screen rendered all 43 real registered subagents as
+persistent pixel-art desks, including two agents (`mail`, `markets`, the always-on `live_runtime.py`
+pollers) showing a real, distinct `LIVE` status neither idle/computing/auth -- proof the renderer
+reflects whatever real status string the backend actually reports, not a hardcoded enum. Three real
+`delegate_parallel` fan-outs were driven live through the actual chat composer (`forced_agent`
+branches to `research_info`/`reviewer`); each one genuinely dispatched and completed (confirmed via
+real tool-error results: a real 404 from `research_info`, a real "no such file" from `reviewer`) --
+proving the underlying fan-out mechanism this screen depends on fires for real. Honest limitation, not
+hidden: every real fan-out in this local, offline environment completed in well under a second (no
+real network fetch succeeded, and the local reviewer tool is instant), so the meeting-room walk
+animation itself was code-reviewed against the exact proven `_orchFanouts` update path but never
+independently caught mid-flight in a screenshot -- a real gap in this pass's own verification, named
+rather than papered over with a staged/fabricated screenshot.
+**Files changed**: `ui/console.html` (`SCREENS` array, the OFFICE pane, the office CSS transition/
+keyframe rules, `officeBuildScene`/`officeUpdateSprite`/`officeMeetingAssignments`/
+`officeMeetingSeat`/`officePixelPersonPaths`, replacing v1's `officeDeskHtml`/`officeMeetingRoomHtml`,
+wired into the existing `orchApplyDelta`/`orchApplyFanout` SSE handlers).
+**Tests added**: none -- pure client-side rendering over already-tested, already-live backend state;
+syntax-verified with `node --check` against the extracted inline script before each live browser
+proof; the pre-existing `test_console_per_screen_busy_state.py` regression guard caught the real
+`busy`-identifier bug above.
+**Result**: fixed -- the agent ecosystem now genuinely moves in response to real signals, not just a
+static status grid. Deeper 3D/pixel-office asset work (real character sprites in place of the blocky
+6x4 grid glyph, a real floor-plan with distinct rooms beyond one dashed meeting-room rectangle,
+celebration/argument flavor animations tied to real deploy/blocked-streak signals like the reference
+project's own) is real, separate, not-yet-built follow-on -- this pass is real movement over real
+data, not the finished visual vision.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

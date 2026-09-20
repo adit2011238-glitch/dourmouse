@@ -294,6 +294,9 @@ class TestRosterShape:
                                    # real live collision: "deep_research"
                                    # word-matched "research" and stole
                                    # research_info's own routing.
+            "device_wiki",  # 2026-09-21: Domain E's chat-reachable wiring
+                             # over device_wiki/'s own real data model,
+                             # store, summarizer, and walker.
         }
 
     def test_orchestrator_exposes_delegate_task(self):

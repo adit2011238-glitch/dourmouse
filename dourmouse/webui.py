@@ -2677,6 +2677,80 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             status = (qs.get("status") or [""])[0].strip().upper() or None
             self._send_json({"goals": store.list_goals(status=status)})
+        elif path == "/api/security_dashboard":
+            # Domain I dashboard UI (docs/COMMERCIAL_GRADE_MASTER_
+            # REQUIREMENTS.md section 11, item 6, the last-scoped Domain I
+            # piece after the sentry itself was proven real -- "after the
+            # sentry itself is real and tested"). Reads the REAL, already-
+            # computed state SentryRuntime's own background tick produced
+            # (server.security_sentry.last_result) -- never triggers a
+            # fresh scan on every dashboard load, since a real scan shells
+            # out to several real system commands per call (sentry.py's
+            # own documented cost). No runtime tick has landed yet (server
+            # just started, or DOURMOUSE_SECURITY_SENTRY_LOOP=0) is an
+            # honest "no scan yet" response, never a fabricated zero-risk
+            # snapshot.
+            from dourmouse.security.sentry import DEFAULT_DB as _SENTRY_DEFAULT_DB
+            from dourmouse.security.sentry import SentryStore
+
+            runtime = getattr(self.server, "security_sentry", None)
+            result = runtime.last_result if runtime else None
+            store = SentryStore(_SENTRY_DEFAULT_DB)
+            by_severity = {"high": 0, "med": 0, "low": 0}
+            findings_payload: list[dict[str, Any]] = []
+            if result is not None:
+                for f in result.all_findings:
+                    by_severity[f.severity] = by_severity.get(f.severity, 0) + 1
+                    findings_payload.append({
+                        "fingerprint": f.fingerprint, "kind": f.kind, "severity": f.severity,
+                        "title": f.title, "detail": f.detail,
+                        "recommended_action": f.recommended_action,
+                        "is_new": f in result.new_findings,
+                    })
+            incidents = store.list_incidents()
+            incidents_by_status = {"OPEN": 0, "INVESTIGATING": 0, "RESOLVED": 0, "ACCEPTED_RISK": 0}
+            for inc in incidents:
+                incidents_by_status[inc["status"]] = incidents_by_status.get(inc["status"], 0) + 1
+            self._send_json({
+                "scanned": result is not None,
+                "last_scan_at": runtime.last_scan_at if runtime else None,
+                "tick_count": runtime.tick_count if runtime else 0,
+                "risk_score": result.risk_score if result else 0.0,
+                "findings_by_severity": by_severity,
+                "findings": findings_payload,
+                "known_device_count": len(store.get_known_device_keys()),
+                "incidents_by_status": incidents_by_status,
+                "telemetry_available": result.telemetry_available if result else {},
+            })
+        elif path == "/api/device_wiki":
+            # Domain E, step 6: read-only inspection of the device wiki's
+            # real persisted state (dourmouse/device_wiki/) -- the same
+            # "already-tested backend, first HTTP surface over it, nothing
+            # new logically" shape as /api/goals and /api/schedules.
+            # ?status=SUMMARIZED|UNSUMMARIZED|MISSING filters; ?path=<exact
+            # real path> returns one entry. Scans/writes go through the
+            # device_wiki subagent's own chat tools -- this route never
+            # triggers a real scan itself, matching /api/goals's own
+            # "read-only inspection, writes go through chat tools" note.
+            from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+            from dourmouse.device_wiki.walker import configured_roots
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            wiki_path = (qs.get("path") or [""])[0].strip()
+            store = WikiStore(DEFAULT_DB)
+            if wiki_path:
+                entry = store.get(wiki_path)
+                if entry is None:
+                    self._send_json({"error": f"no such wiki entry: {wiki_path}"}, status=404)
+                else:
+                    self._send_json({"entry": vars(entry)})
+                return
+            status = (qs.get("status") or [""])[0].strip().upper() or None
+            entries = store.list_all(status=status)
+            self._send_json({
+                "entries": [vars(e) for e in entries],
+                "configured_roots": [str(r) for r in configured_roots()],
+            })
         elif path == "/api/audit":
             # 2026-09-18: the founding spec's own explicit audit-trail
             # requirement ("the user should be able to inspect what the

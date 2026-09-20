@@ -390,6 +390,87 @@ class TestSecurityEndpoint:
         conn.close()
 
 
+class TestSecurityDashboardEndpoint:
+    """GET /api/security_dashboard -- Domain I's own dashboard UI
+    (docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md section 11, item 6, the
+    last-scoped piece after the sentry itself was proven real). Isolated
+    via a real, per-test SQLite file for the sentry store, and a directly-
+    assigned `server.security_sentry` so tests never race the server's
+    own real background SentryRuntime thread."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_sentry_store(self, tmp_path, monkeypatch):
+        import dourmouse.security.sentry as sentry_module
+
+        monkeypatch.setattr(sentry_module, "DEFAULT_DB", tmp_path / "sentry.db")
+
+    def test_no_scan_yet_is_honest(self, server):
+        srv, port = server
+        srv.security_sentry = None
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/security_dashboard")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read())
+        assert data["scanned"] is False
+        assert data["risk_score"] == 0.0
+        assert data["findings"] == []
+        conn.close()
+
+    def test_a_real_scan_result_is_reported(self, server):
+        from dourmouse.security.sentry import SentryFinding, SentryScanResult
+
+        finding = SentryFinding(
+            fingerprint="fp1", kind="firewall_disabled", severity="high",
+            title="Application Firewall is disabled", detail="d", recommended_action="a",
+        )
+        result = SentryScanResult(
+            all_findings=[finding], new_findings=[finding], suppressed_false_positives=[],
+            risk_score=9.0, telemetry_available={"firewall": True}, alerts_written=1,
+        )
+        srv, port = server
+        srv.security_sentry = type("R", (), {"last_result": result, "last_scan_at": 1234.0, "tick_count": 3})()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/security_dashboard")
+        data = json.loads(conn.getresponse().read())
+        assert data["scanned"] is True
+        assert data["risk_score"] == 9.0
+        assert data["tick_count"] == 3
+        assert data["findings_by_severity"]["high"] == 1
+        assert len(data["findings"]) == 1
+        assert data["findings"][0]["is_new"] is True
+        conn.close()
+
+    def test_known_device_count_is_reported(self, server):
+        from dourmouse.security.sentry import DEFAULT_DB, SentryStore
+
+        SentryStore(DEFAULT_DB).record_devices(
+            [{"hostname": "a", "ip": "1.2.3.4", "mac": "aa:aa:aa:aa:aa:aa", "interface": "en0"}], now=1000.0,
+        )
+        srv, port = server
+        srv.security_sentry = None
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/security_dashboard")
+        data = json.loads(conn.getresponse().read())
+        assert data["known_device_count"] == 1
+        conn.close()
+
+    def test_incidents_by_status_counts_real_incidents(self, server):
+        from dourmouse.security.sentry import DEFAULT_DB, SentryFinding, SentryStore
+
+        store = SentryStore(DEFAULT_DB)
+        finding = SentryFinding(fingerprint="fp1", kind="k", severity="med", title="t", detail="d", recommended_action="a")
+        store.record_and_classify(finding, now=1000.0)
+        store.open_incident("fp1", "", now=1000.0)
+        srv, port = server
+        srv.security_sentry = None
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/security_dashboard")
+        data = json.loads(conn.getresponse().read())
+        assert data["incidents_by_status"]["OPEN"] == 1
+        conn.close()
+
+
 class TestGoalsEndpoint:
     """GET /api/goals — read-only inspection of the Phase 2 autonomous
     Goal/Task runtime (docs/GODSPEED_ROADMAP.md). Isolated from whatever
@@ -536,6 +617,93 @@ class TestGoalsEndpoint:
         conn.request("GET", "/assets/../../etc/passwd")
         resp = conn.getresponse()
         assert resp.status == 404
+        conn.close()
+
+
+class TestDeviceWikiEndpoint:
+    """GET /api/device_wiki -- Domain E's own read-only inspection route
+    over the device wiki's real persisted state (docs/GODSPEED_ROADMAP.md
+    Domain E, step 6). Isolated via a real, per-test SQLite file."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_wiki_store(self, tmp_path, monkeypatch):
+        import dourmouse.device_wiki.store as wiki_store_module
+
+        monkeypatch.setattr(wiki_store_module, "DEFAULT_DB", tmp_path / "wiki.db")
+
+    def test_no_entries_yet_is_an_honest_empty_list(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/device_wiki")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        data = json.loads(resp.read())
+        assert data["entries"] == []
+        conn.close()
+
+    def test_lists_a_real_entry(self, server, tmp_path):
+        from dourmouse.device_wiki.core import with_new_entry, with_summary
+        from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+
+        WikiStore(DEFAULT_DB).save_entry(
+            with_summary(with_new_entry("/a.txt", "h1", 10, now=1000.0), "a real summary", now=1000.0)
+        )
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/device_wiki")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert len(data["entries"]) == 1
+        assert data["entries"][0]["path"] == "/a.txt"
+        assert data["entries"][0]["summary"] == "a real summary"
+        conn.close()
+
+    def test_path_returns_one_real_entry(self, server):
+        from dourmouse.device_wiki.core import with_new_entry
+        from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+
+        WikiStore(DEFAULT_DB).save_entry(with_new_entry("/a.txt", "h1", 10, now=1000.0))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/device_wiki?path=/a.txt")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert data["entry"]["path"] == "/a.txt"
+        conn.close()
+
+    def test_unknown_path_is_a_real_404(self, server):
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/device_wiki?path=/never-scanned.txt")
+        resp = conn.getresponse()
+        assert resp.status == 404
+        conn.close()
+
+    def test_status_filter_is_applied(self, server):
+        from dourmouse.device_wiki.core import with_new_entry, with_summary
+        from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+
+        store = WikiStore(DEFAULT_DB)
+        store.save_entry(with_summary(with_new_entry("/keep.txt", "h1", 1, now=1000.0), "s", now=1000.0))
+        store.save_entry(with_new_entry("/drop.txt", "h2", 2, now=1000.0))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/device_wiki?status=summarized")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert [e["path"] for e in data["entries"]] == ["/keep.txt"]
+        conn.close()
+
+    def test_configured_roots_are_reported(self, server, tmp_path, monkeypatch):
+        from dourmouse.device_wiki.walker import ROOTS_ENV
+
+        monkeypatch.setenv(ROOTS_ENV, str(tmp_path))
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/device_wiki")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert data["configured_roots"] == [str(tmp_path)]
         conn.close()
 
 

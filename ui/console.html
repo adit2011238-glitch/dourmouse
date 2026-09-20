@@ -948,6 +948,11 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .orb.listening::before{animation:pulse 1.7s ease-out infinite}
 .orb.speaking{border-color:var(--amber);}
 @keyframes pulse{0%{transform:scale(1);opacity:.8}100%{transform:scale(1.28);opacity:0}}
+@keyframes officeBob{0%{transform:translateY(0)}100%{transform:translateY(-2px)}}
+.office-sprite{transition:transform 1.1s ease-in-out}
+.office-sprite .office-bob{transform-origin:20px 40px}
+.office-sprite.office-computing .office-bob{animation:officeBob .45s ease-in-out infinite alternate}
+.office-sprite .office-speech{transition:opacity .3s ease}
 .orb .g{font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--amber)}
 .vstate{font-size:10px;letter-spacing:.18em;color:var(--blue-dim)}
 .vtext{font-size:12px;line-height:1.7;color:var(--blue-hi);max-width:60ch;min-height:3em}
@@ -1412,6 +1417,12 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
       <div class="panebody" id="timetableBody"></div></section>
     <section class="pane" id="pane-agentsmith"><div class="panehead">◆ AGENT SMITH · SELF-EXTENSION DRAFTS</div>
       <div class="panebody" id="agentSmithBody"></div></section>
+    <section class="pane" id="pane-wiki"><div class="panehead">◆ WIKI · DEVICE KNOWLEDGE BASE</div>
+      <div class="panebody" id="wikiBody"></div></section>
+    <section class="pane" id="pane-security"><div class="panehead">◆ SECURITY · RISK DASHBOARD</div>
+      <div class="panebody" id="securityBody"></div></section>
+    <section class="pane" id="pane-office"><div class="panehead">◆ OFFICE · AGENT ECOSYSTEM</div>
+      <div class="panebody" id="officeBody"></div></section>
 
     <section class="pane" id="pane-news"><div class="panehead">◆ NEWS · LIVE FEED</div>
       <div class="panebody" id="newsBody"></div>
@@ -1492,7 +1503,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (p,o) => { const r = await fetch(p,o); if(!r.ok) throw new Error(p+" HTTP "+r.status); return r.json(); };
 
-const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS","TIMETABLE","AGENTSMITH"];
+const SCREENS = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS","TIMETABLE","AGENTSMITH","WIKI","SECURITY","OFFICE"];
 // v8.29: screens whose composer submissions get their OWN independent
 // thread (a real per-screen conversation, not a shared feed forced onto
 // COMMS). COMMS is deliberately absent — it's a real Gmail inbox now, not
@@ -1801,6 +1812,9 @@ function show(name){
   if(name==="GOALS") loadGoals();
   if(name==="TIMETABLE") loadSchedules();
   if(name==="AGENTSMITH") loadSelfExtensions();
+  if(name==="WIKI") loadWiki();
+  if(name==="SECURITY") loadSecurityDashboard();
+  if(name==="OFFICE") loadOffice();
   if(name==="NEWS") paintNews();
   if(name==="DESIGN3D") paintDesign3d();
   if(name==="VOICE"){ voiceMode = true; $("micChip").classList.add("on"); }
@@ -6644,6 +6658,7 @@ function orchApplyDelta(agents){
     _orchAgents[name] = {status: patch.status, last: patch.last, feed};
   }
   if(screen === "ORCHESTRATION") paintOrchestration();
+  if(screen === "OFFICE") paintOffice();
 }
 // Phase 4: delegate_parallel's own per-branch detail (which branch,
 // which agent, which model) — a genuinely different event than
@@ -6656,6 +6671,7 @@ function orchApplyFanout(payload){
   if(payload.finished) delete _orchFanouts[payload.run_id];
   else _orchFanouts[payload.run_id] = {total: payload.total, branches: payload.branches || {}};
   if(screen === "ORCHESTRATION") paintOrchestration();
+  if(screen === "OFFICE") paintOffice();
 }
 function orchFanoutRowHtml(runId, run){
   const indices = Object.keys(run.branches).map(Number).sort((a,b) => a - b);
@@ -6683,8 +6699,181 @@ async function loadOrchestrationSnapshot(){
     _orchAgents = j.agents || {};
     _orchFanouts = j.fanouts || {};
   }catch{}
+  if(screen === "OFFICE") paintOffice();
 }
 loadOrchestrationSnapshot();
+
+// 2026-09-21: the OFFICE screen -- the agent ecosystem visual monitor
+// (docs/GODSPEED_ROADMAP.md Phase 7), the one thing this console had NO
+// equivalent of at all before now (see the standing status report's own
+// analysis of github.com/KbWen/agent-virtual-office as a real, MIT-
+// licensed reference for visualizing per-agent session status as
+// costumed characters in a pixel-art office). This is a genuinely
+// different, native implementation -- no code or assets copied from that
+// repo -- built entirely on _orchAgents/_orchFanouts, the SAME real,
+// already-live SSE-fed state ORCHESTRATION already renders as a text
+// feed; OFFICE is a second, more visual view over that identical real
+// data, not a new data source or a fabricated one. A real, named
+// difference from the reference project, honestly: no flavor/idle
+// animations on a timer here, only real signals (idle/computing/auth,
+// real fan-out branches) -- this session's own standing discipline is
+// "never fabricate," and a timer-driven idle animation with no real
+// event behind it would cross that line.
+// v2 (user-directed: "visual 3d office where u can see them move interact
+// discuss ... exactly like the GitHub repo I shared"): the reference
+// project's own package.json (fetched live, not assumed) says "Pure SVG,
+// zero backend" -- so a persistent SVG scene with real CSS-transitioned
+// movement is the right-shaped native reimplementation, not a canvas/
+// WebGL rebuild. The scene is built ONCE per agent roster and then only
+// ever PATCHED in place (transform/color/text updates on existing DOM
+// nodes) -- rebuilding the whole innerHTML every update (v1's approach)
+// would destroy and recreate every sprite each tick, and a CSS transition
+// cannot animate between two states of a node that no longer exists.
+// Movement itself is still only ever driven by a REAL signal (a real
+// fan-out branch assignment moves a sprite to the meeting room; a real
+// branch result moves it back) -- never a timer-driven idle wander with
+// no real event behind it, the same "never fabricate" line v1's own
+// comment already drew.
+const OFFICE_COLS = 8;
+const OFFICE_DESK_W = 92, OFFICE_DESK_H = 76;
+const OFFICE_MARGIN_X = 24, OFFICE_MARGIN_Y = 24;
+const OFFICE_PIXEL_PERSON = [
+  [0,1,1,0],
+  [1,1,1,1],
+  [0,1,1,0],
+  [0,1,1,0],
+  [1,1,1,1],
+  [1,0,0,1],
+];
+let _officeHomePos = {};       // agent name -> {x, y}, stable once assigned
+let _officeBuiltNames = null;  // the exact name set the current SVG was built for
+let _officeSpeechTimers = {};  // agent name -> setTimeout handle
+
+function officeStatusColor(status){
+  if(status === "computing") return "var(--ok)";
+  if(status === "auth") return "var(--warn)";
+  return "var(--blue-deep)";
+}
+function officePixelPersonPaths(cell){
+  let rects = "";
+  for(let y=0; y<OFFICE_PIXEL_PERSON.length; y++){
+    for(let x=0; x<OFFICE_PIXEL_PERSON[y].length; x++){
+      if(OFFICE_PIXEL_PERSON[y][x]) rects += `<rect x="${x*cell}" y="${y*cell}" width="${cell}" height="${cell}" fill="currentColor"></rect>`;
+    }
+  }
+  return rects;
+}
+function officeMeetingSeat(index, meetingX, meetingY){
+  const perRow = 8;
+  return {
+    x: meetingX + (index % perRow) * 70,
+    y: meetingY + Math.floor(index / perRow) * 70,
+  };
+}
+function officeMeetingAssignments(){
+  // Which real agents are, right now, a branch of a real active fan-out
+  // still in flight (phase !== "result") -- these are the ones physically
+  // in the meeting room this instant. Order is insertion order across
+  // runs/branches, real and deterministic, not randomized.
+  const assign = {};
+  let seat = 0;
+  for(const run of Object.values(_orchFanouts)){
+    const indices = Object.keys(run.branches).map(Number).sort((a,b) => a - b);
+    for(const i of indices){
+      const b = run.branches[i] || {};
+      if(b.phase !== "result" && b.agent && !(b.agent in assign)){
+        assign[b.agent] = seat++;
+      }
+    }
+  }
+  return assign;
+}
+function officeBuildScene(names){
+  const box = $("officeBody");
+  const rows = Math.max(1, Math.ceil(names.length / OFFICE_COLS));
+  const cols = Math.min(OFFICE_COLS, Math.max(1, names.length));
+  const deskAreaW = OFFICE_MARGIN_X * 2 + cols * OFFICE_DESK_W;
+  const deskAreaH = OFFICE_MARGIN_Y * 2 + rows * OFFICE_DESK_H;
+  const meetingY = deskAreaH + 20;
+  const meetingH = 160;
+  names.forEach((name, i) => {
+    const col = i % OFFICE_COLS, row = Math.floor(i / OFFICE_COLS);
+    _officeHomePos[name] = {
+      x: OFFICE_MARGIN_X + col * OFFICE_DESK_W,
+      y: OFFICE_MARGIN_Y + row * OFFICE_DESK_H,
+    };
+  });
+  const width = Math.max(deskAreaW, OFFICE_MARGIN_X * 2 + 8 * 70);
+  const sprites = names.map(name => {
+    const pos = _officeHomePos[name];
+    const shortName = name.length > 11 ? name.slice(0, 10) + "…" : name;
+    return `<g class="office-sprite" data-agent="${esc(name)}" style="transform:translate(${pos.x}px,${pos.y}px);color:var(--blue-deep)">
+      <rect class="office-desk" x="-8" y="34" width="56" height="7" rx="2" fill="var(--line-2)"></rect>
+      <g class="office-bob">${officePixelPersonPaths(6)}</g>
+      <text class="office-label" x="20" y="56" text-anchor="middle" font-size="6.5" fill="var(--blue-hi)" font-family="inherit">${esc(shortName)}</text>
+      <text class="office-status-text" x="20" y="65" text-anchor="middle" font-size="6" fill="var(--blue-deep)" font-family="inherit">IDLE</text>
+      <g class="office-speech" style="opacity:0">
+        <rect x="-14" y="-22" width="68" height="16" rx="3" fill="var(--panel,#0b1512)" stroke="var(--line-2)"></rect>
+        <text class="office-speech-text" x="19" y="-11" text-anchor="middle" font-size="5.5" fill="var(--blue-hi)" font-family="inherit"></text>
+      </g>
+    </g>`;
+  }).join("");
+  box.innerHTML = `
+    <p class="lede" id="officeLede">${names.length} REAL AGENT(S) IN THE OFFICE.</p>
+    <svg id="officeSvg" viewBox="0 0 ${width} ${meetingY + meetingH}" style="width:100%;height:auto;display:block;background:var(--panel-2,transparent);border:1px solid var(--line);border-radius:6px">
+      <rect x="${OFFICE_MARGIN_X - 10}" y="${meetingY - 16}" width="${width - (OFFICE_MARGIN_X-10)*2}" height="${meetingH}" fill="none" stroke="var(--line-2)" stroke-dasharray="4 3" rx="4"></rect>
+      <text x="${OFFICE_MARGIN_X}" y="${meetingY - 22}" font-size="8" fill="var(--blue-deep)" font-family="inherit" letter-spacing="1">MEETING ROOM</text>
+      ${sprites}
+    </svg>`;
+  window._officeMeetingY = meetingY;
+  _officeBuiltNames = names.slice().sort().join("|");
+}
+function officeUpdateSprite(name, agent, meetingAssignments){
+  const el = document.querySelector(`.office-sprite[data-agent="${CSS.escape(name)}"]`);
+  if(!el) return;
+  const status = agent.status || "idle";
+  const inMeeting = name in meetingAssignments;
+  const target = inMeeting
+    ? officeMeetingSeat(meetingAssignments[name], OFFICE_MARGIN_X, window._officeMeetingY)
+    : _officeHomePos[name];
+  el.style.transform = `translate(${target.x}px,${target.y}px)`;
+  el.style.color = officeStatusColor(status);
+  el.classList.toggle("office-computing", status === "computing");
+  const desk = el.querySelector(".office-desk");
+  if(desk) desk.style.opacity = inMeeting ? "0" : "1";
+  const statusText = el.querySelector(".office-status-text");
+  if(statusText) statusText.textContent = inMeeting ? "IN MEETING" : status.toUpperCase();
+  if(agent.last && agent.last.tool){
+    const speech = el.querySelector(".office-speech");
+    const speechText = el.querySelector(".office-speech-text");
+    if(speech && speechText){
+      speechText.textContent = agent.last.tool.length > 16 ? agent.last.tool.slice(0, 15) + "…" : agent.last.tool;
+      speech.style.opacity = "1";
+      clearTimeout(_officeSpeechTimers[name]);
+      _officeSpeechTimers[name] = setTimeout(() => { speech.style.opacity = "0"; }, 3000);
+    }
+  }
+}
+function paintOffice(){
+  const box = $("officeBody");
+  const names = Object.keys(_orchAgents).sort();
+  if(!names.length){
+    _officeBuiltNames = null;
+    box.innerHTML = `<p class="note" style="padding:8px 0">No real agent activity yet this session -- the office fills in live the moment any agent is delegated a task, on any screen.</p>`;
+    return;
+  }
+  const key = names.join("|");
+  if(_officeBuiltNames !== key) officeBuildScene(names);
+  const meetingAssignments = officeMeetingAssignments();
+  names.forEach(name => officeUpdateSprite(name, _orchAgents[name] || {status: "idle", last: null}, meetingAssignments));
+  const active = names.filter(n => _orchAgents[n].status !== "idle" || n in meetingAssignments);
+  const lede = $("officeLede");
+  if(lede) lede.textContent = `${names.length} REAL AGENT(S) IN THE OFFICE. ${active.length} ACTIVE RIGHT NOW.`;
+}
+async function loadOffice(){
+  await loadOrchestrationSnapshot();
+  paintOffice();
+}
 
 // 2026-09-18: the GOALS screen -- the autonomous Goal/Task runtime
 // (goal_runtime.py, goals.py) had real, tested, live-verified backend
@@ -6865,6 +7054,171 @@ async function exportAuditMarkdown(){
 }
 loadGoals();
 setInterval(() => { if(screen === "GOALS") loadGoals(); }, 4000);
+
+// 2026-09-21: the WIKI screen -- Domain E's device wiki (docs/
+// COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md section 7) had a real,
+// tested, live-verified backend (findings #056-#060: data model, real
+// SQLite store, real summarizer, real walker with its own explicit
+// root-folder allowlist, chat-reachable tools) and precisely zero UI
+// surface -- the domain's own explicit requirement is "a searchable
+// structure ... the user, via a real UI, can browse", not just a tool
+// the model can query silently. Read-only browse surface: scanning
+// itself runs through the device_wiki_scan chat tool (a real scan can
+// take minutes -- one real model call per file needing a summary -- so
+// it is a deliberate chat action, not a button that blocks this screen).
+// Polled every 5s while WIKI is the active screen, same accepted
+// polling tradeoff as GOALS/TIMETABLE/AGENTSMITH above.
+let _wikiEntries = [];
+let _wikiRoots = [];
+
+function wikiStatusDot(status){
+  if(status === "SUMMARIZED") return '<span class="dot" style="background:var(--ok)"></span>';
+  if(status === "MISSING") return '<span class="dot no"></span>';
+  return '<span class="dot" style="background:var(--warn)"></span>';
+}
+async function loadWiki(){
+  try{
+    const r = await fetch("/api/device_wiki");
+    const j = await r.json();
+    _wikiEntries = j.entries || [];
+    _wikiRoots = j.configured_roots || [];
+  }catch{}
+  if(screen === "WIKI") paintWiki();
+}
+function wikiRowHtml(e){
+  const name = e.path.split("/").pop() || e.path;
+  return `<div class="row">
+    ${wikiStatusDot(e.status)}
+    <div class="g">
+      <div class="n">${esc(name)} <span style="color:var(--blue-deep);font-weight:normal">· ${esc(e.status)}</span></div>
+      <div class="d">${esc(e.path)}</div>
+      ${e.summary ? `<div class="d" style="margin-top:4px">${esc(e.summary)}</div>` : ""}
+    </div>
+  </div>`;
+}
+function paintWiki(){
+  const box = $("wikiBody");
+  if(!_wikiRoots.length){
+    box.innerHTML = `<p class="note" style="padding:8px 0">No real root folders configured yet. Set DOURMOUSE_WIKI_ROOTS to one or more real, absolute folder paths, then ask Dourmouse to scan the device wiki.</p>`;
+    return;
+  }
+  const summarized = _wikiEntries.filter(e => e.status === "SUMMARIZED");
+  const unsummarized = _wikiEntries.filter(e => e.status === "UNSUMMARIZED");
+  const missing = _wikiEntries.filter(e => e.status === "MISSING");
+  box.innerHTML = `
+    <p class="lede">${_wikiEntries.length} REAL FILE(S) TRACKED ACROSS ${_wikiRoots.length} ROOT(S). ${summarized.length} SUMMARIZED.</p>
+    <div class="d" style="margin-bottom:10px">ROOTS: ${_wikiRoots.map(esc).join(" · ")}</div>
+    ${_wikiEntries.length ? "" : '<p class="note" style="padding:8px 0">Nothing scanned yet -- ask Dourmouse to scan the device wiki.</p>'}
+    ${summarized.length ? `<div class="sec">SUMMARIZED (${summarized.length})</div>${summarized.map(wikiRowHtml).join("")}` : ""}
+    ${unsummarized.length ? `<div class="sec" style="margin-top:14px">UNSUMMARIZED (${unsummarized.length})</div>${unsummarized.map(wikiRowHtml).join("")}` : ""}
+    ${missing.length ? `<div class="sec" style="margin-top:14px">MISSING (${missing.length})</div>${missing.map(wikiRowHtml).join("")}` : ""}`;
+}
+loadWiki();
+setInterval(() => { if(screen === "WIKI") loadWiki(); }, 5000);
+
+// 2026-09-21: the SECURITY screen -- Domain I's own dashboard UI (docs/
+// COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md section 11, item 6, the last-
+// scoped Domain I piece, deliberately built AFTER the sentry itself was
+// proven real -- "after the sentry itself is real and tested"). Reads
+// /api/security_dashboard, a real, already-computed snapshot from the
+// server's own background SentryRuntime tick -- never triggers a scan
+// itself. A circular risk gauge (real SVG stroke-dasharray, no chart
+// library) plus real severity/incident bars -- the practical, calm,
+// non-decorative dashboard this section's own build plan asks for, not
+// the orbital/sphere concept from docs/DESIGN_SYSTEM.md.
+let _secDashboard = null;
+
+// Purely a visual scaling ceiling for the gauge's fill percentage --
+// the real risk_score itself (sentry.py's own _SEVERITY_WEIGHT sum) is
+// unbounded and reported verbatim in the center label; this constant
+// never changes what is scored, only how full the ring looks.
+const SECURITY_GAUGE_MAX = 40;
+
+function securityRiskColor(score){
+  if(score >= 20) return "var(--bad)";
+  if(score >= 8) return "var(--warn)";
+  return "var(--ok)";
+}
+function securityGaugeSvg(score){
+  const pct = Math.max(0, Math.min(1, score / SECURITY_GAUGE_MAX));
+  const r = 50, c = 2 * Math.PI * r;
+  const color = securityRiskColor(score);
+  return `<svg viewBox="0 0 120 120" width="140" height="140" style="display:block">
+    <circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--line)" stroke-width="10"></circle>
+    <circle cx="60" cy="60" r="${r}" fill="none" stroke="${color}" stroke-width="10"
+      stroke-linecap="round" stroke-dasharray="${(pct*c).toFixed(1)} ${c.toFixed(1)}"
+      transform="rotate(-90 60 60)"></circle>
+    <text x="60" y="56" text-anchor="middle" font-size="22" fill="${color}" font-family="inherit">${score.toFixed(1)}</text>
+    <text x="60" y="74" text-anchor="middle" font-size="8" fill="var(--blue-deep)" font-family="inherit">RISK SCORE</text>
+  </svg>`;
+}
+function securityBarHtml(label, count, max, color){
+  const pct = max > 0 ? Math.round((count / max) * 100) : 0;
+  return `<div style="margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--blue-deep);margin-bottom:3px">
+      <span>${esc(label)}</span><span>${count}</span>
+    </div>
+    <div style="height:8px;background:var(--line);border-radius:4px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:${color};transition:width .3s"></div>
+    </div>
+  </div>`;
+}
+async function loadSecurityDashboard(){
+  try{
+    const r = await fetch("/api/security_dashboard");
+    _secDashboard = await r.json();
+  }catch{ _secDashboard = null; }
+  if(screen === "SECURITY") paintSecurityDashboard();
+}
+function findingRowHtml(f){
+  const color = f.severity === "high" ? "var(--bad)" : f.severity === "med" ? "var(--warn)" : "var(--ok)";
+  return `<div class="row">
+    <span class="dot" style="background:${color}${f.is_new ? ";animation:pulse 1.2s ease-in-out infinite" : ""}"></span>
+    <div class="g">
+      <div class="n">${esc(f.title)} <span style="color:var(--blue-deep);font-weight:normal">· ${f.severity.toUpperCase()}${f.is_new ? " · NEW" : ""}</span></div>
+      <div class="d">${esc(f.detail)}</div>
+    </div>
+  </div>`;
+}
+function paintSecurityDashboard(){
+  const box = $("securityBody");
+  const d = _secDashboard;
+  if(!d){ box.innerHTML = `<p class="note" style="padding:8px 0">Couldn't reach the security dashboard.</p>`; return; }
+  if(!d.scanned){
+    box.innerHTML = `<p class="note" style="padding:8px 0">No real scan has completed yet -- the continuous sentry runs on its own interval (default every 5 minutes) and this dashboard shows its last real result.</p>`;
+    return;
+  }
+  const sev = d.findings_by_severity || {};
+  const inc = d.incidents_by_status || {};
+  const maxSev = Math.max(1, sev.high||0, sev.med||0, sev.low||0);
+  const maxInc = Math.max(1, inc.OPEN||0, inc.INVESTIGATING||0, inc.RESOLVED||0, inc.ACCEPTED_RISK||0);
+  box.innerHTML = `
+    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
+      <div style="display:flex;flex-direction:column;align-items:center">
+        ${securityGaugeSvg(d.risk_score)}
+        <div class="d" style="margin-top:6px">${d.tick_count} real scan(s) so far</div>
+      </div>
+      <div style="flex:1;min-width:220px">
+        <div class="sec">FINDINGS BY SEVERITY</div>
+        ${securityBarHtml("HIGH", sev.high||0, maxSev, "var(--bad)")}
+        ${securityBarHtml("MED", sev.med||0, maxSev, "var(--warn)")}
+        ${securityBarHtml("LOW", sev.low||0, maxSev, "var(--ok)")}
+        <div class="sec" style="margin-top:14px">INCIDENTS BY STATUS</div>
+        ${securityBarHtml("OPEN", inc.OPEN||0, maxInc, "var(--bad)")}
+        ${securityBarHtml("INVESTIGATING", inc.INVESTIGATING||0, maxInc, "var(--warn)")}
+        ${securityBarHtml("RESOLVED", inc.RESOLVED||0, maxInc, "var(--ok)")}
+        ${securityBarHtml("ACCEPTED RISK", inc.ACCEPTED_RISK||0, maxInc, "var(--blue-deep)")}
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+        <div style="font-size:22px;color:var(--ok)">${d.known_device_count}</div>
+        <div class="d">KNOWN DEVICES</div>
+      </div>
+    </div>
+    <div class="sec" style="margin-top:16px">REAL FINDINGS (${d.findings.length})</div>
+    ${d.findings.length ? d.findings.map(findingRowHtml).join("") : '<p class="note" style="padding:8px 0">Nothing found on the last real scan.</p>'}`;
+}
+loadSecurityDashboard();
+setInterval(() => { if(screen === "SECURITY") loadSecurityDashboard(); }, 5000);
 
 // 2026-09-18: the TIMETABLE screen -- Domain C (docs/
 // COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md), the user's own explicit ask

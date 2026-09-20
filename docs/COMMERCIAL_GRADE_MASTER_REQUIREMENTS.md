@@ -318,26 +318,41 @@ Three real, distinct layers, not to be conflated:
    this document treats the wiki as an EXTENSION of that already-specified agent: the file-manager
    organizes; the wiki explains and cross-references what it organized.
 
-**Build plan (scoped 2026-09-19, not yet started -- blocked, see below)**: mirror the exact
-sequence `research_mesh` (finding #033) just proved out, since the shape is the same problem
-(real files -> real per-item summary via a real model -> real persisted, queryable state -> real
-UI): (1) a pure-logic `WikiEntry`/`WikiStore` pair first, no model, no I/O beyond a given file list
--- fully unit-testable; (2) a real SQLite store, workspace-relative
-(`config.workspace_dir() / "device_wiki" / "wiki.db"`, applying finding #028's own lesson from the
-start, not retrofitted); (3) the real summarizer, reusing the SAME tool-less
-`ChatSession(DispatchRegistry(), session_file=None)` primitive proven three times now
-(`_verify_completion`, `_verify_goal_criteria`, `RealBrain.answer`) -- no new call path to invent;
-(4) a real walker with an explicit, user-configured root-folder allowlist (never silently the whole
-filesystem, matching the requirement above literally); (5) a real chat-reachable tool
-(`device_wiki_tools.py`, mirroring `research_mesh_tools.py`'s own dedicated-module shape) plus a
-UI page (mirroring the GOALS screen's own polled-list pattern from finding #026); (6) live proof on
-one real folder with a real model, exactly like `research_mesh`'s own live proof today. Cross-link
-generation (harsh acceptance test 4 below) is real, separate follow-on work layered on AFTER
-per-file summaries are proven -- do not build it first.
-**Blocked, re-check before starting**: this domain's own real folders overlap `~/Documents/`, which
-prior-session memory flags as off-limits while a separate, concurrent Claude Code session
-(`ps aux | grep -i "claude.*Documents/dourmouse"`) is still touching that tree. Verify that session
-has actually ended before writing a single file here, not just before the live-proof step.
+**Build plan (scoped 2026-09-19)**: mirror the exact sequence `research_mesh` (finding #033) just
+proved out, since the shape is the same problem (real files -> real per-item summary via a real
+model -> real persisted, queryable state -> real UI):
+1. **Shipped (finding #056)**: a pure-logic `WikiEntry` (no `WikiStore` pair needed -- the pure
+   collection-management logic lives in one `reconcile()` function rather than a stateful class,
+   simpler than originally scoped and still fully unit-testable), no model, no I/O beyond a given
+   file list. `reconcile(existing, found, now)` is the real function harsh acceptance test 2 depends
+   on: a real deletion is marked MISSING, never dropped from the result; a real content-hash change
+   reverts to a fresh UNSUMMARIZED entry rather than keeping a stale summary; a reappearing MISSING
+   file self-heals from its real, preserved summary.
+2. **Shipped (finding #057)**: a real SQLite store, workspace-relative from the start
+   (`config.workspace_dir() / "device_wiki" / "wiki.db"`, finding #028's own lesson applied, not
+   retrofitted) -- one row PER REAL FILE (`wiki_entries`), not a single mega-JSON blob, matching the
+   scale a real device wiki needs.
+3. **Shipped (finding #058)**: the real summarizer, reusing the SAME tool-less
+   `ChatSession(DispatchRegistry(), session_file=None)` primitive proven repeatedly now
+   (`_verify_completion`, `_verify_goal_criteria`, `RealBrain.answer`, every `research_pipeline` stage
+   function) -- no new call path invented. Harsh acceptance test 1 enforced in code: a binary or
+   unreadable file gets an honest `with_failed_summary` WITHOUT ever reaching the model.
+4. **Shipped (finding #059)**: a real walker with an explicit, user-configured root-folder allowlist
+   (`DOURMOUSE_WIKI_ROOTS`) -- unset or empty is an honest empty result, never silently the whole
+   filesystem, matching the requirement above literally. Skips known system/cache/build directories
+   and a real 5 MB oversized-file cost bound.
+5. **Shipped (finding #060)**: a real chat-reachable tool (`device_wiki_tools.py`, mirroring
+   `research_pipeline_tools.py`'s own dedicated-module shape) -- `device_wiki_scan`/`device_wiki_
+   status`/`device_wiki_get` on a new `device_wiki` subagent.
+6. **Shipped (finding #061)**: a real UI page (`GET /api/device_wiki`, a new WIKI screen in
+   `ui/console.html`, mirroring the GOALS screen's own polled-list pattern from finding #026).
+   Live-verified end to end in the browser: a real scanned file's status, path, and real summary
+   rendered correctly, confirmed by screenshot. Domain E's full build plan (steps 1-6) is now closed.
+Cross-link generation (harsh acceptance test 4 below) is real, separate follow-on work layered on
+AFTER per-file summaries are proven -- do not build it first, and not yet built.
+**Unblocked 2026-09-21**: re-checked `ps aux | grep -i "claude.*Documents/dourmouse"` before writing
+step 1 -- no matching process, and `~/Documents/` contains only this session's own prior
+deliverables. Clear to proceed.
 
 **Harsh acceptance tests**:
 1. Point the wiki at a real folder with 50+ mixed files. Confirm every file gets a real,
@@ -677,9 +692,13 @@ second scheduler per capability:
    permanently-binding scope restatement. Deliberately text-only: no execution path exists, which is
    a stricter reading of "never auto-applied" than a suggest-then-confirm execution gate would be, and
    avoids adding any privilege-escalation surface to a defensive-only subsystem.
-6. **Dashboard UI**: real exposure/findings/incident-status surface, last (per this domain's own
-   original build plan: "after the sentry itself is real and tested") -- the practical, calm,
-   non-decorative version of the orbital/sphere concept already referenced in `docs/DESIGN_SYSTEM.md`.
+6. **Shipped (finding #062, user-directed: "more visual with circles task bars ... a dashboard")**: a
+   real SECURITY screen (`ui/console.html`) over `GET /api/security_dashboard` (`webui.py`) -- a real
+   SVG circular risk gauge, real severity/incident bars, a known-device count, the real findings list.
+   Reads the server's own already-computed `SentryRuntime.last_result`, never triggers a fresh scan.
+   Live-verified against this machine's own real risk score (21.0) and 4 real findings, confirmed by
+   screenshot. The practical, calm, non-decorative version of the orbital/sphere concept already
+   referenced in `docs/DESIGN_SYSTEM.md`.
 7. **Windows/cross-device coverage**: `platform_adapter.py` is macOS-only today (its own real,
    already-stated scope) -- the DOURMOUSE desktop (a real second, Windows machine, per prior-session
    memory) is a genuinely different OS with different real telemetry commands (`netsh`, `Get-

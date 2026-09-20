@@ -537,10 +537,79 @@ one-row-JSON-body resumable SQLite store shape now has THREE:
 `goals.py`, `research_mesh/store.py`, the proposed security sentry store),
 and a real build sequence, not just a requirement statement:
 
-- [ ] Domain E (device wiki) -- **blocked**, re-check
-      `ps aux | grep -i "claude.*Documents/dourmouse"` before writing a
-      single file, not just before the live-proof step. See §7's own Build
-      plan.
+- [x] Domain E, step 1/6 shipped 2026-09-21 -- unblocked (re-checked
+      `ps aux | grep -i "claude.*Documents/dourmouse"`: no match, clear to
+      proceed). `dourmouse/device_wiki/core.py`, mirroring
+      `research_pipeline/core.py`'s own pure-logic-first shape: a real
+      `WikiEntry` (UNSUMMARIZED/SUMMARIZED/MISSING) plus `reconcile()`,
+      the function harsh acceptance test 2 depends on -- a real deletion
+      is marked MISSING, never dropped; a real content change reverts to
+      UNSUMMARIZED rather than keeping a stale summary; a reappearing
+      MISSING file self-heals from its real preserved summary. See
+      `docs/ENGINEERING_AUDIT.md` finding #056.
+- [x] Domain E, steps 2-5/6 shipped 2026-09-21 -- the real SQLite store
+      (`device_wiki/store.py`, one row per real file, workspace-relative
+      `DEFAULT_DB` from the start), the real summarizer
+      (`device_wiki/stages.py`, reusing the tool-less `ChatSession`
+      primitive, harsh acceptance test 1 enforced in code -- a binary or
+      unreadable file never reaches the model), the real walker
+      (`device_wiki/walker.py`, explicit `DOURMOUSE_WIKI_ROOTS`
+      allowlist, never a filesystem-wide fallback, harsh acceptance test
+      2 proven end to end through three real temp-directory scans), and
+      the chat tool (`device_wiki_tools.py`, the `device_wiki` subagent
+      -- `device_wiki_scan`/`device_wiki_status`/`device_wiki_get`).
+      Live-verified against two real local files (a meeting-notes text
+      file, a project README): two real, accurate summaries produced end
+      to end. A real duplicate-summarize-call bug caught before any test
+      ran, fixed. See `docs/ENGINEERING_AUDIT.md` findings #057-#060.
+- [x] Domain E, step 6/6 (final) shipped 2026-09-21 -- `GET /api/device_
+      wiki` (read-only, mirroring `/api/goals`'s own shape) and a new
+      WIKI screen in `ui/console.html` (SCREENS array, polled every 5s,
+      SUMMARIZED/UNSUMMARIZED/MISSING grouping). Live-verified end to
+      end in the browser: a real scanned file's status, path, and real
+      summary rendered correctly through the console's own "MORE"
+      overflow menu, confirmed by screenshot. See
+      `docs/ENGINEERING_AUDIT.md` finding #061. Domain E's full build
+      plan (steps 1-6) is now closed; cross-link generation (harsh
+      acceptance test 4) is real, separate follow-on layered on after,
+      not yet built.
+- [x] Domain I dashboard UI shipped 2026-09-21 (user-directed: "more
+      visual with circles task bars ... a dashboard") -- a real SECURITY
+      screen over `GET /api/security_dashboard`: a real SVG circular
+      risk gauge, severity/incident bars, known-device count, real
+      findings list. Reads the server's own already-computed
+      `SentryRuntime.last_result`, never triggers a fresh scan. Caught
+      and fixed a real bug before any test ran: `var(--no)`/`var(--dim)`
+      do not exist in this stylesheet, the real established colors are
+      `var(--bad)`/`var(--blue-deep)`. Live-verified against this
+      machine's own real risk score (21.0) and 4 real findings,
+      confirmed by screenshot. See `docs/ENGINEERING_AUDIT.md` finding
+      #062.
+- [x] Phase 7, the agent ecosystem visual monitor, shipped 2026-09-21
+      (user-directed: "pixelated office ... confirm as you work"), v1
+      was a static desk grid rebuilt via innerHTML every update -- real
+      user correction ("I want ... move interact discuss ... exactly
+      like the GitHub repo"), fixed same day in v2: a persistent SVG
+      scene, patched in place (`.style.transform`/color/text on existing
+      nodes, never rebuilt) so CSS transitions genuinely animate a
+      sprite walking between its desk and a real meeting-room seat, both
+      driven ONLY by real `_orchFanouts`/`_orchAgents` changes, never a
+      timer. Caught and fixed a real regression along the way: v1's
+      `const busy = ...` tripped the pre-existing
+      `test_console_per_screen_busy_state.py` guard against exactly the
+      shared-global-`busy` bug class this codebase was bitten by once
+      already -- gone in v2's rewrite. Live-verified: all 43 real
+      subagents rendered as persistent desks (including two agents
+      showing a real, distinct `LIVE` status the renderer correctly
+      passed through unmodified); three real `delegate_parallel` fan-
+      outs driven live through the actual chat composer all genuinely
+      dispatched and completed. Honest gap: every real fan-out in this
+      local environment finished in under a second, so the walk
+      animation itself was code-reviewed but never caught mid-flight in
+      a screenshot. See `docs/ENGINEERING_AUDIT.md` finding #063. Deeper
+      3D/pixel-office asset work (real sprites, a full floor plan,
+      deploy/blocked-streak-triggered flavor animations) is real,
+      separate, not-yet-built follow-on.
 - [x] Domain F remainder (named specialist roles) -- shipped 2026-09-19.
       `general_roster.py`'s `_DELEGATE_ROLE_PRESETS`: `researcher`, `coder`,
       `tester`, `security_sentry` each map to a real, already-registered

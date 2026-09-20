@@ -83,6 +83,10 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # (2026-09-20, Domain F's reviewer role) -- same privacy class as
     # dev_coding right above, even though it cannot write or execute.
     "reviewer",
+    # Reads and summarizes real content from the user's own configured
+    # folders (Domain E's device wiki, 2026-09-21) -- personal file
+    # content, same privacy class as "docs"/"memory" above.
+    "device_wiki",
     # Delegating to a coding CLI from inside a delegated turn is a recursion
     # risk, so these never route anywhere but local, and in practice the tool
     # below refuses them outright.
