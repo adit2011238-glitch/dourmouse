@@ -2510,15 +2510,30 @@ def _resolve_brain_model(
 
 
 def _emit_event(
-    event_sink: Callable[[dict[str, Any]], None] | None, entry: dict[str, Any]
+    event_sink: Callable[[dict[str, Any]], None] | None,
+    entry: dict[str, Any],
+    ctx: "DispatchContext | None" = None,
 ) -> None:
     """Call the optional event_sink without letting it break execution.
 
     The sink is a pure observer (Rule: UI streaming must never alter or abort
     dispatch), so a raising sink is swallowed.
+
+    Finding #067: an optional ``ctx`` additively tags the entry (mutated in
+    place, so the SAME object already appended to ``transcript`` picks up
+    the tag too, not just what streams live) with the REAL calling agent
+    and a real per-run ``call_id`` -- see ``DispatchContext.call_id``'s own
+    docstring for why this is the only reliable way to tell apart two
+    concurrent runs against the same agent. Additive only (new keys, never
+    removed/renamed existing ones): every consumer that reads ``entry.get
+    (...)``/``entry["type"]`` keeps working unchanged; nothing in this
+    codebase asserts exact dict equality on a transcript/event entry.
     """
     if event_sink is None:
         return
+    if ctx is not None:
+        entry.setdefault("agent", ctx.forced_agent or "orchestrator")
+        entry.setdefault("call_id", ctx.call_id)
     try:
         event_sink(entry)
     except Exception:
@@ -3275,6 +3290,17 @@ class DispatchContext:
     # owns whichever ONE agent it was forced to), so there is nothing to
     # propagate.
     forced_agent: str | None = None
+    # Finding #067 (agent-ecosystem "full chain of thought, any agent, any
+    # meeting, on demand" gap): a fresh, real per-RUN identifier, distinct
+    # for every DispatchContext instance (default_factory runs once per
+    # construction, never inherited/shared) -- lets office_logger and any
+    # future transcript viewer tell apart two concurrent runs against the
+    # SAME agent (e.g. two independent delegate_task calls to `reviewer`
+    # at once), something `forced_agent` alone cannot do. Deliberately NOT
+    # inherited by nested runs: a nested run is a genuinely different call
+    # instance and gets its own fresh id, same reasoning as forced_agent's
+    # own "NOT inherited" note just above.
+    call_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     # v13: Grounded Mode (config.grounded_mode_enabled()) for THIS run — a
     # user-controllable setting, not inferred from the prompt. See
     # _MAX_GROUNDED_NUDGES's own comment for the mechanism and the live bug
@@ -3699,23 +3725,6 @@ def run_dispatch_messages(
         from dourmouse.gemini_backend import GEMINI_DEFAULT_MODEL
 
         model, backend_name, backend_local = GEMINI_DEFAULT_MODEL, "gemini", False
-    # The chosen brain is surfaced honestly so the UI can show which model
-    # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
-    # of the tree: nested delegate runs ride the parent's event sink, so a
-    # delegate's model must never clobber the top-level brain indicator
-    # (reviewer-caught; the loop already streams assistant_delta only at
-    # depth 0 for the same reason).
-    if event_sink is not None and depth == 0:
-        _emit_event(
-            event_sink,
-            {
-                "type": "brain",
-                "model": model,
-                "escalated": escalated_brain,
-                "backend": backend_name,
-                "local": backend_local,
-            },
-        )
 
     # Compulsory governance defaults: cost-capping and DLP are ON by default
     # (institutional baseline); RBAC is off unless a role is supplied, so the
@@ -3726,6 +3735,12 @@ def run_dispatch_messages(
     # Push a dispatch context so the delegate_task tool can spawn nested runs
     # with the same client/gate/sink and the same recursion guards. The stack
     # is exactly one per in-flight run because nesting is synchronous.
+    #
+    # Built BEFORE the initial "brain" event just below (moved down from its
+    # original spot, finding #067) so that event can carry the same real
+    # agent/call_id tag every other event in this run gets -- nothing
+    # between the two positions reads or depends on ctx, so the reorder is
+    # behavior-preserving for everything except adding that tag.
     ctx = DispatchContext(
         registry=registry,
         client=client,
@@ -3756,6 +3771,24 @@ def run_dispatch_messages(
             _explicit_model is None and not escalated_brain and not fast_lane
         ),
     )
+    # The chosen brain is surfaced honestly so the UI can show which model
+    # actually answered (Rule 2.1) — fast vs heavy per run. Only at the top
+    # of the tree: nested delegate runs ride the parent's event sink, so a
+    # delegate's model must never clobber the top-level brain indicator
+    # (reviewer-caught; the loop already streams assistant_delta only at
+    # depth 0 for the same reason).
+    if event_sink is not None and depth == 0:
+        _emit_event(
+            event_sink,
+            {
+                "type": "brain",
+                "model": model,
+                "escalated": escalated_brain,
+                "backend": backend_name,
+                "local": backend_local,
+            },
+            ctx=ctx,
+        )
     # INVARIANT: at most ONE in-flight run per registry PER THREAD at any
     # instant. The webui guarantees this for the top-level chat path by
     # serializing chat under session_lock, and nesting via delegate_task is
@@ -4366,7 +4399,7 @@ def _run_dispatch_loop(
         if plan:
             plan_entry: dict[str, Any] = {"type": "plan", "steps": plan, "total": len(plan)}
             transcript.append(plan_entry)
-            _emit_event(event_sink, plan_entry)
+            _emit_event(event_sink, plan_entry, ctx=ctx)
         # v4.1: scope the tool schemas to the plan's agents instead of
         # shipping all 60. Plain questions send no tools at all — the
         # biggest single latency lever (see _scoped_tool_specs).
@@ -4524,6 +4557,7 @@ def _run_dispatch_loop(
                         "backend": _routed_backend,
                         "local": _routed_local,
                     },
+                    ctx=ctx,
                 )
 
     # v5.32: the schemas are scoped above, but the ROSTER PROSE in the system
@@ -4596,7 +4630,7 @@ def _run_dispatch_loop(
             if reason is not None:
                 entry = _budget_entry(reason)
                 transcript.append(entry)
-                _emit_event(event_sink, entry)
+                _emit_event(event_sink, entry, ctx=ctx)
                 messages.append({"role": "assistant", "content": ""})
                 return {"final_text": "", "transcript": transcript, "messages": messages}
 
@@ -4607,7 +4641,7 @@ def _run_dispatch_loop(
         if should_stop is not None and should_stop():
             entry = _stop_entry()
             transcript.append(entry)
-            _emit_event(event_sink, entry)
+            _emit_event(event_sink, entry, ctx=ctx)
             messages.append({"role": "assistant", "content": ""})
             return {"final_text": "", "transcript": transcript, "messages": messages}
 
@@ -4680,7 +4714,7 @@ def _run_dispatch_loop(
             messages.append({"role": "system", "content": reminder})
             entry = {"type": "plan_reminder", "steps": [s["n"] for s in missing]}
             transcript.append(entry)
-            _emit_event(event_sink, entry)
+            _emit_event(event_sink, entry, ctx=ctx)
             plan_reminders += 1
 
         if plan and plan_reminders < _MAX_PLAN_REMINDERS:
@@ -4703,7 +4737,7 @@ def _run_dispatch_loop(
             client, (OpenAI, OllamaNativeClient)
         ):
             def on_delta(text: str) -> None:
-                _emit_event(ctx.event_sink, {"type": "assistant_delta", "text": text})
+                _emit_event(ctx.event_sink, {"type": "assistant_delta", "text": text}, ctx=ctx)
 
             # v13.1: visible chain-of-thought — a real, separate SSE channel
             # (never concatenated into assistant_delta/buf) so the UI can
@@ -4711,7 +4745,7 @@ def _run_dispatch_loop(
             # either vanishing (old think:False) or leaking into the
             # answer text (the exact bug think:False existed to prevent).
             def on_thinking(text: str) -> None:
-                _emit_event(ctx.event_sink, {"type": "thinking_delta", "text": text})
+                _emit_event(ctx.event_sink, {"type": "thinking_delta", "text": text}, ctx=ctx)
 
         # v13.1 (Aider port part 4/4): None unless 2+ NVIDIA accounts are
         # actually configured — see _nvidia_rotation_factory's own
@@ -4787,6 +4821,7 @@ def _run_dispatch_loop(
                             "type": "assistant_text",
                             "text": "[compute node offline — answered by the local fast model]",
                         },
+                        ctx=ctx,
                     )
                 response = _call_with_retry(
                     client,
@@ -4839,13 +4874,13 @@ def _run_dispatch_loop(
                 "raw_arguments": _mcp_rec.get("raw_arguments", ""),
             }
             transcript.append(_mcp_use_entry)
-            _emit_event(event_sink, _mcp_use_entry)
+            _emit_event(event_sink, _mcp_use_entry, ctx=ctx)
             _mcp_result_entry = {
                 "type": "tool_result", "name": _mcp_name,
                 "text": str(_mcp_rec.get("result_text") or ""),
             }
             transcript.append(_mcp_result_entry)
-            _emit_event(event_sink, _mcp_result_entry)
+            _emit_event(event_sink, _mcp_result_entry, ctx=ctx)
 
         # Record the call against the budget AFTER it succeeded, using real
         # request + response sizes (token estimate ~4 chars/token). The
@@ -4868,7 +4903,7 @@ def _run_dispatch_loop(
                     text += f"\n[DLP: {len(hits)} secret pattern(s) redacted from model text]"
             entry = {"type": "assistant_text", "text": text}
             transcript.append(entry)
-            _emit_event(event_sink, entry)
+            _emit_event(event_sink, entry, ctx=ctx)
             messages.append({"role": "assistant", "content": text})
             # Orchestration robustness: a text-only message right after a
             # tool result while the plan still has unexecuted steps is often
@@ -4922,7 +4957,7 @@ def _run_dispatch_loop(
                 messages.append({"role": "system", "content": reminder})
                 reminder_entry = {"type": "grounded_reminder"}
                 transcript.append(reminder_entry)
-                _emit_event(event_sink, reminder_entry)
+                _emit_event(event_sink, reminder_entry, ctx=ctx)
                 continue
             # Fabrication case (exit path): a text-only message ends the run
             # even when the plan still has unexecuted steps. The most common
@@ -5029,7 +5064,7 @@ def _run_dispatch_loop(
             if should_stop is not None and should_stop():
                 entry = _stop_entry()
                 transcript.append(entry)
-                _emit_event(event_sink, entry)
+                _emit_event(event_sink, entry, ctx=ctx)
                 return {"final_text": "", "transcript": transcript, "messages": messages}
             name = tool_call.function.name
             use_entry = {
@@ -5038,7 +5073,7 @@ def _run_dispatch_loop(
                 "raw_arguments": tool_call.function.arguments,
             }
             transcript.append(use_entry)
-            _emit_event(event_sink, use_entry)
+            _emit_event(event_sink, use_entry, ctx=ctx)
             spec = registry.lookup(name)
             if spec is None:
                 # v8.11 capability-denial guard: rule 10 of the system
@@ -5154,7 +5189,7 @@ def _run_dispatch_loop(
 
             result_entry = {"type": "tool_result", "name": name, "text": result_text}
             transcript.append(result_entry)
-            _emit_event(event_sink, result_entry)
+            _emit_event(event_sink, result_entry, ctx=ctx)
             messages.append(
                 {"role": "tool", "tool_call_id": tool_call.id, "content": result_text}
             )
@@ -5204,7 +5239,7 @@ def _run_dispatch_loop(
         "reason": "max_turns exceeded — forcing a synthesis answer from what was already gathered",
     }
     transcript.append(forced_entry)
-    _emit_event(event_sink, forced_entry)
+    _emit_event(event_sink, forced_entry, ctx=ctx)
     forced_messages = messages + [
         {
             "role": "system",
@@ -5234,6 +5269,7 @@ def _run_dispatch_loop(
         _emit_event(
             event_sink,
             {"type": "assistant_text", "text": f"[forced synthesis call failed: {exc}]"},
+            ctx=ctx,
         )
 
     if not forced_text.strip():
@@ -5255,7 +5291,7 @@ def _run_dispatch_loop(
 
     entry = {"type": "assistant_text", "text": forced_text}
     transcript.append(entry)
-    _emit_event(event_sink, entry)
+    _emit_event(event_sink, entry, ctx=ctx)
     # Keep the history well-formed for multi-turn chat: after a tool exchange
     # the next turn must NOT begin with a "user" message (OpenAI-compatible
     # APIs reject "tool" then "user" without an intervening assistant).

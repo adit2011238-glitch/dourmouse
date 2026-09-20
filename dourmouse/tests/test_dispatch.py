@@ -4551,3 +4551,72 @@ class TestExecuteToolNoGateMessageIsActionable:
         result = _execute_tool(spec, {}, confirmation_gate=None)
         assert "normal chat tab" in result.lower()
         assert "CLAUDE DIRECT CLI" in result
+
+
+class TestEmitEventTagsRealAgentAndCallId:
+    """Finding #067: _emit_event additively tags tool_use/tool_result/
+    thinking_delta/assistant_delta/assistant_text/brain entries with the
+    REAL calling agent (DispatchContext.forced_agent, or "orchestrator" for
+    the untargeted top-level turn) and a real per-run call_id -- the
+    backbone office_logger.py's agent_events table depends on."""
+
+    def test_untargeted_top_level_run_tags_orchestrator(self):
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        events: list[dict] = []
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "just say hi"},
+        ]
+        run_dispatch_messages(messages, registry, client=client, event_sink=events.append)
+        tagged = [e for e in events if e.get("type") in ("brain", "assistant_text")]
+        assert tagged
+        assert all(e.get("agent") == "orchestrator" for e in tagged)
+        assert all(e.get("call_id") for e in tagged)
+
+    def test_forced_agent_run_tags_the_real_agent_name(self):
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        events: list[dict] = []
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "read a file"},
+        ]
+        run_dispatch_messages(
+            messages, registry, client=client, event_sink=events.append, forced_agent="reviewer",
+        )
+        tagged = [e for e in events if e.get("type") == "assistant_text"]
+        assert tagged
+        assert all(e.get("agent") == "reviewer" for e in tagged)
+
+    def test_two_independent_runs_to_the_same_agent_get_distinct_call_ids(self):
+        """The exact real gap flaw #4 named: two independent forced_agent
+        runs against the SAME agent are otherwise indistinguishable. A real
+        call_id, fresh per DispatchContext, is what tells them apart."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+        from dourmouse.general_roster import build_general_registry
+
+        registry = build_general_registry()
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "read a file"},
+        ]
+        events_a: list[dict] = []
+        run_dispatch_messages(
+            messages, registry, client=FakeClient([_FakeResponse(_FakeMessage(content="a"))]),
+            event_sink=events_a.append, forced_agent="reviewer",
+        )
+        events_b: list[dict] = []
+        run_dispatch_messages(
+            messages, registry, client=FakeClient([_FakeResponse(_FakeMessage(content="b"))]),
+            event_sink=events_b.append, forced_agent="reviewer",
+        )
+        call_id_a = next(e["call_id"] for e in events_a if e.get("call_id"))
+        call_id_b = next(e["call_id"] for e in events_b if e.get("call_id"))
+        assert call_id_a != call_id_b

@@ -2752,13 +2752,17 @@ class _Handler(BaseHTTPRequestHandler):
                 "configured_roots": [str(r) for r in configured_roots()],
             })
         elif path == "/api/office_log":
-            # Finding #066: read-only inspection of the real, persistent
-            # message_bus + delegate_parallel fan-out log -- the durable
-            # backing for an on-demand activity/transcript view that
-            # survives a server restart (message_bus itself does not).
-            # ?kind=messages (default) or ?kind=fanouts; ?run_id=<id>
-            # scopes fanout events to one delegate_parallel run;
-            # ?limit=<n> (default 100, capped at 1000).
+            # Findings #066-067: read-only inspection of the real,
+            # persistent message_bus + delegate_parallel fan-out log, plus
+            # the real per-agent/per-call_id dispatch event log -- the
+            # durable backing for an on-demand activity/transcript view
+            # that survives a server restart (message_bus itself does not).
+            # ?kind=messages (default), ?kind=fanouts, or ?kind=events;
+            # ?run_id=<id> scopes fanout events to one delegate_parallel
+            # run; ?agent=<name> and/or ?call_id=<id> scope events to one
+            # agent's whole history and/or one exact run; ?limit=<n>
+            # (default 100, capped at 1000 for messages/fanouts, 2000 for
+            # events).
             office_log = getattr(self.server, "office_log", None)
             if office_log is None:
                 self._send_json({"error": "office_log not configured"}, status=404)
@@ -2772,6 +2776,13 @@ class _Handler(BaseHTTPRequestHandler):
             if kind == "fanouts":
                 run_id = (qs.get("run_id") or [""])[0].strip() or None
                 self._send_json({"fanout_events": office_log.recent_fanout_events(limit=limit, run_id=run_id)})
+            elif kind == "events":
+                # Finding #067: the real, on-demand transcript -- ?agent=
+                # and/or ?call_id= scope it; oldest-first (a transcript
+                # reads top-to-bottom, unlike the other feeds here).
+                agent = (qs.get("agent") or [""])[0].strip() or None
+                call_id = (qs.get("call_id") or [""])[0].strip() or None
+                self._send_json({"events": office_log.transcript(agent=agent, call_id=call_id, limit=limit)})
             else:
                 self._send_json({"messages": office_log.recent_messages(limit=limit)})
         elif path == "/api/audit":

@@ -645,6 +645,21 @@ and a real build sequence, not just a requirement statement:
       `ctx.depth == 0` today) -- this persists who messaged whom and which fan-out branch ran
       where, real and durable, not yet a full chain-of-thought replay. See
       `docs/ENGINEERING_AUDIT.md` finding #066.
+- [x] Agent ecosystem hardening, round 3, shipped 2026-09-20 -- closed the one backend piece
+      named as still-missing at the end of the design review: real per-agent, per-call
+      reasoning/transcript tagging (the "full chain of thought ... whenever we want" ask).
+      `DispatchContext` gains a real, fresh-per-run `call_id`; `_emit_event` additively tags
+      `tool_use`/`tool_result`/`thinking_delta`/`assistant_delta`/`assistant_text`/`brain`
+      events with the real calling agent and that `call_id` (never overwriting a
+      `delegate_parallel_branch` entry's own already-correct agent). This is the exact real
+      fix for flaw #4 named in round 1/#066 (`ActivityTracker`'s live status collision for two
+      independent `delegate_task` calls to the same agent) at the event-identity level: two
+      concurrent runs against the same agent now carry distinct `call_id`s. `office_logger.py`
+      gained a third table, `agent_events`, and `GET /api/office_log?kind=events`
+      (`?agent=`/`?call_id=`) -- the real, on-demand, oldest-first transcript. Still not built,
+      named honestly: assembling several concurrent `call_id`s from one meeting into a single
+      merged conversation view is a read-side/UI concern layered on top, not yet done. See
+      `docs/ENGINEERING_AUDIT.md` finding #067.
 - [x] Domain F remainder (named specialist roles) -- shipped 2026-09-19.
       `general_roster.py`'s `_DELEGATE_ROLE_PRESETS`: `researcher`, `coder`,
       `tester`, `security_sentry` each map to a real, already-registered

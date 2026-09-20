@@ -2902,6 +2902,54 @@ run_id scoping, non-fan-out event types ignored) and
 
 ---
 
+### 067 -- real per-agent, per-call reasoning/transcript tagging (the "full chain of thought" gap, closed)
+
+**Severity**: n/a (feature -- the one backend piece named as still-missing at the end of the
+agent-ecosystem design review: "we also want to see the live verbose transcription of all agents,
+meeting rooms, their full chain of thought tokens ... whenever we want").
+**Context**: `dispatch.py`'s `tool_use`/`tool_result`/`thinking_delta`/`assistant_delta`/
+`assistant_text`/`brain` events already streamed live through the chat `event_sink`, but carried no
+reliable identity: `tool_use`/`tool_result` only ever named the TOOL, never the calling agent, and
+nothing distinguished two concurrent runs against the same agent (the exact real gap finding #066
+named as flaw #4, "`ActivityTracker`'s live status collision for two independent `delegate_task`
+calls to the same agent"). Without that, an on-demand transcript viewer could show WHAT happened but
+never reliably WHO did it or WHICH run it belonged to.
+**Fix**: `DispatchContext` gains a `call_id` field (`uuid.uuid4().hex[:12]` via `default_factory`,
+so every `DispatchContext` instance -- one per `run_dispatch_messages` call, including every nested
+`delegate_task`/`delegate_parallel` branch -- gets a genuinely fresh one, never inherited). `_emit_
+event` gains an optional `ctx` parameter that additively tags the entry in place (`entry.setdefault
+("agent", ctx.forced_agent or "orchestrator")`, `entry.setdefault("call_id", ctx.call_id)`) --
+`setdefault` so a `delegate_parallel_branch` entry's own already-correct `agent` (the branch's real
+target, not the parent's `forced_agent`) is never overwritten. Every real emission site for the six
+event types above inside `_run_dispatch_loop`, plus the top-level "brain" event in `run_dispatch_
+messages` (moved a few lines later, past `ctx`'s construction, so it can be tagged too -- nothing
+between the old and new position reads or depends on `ctx`, confirmed by re-reading the moved span),
+now passes `ctx=ctx`. Additive only: no entry lost a key, no consumer that reads `entry.get(...)`/
+`entry["type"]` needed to change, and nothing in this codebase asserts exact dict equality on a
+transcript/event entry (checked before making this change, not assumed).
+**Consumer wired the same day**: `office_logger.py` (finding #066) gained a third table,
+`agent_events`, and a new `transcript(agent=, call_id=, limit=)` read method -- the real backing for
+"show me everything agent X did" or "show me exactly this one run", oldest-first. An untagged event
+(no `call_id` at all -- e.g. a future emitter that never passes `ctx`) is skipped, never logged under
+a fabricated identity. `GET /api/office_log?kind=events` exposes it.
+**Honest, named scope limit**: this persists the real event STREAM per agent/call_id; it does not
+itself reconstruct a "conversation" (grouping `thinking_delta` chunks into one paragraph, merging
+several concurrent `call_id`s from one meeting into a single timeline) -- that assembly is a read-
+side/UI concern layered on top of this real, ordered, durable data, not yet built.
+**Files changed**: `dourmouse/dispatch.py` (`DispatchContext.call_id`, `_emit_event`'s new `ctx`
+param, ~17 call sites in `_run_dispatch_loop` plus the top-level brain event in `run_dispatch_
+messages`), `dourmouse/office_logger.py` (`agent_events` table, `_AGENT_EVENT_TYPES`, `_log_agent_
+event`, `transcript()`), `dourmouse/webui.py` (`/api/office_log?kind=events`).
+**Tests added**: `dourmouse/tests/test_dispatch.py::TestEmitEventTagsRealAgentAndCallId` (untargeted
+top-level run tags `"orchestrator"`, a `forced_agent` run tags the real agent name, two independent
+`forced_agent` runs to the SAME agent get distinct `call_id`s -- the exact flaw #4 scenario);
+`dourmouse/tests/test_office_logger.py::TestOfficeLoggerAgentEvents` (persistence, untagged events
+skipped not fabricated, unrelated event types ignored, scoping by agent/call_id, the same two-
+concurrent-calls scenario at the store level).
+**Result**: fixed. Full suite green.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified
