@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 
 import pytest
 
@@ -675,11 +676,28 @@ class TestOpenFilePreview:
         monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
         out = _open_file_preview_tool({"path": str(p)})
         assert "OPENED FILE PREVIEW" in out
+        # The API CALL is still absolute, and has to be: this tool can run in
+        # a separate subprocess with no page context at all, which is the
+        # whole reason it posts over HTTP rather than touching the in-process
+        # singleton.
         assert seen["url"] == "http://127.0.0.1:8765/api/browser-pane/open"
         assert seen["method"] == "POST"
         preview_url = seen["body"]["url"]
-        assert preview_url.startswith("http://127.0.0.1:8765/file_preview.html?src=files&path=")
-        assert str(p) in preview_url
+        # 2026-09-23 (finding #076): what goes INTO the pane is now
+        # ROOT-RELATIVE, and this assertion changed deliberately. It used to
+        # require "http://127.0.0.1:8765/file_preview.html?..." -- an absolute
+        # URL for this app's OWN page, while the console may well be loaded as
+        # "localhost". Those are different origins to a browser, so the app was
+        # framing its own page cross-origin for no reason, which is exactly why
+        # the pane's own code comments say back/forward history "isn't
+        # reachable from the parent page". A relative URL resolves against the
+        # console's own origin and makes the embed same-origin.
+        assert preview_url.startswith("/file_preview.html?src=files&path=")
+        # Not protocol-relative: "//host/path" reads as relative but is a
+        # different origin entirely.
+        assert not preview_url.startswith("//")
+        assert "127.0.0.1" not in preview_url
+        assert str(p) in urllib.parse.unquote(preview_url)
 
     def test_honest_error_when_the_running_server_is_unreachable(self, tmp_path, monkeypatch):
         p = tmp_path / "pic.png"

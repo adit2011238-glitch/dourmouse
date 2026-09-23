@@ -3276,6 +3276,146 @@ launch path, iframe-proxy sites without a live logged-in session, no YouTube int
 
 ---
 
+### 076 -- OS-1: a real embedded audio/video player, the first media playback in the product
+
+**Severity**: real missing capability (the vision deck's own "media playback for any type of
+media or files"), plus one real bug found live and one real pre-existing defect fixed along
+the way. **Context**: finding #075 established that no embedded audio or video playback
+existed anywhere -- the only `<audio>`/`<video>` elements in any `ui/*.html` were TTS output
+and a webcam gesture feed, Spotify is remote-control only (it drives the user's own separate
+Connect device and never receives audio bytes), and there is no YouTube integration at all.
+This builds it.
+
+**What was built**:
+1. `webui.py`: `_PREVIEWABLE_AUDIO_EXTS` / `_PREVIEWABLE_VIDEO_EXTS` / `_MEDIA_CONTENT_TYPES`,
+   folded into `_PREVIEWABLE_EXTS` so `_sandboxed_preview_path` (the same open_path trust
+   boundary, unchanged) accepts media. A container a browser cannot natively decode (`.mkv`,
+   `.avi`, `.flac`, `.wmv`) is deliberately NOT listed: listing it would produce a silently
+   blank player instead of an honest refusal. `_MEDIA_CONTENT_TYPES` is explicit rather than
+   `mimetypes.guess_type()` because that is registry-dependent and returns `None` for several
+   of these on a stock macOS Python, which would make the browser refuse a file it can decode.
+2. `_parse_byte_range()` plus `_send_media_file()`: real HTTP range semantics (206 with
+   `Content-Range`, `Accept-Ranges`, a real 416 for an unsatisfiable range) streamed from disk
+   in 256KB chunks. Not an optimisation: without a 206 and `Accept-Ranges` a `<video>` element
+   cannot seek at all, and `read_bytes()` on a real video would be a genuine way to kill a
+   stdlib `ThreadingHTTPServer`. Multi-range is deliberately declined (falls back to a full
+   200, which is legal) rather than half-answered. `BrokenPipeError`/`ConnectionResetError`
+   are swallowed because a media element seeking or closing mid-stream is ordinary client
+   behaviour, never a server error -- but only those two, never a read error on the file.
+3. `GET /api/files/media`, the audio/video counterpart to the existing `/api/files/image`.
+4. `ui/file_preview.html`: real `<audio>`/`<video>` branches with native controls, an explicit
+   image branch, and an honest terminal state for anything else that names `open_path` instead
+   of rendering an empty player.
+5. `system_access.py`: `open_file_preview` accepts media, refuses an undecodable container by
+   name, and reports a media open distinctly -- explicitly stating it does not press play,
+   because it cannot.
+
+**A real bug this had, found by live testing and NOT by the unit tests** (the exact reason
+`docs/TESTING.md` says a passing test is evidence of what someone thought should work): for an
+open-ended range past the end of the file (`bytes=99999999-`), `end` is computed as `size-1`,
+which is LESS than `start`, so an inverted-range check placed before the past-the-end check
+classified a genuinely unsatisfiable range as merely malformed and served the whole file with
+a 200. The unit tests only covered a CLOSED range past the end, where `end >= start` held and
+the bug was invisible. This is precisely the request a media element makes when it seeks near
+the end of a file it has stale duration metadata for. Fixed by reordering; both shapes now
+have regression tests; re-verified live (416 with `Content-Range: bytes */1447248`).
+
+**A second real problem, in this change's own error copy**: a mistyped test URL returned 400
+and the player surfaced it as `MEDIA_ERR_SRC_NOT_SUPPORTED` (code 4), which the message
+confidently attributed to the codec. A browser raises code 4 both for an undecodable codec and
+for a server that refused the URL. Naming one cause when there are two is a guess presented as
+a diagnosis; rewritten to state both, show the real media URL, and say how to tell them apart.
+
+**A real pre-existing defect fixed along the way**: `open_file_preview` handed the pane an
+absolute `http://127.0.0.1:<port>/file_preview.html?...` for this app's OWN page, while the
+console may be loaded as `localhost` -- different origins to a browser, so the app was framing
+its own page as a cross-origin embed for no reason, which is exactly why the pane's own code
+comments say back/forward history "isn't reachable from the parent page". The tool now hands
+the pane a ROOT-RELATIVE URL; `/api/browser-pane/open` accepts one; `console.html` skips the
+frameability probe for one (this server never sends `X-Frame-Options` against itself, and the
+probe needs an absolute URL to fetch anyway). `//host/path` is explicitly refused -- it reads
+as relative but is a different origin, and accepting it as same-origin would frame a foreign
+site with this app's own trust.
+
+**Live verification** (`~/Documents/DOURMOUSE/EVIDENCE/002_media_player.txt`): range semantics
+and byte-exactness confirmed against a real 1.4MB MP4 (a mid-file range's md5 matches `dd` of
+the same offsets exactly); a real H.264 video decoded and SEEKED in the browser
+(`readyState: 4`, `videoWidth: 194`, seek to t=1.0s completed, frame drawn); real AAC audio
+decoded with native transport, including a filename containing a space; the honest
+unsupported state rendered for a real `.mkv`; the real tool run against the real server for
+both the accept and the refuse path.
+
+**What is NOT verified, stated plainly (two separate things)**:
+
+*(a) Wall-clock playback.* Pushed past metadata deliberately, because "the player loads" is a
+weaker claim than "the player plays". `play()` resolves successfully and then `currentTime`
+does not advance, for audio OR video, in this test browser: a headless/automated browser has no
+audio sink and does not drive the media clock when the tab is not genuinely painting. What IS
+proven is the substantive part: `readyState: 4` (HAVE_ENOUGH_DATA) on both, a parsed real video
+track (`videoWidth: 194`), a real decoded frame drawn on screen, and a seek to an arbitrary
+offset landing EXACTLY (`currentTime == 5.0`) -- a seek cannot land without a successful 206 and
+real demuxing at that offset, which is the strongest available evidence that the range
+implementation is correct end to end from the browser's side. So: decode verified, seek
+verified, render verified, wall-clock playback NOT verified and not claimed. It needs the real
+desktop shell with a real audio device.
+
+*(b) Rendering inside the browser pane's sandboxed iframe.* Diagnosed rather than
+assumed: a plain PNG, a pre-existing path this change never touched, renders blank in the pane
+identically; the network trace shows `net::ERR_BLOCKED_BY_CLIENT` on the iframe load, a
+client-side block that never reached the server, while `/api/browser-pane/check` returned 200;
+and after the same-origin fix above the same-origin URL is still blocked identically, so the
+origin mismatch was a real defect but not the cause. This test browser blocks sandboxed-iframe
+navigation outright, matching the standing note that it is a separate browser hitting the same
+server rather than the native pywebview shell. The route, the player and the tool are
+verified; the pane embed is not claimed, and is tracked as OS-4.
+
+**Also found, recorded separately rather than absorbed here**: driving this through the real
+directive box, the local `gpt-oss:20b` backend answered "I've opened the audio file in the
+embedded preview pane" WITHOUT calling `open_file_preview` at all (`GET /api/office_log?kind=
+events` shows zero tool events for that turn). A fabricated tool result is a direct violation
+of this product's own honesty contract and is a real, separate problem.
+
+**Security of the new route, checked rather than assumed** (it streams arbitrary absolute
+paths, so it is a real surface): traversal, non-media absolute paths, `/dev/zero`, an empty
+path, and a traversal suffix appended to a real media path are all refused, verified live
+against the running server and pinned in tests. The load-bearing property is an ORDERING one:
+`_sandboxed_preview_path` resolves the path FIRST and then checks the extension of what it
+actually resolved to, so a symlink named `looks_like.mp4` pointing at `/etc/passwd` is refused
+(confirmed live), while a symlink whose real target IS media is served. A check on the given
+NAME instead would have served the former. Both halves are tested, because a test for only the
+refusal would also pass under a blanket "refuse all symlinks" rule, which is not what the code
+does and not what it should do.
+
+**Regression check on what this restructured**: `file_preview.html`'s single else-branch became
+three (media, image, honest fallback), so the pre-existing PDF and image paths were re-checked
+rather than assumed intact: `/api/files/pdf-info` 200 with a real `page_count: 11`,
+`/api/files/pdf-page.png` 200 with real PNG bytes, `/api/files/image` 200, and a real 11-page
+PDF rendering in the browser with correct paging controls.
+
+**One existing test changed deliberately, and why**:
+`test_system_access.py::TestOpenFilePreview::test_real_post_reaches_the_browser_pane_open_
+endpoint` asserted the pane URL started with `http://127.0.0.1:8765/file_preview.html?...`.
+That assertion encoded the defect described above, so it was updated to require the
+root-relative form (and to reject a protocol-relative one), not merely relaxed. The API call
+itself is still asserted to be absolute, because that half is correct and must stay.
+
+**A second full-suite failure, diagnosed and NOT caused by this work**:
+`test_app_control_ax.py::TestRealLiveIntegration::test_activate_app_fast_really_works_against_
+finder` failed with `macOS refused to activate 'Finder' (activateWithOptions_ returned false)`.
+It passes in isolation on clean HEAD and in isolation with these changes applied. It failed
+because a browser was being driven on this machine throughout that suite run, and macOS
+refuses a foreground activation while another app holds focus. Its own docstring's claim that
+it is "safe to exercise for real in CI on a real Mac runner too" is too strong. Recorded as a
+real, separate item (X-7) rather than patched over or ignored.
+
+**Tests**: `dourmouse/tests/test_media_preview.py`, 46 cases -- the real route against real
+files on disk with the fake only at the socket boundary, the range parser's three return
+shapes in isolation, extension/content-type consistency between the tool and the server (two
+lists that can drift is a real bug class), and the same-origin pane URL including the
+protocol-relative refusal.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

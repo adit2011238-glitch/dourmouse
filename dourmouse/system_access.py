@@ -597,7 +597,18 @@ def _open_path_tool(arguments: dict[str, Any]) -> str:
 # open_browser_pane's own tool uses (see general_roster.py's
 # _open_browser_pane_tool for why that matters across a Claude CLI
 # subprocess).
-_PREVIEWABLE_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+# 2026-09-23 (OS-1): extended with the audio/video formats a browser's own
+# media element can genuinely decode, matching webui.py's
+# _PREVIEWABLE_AUDIO_EXTS/_PREVIEWABLE_VIDEO_EXTS exactly. A container the
+# browser cannot decode (.mkv, .avi, .flac, .wmv) is deliberately absent from
+# both lists, so this tool refuses it honestly and points at open_path rather
+# than opening a pane that shows nothing.
+_PREVIEWABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+_PREVIEWABLE_AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".wav", ".oga", ".ogg", ".opus", ".weba"}
+_PREVIEWABLE_VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".ogv", ".mov"}
+_PREVIEWABLE_EXTS = (
+    _PREVIEWABLE_IMAGE_EXTS | _PREVIEWABLE_AUDIO_EXTS | _PREVIEWABLE_VIDEO_EXTS | {".pdf"}
+)
 
 
 def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
@@ -610,10 +621,10 @@ def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
     ext = target.suffix.lower()
     if ext not in _PREVIEWABLE_EXTS:
         return (
-            f"REFUSED: open_file_preview only handles PDFs and images "
-            f"({', '.join(sorted(_PREVIEWABLE_EXTS))}), got {ext!r}. Use "
-            f"open_path instead for this file — it opens in the real "
-            f"default app (Preview.app, etc)."
+            f"REFUSED: open_file_preview handles PDFs, images, and audio/video "
+            f"in browser-decodable formats ({', '.join(sorted(_PREVIEWABLE_EXTS))}), "
+            f"got {ext!r}. Use open_path instead for this file: it opens in the "
+            f"real default app (Preview.app, QuickTime, etc)."
         )
     import json as _json
     import os as _os
@@ -622,10 +633,16 @@ def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
     import urllib.request
 
     port = _os.environ.get("DOURMOUSE_UI_PORT", "8765").strip() or "8765"
-    preview_url = (
-        f"http://127.0.0.1:{port}/file_preview.html?src=files&path="
-        + urllib.parse.quote(str(target))
-    )
+    # ROOT-RELATIVE on purpose (2026-09-23): the pane resolves this against
+    # the console's own origin, so it frames a same-origin document. The
+    # absolute "http://127.0.0.1:<port>/..." this used to send was a different
+    # origin from a console loaded as "localhost", which made embedding this
+    # app's own preview page a real cross-origin embed and broke the pane's
+    # back/forward buttons for previews. The API call below still needs a real
+    # absolute URL, because this tool may be running in a separate subprocess
+    # with no page context at all -- that is the whole reason it posts over
+    # HTTP rather than touching the in-process singleton.
+    preview_url = "/file_preview.html?src=files&path=" + urllib.parse.quote(str(target))
     api_url = f"http://127.0.0.1:{port}/api/browser-pane/open"
     body = _json.dumps({"url": preview_url}).encode("utf-8")
     req = urllib.request.Request(
@@ -636,6 +653,14 @@ def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
             resp.read()
     except (urllib.error.URLError, OSError) as exc:
         return f"ERROR: open_file_preview failed to reach the running app's own server: {exc}"
+    if ext in _PREVIEWABLE_AUDIO_EXTS or ext in _PREVIEWABLE_VIDEO_EXTS:
+        kind = "video" if ext in _PREVIEWABLE_VIDEO_EXTS else "audio"
+        return (
+            f"OPENED MEDIA PLAYER: {target} (a real {kind} player with native "
+            f"controls and working seek, embedded in the app's own pane, not a "
+            f"second OS window). Playback is the user's to start; this tool "
+            f"opens the player, it does not press play."
+        )
     return (
         f"OPENED FILE PREVIEW: {target} (visible to the user now, "
         f"embedded in the app's own pane — real, resizable/minimizable, "
@@ -1038,20 +1063,28 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="open_file_preview",
                 description=(
-                    "Open a real PDF or image (path, png, jpg, jpeg, gif, "
-                    "webp, svg, bmp) INLINE in the app's own embedded "
-                    "preview pane — a real, resizable/minimizable panel, "
-                    "NOT a second OS window like open_path's Preview.app. "
-                    "A PDF gets a real rendered page-by-page view (prev/"
-                    "next), not just extracted text. Prefer this over "
-                    "open_path whenever the user wants to actually LOOK "
-                    "at a PDF or image without leaving the app; use "
-                    "open_path instead for any other file type, or when "
-                    "the user explicitly wants the real default app."
+                    "Open a real PDF, image, audio file or video file INLINE "
+                    "in the app's own embedded pane: a real, resizable/"
+                    "minimizable panel, NOT a second OS window like "
+                    "open_path's Preview.app or QuickTime. A PDF gets a real "
+                    "rendered page-by-page view (prev/next), not just "
+                    "extracted text. Audio and video get a real player with "
+                    "native controls and working seek. Handles pdf, png, jpg, "
+                    "jpeg, gif, webp, svg, bmp, mp3, m4a, aac, wav, oga, ogg, "
+                    "opus, weba, mp4, m4v, webm, ogv, mov. Prefer this over "
+                    "open_path whenever the user wants to LOOK AT or LISTEN TO "
+                    "a file without leaving the app; use open_path instead for "
+                    "any other file type, or when the user explicitly wants "
+                    "the real default app."
                 ),
                 parameters={
                     "type": "object",
-                    "properties": {"path": {"type": "string", "description": "absolute path to the PDF or image"}},
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "absolute path to the PDF, image, audio or video file",
+                        }
+                    },
                     "required": ["path"],
                 },
                 handler=_open_file_preview_tool,

@@ -966,8 +966,22 @@ and a real build sequence, not just a requirement statement:
       1. Make the Electron shell (real CDP-connected `BrowserView`) the default launch path, or
          explicitly decide to keep pywebview and drop the Electron migration -- currently neither
          is true, it is just half-built.
-      2. A real embedded audio/video player (native `<audio>`/`<video>`, not a remote-control
-         panel) for actual media playback inside Dourmouse.
+      2. ~~A real embedded audio/video player~~ **DONE 2026-09-23, finding #076.** Real
+         native `<audio>`/`<video>` in `ui/file_preview.html`, backed by a new
+         `GET /api/files/media` with real HTTP byte-range support (206/416, streamed in
+         256KB chunks, never `read_bytes()` on a video). `open_file_preview` now accepts
+         media and refuses an undecodable container by name rather than opening an empty
+         player. Live-verified: a real H.264 file decoded and SEEKED in the browser
+         (`readyState: 4`, seek completed), real AAC audio with native transport, and
+         byte-exact ranges confirmed against `dd` on the same offsets. A real bug the unit
+         tests missed was found by that live run and fixed (an open-ended range past the end
+         served a 200 instead of a 416). Honest limit: rendering inside the pane's sandboxed
+         iframe is NOT verified -- this test browser blocks sandboxed-iframe navigation
+         outright (`ERR_BLOCKED_BY_CLIENT`, reproduced identically on a pre-existing image
+         path), so that step needs the real desktop shell. Also fixed en route: the tool used
+         to hand the pane an absolute `127.0.0.1` URL for this app's own page while the
+         console may be loaded as `localhost`, framing its own page cross-origin for no
+         reason; it now sends a root-relative, same-origin URL.
       3. Real login/session handling for the iframe-pane's proxy fallback, or an honest, visible
          "this site can't be embedded, use `open_url` instead" UI state rather than a silently
          cookie-less proxy.

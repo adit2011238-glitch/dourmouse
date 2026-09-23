@@ -144,7 +144,108 @@ def _sandboxed_upload_path(rel: str) -> Path | None:
 # absolute path (_sandboxed_preview_path, below), one for the study
 # folder (study_agent._resolve_within_root, already real and tested).
 _PREVIEWABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
-_PREVIEWABLE_EXTS = _PREVIEWABLE_IMAGE_EXTS | {".pdf"}
+
+# 2026-09-23 (OS-1, the embedded media player): audio/video playback did not
+# exist anywhere in this product -- the only <audio>/<video> elements in any
+# ui/*.html were TTS output and a webcam gesture feed, and Spotify is
+# remote-control only (it drives the user's own separate Connect device, this
+# app never receives audio bytes). See docs/ENGINEERING_AUDIT.md finding #075.
+# These two sets are the formats a browser's own native media element can
+# genuinely decode; a container it cannot (.mkv, .avi, .flac, .wmv) is
+# deliberately NOT listed, because listing it would produce a silently blank
+# player rather than an honest "this format cannot be played here" -- exactly
+# the fabrication this codebase refuses everywhere else. _MEDIA_CONTENT_TYPES
+# below is explicit for the same reason: mimetypes.guess_type() is
+# registry-dependent and returns None for several of these on a stock macOS
+# Python, which would make the browser refuse to play a file it can actually
+# decode.
+_PREVIEWABLE_AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".wav", ".oga", ".ogg", ".opus", ".weba"}
+_PREVIEWABLE_VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".ogv", ".mov"}
+_PREVIEWABLE_MEDIA_EXTS = _PREVIEWABLE_AUDIO_EXTS | _PREVIEWABLE_VIDEO_EXTS
+
+_MEDIA_CONTENT_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".wav": "audio/wav",
+    ".oga": "audio/ogg",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".weba": "audio/webm",
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".ogv": "video/ogg",
+    ".mov": "video/quicktime",
+}
+
+# Chunk size for streaming a media body. Deliberately not read_bytes(): a real
+# video file is routinely hundreds of megabytes and this server is a stdlib
+# ThreadingHTTPServer, so reading a whole file into memory per request is a
+# real way to kill it.
+_MEDIA_CHUNK = 256 * 1024
+
+_PREVIEWABLE_EXTS = _PREVIEWABLE_IMAGE_EXTS | _PREVIEWABLE_MEDIA_EXTS | {".pdf"}
+
+
+def _parse_byte_range(header: str | None, size: int) -> tuple[int, int] | None | str:
+    """Parse one HTTP Range header against a real file size.
+
+    Returns (start, end) inclusive for a satisfiable single range, None when
+    there is no range to honour (absent header, a syntax this deliberately
+    does not support, or a zero-length file -- all of which mean "send the
+    whole body, 200"), and the string "unsatisfiable" for a syntactically
+    valid range that falls entirely outside the file, which RFC 9110 requires
+    be answered with 416 rather than silently clamped.
+
+    Multi-range requests ("bytes=0-99,200-299") are deliberately NOT
+    supported: honouring them means a multipart/byteranges body, no media
+    element in any browser asks for one, and quietly serving only the first
+    range would be a wrong answer dressed as a right one. They fall back to a
+    full 200, which is explicitly allowed.
+    """
+    if not header or size <= 0:
+        return None
+    header = header.strip()
+    if not header.lower().startswith("bytes="):
+        return None
+    spec = header[6:].strip()
+    if "," in spec:
+        return None
+    if "-" not in spec:
+        return None
+    raw_start, _, raw_end = spec.partition("-")
+    raw_start, raw_end = raw_start.strip(), raw_end.strip()
+    try:
+        if not raw_start:
+            # "bytes=-500" -- the LAST 500 bytes.
+            if not raw_end:
+                return None
+            suffix = int(raw_end)
+            if suffix <= 0:
+                return "unsatisfiable"
+            start = max(0, size - suffix)
+            end = size - 1
+        else:
+            start = int(raw_start)
+            end = int(raw_end) if raw_end else size - 1
+    except ValueError:
+        return None
+    if start < 0:
+        return None
+    # ORDER MATTERS, and getting it wrong is a real bug this had: the
+    # past-the-end check has to run BEFORE the inverted-range check. For an
+    # open-ended "bytes=99999999-" against a small file, `end` is computed as
+    # size-1, which is LESS than start, so an `end < start` test placed first
+    # classifies a genuinely unsatisfiable range as merely malformed and
+    # answers 200 with the whole file. Caught live against a real 1.4MB MP4
+    # (the unit tests only exercised a CLOSED range past the end, where
+    # end >= start held and the bug was invisible).
+    if start >= size:
+        return "unsatisfiable"
+    if end < start:
+        return None
+    return start, min(end, size - 1)
 
 
 def _sandboxed_preview_path(raw: str) -> Path | None:
@@ -1796,6 +1897,83 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_error_cors(self, status: int, message: str) -> None:
         self._send_bytes_cors(message.encode("utf-8"), "text/plain; charset=utf-8", status=status)
 
+    # 2026-09-23 (OS-1, the embedded media player). Separate from
+    # _send_bytes_cors deliberately: that one takes a body already in memory,
+    # which is correct for a rendered PDF page but is exactly the wrong shape
+    # for a video file. This streams from disk in chunks and speaks real HTTP
+    # range semantics, which are not optional for media -- without a 206 and
+    # an Accept-Ranges header a <video> element cannot seek at all, and Safari
+    # refuses to begin playback of a ranged-media URL that answers 200.
+    def _send_media_file(self, target: Path, content_type: str) -> None:
+        try:
+            size = target.stat().st_size
+        except OSError as exc:
+            self._send_error_cors(404, f"could not stat media file: {exc}")
+            return
+
+        parsed_range = _parse_byte_range(self.headers.get("Range"), size)
+
+        if parsed_range == "unsatisfiable":
+            # RFC 9110: a valid range entirely past the end is a real 416,
+            # with the real size so the client can correct itself.
+            body = b"requested range not satisfiable"
+            self.send_response(416)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Range", f"bytes */{size}")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if isinstance(parsed_range, tuple):
+            start, end = parsed_range
+            status, length = 206, end - start + 1
+        else:
+            start, end = 0, max(0, size - 1)
+            status, length = 200, size
+
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        # Media is a real file on disk, not a computed view, so unlike every
+        # other route here it is genuinely cacheable. The pane's own URLs
+        # already carry a cache-busting timestamp when they need one.
+        self.send_header("Cache-Control", "private, max-age=3600")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length")
+        self.end_headers()
+
+        # There is no do_HEAD on this handler today, so this guard is
+        # currently unreachable. It stays because adding one later without it
+        # would mean sending a body on a HEAD response -- a real protocol
+        # violation, and a very easy one to miss.
+        if self.command == "HEAD" or length <= 0:
+            return
+
+        # A media element seeking, pausing or being closed mid-stream aborts
+        # the connection, which surfaces here as a broken pipe. That is
+        # ordinary, expected client behaviour for media, not a server error,
+        # so it is swallowed rather than logged as a failure -- but ONLY these
+        # specific connection errors are, never a read error on the file
+        # itself, which is a real problem and must propagate.
+        remaining = length
+        try:
+            with target.open("rb") as handle:
+                handle.seek(start)
+                while remaining > 0:
+                    chunk = handle.read(min(_MEDIA_CHUNK, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
     def _read_json_body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
@@ -3150,6 +3328,19 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
             self._send_bytes_cors(target.read_bytes(), content_type)
+        elif path == "/api/files/media":
+            # 2026-09-23 (OS-1). The audio/video counterpart to
+            # /api/files/image above: same _sandboxed_preview_path trust
+            # boundary (an absolute path open_path could already hand to the
+            # real OS `open`), but streamed with real byte-range support
+            # instead of read into memory -- see _send_media_file for why
+            # that is a requirement rather than an optimisation for media.
+            qs = urllib.parse.parse_qs(parsed.query)
+            target = _sandboxed_preview_path((qs.get("path") or [""])[0])
+            if target is None or target.suffix.lower() not in _PREVIEWABLE_MEDIA_EXTS:
+                self._send_error_cors(400, "bad or missing media path")
+                return
+            self._send_media_file(target, _MEDIA_CONTENT_TYPES[target.suffix.lower()])
         elif path == "/api/study/pdf-info":
             # Same real preview mechanism, sandboxed to the study folder
             # (study_agent._resolve_within_root, already real and
@@ -3464,8 +3655,28 @@ class _Handler(BaseHTTPRequestHandler):
             # process-detection branching.
             body = self._read_json_body()
             url = (body.get("url") or "").strip()
-            if not url.lower().startswith(("http://", "https://")):
-                self._send_json({"ok": False, "error": "url must be a real http(s) URL"}, status=400)
+            # 2026-09-23 (OS-1): a ROOT-RELATIVE path is now accepted alongside
+            # a full http(s) URL, and is the right shape for this app's own
+            # pages. open_file_preview used to hand the pane an absolute
+            # "http://127.0.0.1:<port>/file_preview.html?..." even though the
+            # pane lives in a page the user may have loaded as "localhost" --
+            # two different origins to a browser, which made framing our own
+            # page a genuine cross-origin embed for no reason. A relative URL
+            # resolves against the console's own origin, so the pane frames a
+            # same-origin document: no opaque origin, and the pane's own
+            # back/forward buttons (which its code already notes cannot reach
+            # cross-origin history) start working for previews.
+            #
+            # "//host/path" is deliberately refused: it looks relative but is
+            # protocol-relative, i.e. a DIFFERENT origin, and treating it as
+            # same-origin would be exactly the kind of quiet mistake this
+            # check exists to prevent.
+            is_relative = url.startswith("/") and not url.startswith("//")
+            if not is_relative and not url.lower().startswith(("http://", "https://")):
+                self._send_json(
+                    {"ok": False, "error": "url must be a real http(s) URL or a root-relative path"},
+                    status=400,
+                )
                 return
             # self.server.browser_pane_requests, not a fresh
             # get_browser_pane_requests() call -- run_server() wires the

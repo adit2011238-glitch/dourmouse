@@ -31,8 +31,18 @@
     gap:12px}
   .stage img{max-width:100%;box-shadow:0 2px 16px rgba(0,0,0,.4);
     background:#fff}
+  /* 2026-09-23 (OS-1, the embedded media player). A real <audio>/<video>
+     element, not a remote-control panel: this is the first actual media
+     playback anywhere in Dourmouse. Byte-range seeking is handled by
+     /api/files/media server-side; all this needs to do is not fight the
+     element's own native controls. */
+  .stage video{max-width:100%;max-height:78vh;background:#000;
+    box-shadow:0 2px 16px rgba(0,0,0,.4)}
+  .stage audio{width:min(560px,100%)}
   .msg{padding:24px;opacity:.75}
   .err{color:#ff8a80}
+  .hint{padding:0 24px 8px;opacity:.6;font-size:12px;max-width:560px;
+    text-align:center;line-height:1.5}
 </style>
 </head>
 <body>
@@ -57,6 +67,17 @@
   var nextBtn = document.getElementById("next");
   var ext = (path.split(".").pop() || "").toLowerCase();
   var isPdf = ext === "pdf";
+  // Kept deliberately in step with webui.py's _PREVIEWABLE_AUDIO_EXTS /
+  // _PREVIEWABLE_VIDEO_EXTS. A container a browser cannot natively decode
+  // (.mkv, .avi, .flac, .wmv) is NOT listed on either side, so it reaches the
+  // honest "cannot be played here" branch below instead of rendering a player
+  // that silently shows nothing.
+  var AUDIO_EXTS = ["mp3","m4a","aac","wav","oga","ogg","opus","weba"];
+  var VIDEO_EXTS = ["mp4","m4v","webm","ogv","mov"];
+  var IMAGE_EXTS = ["png","jpg","jpeg","gif","webp","svg","bmp"];
+  var isAudio = AUDIO_EXTS.indexOf(ext) !== -1;
+  var isVideo = VIDEO_EXTS.indexOf(ext) !== -1;
+  var isImage = IMAGE_EXTS.indexOf(ext) !== -1;
   var displayName = path.split("/").pop() || path;
   nameEl.textContent = displayName;
   document.title = displayName;
@@ -102,7 +123,47 @@
     nextBtn.addEventListener("click", function(){
       if (state.page < state.pageCount - 1) { state.page++; loadPage(); }
     });
-  } else {
+  } else if (isAudio || isVideo) {
+    // No cache-busting timestamp here, unlike the image and PDF-page routes:
+    // /api/files/media answers real range requests and is served cacheable on
+    // purpose, and a URL that changes every load would defeat both.
+    var media = document.createElement(isVideo ? "video" : "audio");
+    media.controls = true;
+    media.preload = "metadata";
+    media.src = prefix + "/media?" + pathParam + "=" + encodeURIComponent(path);
+    media.onerror = function(){
+      // Report what the browser actually said rather than a generic line.
+      // MEDIA_ERR_SRC_NOT_SUPPORTED (4) is deliberately NOT described as "the
+      // codec is unsupported": a browser raises the same code 4 when the
+      // server refused the URL outright, and a real live test hit exactly
+      // that (a mistyped path returned 400 and surfaced as code 4). Naming
+      // one cause when there are two would be a guess presented as a
+      // diagnosis, so both are stated and the way to tell them apart is
+      // given.
+      var codes = {1:"playback was stopped",
+                   2:"a network error interrupted it",
+                   3:"its contents could not be decoded"};
+      var err = media.error;
+      var code = err ? err.code : 0;
+      var why = codes[code] || "the browser would not accept it";
+      var hint;
+      if (code === 4 || !err) {
+        hint = 'Two things produce this: the file\'s codec is one this ' +
+               'browser cannot decode, or the server refused the path. ' +
+               'Open the URL below directly to tell them apart \u2014 a 400 ' +
+               'means the path, anything else means the codec. Either way, ' +
+               'open_path will open this file in the real default app.';
+      } else {
+        hint = 'Use open_path to open this file in the real default app.';
+      }
+      stage.innerHTML = '<div class="msg err">Could not play ' + displayName +
+        ": " + why + '.</div><div class="hint">' + hint +
+        '<br><br><code style="opacity:.8;word-break:break-all">' +
+        media.src.replace(/</g, "&lt;") + '</code></div>';
+    };
+    stage.innerHTML = "";
+    stage.appendChild(media);
+  } else if (isImage) {
     var img = document.createElement("img");
     img.alt = displayName;
     img.onerror = function(){
@@ -111,6 +172,13 @@
     img.src = prefix + "/image?" + pathParam + "=" + encodeURIComponent(path) + "&t=" + Date.now();
     stage.innerHTML = "";
     stage.appendChild(img);
+  } else {
+    // An honest dead end, not a blank player. Reaching here means the file is
+    // genuinely outside what a browser can render natively.
+    stage.innerHTML = '<div class="msg err">' + displayName +
+      ' cannot be previewed here.</div><div class="hint">This pane renders ' +
+      'PDFs, images, and audio/video in formats a browser can decode ' +
+      'natively. Use open_path to open this file in the real default app.</div>';
   }
 })();
 </script>
