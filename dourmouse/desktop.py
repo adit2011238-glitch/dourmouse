@@ -1139,6 +1139,77 @@ def launch(
         server.server_close()
 
 
+# --------------------------------------------------------------------- #
+# Which native shell actually opens (OS-2, 2026-09-23)
+# --------------------------------------------------------------------- #
+# Two real native shells exist. electron/main.js is the better one: it embeds
+# a real Chromium BrowserView wired over CDP to the SAME live Playwright
+# session browser_agent.py drives, which is what makes the in-app browser
+# pane, the PDF viewer and the media player behave like a real browser rather
+# than a sandboxed iframe. It was fully built (windowing, IPC, tray,
+# notifications, the CDP pane, electron-builder packaging) and verified once
+# -- but NOTHING EVER LAUNCHED IT. Every entry point still ran the older
+# pywebview shell, so none of that work reached a user.
+#
+# This closes that, and it lives in __main__ rather than inside launch() on
+# purpose: launch() is called directly by a lot of hermetic tests, and those
+# must keep getting the pywebview path byte for byte. Putting the choice here
+# means every real launcher (both .app bundles, start.command, a bare
+# `python -m dourmouse.desktop`) picks it up with zero changes to any of them.
+#
+# Electron is NOT an unconditional default, deliberately: electron/node_modules
+# is gitignored and ~408MB, so a fresh clone genuinely does not have it. "auto"
+# therefore means "prefer the better shell when it is really here", never
+# "assume it is here".
+_SHELL_ENV = "DOURMOUSE_SHELL"
+
+
+def _electron_shell_argv() -> list[str] | None:
+    """The real command to launch the Electron shell, or None when it is not
+    genuinely available in this checkout.
+
+    Checks for the real files rather than trusting a flag: a missing
+    node_modules (never committed) is the normal state of a fresh clone, not
+    an error, and must degrade to pywebview rather than failing to start."""
+    root = Path(__file__).resolve().parent.parent
+    electron_dir = root / "electron"
+    binary = electron_dir / "node_modules" / ".bin" / "electron"
+    main_js = electron_dir / "main.js"
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        return None
+    if not main_js.is_file():
+        return None
+    return [str(binary), str(electron_dir)]
+
+
+def _resolve_shell_choice() -> str:
+    """'electron' or 'pywebview'. Honest about an explicit request that
+    cannot be satisfied: asking for electron when it is genuinely absent
+    prints the real reason and the real fix, then falls back rather than
+    dying, because refusing to open the app at all would be worse."""
+    raw = os.environ.get(_SHELL_ENV, "auto").strip().lower() or "auto"
+    available = _electron_shell_argv() is not None
+    if raw == "pywebview":
+        return "pywebview"
+    if raw == "electron":
+        if available:
+            return "electron"
+        print(
+            f"{_SHELL_ENV}=electron but the Electron shell is not installed in this "
+            "checkout (electron/node_modules is gitignored and not committed).\n"
+            "  fix: cd electron && npm install\n"
+            "  falling back to the pywebview shell for this launch.",
+            file=sys.stderr,
+        )
+        return "pywebview"
+    if raw != "auto":
+        print(
+            f"{_SHELL_ENV}={raw!r} is not one of auto/electron/pywebview - using auto.",
+            file=sys.stderr,
+        )
+    return "electron" if available else "pywebview"
+
+
 if __name__ == "__main__":
     import sys
 
@@ -1160,6 +1231,33 @@ if __name__ == "__main__":
         # launch() itself) resumes the most recently written conversation
         # instead of always starting a brand-new, empty one.
         from dourmouse.chat import most_recent_session_file
+
+        # OS-2: hand off to the Electron shell when it is really available.
+        # os.execv REPLACES this process rather than spawning a child, so
+        # there is exactly one app process either way and the .pid file above
+        # still refers to the real running app. The deep link is forwarded
+        # verbatim; electron/main.js spawns its own backend, so no server is
+        # started here on that path.
+        _shell = _resolve_shell_choice()
+        if _shell == "electron":
+            _argv = _electron_shell_argv()
+            assert _argv is not None  # _resolve_shell_choice only returns this when it is
+            _link = deep_link_from_argv(sys.argv)
+            if _link:
+                _argv = [*_argv, "--", _link]
+            print("DOURMOUSE: launching the Electron shell "
+                  f"(set {_SHELL_ENV}=pywebview for the older native window).")
+            sys.stdout.flush()
+            try:
+                # noqa reason: S606 flags exec WITHOUT a shell, which is the safe
+                # form. Every element of _argv is built from this file's own
+                # resolved location, never from user input or the environment.
+                os.execv(_argv[0], _argv)  # noqa: S606 - internal path, no shell
+            except OSError as exc:
+                # Never strand the user with no app because the handoff
+                # failed: say what happened and open the shell that works.
+                print(f"DOURMOUSE: could not start the Electron shell ({exc}); "
+                      "falling back to the pywebview window.", file=sys.stderr)
 
         sys.exit(launch(
             deep_link=deep_link_from_argv(sys.argv),

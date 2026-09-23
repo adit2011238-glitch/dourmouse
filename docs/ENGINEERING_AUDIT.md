@@ -3476,6 +3476,159 @@ from outside, NOT that it failed to render).
 
 ---
 
+### 078 -- OS-2: the Electron shell was fully built and nothing ever launched it
+
+**Severity**: real shipped capability that no user could reach. **Context**: the roadmap
+carried this as "half-built, pick one: finish the migration or delete it". Reading the source
+showed that framing was wrong. All five migration stages are real and present in
+`electron/main.js`: A/B (shell, windowing, IPC bridge), C (real `Tray`, `Notification`,
+`nativeImage` branding), D (the embedded CDP-driven `BrowserView` plus a pane-bridge HTTP
+server), and E (`electron-builder` config with notarization and `extraResources` laying
+`dourmouse/`, `ui/` and `.venv/` out in the layout the Python path helpers already expect).
+`dourmouse/browser_agent.py` genuinely reads `DOURMOUSE_ELECTRON_CDP_PORT` and calls
+`chromium.connect_over_cdp()`. `electron/verify-result.json` records a real verification run
+with `"errors": []`.
+
+**The actual defect was that nothing launched it.** `start.command` and both installed `.app`
+bundles all ran `python -m dourmouse.desktop`, which opened the older pywebview shell. Every
+one of those stages shipped to a user who never saw any of it -- including the CDP pane that
+finding #077 proved is what makes the browser pane, PDF viewer and media player behave like a
+real browser instead of a blocked sandboxed iframe.
+
+**Fix**: shell selection in `dourmouse/desktop.py`'s `__main__` block.
+- `_electron_shell_argv()` checks for the real files (an executable
+  `electron/node_modules/.bin/electron` and `electron/main.js`) rather than trusting a flag.
+- `_resolve_shell_choice()` reads `DOURMOUSE_SHELL` (`auto` default, or `electron`/`pywebview`).
+- `os.execv` REPLACES this process, so there is exactly one app process either way and the
+  existing `.pid` file still refers to the real running app. The deep link is forwarded verbatim.
+
+**Two deliberate constraints, both load-bearing:**
+1. **This lives in `__main__`, never inside `launch()`.** `launch()` is called directly by many
+   hermetic tests, which must keep getting the pywebview path byte for byte; if the choice ever
+   migrated into `launch()` those tests would start exec'ing a real Electron binary. A test
+   asserts this by reading `launch`'s own source. The payoff is that every real launcher --
+   both `.app` bundles, `start.command`, a bare `python -m dourmouse.desktop` -- picks the new
+   behaviour up with **zero changes to any of them**.
+2. **Electron is NOT an unconditional default.** `electron/node_modules` is gitignored and
+   ~408MB, so a fresh clone genuinely does not have it. `auto` means "prefer the better shell
+   when it is really here", never "assume it is here". An explicit `DOURMOUSE_SHELL=electron`
+   that cannot be satisfied prints the real reason AND the real fix (`cd electron && npm
+   install`) and then still opens the app, because refusing to start at all would be worse than
+   degrading -- but it degrades loudly, never silently.
+
+**Live-verified through the real entry point**, not a helper: `python -m dourmouse.desktop`
+printed the handoff line, exec'd Electron, and the shell came up with its backend on 18791, CDP
+on 19335 and the pane bridge on 19336, all three held by a single PID (confirming `execv`
+replaced rather than spawned). Screenshot of the real Vision Workspace running under the
+default path, with real live data (44 World Pulse events across 8 channels):
+`~/Documents/DOURMOUSE/EVIDENCE/005_electron_is_the_default_shell.png`.
+
+**Also corrected: `electron/main.js`'s own header comment was stale**, claiming Stages C, D and
+E were "not yet done" while `package.json`'s description in the same directory said the
+opposite. This is the same documentation-reality drift `docs/UI_SOURCE_MAP.md` already recorded
+twice ("four skins" where there were eight, "nine screens" where there were fourteen). Rewritten
+to state what is actually there, with a note to treat in-file comments as directional until
+re-checked.
+
+**Tests**: `dourmouse/tests/test_shell_selection.py`, 17 cases. They fake the FILESYSTEM (a real
+temp `electron/` layout) rather than the function under test, per `docs/TESTING.md`'s house
+convention. Covered: a real install is found; a missing `node_modules` is not an error; a
+non-executable binary (an interrupted `npm install`) is refused rather than handed to `execv`; a
+missing `main.js` is refused; `auto` prefers Electron only when present; the `pywebview` opt-out
+wins over availability; an unsatisfiable explicit request both degrades AND says so with the
+fix; unknown and mixed-case values resolve sanely; and `launch()` itself contains neither the
+selection nor `execv`.
+
+**One notable S606 lint annotation**: `os.execv` is flagged as "starting a process without a
+shell", which is the SAFE form (S602/S605 flag the opposite). Annotated with the real reason --
+every element of the argv is built from this file's own resolved location, never from user
+input or the environment.
+
+---
+
+### 079 -- UI-2: the type and spacing scales, plus a real Figma design system
+
+**Severity**: design-system gap that `docs/DESIGN_SYSTEM.md` itself named as blocking.
+**Context**: `docs/UI_SOURCE_MAP.md` section 2 recorded that colour is fully tokenized ("every
+colour already routes through var()") while **seventeen** distinct font-size values ran from
+7.5px to 22px in half-pixel increments across `console.html` alone with no scale governing any
+of them, and nothing at all governed section/panel spacing against ~720 raw px literals in the
+same style block. `DESIGN_SYSTEM.md` listed these as gaps 1 and 2 and said explicitly to close
+them **before** building new panels, so new components do not reintroduce the problem.
+
+**What shipped, in `ui/assets/dourmouse-ui.css`:**
+1. **An 8-step type scale** (`--dm-text-2xs` 9px through `--dm-text-2xl` 22px), integers only.
+   The steps are DERIVED from where the seventeen real values actually clustered, not invented:
+   the 7.5/8/8.5/9 cluster becomes `2xs`, 10/10.5 becomes `xs`, 11/11.5 `sm`, 12/12.5 `base`,
+   13/13.5 `md`, then 15/19/22 which were already single values.
+2. **A 6-step spacing scale** (`--dm-space-1` 4px through `--dm-space-6` 32px). These are the
+   exact values `DESIGN_SYSTEM.md` had already specified in prose, now real rather than
+   described -- implementing the existing decision, not inventing a second one.
+
+**Two deliberate design decisions, both recorded in the stylesheet and pinned by tests:**
+- **A conventional 1.25 "major third" scale was rejected.** It would collapse the five distinct
+  metadata/label/body weights this dense terminal UI genuinely distinguishes into two or three.
+  The small end therefore stays tight (~1.1 ratio) and widens only toward display sizes. A test
+  asserts the small steps stay under 1.18 so a future "tidy up the scale" cannot silently undo
+  it.
+- **The spacing scale is ADDITIVE, never a replacement for `--dm-row-y`/`--dm-gap`.** Those two
+  have precise, different jobs (vertical padding inside a dense row; the gap between adjacent
+  controls) and folding them into a generic scale would lose that meaning. A test asserts they
+  still exist.
+
+**Deliberately NOT done in this pass, and stated rather than implied**: migrating the ~720 raw
+px literals and seventeen font-size call sites onto these tokens. Defining the scale is the
+prerequisite and is safe and additive; a blind sweep of 720 literals across a 7,092-line file is
+exactly the kind of change that breaks a UI silently. Tracked as real follow-on.
+
+**A second, separate real find, fixed here**: `ui/workspace.html`'s hand-control panel rendered
+a `.note` containing pure developer commentary directly to the user -- internal constant names
+(`LANDMARK_SMOOTH_ALPHA` / `PINCH_ENGAGE_RATIO` / `PINCH_RELEASE_RATIO`), "see page source",
+"see startHandControl below", and a paragraph on MediaPipe's GPU-delegate internals. Spotted in
+a real screenshot of the running app, not by grep. The vision deck asks for "sleek professional
+and easy to use". The information was NOT deleted -- it moved into an HTML comment, where the
+developers it was written for actually read it, and the two sentences that genuinely tell a
+USER what to do stayed visible.
+
+**The Figma design system** (user-directed: "use claude design and figma design in regards to
+ui"). A real Figma file now mirrors these tokens: `Dourmouse Design System`, file key
+`zHH3ZLx5MZHfAltHOGkYBk`. Built per the `figma-generate-library` workflow.
+- *Phase 0 discovery*: `get_libraries` returned 8 subscribed community kits (Material 3, Simple
+  Design System, the Apple platform kits) and nothing Dourmouse-specific. **Decision: build from
+  code, do not reuse** -- those kits' token models are incompatible and contradict this
+  product's own documented philosophy (dense terminal, four solid layers, no translucency, one
+  accent under ~10% of the screen). That is the skill's own "rebuild if token model
+  incompatible" branch, recorded rather than assumed.
+- *Phase 1 foundations*: 43 variables across 3 collections -- `Primitives` (12 raw values,
+  scopes deliberately `[]` so they never pollute a property picker), `Color` (13 semantic roles,
+  each a real `VARIABLE_ALIAS` to a primitive, never a duplicated literal), and `Scale` (18: the
+  8 type steps, the 6 spacing steps, and the 4 density values kept as their own family for the
+  same reason they are separate in CSS). Every variable carries explicit scopes and WEB code
+  syntax using the real `var(--dm-*)` name, so Dev Mode round-trips to the actual stylesheet.
+
+**Honest limits on the Figma work**: Phase 2 (foundations documentation pages) and Phase 3
+(components) are NOT done. The tokens are what UI-2 asked for and what unblocks the rest; the
+component library is real, separate, larger work. Also worth recording for a future session: the
+account reports a "View" seat on a starter tier, which I assumed would block writes -- it did
+not, verified by actually creating the file rather than concluding from the label.
+
+**Phase 1 exit criteria verified from the file, not from the write's return value**: a
+read-only audit re-read all 43 variables and reported 0 problems. Every one of the 13 semantic
+colours is a genuine `VARIABLE_ALIAS` to a primitive (0 literals), every non-primitive has real
+scopes with no `ALL_SCOPES` survivor, every primitive has the hidden `[]` scope, and every
+variable has WEB code syntax with the `var()` wrapper. Three end-to-end spot checks resolve to
+the exact hex in the real stylesheet: `canvas` -> `green/canvas` -> `#0a2a22` ->
+`var(--dm-canvas)`; `active` -> `amber/500` -> `#f59e0b`; `fg` -> `neutral/50` -> `#fafafa`.
+
+**Tests**: `dourmouse/tests/test_design_tokens.py`, 29 cases, reading the REAL shipped
+stylesheet rather than a fixture. They pin that every step exists, every step is a whole pixel
+(the half-pixel mess is the specific thing being replaced), the scale ascends with no duplicate
+steps, it spans the real 9-to-22 range that was in use, the small end stays dense, the spacing
+values match what the design doc already specified, the dense row tokens survive, and both
+scales carry a stated rationale rather than bare numbers.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

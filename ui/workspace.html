@@ -546,18 +546,32 @@ a.backlink:hover{color:var(--blue-hi);border-color:var(--line-2)}
     <div class="row"><span>Signal</span><b id="visSignal">-</b></div>
     <div class="row"><span>Delegate</span><b id="visDelegate">-</b></div>
     <button class="hb" id="visToggle" type="button">ENABLE HAND CONTROL</button>
+    <!-- 2026-09-23 (finding #079). This note used to render ALL of the text now in
+         this comment directly to the user: internal constant names
+         (LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO), "see
+         page source", "see startHandControl below", and a paragraph on MediaPipe's
+         GPU delegate internals. That is developer commentary, and the vision deck
+         asks for "sleek professional and easy to use".
+
+         The information is NOT deleted, because it is real and hard-won -- it moved
+         here, where the developers it was written for actually read it, and the two
+         sentences that genuinely tell a USER what to do stayed visible:
+
+         Gated by the tray.py camera kill-switch; verified live-desktop, not in the
+         browser-pane sandbox. Raw landmarks are EMA-smoothed and pinch has real
+         on/off hysteresis (LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO /
+         PINCH_RELEASE_RATIO below); the SIGNAL row reports NOISY when smoothing is
+         actively correcting a jittery frame. DELEGATE tries GPU first and falls back
+         to CPU automatically (see startHandControl below). An embedded desktop
+         webview's GPU compute support is real but frequently degraded or absent
+         compared to a normal browser tab, and MediaPipe's GPU delegate then either
+         fails outright or silently produces near-zero real detections, which reads to
+         a user as "hand tracking doesn't work" with no visible error at all -- which
+         is exactly why the DELEGATE and SIGNAL rows above exist and are worth keeping
+         visible. -->
     <div class="note">Pinch a titlebar with one hand to drag it. Pinch with BOTH hands and
       change the distance between them to resize the focused window; change the angle
-      between them to tilt it. Gated by the tray.py camera kill-switch, verified
-      live-desktop, not this sandbox (see page source for the full
-      honesty note). Raw landmarks are EMA-smoothed and pinch has real on/off hysteresis
-      (see LANDMARK_SMOOTH_ALPHA / PINCH_ENGAGE_RATIO / PINCH_RELEASE_RATIO below); SIGNAL
-      above reports NOISY when smoothing is actively correcting a jittery frame. DELEGATE
-      tries GPU first and falls back to CPU automatically (see startHandControl below);
-      an embedded desktop webview's GPU compute support is real but frequently degraded or
-      absent compared to a normal browser tab, and MediaPipe's GPU delegate then either
-      fails outright or silently produces near-zero real detections, which reads to a user
-      as "hand tracking doesn't work" with no visible error at all.</div>
+      between them to tilt it.</div>
   </div>
 </div>
 

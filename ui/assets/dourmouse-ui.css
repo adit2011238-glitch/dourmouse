@@ -113,6 +113,46 @@
   --dm-font-sans: 'Departure Mono', 'Commit Mono', 'Intel One Mono', ui-monospace, monospace;
   --dm-font-mono: 'Berkeley Mono', 'Monaspace Neon', 'JetBrains Mono NL', 'JetBrains Mono', ui-monospace, monospace;
 
+  /* Type scale (UI-2, 2026-09-23, finding #079). Eight steps, integers
+     only, replacing SEVENTEEN ad hoc font-size values that ran from 7.5px
+     to 22px in half-pixel increments across console.html alone with no
+     scale governing any of them (docs/UI_SOURCE_MAP.md section 2).
+     The steps are derived from where those seventeen values actually
+     clustered, not invented: the 7.5/8/8.5/9 cluster becomes 2xs, the
+     10/10.5 cluster xs, 11/11.5 sm, 12/12.5 base, 13/13.5 md, then 15, 19
+     and 22 which were already single values.
+     The ratio is deliberately tight at the small end (~1.1) and widens
+     toward display sizes. A conventional 1.25 "major third" scale is wrong
+     for this product: it would force the five distinct metadata/label/body
+     weights this dense terminal UI genuinely distinguishes into two or
+     three, and the whole design philosophy above is density.
+     Roles, matching the names docs/DESIGN_SYSTEM.md already uses: */
+  --dm-text-2xs:     9px;   /* micro metadata: line numbers, tick labels   */
+  --dm-text-xs:     10px;   /* small uppercase labels (.dm-label)          */
+  --dm-text-sm:     11px;   /* secondary text, metadata rows               */
+  --dm-text-base:   12px;   /* body copy, logs, the default               */
+  --dm-text-md:     13px;   /* assistant prose in the feed                 */
+  --dm-text-lg:     15px;   /* headings, pane titles                       */
+  --dm-text-xl:     19px;   /* section display                             */
+  --dm-text-2xl:    22px;   /* display, the largest real size in use       */
+
+  /* Spacing scale (UI-2). The row/gap tokens below cover DENSE ROWS and
+     always did; what never existed was anything governing section and
+     panel level spacing, against ~720 raw px literals in console.html's
+     style block alone. These are the exact 4/8/12/16/24/32 values
+     docs/DESIGN_SYSTEM.md already specified, now real rather than
+     described. Deliberately a separate family from --dm-row-y/--dm-gap
+     rather than a replacement: those two have precise, different jobs
+     (the vertical padding inside a dense row, and the gap between
+     adjacent controls) and collapsing them into a generic scale would
+     lose that meaning. */
+  --dm-space-1:      4px;
+  --dm-space-2:      8px;
+  --dm-space-3:     12px;
+  --dm-space-4:     16px;
+  --dm-space-5:     24px;
+  --dm-space-6:     32px;
+
   /* Density. Rows are tight on purpose; this is a dense tool, not a page. */
   --dm-row-y:       6px;
   --dm-row-y-lg:    8px;

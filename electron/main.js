@@ -1,14 +1,25 @@
-// Dourmouse native shell (Electron) -- Stage A (shell + windowing) and
-// Stage B (IPC bridge) of the migration in
-// ~/.claude/plans/sorted-wiggling-pearl.md. Replaces dourmouse/desktop.py's
-// pywebview-based launch() for this shell; the Python backend it points at
+// Dourmouse native shell (Electron). Replaces dourmouse/desktop.py's
+// pywebview-based launch(); the Python backend it points at
 // (dourmouse/webui.py's HTTP+SSE server) is completely unmodified.
 //
-// Not yet done (later stages, see the plan): native tray/notifications/
-// app branding (Stage C), the embedded CDP-driven browser pane (Stage D),
-// electron-builder packaging (Stage E). Until Stage E ships, run this with
-// `cd electron && npm start` against a source checkout -- it is not yet a
-// distributable app.
+// STATUS, corrected 2026-09-23 (OS-2, finding #078). This header used to say
+// Stages C, D and E were "not yet done" -- stale, and contradicted by
+// package.json's own description in the same directory. All five stages are
+// real and present in this file: A/B (shell, windowing, IPC bridge), C (real
+// Tray, Notification and nativeImage branding), D (the embedded CDP-driven
+// BrowserView plus the pane-bridge server below), and E (electron-builder
+// config with notarization in package.json). electron/verify-result.json
+// records a real verification run with "errors": []. The same
+// documentation-reality drift this repo has hit before -- docs/UI_SOURCE_MAP.md
+// found "four skins" where there were eight and "nine screens" where there
+// were fourteen -- so treat any in-file comment here as directional until
+// re-checked against the code.
+//
+// This IS now the default shell for a real launch: dourmouse/desktop.py's
+// __main__ block hands off to it when electron/node_modules is present
+// (DOURMOUSE_SHELL=pywebview opts back out). It is not an unconditional
+// default because node_modules is gitignored, so a fresh clone genuinely has
+// no Electron and must still start -- run `npm install` here to enable it.
 
 const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification } = require("electron");
 const { spawn } = require("child_process");
