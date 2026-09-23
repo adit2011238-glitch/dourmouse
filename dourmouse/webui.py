@@ -2111,6 +2111,13 @@ class _Handler(BaseHTTPRequestHandler):
             # backlog #9: the Study tab — chat scoped to the "study"
             # subagent (real, read-only access to the user's study folder).
             self._serve_static("study.html")
+        elif path in ("/os_mockup", "/os_mockup.html"):
+            # 2026-09-23 (finding #080): the OS shell design mockup, served
+            # for review before any of it is wired into a live surface.
+            # Read-only and self-contained: it fetches nothing and writes
+            # nothing, and every figure on it is a real observed value
+            # hardcoded as text, never a live call.
+            self._serve_static("os_mockup.html")
         elif path in ("/file_preview", "/file_preview.html"):
             # 2026-09-14: the missing in-app preview surface for PDFs/
             # images (open_file_preview tool, study.html's own preview

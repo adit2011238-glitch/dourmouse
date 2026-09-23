@@ -1,0 +1,601 @@
+/* ===================================================================== *
+   DOURMOUSE OS LAYER
+   The shell language: materials, depth, window chrome, dock, widgets,
+   wallpaper and motion. Built on the --dm-* tokens in dourmouse-ui.css,
+   which stays the source of truth for colour and the type/spacing scales.
+
+   2026-09-23, finding #080. User direction, verbatim: "keep in mind this
+   is an os, it shoukd be as such, wallpapers, custom widgetes, fonts,
+   neat professional presentatons, animations for stuff, 3d designs,
+   similar tp how mac os is, os design rules etc".
+
+   A REAL CONFLICT, resolved rather than ignored. dourmouse-ui.css's own
+   header forbids four things by name: floating cards, translucent wash,
+   decorative glow, icon/badge vomit. macOS is built on the first three
+   (vibrancy, layered depth, real shadows). Those rules were written for a
+   DENSE TOOL SURFACE and they remain correct there, which is why nothing
+   in this file changes console.html's terminal feed.
+
+   The resolution is that a shell and a tool are different surfaces with
+   different jobs, and the anti-patterns those rules actually target are
+   decoration without meaning. So this layer keeps the intent and drops
+   the letter:
+     - depth is allowed, but every level MEANS something (§2). A shadow
+       communicates focus and stacking order, never "this looks nicer".
+     - translucency is allowed, but only as a real MATERIAL over a real
+       wallpaper (§1), never a wash over a flat colour to fake depth.
+     - glow is still banned. There are no neon edges here.
+     - icons still earn their place. The dock is icons because a dock is
+       the one place where an icon IS the label.
+   The accent budget (~10% of the screen) is unchanged and still binding.
+ * ===================================================================== */
+
+:root {
+  /* ---- §1 MATERIALS -------------------------------------------------
+     Four steps, mirroring the real vibrancy hierarchy an OS uses. Each is
+     a blur PLUS a tint, never a bare alpha, because a bare alpha over a
+     busy wallpaper destroys text contrast. The tint is what keeps body
+     copy readable at 4.5:1 no matter what is behind it.
+     Fallback matters: backdrop-filter silently does nothing in some
+     embedded webviews (this app ships in two different shells), so every
+     material's tint is opaque enough to stand alone. Checked in the real
+     Electron shell, not assumed. */
+  --os-mat-ultrathin: rgba(20, 46, 34, 0.55);
+  --os-mat-thin:      rgba(16, 40, 30, 0.72);
+  --os-mat-regular:   rgba(13, 35, 27, 0.86);
+  --os-mat-thick:     rgba(10, 42, 34, 0.94);
+  --os-blur-ultrathin: saturate(180%) blur(30px);
+  --os-blur-thin:      saturate(170%) blur(22px);
+  --os-blur-regular:   saturate(160%) blur(16px);
+  --os-blur-thick:     saturate(140%) blur(10px);
+
+  /* Hairlines that read correctly ON a material rather than on a solid.
+     A material sits over unknown wallpaper, so its edge needs a light top
+     highlight and a dark outer line, which is how a real OS separates a
+     floating surface from whatever is behind it. */
+  --os-edge-hi:  rgba(255, 255, 255, 0.10);
+  --os-edge-lo:  rgba(0, 0, 0, 0.45);
+
+  /* ---- §2 ELEVATION -------------------------------------------------
+     Four levels, and each one is a STATEMENT ABOUT STATE, not a style:
+       rest    a window that exists but is not focused
+       raised  the focused window, or a hovered dock tile
+       float   a panel that outranks windows (voice, hand control)
+       modal   something that blocks interaction beneath it
+     Two shadows per level: a tight contact shadow and a wide ambient one.
+     One shadow alone reads as a sticker; two is what makes a surface look
+     like it is actually above the thing behind it. */
+  --os-elev-rest:  0 1px 2px rgba(0,0,0,.28),  0 4px 12px rgba(0,0,0,.22);
+  --os-elev-raise: 0 2px 6px rgba(0,0,0,.34),  0 14px 34px rgba(0,0,0,.34);
+  --os-elev-float: 0 4px 10px rgba(0,0,0,.38), 0 24px 56px rgba(0,0,0,.42);
+  --os-elev-modal: 0 8px 20px rgba(0,0,0,.46), 0 40px 90px rgba(0,0,0,.52);
+
+  /* ---- §3 GEOMETRY --------------------------------------------------
+     macOS window corners are ~10px and its widgets are much rounder. The
+     difference is meaningful: a window is a frame, a widget is an object. */
+  --os-radius-window: 10px;
+  --os-radius-panel:  10px;
+  --os-radius-widget: 18px;
+  --os-radius-tile:   14px;
+  --os-radius-pill:   999px;
+
+  /* ---- §4 MOTION ----------------------------------------------------
+     A real OS springs; it does not ease. The overshoot is the entire
+     reason a window feels physical rather than animated. --os-spring
+     overshoots slightly (the 1.6 in the final term), --os-spring-soft is
+     for anything large enough that overshoot would read as a wobble.
+     Durations stay short: the existing design language's 180-260ms range
+     is right, and an OS that takes longer than that feels slow. */
+  --os-spring:      cubic-bezier(0.34, 1.56, 0.64, 1);
+  --os-spring-soft: cubic-bezier(0.22, 1.00, 0.36, 1);
+  --os-dur-fast:    140ms;
+  --os-dur:         220ms;
+  --os-dur-slow:    320ms;
+}
+
+/* ===================================================================== *
+   §5 WALLPAPER
+   Procedural, never a bundled image: this app is offline-first (its fonts
+   are self-hosted for exactly that reason) and shipping megabytes of
+   photography would contradict that. Layered radial gradients over a base
+   give real depth, cost nothing, and scale to any display.
+ * ===================================================================== */
+.os-wallpaper {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-color: #071d18;
+  transition: background var(--os-dur-slow) var(--os-spring-soft);
+}
+/* Deep green, the product's own canvas colour pushed to a horizon. */
+.os-wallpaper[data-wall="aurora"] {
+  background-image:
+    radial-gradient(ellipse 120% 80% at 18% 0%,  rgba(16,185,129,.20), transparent 60%),
+    radial-gradient(ellipse 100% 70% at 82% 12%, rgba(245,158,11,.10), transparent 58%),
+    radial-gradient(ellipse 140% 90% at 50% 105%, rgba(10,42,34,.95), transparent 70%);
+}
+.os-wallpaper[data-wall="slate"] {
+  background-color: #0b0e14;
+  background-image:
+    radial-gradient(ellipse 110% 75% at 25% 5%,  rgba(99,102,241,.14), transparent 60%),
+    radial-gradient(ellipse 120% 80% at 78% 95%, rgba(14,165,233,.10), transparent 62%);
+}
+.os-wallpaper[data-wall="ember"] {
+  background-color: #150b08;
+  background-image:
+    radial-gradient(ellipse 110% 70% at 80% 8%,  rgba(245,158,11,.20), transparent 58%),
+    radial-gradient(ellipse 120% 85% at 15% 92%, rgba(239,68,68,.12), transparent 62%);
+}
+.os-wallpaper[data-wall="mono"] {
+  background-color: #0a0a0b;
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% 0%, rgba(255,255,255,.055), transparent 62%);
+}
+/* A faint grid, sized to the spacing scale rather than an arbitrary
+   number, so the desktop reads as a workbench and not a lock screen. */
+.os-wallpaper::after {
+  content: ""; position: absolute; inset: 0; opacity: .30;
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+  background-size: var(--dm-space-6, 32px) var(--dm-space-6, 32px);
+}
+
+/* ===================================================================== *
+   §6 WINDOW CHROME
+ * ===================================================================== */
+.os-window {
+  position: absolute;
+  display: flex; flex-direction: column;
+  min-width: 260px; min-height: 140px;
+  border-radius: var(--os-radius-window);
+  background: var(--os-mat-regular);
+  -webkit-backdrop-filter: var(--os-blur-regular);
+  backdrop-filter: var(--os-blur-regular);
+  border: 1px solid var(--os-edge-lo);
+  box-shadow: var(--os-elev-rest);
+  overflow: hidden;
+  /* Unfocused windows recede. This is the single strongest cue an OS has
+     for "which window am I typing into", and it costs one property. */
+  opacity: .88;
+  transition:
+    box-shadow var(--os-dur) var(--os-spring-soft),
+    opacity    var(--os-dur) var(--os-spring-soft),
+    transform  var(--os-dur) var(--os-spring);
+}
+.os-window::before {
+  /* The top highlight that separates a floating surface from the
+     wallpaper behind it. Inset, one pixel, never a glow. */
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  border-top: 1px solid var(--os-edge-hi);
+  pointer-events: none;
+}
+.os-window[data-focused="true"] {
+  opacity: 1;
+  box-shadow: var(--os-elev-raise);
+}
+.os-window[data-state="opening"] { animation: os-window-in var(--os-dur) var(--os-spring) both; }
+.os-window[data-state="closing"] { animation: os-window-out var(--os-dur-fast) ease-in both; }
+.os-window[data-state="minimized"] { animation: os-window-min var(--os-dur) var(--os-spring-soft) both; }
+
+@keyframes os-window-in {
+  from { opacity: 0; transform: scale(.94) translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes os-window-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: scale(.96) translateY(4px); }
+}
+@keyframes os-window-min {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: scale(.30) translateY(40vh); }
+}
+
+.os-titlebar {
+  display: flex; align-items: center; gap: var(--dm-space-2, 8px);
+  height: 30px; padding: 0 var(--dm-space-2, 8px);
+  background: linear-gradient(rgba(255,255,255,.045), rgba(255,255,255,0));
+  border-bottom: 1px solid var(--os-edge-lo);
+  cursor: grab; user-select: none; flex: 0 0 auto;
+}
+.os-titlebar:active { cursor: grabbing; }
+.os-title {
+  flex: 1; text-align: center;
+  font-family: var(--dm-font-sans, ui-monospace, monospace);
+  font-size: var(--dm-text-xs, 10px);
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--dm-fg-label, #71717A);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--os-dur) var(--os-spring-soft);
+}
+.os-window[data-focused="true"] .os-title { color: var(--dm-fg, #FAFAFA); }
+
+/* Traffic lights. Grey until the window is focused OR the cluster is
+   hovered, which is exactly how macOS behaves and is the detail that
+   makes the whole thing read as a real window rather than a mimic. */
+.os-lights { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+.os-light {
+  width: 12px; height: 12px; border-radius: var(--os-radius-pill);
+  border: none; padding: 0; cursor: pointer;
+  background: #3f4a45;
+  position: relative;
+  transition: background var(--os-dur-fast) linear, transform var(--os-dur-fast) var(--os-spring);
+}
+.os-window[data-focused="true"] .os-light--close { background: #FF5F57; }
+.os-window[data-focused="true"] .os-light--min   { background: #FEBC2E; }
+.os-window[data-focused="true"] .os-light--zoom  { background: #28C840; }
+.os-lights:hover .os-light--close { background: #FF5F57; }
+.os-lights:hover .os-light--min   { background: #FEBC2E; }
+.os-lights:hover .os-light--zoom  { background: #28C840; }
+.os-light:active { transform: scale(.88); }
+/* The glyph only appears on hover, same as the real thing. */
+.os-light::after {
+  content: ""; position: absolute; inset: 0;
+  display: grid; place-items: center;
+  font-size: 9px; line-height: 1; color: rgba(0,0,0,.62);
+  opacity: 0; transition: opacity var(--os-dur-fast) linear;
+}
+.os-lights:hover .os-light--close::after { content: "\00d7"; opacity: 1; }
+.os-lights:hover .os-light--min::after   { content: "\2212"; opacity: 1; }
+.os-lights:hover .os-light--zoom::after  { content: "\002b"; opacity: 1; }
+.os-light:focus-visible { outline: 2px solid var(--dm-active, #F59E0B); outline-offset: 2px; }
+
+.os-window-body {
+  flex: 1 1 auto; overflow: auto; padding: var(--dm-space-3, 12px);
+  font-size: var(--dm-text-base, 12px);
+  color: var(--dm-fg-body, #A1A1AA);
+  line-height: 1.55;
+}
+
+/* ===================================================================== *
+   §7 DOCK
+   Bottom-centred, ultrathin material, running indicators. The hover lift
+   is deliberately a LIFT and not macOS's magnification: magnification
+   reflows every neighbouring tile and is genuinely disorienting on a
+   dense workbench where the dock sits under live content.
+ * ===================================================================== */
+.os-dock {
+  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+  z-index: 900;
+  display: flex; align-items: flex-end; gap: var(--dm-space-2, 8px);
+  padding: var(--dm-space-2, 8px);
+  border-radius: var(--os-radius-widget);
+  background: var(--os-mat-ultrathin);
+  -webkit-backdrop-filter: var(--os-blur-ultrathin);
+  backdrop-filter: var(--os-blur-ultrathin);
+  border: 1px solid var(--os-edge-lo);
+  box-shadow: var(--os-elev-float);
+}
+.os-dock::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  border-top: 1px solid var(--os-edge-hi); pointer-events: none;
+}
+.os-dock-item {
+  position: relative; width: 46px; height: 46px;
+  display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: var(--os-radius-tile);
+  background: rgba(255,255,255,.05);
+  color: var(--dm-fg-body, #A1A1AA);
+  cursor: pointer; padding: 0;
+  transition: transform var(--os-dur) var(--os-spring),
+              background var(--os-dur-fast) linear,
+              color var(--os-dur-fast) linear;
+}
+.os-dock-item:hover {
+  transform: translateY(-6px);
+  background: rgba(255,255,255,.11);
+  color: var(--dm-fg, #FAFAFA);
+}
+.os-dock-item:active { transform: translateY(-2px) scale(.96); }
+.os-dock-item:focus-visible { outline: 2px solid var(--dm-active, #F59E0B); outline-offset: 2px; }
+.os-dock-item[data-running="true"]::after {
+  content: ""; position: absolute; bottom: -5px; left: 50%;
+  transform: translateX(-50%);
+  width: 4px; height: 4px; border-radius: var(--os-radius-pill);
+  background: var(--dm-active, #F59E0B);
+}
+.os-dock-item svg { width: 22px; height: 22px; stroke-width: 1.5; }
+/* Tooltip on hover. Real label, because an icon alone is a guess. */
+.os-dock-item .os-dock-label {
+  position: absolute; bottom: calc(100% + 10px); left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 4px var(--dm-space-2, 8px);
+  border-radius: var(--os-radius-pill);
+  background: var(--os-mat-thick);
+  -webkit-backdrop-filter: var(--os-blur-thick);
+  backdrop-filter: var(--os-blur-thick);
+  border: 1px solid var(--os-edge-lo);
+  font-family: var(--dm-font-sans, ui-monospace, monospace);
+  font-size: var(--dm-text-2xs, 9px);
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--dm-fg, #FAFAFA);
+  white-space: nowrap; pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--os-dur-fast) linear, transform var(--os-dur) var(--os-spring);
+}
+.os-dock-item:hover .os-dock-label,
+.os-dock-item:focus-visible .os-dock-label { opacity: 1; transform: translateX(-50%) translateY(0); }
+.os-dock-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--os-edge-lo); }
+
+/* ===================================================================== *
+   §8 WIDGETS
+   Rounder than windows on purpose: a widget is an object you read, not a
+   frame you work inside. Sized on a real grid so they tile predictably.
+ * ===================================================================== */
+.os-widget-grid {
+  display: grid; gap: var(--dm-space-3, 12px);
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  align-content: start;
+}
+.os-widget {
+  border-radius: var(--os-radius-widget);
+  background: var(--os-mat-thin);
+  -webkit-backdrop-filter: var(--os-blur-thin);
+  backdrop-filter: var(--os-blur-thin);
+  border: 1px solid var(--os-edge-lo);
+  box-shadow: var(--os-elev-rest);
+  padding: var(--dm-space-3, 12px);
+  position: relative; overflow: hidden;
+  transition: transform var(--os-dur) var(--os-spring),
+              box-shadow var(--os-dur) var(--os-spring-soft);
+}
+.os-widget::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  border-top: 1px solid var(--os-edge-hi); pointer-events: none;
+}
+.os-widget:hover { transform: translateY(-2px); box-shadow: var(--os-elev-raise); }
+.os-widget--2x { grid-column: span 2; }
+.os-widget-label {
+  font-family: var(--dm-font-sans, ui-monospace, monospace);
+  font-size: var(--dm-text-2xs, 9px);
+  letter-spacing: .10em; text-transform: uppercase;
+  color: var(--dm-fg-label, #71717A);
+  margin-bottom: var(--dm-space-2, 8px);
+}
+.os-widget-value {
+  font-family: var(--dm-font-mono, ui-monospace, monospace);
+  font-size: var(--dm-text-2xl, 22px);
+  color: var(--dm-fg, #FAFAFA);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums; /* a clock that does not jitter */
+}
+.os-widget-sub {
+  font-size: var(--dm-text-sm, 11px);
+  color: var(--dm-fg-dim, #52525B);
+  margin-top: var(--dm-space-1, 4px);
+}
+
+/* A real meter, not a decorative bar: the fill is set from data. */
+.os-meter {
+  height: 6px; border-radius: var(--os-radius-pill);
+  background: rgba(255,255,255,.08); overflow: hidden; margin-top: var(--dm-space-2, 8px);
+}
+.os-meter > i {
+  display: block; height: 100%; border-radius: inherit;
+  background: var(--dm-active, #F59E0B);
+  transition: width var(--os-dur-slow) var(--os-spring-soft);
+}
+.os-meter[data-tone="ok"]  > i { background: var(--dm-ok, #10B981); }
+.os-meter[data-tone="bad"] > i { background: var(--dm-error, #EF4444); }
+
+/* ===================================================================== *
+   §9 MENU BAR
+ * ===================================================================== */
+.os-menubar {
+  position: fixed; top: 0; left: 0; right: 0; height: 28px; z-index: 950;
+  display: flex; align-items: center; gap: var(--dm-space-3, 12px);
+  padding: 0 var(--dm-space-3, 12px);
+  background: var(--os-mat-ultrathin);
+  -webkit-backdrop-filter: var(--os-blur-ultrathin);
+  backdrop-filter: var(--os-blur-ultrathin);
+  border-bottom: 1px solid var(--os-edge-lo);
+  font-family: var(--dm-font-sans, ui-monospace, monospace);
+  font-size: var(--dm-text-xs, 10px);
+  letter-spacing: .06em;
+  color: var(--dm-fg-body, #A1A1AA);
+}
+.os-menubar .os-menubar-spacer { flex: 1; }
+.os-menubar b { color: var(--dm-fg, #FAFAFA); font-weight: 500; }
+
+/* ===================================================================== *
+   §10 ACCESSIBILITY AND HONESTY
+ * ===================================================================== */
+/* Every spring above becomes an instant state change when the user has
+   asked for less motion. An OS that ignores this setting is not a
+   professional OS. Note this kills ANIMATION, never FEEDBACK: hover and
+   focus states still change, they just stop moving. */
+@media (prefers-reduced-motion: reduce) {
+  .os-window, .os-dock-item, .os-widget, .os-meter > i, .os-dock-item .os-dock-label {
+    transition-duration: 1ms !important;
+  }
+  .os-window[data-state] { animation-duration: 1ms !important; }
+}
+/* Some embedded webviews silently no-op backdrop-filter. The tints above
+   are already opaque enough to carry text on their own, and this makes
+   that explicit rather than leaving readability to chance. */
+@supports not (backdrop-filter: blur(1px)) {
+  .os-window   { background: #0d231b; }
+  .os-widget   { background: #10281e; }
+  .os-dock,
+  .os-menubar  { background: #0f2a20; }
+}
+
+/* ===================================================================== *
+   §11 DEPTH AND 3D
+   User direction: "3d designs ... like those 3d design on websites and
+   OS's". Real perspective, not a drop shadow pretending to be depth.
+
+   The rule that keeps this from becoming decoration: 3D is used where
+   depth CARRIES MEANING -- a stack whose order matters, a network whose
+   layers are real tiers, a card that responds to the pointer so it reads
+   as a physical object. It is never applied to text or to a data value,
+   because rotating a number makes it harder to read and communicates
+   nothing.
+ * ===================================================================== */
+.os-stage-3d { perspective: 1400px; perspective-origin: 50% 40%; }
+
+/* A card that tilts toward the pointer. The transform is driven by two
+   CSS variables so the JS only has to write numbers, never strings, and
+   the whole effect degrades to a flat card if that JS never runs. */
+.os-card-3d {
+  transform-style: preserve-3d;
+  transform: rotateX(var(--os-rx, 0deg)) rotateY(var(--os-ry, 0deg)) translateZ(0);
+  transition: transform var(--os-dur) var(--os-spring-soft), box-shadow var(--os-dur) var(--os-spring-soft);
+  will-change: transform;
+}
+.os-card-3d:hover { box-shadow: var(--os-elev-float); }
+/* Children can be pushed off the card's own plane to create real parallax
+   rather than a painted-on highlight. */
+.os-card-3d .os-layer-1 { transform: translateZ(18px); }
+.os-card-3d .os-layer-2 { transform: translateZ(36px); }
+.os-card-3d .os-layer-3 { transform: translateZ(58px); }
+
+/* A layered tier diagram: the agent ecosystem's real Layer 1 / Layer 2
+   shape from the vision deck, rendered as actual planes in space. */
+.os-tiers { transform-style: preserve-3d; transform: rotateX(52deg) rotateZ(-38deg); }
+.os-tier {
+  position: absolute; inset: 0;
+  border: 1px solid var(--os-edge-hi);
+  border-radius: var(--os-radius-panel);
+  background: linear-gradient(135deg, rgba(16,185,129,.16), rgba(10,42,34,.30));
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  transition: transform var(--os-dur-slow) var(--os-spring-soft);
+}
+.os-tiers:hover .os-tier { box-shadow: 0 14px 40px rgba(0,0,0,.55); }
+
+/* Wallpaper parallax. Two planes drifting at different rates is the whole
+   trick; it reads as depth without costing a repaint of real content. */
+@keyframes os-drift {
+  0%   { transform: translate3d(0, 0, 0) scale(1.04); }
+  50%  { transform: translate3d(-1.5%, -1%, 0) scale(1.07); }
+  100% { transform: translate3d(0, 0, 0) scale(1.04); }
+}
+.os-wallpaper[data-animated="true"] { animation: os-drift 46s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .os-wallpaper[data-animated="true"] { animation: none; }
+  .os-card-3d { transition-duration: 1ms !important; }
+}
+
+/* Specular sweep for glass surfaces. Fixed angle, very low alpha: this is
+   a material property (glass catches light along one edge), which is why
+   it is allowed where a "decorative glow" is not. */
+.os-specular { position: relative; overflow: hidden; }
+.os-specular::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 38%);
+}
+
+/* ===================================================================== *
+   §12 CONTROLS
+   Every interactive element in the shell, with all of its real states
+   declared rather than left to the browser. The states are the spec: a
+   control that has no visible pressed state is a control a user cannot
+   tell they activated.
+ * ===================================================================== */
+.os-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--os-edge-lo);
+  background: rgba(255,255,255,.06);
+  color: var(--dm-fg-body, #A1A1AA);
+  font-family: var(--dm-font-sans, ui-monospace, monospace);
+  font-size: var(--dm-text-xs, 10px);
+  letter-spacing: .06em; text-transform: uppercase;
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--os-dur-fast) linear,
+              color var(--os-dur-fast) linear,
+              border-color var(--os-dur-fast) linear,
+              transform var(--os-dur-fast) var(--os-spring);
+}
+.os-btn:hover { background: rgba(255,255,255,.12); color: var(--dm-fg, #FAFAFA); }
+.os-btn:active { transform: scale(.96); }
+.os-btn:focus-visible { outline: 2px solid var(--dm-active, #F59E0B); outline-offset: 2px; }
+.os-btn[aria-pressed="true"], .os-btn.is-on {
+  background: rgba(245,158,11,.16); border-color: var(--dm-active, #F59E0B);
+  color: var(--dm-active, #F59E0B);
+}
+.os-btn[disabled] { opacity: .38; cursor: not-allowed; }
+.os-btn[disabled]:hover { background: rgba(255,255,255,.06); color: var(--dm-fg-body, #A1A1AA); }
+.os-btn--primary {
+  background: var(--dm-active, #F59E0B); border-color: transparent;
+  color: #09090B; font-weight: 600;
+}
+.os-btn--primary:hover { background: #ffb224; color: #09090B; }
+.os-btn--danger { color: var(--dm-error, #EF4444); border-color: rgba(239,68,68,.35); }
+.os-btn--danger:hover { background: rgba(239,68,68,.16); color: #ff7b7b; }
+/* A control that is doing something says so. */
+.os-btn[data-busy="true"] { color: var(--dm-fg-dim, #52525B); pointer-events: none; }
+.os-btn[data-busy="true"]::before {
+  content: ""; width: 9px; height: 9px; border-radius: 999px;
+  border: 1.5px solid currentColor; border-top-color: transparent;
+  animation: os-spin .7s linear infinite;
+}
+@keyframes os-spin { to { transform: rotate(360deg); } }
+
+.os-seg { display: inline-flex; border: 1px solid var(--os-edge-lo);
+  border-radius: 8px; overflow: hidden; background: rgba(0,0,0,.2); }
+.os-seg button {
+  border: none; background: transparent; cursor: pointer;
+  padding: 5px 11px; color: var(--dm-fg-dim, #52525B);
+  font-family: var(--dm-font-sans, ui-monospace, monospace);
+  font-size: var(--dm-text-2xs, 9px); letter-spacing: .07em; text-transform: uppercase;
+  transition: background var(--os-dur-fast) linear, color var(--os-dur-fast) linear;
+}
+.os-seg button:hover { color: var(--dm-fg, #FAFAFA); background: rgba(255,255,255,.06); }
+.os-seg button[aria-selected="true"] { background: rgba(255,255,255,.12); color: var(--dm-fg, #FAFAFA); }
+
+.os-switch {
+  position: relative; width: 34px; height: 19px; border-radius: 999px;
+  border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.08);
+  cursor: pointer; padding: 0; flex: 0 0 auto;
+  transition: background var(--os-dur) var(--os-spring-soft);
+}
+.os-switch::after {
+  content: ""; position: absolute; top: 1px; left: 1px;
+  width: 15px; height: 15px; border-radius: 999px; background: var(--dm-fg, #FAFAFA);
+  transition: transform var(--os-dur) var(--os-spring);
+}
+.os-switch[aria-checked="true"] { background: var(--dm-ok, #10B981); border-color: transparent; }
+.os-switch[aria-checked="true"]::after { transform: translateX(15px); }
+.os-switch:focus-visible { outline: 2px solid var(--dm-active, #F59E0B); outline-offset: 2px; }
+
+.os-field {
+  width: 100%; background: rgba(255,255,255,.05); color: var(--dm-fg, #FAFAFA);
+  border: 1px solid var(--os-edge-lo); border-radius: 8px; padding: 7px 10px;
+  font-family: var(--dm-font-mono, ui-monospace, monospace);
+  font-size: var(--dm-text-base, 12px); outline: none;
+  transition: border-color var(--os-dur-fast) linear;
+}
+.os-field:focus { border-color: var(--dm-active, #F59E0B); }
+.os-field::placeholder { color: var(--dm-fg-dim, #52525B); }
+
+/* Row that reveals its actions on hover, the way a real list does. */
+.os-row {
+  display: flex; align-items: center; gap: var(--dm-space-2, 8px);
+  padding: 7px var(--dm-space-2, 8px); border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--os-dur-fast) linear;
+}
+.os-row:hover { background: rgba(255,255,255,.06); }
+.os-row[aria-selected="true"] { background: rgba(245,158,11,.13); }
+.os-row .os-row-actions { margin-left: auto; opacity: 0; transition: opacity var(--os-dur-fast) linear; }
+.os-row:hover .os-row-actions, .os-row:focus-within .os-row-actions { opacity: 1; }
+
+/* ===================================================================== *
+   §13 ANNOTATION MODE
+   A real overlay that labels every interactive element with what it does.
+   This is how the interaction spec is READ, not a decoration: toggling it
+   is the difference between "here is a picture" and "here is what happens
+   when you press this".
+ * ===================================================================== */
+body[data-annotate="true"] [data-spec] { position: relative; outline: 1px dashed rgba(245,158,11,.55); }
+body[data-annotate="true"] [data-spec]::after {
+  content: attr(data-spec);
+  position: absolute; left: 50%; top: 100%; transform: translate(-50%, 4px);
+  z-index: 9999; max-width: 260px; width: max-content;
+  padding: 5px 8px; border-radius: 6px;
+  background: #1b1205; border: 1px solid var(--dm-active, #F59E0B);
+  color: #ffd98a; font-family: var(--dm-font-sans, ui-monospace, monospace);
+  font-size: 9px; line-height: 1.45; letter-spacing: .02em;
+  text-transform: none; white-space: normal; text-align: left;
+  pointer-events: none; box-shadow: var(--os-elev-float);
+}
+body[data-annotate="true"] .os-dock-item::after { top: auto; bottom: 100%; transform: translate(-50%, -6px); }

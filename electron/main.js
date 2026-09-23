@@ -435,6 +435,68 @@ function startPaneBridge() {
       respond(200, { ok: showPane() });
     } else if (req.method === "POST" && req.url === "/hide") {
       respond(200, { ok: hidePane() });
+    } else if (req.method === "POST" && req.url.startsWith("/navigate")) {
+      // 2026-09-23 (finding #081). THE fix for the browser pane's proxy
+      // errors, and it is an architectural one rather than a patch.
+      //
+      // The iframe pane cannot load a site that sends X-Frame-Options or
+      // CSP frame-ancestors, which is most of the real web, so a rewriting
+      // proxy existed as the fallback. That proxy is where the errors come
+      // from: it mangles relative URLs, it carries no cookies so a logged-in
+      // site looks logged out, and it has to rewrite responses it cannot
+      // always parse.
+      //
+      // None of that is necessary here. Those headers restrict FRAMING. A
+      // BrowserView is a real top-level browsing context, not a frame, so
+      // they do not apply to it at all. Proven with a controlled experiment
+      // rather than assumed: the same local page serving
+      // "X-Frame-Options: DENY" plus "frame-ancestors 'none'" came back
+      // BLANK (ERR_BLOCKED_BY_RESPONSE) in an iframe and LOADED in a
+      // BrowserView, same Chromium, same process.
+      //
+      // So: no proxy, no rewriting, real cookies, real sessions.
+      let body = "";
+      req.on("data", (c) => { body += c; if (body.length > 8192) req.destroy(); });
+      req.on("end", () => {
+        let url;
+        try { url = JSON.parse(body || "{}").url; } catch { url = null; }
+        // Only real http(s). Refusing file:// and data:// here matters: this
+        // bridge is reachable from any local process, and a BrowserView
+        // pointed at file:// would read the user's disk.
+        if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+          respond(400, { ok: false, error: "url must be a real http(s) URL" });
+          return;
+        }
+        try {
+          const view = ensurePaneView();
+          if (!paneVisible) showPane();
+          view.webContents.loadURL(url);
+          respond(200, { ok: true, url });
+        } catch (err) {
+          respond(500, { ok: false, error: String(err && err.message || err) });
+        }
+      });
+    } else if (req.method === "POST" && /^\/(back|forward|reload)$/.test(req.url)) {
+      // Real history, which the iframe pane could never have: its own code
+      // comments note cross-origin history "isn't reachable from the parent
+      // page". A BrowserView owns its history outright.
+      if (!paneView) { respond(409, { ok: false, error: "pane not open" }); return; }
+      const wc = paneView.webContents;
+      const nav = wc.navigationHistory;
+      try {
+        if (req.url === "/back") {
+          if (nav && typeof nav.canGoBack === "function" ? nav.canGoBack() : wc.canGoBack())
+            (nav && nav.goBack ? nav.goBack() : wc.goBack());
+        } else if (req.url === "/forward") {
+          if (nav && typeof nav.canGoForward === "function" ? nav.canGoForward() : wc.canGoForward())
+            (nav && nav.goForward ? nav.goForward() : wc.goForward());
+        } else {
+          wc.reload();
+        }
+        respond(200, { ok: true });
+      } catch (err) {
+        respond(500, { ok: false, error: String(err && err.message || err) });
+      }
     } else {
       respond(404, { ok: false, error: "not found" });
     }

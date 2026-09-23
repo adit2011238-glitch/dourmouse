@@ -3629,6 +3629,144 @@ scales carry a stated rationale rather than bare numbers.
 
 ---
 
+### 080 -- the OS shell design system and a 20-screen interactive mockup
+
+**Severity**: n/a (new design layer plus a prototype; nothing wired into a live surface).
+**Context**: user direction, verbatim: *"keep in mind this is an os, it shoukd be as such,
+wallpapers, custom widgetes, fonts, neat professional presentatons, animations for stuff, 3d
+designs, similar tp how mac os is, os design rules etc"*, then *"i need it more detaled much
+more, mock up everything, every part of dourmouse"* and *"i need to understand how tghe
+buttonswould work, everythng"*.
+
+**A real conflict, resolved rather than ignored.** `ui/assets/dourmouse-ui.css`'s own header
+forbids four things BY NAME: floating cards, translucent wash, decorative glow, icon/badge
+vomit. macOS is built on the first three. Those rules were written for a DENSE TOOL SURFACE
+and they remain correct there, which is why nothing in this change touches `console.html`'s
+terminal feed. The resolution keeps the intent and drops the letter, and the reasoning is
+written into the new stylesheet rather than left implicit: depth is allowed but every level
+MEANS something (focus, stacking, modality), never "looks nicer"; translucency is allowed but
+only as a real material over a real wallpaper, never a wash faking depth over a flat colour;
+**glow stays banned**; icons still have to earn their place. The ~10% accent budget is
+unchanged and still binding.
+
+**`ui/assets/dourmouse-os.css` (601 lines), thirteen numbered sections**: materials (four
+vibrancy steps, each a blur PLUS a tint because a bare alpha over a busy wallpaper destroys
+text contrast), elevation (four levels, each a statement about STATE, two shadows per level
+because one alone reads as a sticker), geometry, motion (real springs with overshoot, because
+an OS springs and does not ease), procedural wallpaper, window chrome, dock, widgets, menu
+bar, accessibility, depth/3D, controls, and the annotation mode.
+
+**Decisions worth recording because they are not the obvious choice:**
+- **The dock lifts, it does not magnify.** macOS magnification reflows every neighbouring tile
+  and is genuinely disorienting on a dense workbench where the dock sits under live content.
+- **Wallpapers are procedural, not bundled images.** This app self-hosts its fonts specifically
+  to stay offline-capable; shipping photography would contradict that. Four gradient presets,
+  plus a real user photo upload read with `FileReader` so the bytes never leave the machine.
+- **A dim control ships with the photo upload.** A real photo has arbitrary brightness and body
+  copy needs 4.5:1 over whatever is behind it, so this is a readability control, not a taste one.
+- **An opaque fallback for `backdrop-filter`.** Some embedded webviews silently no-op it, and
+  this app ships in two different shells.
+- **`prefers-reduced-motion` collapses every animation to 1ms but keeps hover and focus
+  feedback.** Killing animation is not the same as killing feedback.
+
+**`ui/os_mockup.html`: an interactive prototype, not a picture.** All 20 screens from
+`console.html`'s own real `SCREENS` array, each with realistic content, driven by data so
+twenty screens do not mean twenty copies of the same scaffolding. Screens state what is NOT
+built rather than implying completeness: RESEARCH greys out 10 of its 14 stages and says the
+loop cannot run backwards; PROJECTS says outright it is a read-only summary rather than the
+isolated environment the deck asks for; the Alerts dock tile is labelled "not built yet".
+Every figure shown is a real observed value from this machine (49 agents, risk 21 with 4
+findings, 8 pulse channels, 5442 tests, 4 of 14 research stages) so the layout is judged
+against content it will really carry.
+
+**Annotation mode answers "how do the buttons work" directly.** Press `A` and every interactive
+element labels itself from its own `data-spec` attribute. The spec sits ON the control rather
+than in a legend to cross-reference.
+
+**One custom icon per screen**, stroke-based, 24x24, 1.5 weight, all on the same grid so they
+read as one family rather than twenty borrowings. Each is a literal of what the screen does.
+
+**Three real bugs found by DRIVING the prototype, not by reading it** (all mine, all fixed):
+1. `show()` rebuilt the entire sidebar on every screen change, which destroyed the element a
+   user was mid-press on (a scripted click timed out for exactly this reason), threw away
+   focus, and flickered. A real window manager moves a highlight; it does not rebuild its dock.
+2. The fix for (1) broke it worse: `renderNav()`/`renderDock()` were only ever CALLED from
+   inside `show()`, so removing them meant the chrome never rendered at all. Zero nav items.
+3. GLOBE overflowed: a `height:100%` card inside a scrolling body pushed three cards past the
+   viewport.
+
+**Also found while doing this, and it is a real product defect**: the server injects
+`#dmSpotifyWidget` into EVERY served page. It was covering the browser pane window in a
+screenshot, reporting NOT CONFIGURED on a surface it has nothing to do with. The mockup opts
+out; the underlying injection is tracked as a separate item.
+
+**Verified**: all 20 screens walked programmatically in a real Chromium, zero JS errors, zero
+overflow, zero window collisions, every screen rendering its own content. Photo upload verified
+end to end (a real PNG applied as a `data:` URL at `background-size: cover` and persisted to
+`localStorage`), and the dim slider verified moving the overlay from 0.35 to 0.65. Evidence:
+`~/Documents/DOURMOUSE/EVIDENCE/mockup_screens/` (24 files) plus `007`/`008`.
+
+**Not done and not claimed**: none of this is wired into `workspace.html` or `console.html`.
+That is the approval gate. Figma Phases 2 and 3 (foundations doc pages, component library) are
+also still not built.
+
+---
+
+### 081 -- the browser pane's proxy errors are an architecture problem, and the fix is proven
+
+**Severity**: real capability defect. **Context**: user asked directly, *"how can we integrate
+a rea kworking browser in here that works and doesnt throw proxy errors"*.
+
+**The real cause.** The in-app browser pane is an `<iframe>`. Any site sending
+`X-Frame-Options` or CSP `frame-ancestors` refuses to load in it, which is most of the real
+web, so a server-side rewriting proxy exists as the fallback. **That proxy is where the errors
+come from**: it rewrites relative URLs imperfectly, it carries no cookies so a logged-in site
+looks logged out (named as a real limitation in finding #075), and it has to rewrite responses
+it cannot always parse.
+
+**The fix is not a better proxy. It is not needing one.** Those headers restrict FRAMING. An
+Electron `BrowserView` is a real top-level browsing context, not a frame, so they do not apply
+to it at all.
+
+**Proven with a controlled experiment rather than asserted.** A local page was served with both
+`X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`, then loaded two
+ways in the SAME Chromium, in the same process:
+
+```
+iframe      -> "BLANK (refused)"   (ERR_BLOCKED_BY_RESPONSE)
+BrowserView -> "LOADED: this page refuses framing"
+```
+
+A local page was used deliberately over a real site: it makes the headers the only variable,
+needs no network, and is reproducible by anyone.
+
+**What shipped**: `electron/main.js`'s pane bridge previously had only `/status`, `/show` and
+`/hide`, so the `BrowserView` could never be navigated except through Playwright over CDP. It
+now has `POST /navigate` plus `/back`, `/forward` and `/reload`.
+
+**Security of the new endpoint, since this bridge is reachable from any local process**: only
+real `http(s)` URLs are accepted. `file://` and `javascript:` are refused by name and verified
+refused live, because a `BrowserView` pointed at `file://` would read the user's disk. The
+request body is capped at 8KB.
+
+**Verified end to end**: `POST /navigate` with the framing-blocked page returned
+`{"ok":true}`, and reading the real pane back over CDP confirmed it had genuinely rendered
+(`document.getElementById('ok').textContent` came back as the page's own text, not a blank
+document). Screenshot: `EVIDENCE/009_browserview_loads_framing_blocked_site.png`.
+
+**Consequences worth stating**: no proxy means no URL rewriting, no broken relative links, real
+cookies and real sessions, and real history (the iframe pane's own comments note cross-origin
+history "isn't reachable from the parent page"; a `BrowserView` owns its history outright).
+
+**Honest limits.** This is the Electron path only. The pywebview shell has no `BrowserView`, so
+the iframe plus proxy remains its fallback and keeps every limitation named in #075. Finding
+#078 made Electron the default when it is installed, so the good path is now the normal one,
+but a fresh clone without `electron/node_modules` still gets the old behaviour. Wiring the
+console's pane UI to call `/navigate` instead of setting `iframe.src` is the remaining step and
+is NOT done.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

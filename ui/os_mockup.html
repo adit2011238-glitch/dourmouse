@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOURMOUSE OS · interactive mockup</title>
+<!-- 2026-09-23, finding #080. An INTERACTIVE PROTOTYPE, not a picture, and
+     not wired to anything. All 20 real screens from console.html's own
+     SCREENS array, each with realistic content. Every interactive element
+     carries a data-spec attribute describing exactly what it does; press A
+     or use the SPEC button to overlay those on screen.
+     It fetches nothing and writes nothing. Numbers shown are real observed
+     values from this machine so layouts are judged against real content. -->
+<link rel="stylesheet" href="/assets/dourmouse-ui.css">
+<link rel="stylesheet" href="/assets/dourmouse-os.css">
+<style>
+  html,body{height:100%;margin:0;overflow:hidden;background:#071d18;color:var(--dm-fg);
+    font-family:var(--dm-font-sans);-webkit-font-smoothing:antialiased}
+  #dmSpotifyWidget{display:none !important}
+  #shell{position:fixed;inset:28px 0 92px 0;z-index:1;display:flex;gap:12px;padding:12px}
+  #sidebar{width:176px;flex:0 0 auto;display:flex;flex-direction:column;gap:2px;
+    padding:8px;border-radius:var(--os-radius-panel);
+    background:var(--os-mat-thin);-webkit-backdrop-filter:var(--os-blur-thin);
+    backdrop-filter:var(--os-blur-thin);border:1px solid var(--os-edge-lo);
+    box-shadow:var(--os-elev-rest);overflow:auto}
+  .navitem{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:7px;
+    border:none;background:transparent;cursor:pointer;width:100%;text-align:left;
+    font-family:var(--dm-font-sans);font-size:var(--dm-text-xs);letter-spacing:.06em;
+    color:var(--dm-fg-dim);transition:background var(--os-dur-fast) linear,color var(--os-dur-fast) linear}
+  .navitem:hover{background:rgba(255,255,255,.07);color:var(--dm-fg)}
+  .navitem[aria-current="true"]{background:rgba(245,158,11,.15);color:var(--dm-active)}
+  .navitem .ni{width:15px;height:15px;flex:0 0 auto;opacity:.75}
+  .navitem:hover .ni,.navitem[aria-current="true"] .ni{opacity:1}
+  .navitem .nd{width:5px;height:5px;border-radius:999px;background:var(--dm-ok);flex:0 0 auto;opacity:0}
+  .navitem[data-live="1"] .nd{opacity:1}
+  #stage{flex:1;min-width:0;display:flex;flex-direction:column;
+    border-radius:var(--os-radius-window);background:var(--os-mat-regular);
+    -webkit-backdrop-filter:var(--os-blur-regular);backdrop-filter:var(--os-blur-regular);
+    border:1px solid var(--os-edge-lo);box-shadow:var(--os-elev-raise);overflow:hidden}
+  #stagebar{display:flex;align-items:center;gap:10px;height:34px;flex:0 0 auto;
+    padding:0 12px;border-bottom:1px solid var(--os-edge-lo);
+    background:linear-gradient(rgba(255,255,255,.05),rgba(255,255,255,0))}
+  #stagetitle{font-size:var(--dm-text-xs);letter-spacing:.1em;text-transform:uppercase;color:var(--dm-fg)}
+  #stagesub{font-size:var(--dm-text-2xs);color:var(--dm-fg-dim);letter-spacing:.04em}
+  #body{flex:1;overflow:auto;padding:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .card{border-radius:var(--os-radius-panel);background:rgba(255,255,255,.04);
+    border:1px solid var(--os-edge-lo);padding:12px}
+  .lbl{font-size:var(--dm-text-2xs);letter-spacing:.1em;text-transform:uppercase;
+    color:var(--dm-fg-label);margin-bottom:8px}
+  .kv{display:flex;justify-content:space-between;padding:4px 0;font-size:var(--dm-text-sm);color:var(--dm-fg-body)}
+  .kv b{color:var(--dm-fg);font-weight:500;font-variant-numeric:tabular-nums}
+  .muted{color:var(--dm-fg-dim);font-size:var(--dm-text-sm);line-height:1.6}
+  .big{font-family:var(--dm-font-mono);font-size:var(--dm-text-2xl);color:var(--dm-fg);
+    font-variant-numeric:tabular-nums;line-height:1.1}
+  .tag{display:inline-block;padding:2px 7px;border-radius:999px;font-size:var(--dm-text-2xs);
+    letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--os-edge-lo);
+    color:var(--dm-fg-body);margin:0 4px 4px 0}
+  .tag.ok{color:var(--dm-ok);border-color:rgba(16,185,129,.4)}
+  .tag.warn{color:var(--dm-active);border-color:rgba(245,158,11,.4)}
+  .tag.bad{color:var(--dm-error);border-color:rgba(239,68,68,.4)}
+  .composer{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--os-edge-lo);
+    background:rgba(0,0,0,.2);flex:0 0 auto}
+  .who{font-size:var(--dm-text-2xs);letter-spacing:.1em;text-transform:uppercase;
+    color:var(--dm-fg-label);margin-bottom:4px}
+  .turn{margin-bottom:14px}
+  .turn .you{color:var(--dm-fg)}
+  .bar{height:5px;border-radius:999px;background:rgba(255,255,255,.09);overflow:hidden;margin-top:6px}
+  .bar i{display:block;height:100%;background:var(--dm-active);border-radius:999px}
+  #specbar{position:fixed;left:12px;bottom:12px;z-index:940;display:flex;gap:8px;align-items:center}
+  #speclegend{font-size:var(--dm-text-2xs);color:var(--dm-fg-dim);letter-spacing:.04em}
+  .empty{display:grid;place-items:center;height:100%;text-align:center;color:var(--dm-fg-dim);
+    font-size:var(--dm-text-sm);line-height:1.7}
+  #wallpicker{position:fixed;top:34px;left:92px;z-index:960;width:248px;padding:12px;
+    border-radius:var(--os-radius-widget);background:var(--os-mat-thick);
+    -webkit-backdrop-filter:var(--os-blur-thick);backdrop-filter:var(--os-blur-thick);
+    border:1px solid var(--os-edge-lo);box-shadow:var(--os-elev-modal)}
+  .wp-head{font-size:var(--dm-text-2xs);letter-spacing:.1em;text-transform:uppercase;
+    color:var(--dm-fg-label);margin-bottom:8px}
+  .wp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .wp{height:42px;border-radius:8px;border:1px solid var(--os-edge-lo);cursor:pointer;
+    transition:transform var(--os-dur) var(--os-spring),border-color var(--os-dur-fast) linear}
+  .wp:hover{transform:translateY(-2px)}
+  .wp[aria-current="true"]{border-color:var(--dm-active);border-width:2px}
+  .wp-row{display:flex;align-items:center;gap:8px;margin-top:10px;
+    font-size:var(--dm-text-sm);color:var(--dm-fg-body)}
+  .wp-row span{flex:1}
+  .wp-row input[type=range]{width:96px;accent-color:var(--dm-active)}
+  /* The dim layer sits between the photo and the UI. Without it, body copy
+     over a bright photo drops below 4.5:1 and the shell becomes unreadable. */
+  #walldim{position:fixed;inset:0;z-index:0;pointer-events:none;background:#000;opacity:.35}
+</style>
+</head>
+<body>
+<div class="os-wallpaper" id="wall" data-wall="aurora" data-animated="true"></div>
+<div id="walldim"></div>
+
+<div class="os-menubar">
+  <b>DOURMOUSE</b>
+  <button class="os-btn" id="wallBtn" data-spec="Opens the wallpaper picker: four built-in gradients plus your own photo.">WALLPAPER</button>
+  <span class="os-menubar-spacer"></span>
+  <span data-spec="Live agent count from GET /api/roster. Green dot = all reachable.">&#9679; 49 agents</span>
+  <span data-spec="Security risk score from the sentry. Click opens SECURITY.">&#9679; risk 21</span>
+  <span id="clock" style="font-variant-numeric:tabular-nums"></span>
+</div>
+
+<div id="shell">
+  <nav id="sidebar" aria-label="Screens"></nav>
+  <section id="stage">
+    <div id="stagebar">
+      <span id="stagetitle">HOME</span>
+      <span id="stagesub"></span>
+      <span style="flex:1"></span>
+      <div id="stageactions" style="display:flex;gap:8px"></div>
+    </div>
+    <div id="body"></div>
+    <div class="composer" id="composer">
+      <input class="os-field" id="cin" placeholder="Ask anything, or /all <goal> to put every resource on it"
+             data-spec="Directive box. Enter sends, Shift+Enter newlines. Routes to THIS screen's own thread on the 7 thread-screens, otherwise falls back to HOME's.">
+      <button class="os-btn os-btn--primary" data-spec="Sends the directive. Becomes a spinner while the run is in flight; the run can be cancelled from the stage bar.">SEND</button>
+    </div>
+  </section>
+</div>
+
+<div id="wallpicker" hidden>
+  <div class="wp-head">Wallpaper</div>
+  <div class="wp-grid">
+    <button class="wp" data-wall="aurora" style="background:linear-gradient(135deg,#0d3a2c,#0a2a22)" data-spec="Aurora. The product's own canvas colour pushed to a horizon."></button>
+    <button class="wp" data-wall="slate" style="background:linear-gradient(135deg,#1a2233,#0b0e14)" data-spec="Slate. Cooler, lower contrast, for long sessions."></button>
+    <button class="wp" data-wall="ember" style="background:linear-gradient(135deg,#3a1f0c,#150b08)" data-spec="Ember. Warm, higher contrast."></button>
+    <button class="wp" data-wall="mono" style="background:linear-gradient(135deg,#1a1a1c,#0a0a0b)" data-spec="Mono. Neutral, no hue, maximum text contrast."></button>
+  </div>
+  <label class="os-btn" style="width:100%;justify-content:center;margin-top:8px" data-spec="Pick any image from disk. It is read locally with FileReader and never uploaded: the bytes stay in this browser. Stored as a data URL against your profile.">
+    UPLOAD PHOTO<input type="file" id="wallFile" accept="image/*" hidden>
+  </label>
+  <div class="wp-row">
+    <span>Dim</span>
+    <input type="range" id="wallDim" min="0" max="80" value="35"
+      data-spec="Darkens the photo behind the UI. A real photo has arbitrary brightness, and body text needs 4.5:1 over whatever is behind it, so this is a readability control rather than a taste one.">
+  </div>
+  <div class="wp-row">
+    <span>Motion</span>
+    <button class="os-switch" id="wallAnim" role="switch" aria-checked="true" data-spec="The slow 46s parallax drift. Off automatically when the OS asks for reduced motion."></button>
+  </div>
+</div>
+
+<div id="specbar">
+  <button class="os-btn" id="specBtn" data-spec="Toggles this overlay. Keyboard: A.">SPEC</button>
+  <span id="speclegend">press A to label every control</span>
+</div>
+
+<div class="os-dock" id="dock"></div>
+
+<script>
+(function(){
+/* ------------------------------------------------------------------ *
+   Screen definitions. Data, not markup, so twenty screens do not mean
+   twenty copies of the same scaffolding. Each screen declares its own
+   stage-bar actions and body. Everything a user can press carries a
+   data-spec describing its real behaviour.
+ * ------------------------------------------------------------------ */
+var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); };
+function row(a,b,c){ return '<div class="kv"><span>'+a+'</span><b>'+b+'</b></div>'; }
+function btn(label, spec, cls){ return '<button class="os-btn '+(cls||'')+'" data-spec="'+spec+'">'+label+'</button>'; }
+
+
+/* One custom icon per screen. Stroke-based, 24x24, 1.5 weight, all drawn on
+   the same grid so they read as one family rather than twenty borrowings.
+   Each is a literal of what the screen does, never an abstract mark: a
+   caret for the console, a shield for security, a flask for research. */
+var ICON = {
+ HOME:'M4 17l6-5-6-5M12 19h8',
+ COMMS:'M3 6.5A1.5 1.5 0 014.5 5h15A1.5 1.5 0 0121 6.5v11a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5zM3.5 7l8.5 6 8.5-6',
+ RESEARCH:'M9 3v5.5L4.5 17A2 2 0 006.3 20h11.4a2 2 0 001.8-3L15 8.5V3M8 3h8M7.5 14h9',
+ CODE:'M8.5 8.5L5 12l3.5 3.5M15.5 8.5L19 12l-3.5 3.5M13.5 6l-3 12',
+ VISION:'M2 12s3.8-6 10-6 10 6 10 6-3.8 6-10 6-10-6-10-6zM12 9.5a2.5 2.5 0 110 5 2.5 2.5 0 010-5z',
+ MEDIA:'M3 6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2zM10 9l5 3-5 3zM3 8h18',
+ PROJECTS:'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2zM3 11h18',
+ SETTINGS:'M12 9a3 3 0 110 6 3 3 0 010-6M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M19.8 4.2l-2.1 2.1M6.3 17.7l-2.1 2.1',
+ ATLAS:'M12 2a10 10 0 100 20 10 10 0 000-20M2 12h20M12 2c3 3.6 3 14.4 0 20M5 6c2 1.2 12 1.2 14 0M5 18c2-1.2 12-1.2 14 0',
+ GLOBE:'M12 2a10 10 0 100 20 10 10 0 000-20M12 2c3.2 3.4 3.2 14.6 0 20M12 2c-3.2 3.4-3.2 14.6 0 20M2.5 9h19M2.5 15h19',
+ NEWS:'M4 5h13v14H5a1 1 0 01-1-1zM17 9h3v8a2 2 0 01-2 2M7 8.5h7M7 12h7M7 15.5h4',
+ DESIGN3D:'M12 2.5l8.5 4.9v9.2L12 21.5 3.5 16.6V7.4zM12 2.5v19M3.5 7.4l8.5 4.9 8.5-4.9',
+ VOICE:'M12 3a3 3 0 013 3v6a3 3 0 01-6 0V6a3 3 0 013-3M5.5 11.5a6.5 6.5 0 0013 0M12 18v3M9 21h6',
+ ORCHESTRATION:'M12 3.5a2 2 0 110 4 2 2 0 010-4M5 16.5a2 2 0 110 4 2 2 0 010-4M19 16.5a2 2 0 110 4 2 2 0 010-4M12 7.5v4M12 11.5l-6 5M12 11.5l6 5',
+ GOALS:'M12 2.5a9.5 9.5 0 100 19 9.5 9.5 0 000-19M12 7a5 5 0 100 10 5 5 0 000-10M12 11a1 1 0 110 2 1 1 0 010-2',
+ TIMETABLE:'M4 6a2 2 0 012-2h12a2 2 0 012 2v13a1 1 0 01-1 1H5a1 1 0 01-1-1zM4 9h16M8 3v4M16 3v4M8 13h3M8 16.5h6',
+ AGENTSMITH:'M12 3l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 8.3l5-.7zM12 14.5v6M9 20.5h6',
+ WIKI:'M4 5.5A2.5 2.5 0 016.5 3H20v16H6.5A2.5 2.5 0 004 21.5zM20 19v2H6.5M8 7.5h8M8 11h8M8 14.5h5',
+ SECURITY:'M12 2.8l7.5 3.1v6c0 4.4-3.1 7.6-7.5 9.3-4.4-1.7-7.5-4.9-7.5-9.3v-6zM9 12l2.2 2.2L15.5 10',
+ OFFICE:'M3 20.5h18M5 20.5V9l7-5 7 5v11.5M9.5 20.5V15h5v5.5M9 11h1.5M13.5 11H15'
+};
+
+var SCREENS = {
+HOME: { sub:'central agent dispatch', live:1, composer:true,
+  actions:[ btn('NEW THREAD','Clears the visible thread and starts a fresh session file. The old one stays on disk and is resumable.'),
+            btn('AUTONOMOUS','Opt-in: raises this turn\'s step ceiling from 8 to the Phase 5 autonomous limit. Still bounded by the governance budget.','') ],
+  body:
+   '<div class="turn"><div class="who">You</div><div class="you">play the verification clip and show me the security dashboard</div></div>'+
+   '<div class="turn"><div class="who">Dourmouse &middot; 2 steps &middot; 2.4s</div>'+
+   '<span class="tag" data-spec="Tool chip. Click expands the real arguments and the real result. Never a summary.">&#9670; open_file_preview</span>'+
+   '<span class="tag">&#9670; security_dashboard</span>'+
+   '<div class="muted" style="margin-top:8px;color:var(--dm-fg-body)">Opened the clip in the embedded player and pulled the current dashboard. Risk score is <b style="color:var(--dm-active)">21</b> with four findings open, the highest being the Application Firewall reporting disabled.</div>'+
+   '<div style="margin-top:8px;display:flex;gap:8px">'+
+   btn('COPY','Copies the raw reply text to the clipboard.')+
+   btn('REGENERATE','Re-runs the same directive on a fresh turn. The previous answer stays in the transcript.')+
+   btn('SHELVE','Moves this turn out of the active context window without deleting it.')+'</div></div>'+
+   '<div class="turn"><div class="who">You</div><div class="you">which of those four is worth acting on tonight</div></div>'+
+   '<div class="turn"><div class="who">Dourmouse &middot; 1 step &middot; 0.9s</div>'+
+   '<div class="muted" style="color:var(--dm-fg-body)">One. The firewall being off is the only finding that changes your exposure right now. Remediation is suggest-only, so nothing has been altered.</div></div>' },
+
+COMMS: { sub:'real gmail inbox', live:1, composer:true,
+  actions:[ btn('REFRESH','Re-polls the real Gmail inbox. The mail agent caches for 300s; this forces it.'),
+            btn('COMPOSE','Opens a draft. Sending is confirmation-gated: a real approval card appears before anything leaves.','os-btn--primary') ],
+  body:
+   '<div class="os-row" data-spec="Click opens the thread. Hover reveals archive, flag and delete. Delete moves to Trash, never a permanent purge."><b style="color:var(--dm-fg);font-size:var(--dm-text-base)">GitHub</b><span class="muted" style="flex:1">[dourmouse] 3 new commits on recon-2026-09-11</span><span class="muted">17:02</span><span class="os-row-actions">'+btn('FLAG','IMAP STORE +FLAGS (\\Flagged).')+btn('TRASH','IMAP STORE +FLAGS (\\Deleted). Confirmation-gated.','os-btn--danger')+'</span></div>'+
+   '<div class="os-row"><b style="color:var(--dm-fg);font-size:var(--dm-text-base)">Figma</b><span class="muted" style="flex:1">Dourmouse Design System was updated</span><span class="muted">16:41</span></div>'+
+   '<div class="os-row"><b style="color:var(--dm-fg);font-size:var(--dm-text-base)">Tailscale</b><span class="muted" style="flex:1">A new device joined your tailnet</span><span class="muted">14:08</span></div>'+
+   '<div class="os-row" aria-selected="true"><b style="color:var(--dm-fg);font-size:var(--dm-text-base)">School</b><span class="muted" style="flex:1">MYP personal project checkpoint</span><span class="muted">11:20</span></div>'+
+   '<div class="muted" style="margin-top:14px">Sending, deleting and flagging are all confirmation-gated. Reading is not.</div>' },
+
+RESEARCH: { sub:'pipeline &middot; 4 of 14 stages', composer:true,
+  actions:[ btn('NEW QUESTION','Creates a ResearchRecord and runs plan(), which decomposes it into real sub-questions.','os-btn--primary'),
+            btn('EXPORT','Writes the record plus every surviving claim and its source URL to a file.') ],
+  body:
+   '<div class="grid2"><div class="card"><div class="lbl">Current question</div>'+
+   '<div style="color:var(--dm-fg);font-size:var(--dm-text-md);line-height:1.5">Does byte-range streaming meaningfully change perceived video start time?</div>'+
+   '<div class="bar"><i style="width:28%"></i></div>'+
+   '<div class="muted" style="margin-top:8px">stage 4 of 14 &middot; synthesized</div></div>'+
+   '<div class="card"><div class="lbl">Stages</div>'+
+   '<span class="tag ok">plan</span><span class="tag ok">discover_sources</span><span class="tag ok">extract_evidence</span><span class="tag ok">synthesize</span>'+
+   '<span class="tag">source validation</span><span class="tag">hypothesis</span><span class="tag">criticism</span><span class="tag">experiment</span>'+
+   '<span class="tag">statistics</span><span class="tag">replication</span><span class="tag">contradiction</span><span class="tag">revision</span>'+
+   '<div class="muted" style="margin-top:8px">Greyed stages are not built. The loop also cannot yet run backwards.</div></div></div>'+
+   '<div class="card" style="margin-top:12px"><div class="lbl">Claims &middot; every quote verified as an exact substring of the real page</div>'+
+   '<div class="os-row" data-spec="Click opens the claim: its exact supporting quote, the source URL, the document hash, and the stage that produced it."><span class="tag ok">verified</span><span class="muted" style="flex:1">Range requests let a player begin decoding before the full file arrives</span><span class="os-row-actions">'+btn('SOURCE','Opens the cached document at the hash this claim was extracted from.')+btn('REJECT','Marks the claim rejected with a reason. It stays in the record, never deleted.','os-btn--danger')+'</span></div>'+
+   '<div class="os-row"><span class="tag ok">verified</span><span class="muted" style="flex:1">A 206 response is required for a media element to seek at all</span></div>'+
+   '<div class="os-row"><span class="tag warn">contested</span><span class="muted" style="flex:1">Chunk size materially affects start latency</span></div></div>' },
+
+CODE: { sub:'diff and run', composer:true,
+  actions:[ btn('RUN TESTS','Runs the real suite in a subprocess and streams output. Never fabricates a pass.','os-btn--primary'),
+            btn('APPROVE','Applies the staged diff to disk. Gated: nothing is written before this is pressed.') ],
+  body:
+   '<div class="card"><div class="lbl">dourmouse/webui.py &middot; <span style="color:var(--dm-ok)">+21</span> <span style="color:var(--dm-error)">&minus;0</span></div>'+
+   '<pre style="margin:0;font-family:var(--dm-font-mono);font-size:var(--dm-text-sm);line-height:1.65;color:var(--dm-fg-body);overflow:auto"><span style="color:var(--dm-fg-dim)">1785  class _Handler(BaseHTTPRequestHandler):</span>\n<span style="color:var(--dm-ok)">+     def handle_one_request(self):</span>\n<span style="color:var(--dm-ok)">+         try:</span>\n<span style="color:var(--dm-ok)">+             super().handle_one_request()</span>\n<span style="color:var(--dm-ok)">+         except (BrokenPipeError, ConnectionResetError):</span>\n<span style="color:var(--dm-ok)">+             self.close_connection = True</span></pre>'+
+   '<div style="margin-top:10px;display:flex;gap:8px">'+btn('EXPAND','Shows the full hunk with surrounding context.')+btn('REVERT','Discards this staged hunk. Does not touch the file on disk.','os-btn--danger')+'</div></div>'+
+   '<div class="card" style="margin-top:12px"><div class="lbl">Last run</div>'+
+   '<div class="big" style="color:var(--dm-ok)">5442</div><div class="muted">passed &middot; 10 skipped &middot; 0 failed &middot; 460s</div></div>' },
+
+VISION: { sub:'camera and hand control', live:1,
+  actions:[ btn('KILL SWITCH','Hard-stops the camera at the tray process. Overrides every other setting.','os-btn--danger') ],
+  body:
+   '<div class="grid2"><div class="card"><div class="lbl">Hand control</div>'+
+   row('Gesture','none')+row('Focused window','WORLD MAP')+row('Signal','&mdash;')+row('Delegate','CPU')+
+   '<div style="margin-top:10px">'+btn('ENABLE HAND CONTROL','Starts MediaPipe tracking. Requires the camera grant; refused honestly if the kill switch is on.','os-btn--primary')+'</div></div>'+
+   '<div class="card"><div class="lbl">Camera</div><div class="muted">Pinch a titlebar with one hand to drag it. Pinch with both hands and change the distance to resize, or the angle to tilt.</div>'+
+   '<div style="margin-top:10px;display:flex;align-items:center;gap:8px"><span class="muted" style="flex:1">Camera access</span>'+
+   '<button class="os-switch" role="switch" aria-checked="false" data-spec="Per-session camera grant. Off by default. The tray kill switch can override this to off but never to on."></button></div></div></div>' },
+
+MEDIA: { sub:'player and library', composer:true,
+  actions:[ btn('OPEN FILE','Opens any pdf, image, audio or video in the pane. Refuses a container the browser cannot decode, and names open_path instead.','os-btn--primary') ],
+  body:
+   '<div class="card" style="padding:0;overflow:hidden"><div style="height:190px;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 40%,rgba(255,255,255,.07),transparent 70%)">'+
+   '<button class="os-btn" style="width:52px;height:52px;border-radius:999px;justify-content:center" data-spec="Play and pause. The clock, the scrubber and this glyph are the only three things that change during playback.">&#9654;</button></div>'+
+   '<div style="padding:12px;border-top:1px solid var(--os-edge-lo)">'+
+   '<div class="muted" style="color:var(--dm-fg-body)">verification.mp4 &middot; 2:58 &middot; H.264 &middot; 194x134</div>'+
+   '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="muted">1:08</span>'+
+   '<span style="flex:1;height:3px;border-radius:999px;background:rgba(255,255,255,.14)" data-spec="Scrubber. Dragging issues a real HTTP range request; the server answers 206 with exactly those bytes."><i style="display:block;height:100%;width:38%;border-radius:999px;background:var(--dm-fg)"></i></span>'+
+   '<span class="muted">2:58</span></div></div></div>'+
+   '<div class="grid3" style="margin-top:12px">'+
+   '<div class="card"><div class="lbl">Audio</div><div class="muted">mp3 m4a aac wav oga ogg opus weba</div></div>'+
+   '<div class="card"><div class="lbl">Video</div><div class="muted">mp4 m4v webm ogv mov</div></div>'+
+   '<div class="card"><div class="lbl">Refused honestly</div><div class="muted">mkv avi flac wmv. A blank player would be a lie, so these name open_path instead.</div></div></div>' },
+
+PROJECTS: { sub:'isolated workspaces', 
+  actions:[ btn('NEW PROJECT','Creates a folder in ~/Documents and a scoped workspace. Not built yet: today this dashboard is read-only.','os-btn--primary') ],
+  body:
+   '<div class="grid3">'+
+   '<div class="card"><div class="lbl">dourmouse-recon</div><div class="big">79</div><div class="muted">findings &middot; 5442 tests</div></div>'+
+   '<div class="card"><div class="lbl">atlas-strategy-lab</div><div class="big">12</div><div class="muted">sessions this week</div></div>'+
+   '<div class="card"><div class="lbl">entropy generation</div><div class="big">3</div><div class="muted">sessions this week</div></div></div>'+
+   '<div class="card" style="margin-top:12px"><div class="lbl">Honest state</div><div class="muted">This is a read-only summary of Claude Code and Codex history per directory. The deck asks for a real isolated environment per project with scoped access to research, coding and security. That is item OS-6 and is not built.</div></div>' },
+
+SETTINGS: { sub:'preferences', 
+  actions:[ btn('RESET','Restores defaults. Confirmation-gated.','os-btn--danger') ],
+  body:
+   '<div class="grid2"><div class="card"><div class="lbl">Shell</div>'+
+   '<div class="kv"><span>Native shell</span><span class="os-seg"><button aria-selected="true" data-spec="Electron. The CDP BrowserView shell. Default when electron/node_modules is present.">ELECTRON</button><button data-spec="pywebview. The older shell. Always available, no install needed.">PYWEBVIEW</button></span></div>'+
+   '<div class="kv"><span>Reduced motion</span><button class="os-switch" role="switch" aria-checked="false" data-spec="Follows the OS setting by default. Forcing it on collapses every animation to 1ms but keeps hover and focus feedback."></button></div>'+
+   '<div class="kv"><span>Auto approve</span><button class="os-switch" role="switch" aria-checked="false" data-spec="Skips confirmation cards for gated tools. Persisted to a 0600 file, no restart needed. Off is the safe default."></button></div></div>'+
+   '<div class="card"><div class="lbl">Backends</div>'+
+   row('Ollama','<span class="tag ok">local</span>')+row('NVIDIA NIM','<span class="tag ok">key set</span>')+
+   row('Claude Code CLI','<span class="tag ok">auth ok</span>')+row('Codex CLI','<span class="tag warn">rate limited</span>')+
+   '<div style="margin-top:8px">'+btn('TEST ALL','Makes one real call per backend and reports the provider\'s real error on failure. Never a fabricated success.')+'</div></div></div>'+
+   '<div class="card" style="margin-top:12px"><div class="lbl">Remote access</div>'+
+   row('Bind host','127.0.0.1')+row('Access token','<span class="tag ok">set</span>')+
+   '<div class="muted" style="margin-top:6px">Binding beyond loopback without a token is a hard refusal.</div></div>' },
+
+ATLAS: { sub:'world monitor', live:1,
+  actions:[ btn('REFRESH','Re-pulls all 8 keyless feeds.') ],
+  body:
+   '<div class="grid2"><div class="card"><div class="lbl">Channels</div>'+
+   row('disasters','8')+row('conflict zones','8')+row('air quality','8')+row('storms','3')+
+   row('power grid','1')+row('launches','8')+row('quakes','8')+row('flights','8')+'</div>'+
+   '<div class="card"><div class="lbl">Pulse</div><div class="big" style="color:var(--dm-active)">HEIGHTENED</div>'+
+   '<div class="muted">44 events across 8 channels</div>'+
+   '<div class="muted" style="margin-top:10px">Every channel is a real public feed with no API key. A feed that fails reports the real error rather than showing stale numbers.</div></div></div>' },
+
+GLOBE: { sub:'world map', live:1, actions:[],
+  body:'<div class="card" style="height:300px;display:grid;place-items:center">'+
+   '<div class="os-stage-3d" style="width:100%;display:grid;place-items:center">'+
+   '<div style="position:relative;width:260px;height:150px" class="os-tiers">'+
+   '<div class="os-tier"></div></div></div>'+
+   '<div class="muted" style="margin-top:14px">Orthographic SVG projection with 8 live channels plotted. Click a marker to open the underlying event.</div></div>'+
+   '<div class="grid3" style="margin-top:12px">'+
+   '<div class="card"><div class="lbl">Projection</div><div class="muted">Orthographic. Drag to rotate, scroll to zoom. Renders as SVG, not a tile service, so it works with no network.</div></div>'+
+   '<div class="card"><div class="lbl">Markers</div><div class="muted">One per real event across the 8 channels. Colour is the channel, never severity, because severity is not comparable between them.</div></div>'+
+   '<div class="card"><div class="lbl">Click</div><div class="muted">Opens the underlying record: source feed, timestamp, coordinates and the raw payload.</div></div></div>' },
+
+NEWS: { sub:'live headlines', live:1, composer:true, actions:[],
+  body:
+   '<div class="os-row" data-spec="Click opens the article in the browser pane. Hover offers send to research, which creates a ResearchRecord seeded with this source."><span class="tag">reuters</span><span class="muted" style="flex:1;color:var(--dm-fg-body)">Grid operators report elevated load across three regions</span><span class="os-row-actions">'+btn('TO RESEARCH','Creates a ResearchRecord with this URL as its first source.')+'</span></div>'+
+   '<div class="os-row"><span class="tag">ap</span><span class="muted" style="flex:1;color:var(--dm-fg-body)">Storm system tracked across the eastern seaboard</span></div>'+
+   '<div class="os-row"><span class="tag">bbc</span><span class="muted" style="flex:1;color:var(--dm-fg-body)">Air quality advisories issued in four cities</span></div>'+
+   '<div class="muted" style="margin-top:12px">Keyless RSS. Polls every 120s.</div>' },
+
+DESIGN3D: { sub:'scene editor', composer:true,
+  actions:[ btn('ADD MESH','Inserts a primitive into the real Three.js scene graph.','os-btn--primary'), btn('EXPORT','Writes the scene to glTF.') ],
+  body:'<div class="card os-stage-3d" style="height:230px;display:grid;place-items:center">'+
+   '<div style="position:relative;width:200px;height:120px" class="os-tiers">'+
+   '<div class="os-tier" style="transform:translateZ(50px)"></div><div class="os-tier" style="transform:translateZ(0)"></div>'+
+   '<div class="os-tier" style="transform:translateZ(-50px)"></div></div></div>'+
+   '<div class="muted" style="margin-top:10px">A real Three.js scene with its own graph, not a render. Orbit with drag, zoom with scroll.</div>'+
+   '<div class="grid3" style="margin-top:12px">'+
+   '<div class="card"><div class="lbl">Scene graph</div><div class="muted">Real nodes with transforms and materials. Selecting a mesh shows its live properties rather than a cached snapshot.</div></div>'+
+   '<div class="card"><div class="lbl">Camera</div><div class="muted">Drag orbits, scroll dollies, shift-drag pans. Double click frames the selection.</div></div>'+
+   '<div class="card"><div class="lbl">Export</div><div class="muted">Writes glTF to the workspace. Nothing leaves the machine.</div></div></div>' },
+
+VOICE: { sub:'speech in and out', live:1,
+  actions:[ btn('LISTEN','Starts capture. Wakeword is separate and off by default.','os-btn--primary') ],
+  body:
+   '<div class="card"><div class="lbl">Voice commands</div>'+
+   '<div class="muted">Try: open mail &middot; close research &middot; search for nvidia earnings &middot; email sam saying running late. Anything unrecognised is sent to the companion as a normal chat message rather than dropped.</div>'+
+   '<div style="display:flex;gap:8px;margin-top:10px"><input class="os-field" placeholder="type a command" data-spec="Same parser as speech, typed. Useful for testing a phrase without speaking."><button class="os-btn" data-spec="Runs the parsed command.">RUN</button></div></div>'+
+   '<div class="card" style="margin-top:12px"><div class="lbl">Wakeword</div>'+
+   '<div class="kv"><span>DOURMOUSE_WAKEWORD</span><span class="tag">not configured</span></div>'+
+   '<div class="muted">Off by default and honestly reported. Enabling it needs the real model files present.</div></div>' },
+
+ORCHESTRATION: { sub:'parallel fan-out', live:1, actions:[],
+  body:
+   '<div class="card"><div class="lbl">Active run &middot; delegate_parallel &middot; 3 branches</div>'+
+   '<div class="os-row"><span class="tag ok">done</span><span class="muted" style="flex:1">research_info &middot; 4 tool calls &middot; 3.2s</span><span class="os-row-actions">'+btn('TRANSCRIPT','Opens this branch\'s own reasoning and tool calls, keyed by its call_id.')+'</span></div>'+
+   '<div class="os-row"><span class="tag warn">running</span><span class="muted" style="flex:1">security &middot; 2 tool calls</span></div>'+
+   '<div class="os-row"><span class="tag">queued</span><span class="muted" style="flex:1">markets</span></div>'+
+   '<div class="muted" style="margin-top:10px">Up to 6 branches run genuinely concurrently, each with its own thread-local context. Budget is consumed up front to avoid a cross-thread race.</div></div>' },
+
+GOALS: { sub:'autonomous runtime', live:1,
+  actions:[ btn('NEW GOAL','Creates a persistent goal. It survives closing the chat and a process kill.','os-btn--primary') ],
+  body:
+   '<div class="card"><div class="lbl">Executing</div>'+
+   '<div style="color:var(--dm-fg);font-size:var(--dm-text-md)">Keep the engineering audit and the roadmap in sync after every commit</div>'+
+   '<div class="bar"><i style="width:62%"></i></div>'+
+   '<div style="margin-top:10px;display:flex;gap:8px">'+
+   btn('PAUSE','Halts after the current task completes. State is durable, so resume picks up exactly where it stopped.')+
+   btn('AUDIT','Opens the per-goal event history: every task, every status change, every verification pass.')+
+   btn('CANCEL','Stops the goal. Completed work is kept.','os-btn--danger')+'</div></div>'+
+   '<div class="card" style="margin-top:12px"><div class="lbl">Tasks</div>'+
+   '<div class="os-row"><span class="tag ok">done</span><span class="muted" style="flex:1">write finding #078</span></div>'+
+   '<div class="os-row"><span class="tag warn">running</span><span class="muted" style="flex:1">update the roadmap checklist</span></div>'+
+   '<div class="os-row"><span class="tag">blocked</span><span class="muted" style="flex:1">push &middot; waiting on the suite</span></div>'+
+   '<div class="muted" style="margin-top:8px">Completion is independently verified: a second reasoning pass checks the claim rather than accepting it.</div></div>' },
+
+TIMETABLE: { sub:'routines', live:1,
+  actions:[ btn('NEW ROUTINE','Created from natural language. Persists across restarts.','os-btn--primary') ],
+  body:
+   '<div class="os-row"><span class="tag ok">daily 07:00</span><span class="muted" style="flex:1">Morning brief: mail triage, market open scan, system check</span><span class="os-row-actions">'+btn('EDIT','Live edit. Changing the day keeps the run history intact.')+btn('DISABLE','Stops future runs without deleting the routine or its history.')+'</span></div>'+
+   '<div class="os-row"><span class="tag ok">every 30m</span><span class="muted" style="flex:1">History sync from the desktop</span></div>'+
+   '<div class="os-row"><span class="tag warn">missed</span><span class="muted" style="flex:1">Market close scan &middot; machine asleep at 21:00</span></div>'+
+   '<div class="muted" style="margin-top:10px">A missed run is reported as missed. It is never silently backfilled as if it had happened.</div>' },
+
+AGENTSMITH: { sub:'self-extension', 
+  actions:[ btn('DRAFT TOOL','Dourmouse writes a new tool for itself. It cannot register it without the approval below.','os-btn--primary') ],
+  body:
+   '<div class="card"><div class="lbl">Pending approval</div>'+
+   '<div style="font-family:var(--dm-font-mono);font-size:var(--dm-text-sm);color:var(--dm-fg-body)">gmail_flag(message_id: str) &rarr; str</div>'+
+   '<div class="muted" style="margin-top:6px">IMAP STORE +FLAGS (\\Flagged). Drafted by dev_coding after the daily ops order found the tool missing.</div>'+
+   '<div style="margin-top:10px;display:flex;gap:8px">'+
+   btn('APPROVE','Registers the tool. It is permanently forced to the most restrictive permission tier and has no path to grant itself more.','os-btn--primary')+
+   btn('REJECT','Discards the draft.','os-btn--danger')+'</div></div>'+
+   '<div class="muted" style="margin-top:12px">Live-verified end to end, including the hard case: after approval and a real server restart, a fresh chat calling the new tool still pauses for confirmation.</div>' },
+
+WIKI: { sub:'device wiki', live:1,
+  actions:[ btn('SCAN','Walks the DOURMOUSE_WIKI_ROOTS allowlist. Never the whole filesystem.','os-btn--primary') ],
+  body:
+   '<div class="grid3"><div class="card"><div class="lbl">Summarized</div><div class="big" style="color:var(--dm-ok)">128</div></div>'+
+   '<div class="card"><div class="lbl">Unsummarized</div><div class="big" style="color:var(--dm-active)">14</div></div>'+
+   '<div class="card"><div class="lbl">Missing</div><div class="big" style="color:var(--dm-fg-dim)">3</div></div></div>'+
+   '<div class="card" style="margin-top:12px">'+
+   '<div class="os-row"><span class="tag ok">summarized</span><span class="muted" style="flex:1">REMAINING_WORK.md</span><span class="os-row-actions">'+btn('OPEN','Opens the file in the preview pane.')+'</span></div>'+
+   '<div class="os-row"><span class="tag">missing</span><span class="muted" style="flex:1">old_notes.md &middot; deleted on disk</span></div>'+
+   '<div class="muted" style="margin-top:8px">A deleted file is marked MISSING, never dropped. If it reappears it self-heals from its preserved summary. A content change reverts to UNSUMMARIZED rather than keeping a stale summary.</div></div>' },
+
+SECURITY: { sub:'defensive posture', live:1,
+  actions:[ btn('SCAN NOW','Runs the deterministic scan. There is no model call anywhere in the detection path.','os-btn--primary') ],
+  body:
+   '<div class="grid2"><div class="card" style="display:grid;place-items:center">'+
+   '<svg width="120" height="120" viewBox="0 0 120 120"><circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="9"/>'+
+   '<circle cx="60" cy="60" r="50" fill="none" stroke="var(--dm-ok)" stroke-width="9" stroke-linecap="round" stroke-dasharray="314" stroke-dashoffset="248" transform="rotate(-90 60 60)"/>'+
+   '<text x="60" y="66" text-anchor="middle" fill="var(--dm-fg)" font-size="26" font-family="var(--dm-font-mono)">21</text></svg>'+
+   '<div class="muted">risk score</div></div>'+
+   '<div class="card"><div class="lbl">Findings</div>'+
+   '<div class="os-row"><span class="tag bad">high</span><span class="muted" style="flex:1">Application Firewall disabled</span><span class="os-row-actions">'+btn('REMEDIATE','Suggests the fix and routes it through the same human approval gate as self-extension. Never auto-applies.')+'</span></div>'+
+   '<div class="os-row"><span class="tag warn">medium</span><span class="muted" style="flex:1">3 ports exposed beyond loopback</span></div>'+
+   '<div class="os-row"><span class="tag">info</span><span class="muted" style="flex:1">New device on the tailnet</span></div>'+
+   '<div class="muted" style="margin-top:8px">8 of the founding spec\'s 54 items are built. The score never hides the evidence behind it.</div></div></div>' },
+
+OFFICE: { sub:'agent ecosystem', live:1, actions:[],
+  body:
+   '<div class="card"><div class="lbl">49 agents &middot; live status from the real event stream</div>'+
+   '<div class="os-row"><span class="tag warn">working</span><span class="muted" style="flex:1">research_info</span><span class="muted">2 active calls</span><span class="os-row-actions">'+btn('WATCH','Opens this agent\'s live reasoning stream, tagged by call_id so two concurrent runs never merge.')+'</span></div>'+
+   '<div class="os-row"><span class="tag ok">live</span><span class="muted" style="flex:1">security</span><span class="muted">polling 300s</span></div>'+
+   '<div class="os-row"><span class="tag ok">live</span><span class="muted" style="flex:1">markets</span><span class="muted">polling 120s</span></div>'+
+   '<div class="os-row"><span class="tag">idle</span><span class="muted" style="flex:1">device_wiki</span></div>'+
+   '<div class="muted" style="margin-top:10px">Messages between agents are persisted to office_log.db. A direct message raises a real desktop notification; a broadcast does not, because routine data-plane traffic is not urgent.</div></div>' }
+};
+
+var ORDER = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS","TIMETABLE","AGENTSMITH","WIKI","SECURITY","OFFICE"];
+
+var DOCK = [
+  ['HOME','Console','M4 17l6-5-6-5 M12 19h8'],
+  ['OFFICE','Agents','M12 5a3 3 0 110 6 3 3 0 010-6 M5.5 20a6.5 6.5 0 0113 0'],
+  ['RESEARCH','Research','M11 5a6 6 0 110 12 6 6 0 010-12 M20 20l-4.5-4.5'],
+  ['SECURITY','Security','M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z'],
+  ['GLOBE','Browser','M12 3a9 9 0 110 18 9 9 0 010-18 M3 12h18 M12 3c3 3.5 3 14 0 18-3-4-3-14.5 0-18z'],
+  ['MEDIA','Media','M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z M10 9l5 3-5 3z'],
+  ['WIKI','Wiki','M4 5.5A2.5 2.5 0 016.5 3H20v16H6.5A2.5 2.5 0 004 21.5z'],
+  ['GOALS','Goals','M12 3v18 M5 8l7-5 7 5'],
+  ['SETTINGS','Settings','M12 9a3 3 0 110 6 3 3 0 010-6 M12 3v3 M12 18v3 M3 12h3 M18 12h3']
+];
+
+var cur = 'HOME';
+
+function renderNav(){
+  document.getElementById('sidebar').innerHTML = ORDER.map(function(k){
+    var s = SCREENS[k];
+    return '<button class="navitem" data-go="'+k+'" data-live="'+(s.live?1:0)+'" '+
+      'aria-current="'+(k===cur)+'" data-spec="Switches the stage to '+k+'. '+
+      (['HOME','RESEARCH','CODE','MEDIA','NEWS','DESIGN3D','COMMS'].indexOf(k)>=0
+        ? 'Has its own independent thread.' : 'Directives typed here fall back to HOME\'s thread.')+'">'+
+      '<svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" '+
+      'stroke-linecap="round" stroke-linejoin="round"><path d="'+ICON[k]+'"/></svg>'+
+      '<span style="flex:1">'+k+'</span><i class="nd"></i></button>';
+  }).join('');
+}
+function renderDock(){
+  document.getElementById('dock').innerHTML = DOCK.map(function(d){
+    return '<button class="os-dock-item" data-go="'+d[0]+'" data-running="'+(SCREENS[d[0]].live?'true':'false')+'" '+
+      'aria-label="'+d[1]+'" data-spec="Opens '+d[0]+'. The dot means that surface has something live running.">'+
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" '+
+      'stroke-linecap="round" stroke-linejoin="round"><path d="'+ICON[d[0]]+'"/></svg>'+
+      '<span class="os-dock-label">'+d[1]+'</span></button>';
+  }).join('') + '<div class="os-dock-sep"></div>' +
+  '<button class="os-dock-item" data-spec="Notification centre. Collects every alert the desktop notifier raised, with read state. Not built yet: item OS-8." aria-label="Alerts">'+
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10 20a2 2 0 004 0"/></svg>'+
+  '<span class="os-dock-label">Alerts</span></button>';
+}
+function show(k){
+  if(!SCREENS[k]) return;
+  cur = k; var s = SCREENS[k];
+  document.getElementById('stagetitle').textContent = k;
+  document.getElementById('stagesub').innerHTML = s.sub || '';
+  document.getElementById('stageactions').innerHTML = (s.actions||[]).join('');
+  document.getElementById('body').innerHTML = s.body || '<div class="empty">Nothing here yet.</div>';
+  document.getElementById('composer').style.display = s.composer ? 'flex' : 'none';
+  // Update the SELECTION, never re-render the nav. Rebuilding innerHTML on
+  // every screen change destroys the element the user is currently pressing
+  // (found for real: a scripted click timed out because the button was
+  // replaced mid-click), throws away focus, and makes the sidebar flicker.
+  // A real window manager moves a highlight; it does not rebuild its dock.
+  document.querySelectorAll('#sidebar .navitem').forEach(function(n){
+    n.setAttribute('aria-current', String(n.dataset.go === k));
+  });
+}
+document.addEventListener('click', function(e){
+  var g = e.target.closest('[data-go]');
+  if(g){ show(g.dataset.go); return; }
+  var sw = e.target.closest('.os-switch');
+  if(sw){ sw.setAttribute('aria-checked', sw.getAttribute('aria-checked')==='true'?'false':'true'); return; }
+  var seg = e.target.closest('.os-seg button');
+  if(seg){ [].forEach.call(seg.parentNode.children, function(b){ b.setAttribute('aria-selected','false'); });
+           seg.setAttribute('aria-selected','true'); return; }
+  if(e.target.closest('#specBtn')){ toggleSpec(); return; }
+  if(e.target.closest('#wallBtn')){
+    var pk=document.getElementById('wallpicker'); pk.hidden=!pk.hidden;
+    document.getElementById('wallBtn').classList.toggle('is-on', !pk.hidden); return;
+  }
+  var wp = e.target.closest('.wp');
+  if(wp){
+    var el=document.getElementById('wall');
+    el.style.backgroundImage=''; el.dataset.wall=wp.dataset.wall;
+    document.querySelectorAll('.wp').forEach(function(b){ b.setAttribute('aria-current', String(b===wp)); });
+    try{ localStorage.setItem('dm.wall', wp.dataset.wall); localStorage.removeItem('dm.wallPhoto'); }catch(_){}
+    return;
+  }
+  if(!e.target.closest('#wallpicker') && !e.target.closest('#wallBtn')){
+    var pk2=document.getElementById('wallpicker');
+    if(pk2 && !pk2.hidden){ pk2.hidden=true; document.getElementById('wallBtn').classList.remove('is-on'); }
+  }
+});
+function toggleSpec(){
+  var on = document.body.dataset.annotate === 'true';
+  document.body.dataset.annotate = on ? 'false' : 'true';
+  document.getElementById('specBtn').classList.toggle('is-on', !on);
+  document.getElementById('speclegend').textContent = on
+    ? 'press A to label every control' : 'every control is labelled with what it does';
+}
+document.addEventListener('keydown', function(e){
+  if(e.key==='a'||e.key==='A'){ if(document.activeElement.tagName!=='INPUT') toggleSpec(); }
+});
+function tick(){
+  var d=new Date(), c=document.getElementById('clock');
+  if(c) c.textContent = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+// Wallpaper: a real local photo, read with FileReader so the bytes never
+// leave this machine. Persisted as a data URL. A file too large for
+// localStorage fails honestly rather than silently dropping the choice.
+var wallFile = document.getElementById('wallFile');
+if(wallFile) wallFile.addEventListener('change', function(){
+  var f = this.files && this.files[0]; if(!f) return;
+  var r = new FileReader();
+  r.onload = function(){
+    var el = document.getElementById('wall');
+    el.style.backgroundImage = 'url('+r.result+')';
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+    el.dataset.wall = 'photo';
+    document.querySelectorAll('.wp').forEach(function(b){ b.setAttribute('aria-current','false'); });
+    try { localStorage.setItem('dm.wallPhoto', r.result); }
+    catch(err){
+      // Real, named failure: a multi-megabyte photo exceeds the localStorage
+      // quota. The wallpaper still applies for this session; only the
+      // remembering fails, and saying so beats pretending it saved.
+      var lg = document.getElementById('speclegend');
+      if(lg) lg.textContent = 'photo applied, too large to remember across restarts';
+    }
+  };
+  r.readAsDataURL(f);
+});
+var dim = document.getElementById('wallDim');
+if(dim) dim.addEventListener('input', function(){
+  document.getElementById('walldim').style.opacity = String(this.value/100);
+  try{ localStorage.setItem('dm.wallDim', this.value); }catch(_){}
+});
+var anim = document.getElementById('wallAnim');
+if(anim) anim.addEventListener('click', function(){
+  var on = this.getAttribute('aria-checked')==='true';
+  document.getElementById('wall').dataset.animated = String(!on);
+});
+// Restore a remembered choice.
+try {
+  var savedPhoto = localStorage.getItem('dm.wallPhoto');
+  var savedWall  = localStorage.getItem('dm.wall');
+  var savedDim   = localStorage.getItem('dm.wallDim');
+  var wEl = document.getElementById('wall');
+  if(savedPhoto){ wEl.style.backgroundImage='url('+savedPhoto+')';
+    wEl.style.backgroundSize='cover'; wEl.style.backgroundPosition='center'; wEl.dataset.wall='photo'; }
+  else if(savedWall){ wEl.dataset.wall = savedWall; }
+  if(savedDim){ document.getElementById('walldim').style.opacity=String(savedDim/100);
+    document.getElementById('wallDim').value = savedDim; }
+  document.querySelectorAll('.wp').forEach(function(b){
+    b.setAttribute('aria-current', String(!savedPhoto && b.dataset.wall===(savedWall||'aurora')));
+  });
+} catch(_){}
+
+tick(); setInterval(tick, 10000);
+// Render the chrome ONCE. show() only moves the selection after this.
+renderNav(); renderDock();
+show('HOME');
+})();
+</script>
+</body>
+</html>
