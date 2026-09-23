@@ -436,7 +436,9 @@ def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
     try:
         cols = [schema.id_col, schema.text_col] + ([schema.metadata_col] if schema.metadata_col else [])
         select_cols = ", ".join(f'"{c}"' for c in cols)
-        for raw_score, position in zip(distances[0].tolist(), indices[0].tolist()):
+        # strict=True: FAISS returns distances and indices of identical shape by
+        # contract. A mismatch would silently pair a score with the wrong row.
+        for raw_score, position in zip(distances[0].tolist(), indices[0].tolist(), strict=True):
             if position < 0:
                 continue  # FAISS's own "no result" sentinel
             if position >= len(position_to_id):

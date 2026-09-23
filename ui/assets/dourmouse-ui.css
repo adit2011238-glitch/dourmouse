@@ -40,6 +40,59 @@
    is named first (it will be used if the machine has it) and Monaspace
    Neon, which is OFL and vendored here, is the real shipped face. */
 
+/* 2026-09-23 (finding #082). Space Grotesk becomes the UI typeface.
+   It was already self-hosted here -- NINE files, three weights, three
+   subsets -- with no @font-face declaration at all, so none of it could
+   ever load. docs/UI_SOURCE_MAP.md predicted exactly this ("several
+   weights not obviously wired to any current theme token -- check for
+   orphans during the redesign"). Declaring it costs no new bytes and
+   keeps this app's deliberate offline-first posture intact.
+
+   unicode-range is not decoration: with it the browser downloads ONLY the
+   subset a page actually needs, so a latin-only screen never fetches the
+   Vietnamese file. Without it all three subsets load and the split is
+   worse than having no split. */
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('fonts/space-grotesk-400-latin.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2074, U+20AC, U+2212;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('fonts/space-grotesk-400-latin-ext.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('fonts/space-grotesk-500-latin.woff2') format('woff2');
+  font-weight: 500; font-style: normal; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2074, U+20AC, U+2212;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('fonts/space-grotesk-500-latin-ext.woff2') format('woff2');
+  font-weight: 500; font-style: normal; font-display: swap;
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('fonts/space-grotesk-600-latin.woff2') format('woff2');
+  font-weight: 600; font-style: normal; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2074, U+20AC, U+2212;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('fonts/space-grotesk-600-latin-ext.woff2') format('woff2');
+  font-weight: 600; font-style: normal; font-display: swap;
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+2C60-2C7F, U+A720-A7FF;
+}
+/* Departure Mono stays DECLARED but is no longer the UI face. It is a
+   pixel font: correct as a deliberate accent, wrong as the typeface every
+   label and every line of body copy is set in. Nothing references it in
+   the default token set any more; it remains available to a theme that
+   wants it on purpose. */
 @font-face {
   font-family: 'Departure Mono';
   src: url('fonts/departure-mono-400.woff2') format('woff2');
@@ -109,9 +162,26 @@
   --dm-ok:          #10B981;  /* online, passing, settled                  */
   --dm-error:       #EF4444;  /* breaking log, failed run                  */
 
-  /* Type. Track 1 is structure, Track 2 is everything the machine says. */
-  --dm-font-sans: 'Departure Mono', 'Commit Mono', 'Intel One Mono', ui-monospace, monospace;
-  --dm-font-mono: 'Berkeley Mono', 'Monaspace Neon', 'JetBrains Mono NL', 'JetBrains Mono', ui-monospace, monospace;
+  /* Type. Two faces, one job each, both self-hosted so they work offline.
+     2026-09-23 (finding #082): --dm-font-sans was 'Departure Mono', a PIXEL
+     font. That is a deliberate accent typeface and it was being used for
+     every label and every line of body copy in the product, which is why
+     the UI read as pixelated rather than clean.
+
+     Track 1, structure and UI text: Space Grotesk. A geometric sans with
+     real 400/500/600 weights, already on disk, distinctive enough to be
+     this product's own voice rather than the system default every app
+     reaches for.
+
+     Track 2, everything the machine says: Monaspace Neon. Clean, modern,
+     four real weights, and a mono so columns of numbers and paths actually
+     align. Berkeley Mono stays first in the stack for anyone who has
+     licensed it locally; Monaspace is the real shipped fallback.
+
+     The fallbacks are ordered so a missing face degrades to something with
+     the SAME shape (sans to sans, mono to mono), never across. */
+  --dm-font-sans: 'Space Grotesk', 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --dm-font-mono: 'Berkeley Mono', 'Monaspace Neon', 'Intel One Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Type scale (UI-2, 2026-09-23, finding #079). Eight steps, integers
      only, replacing SEVENTEEN ad hoc font-size values that ran from 7.5px

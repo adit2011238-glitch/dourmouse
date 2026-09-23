@@ -91,7 +91,10 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Cosine similarity, pure Python (stdlib only). 0.0 for empty/mismatched."""
     if not a or not b or len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    # strict=True asserts the equal-length invariant the guard above already
+    # established. If it ever fails, a cosine over mismatched vectors is a
+    # meaningless number and raising beats returning one.
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     if na == 0.0 or nb == 0.0:
@@ -132,7 +135,9 @@ def ensure_embeddings(
         batch = embed_texts([f["body"] for f in missing])
         if batch is None or len(batch) != len(missing):
             return None
-        for fact, vec in zip(missing, batch):
+        # strict=True: the guard above already returned on a length mismatch, so a
+        # failure here would mean embeddings silently paired to the wrong facts.
+        for fact, vec in zip(missing, batch, strict=True):
             store.save_embedding(fact["id"], embed_model(), vec)
             vectors[fact["id"]] = vec
     return vectors

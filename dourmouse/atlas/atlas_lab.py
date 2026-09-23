@@ -282,7 +282,10 @@ def _parse_csv_strategies(
                 continue
             if len(parts) < len(headers):
                 continue
-            row = dict(zip(headers, [p.strip().strip('"') for p in parts]))
+            row = dict(zip(headers, [p.strip().strip('"') for p in parts], strict=False))
+            # strict=False is deliberate: the guard above only rejects rows with
+            # FEWER fields than headers, so a row with extra trailing columns is
+            # legitimately truncated to the known header set.
 
             def first(cols: tuple[str, ...]) -> str:
                 for col in cols:

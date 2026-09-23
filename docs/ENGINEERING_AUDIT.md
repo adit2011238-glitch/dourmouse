@@ -3767,6 +3767,88 @@ is NOT done.
 
 ---
 
+### 082 -- the UI was set in a pixel font, and the clean one was already on disk
+
+**Severity**: real, product-wide. **Context**: user reviewed the OS mockup and asked for "a
+standard font for everything, not pixelated, clean and neat but not your defaults".
+
+**The defect**: `--dm-font-sans`, the token every label, heading and line of body copy in the
+product resolves through, was set to **Departure Mono, a pixel font**. That is a legitimate
+deliberate accent face and entirely the wrong choice for the typeface a whole UI is set in.
+It is why the interface read as pixelated rather than clean.
+
+**The fix cost no new bytes, because the right face was already here.** `ui/assets/fonts/`
+contains **nine Space Grotesk files** (three weights, three subsets) with **no `@font-face`
+declaration anywhere**, so none of it could ever load. `docs/UI_SOURCE_MAP.md` predicted
+exactly this in its typography section: *"several weights not obviously wired to any current
+theme token -- check for orphans during the redesign."* This is that orphan.
+
+**What shipped, in `ui/assets/dourmouse-ui.css`:**
+- Six `@font-face` declarations for Space Grotesk: 400/500/600, latin and latin-ext.
+- `--dm-font-sans` is now Space Grotesk. Geometric, real weights, distinctive enough to be
+  this product's own voice rather than the system default every application reaches for
+  (explicitly not `system-ui` and not Inter, per the user's "not your defaults").
+- `--dm-font-mono` leads with Monaspace Neon as the real shipped face. Clean, modern, four
+  genuine weights, and a mono so columns of numbers and paths actually align. Berkeley Mono
+  stays first in the stack for anyone who has licensed it locally.
+- Fallback stacks reordered so a missing face degrades to the SAME shape, sans to sans and
+  mono to mono, never across. A sans falling back to a mono changes every column width.
+
+**`unicode-range` is load-bearing, not decoration.** With it the browser downloads only the
+subset a page actually needs, so a latin-only screen never fetches the Vietnamese file.
+Without it all three subsets download and the split is strictly worse than having no split at
+all.
+
+**Departure Mono is kept DECLARED but unreferenced.** Deleting the face would remove a real
+option from any theme that wants a pixel accent on purpose; the defect was using it as the
+default, not its existence.
+
+**Offline-first is preserved.** Both faces were already self-hosted, which is the whole reason
+this app vendors its fonts. Nothing new is fetched and no CDN is introduced.
+
+**Verified live, from the browser rather than from the source**: `document.fonts` reports
+`Space Grotesk 400`, `500`, `600` and `Monaspace Neon 400` all loaded;
+`document.fonts.check('16px "Space Grotesk"')` is `true` and the same check for Departure Mono
+is `false`; and the computed `font-family` on the menu bar, the nav items and the body all
+resolve to Space Grotesk. All 20 mockup screens re-walked afterwards: zero JS errors, zero
+overflow, layout unaffected.
+
+**Addendum, same day: the agent office view.** The mockup's OFFICE screen was a flat list,
+which does not show what the design actually calls for. Rebuilt as the real building from the
+design phase: five floors plus the Lounge, with the **verified 43-agent floor map** (F1
+Executive and Ops 11, F2 Research and Intel 9, F3 Trust and Security 3, F4 Engineering 11, F5
+Finance and Media 8, Lounge 1). That map came from a live `build_general_registry()` call, not
+from invention. A floor selector on the left doubles as a building cross-section, each floor
+showing a dot per agent coloured by its real `ActivityTracker` status (idle, working, live, in
+meeting). Selecting a floor renders its desks; an agent in a fan-out has its desk dimmed
+because the seat is genuinely empty, and appears in the meeting room instead with a real
+arrival animation. The animation is the point: it is how a fan-out reads as agents going
+somewhere rather than a list changing colour.
+
+**Two real defects found while building it, both worth recording as classes:**
+1. **An undercount caught by counting.** The first build rendered 42 of 43 agents. `mail` is an
+   always-on poller belonging to no team, so it had silently fallen out. It now has the Lounge.
+   This is the same quiet-undercount class this project has repeatedly found in its own stale
+   comments, and it was caught only because the render was checked against the known total.
+2. **A CSS class collision that only shows visually.** `meet` was used as BOTH a status
+   modifier (`<i class="fd meet">`, `<div class="desk meet">`) and the meeting room's own class.
+   The bare `.meet{width:196px;display:flex}` rule therefore styled every status dot as a
+   196px-wide meeting room, producing purple bars across the building column. A modifier and a
+   component must never share a class name; the room is now `.meetroom`.
+
+Worth noting how (2) was diagnosed, because the first two hypotheses were wrong: it was
+initially assumed to be an animation artifact, and a screenshot with `animations="disabled"`
+disproved that by reproducing it identically. A DOM query then found three elements with a
+computed `width: 196px` that should have been 4px, which named the collision immediately.
+Checking computed values beat reasoning about the symptom.
+
+**Scope note**: this changes the shared token, so it reaches every surface that actually uses
+`--dm-*`. `console.html` and `workspace.html` still maintain their own duplicated `:root`
+palettes (finding #040, roadmap item UI-1), so they keep their own font declarations until
+that duplication is resolved. That is a known, separately tracked gap, not an oversight here.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

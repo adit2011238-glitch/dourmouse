@@ -90,6 +90,64 @@
   /* The dim layer sits between the photo and the UI. Without it, body copy
      over a bright photo drops below 4.5:1 and the shell becomes unreadable. */
   #walldim{position:fixed;inset:0;z-index:0;pointer-events:none;background:#000;opacity:.35}
+  /* ---- agent office ------------------------------------------------
+     Four statuses, and each is a real ActivityTracker value rather than a
+     mood: idle (no current call), work (a tool call in flight), live (an
+     always-on poller), meet (in a delegate_parallel fan-out). */
+  .floor{display:grid;grid-template-columns:26px 1fr;grid-template-rows:auto auto;
+    gap:1px 7px;align-items:center;padding:6px 8px;border-radius:9px;cursor:pointer;
+    border:1px solid var(--os-edge-lo);background:rgba(255,255,255,.04);text-align:left;
+    transition:background var(--os-dur-fast) linear,border-color var(--os-dur-fast) linear,
+               transform var(--os-dur) var(--os-spring)}
+  .floor:hover{background:rgba(255,255,255,.09);transform:translateX(2px)}
+  .floor[aria-current="true"]{border-color:var(--dm-active);background:rgba(245,158,11,.13)}
+  .floor .fno{grid-row:1/3;font-family:var(--dm-font-mono);font-size:var(--dm-text-sm);
+    color:var(--dm-fg-dim);text-align:center}
+  .floor[aria-current="true"] .fno{color:var(--dm-active)}
+  .floor .fname{font-size:var(--dm-text-2xs);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--dm-fg-body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .floor .fdots{display:flex;gap:2px;flex-wrap:wrap}
+  .fd{width:4px;height:4px;border-radius:999px;background:var(--dm-fg-dim);opacity:.45}
+  .fd.work{background:var(--dm-active);opacity:1}
+  .fd.live{background:var(--dm-ok);opacity:1}
+  .fd.meet{background:#8b5cf6;opacity:1}
+  .desks{flex:1;min-width:0;display:grid;gap:8px;align-content:start;
+    grid-template-columns:repeat(auto-fill,minmax(112px,1fr));overflow:auto}
+  .desk{position:relative;padding:8px 7px 7px;border-radius:9px;
+    border:1px solid var(--os-edge-lo);background:rgba(255,255,255,.035);
+    transition:transform var(--os-dur) var(--os-spring),background var(--os-dur-fast) linear}
+  .desk:hover{transform:translateY(-2px);background:rgba(255,255,255,.08)}
+  .desk .who{font-size:var(--dm-text-2xs);color:var(--dm-fg-body);letter-spacing:.02em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:none}
+  .desk .st{font-size:8px;letter-spacing:.09em;text-transform:uppercase;margin-top:3px;
+    color:var(--dm-fg-dim)}
+  .desk.work .st{color:var(--dm-active)} .desk.live .st{color:var(--dm-ok)}
+  .desk.meet{opacity:.35}                    /* seat is empty: they are in the meeting */
+  .desk .av{width:16px;height:16px;border-radius:5px;margin-bottom:5px;
+    background:linear-gradient(160deg,rgba(255,255,255,.28),rgba(255,255,255,.08));
+    border:1px solid var(--os-edge-hi)}
+  .desk.work .av{background:linear-gradient(160deg,#f59e0b,#b45309)}
+  .desk.live .av{background:linear-gradient(160deg,#10b981,#047857)}
+  /* NAMED meetroom, not meet: `meet` is also the status modifier on .fd and
+     .desk, and a bare `.meet` rule was styling every status dot as a 196px
+     meeting room. A modifier and a component must never share a class name. */
+  .meetroom{width:196px;flex:0 0 auto;padding:10px;display:flex;flex-direction:column;
+    border-radius:var(--os-radius-widget);border:1px solid rgba(139,92,246,.42);
+    background:rgba(139,92,246,.11);box-shadow:var(--os-elev-rest)}
+  .meetroom-l{font-size:8px;letter-spacing:.14em;color:#c4b5fd;margin-bottom:7px}
+  .meetroom-seats{display:flex;gap:8px;flex-wrap:wrap;align-content:flex-start;flex:1}
+  .seat{display:flex;flex-direction:column;align-items:center;gap:3px;width:52px}
+  .seat .av{width:16px;height:16px;border-radius:5px;
+    background:linear-gradient(160deg,#a78bfa,#6d28d9);border:1px solid rgba(255,255,255,.22);
+    animation:os-seat-in var(--os-dur-slow) var(--os-spring) both}
+  .seat .nm{font-size:8px;color:#ddd6fe;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;max-width:52px}
+  /* The sprite ARRIVES. The walk is the whole point of the office: it is
+     how a fan-out reads as agents going somewhere rather than a list
+     changing colour. Driven only by real events, never a timer. */
+  @keyframes os-seat-in{from{opacity:0;transform:translate(-26px,16px) scale(.6)}
+                        to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){ .seat .av{animation-duration:1ms} }
 </style>
 </head>
 <body>
@@ -191,6 +249,30 @@ var ICON = {
  SECURITY:'M12 2.8l7.5 3.1v6c0 4.4-3.1 7.6-7.5 9.3-4.4-1.7-7.5-4.9-7.5-9.3v-6zM9 12l2.2 2.2L15.5 10',
  OFFICE:'M3 20.5h18M5 20.5V9l7-5 7 5v11.5M9.5 20.5V15h5v5.5M9 11h1.5M13.5 11H15'
 };
+
+/* The real 43-agent floor map, verified against a live build_general_registry()
+   call rather than invented. Status values are the four the ActivityTracker
+   genuinely reports. */
+var OFFICE_FLOORS = [
+ { name:'Executive &amp; Ops', agents:[['orchestrator','work'],['comms','idle'],['companion','idle'],
+   ['admin_ops','idle'],['scheduling','idle'],['tasks','idle'],['goals','work'],['system','live'],
+   ['memory','idle'],['messenger','idle'],['docs','idle']] },
+ { name:'Research &amp; Intel', agents:[['research_info','meet'],['research_mesh','idle'],
+   ['evidence_pipeline','idle'],['device_wiki','idle'],['study','idle'],['worldmonitor','live'],
+   ['globe','idle'],['news','live'],['rnd','meet']] },
+ { name:'Trust &amp; Security', agents:[['security','meet'],['reviewer','idle'],['agent_smith','idle']] },
+ { name:'Engineering', agents:[['dev_coding','work'],['code_claude','idle'],['code_codex','idle'],
+   ['code_deepseek','idle'],['code_nvidia','idle'],['code_ollama','idle'],['compute','idle'],
+   ['browser','work'],['panel_control','idle'],['apps','idle'],['design_3d','idle']] },
+ { name:'Finance &amp; Media', agents:[['forex','idle'],['freebuff','idle'],['google_workspace','idle'],
+   ['markets','live'],['media','idle'],['music','idle'],['mt5','idle'],['t212','idle']] },
+ /* The Lounge is the 43rd agent and it is NOT a spare floor. mail is an
+    always-on poller (every 300s), so it belongs to no team and is shown
+    regardless of which floor is open. Dropping it silently would have made
+    the building show 42 of 43 agents, which is exactly the kind of quiet
+    undercount this project keeps finding in its own stale comments. */
+ { name:'Lounge', agents:[['mail','live']] },
+];
 
 var SCREENS = {
 HOME: { sub:'central agent dispatch', live:1, composer:true,
@@ -415,15 +497,38 @@ SECURITY: { sub:'defensive posture', live:1,
    '<div class="os-row"><span class="tag">info</span><span class="muted" style="flex:1">New device on the tailnet</span></div>'+
    '<div class="muted" style="margin-top:8px">8 of the founding spec\'s 54 items are built. The score never hides the evidence behind it.</div></div></div>' },
 
-OFFICE: { sub:'agent ecosystem', live:1, actions:[],
+OFFICE: { sub:'5 floors + lounge &middot; 43 agents &middot; live', live:1, actions:[
+    btn('FOLLOW','Pins the view to whichever floor has activity, so the building follows the work instead of you hunting for it.'),
+    btn('TRANSCRIPTS','Opens the merged conversation for the selected meeting, assembled from every participating call_id.') ],
   body:
-   '<div class="card"><div class="lbl">49 agents &middot; live status from the real event stream</div>'+
-   '<div class="os-row"><span class="tag warn">working</span><span class="muted" style="flex:1">research_info</span><span class="muted">2 active calls</span><span class="os-row-actions">'+btn('WATCH','Opens this agent\'s live reasoning stream, tagged by call_id so two concurrent runs never merge.')+'</span></div>'+
-   '<div class="os-row"><span class="tag ok">live</span><span class="muted" style="flex:1">security</span><span class="muted">polling 300s</span></div>'+
-   '<div class="os-row"><span class="tag ok">live</span><span class="muted" style="flex:1">markets</span><span class="muted">polling 120s</span></div>'+
-   '<div class="os-row"><span class="tag">idle</span><span class="muted" style="flex:1">device_wiki</span></div>'+
-   '<div class="muted" style="margin-top:10px">Messages between agents are persisted to office_log.db. A direct message raises a real desktop notification; a broadcast does not, because routine data-plane traffic is not urgent.</div></div>' }
+   '<div style="display:flex;gap:12px;height:100%">'+
+   /* building cross-section */
+   '<div style="width:150px;flex:0 0 auto;display:flex;flex-direction:column-reverse;'+
+     'justify-content:flex-end;gap:6px" id="bldg">'+
+     OFFICE_FLOORS.map(function(f,i){
+       return '<button class="floor" data-floor="'+i+'" aria-current="'+(i===1)+'" '+
+         'data-spec="Floor '+(i+1)+', '+f.name+'. '+f.agents.length+' agents. Click to open this floor. '+
+         'The dot count is how many are doing something right now.">'+
+         '<span class="fno">F'+(i+1)+'</span>'+
+         '<span class="fname">'+f.name+'</span>'+
+         '<span class="fdots">'+f.agents.map(function(a){
+            return '<i class="fd '+a[1]+'"></i>'; }).join('')+'</span>'+
+       '</button>';
+     }).join('')+
+   '</div>'+
+   /* the floor itself */
+   '<div class="card" style="flex:1;min-width:0;display:flex;flex-direction:column;padding:10px">'+
+     '<div class="lbl" id="floorname" style="margin-bottom:8px">Research &amp; Intel</div>'+
+     '<div style="flex:1;min-height:0;display:flex;gap:10px">'+
+       '<div id="desks" class="desks"></div>'+
+       '<div class="meetroom" data-spec="Meeting room. An agent walks here when it joins a real '+
+         'delegate_parallel fan-out and walks back when its branch returns. Driven only by real '+
+         'events, never a timer, so an empty room means nothing is fanned out.">'+
+         '<div class="meetroom-l">MEETING ROOM</div><div class="meetroom-seats" id="seats"></div></div>'+
+     '</div>'+
+   '</div></div>' },
 };
+
 
 var ORDER = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS","TIMETABLE","AGENTSMITH","WIKI","SECURITY","OFFICE"];
 
@@ -465,6 +570,28 @@ function renderDock(){
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10 20a2 2 0 004 0"/></svg>'+
   '<span class="os-dock-label">Alerts</span></button>';
 }
+function paintFloor(i){
+  var f = OFFICE_FLOORS[i];
+  var fn = document.getElementById('floorname'); if(!fn) return;
+  fn.innerHTML = f.name;
+  document.querySelectorAll('.floor').forEach(function(b){
+    b.setAttribute('aria-current', String(Number(b.dataset.floor) === i));
+  });
+  document.getElementById('desks').innerHTML = f.agents.map(function(a){
+    var label = a[1]==='meet' ? 'in meeting' : a[1]==='work' ? 'working'
+              : a[1]==='live' ? 'live' : 'idle';
+    return '<div class="desk '+a[1]+'" data-spec="'+a[0]+'. Click opens this agent\'s live '+
+      'reasoning stream, tagged by call_id so two concurrent runs never merge.">'+
+      '<div class="av"></div><div class="who">'+a[0]+'</div>'+
+      '<div class="st">'+label+'</div></div>';
+  }).join('');
+  var inMeeting = f.agents.filter(function(a){ return a[1]==='meet'; });
+  document.getElementById('seats').innerHTML = inMeeting.length
+    ? inMeeting.map(function(a){
+        return '<div class="seat"><div class="av"></div><div class="nm">'+a[0]+'</div></div>'; }).join('')
+    : '<div style="font-size:8px;color:#a78bfa;opacity:.6;align-self:center">no fan-out running</div>';
+}
+
 function show(k){
   if(!SCREENS[k]) return;
   cur = k; var s = SCREENS[k];
@@ -481,10 +608,13 @@ function show(k){
   document.querySelectorAll('#sidebar .navitem').forEach(function(n){
     n.setAttribute('aria-current', String(n.dataset.go === k));
   });
+  if(k === 'OFFICE') paintFloor(1);
 }
 document.addEventListener('click', function(e){
   var g = e.target.closest('[data-go]');
   if(g){ show(g.dataset.go); return; }
+  var fl = e.target.closest('.floor');
+  if(fl){ paintFloor(Number(fl.dataset.floor)); return; }
   var sw = e.target.closest('.os-switch');
   if(sw){ sw.setAttribute('aria-checked', sw.getAttribute('aria-checked')==='true'?'false':'true'); return; }
   var seg = e.target.closest('.os-seg button');

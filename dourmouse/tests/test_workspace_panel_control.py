@@ -184,7 +184,9 @@ class TestComputeGridLayoutRealMath:
             by_row.setdefault(r["y"], []).append(r)
         for row in by_row.values():
             row_sorted = sorted(row, key=lambda r: r["x"])
-            for a, b in zip(row_sorted, row_sorted[1:]):
+            # strict=False is required, not a preference: the adjacent-pairs
+            # idiom zip(xs, xs[1:]) is off by one BY CONSTRUCTION.
+            for a, b in zip(row_sorted, row_sorted[1:], strict=False):
                 assert a["x"] + a["w"] <= b["x"], f"real horizontal overlap: {a} vs {b}"
 
     def test_every_rect_respects_the_real_client_minimum_size(self, tmp_path):

@@ -3515,7 +3515,9 @@ class TestAgentSplitBackend:
         # Every non-heavy agent's verdict must actually MATCH what
         # model_delegation itself would say — the whole point of merging
         # rather than keeping a second, independent classification.
-        for name, backend in zip(names, backends):
+        # strict=True: these are parallel lists over the same agents, so a
+        # length mismatch means the fixture drifted rather than a real result.
+        for name, backend in zip(names, backends, strict=True):
             if backend == "claude":
                 continue
             assert backend == ("gemini" if route_for(name) == CLOUD else "local"), name

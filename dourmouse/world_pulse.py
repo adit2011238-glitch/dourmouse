@@ -740,7 +740,13 @@ def _fetch_air_quality() -> list[dict[str, Any]]:
     if not isinstance(rows, list) or not rows:
         raise RuntimeError("Open-Meteo air-quality returned no rows")
     out: list[dict[str, Any]] = []
-    for (name, req_lat, req_lon), row in zip(_AQ_CITIES, rows):
+    # strict=False because `rows` is a LIVE Open-Meteo response and a short one is
+    # genuinely possible. Named limitation rather than a silent one: a response
+    # with fewer rows than requested cities drops the trailing cities from this
+    # report without saying so. Raising here would turn a partial result into a
+    # total outage, which is worse, but reporting the shortfall would be better
+    # than both. Tracked as a follow-on rather than changed inside a lint pass.
+    for (name, req_lat, req_lon), row in zip(_AQ_CITIES, rows, strict=False):
         if not isinstance(row, dict):
             continue
         current = row.get("current") or {}
