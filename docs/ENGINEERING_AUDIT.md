@@ -3227,6 +3227,55 @@ commit this session -- `google_auth`/`deeplink` env leakage).
 
 ---
 
+### 075 -- audit: the embedded browser/PDF/media shell (real state, user-directed, "replace every app")
+
+**Severity**: n/a (audit only, no code changed). **Context**: user framed the embedded browser as key
+to a larger ambition -- Dourmouse as a real OS-level shell users never need to leave (writing docs,
+watching video, browsing, media, search, all inside Dourmouse). Asked for a brutally honest map of what
+actually exists today before scoping new work, not a guess from file/tool names.
+**Real, source-verified findings** (file:line references from a dedicated read, not inferred):
+1. **Browser automation is real, not a stub**: `dourmouse/browser_agent.py` drives real, locally-installed
+   Chrome via Playwright (`pw.chromium.launch(channel="chrome", ...)`) -- real DOM fill/click/submit, not
+   a urllib scraper. A separate, much simpler `fetch_url`/`open_url` pair lives on `research_info`
+   (text-only fetch / OS-level `webbrowser.open`, not embedded).
+2. **A real in-page browser pane exists**: `console.html`'s `<iframe id="bpFrame">` (real nav chrome:
+   back/forward/reload/address bar, resizable/minimizable), backed by `browser_pane.py`'s real
+   `check_frameable()` (reads actual `X-Frame-Options`/CSP) and a real server-side rewriting proxy
+   fallback for sites that block framing. **Real, named limitation**: the proxy fallback carries no live
+   cookies/session -- a site requiring login inside the pane, once proxied, will not behave like a real
+   logged-in session. The iframe sandbox deliberately omits `allow-same-origin` (a documented sandbox-
+   escape tradeoff), which also narrows what can work embedded.
+3. **A second, faster embed exists but is not the shipped default**: `electron/main.js` wires a real
+   Chromium `BrowserView` connected over CDP to the *same* live Playwright session the automation tools
+   drive -- but it self-reports NOT CONFIGURED unless launched through the Electron shell specifically,
+   and the currently-scripted launch path (`start.command`, `build_dist.sh`, `README.md`) still boots the
+   older pywebview/WKWebView shell. Real, half-migrated state, not a design choice announced anywhere.
+4. **PDF has a real page-image viewer**, not just text extraction: `pdf_reader.py` uses `pypdfium2`
+   (the same engine Chrome's own PDF viewer uses) to render real page PNGs, plus real Tesseract OCR for
+   scanned pages. Surfaced two ways: `ui/workspace.html`'s dedicated PDF READER panel, and `ui/file_
+   preview.html` loaded into the shared browser pane via `open_file_preview`. A separate, backend-only
+   `extract_pdf` (pypdf, text-only, no images) feeds RAG ingestion -- correctly kept separate, not
+   confused with the visual viewer.
+5. **No embedded audio/video playback exists anywhere in Dourmouse's own UI.** Checked directly: the only
+   `<audio>`/`<video>` elements in any `ui/*.html` are TTS voice output (`new Audio()` against `/api/
+   speech`) and a webcam feed for hand-gesture tracking -- neither is media playback. **Spotify is real
+   but remote-control only**: it drives the user's own separate Spotify Connect device via the real
+   Spotify Web API; Dourmouse never receives or plays audio bytes itself. **No YouTube integration exists
+   at all** (zero matches repo-wide).
+6. **This was never a scoped domain**: grepped both `docs/COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md` and
+   `docs/GODSPEED_ROADMAP.md` for "browser"/"PDF"/"media"/"replace every app"/"OS-level" as a named
+   feature domain -- none exists. The closest real text is one product-vision sentence calling Dourmouse
+   a "persistent, local-first, personal operating **layer**" (not "operating system," and about autonomy/
+   persistence, not embedding other apps' UIs). A separate, pre-existing note,
+   `docs/browser_pane_architecture.md`, scoped the iframe-vs-second-window tradeoff for the pane
+   specifically, before both the fuller iframe+proxy implementation and the Electron `BrowserView` (both
+   confirmed real above) existed.
+**Result**: audit only. Real gap list (not yet built, see `docs/GODSPEED_ROADMAP.md`'s new Phase 5 item
+for the tracked TODO): no in-app audio/video player, Electron's faster real embed not on the default
+launch path, iframe-proxy sites without a live logged-in session, no YouTube integration.
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified

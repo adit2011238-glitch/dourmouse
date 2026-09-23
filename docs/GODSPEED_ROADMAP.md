@@ -956,6 +956,24 @@ and a real build sequence, not just a requirement statement:
       locally overrides the canvas color instead of inheriting it --
       unaudited beyond the primary screen. See
       `docs/ENGINEERING_AUDIT.md` finding #040.
+- [ ] **New, user-directed 2026-09-20 ("browser is key... replace every app")**: the embedded
+      browser/PDF/media shell, audited (finding #075) but not yet built out. Real state: browser
+      automation and an in-page iframe pane are real and working (with a proxy fallback for
+      framing-blocked sites, no live login there); PDF has a real PDFium page-image viewer; a
+      faster Electron `BrowserView` embed exists but is not on the default launch path; there is
+      **no embedded audio/video player anywhere** (Spotify is remote-control only, no YouTube
+      integration at all). Real gaps to close, not yet scoped into steps:
+      1. Make the Electron shell (real CDP-connected `BrowserView`) the default launch path, or
+         explicitly decide to keep pywebview and drop the Electron migration -- currently neither
+         is true, it is just half-built.
+      2. A real embedded audio/video player (native `<audio>`/`<video>`, not a remote-control
+         panel) for actual media playback inside Dourmouse.
+      3. Real login/session handling for the iframe-pane's proxy fallback, or an honest, visible
+         "this site can't be embedded, use `open_url` instead" UI state rather than a silently
+         cookie-less proxy.
+      4. Live-verify the existing browser pane, PDF viewer, and Spotify remote control against a
+         real range of sites/documents (not just the one path already proven) -- brutal, no
+         assumed-working claims.
 
 ## Notes / decisions log
 

@@ -79,3 +79,6 @@ electron/verify-result.json
 # an external static-site deploy serves it straight from this repo's
 # working tree). Don't add them to this file without re-reading that note
 # and README.md "Binary assets & Git LFS" first.
+
+# Claude Code session-local settings
+.claude/
