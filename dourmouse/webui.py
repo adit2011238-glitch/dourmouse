@@ -1788,6 +1788,27 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # quieter logs
         pass
 
+    # 2026-09-23, found on a real Electron cold boot (finding #077): a client
+    # that goes away mid-response raised an unhandled BrokenPipeError out of
+    # do_GET, and socketserver printed a ~25-line traceback to stderr for it.
+    # That is not an error: this server's own UI polls /api/activity on a
+    # timer, and any reload, navigation or window close aborts an in-flight
+    # poll. The traceback is pure noise, and noise that routinely buries real
+    # errors is an operability bug, not a cosmetic one.
+    #
+    # This codebase already treats a vanished client as ordinary in the two
+    # places that stream (the SSE emitter sets client_gone; _send_media_file
+    # returns quietly), so this generalizes that ESTABLISHED convention to
+    # every ordinary route instead of adding a third opinion. Deliberately
+    # narrow: only these two exceptions, only here, and close_connection is
+    # set so the server tears the socket down rather than trying to reuse it.
+    # Any other exception still propagates and is still logged loudly.
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
     # -- v4.0 auth gate (multi-device, spec Phase 9) ---------------------- #
 
     def _authorized(self) -> bool:

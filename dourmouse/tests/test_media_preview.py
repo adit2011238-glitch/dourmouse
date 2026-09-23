@@ -503,3 +503,74 @@ class TestMediaRouteIsNotAFileReadPrimitive:
         status, body, _ = _get(port, "/api/files/media?path=" + urllib.parse.quote(str(link)))
         assert status == 200
         assert body == _BODY
+
+
+class TestClientDisconnectIsNotAnError:
+    """2026-09-23 (finding #077), found on a real Electron cold boot: a client
+    that goes away mid-response raised an unhandled BrokenPipeError out of
+    do_GET and socketserver printed a ~25-line traceback for it. This server's
+    own UI polls /api/activity on a timer, so any reload or window close
+    aborts an in-flight poll. Noise that routinely buries real errors is an
+    operability bug."""
+
+    @pytest.mark.parametrize("exc_type", [BrokenPipeError, ConnectionResetError])
+    def test_the_handler_swallows_a_vanished_client_and_closes_the_socket(self, exc_type):
+        import dourmouse.webui as webui_mod
+        from dourmouse.webui import _Handler
+
+        handler = _Handler.__new__(_Handler)  # no socket needed for this path
+        handler.close_connection = False
+        original = webui_mod.BaseHTTPRequestHandler.handle_one_request
+
+        def boom(self, _exc=exc_type):
+            raise _exc("client went away")
+
+        # Exercise the REAL method through the real MRO, faking only what it
+        # delegates to, rather than reimplementing its logic in the test.
+        webui_mod.BaseHTTPRequestHandler.handle_one_request = boom
+        try:
+            _Handler.handle_one_request(handler)  # must NOT raise
+        finally:
+            webui_mod.BaseHTTPRequestHandler.handle_one_request = original
+        assert handler.close_connection is True
+
+    def test_any_other_exception_still_propagates(self):
+        # The narrowness is the point: swallowing everything here would hide
+        # real server bugs behind a silent socket close.
+        import dourmouse.webui as webui_mod
+        from dourmouse.webui import _Handler
+
+        handler = _Handler.__new__(_Handler)
+        handler.close_connection = False
+        original = webui_mod.BaseHTTPRequestHandler.handle_one_request
+
+        def boom(self):
+            raise ValueError("a real bug")
+
+        webui_mod.BaseHTTPRequestHandler.handle_one_request = boom
+        try:
+            with pytest.raises(ValueError, match="a real bug"):
+                _Handler.handle_one_request(handler)
+        finally:
+            webui_mod.BaseHTTPRequestHandler.handle_one_request = original
+
+    def test_a_real_aborted_request_leaves_the_server_usable(self, server, media_file):
+        # End to end: abort a real request mid-flight by closing the socket
+        # without reading the body, then prove the NEXT request still works.
+        # A server that died or wedged on the disconnect fails this.
+        import socket
+        import urllib.parse
+
+        _, port = server
+        raw = (
+            f"GET /api/files/media?path={urllib.parse.quote(str(media_file))} "
+            "HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        )
+        sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+        sock.sendall(raw.encode())
+        sock.recv(16)  # read a token amount, then vanish mid-body
+        sock.close()
+
+        status, body, _ = _get(port, _media_url(media_file))
+        assert status == 200
+        assert body == _BODY

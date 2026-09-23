@@ -3416,6 +3416,66 @@ protocol-relative refusal.
 
 ---
 
+### 077 -- an unhandled BrokenPipeError on every client disconnect, found by booting the real shell
+
+**Severity**: operability. **Context**: found while verifying finding #076's two unverified
+gaps in the real Electron shell rather than the Claude Browser test tool. The very first
+Electron cold boot printed a ~25-line traceback to stderr:
+
+```
+Exception occurred during processing of request from ('127.0.0.1', 55925)
+  ... File "dourmouse/webui.py", line 2159, in do_GET
+      self._send_json(self.server.tracker.snapshot())
+BrokenPipeError: [Errno 32] Broken pipe
+```
+
+**Why this is real and not cosmetic**: `/api/activity` is polled on a timer by this server's
+own UI, so any reload, navigation or window close aborts an in-flight poll. A vanished client
+is ORDINARY, expected behaviour, not an error -- but `socketserver` logged a full traceback for
+each one. Noise that routinely buries real errors is an operability bug.
+
+**Fix**: this codebase already treats a vanished client as ordinary in both places that stream
+(the SSE emitter sets `client_gone`; `_send_media_file` returns quietly, added in #076). This
+generalizes that ESTABLISHED convention to every ordinary route at the one chokepoint,
+`_Handler.handle_one_request`, rather than adding a third opinion or sprinkling try/except per
+route. Deliberately narrow: only `BrokenPipeError` and `ConnectionResetError` are caught, and
+`close_connection` is set so the socket is torn down rather than reused. Every other exception
+still propagates and is still logged loudly -- swallowing more here would hide real server bugs
+behind a silent socket close, which is the opposite of what this codebase does everywhere else.
+
+**Verified**: re-booted the real Electron shell after the fix. Traceback count 0 (was 1),
+`BrokenPipeError` count 0. Tests exercise the real method through the real MRO (faking only
+what it delegates to) for both exception types, assert a `ValueError` still propagates, and
+end-to-end abort a real in-flight request by closing the socket mid-body and then prove the
+next request still succeeds.
+
+**Both of #076's unverified gaps are now closed by this same session**, in the real shell:
+- **Wall-clock playback**: audio advanced 1.95s over 2.5s and seeked exactly to 5.0; video
+  advanced **2.002s across 2.000s** of wall clock with a real decoded frame. In the Claude
+  Browser tool `play()` resolved but `currentTime` never moved, for either, because a headless
+  browser has no audio sink.
+- **The pane embed**: `POST /api/browser-pane/open` with the root-relative URL returned
+  `{"ok": true}` and the media player rendered correctly INSIDE the real browser pane, inside
+  the real Electron window, on the first try. The pane's address bar reads
+  `/file_preview.html?src=files&path=...`, so #076's same-origin fix is live and visible in the
+  real UI. Screenshots: `~/Documents/DOURMOUSE/EVIDENCE/003_*.png` and `004_*.png`.
+
+The #076 diagnosis was therefore correct: the blank pane was the Claude Browser test tool
+blocking sandboxed-iframe navigation (`ERR_BLOCKED_BY_CLIENT`), never a product defect. Worth
+recording as a method, not just a result: it was established as a harness problem rather than a
+regression by checking a PRE-EXISTING path the change never touched (a plain PNG) and finding it
+failed identically.
+
+**Also established, and it supersedes a standing limitation**: screenshots CAN be written to
+real disk paths, via Playwright `connect_over_cdp` against the Electron shell's own CDP port
+plus `page.screenshot(path=...)` -- the same mechanism `browser_agent.py` already uses. Two real
+gotchas: Electron refuses `Target.createTarget` (so navigate an existing page from
+`context.pages` and restore it in a `finally`, never `new_page()`), and a sandboxed iframe's
+`contentDocument` is `null` from the parent (an opaque origin, meaning it cannot be introspected
+from outside, NOT that it failed to render).
+
+---
+
 ## Not yet audited (honest, tracked gap — see `docs/GODSPEED_ROADMAP.md` Phase 1)
 
 Every own-write-path SQLite store's cross-thread safety is now verified
