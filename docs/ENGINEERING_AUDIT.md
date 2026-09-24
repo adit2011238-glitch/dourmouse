@@ -4387,3 +4387,47 @@ alone. It proved concurrency with overlapping call windows and then also asserte
 upper bound (`elapsed < 0.35`), which a busy machine breaks without saying anything about
 concurrency. The overlap assertion stays; the upper bound is gone (the serial test's lower bound
 is kept, since load can only slow it down).
+
+### 095 -- research lived in one JSON blob per question; now it is a versioned object graph
+
+Status: DONE 2026-09-24 (R1 object model + R2 versioning + the migration). Phase 2.
+
+`research_pipeline/store.py` persisted one row per question holding the whole `ResearchRecord` as a
+JSON blob. A blob cannot answer "what evidence contradicts hypothesis H1", cannot be queried across
+projects, and three of the spec's 21 research objects existed at all.
+
+New package `dourmouse/research_graph/`:
+
+- `model.py` (pure): the 21 objects of spec item 35, each declared IMMUTABLE (source, document,
+  passage, evidence, dataset, metric, result, message, decision, artifact, event) or VERSIONED
+  (project, research question, objective, hypothesis, claim, experiment, experiment run,
+  contradiction, agent, task), with required and optional fields; an undeclared field is refused
+  rather than silently stored. A closed relation vocabulary (supported_by, contradicted_by,
+  tested_by, revised_by, derived_from, part_of, extracted_from, decomposes_into, answers, about,
+  spawned, ...).
+- `store.py`: one SQLite table per type keyed `(id, version)`; nothing is updated in place. A
+  revision inserts version N+1 and marks N superseded; immutable objects refuse revision (spec
+  item 36: "the original passage should not change"). `history()` and `as_of(when)` answer "what
+  did we actually know when this conclusion was produced". A typed, append-only `edges` table
+  with both ends checked. `related()` turns the spec's worked example ("H1 supported by E1 and E4,
+  contradicted by E9, tested by X3, revised by D7") into a query, and the test does exactly that.
+  `transaction()` runs a whole record's sync on one connection with one commit: all or nothing,
+  and 39s down to 2.5s for the test file.
+- `sync.py`: maps a `ResearchRecord` onto the graph with deterministic ids, so migration and
+  ongoing sync are the same idempotent operation. A document is its bytes: its body holds only the
+  hash (`raw_sha256` for claims made after #089; `legacy_text_hash` for older ones, since calling a
+  stripped-text hash a raw hash would be false), and the URLs it was reached by are sources linked
+  by edges, so the same bytes met through two URLs are one document. A later claim rejection
+  becomes a new claim version.
+
+`ResearchStore` now opens the graph in the same `research.db`, copies existing legacy records in
+once (the legacy table is read only; a test proves it is byte-for-byte unchanged), and syncs the
+graph after every save. The blob table stays until R3 moves the stages onto graph Tasks.
+
+On the spec's "test against the live research.db": there is no `research.db` on this Mac (the
+pipeline has never persisted a record here), and the desktop is not reachable from here. The
+migration is therefore tested against databases written by the real current `ResearchStore` code,
+checks every field of every claim, and runs automatically and non-destructively the first time any
+existing database is opened, including the desktop's if it has one.
+
+Tests: `test_research_graph.py` (24).

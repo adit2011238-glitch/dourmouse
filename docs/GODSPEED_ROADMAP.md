@@ -1039,3 +1039,6 @@ and a real build sequence, not just a requirement statement:
   X11 backend (Latin-1); title is ASCII now, all four states tested.
 - [x] Phase 2 R0-3 (finding #094) 2026-09-24 -- robots.txt honoured and per-host spacing (Crawl-delay,
   capped) for every automated fetch. R0 acquisition complete.
+- [x] Phase 2 R1 + R2 (finding #095) 2026-09-24 -- research_graph: 21 typed objects (immutable
+  evidence chain, versioned interpretations with as_of), typed edges, all-or-nothing sync, one-time
+  non-destructive migration off the JSON blob; ResearchStore keeps the graph in step.

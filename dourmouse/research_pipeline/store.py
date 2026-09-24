@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -50,6 +51,18 @@ class ResearchStore:
         with self._lock, self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+        # R1 (finding #095): research also lives in the object graph, in the
+        # same file. Records written before the graph existed are copied in
+        # once (the legacy table is only read); every save after that keeps
+        # the graph in step. The blob table stays until R3 moves the
+        # pipeline's stages onto graph Tasks.
+        from dourmouse.research_graph.store import GraphStore
+        from dourmouse.research_graph.sync import migrate_legacy
+
+        self._graph = GraphStore(self._path)
+        if self._graph.meta_get("legacy_migrated_at") is None:
+            migrate_legacy(self._path, self._graph)
+            self._graph.meta_set("legacy_migrated_at", str(time.time()))
 
     def _conn(self) -> sqlite3.Connection:
         return sqlite3.connect(str(self._path), timeout=30.0)
@@ -65,6 +78,17 @@ class ResearchStore:
                 (record.question, body, record.stage.name, now),
             )
             conn.commit()
+        # After the legacy row is safely written. A graph failure raises
+        # (never swallowed) and, being one transaction, leaves the graph as
+        # it was; the record itself is not lost.
+        from dourmouse.research_graph.sync import sync_record
+
+        sync_record(self._graph, record, by="research_pipeline")
+
+    @property
+    def graph(self):  # type: ignore[no-untyped-def]
+        """The object graph this store keeps in step (R1)."""
+        return self._graph
 
     def load(self, question: str) -> Optional[ResearchRecord]:
         with self._lock, self._conn() as conn:
