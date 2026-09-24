@@ -1011,3 +1011,6 @@ and a real build sequence, not just a requirement statement:
   real shutdown), six import-time store paths let the suite write into the real workspace (now
   resolved per call, AST-guarded), and one approve test timed out before the server's own budget.
   Suite 5565 passed, 0 failed.
+- [ ] Phase 1 X-1 (finding #085) 2026-09-24 -- CI rewritten to actually run on the working branch
+  (3-OS matrix, Python 3.14, one gated pytest run) plus a lint ratchet (ruff per-rule and mypy
+  total may only go down; baseline ruff 447, mypy 352). Open until all runner jobs are green.

@@ -1,22 +1,41 @@
-name: dourmouse suite
+name: dourmouse CI
+
+# Finding #085. This workflow used to trigger only on `main` and PRs, while
+# every commit lands on the working branch, so it had never once run on the
+# code actually being built; its last runs (2026-08-13, on main) were red and
+# nobody saw. It also pinned Python 3.11 while development runs 3.14, and ran
+# the whole suite twice (the second run only grepped the first's output).
 
 on:
   push:
-    branches: [main]
+    branches: [main, recon-2026-09-11]
   pull_request:
+  workflow_dispatch:
 
-# Phase 0.4 (COMMERCIAL_CHECKLIST): the suite is the product's honesty
-# engine — it must pass on every OS before anything ships. As of c4ee954
-# (fixing a confirmed indefinite hang in test_live_runtime.py that stalled
-# the whole suite forever at ~50-56%) the suite is 100% green on macOS —
-# 3854 passed / 3 skipped / 0 failed, a real `pytest dourmouse/tests/`
-# run to full completion, not the 1024/Windows figure this comment
-# previously (and by then stale-ly) cited from 731b1dd; this matrix
-# enforces green on every OS on every push.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  dourmouse-suite:
+  lint-ratchet:
+    name: lint ratchet (ruff + mypy may only go down)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Ratchet
+        run: python scripts/lint_ratchet.py
+
+  suite:
     name: suite (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -26,26 +45,16 @@ jobs:
         shell: bash  # POSIX syntax everywhere (Git Bash on Windows)
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
+          python-version: "3.14"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
           pip install -r requirements-extract.txt  # extract tests need pypdf
-          pip install pywebview  # desktop tests touch the bridge module
-
       - name: Run the suite
         env:
           PYTHONIOENCODING: utf-8
-        run: |
-          python -m pytest dourmouse/tests -q --tb=short
-
-      - name: Confirm zero failures
-        run: |
-          python -m pytest dourmouse/tests -q --tb=no > _ci_last.txt 2>&1 || true
-          if grep -q "FAILED\|ERROR" _ci_last.txt; then echo "CI BLOCKED: suite not fully green"; exit 1; fi
-          echo "OK: $(grep -oE '[0-9]+ passed' _ci_last.txt | tail -1)"
+        # pytest's own exit code is the gate: non-zero on any failure or error.
+        run: python -m pytest dourmouse/tests -q --tb=short

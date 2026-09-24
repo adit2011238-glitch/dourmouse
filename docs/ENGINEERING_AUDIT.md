@@ -4044,3 +4044,27 @@ Suite after all seven: **5565 passed, 10 skipped, 0 failed** in 727s (was 5442 o
 No new ruff findings in any touched file (four import-spacing findings the refactor introduced were fixed).
 Lint: `atlas_lab.py` ruff findings went from 15 to 14 (one S110 removed, zero added); mypy
 unchanged at 79 repo-wide for that file's import graph.
+
+### 085 -- CI existed but had never run on the code being built; lint had no gate
+
+Status: IN PROGRESS 2026-09-24. Phase 1 of the completion plan (item X-1). This entry covers the
+workflow rewrite and the lint ratchet; the first real runner results are recorded below as they land.
+
+**1. The workflow never ran on the working branch.** `.github/workflows/tests.yml` triggered on
+`main` and pull requests only. Every commit lands on `recon-2026-09-11`, so CI had never run on the
+code actually being built, and its last runs (2026-08-13, on `main`) were red with nobody looking.
+It also pinned Python 3.11 while development runs 3.14, and ran the whole suite twice (the second
+run only grepped the first run's output). Rewritten: triggers on the working branch, `main`, pull
+requests and manual dispatch; Python 3.14; a 3-OS matrix (Ubuntu, macOS, Windows, all free on a
+public repo); one pytest run whose own exit code is the gate; stale runs cancelled.
+
+**2. Lint ratchet.** `scripts/lint_ratchet.py` compares per-rule ruff counts and the mypy error
+total with `scripts/lint_baseline.json` and fails if any number goes up. `--update` only tightens:
+it refuses to write a higher number, so a count can only rise through a visible hand edit of the
+JSON. Tool crashes exit 2 and are never read as "zero errors". mypy runs with `--platform linux`:
+measured on this Mac, the unpinned total is 351 and the Linux-platform total is 352, so without the
+pin the Mac and the CI runner would disagree. Baseline: ruff 447 across 29 rules, mypy 352.
+Proven: lowering S110 and the mypy total by one in the baseline makes the check exit 1 with both
+regressions named, and `--update` refuses.
+
+Not done, owner's call: branch protection requiring these checks is a repository settings change.
