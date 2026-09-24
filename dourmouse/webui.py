@@ -3141,6 +3141,11 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.security.platform_adapter import get_system_security_state
 
             self._send_json(get_system_security_state())
+        elif path == "/api/security/lockdown":
+            # MS-13 (finding #103): blocklist, state, and what is really blocked now.
+            from dourmouse.security import lockdown
+
+            self._send_json(lockdown.status())
         elif path == "/api/security/monitoring":
             # MS-5 (finding #102): "am I being monitored?" indicators.
             from dourmouse.security.monitoring import analyze
@@ -7736,6 +7741,15 @@ def run_server(
         downloads_watch = DownloadsWatcher(on_file=_on_download)
         downloads_watch.start()
     setattr(server, "downloads_watch", downloads_watch)  # noqa: B010 -- read back in serve_forever's shutdown
+    # MS-13 (finding #103): the lockdown app enforcer. Idle unless a lockdown
+    # is on; then it closes blocklisted apps the moment they launch.
+    from dourmouse.security.lockdown import AppEnforcer, lockdown_enforcer_enabled
+
+    lockdown_enforcer: AppEnforcer | None = None
+    if lockdown_enforcer_enabled():
+        lockdown_enforcer = AppEnforcer()
+        lockdown_enforcer.start()
+    setattr(server, "lockdown_enforcer", lockdown_enforcer)  # noqa: B010 -- read back in serve_forever's shutdown
     # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
     # HUD and the dedicated window listen to (live per-brain cards).
     from dourmouse import all_hands
@@ -8007,9 +8021,10 @@ def serve_forever(
             server.goal_runtime.stop()
         if server.security_sentry is not None:
             server.security_sentry.stop()
-        watch = getattr(server, "downloads_watch", None)
-        if watch is not None:
-            watch.stop()
+        for attr in ("downloads_watch", "lockdown_enforcer"):
+            runner = getattr(server, attr, None)
+            if runner is not None:
+                runner.stop()
         if server.daily_reporter is not None:
             server.daily_reporter.stop()
         if server.freebuff_watcher is not None:

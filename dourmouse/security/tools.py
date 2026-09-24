@@ -19,7 +19,7 @@ import dataclasses
 import time
 from typing import Any
 
-from dourmouse.dispatch import Subagent, ToolSpec
+from dourmouse.dispatch import Permission, Subagent, ToolSpec
 from dourmouse.security import platform_adapter as pa
 from dourmouse.security import reputation as rep
 from dourmouse.security.sentry import SentryStore, run_scan
@@ -246,6 +246,66 @@ def _security_monitoring_check(_arguments: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_lockdown(st: dict[str, Any]) -> str:
+    lines = [f"Lockdown is {'ON' if st['active'] else 'off'}."]
+    lines.append("Apps: " + (", ".join(a["name"] for a in st["apps"]) or "none"))
+    sites = []
+    for s in st["sites"]:
+        mark = ""
+        if "blocked_now" in s:
+            mark = " (blocked now)" if s["blocked_now"] else " (NOT blocked right now)"
+        note = f" [path {s['path_ignored']} cannot be blocked, whole site is]" if s.get("path_ignored") else ""
+        sites.append(s["domain"] + mark + note)
+    lines.append("Websites: " + (", ".join(sites) or "none"))
+    lines.extend("Note: " + x for x in st["limits"])
+    return "\n".join(lines)
+
+
+def _lockdown_status(_arguments: dict[str, Any]) -> str:
+    from . import lockdown
+
+    return _format_lockdown(lockdown.status())
+
+
+def _lockdown_edit(arguments: dict[str, Any]) -> str:
+    from . import lockdown
+
+    bl = lockdown.Blocklist.load()
+    added, removed, errors = [], [], []
+    for entry in arguments.get("add_sites") or []:
+        try:
+            added.append(bl.add_site(entry)["domain"])
+        except ValueError as exc:
+            errors.append(str(exc))
+    for entry in arguments.get("add_apps") or []:
+        added.append(bl.add_app(entry)["name"])
+    for entry in arguments.get("remove") or []:
+        if bl.remove(entry):
+            removed.append(entry)
+    bl.save()
+    if bl.active:
+        lockdown.write_hosts_request(bl)  # a running lockdown picks up the change
+    out = []
+    if added:
+        out.append("Added: " + ", ".join(added))
+    if removed:
+        out.append("Removed: " + ", ".join(removed))
+    out.extend("ERROR: " + e for e in errors)
+    return "\n".join(out + ["", _format_lockdown(lockdown.status(bl))])
+
+
+def _lockdown_start(_arguments: dict[str, Any]) -> str:
+    from . import lockdown
+
+    return _format_lockdown(lockdown.start())
+
+
+def _lockdown_stop(_arguments: dict[str, Any]) -> str:
+    from . import lockdown
+
+    return _format_lockdown(lockdown.stop())
+
+
 def build_security_subagent() -> Subagent:
     return Subagent(
         name="security",
@@ -381,6 +441,41 @@ def build_security_subagent() -> Subagent:
                 ),
                 parameters={"type": "object", "properties": {}},
                 handler=_security_monitoring_check,
+            ),
+            ToolSpec(
+                name="lockdown_status",
+                description="Show the lockdown blocklist (apps and websites), whether lockdown is on, and whether each site is really blocked right now.",
+                parameters={"type": "object", "properties": {}},
+                handler=_lockdown_status,
+            ),
+            ToolSpec(
+                name="lockdown_edit",
+                description=(
+                    "Add or remove entries on the lockdown blocklist. Websites can be URLs or domains (the whole "
+                    "domain is blocked); apps by name (e.g. 'Discord'), bundle id or path. Does not start lockdown."
+                ),
+                parameters={"type": "object", "properties": {
+                    "add_sites": {"type": "array", "items": {"type": "string"}},
+                    "add_apps": {"type": "array", "items": {"type": "string"}},
+                    "remove": {"type": "array", "items": {"type": "string"}},
+                }},
+                handler=_lockdown_edit,
+            ),
+            ToolSpec(
+                name="lockdown_start",
+                description="Start lockdown: every app and website on the blocklist becomes unopenable until lockdown_stop.",
+                parameters={"type": "object", "properties": {}},
+                handler=_lockdown_start,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: "Start lockdown now? Everything on the blocklist will be closed and blocked until you end it.",
+            ),
+            ToolSpec(
+                name="lockdown_stop",
+                description="End lockdown: blocklisted apps and websites open normally again.",
+                parameters={"type": "object", "properties": {}},
+                handler=_lockdown_stop,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: "End lockdown now? Blocked apps and websites will open normally again.",
             ),
             ToolSpec(
                 name="security_downloads",

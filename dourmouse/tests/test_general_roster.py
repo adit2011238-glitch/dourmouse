@@ -515,6 +515,10 @@ class TestRosterShape:
             "send_app_keystrokes",
             "press_app_key",
             "click_app_menu_item",
+            # finding #103: switching a lockdown on closes apps and blocks
+            # websites; switching it off lifts that. Both need the owner.
+            "lockdown_start",
+            "lockdown_stop",
         }
 
     def test_internet_tools_registered(self):

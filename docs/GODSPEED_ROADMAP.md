@@ -1058,3 +1058,5 @@ and a real build sequence, not just a requirement statement:
   origin, signature, Gatekeeper, decoy tricks); honest "not malware-scanned" without ClamAV.
 - [x] Phase 3 MS-5 (finding #102) 2026-09-24 -- "am I being monitored?": eight indicators with
   evidence and confidence, and an explicit Unknowns list.
+- [x] Phase 3 MS-13 (finding #103) 2026-09-25 -- lockdown: blocklisted apps closed on launch, websites
+  blocked system-wide via a minimal, validated root helper (one sudo install), approval-gated switches.

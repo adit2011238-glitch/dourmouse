@@ -4681,3 +4681,43 @@ Live on this Mac: no proxy, not MDM-enrolled, no profiles, no added root certifi
 Tailscale VPN and its network extension, Remote Login and Screen Sharing, and two remote-control
 tools running (Splashtop XDisplay and Parsec), each shown with its evidence and its common
 legitimate explanation.
+
+### 103 -- lockdown: a blocklist of apps and websites that cannot be opened while it is on
+
+Status: DONE 2026-09-25 (the website half becomes active once the owner installs the helper, one
+sudo command). Phase 3, MS-13. Owner spec: "a list of urls and apps and websites that can't be
+opened when initiated."
+
+`security/lockdown.py`: the blocklist (apps by name, bundle id or path, resolved to the installed
+bundle so a renamed copy is still caught; sites from URLs or domains, the domain blocked and any
+URL path named as not blockable) in the user config dir. **Apps:** an enforcer checks running
+processes twice a second while a lockdown is on and closes a blocklisted app the moment it
+appears (SIGTERM, then SIGKILL after 2 s), relaunches included, and tells the user why with a
+notification. No admin rights needed; started by the server, off in tests. **Websites:**
+system-wide through `/etc/hosts` (`0.0.0.0` and `::` for the domain and its `www.` twin) plus a
+DNS cache flush.
+
+`security/lockdown_helper.py` is the only code in Dourmouse that runs as root, and it is built to be
+harmless: standalone, standard library, Python 3.9 (macOS's own `/usr/bin/python3`). launchd runs it
+whenever one user-owned request file changes; it keeps a clearly marked block of `/etc/hosts` equal
+to the list in that file and touches nothing outside the markers. Every name must match a strict
+domain pattern (injection attempts such as a name carrying a newline and a second hosts line, IP
+lines, wildcards and spaces are dropped, tested), the request file must be a regular file (no
+symlinks) under 1 MB, and only `0.0.0.0 name` / `:: name` lines are ever written. So the most a
+compromised Dourmouse can do through it is block websites. It installs to
+`/Library/PrivilegedHelperTools`, not `/usr/local` (Homebrew makes that user-writable on many
+Macs, and a root-run script in a user-writable folder is a privilege escalation), and install
+refuses if any folder above it is writable by a non-root user.
+
+Status never assumes: each blocked site is checked by resolving it. The status names its own
+limits: domains not paths; a browser's own DNS-over-HTTPS or an app using a fixed IP can bypass
+hosts; and when the helper is not installed, websites are NOT blocked, with the exact install
+command shown. Chat tools `lockdown_status`, `lockdown_edit`, and `lockdown_start` /
+`lockdown_stop`, both behind the approval gate (no agent can start or end a lockdown on its own);
+API `/api/security/lockdown`. The old security-tools test "no tool requires confirmation" came
+from the observation-only design; it now asserts exactly that the two lockdown switches are gated.
+
+Found while testing: a copy of `/bin/sleep` is killed by macOS on launch (system binaries only run
+from where they belong), and the venv's `python` re-executes the framework Python, so the
+enforcer test uses a copy of the real interpreter binary under the probe's name; and this Mac's
+Command Line Tools cannot link a C program (SDK mismatch), noted for later.

@@ -291,3 +291,5 @@ def _security_sentry_off(monkeypatch):
     # Finding #101: the same for the Downloads watcher, which would otherwise
     # poll the developer's real ~/Downloads from every server a test builds.
     monkeypatch.setenv("DOURMOUSE_DOWNLOADS_WATCH", "0")
+    # Finding #103: and the lockdown enforcer, which scans real processes.
+    monkeypatch.setenv("DOURMOUSE_LOCKDOWN_ENFORCER", "0")

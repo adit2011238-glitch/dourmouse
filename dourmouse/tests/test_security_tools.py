@@ -41,15 +41,19 @@ class TestBuildSecuritySubagent:
         assert {t.name for t in subagent.tools} == {
             "security_status", "list_exposed_services",
             "security_sentry_scan", "security_external_peers", "security_check_reputation",
-            "security_known_devices", "security_sentry_dismiss", "security_downloads", "security_monitoring_check",
+            "security_known_devices", "security_sentry_dismiss", "security_downloads", "security_monitoring_check", "lockdown_status", "lockdown_edit", "lockdown_start", "lockdown_stop",
             "security_incident_open", "security_incident_update", "security_incidents",
         }
 
-    def test_no_tool_requires_confirmation(self):
+    def test_only_the_tools_that_change_the_machine_require_confirmation(self):
+        """Observation tools run freely; starting or ending a lockdown
+        (finding #103) changes what can be opened and always asks first."""
         from dourmouse.dispatch import Permission
 
         subagent = sec_tools.build_security_subagent()
-        assert all(t.permission == Permission.REGULAR for t in subagent.tools)
+        gated = {t.name for t in subagent.tools if t.permission == Permission.REQUIRES_CONFIRMATION}
+        assert gated == {"lockdown_start", "lockdown_stop"}
+        assert all(t.confirm_prompt is not None for t in subagent.tools if t.name in gated)
 
 
 class TestSecurityStatus:
