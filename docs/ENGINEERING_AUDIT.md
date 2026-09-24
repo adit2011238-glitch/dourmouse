@@ -4304,3 +4304,41 @@ a test; the Linux CI job runs the suite under `xvfb-run` so the real tray code i
 The same run's macOS job failed once in `test_auto_sync_loop_survives_failures` (the #084
 rewrite): it slept a fixed 0.15s and expected two loop ticks, too short on a busy runner. It now
 waits for the retry itself (up to 5s) before stopping the loop.
+
+### 092 -- JavaScript-only pages were recorded as successful fetches of nothing
+
+Status: DONE 2026-09-24. Phase 2, R0-2 (RES-8).
+
+A single-page app answers a plain HTTP fetch with an empty shell (`<div id="root"></div>` and
+scripts). The pipeline stored that as a successful fetch with no text, the dominant observed
+failure mode on modern sites.
+
+New `research_pipeline/render.py`. When a fetched HTML page has under 300 characters of extracted
+text and carries scripts, `acquire.fetch_document` renders it in a short-lived headless Chrome
+(Playwright, already a dependency; never the user's shared `browser_agent` page) and stores the
+rendered DOM as its own document, marked `rendered` and linked by `rendered_from` to the sha of the
+bytes the server actually sent, which are kept too. When rendering is switched off
+(`DOURMOUSE_RESEARCH_RENDER=0`) or Chrome is unavailable, the static document is returned with a
+`render_note` saying why, never silently.
+
+Security design: the browser never touches the network itself. Every request the page makes (the
+document, scripts, XHR/fetch, every redirect) is intercepted and fulfilled from Python through
+`net_guard.guarded_urlopen`, so rendering has exactly the SSRF properties of `fetch_url` (#086).
+Playwright's `route()` alone was not enough: it does not see redirects, so a page could have
+bounced the browser to 169.254.169.254. Images, media, fonts and stylesheets are not fetched at
+all.
+
+Performance, measured live: docsify.js.org (which renders its markdown in the browser) came back
+with its real content ("A magical documentation site generator", "What it is"). With the sync
+Playwright API the 57 requests were served one at a time and the render took 41.9s; with async
+route handlers fetching concurrently on worker threads it takes 7.9s. excalidraw.com also renders
+(6.5s). Server-rendered sites (react.dev, vitejs.dev) are correctly not rendered.
+
+Tests: `test_research_render.py` (5, real headless Chrome and a real local SPA whose script
+fetches its content and also tries the metadata address: content kept, internal request refused,
+server bytes kept under their own hash, static pages not re-rendered, switched-off rendering
+recorded). They skip where Chrome cannot start.
+
+Noticed, not changed: react.dev's extraction still leads with some header chrome ("Search ⌘ Ctrl K
+/ Learn / Reference"), because that site marks it with neither `<nav>` nor a recognisable class.
+Extraction quality tuning is a follow-on, measured against real pages.

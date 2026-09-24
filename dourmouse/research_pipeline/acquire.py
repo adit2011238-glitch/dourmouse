@@ -86,6 +86,13 @@ class FetchedDocument:
     truncated: bool
     kind: str  # "html" | "text" | "pdf"
     text: str = field(repr=False)
+    # R0-2 (finding #092): True when this is the DOM a headless render
+    # produced for a JavaScript-only page; `rendered_from` is the sha of the
+    # static bytes the server actually sent. `render_note` says why a page
+    # that looked empty was NOT rendered (switched off, Chrome missing, ...).
+    rendered: bool = False
+    rendered_from: str = ""
+    render_note: str = ""
     # Headings and blocks of an HTML document (finding #091), derived from
     # the raw bytes like `text`; never stored in the metadata.
     structure: ExtractedDocument | None = field(default=None, repr=False, compare=False)
@@ -272,6 +279,7 @@ def fetch_document(
     *,
     cache: DocumentCache | None = None,
     use_cache: bool = True,
+    render: bool = True,
     timeout: float = DEFAULT_TIMEOUT,
     max_bytes: int = MAX_BYTES,
 ) -> FetchedDocument:
@@ -316,9 +324,58 @@ def fetch_document(
         "truncated": truncated,
         "kind": kind,
     }
+    text, structure = _decode(raw, kind, charset, cache.raw_path(sha)) if kind != "pdf" else ("", None)
+    if kind == "html" and render:
+        rendered = _maybe_render(raw, text, meta, cache)
+        if rendered is not None:
+            return rendered
     cache.put(raw, meta)
-    text, structure = _decode(raw, kind, charset, cache.raw_path(sha))
+    if kind == "pdf":
+        text, structure = _decode(raw, kind, charset, cache.raw_path(sha))
     return FetchedDocument(**{**meta, "redirect_chain": tuple(hops)}, text=text, structure=structure)  # type: ignore[arg-type]
+
+
+def _maybe_render(raw: bytes, text: str, meta: dict[str, Any], cache: DocumentCache) -> FetchedDocument | None:
+    """For a page that is an empty shell until its JavaScript runs, render
+    it and store the rendered DOM as its own document (it is not what the
+    server sent, so it never overwrites or impersonates the static bytes).
+    Returns None when the page does not need rendering. When it does but
+    rendering is unavailable, the reason is recorded on the static meta."""
+    from .render import RenderUnavailable, looks_like_an_empty_shell, render_page
+
+    if not looks_like_an_empty_shell(raw, text):
+        return None
+    try:
+        result = render_page(meta["final_url"])
+    except RenderUnavailable as exc:
+        meta["render_note"] = f"looked empty without JavaScript; not rendered: {exc}"
+        return None
+    except Exception as exc:  # noqa: BLE001 -- a render must never lose the static fetch
+        meta["render_note"] = f"looked empty without JavaScript; render failed: {type(exc).__name__}: {exc}"
+        return None
+    cache.put(raw, meta)  # keep the server's own bytes too, under their own hash
+    body = result.html.encode("utf-8")
+    rsha = hashlib.sha256(body).hexdigest()
+    rmeta = {
+        **meta,
+        "final_url": result.final_url or meta["final_url"],
+        "content_type": "text/html; charset=utf-8",
+        "charset": "utf-8",
+        "charset_source": "rendered",
+        "fetched_at": time.time(),
+        "raw_sha256": rsha,
+        "raw_bytes": len(body),
+        "truncated": False,
+        "rendered": True,
+        "rendered_from": meta["raw_sha256"],
+        "render_note": (
+            f"rendered in headless Chrome; {result.requests_served} requests served through the "
+            f"SSRF guard, {len(result.requests_refused)} refused"
+        ),
+    }
+    cache.put(body, rmeta)
+    rtext, rstructure = _decode(body, "html", "utf-8", cache.raw_path(rsha))
+    return FetchedDocument(**{**rmeta, "redirect_chain": tuple(rmeta["redirect_chain"])}, text=rtext, structure=rstructure)  # type: ignore[arg-type]
 
 
 def cut_at_word(text: str, limit: int) -> tuple[str, bool]:

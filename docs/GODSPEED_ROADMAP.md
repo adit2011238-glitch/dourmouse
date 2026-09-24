@@ -1033,3 +1033,5 @@ and a real build sequence, not just a requirement statement:
   world_pulse_history defaulted to a cwd-relative workspace; now config.workspace_dir(), guarded.
 - [x] Phase 2 R0-1 (finding #091) 2026-09-24 -- stdlib main-content extraction: chrome removed,
   article picked, heading paths kept; claim location computed from the document, not guessed.
+- [x] Phase 2 R0-2 (finding #092) 2026-09-24 -- headless render for JS-only pages; every request
+  the page makes is served through the SSRF guard; rendered DOM stored linked to the server bytes.
