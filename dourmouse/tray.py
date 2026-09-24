@@ -200,6 +200,14 @@ def _import_pystray() -> tuple[Any, Any, Any]:
             "NOT CONFIGURED: the system tray needs pystray + Pillow — run "
             "`.venv/bin/python -m pip install -r requirements-desktop.txt`."
         ) from exc
+    except Exception as exc:  # noqa: BLE001 -- pystray picks its backend at import
+        # On Linux pystray connects to the X display while importing; with no
+        # display it raised a raw Xlib.error.DisplayNameError (finding #091,
+        # first Linux CI run). Report it the same honest way as a missing
+        # package, instead of crashing the caller.
+        raise RuntimeError(
+            f"NOT AVAILABLE: the system tray needs a desktop display ({type(exc).__name__}: {exc})."
+        ) from exc
     return pystray, Image, ImageDraw
 
 

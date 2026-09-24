@@ -51,7 +51,9 @@ jobs:
           python-version: "3.14"
       - name: System audio library (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2  # sounddevice loads PortAudio at import
+        # PortAudio: sounddevice loads it at import. Xvfb: pystray connects to an
+        # X display at import, so the real tray is tested under a virtual one.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2 xvfb
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -65,4 +67,9 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         # pytest's own exit code is the gate: non-zero on any failure or error.
-        run: python -m pytest dourmouse/tests -q --tb=short
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python -m pytest dourmouse/tests -q --tb=short
+          else
+            python -m pytest dourmouse/tests -q --tb=short
+          fi

@@ -810,7 +810,8 @@ class TestResearchInfo:
         monkeypatch.setattr(acquire, "fetch_document", fake_fetch)
         result = _fetch_url_tool({"url": "https://example.com/page"})
         assert "FETCHED" in result
-        assert "Hi\nWorld & more" in result  # tags stripped, entities decoded
+        # Tags stripped, entities decoded, headings kept as markdown (#091).
+        assert "# Hi\n\nWorld & more" in result
 
     def test_fetch_url_rejects_non_http_scheme(self):
         result = _fetch_url_tool({"url": "file:///etc/passwd"})

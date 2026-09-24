@@ -193,6 +193,26 @@ class TestImportPystray:
         with pytest.raises(RuntimeError, match="NOT CONFIGURED"):
             tray._import_pystray()
 
+    def test_no_desktop_display_is_reported_not_raised_raw(self, monkeypatch):
+        """Finding #091: on headless Linux pystray raised Xlib's
+        DisplayNameError while importing."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        class DisplayNameError(Exception):
+            pass
+
+        def fake_import(name, *a, **k):
+            if name == "pystray":
+                raise DisplayNameError('Bad display name ""')
+            return real_import(name, *a, **k)
+
+        monkeypatch.delitem(sys.modules, "pystray", raising=False)
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(RuntimeError, match="NOT AVAILABLE.*desktop display.*DisplayNameError"):
+            tray._import_pystray()
+
     def test_real_pystray_available_in_this_venv(self):
         """pystray + Pillow are genuinely installed here — confirms the
         happy path actually works, not just that the except-branch exists."""

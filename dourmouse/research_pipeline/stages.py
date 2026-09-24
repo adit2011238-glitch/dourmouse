@@ -306,6 +306,13 @@ def extract_evidence(
             "real substring of the real fetched text (rejected, not silently accepted)"
         )
 
+    # The location comes from the document's own heading structure when it
+    # has one (finding #091): the model's LOCATION line was a guess, the
+    # heading path is a fact. The model's wording is kept only as fallback.
+    computed = doc.structure.locate(passage) if doc.structure is not None else None
+    if computed:
+        location = computed
+
     claim = Claim(
         claim=claim_text,
         source_id=_source_id_for_url(doc.final_url),

@@ -37,6 +37,8 @@ from typing import Any
 from dourmouse import net_guard
 from dourmouse.config import workspace_dir
 
+from .extract_html import ExtractedDocument, extract_main
+
 #: Bytes read from one response. Past this the document is kept but marked
 #: truncated: never silently presented as whole.
 MAX_BYTES = 10 * 1024 * 1024
@@ -84,10 +86,12 @@ class FetchedDocument:
     truncated: bool
     kind: str  # "html" | "text" | "pdf"
     text: str = field(repr=False)
+    # Headings and blocks of an HTML document (finding #091), derived from
+    # the raw bytes like `text`; never stored in the metadata.
+    structure: ExtractedDocument | None = field(default=None, repr=False, compare=False)
 
     def meta(self) -> dict[str, Any]:
-        d = asdict(self)
-        d.pop("text")
+        d = {k: v for k, v in asdict(self).items() if k not in ("text", "structure")}
         d["redirect_chain"] = list(self.redirect_chain)
         return d
 
@@ -134,9 +138,16 @@ def classify(content_type: str, raw: bytes) -> str:
 
 
 def html_to_text(markup: str) -> str:
+    """Main-content text of an HTML page (finding #091), falling back to a
+    plain tag strip when extraction finds nothing to keep."""
+    extracted = extract_main(markup).text
+    return extracted or _strip_tags(markup)
+
+
+def _strip_tags(markup: str) -> str:
     """Script/style/noscript removed, tags removed, ALL entities decoded
     (the old path decoded four), whitespace collapsed with paragraph breaks
-    kept at block boundaries. Main-content extraction is R0-1."""
+    kept at block boundaries."""
     markup = re.sub(r"(?is)<(script|style|noscript|template)[^>]*>.*?</\1>", " ", markup)
     markup = re.sub(r"(?s)<!--.*?-->", " ", markup)
     markup = re.sub(r"(?i)<(br|/p|/div|/li|/h[1-6]|/tr|/section|/article)[^>]*>", "\n", markup)
@@ -230,11 +241,17 @@ class DocumentCache:
         return meta
 
 
-def _decode(raw: bytes, kind: str, charset: str, raw_path: Path) -> str:
+def _decode(raw: bytes, kind: str, charset: str, raw_path: Path) -> tuple[str, ExtractedDocument | None]:
     if kind == "pdf":
-        return _pdf_to_text(raw_path)
+        return _pdf_to_text(raw_path), None
     decoded = raw.decode(charset, errors="replace")
-    return html_to_text(decoded) if kind == "html" else decoded.strip()
+    if kind != "html":
+        return decoded.strip(), None
+    structure = extract_main(decoded)
+    text = structure.text
+    if not text:
+        return _strip_tags(decoded), None
+    return text, structure
 
 
 def load_cached(url: str, cache: DocumentCache | None = None) -> FetchedDocument | None:
@@ -243,9 +260,10 @@ def load_cached(url: str, cache: DocumentCache | None = None) -> FetchedDocument
     if meta is None:
         return None
     raw = cache.read_raw(meta["raw_sha256"])
-    text = _decode(raw, meta["kind"], meta["charset"], cache.raw_path(meta["raw_sha256"]))
+    text, structure = _decode(raw, meta["kind"], meta["charset"], cache.raw_path(meta["raw_sha256"]))
     return FetchedDocument(
-        **{**meta, "redirect_chain": tuple(meta.get("redirect_chain") or ())}, text=text,
+        **{**meta, "redirect_chain": tuple(meta.get("redirect_chain") or ())},
+        text=text, structure=structure,
     )
 
 
@@ -299,8 +317,8 @@ def fetch_document(
         "kind": kind,
     }
     cache.put(raw, meta)
-    text = _decode(raw, kind, charset, cache.raw_path(sha))
-    return FetchedDocument(**{**meta, "redirect_chain": tuple(hops)}, text=text)  # type: ignore[arg-type]
+    text, structure = _decode(raw, kind, charset, cache.raw_path(sha))
+    return FetchedDocument(**{**meta, "redirect_chain": tuple(hops)}, text=text, structure=structure)  # type: ignore[arg-type]
 
 
 def cut_at_word(text: str, limit: int) -> tuple[str, bool]:

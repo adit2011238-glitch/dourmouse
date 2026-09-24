@@ -219,7 +219,11 @@ class TestAutoSync:
         t = threading.Thread(target=runner, daemon=True)
         t.start()
         import time
-        time.sleep(0.15)
+        # Wait for the retry itself, not a fixed nap: a fixed 0.15s was too
+        # short on a busy CI runner (macOS job, run 4).
+        deadline = time.monotonic() + 5.0
+        while calls["n"] < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
         stop.set()
         t.join(timeout=2)
         assert not t.is_alive(), "the loop must actually end when stopped"

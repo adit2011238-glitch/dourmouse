@@ -914,3 +914,32 @@ class TestRunFullPipelineStage:
         assert set(record.sources) == {"https://a.example/1", "https://b.example/1"}
         assert len(record.claims) == 1
         assert record.claims[0].claim == "claim B"
+
+
+class TestExtractEvidenceLocationComesFromTheDocument:
+    def test_the_heading_path_replaces_the_models_guess(self, monkeypatch):
+        """finding #091: an HTML source's location is computed from its own
+        headings; the model's LOCATION line is only a fallback."""
+        from dourmouse.research_pipeline import acquire
+        from dourmouse.research_pipeline.extract_html import extract_main
+
+        page = ("<html><body><article><h1>Guide</h1><h2>Setup</h2>"
+                "<p>Install the package first, then run the init command.</p></article></body></html>")
+        structure = extract_main(page)
+
+        def fake(url, **kw):
+            base = _fake_doc(url, structure.text)
+            return acquire.FetchedDocument(**{**base.meta(), "redirect_chain": ()},
+                                           text=structure.text, structure=structure)
+
+        monkeypatch.setattr(acquire, "fetch_document", fake)
+        record = ResearchRecord(question="q")
+        record.set_plan(["sub"])
+        record.add_sources(["https://example.com/guide"])
+        _install_chat_fake(monkeypatch, [
+            "CLAIM: Install first.\n"
+            "PASSAGE: Install the package first, then run the init command.\n"
+            "LOCATION: somewhere near the top",
+        ])
+        extract_evidence(record, _research_info_registry())
+        assert record.claims[0].location == "Guide > Setup, paragraph 1"

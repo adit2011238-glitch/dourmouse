@@ -1031,3 +1031,5 @@ and a real build sequence, not just a requirement statement:
   hash of stored bytes; fetch_url cuts at word boundaries and says so.
 - [x] Kill-switch path (finding #090) 2026-09-24 -- tray, live_feeds, world_watch_regions and
   world_pulse_history defaulted to a cwd-relative workspace; now config.workspace_dir(), guarded.
+- [x] Phase 2 R0-1 (finding #091) 2026-09-24 -- stdlib main-content extraction: chrome removed,
+  article picked, heading paths kept; claim location computed from the document, not guessed.

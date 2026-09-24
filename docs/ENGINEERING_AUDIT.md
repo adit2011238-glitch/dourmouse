@@ -4260,3 +4260,47 @@ Also in this pass: the Windows fake CLI in `test_code_backends.py` learned the a
 tests), and the tray path tests compare `Path`s instead of POSIX strings.
 
 Windows CI progress across the three runs: 52 failures, then 6, then these fixes.
+
+### 091 -- research evidence included the site's own menu, and a claim's location was a guess
+
+Status: DONE 2026-09-24. Phase 2, R0-1 (RES-7).
+
+The HTML-to-text path stripped tags and kept everything else: navigation, site headers, footers,
+sidebars, cookie banners, share bars, "related stories". So a claim's passage could come from a
+menu, and `Claim.location` was whatever the extraction model wrote ("second paragraph"), because
+the text carried no structure to check it against.
+
+New `research_pipeline/extract_html.py`, stdlib only (no lxml or trafilatura, so no Python 3.14
+wheel risk on the three CI operating systems). It parses the page into an element tree with HTML's
+implicit end tags handled and stray end tags ignored; removes boilerplate: semantic elements
+(`nav`, `aside`, site-level `header`/`footer`, `form`, `svg`, ...), ARIA landmark roles, hidden
+elements (`hidden`, `aria-hidden`, `display:none`), and class/id names that say menu, cookie,
+share, sidebar and so on; picks the main content (a marked `<article>`/`<main>` when present,
+otherwise the container with the best readability-style paragraph score discounted by link
+density, falling back to the whole body when the best container holds under a quarter of the
+prose); and serialises blocks carrying their heading path. `ExtractedDocument.locate(passage)`
+returns where a passage sits, e.g. "Guide > Setup, paragraph 1". `extract_evidence` now uses that
+computed location, keeping the model's wording only when the passage cannot be placed.
+`acquire.fetch_document` exposes the structure alongside the text; a page where extraction finds
+nothing falls back to the plain tag strip.
+
+Found live and fixed before landing: on bbc.com inline `<svg><title>` logos were appended to the
+page title (only the document's first `<title>` counts now); on docs.python.org Sphinx's `¶`
+heading anchors leaked into headings (`headerlink` added to the chrome names); on github.com a
+page-wide wrapper `<div>` whose class contained `header-overlay` made the class heuristic remove
+the entire page (a class/id match now never removes an element holding 40% or more of the page's
+text; semantic tags and roles stay unconditional). Measured on real pages: Wikipedia's MCP article
+20,392 characters of soup to 11,674 of article with its real headings; extraction of the 576 KB
+GitHub page takes 0.03s.
+
+Tests: `test_research_extract_html.py` (12), plus a pipeline test that the heading path replaces
+the model's location.
+
+Also from the fourth CI run (Linux now installs everything; 5515 passed, 9 failed, all tray): on
+Linux `pystray` connects to the X display while importing, so on a headless machine
+`tray._import_pystray()` let a raw `Xlib.error.DisplayNameError` escape instead of Dourmouse's
+honest refusal. It now reports "NOT AVAILABLE: the system tray needs a desktop display (...)", with
+a test; the Linux CI job runs the suite under `xvfb-run` so the real tray code is exercised there.
+The same run's macOS job failed once in `test_auto_sync_loop_survives_failures` (the #084
+rewrite): it slept a fixed 0.15s and expected two loop ticks, too short on a busy runner. It now
+waits for the retry itself (up to 5s) before stopping the loop.
