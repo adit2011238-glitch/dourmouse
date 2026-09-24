@@ -286,6 +286,13 @@ def _write_fake_cli(tmp_path, script: str) -> str:
         p = tmp_path / "fake-claude.cmd"
         if ">&2" in script:
             body = ["@echo off", "echo boom 1>&2", "exit /b 3"]
+        elif "ARGV:" in script:
+            # Echo argv through the real interpreter: cmd's %* re-quotes
+            # arguments, Python's argv parsing unquotes them faithfully.
+            import sys as _sys
+
+            py = "import sys; print('ARGV: ' + ' '.join(sys.argv[1:]))"
+            body = ["@echo off", f'"{_sys.executable}" -c "{py}" %*']
         else:
             body = ["@echo off", 'echo CLAUDE SAYS: print("hello")']
         p.write_text("\r\n".join(body) + "\r\n", encoding="utf-8")

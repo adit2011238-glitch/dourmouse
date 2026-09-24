@@ -86,12 +86,6 @@ _DISCOVERY_INSTRUCTIONS = (
     "useful and why, in plain text.\n\nQUESTION: {question}"
 )
 
-_FETCH_INSTRUCTIONS = (
-    "Use fetch_url to fetch this exact real URL and report back its full raw "
-    "content. Do not summarize, do not add commentary -- just fetch it.\n\n"
-    "URL: {url}"
-)
-
 _SYNTHESIS_PROMPT = (
     "You are writing the final, real, sourced answer to a research question, "
     "using ONLY the real claims listed below -- never state anything these "
@@ -230,20 +224,9 @@ def discover_sources(
     return record
 
 
-def _extract_fetched_text(transcript: list[dict[str, Any]], url: str) -> str | None:
-    """The real fetched body for `url` from a real dispatch transcript.
-    `_fetch_url_tool`'s own real return shape is `f"FETCHED {url} ({n}
-    chars):\\n{text}"` (general_roster.py) -- matched by prefix so a
-    fetch of a DIFFERENT url in the same transcript (the model going off
-    -script) is never mistaken for the one this call asked for."""
-    marker = f"FETCHED {url} ("
-    for entry in transcript:
-        if entry.get("type") != "tool_result" or entry.get("name") != "fetch_url":
-            continue
-        text = entry.get("text") or ""
-        if text.startswith(marker) and "\n" in text:
-            return text.split("\n", 1)[1]
-    return None
+#: Characters of the document shown to the extraction model (about 15k
+#: tokens). Passage validation always uses the whole document.
+_EXTRACT_PROMPT_CHARS = 60_000
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -262,21 +245,29 @@ def extract_evidence(
     sub_question_index: int = 0,
     **dispatch_kwargs: Any,
 ) -> ResearchRecord:
-    """Real per-source evidence extraction. Two real calls, both reusing
-    already-proven machinery: a forced fetch through the real
-    `research_info` subagent (same mechanism as discover_sources), then a
-    real tool-less ChatSession call (same primitive as plan()) asked to
-    quote its supporting passage verbatim. The quote is never trusted on
-    the model's word alone -- it is checked as a real (whitespace-
-    normalized) substring of the real fetched text before becoming a
-    `Claim`, so harsh acceptance test 1 ("click through to the ORIGINAL
-    passage") is a real, enforced guarantee, not just a prompt request.
-    Raises loudly on a genuinely failed fetch or a claim whose passage
-    cannot be verified -- same "no real work yet to protect" honesty as
-    plan()'s own failure mode."""
+    """Real per-source evidence extraction. The source is fetched directly
+    through the research acquisition layer (finding #089): SSRF-guarded,
+    decoded with its real charset, the raw bytes stored content-addressed
+    so the citation can be re-read later. Then one real tool-less
+    ChatSession call (same primitive as plan()) is asked to quote its
+    supporting passage verbatim. The quote is never trusted on the model's
+    word alone -- it is checked as a real (whitespace-normalized) substring
+    of the real fetched text before becoming a `Claim`, so harsh acceptance
+    test 1 ("click through to the ORIGINAL passage") is a real, enforced
+    guarantee, not just a prompt request. Raises loudly on a genuinely
+    failed fetch or a claim whose passage cannot be verified -- same "no
+    real work yet to protect" honesty as plan()'s own failure mode.
+
+    Before #089 the fetch was a nested LLM dispatch told to call fetch_url
+    on an already-known URL, and the claim was built from that tool's text
+    output: capped at 8000 characters, UTF-8 regardless of charset, and
+    cached as that stripped text, so ``document_hash`` fingerprinted text
+    that matched no stored document. `registry` and `dispatch_kwargs` are
+    kept for call-site compatibility and no longer used here."""
     from dourmouse.chat import ChatSession
-    from dourmouse.config import workspace_dir
-    from dourmouse.dispatch import DispatchRegistry, run_dispatch_messages
+    from dourmouse.dispatch import DispatchRegistry
+
+    from .acquire import cut_at_word, fetch_document
 
     if not record.plan:
         raise ValueError("cannot extract evidence before a real plan exists")
@@ -285,35 +276,21 @@ def extract_evidence(
     url = record.sources[source_index]
     sub_question = record.plan[sub_question_index]
 
-    # Real gap closed (2026-09-20, named in the standing status report): a
-    # fetched page used to live only in memory for the duration of this one
-    # call -- document_hash was a fingerprint of something that no longer
-    # existed anywhere the moment this function returned, and a research run
-    # that revisited the same URL re-fetched it from the real network every
-    # time. Cached by a hash of the URL (not document_hash -- that requires
-    # the content this cache exists to avoid re-fetching), workspace-
-    # relative, so a citation is now a real, re-openable artifact and a
-    # repeated source costs one real fetch, not one per call.
-    cache_dir = workspace_dir() / "research_pipeline" / "documents"
-    cache_path = cache_dir / f"{_source_id_for_url(url)}.txt"
-    if cache_path.exists():
-        fetched_text = cache_path.read_text(encoding="utf-8")
-    else:
-        fetch_messages = [
-            {"role": "user", "content": _FETCH_INSTRUCTIONS.format(url=url)},
-        ]
-        fetch_report = run_dispatch_messages(
-            fetch_messages, registry, forced_agent="research_info", **dispatch_kwargs
-        )
-        fetched_text = _extract_fetched_text(fetch_report.get("transcript") or [], url)
-        if not fetched_text:
-            raise ValueError(f"could not fetch real content from {url} for evidence extraction")
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(fetched_text, encoding="utf-8")
+    try:
+        doc = fetch_document(url)
+    except Exception as exc:  # noqa: BLE001 - re-raised with the source named
+        raise ValueError(f"could not fetch real content from {url} for evidence extraction: {exc}") from exc
+    fetched_text = doc.text
+    if not fetched_text.strip():
+        raise ValueError(f"could not fetch real content from {url} for evidence extraction: no readable text")
+    # The model sees at most this much; passage validation below still runs
+    # against the WHOLE document. Chunked extraction over long documents is
+    # R1 work (passages as first-class objects).
+    prompt_text, _cut = cut_at_word(fetched_text, _EXTRACT_PROMPT_CHARS)
 
     session = ChatSession(DispatchRegistry(), session_file=None)
     result = session.ask(
-        _EXTRACT_PROMPT.format(sub_question=sub_question, url=url, text=fetched_text),
+        _EXTRACT_PROMPT.format(sub_question=sub_question, url=url, text=prompt_text),
         force_plain_dispatch=True,
     )
     reply = _strip_internal_diagnostics((result.get("final_text") or "").strip())
@@ -331,14 +308,17 @@ def extract_evidence(
 
     claim = Claim(
         claim=claim_text,
-        source_id=_source_id_for_url(url),
+        source_id=_source_id_for_url(doc.final_url),
         url=url,
-        document_hash=hashlib.sha256(fetched_text.encode("utf-8")).hexdigest(),
+        # The hash of the raw bytes actually stored (acquire.DocumentCache),
+        # so the cited document can be re-read and re-verified by hash.
+        document_hash=doc.raw_sha256,
         location=location,
         passage=passage,
         retrieved_at=time.time(),
         agent="research_info",
         sub_question=sub_question,
+        final_url=doc.final_url,
     )
     record.add_claim(claim)
     return record

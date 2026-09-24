@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -28,17 +29,23 @@ class TestStatePath:
     def test_default_uses_workspace_env(self, monkeypatch):
         monkeypatch.delenv("DOURMOUSE_PRIVACY_STATE", raising=False)
         monkeypatch.setenv("DOURMOUSE_WORKSPACE", "/tmp/some-workspace")
-        assert str(tray._state_path()) == "/tmp/some-workspace/privacy_state.json"
+        assert tray._state_path() == Path("/tmp/some-workspace") / "privacy_state.json"
 
     def test_explicit_override_wins(self, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_WORKSPACE", "/tmp/some-workspace")
         monkeypatch.setenv("DOURMOUSE_PRIVACY_STATE", "/tmp/explicit.json")
-        assert str(tray._state_path()) == "/tmp/explicit.json"
+        assert tray._state_path() == Path("/tmp/explicit.json")
 
-    def test_default_workspace_relative(self, monkeypatch):
+    def test_default_is_the_real_workspace_not_the_current_directory(self, monkeypatch, tmp_path):
+        """Finding #090: the default was a cwd-relative "workspace", so a
+        tray started from another directory used a different kill switch."""
+        from dourmouse.config import workspace_dir
+
         monkeypatch.delenv("DOURMOUSE_PRIVACY_STATE", raising=False)
         monkeypatch.delenv("DOURMOUSE_WORKSPACE", raising=False)
-        assert str(tray._state_path()) == "workspace/privacy_state.json"
+        monkeypatch.chdir(tmp_path)
+        assert tray._state_path() == workspace_dir() / "privacy_state.json"
+        assert tray._state_path().is_absolute()
 
 
 # --------------------------------------------------------------------------- #

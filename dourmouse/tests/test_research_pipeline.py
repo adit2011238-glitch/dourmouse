@@ -19,7 +19,6 @@ from dourmouse.dispatch import Subagent, ToolSpec
 from dourmouse.research_pipeline.core import Claim, Contradiction, ResearchRecord, Stage
 from dourmouse.research_pipeline.stages import (
     _claim_fingerprint,
-    _extract_fetched_text,
     _extract_urls_from_transcript,
     _source_id_for_url,
     _strip_internal_diagnostics,
@@ -405,28 +404,32 @@ class TestDiscoverSourcesStage:
         assert "first sub-question" not in seen_prompts[0]
 
 
-def _fetch_transcript(url: str, body: str) -> list[dict[str, object]]:
-    return [
-        {"type": "tool_result", "name": "fetch_url", "text": f"FETCHED {url} ({len(body)} chars):\n{body}"},
-    ]
+def _fake_doc(url: str, body: str, final_url: str | None = None):
+    from dourmouse.research_pipeline.acquire import FetchedDocument
+
+    return FetchedDocument(
+        requested_url=url, final_url=final_url or url, redirect_chain=(), status=200,
+        content_type="text/plain", charset="utf-8", charset_source="header",
+        fetched_at=1.0, raw_sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        raw_bytes=len(body), truncated=False, kind="text", text=body,
+    )
 
 
-class TestExtractFetchedText:
-    def test_matches_by_exact_url_prefix(self):
-        transcript = _fetch_transcript("https://x.example/page", "real body text")
-        assert _extract_fetched_text(transcript, "https://x.example/page") == "real body text"
+def _install_fetch(monkeypatch, pages: dict[str, str], seen: list | None = None):
+    """finding #089: extract_evidence fetches through acquire.fetch_document
+    (no nested LLM dispatch). An unknown URL fails like a real network error."""
+    import urllib.error
 
-    def test_ignores_a_fetch_of_a_different_url(self):
-        transcript = _fetch_transcript("https://other.example/page", "wrong page")
-        assert _extract_fetched_text(transcript, "https://x.example/page") is None
+    from dourmouse.research_pipeline import acquire
 
-    def test_ignores_non_fetch_url_tool_results(self):
-        transcript = [{"type": "tool_result", "name": "web_search", "text": "FETCHED https://x.example/page (4 chars):\nreal"}]
-        assert _extract_fetched_text(transcript, "https://x.example/page") is None
+    def fake(url, **kw):
+        if seen is not None:
+            seen.append(url)
+        if url not in pages:
+            raise urllib.error.URLError("unreachable in test")
+        return _fake_doc(url, pages[url])
 
-    def test_a_real_no_readable_text_response_does_not_match(self):
-        transcript = [{"type": "tool_result", "name": "fetch_url", "text": "FETCH: page returned no readable text (honest)."}]
-        assert _extract_fetched_text(transcript, "https://x.example/page") is None
+    monkeypatch.setattr(acquire, "fetch_document", fake)
 
 
 class TestExtractEvidenceStage:
@@ -451,12 +454,7 @@ class TestExtractEvidenceStage:
         url = "https://example.com/mcp"
         body = "Intro text.\n\nMCP has three core parts: hosts, servers, and clients.\n\nMore text."
         record = self._planned_and_discovered(url)
-        import dourmouse.dispatch as dispatch_module
-
-        monkeypatch.setattr(
-            dispatch_module, "run_dispatch_messages",
-            lambda messages, registry, **kw: {"final_text": "ok", "transcript": _fetch_transcript(url, body)},
-        )
+        _install_fetch(monkeypatch, {url: body})
         _install_chat_fake(monkeypatch, [
             "CLAIM: MCP has three core parts.\n"
             "PASSAGE: MCP has three core parts: hosts, servers, and clients.\n"
@@ -486,24 +484,14 @@ class TestExtractEvidenceStage:
 
     def test_fetch_failure_raises_honestly(self, monkeypatch):
         record = self._planned_and_discovered()
-        import dourmouse.dispatch as dispatch_module
-
-        monkeypatch.setattr(
-            dispatch_module, "run_dispatch_messages",
-            lambda messages, registry, **kw: {"final_text": "ok", "transcript": []},
-        )
-        with pytest.raises(ValueError):
+        _install_fetch(monkeypatch, {})
+        with pytest.raises(ValueError, match="could not fetch"):
             extract_evidence(record, _research_info_registry())
 
     def test_malformed_model_reply_raises_honestly(self, monkeypatch):
         url = "https://example.com/mcp"
         record = self._planned_and_discovered(url)
-        import dourmouse.dispatch as dispatch_module
-
-        monkeypatch.setattr(
-            dispatch_module, "run_dispatch_messages",
-            lambda messages, registry, **kw: {"final_text": "ok", "transcript": _fetch_transcript(url, "some body")},
-        )
+        _install_fetch(monkeypatch, {url: "some body"})
         _install_chat_fake(monkeypatch, ["I don't know, sorry."])
         with pytest.raises(ValueError):
             extract_evidence(record, _research_info_registry())
@@ -512,12 +500,7 @@ class TestExtractEvidenceStage:
         url = "https://example.com/mcp"
         body = "The real fetched sentence is right here."
         record = self._planned_and_discovered(url)
-        import dourmouse.dispatch as dispatch_module
-
-        monkeypatch.setattr(
-            dispatch_module, "run_dispatch_messages",
-            lambda messages, registry, **kw: {"final_text": "ok", "transcript": _fetch_transcript(url, body)},
-        )
+        _install_fetch(monkeypatch, {url: body})
         _install_chat_fake(monkeypatch, [
             "CLAIM: A claim not backed by the text.\n"
             "PASSAGE: This exact sentence was never in the fetched page.\n"
@@ -530,12 +513,7 @@ class TestExtractEvidenceStage:
         url = "https://example.com/mcp"
         body = "MCP   has\nthree   core parts."
         record = self._planned_and_discovered(url)
-        import dourmouse.dispatch as dispatch_module
-
-        monkeypatch.setattr(
-            dispatch_module, "run_dispatch_messages",
-            lambda messages, registry, **kw: {"final_text": "ok", "transcript": _fetch_transcript(url, body)},
-        )
+        _install_fetch(monkeypatch, {url: body})
         _install_chat_fake(monkeypatch, [
             "CLAIM: MCP has three core parts.\n"
             "PASSAGE: MCP has three core parts.\n"
@@ -548,18 +526,11 @@ class TestExtractEvidenceStage:
         record = ResearchRecord(question="What is MCP?")
         record.set_plan(["a sub-question"])
         record.add_sources(["https://example.com/first", "https://example.com/second"])
-        seen_urls = []
-        import dourmouse.dispatch as dispatch_module
-
-        def _capture(messages, registry, **kw):
-            seen_urls.append(messages[0]["content"])
-            return {"final_text": "ok", "transcript": []}
-
-        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _capture)
-        with pytest.raises(ValueError):  # empty transcript -> honest fetch-failure, still proves selection
+        seen_urls: list = []
+        _install_fetch(monkeypatch, {}, seen_urls)
+        with pytest.raises(ValueError):  # unreachable -> honest fetch failure, still proves selection
             extract_evidence(record, _research_info_registry(), source_index=1)
-        assert "https://example.com/second" in seen_urls[0]
-        assert "https://example.com/first" not in seen_urls[0]
+        assert seen_urls == ["https://example.com/second"]
 
 
 class TestSynthesizeStage:
@@ -668,12 +639,7 @@ class TestExtractEvidenceStripsLeakedDiagnostics:
         url = "https://example.com/mcp"
         body = "The real fetched sentence is right here."
         record = TestExtractEvidenceStage()._planned_and_discovered(url)
-        import dourmouse.dispatch as dispatch_module
-
-        monkeypatch.setattr(
-            dispatch_module, "run_dispatch_messages",
-            lambda messages, registry, **kw: {"final_text": "ok", "transcript": _fetch_transcript(url, body)},
-        )
+        _install_fetch(monkeypatch, {url: body})
         scripted = (
             "CLAIM: A real claim.\n"
             "PASSAGE: The real fetched sentence is right here.\n"
@@ -685,88 +651,64 @@ class TestExtractEvidenceStripsLeakedDiagnostics:
         assert "[DOURMOUSE" not in record.claims[0].location
 
 
-class TestExtractEvidenceDocumentCache:
-    """Real gap closed 2026-09-20: a fetched page used to live only in
-    memory for one call. Now cached workspace-relative by a hash of the
-    URL, so a repeated source costs one real fetch, not one per call, and
-    document_hash stops fingerprinting something already gone."""
+class TestExtractEvidenceStoresTheRealDocument:
+    """finding #089, end to end with a real local server and the real
+    acquisition layer: the claim's document_hash names raw bytes that are
+    really on disk, and the final URL after a redirect is recorded."""
 
-    def _record(self, url="https://example.com/mcp") -> ResearchRecord:
-        record = ResearchRecord(question="What is MCP?")
-        record.set_plan(["a sub-question"])
-        record.add_sources([url])
-        return record
+    def test_the_cited_document_is_stored_and_rereadable_by_its_hash(self, monkeypatch, tmp_path):
+        import http.server
+        import ipaddress
+        import threading
 
-    def test_second_extraction_reuses_the_cached_document_no_new_fetch(self, monkeypatch, tmp_path):
+        from dourmouse import net_guard
+        from dourmouse.research_pipeline.acquire import DocumentCache
+
+        body = b"<html><body><p>The real fetched sentence is right here.</p></body></html>"
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                if self.path == "/old":
+                    self.send_response(301)
+                    self.send_header("Location", "/page")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        real = net_guard.is_public_address
+        monkeypatch.setattr(net_guard, "is_public_address",
+                            lambda a: a == ipaddress.ip_address("127.0.0.1") or real(a))
         monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
-        url = "https://example.com/mcp"
-        body = "The real fetched sentence is right here."
-        fetch_calls = []
-        import dourmouse.dispatch as dispatch_module
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{srv.server_address[1]}"
+            record = ResearchRecord(question="q")
+            record.set_plan(["sub"])
+            record.add_sources([base + "/old"])
+            _install_chat_fake(monkeypatch, [
+                "CLAIM: A real claim.\n"
+                "PASSAGE: The real fetched sentence is right here.\n"
+                "LOCATION: only sentence",
+            ])
+            extract_evidence(record, _research_info_registry())
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
-        def _fake_fetch(messages, registry, **kw):
-            fetch_calls.append(url)
-            return {"final_text": "ok", "transcript": _fetch_transcript(url, body)}
-
-        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _fake_fetch)
-        _install_chat_fake(monkeypatch, [
-            "CLAIM: A real claim.\n"
-            "PASSAGE: The real fetched sentence is right here.\n"
-            "LOCATION: only sentence",
-            "CLAIM: A second real claim.\n"
-            "PASSAGE: The real fetched sentence is right here.\n"
-            "LOCATION: only sentence",
-        ])
-
-        extract_evidence(self._record(url), _research_info_registry())
-        assert len(fetch_calls) == 1
-
-        # A brand new record, same URL -- the SECOND extraction must hit the
-        # real on-disk cache, never call run_dispatch_messages again.
-        extract_evidence(self._record(url), _research_info_registry())
-        assert len(fetch_calls) == 1  # still 1 -- the cache served it
-
-    def test_cache_file_actually_exists_on_disk_with_the_real_fetched_text(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
-        url = "https://example.com/mcp"
-        body = "The real fetched sentence is right here."
-        import dourmouse.dispatch as dispatch_module
-
-        monkeypatch.setattr(
-            dispatch_module, "run_dispatch_messages",
-            lambda messages, registry, **kw: {"final_text": "ok", "transcript": _fetch_transcript(url, body)},
-        )
-        _install_chat_fake(monkeypatch, [
-            "CLAIM: A real claim.\n"
-            "PASSAGE: The real fetched sentence is right here.\n"
-            "LOCATION: only sentence",
-        ])
-        extract_evidence(self._record(url), _research_info_registry())
-
-        cache_path = tmp_path / "research_pipeline" / "documents" / f"{_source_id_for_url(url)}.txt"
-        assert cache_path.exists()
-        assert cache_path.read_text(encoding="utf-8") == body
-
-    def test_different_urls_never_collide_in_the_cache(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
-        import dourmouse.dispatch as dispatch_module
-
-        def _fake_fetch(messages, registry, **kw):
-            url = "https://example.com/a" if "example.com/a" in messages[0]["content"] else "https://example.com/b"
-            body = "Body A." if url.endswith("/a") else "Body B."
-            return {"final_text": "ok", "transcript": _fetch_transcript(url, body)}
-
-        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _fake_fetch)
-        _install_chat_fake(monkeypatch, [
-            "CLAIM: Claim A.\nPASSAGE: Body A.\nLOCATION: only line",
-            "CLAIM: Claim B.\nPASSAGE: Body B.\nLOCATION: only line",
-        ])
-        extract_evidence(self._record("https://example.com/a"), _research_info_registry())
-        extract_evidence(self._record("https://example.com/b"), _research_info_registry())
-
-        docs_dir = tmp_path / "research_pipeline" / "documents"
-        assert (docs_dir / f"{_source_id_for_url('https://example.com/a')}.txt").read_text() == "Body A."
-        assert (docs_dir / f"{_source_id_for_url('https://example.com/b')}.txt").read_text() == "Body B."
+        claim = record.claims[0]
+        assert claim.url == base + "/old"
+        assert claim.final_url == base + "/page"
+        assert claim.document_hash == hashlib.sha256(body).hexdigest()
+        assert DocumentCache().read_raw(claim.document_hash) == body
 
 
 class TestDetectContradictionsStage:
@@ -897,15 +839,13 @@ class TestRunFullPipelineStage:
                     {"type": "tool_use", "name": "fetch_url",
                      "raw_arguments": json.dumps({"url": "https://b.example/1"})},
                 ]}
-            if "https://a.example/1" in content:
-                return {"final_text": "ok",
-                        "transcript": _fetch_transcript("https://a.example/1", "Body A content real.")}
-            if "https://b.example/1" in content:
-                return {"final_text": "ok",
-                        "transcript": _fetch_transcript("https://b.example/1", "Body B content real.")}
             raise AssertionError(f"unexpected dispatch content: {content!r}")
 
         monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_fetch(monkeypatch, {
+            "https://a.example/1": "Body A content real.",
+            "https://b.example/1": "Body B content real.",
+        })
         _install_chat_fake(monkeypatch, [
             "CLAIM: claim A\nPASSAGE: Body A content real.\nLOCATION: whole",
             "CLAIM: claim B\nPASSAGE: Body B content real.\nLOCATION: whole",
@@ -929,12 +869,10 @@ class TestRunFullPipelineStage:
                      "raw_arguments": json.dumps({"url": u})}
                     for u in ("https://a.example/1", "https://a.example/2", "https://a.example/3")
                 ]}
-            return {"final_text": "ok", "transcript": _fetch_transcript(
-                next(u for u in ("https://a.example/1", "https://a.example/2", "https://a.example/3") if u in content),
-                "Body content real.",
-            )}
+            raise AssertionError(f"unexpected dispatch content: {content!r}")
 
         monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_fetch(monkeypatch, dict.fromkeys(("https://a.example/1", "https://a.example/2", "https://a.example/3"), "Body content real."))
         _install_chat_fake(monkeypatch, [
             "CLAIM: claim\nPASSAGE: Body content real.\nLOCATION: whole",
         ])
@@ -959,15 +897,13 @@ class TestRunFullPipelineStage:
                     {"type": "tool_use", "name": "fetch_url",
                      "raw_arguments": json.dumps({"url": "https://b.example/1"})},
                 ]}
-            if "https://a.example/1" in content:
-                return {"final_text": "ok",
-                        "transcript": _fetch_transcript("https://a.example/1", "Body A content real.")}
-            if "https://b.example/1" in content:
-                return {"final_text": "ok",
-                        "transcript": _fetch_transcript("https://b.example/1", "Body B content real.")}
             raise AssertionError(f"unexpected dispatch content: {content!r}")
 
         monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_fetch(monkeypatch, {
+            "https://a.example/1": "Body A content real.",
+            "https://b.example/1": "Body B content real.",
+        })
         _install_chat_fake(monkeypatch, [
             "CLAIM: claim A\nPASSAGE: this text is not in the real fetched page\nLOCATION: nowhere",
             "CLAIM: claim B\nPASSAGE: Body B content real.\nLOCATION: whole",

@@ -58,3 +58,16 @@ def test_no_module_freezes_a_workspace_path_at_import_time():
                         and sub.func.id == "workspace_dir"):
                     offenders.append(f"{path.relative_to(root)}:{node.lineno}")
     assert offenders == []
+
+
+def test_no_module_falls_back_to_a_cwd_relative_workspace():
+    """Finding #090: `... or "workspace"` resolved against whatever directory
+    the process started in, so two processes (tray and server) could use two
+    different kill-switch files. Use config.workspace_dir()."""
+    root = Path(__file__).resolve().parent.parent
+    offenders = [
+        str(p.relative_to(root)) for p in root.rglob("*.py")
+        if "tests" not in p.relative_to(root).parts
+        and 'or "workspace")' in p.read_text(encoding="utf-8")
+    ]
+    assert offenders == []

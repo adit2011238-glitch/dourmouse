@@ -64,7 +64,12 @@ def _state_path() -> Path:
     override = os.environ.get(_STATE_ENV, "").strip()
     if override:
         return Path(override)
-    root = Path(os.environ.get(_WORKSPACE_ENV, "").strip() or "workspace")
+    # workspace_dir(), not a cwd-relative "workspace" (finding #090): the tray
+    # and the server read the kill switch from the SAME file only if they
+    # resolve it the same way, whatever directory each was started from.
+    from dourmouse.config import workspace_dir
+
+    root = workspace_dir()
     return root / "privacy_state.json"
 
 

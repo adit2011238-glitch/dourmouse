@@ -60,6 +60,7 @@ jobs:
           pip install -r dell/requirements.txt  # test_dell_server / test_compute_api need fastapi
           pip install -r requirements-desktop.txt  # tray tests need pystray + Pillow
           pip install -r requirements-voice.txt  # wakeword tests need openwakeword + sounddevice
+          if [ "$RUNNER_OS" = "Linux" ]; then pip install --no-deps openwakeword==0.6.0; fi  # see requirements-voice.txt
       - name: Run the suite
         env:
           PYTHONIOENCODING: utf-8

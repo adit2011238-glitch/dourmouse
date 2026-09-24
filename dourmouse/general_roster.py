@@ -676,22 +676,14 @@ def _web_search_tool(arguments: dict[str, Any]) -> str:
     )
 
 
-def _strip_html(raw: str) -> str:
-    """Crude HTML -> text for read-back purposes (stdlib only, no deps)."""
-    raw = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
-    raw = re.sub(r"(?s)<[^>]+>", " ", raw)
-    raw = raw.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-    raw = re.sub(r"[ \t\r\f\v]+", " ", raw)
-    return raw.strip()
-
-
 def _fetch_url_tool(arguments: dict[str, Any]) -> str:
     """SSRF guard (finding #003, hardened in #086): model-supplied URLs go
     through net_guard.guarded_urlopen, which refuses any hop whose host
     resolves to a non-public address, connects only to the address it
     vetted (no DNS rebinding between check and connect), and re-checks
     every redirect with a hop cap."""
-    from dourmouse.net_guard import FetchRefused, guarded_urlopen
+    from dourmouse.net_guard import FetchRefused
+    from dourmouse.research_pipeline.acquire import UnsupportedContent, cut_at_word, fetch_document
 
     url = (arguments.get("url") or "").strip()
     if not url:
@@ -704,14 +696,16 @@ def _fetch_url_tool(arguments: dict[str, Any]) -> str:
         max_chars = int(arguments.get("max_chars", 8000))
     except (TypeError, ValueError):
         return "ERROR: max_chars must be an integer."
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "dourmouse/0.1"}
-    )
+    # finding #089: the whole document is fetched, decoded with its real
+    # charset, checked for content type and stored raw (re-readable later);
+    # only the text shown here is cut, at a word boundary, and says so.
+    # Always a fresh fetch for chat: a cached page could be stale news.
     try:
-        with guarded_urlopen(req, timeout=15) as resp:
-            raw = resp.read(max_chars * 2 + 4096).decode("utf-8", errors="replace")
+        doc = fetch_document(url, use_cache=False, timeout=15)
     except FetchRefused as exc:
         return f"REFUSED: {exc} -- fetch_url only fetches the public web."
+    except UnsupportedContent as exc:
+        return f"FETCH: {exc} (honest)."
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return net_errors.report(
             exc,
@@ -720,10 +714,17 @@ def _fetch_url_tool(arguments: dict[str, Any]) -> str:
             extra={"url": url},
             prefix="FETCH FAILED (reported honestly):",
         )
-    text = _strip_html(raw)[:max_chars]
-    if not text:
+    if not doc.text:
         return "FETCH: page returned no readable text (honest)."
-    return f"FETCHED {url} ({len(text)} chars):\n{text}"
+    text, cut = cut_at_word(doc.text, max_chars)
+    notes = [f"{len(text)} chars"]
+    if doc.final_url != url:
+        notes.append(f"final URL {doc.final_url}")
+    if cut:
+        notes.append(f"showing {len(text)} of {len(doc.text)} chars")
+    if doc.truncated:
+        notes.append("document larger than the fetch cap, stored truncated")
+    return f"FETCHED {url} ({', '.join(notes)}):\n{text}"
 
 
 def _open_url_tool(arguments: dict[str, Any]) -> str:

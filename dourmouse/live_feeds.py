@@ -430,7 +430,11 @@ def read_inbox(max_items: int = 10) -> list[dict[str, str]]:
 def _tasks_path() -> Path:
     import os
 
-    root = Path(os.environ.get("DOURMOUSE_WORKSPACE", "").strip() or "workspace")
+    # workspace_dir(), not a cwd-relative "workspace" (finding #090): a
+    # process started from another directory read and wrote a different file.
+    from dourmouse.config import workspace_dir
+
+    root = workspace_dir()
     env = os.environ.get(_TASKS_ENV, "").strip()
     if env:
         return Path(env)

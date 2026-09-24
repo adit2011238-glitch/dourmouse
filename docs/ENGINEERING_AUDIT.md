@@ -4186,3 +4186,77 @@ executable, a chmod-ed binary) and are now skipped on Windows with the reason st
 Tests: `test_windows_portability.py` (encoding guard, stdin guard, extension names, npm shim found
 outside PATH on the Windows runner, no POSIX dirs on the Windows PATH, double bind refused, server
 construction guard); 29 CLI backend tests moved from argv inspection to what was sent on stdin.
+
+### 089 -- research evidence was built from a truncated, mis-decoded copy that was then thrown away
+
+Status: DONE 2026-09-24. Phase 2 of the completion plan: R0-6 (raw document cache), R0-4 (the
+truncation and decoding defects) and R0-5 (final-URL provenance), done together because they share
+one code path.
+
+**What was wrong.** `extract_evidence` ran a nested LLM dispatch whose only job was to call
+`fetch_url` on a URL it already had, then scraped the tool's text output. That output was built by
+reading `max_chars * 2 + 4096` bytes before any parsing (so a page with a big `<head>` could yield
+no body at all), decoding them as UTF-8 whatever the page declared (Latin-1 and Shift-JIS became
+mojibake), regex-stripping anything including PDFs and images as if they were HTML, decoding four
+HTML entities, and cutting at 8000 characters mid-word. Only that text was cached, keyed by the
+requested URL, so `document_hash` fingerprinted text that matched no stored document and a cited
+passage could never be re-read against the page it came from. The URL recorded was the requested
+one even when a redirect served the content from somewhere else.
+
+**Fix.** New `research_pipeline/acquire.py`. `fetch_document` fetches through `net_guard` (#086),
+reads up to 10 MB (a bigger body is stored and marked `truncated`, never presented as whole),
+classifies the content type (HTML, text, PDF through the existing pypdf path; anything else is
+`UnsupportedContent`, and a PDF with no text layer is reported, not stored as its error message),
+detects the charset from the header, then a BOM, then `<meta charset>`, then UTF-8 (an unknown
+codec name is not trusted), and decodes every HTML entity. The raw bytes go into a
+content-addressed `DocumentCache` (`raw/<ab>/<sha256>.bin`, atomic writes) with the fetch metadata
+beside them (requested URL, final URL, redirect chain, status, content type, charset and where it
+came from) and a per-URL index for both the requested and final URL. Text is always re-derived from
+the stored bytes, and reading a blob verifies its hash. `net_guard.guarded_urlopen` now reports
+the redirect chain.
+
+`extract_evidence` fetches directly (no LLM needed to fetch a known URL), sets
+`document_hash` to the SHA-256 of the stored raw bytes and records the new `Claim.final_url`; the
+model sees up to 60,000 characters while passage validation still runs against the whole
+document. `fetch_url` (chat) uses the same layer, always fresh, still stored: the shown text is cut
+at a word boundary and the header says so ("showing N of M chars", "final URL ..."). Also fixed on
+the way: `ResearchRecord.reject_claim` rebuilt the claim field by field and would have dropped any
+new field; it now uses `dataclasses.replace`. Removed as dead: `_strip_html`,
+`_extract_fetched_text`, `_FETCH_INSTRUCTIONS`.
+
+Verified live: `http://github.com/` recorded as final `https://github.com/` with the chain, charset
+from the header, all 576,667 bytes stored (the old read took about 20 KB before parsing).
+
+CI dependency found in the same pass: `openwakeword` declares `tflite-runtime` on Linux, which has
+no Python 3.14 wheel, so `requirements-voice.txt` could not install on Linux. Dourmouse uses only
+its ONNX backend; the file now installs it off Linux, pins its real runtime deps, and documents
+`pip install --no-deps openwakeword` for Linux (which CI does).
+
+Tests: `test_research_acquire.py` (18, real local server: hash-addressed storage, cache reuse,
+re-derivation, corruption detected, header/meta/BOM charset, all entities, big head, image
+refused, text-less PDF refused, redirect chain and final URL indexed, truncation marked, word-safe
+cut). The research pipeline tests moved from fake dispatch transcripts to the fetch seam, plus one
+end-to-end test that the claim's hash names bytes really on disk after a redirect.
+
+### 090 -- the privacy kill switch lived wherever the process happened to start
+
+Status: DONE 2026-09-24. Found by the third Windows CI run, whose six remaining failures were all
+tests; one of them was hiding a real defect.
+
+`tray._state_path()`, the file holding the camera and microphone kill switch, defaulted to
+`Path(os.environ.get("DOURMOUSE_WORKSPACE") or "workspace")`: a path relative to the current
+directory of whichever process asked. `config.workspace_dir()` (the single source of truth added
+precisely to stop path drift) resolves to the project's own `workspace/`. So a tray started from
+one directory and a server or vision bridge started from another read different kill-switch files,
+and switching the microphone off in one was invisible to the other; a packaged app started with
+`/` as its directory would have tried `/workspace`. The same cwd-relative fallback was in
+`live_feeds._tasks_path`, `world_watch_regions` and `world_pulse_history`. All four now use
+`workspace_dir()`, and `tradingview_ops` (correct, but re-implemented) does too. On this Mac the dev
+server runs from the repo root, so existing files stay where they are. A guard fails if any module
+reintroduces `or "workspace")`. Five other modules re-implement the lookup correctly
+(project_bookkeeper, spotify_services, orch_net, schedules, learn); left as they are.
+
+Also in this pass: the Windows fake CLI in `test_code_backends.py` learned the argv-echo shape (three
+tests), and the tray path tests compare `Path`s instead of POSIX strings.
+
+Windows CI progress across the three runs: 52 failures, then 6, then these fixes.

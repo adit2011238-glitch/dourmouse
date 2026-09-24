@@ -13,7 +13,16 @@ piper-tts==1.6.0
 # device access verified on macOS in this project's .venv). Without these
 # wheels dourmouse.wakeword.wakeword_status() reports NOT CONFIGURED
 # honestly and dourmouse.wakeword.launch() refuses to start.
-openwakeword==0.6.0
+# Finding #089: openwakeword declares tflite-runtime on Linux, which has no
+# Python 3.14 wheel, so this file could not install there at all. Dourmouse
+# only uses the ONNX backend (dourmouse/wakeword.py), so on Linux install it
+# with: pip install --no-deps openwakeword==0.6.0 (its real runtime deps are
+# pinned just below, so nothing is missing).
+openwakeword==0.6.0; sys_platform != "linux"
+onnxruntime==1.30.0
+scikit-learn==1.9.1
+tqdm==4.70.1
+requests==2.34.2
 sounddevice==0.5.6
 # Vision OS checklist item 5 (dourmouse/audio_denoise.py) — real-time
 # RNNoise noise scrubbing ahead of faster-whisper. Uses pyrnnoise's

@@ -1025,3 +1025,9 @@ and a real build sequence, not just a requirement statement:
 - [x] Windows portability (finding #088) 2026-09-24 -- coding-CLI task on stdin (first Claude turn
   hit cmd.exe's 8191-char limit), UTF-8 on all 31 text subprocess calls, exclusive port bind,
   project lookups by raw per-tool path, CLI discovery with extensions and npm folder.
+- [x] Phase 2 R0-6 + R0-4 + R0-5 (finding #089) 2026-09-24 -- research_pipeline/acquire.py: raw
+  bytes stored content-addressed with fetch metadata, real charset and content-type handling,
+  final URL and redirect chain recorded; evidence fetched directly (no LLM), document_hash is the
+  hash of stored bytes; fetch_url cuts at word boundaries and says so.
+- [x] Kill-switch path (finding #090) 2026-09-24 -- tray, live_feeds, world_watch_regions and
+  world_pulse_history defaulted to a cwd-relative workspace; now config.workspace_dir(), guarded.

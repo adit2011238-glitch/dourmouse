@@ -111,6 +111,7 @@ def _claim_to_dict(c: Claim) -> dict[str, Any]:
         "document_hash": c.document_hash, "location": c.location,
         "passage": c.passage, "retrieved_at": c.retrieved_at,
         "agent": c.agent, "status": c.status, "sub_question": c.sub_question,
+        "final_url": c.final_url,
     }
 
 
@@ -121,6 +122,7 @@ def _claim_from_dict(d: dict[str, Any]) -> Claim:
         passage=d["passage"], retrieved_at=d["retrieved_at"],
         agent=d["agent"], status=d.get("status", "ACTIVE"),
         sub_question=d.get("sub_question", ""),
+        final_url=d.get("final_url", ""),
     )
 
 

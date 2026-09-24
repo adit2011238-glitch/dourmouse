@@ -9,7 +9,7 @@ visible in the real record rather than vanishing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 
 
@@ -55,6 +55,10 @@ class Claim:
     # so every pre-existing call site (tests, `reject_claim`'s own copy
     # below) keeps working unchanged; real callers set it going forward.
     sub_question: str = ""
+    # R0-5 (finding #089): the URL the content actually came from after
+    # redirects. `url` stays the discovered source; "" on claims made
+    # before this existed.
+    final_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -110,13 +114,9 @@ class ResearchRecord:
         """Never deletes -- replaces the claim at `index` with a REJECTED
         copy carrying the same real provenance, so the record stays
         honest about what was once claimed and why it was dropped."""
-        old = self.claims[index]
-        rejected = Claim(
-            claim=old.claim, source_id=old.source_id, url=old.url,
-            document_hash=old.document_hash, location=old.location,
-            passage=old.passage, retrieved_at=old.retrieved_at,
-            agent=old.agent, status="REJECTED", sub_question=old.sub_question,
-        )
+        # replace(), not a hand-listed copy: a field added to Claim later
+        # (final_url, finding #089) must survive rejection too.
+        rejected = replace(self.claims[index], status="REJECTED")
         self.claims = self.claims[:index] + (rejected,) + self.claims[index + 1:]
 
     def add_contradiction(self, contradiction: Contradiction) -> None:

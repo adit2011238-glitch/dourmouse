@@ -60,7 +60,11 @@ def _history_path() -> Path:
     per-file env var (here ``DOURMOUSE_WORLD_HISTORY_FILE``) can override the
     path outright, same as ``DOURMOUSE_TASKS_FILE`` does for tasks.json.
     """
-    root = Path(os.environ.get("DOURMOUSE_WORKSPACE", "").strip() or "workspace")
+    # workspace_dir(), not a cwd-relative "workspace" (finding #090): a
+    # process started from another directory read and wrote a different file.
+    from dourmouse.config import workspace_dir
+
+    root = workspace_dir()
     env = os.environ.get(_ENV_HISTORY_FILE, "").strip()
     if env:
         return Path(env)

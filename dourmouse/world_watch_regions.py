@@ -54,7 +54,11 @@ def _regions_path() -> Path:
     under, and ``DOURMOUSE_WATCH_REGIONS_FILE`` — the watch-regions analogue
     of ``DOURMOUSE_TASKS_FILE`` — overrides the path outright when set.
     """
-    root = Path(os.environ.get("DOURMOUSE_WORKSPACE", "").strip() or "workspace")
+    # workspace_dir(), not a cwd-relative "workspace" (finding #090): a
+    # process started from another directory read and wrote a different file.
+    from dourmouse.config import workspace_dir
+
+    root = workspace_dir()
     env = os.environ.get(_WATCH_REGIONS_ENV, "").strip()
     if env:
         return Path(env)

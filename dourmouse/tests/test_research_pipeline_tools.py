@@ -175,17 +175,16 @@ class TestResearchRunPipelineTool:
                     {"type": "tool_use", "name": "fetch_url",
                      "raw_arguments": '{"url": "https://b.example/1"}'},
                 ]}
-            if "https://a.example/1" in content:
-                return {"final_text": "ok", "transcript": [
-                    {"type": "tool_result", "name": "fetch_url",
-                     "text": "FETCHED https://a.example/1 (20 chars):\nBody A content real."},
-                ]}
-            return {"final_text": "ok", "transcript": [
-                {"type": "tool_result", "name": "fetch_url",
-                 "text": "FETCHED https://b.example/1 (20 chars):\nBody B content real."},
-            ]}
+            raise AssertionError(f"unexpected dispatch content: {content!r}")
 
         monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        # finding #089: evidence fetches go through acquire.fetch_document,
+        # not a nested dispatch.
+        from dourmouse.research_pipeline import acquire
+        from dourmouse.tests.test_research_pipeline import _fake_doc
+
+        pages = {"https://a.example/1": "Body A content real.", "https://b.example/1": "Body B content real."}
+        monkeypatch.setattr(acquire, "fetch_document", lambda url, **kw: _fake_doc(url, pages[url]))
         tool = rpt._build_run_pipeline_tool(_registry())
         out = tool.handler({"question": "Is Z real?"})
         assert "Sources: 0 -> 2" in out

@@ -112,32 +112,41 @@ class _VettedHTTPSHandler(urllib.request.HTTPSHandler):
 class _CappedRedirectHandler(urllib.request.HTTPRedirectHandler):
     max_redirections = MAX_REDIRECTS
 
+    def __init__(self, hops: list[str] | None = None) -> None:
+        super().__init__()
+        self.hops = hops if hops is not None else []
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
         scheme = urllib.parse.urlparse(newurl).scheme.lower()
         if scheme not in _ALLOWED_SCHEMES:
             raise FetchRefused(f"redirect to a non-web scheme refused: {newurl!r}")
+        self.hops.append(newurl)
         # The new hop is vetted when its connection opens, like the first.
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _build_opener() -> urllib.request.OpenerDirector:
+def _build_opener(hops: list[str] | None = None) -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(
         urllib.request.ProxyHandler({}),
         _VettedHTTPHandler(),
         _VettedHTTPSHandler(),
-        _CappedRedirectHandler(),
+        _CappedRedirectHandler(hops),
     )
 
 
-def guarded_urlopen(req: urllib.request.Request | str, timeout: float) -> Any:
+def guarded_urlopen(
+    req: urllib.request.Request | str, timeout: float, hops: list[str] | None = None,
+) -> Any:
     """``urlopen`` for model-supplied URLs. Raises FetchRefused (never a
     wrapped URLError) when any hop targets a non-public address or a
-    non-web scheme; every other failure propagates exactly as urlopen's."""
+    non-web scheme; every other failure propagates exactly as urlopen's.
+    Pass ``hops`` to receive every redirect target in order (R0-5
+    provenance: the content may come from a different URL than asked)."""
     url = req.full_url if isinstance(req, urllib.request.Request) else req
     if urllib.parse.urlparse(url).scheme.lower() not in _ALLOWED_SCHEMES:
         raise FetchRefused(f"only http(s) URLs can be fetched, got {url!r}")
     try:
-        return _build_opener().open(req, timeout=timeout)
+        return _build_opener(hops).open(req, timeout=timeout)
     except urllib.error.URLError as exc:
         if isinstance(exc.reason, FetchRefused):
             raise exc.reason from None

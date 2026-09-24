@@ -794,20 +794,23 @@ class TestResearchInfo:
         assert "requires a non-empty" in _web_search_tool({"query": "  "})
 
     def test_fetch_url_returns_stripped_text(self, monkeypatch):
-        class _FakeResponse:
-            def __enter__(self):
-                return self
+        from dourmouse.research_pipeline import acquire
 
-            def __exit__(self, *exc):
-                return False
+        def fake_fetch(url, **kw):
+            text = acquire.html_to_text(
+                "<html><head><title>x</title></head><body><h1>Hi</h1><p>World &amp; more</p></body></html>"
+            )
+            return acquire.FetchedDocument(
+                requested_url=url, final_url=url, redirect_chain=(), status=200,
+                content_type="text/html", charset="utf-8", charset_source="header",
+                fetched_at=0.0, raw_sha256="0" * 64, raw_bytes=10, truncated=False,
+                kind="html", text=text,
+            )
 
-            def read(self, n=None):
-                return b"<html><head><title>x</title></head><body><h1>Hi</h1><p>World &amp; more</p></body></html>"
-
-        monkeypatch.setattr("dourmouse.net_guard.guarded_urlopen", lambda *a, **k: _FakeResponse())
+        monkeypatch.setattr(acquire, "fetch_document", fake_fetch)
         result = _fetch_url_tool({"url": "https://example.com/page"})
         assert "FETCHED" in result
-        assert "Hi World & more" in result  # tags stripped, entities decoded
+        assert "Hi\nWorld & more" in result  # tags stripped, entities decoded
 
     def test_fetch_url_rejects_non_http_scheme(self):
         result = _fetch_url_tool({"url": "file:///etc/passwd"})

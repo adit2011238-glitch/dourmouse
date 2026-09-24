@@ -96,8 +96,9 @@ if strategy.position_size != 0 and not inWindow
 
 def _signals_path() -> Path:
     """workspace/tv_signals.jsonl — created on demand."""
-    raw = os.environ.get("DOURMOUSE_WORKSPACE")
-    root = Path(raw).expanduser() if raw else Path(__file__).resolve().parent.parent / "workspace"
+    from dourmouse.config import workspace_dir
+
+    root = workspace_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root / "tv_signals.jsonl"
 
