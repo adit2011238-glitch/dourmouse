@@ -378,7 +378,10 @@ class SentryStore:
                     )
                 else:
                     conn.execute(
-                        "UPDATE known_devices SET ip=?, hostname=?, last_seen=? WHERE device_key=?",
+                        # COALESCE: a sighting without a name (arp -an never
+                        # has one) must not erase a name recorded earlier.
+                        "UPDATE known_devices SET ip=?, hostname=COALESCE(?, hostname), "
+                        "last_seen=? WHERE device_key=?",
                         (neighbor["ip"], neighbor.get("hostname"), now, key),
                     )
             conn.commit()

@@ -523,15 +523,19 @@ def _run_claude_once(
         env[_MCP_TOOLCALL_LOG_ENV_VAR] = toolcall_log_path
     try:
         return subprocess.run(
+            # The task goes on stdin, never argv (finding #088): on Windows the
+            # npm-installed CLI is a .cmd shim run through cmd.exe, whose 8191-char
+            # limit and newline handling broke every first turn (the orchestrator
+            # preamble alone is ~16.5 KB), and Linux caps one argument at 128 KB.
             [
                 cli, "-p", "--permission-mode", "bypassPermissions",
-                *session_args, task, *mcp_args,
+                *session_args, *mcp_args,
             ],
             cwd=cwd,
             env=env,
-            stdin=subprocess.DEVNULL,  # claude -p waits ~3s on stdin otherwise
+            input=task,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -569,8 +573,11 @@ def _cli_env(cli: str | None = None) -> dict[str, str]:
     extra: list[str] = []
     if cli:
         extra.append(str(Path(cli).resolve().parent))
-    for d in ("~/.local/bin", "~/.claude/local", "~/bin",
-              "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"):
+    home_dirs = ("~/.local/bin", "~/.claude/local", "~/bin")
+    # POSIX system dirs only off Windows (finding #088): there Path("/usr/bin")
+    # became "D:\\usr\\bin" and put junk entries on the child's PATH.
+    system_dirs = () if os.name == "nt" else ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
+    for d in home_dirs + system_dirs:
         extra.append(str(Path(d).expanduser()))
 
     nvm = Path("~/.nvm/versions/node").expanduser()
@@ -868,20 +875,32 @@ def stream_claude(
 
     def _run_once(session_args: list[str]) -> tuple[int, str, str]:
         proc = subprocess.Popen(
+            # The task goes on stdin, never argv (finding #088): on Windows the
+            # npm-installed CLI is a .cmd shim run through cmd.exe, whose 8191-char
+            # limit and newline handling broke every first turn (the orchestrator
+            # preamble alone is ~16.5 KB), and Linux caps one argument at 128 KB.
             [
                 cli, "-p", "--output-format", "stream-json",
                 "--include-partial-messages", "--verbose",
                 "--permission-mode", "bypassPermissions",
-                *session_args, task, *mcp_args,
+                *session_args, *mcp_args,
             ],
             cwd=cwd,
             env=_cli_env(cli),
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             bufsize=1,
         )
+        # claude reads the whole prompt before it writes anything, so writing
+        # it all up front cannot deadlock against a full stdout pipe.
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(task)
+            proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass  # the CLI died at startup; its exit code and stderr say why
         stopped = threading.Event()
 
         def _watchdog() -> None:
@@ -1044,11 +1063,15 @@ def _run_codex(task: str, *, cwd: str | None, timeout: int) -> str:
     timeout = max(1, min(int(timeout), 600))
     try:
         proc = subprocess.run(
-            [cli, "exec", task, "--skip-git-repo-check"],
+            # The task goes on stdin, never argv (finding #088): on Windows the
+            # npm-installed CLI is a .cmd shim run through cmd.exe, whose 8191-char
+            # limit and newline handling broke every first turn (the orchestrator
+            # preamble alone is ~16.5 KB), and Linux caps one argument at 128 KB.
+            [cli, "exec", "-", "--skip-git-repo-check"],
             cwd=cwd,
-            stdin=subprocess.DEVNULL,
+            input=task,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:

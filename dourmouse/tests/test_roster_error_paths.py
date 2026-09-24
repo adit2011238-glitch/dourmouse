@@ -163,8 +163,9 @@ def test_fetch_url_failure_is_clean_and_logged(monkeypatch):
     def boom(*a, **k):
         raise urllib.error.HTTPError("https://example.test/x", 404, "nf", None, None)
 
-    monkeypatch.setattr(general_roster.socket, "gethostbyname", lambda host: "93.184.215.14")
-    monkeypatch.setattr(general_roster.urllib.request, "urlopen", boom)
+    from dourmouse import net_guard
+
+    monkeypatch.setattr(net_guard, "guarded_urlopen", boom)
 
     out = general_roster._fetch_url_tool({"url": "https://example.test/x"})
 

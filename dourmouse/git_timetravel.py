@@ -54,7 +54,7 @@ def _run_git(args: list[str], repo_root: Path, timeout: float = _DEFAULT_TIMEOUT
         ["git", *args],
         cwd=str(repo_root),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=timeout,
     )
 

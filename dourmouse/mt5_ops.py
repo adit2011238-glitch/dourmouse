@@ -332,7 +332,7 @@ def _run_worker(args: list[str], timeout: float = 12.0) -> dict[str, Any]:
     cmd = [sys.executable, "-m", "dourmouse.mt5_probe", *args]
     try:
         out = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             cwd=str(_ROSTER_ROOT),
         )
     except subprocess.TimeoutExpired:

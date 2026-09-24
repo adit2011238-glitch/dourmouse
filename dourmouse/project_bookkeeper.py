@@ -352,12 +352,17 @@ def refresh(
 
         if _needs_context_refresh(prior, last_active_epoch):
             items: list[dict[str, Any]] = []
+            # Look each tool up by its OWN spelling of the path, not the
+            # normalized merge key (finding #088; see project_import).
+            raw_paths = p.get("raw_paths") or {}
             if "claude_code" in p["sources"]:
-                claude_dir = real_claude_root / _sanitized_dirname(path)
-                if claude_dir.is_dir():
-                    items.extend(_claude_recent_items(claude_dir, _CLAUDE_SCAN_FILES_CAP))
+                for raw in raw_paths.get("claude_code") or [path]:
+                    claude_dir = real_claude_root / _sanitized_dirname(raw)
+                    if claude_dir.is_dir():
+                        items.extend(_claude_recent_items(claude_dir, _CLAUDE_SCAN_FILES_CAP))
             if "codex_cli" in p["sources"]:
-                items.extend(_codex_recent_items(real_codex_db, path, _CLAUDE_SCAN_FILES_CAP))
+                for raw in raw_paths.get("codex_cli") or [path]:
+                    items.extend(_codex_recent_items(real_codex_db, raw, _CLAUDE_SCAN_FILES_CAP))
             items.sort(key=_sort_key, reverse=True)
             items = items[:_MAX_CONTEXT_ITEMS]
             if items:

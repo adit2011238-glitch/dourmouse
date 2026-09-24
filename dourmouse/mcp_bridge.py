@@ -393,7 +393,7 @@ def ensure_codex_mcp_registered(cli: str) -> None:
     """
     try:
         listed = subprocess.run(
-            [cli, "mcp", "list"], capture_output=True, text=True, timeout=15
+            [cli, "mcp", "list"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15
         )
     except (OSError, subprocess.TimeoutExpired):
         return
@@ -402,7 +402,7 @@ def ensure_codex_mcp_registered(cli: str) -> None:
     try:
         subprocess.run(
             [cli, "mcp", "add", "dourmouse", "--", sys.executable, "-m", "dourmouse.mcp_bridge"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired):
         pass

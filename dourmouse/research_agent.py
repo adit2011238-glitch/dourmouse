@@ -158,7 +158,7 @@ def run_atlas_research(
         input=json.dumps(request),
         cwd=str(repo),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=900,
         env=env,
     )

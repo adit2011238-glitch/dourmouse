@@ -210,6 +210,14 @@ class TestDnsConfiguration:
 
 
 class TestArpNeighbors:
+    def test_arp_is_run_numeric_so_it_never_waits_on_reverse_dns(self, monkeypatch):
+        """Finding #087: `arp -a` timed out resolving 206 LAN names and the
+        whole ARP view went unavailable."""
+        seen = []
+        monkeypatch.setattr(pa, "_run", lambda cmd, timeout=pa._DEFAULT_TIMEOUT_S: (seen.append(cmd), (True, ""))[1])
+        pa.get_arp_neighbors()
+        assert seen == [["arp", "-an"]]
+
     def test_parses_every_real_neighbor(self, monkeypatch):
         monkeypatch.setattr(pa, "_run", lambda cmd, timeout=pa._DEFAULT_TIMEOUT_S: (True, _REAL_ARP))
         result = pa.get_arp_neighbors()

@@ -25,6 +25,10 @@ from dourmouse.project_import import (
     get_imported_projects,
 )
 
+# Merged project paths are normpath'd (native separators on Windows);
+# raw per-tool records keep the tool's own spelling (finding #088).
+_n = os.path.normpath
+
 
 def _write_claude_session(path, lines, mtime=None):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -205,7 +209,7 @@ class TestGetImportedProjects:
         assert result["codex_cli"]["configured"] is True
         assert len(result["projects"]) == 1
         p = result["projects"][0]
-        assert p["path"] == "/Users/x/proj"
+        assert p["path"] == _n("/Users/x/proj")
         assert p["title"] == "proj"
         assert p["sources"] == ["claude_code", "codex_cli"]
         assert p["session_counts"] == {"claude_code": 1, "codex_cli": 1}
@@ -223,7 +227,7 @@ class TestGetImportedProjects:
         _make_codex_db(codex_db, [("t1", "/Users/x/b", "", 1786899547)])
         result = get_imported_projects(claude_root=claude_root, codex_db=codex_db)
         paths = {p["path"] for p in result["projects"]}
-        assert paths == {"/Users/x/a", "/Users/x/b"}
+        assert paths == {_n("/Users/x/a"), _n("/Users/x/b")}
 
     def test_sorted_newest_active_first(self, tmp_path):
         claude_root = tmp_path / "projects"
@@ -238,7 +242,7 @@ class TestGetImportedProjects:
         )
         result = get_imported_projects(claude_root=claude_root, codex_db=tmp_path / "nope.sqlite")
         paths = [p["path"] for p in result["projects"]]
-        assert paths == ["/Users/x/new", "/Users/x/old"]
+        assert paths == [_n("/Users/x/new"), _n("/Users/x/old")]
 
     def test_exists_flag_reflects_real_disk_state(self, tmp_path):
         real_dir = tmp_path / "real_project"
@@ -253,7 +257,7 @@ class TestGetImportedProjects:
         result = get_imported_projects(claude_root=claude_root, codex_db=tmp_path / "nope.sqlite")
         by_path = {p["path"]: p for p in result["projects"]}
         assert by_path[str(real_dir)]["exists"] is True
-        assert by_path["/Users/x/long_gone"]["exists"] is False
+        assert by_path[_n("/Users/x/long_gone")]["exists"] is False
 
     def test_neither_source_configured_never_raises(self, tmp_path):
         result = get_imported_projects(
@@ -299,7 +303,7 @@ class TestProjectsImportedEndpoint:
             assert data["claude_code"]["configured"] is True
             assert data["codex_cli"]["configured"] is False
             assert len(data["projects"]) == 1
-            assert data["projects"][0]["path"] == "/Users/x/proj"
+            assert data["projects"][0]["path"] == _n("/Users/x/proj")
             assert data["projects"][0]["sources"] == ["claude_code"]
         finally:
             srv.shutdown()

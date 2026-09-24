@@ -18,6 +18,26 @@ from dourmouse import code_backends
 from dourmouse.general_roster import _make_code_tool, build_general_registry
 
 
+class _Argv(list):
+    """A recorded argv plus what the call sent on stdin (finding #088: the
+    task travels on stdin, never argv)."""
+
+    def __init__(self, argv, kwargs):
+        super().__init__(argv)
+        self.stdin = kwargs.get("input")
+
+
+class _FakeStdin:
+    def __init__(self, owner):
+        self._owner = owner
+
+    def write(self, text):
+        self._owner.stdin = (self._owner.stdin or "") + text
+
+    def close(self):
+        pass
+
+
 @pytest.fixture(autouse=True)
 def _reset_claude_sessions():
     """The Claude CLI session-continuity map (code_backends._CLAUDE_SESSIONS)
@@ -458,7 +478,7 @@ class TestCodexMcpRegistration:
 class TestClaudeSessionContinuity:
     def _fake_run_factory(self, seen: list, proc_factory):
         def _fake_run(argv, **kwargs):
-            seen.append(argv)
+            seen.append(_Argv(argv, kwargs))
             return proc_factory(argv)
 
         return _fake_run
@@ -485,20 +505,13 @@ class TestClaudeSessionContinuity:
         sid = argv[argv.index("--session-id") + 1]
         # a real UUID4, not a placeholder
         assert uuid.UUID(sid).version == 4
-        # v13: task lands right after the session args, not necessarily
-        # last — real --mcp-config/--allowedTools flags now ride after it
-        # (see _run_claude_once). They must never ride BEFORE it:
-        # --allowedTools takes a variadic value list and a trailing prompt
-        # would be silently swallowed into it (live-caught on the real
-        # CLI: `claude -p --allowedTools "mcp__dourmouse__*" "say hello"`
-        # really does error "Input must be provided either through stdin
-        # or as a prompt argument" — it ate "say hello" as another tool
-        # name).
-        # v13.9 (production-testing fix): a genuine first-ever turn for
-        # this session key now also carries the one-time capability
-        # preamble (see _run_claude's own comment) — the real task text
-        # is appended after it, not the whole positional argument.
-        assert argv[argv.index("--session-id") + 2].endswith("write add")
+        # The task travels on stdin (finding #088). That also retires a
+        # live-caught v13 hazard: --allowedTools takes a variadic value list
+        # and swallowed a trailing positional prompt as another tool name.
+        # A genuine first turn carries the one-time capability preamble
+        # (v13.9) ahead of the real task text.
+        assert "write add" not in " ".join(argv)
+        assert argv.stdin.endswith("write add")
         assert code_backends._CLAUDE_SESSIONS["/tmp/proj"] == sid
 
     def test_second_call_same_cwd_resumes_the_same_session(self, monkeypatch):
@@ -520,9 +533,7 @@ class TestClaudeSessionContinuity:
         first_sid = seen[0][seen[0].index("--session-id") + 1]
         assert "--resume" in seen[1]
         assert seen[1][seen[1].index("--resume") + 1] == first_sid
-        # v13: task lands right after --resume's value — see the sibling
-        # test above for why order (not "last") is what matters here.
-        assert seen[1][seen[1].index("--resume") + 2] == "second turn"
+        assert seen[1].stdin == "second turn"
 
     def test_different_cwd_gets_a_different_session(self, monkeypatch):
         seen: list = []
@@ -918,7 +929,7 @@ class TestCodexCliFirst:
             stderr = ""
 
         def _fake_run(argv, **kwargs):
-            seen["argv"] = argv
+            seen["argv"] = _Argv(argv, kwargs)
             return _Proc()
 
         monkeypatch.setattr(
@@ -1043,7 +1054,7 @@ class TestSharedContextInjection:
             stderr = ""
 
         def _fake_run(argv, **kwargs):
-            seen["argv"] = argv
+            seen["argv"] = _Argv(argv, kwargs)
             return _Proc()
 
         monkeypatch.setattr(
@@ -1051,14 +1062,10 @@ class TestSharedContextInjection:
         )
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
-        # argv == [cli, "-p", *session_args, task, *mcp_args] — task rides
-        # right after the session args, not necessarily last (v13: real
-        # --mcp-config/--allowedTools flags ride after it — see
-        # TestClaudeSessionContinuity below for why they can't ride
-        # before). A genuine first turn also carries the one-time
-        # capability preamble (v13.9) ahead of the real task text.
+        # The task (with the v13.9 first-turn preamble ahead of it) goes on
+        # stdin, never argv (finding #088).
         argv = seen["argv"]
-        assert argv[argv.index("--session-id") + 2].endswith("write a fib function")
+        assert argv.stdin.endswith("write a fib function")
 
     def test_hits_get_prepended_to_the_claude_task(self, monkeypatch):
         from dourmouse import shared_rag
@@ -1077,7 +1084,7 @@ class TestSharedContextInjection:
             stderr = ""
 
         def _fake_run(argv, **kwargs):
-            seen["argv"] = argv
+            seen["argv"] = _Argv(argv, kwargs)
             return _Proc()
 
         monkeypatch.setattr(
@@ -1086,7 +1093,7 @@ class TestSharedContextInjection:
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
         argv = seen["argv"]
-        sent_task = argv[argv.index("--session-id") + 2]
+        sent_task = argv.stdin
         assert "prior note: use pytest" in sent_task
         assert sent_task.endswith("write a fib function")
         # real formatting came from format_merged_result, not a hand-rolled dupe
@@ -1109,7 +1116,7 @@ class TestSharedContextInjection:
             stderr = ""
 
         def _fake_run(argv, **kwargs):
-            seen["argv"] = argv
+            seen["argv"] = _Argv(argv, kwargs)
             return _Proc()
 
         monkeypatch.setattr(
@@ -1117,8 +1124,7 @@ class TestSharedContextInjection:
         )
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("codex", "write add function")
-        # argv == [cli, "exec", task, "--skip-git-repo-check"]
-        sent_task = seen["argv"][2]
+        sent_task = seen["argv"].stdin
         assert "desktop vault note" in sent_task
         assert sent_task.endswith("write add function")
 
@@ -1137,7 +1143,7 @@ class TestSharedContextInjection:
             stderr = ""
 
         def _fake_run(argv, **kwargs):
-            seen["argv"] = argv
+            seen["argv"] = _Argv(argv, kwargs)
             return _Proc()
 
         monkeypatch.setattr(
@@ -1147,7 +1153,7 @@ class TestSharedContextInjection:
         out = code_backends.run_code_task("claude", "write a fib function")
         assert out == "ok"
         argv = seen["argv"]
-        assert argv[argv.index("--session-id") + 2].endswith("write a fib function")
+        assert argv.stdin.endswith("write a fib function")
 
     def test_empty_hits_injects_nothing(self, monkeypatch):
         from dourmouse import shared_rag
@@ -1162,7 +1168,7 @@ class TestSharedContextInjection:
             stderr = ""
 
         def _fake_run(argv, **kwargs):
-            seen["argv"] = argv
+            seen["argv"] = _Argv(argv, kwargs)
             return _Proc()
 
         monkeypatch.setattr(
@@ -1171,7 +1177,7 @@ class TestSharedContextInjection:
         monkeypatch.setattr(code_backends.subprocess, "run", _fake_run)
         code_backends.run_code_task("claude", "write a fib function")
         argv = seen["argv"]
-        assert argv[argv.index("--session-id") + 2].endswith("write a fib function")
+        assert argv.stdin.endswith("write a fib function")
 
 
 # --------------------------------------------------------------------------- #
@@ -1188,6 +1194,7 @@ class _FakePopenStream:
         self._stderr_text = stderr_text
         self.returncode = returncode
         self.stderr = self
+        self.stdin = _FakeStdin(_Argv([], {}))  # real Popen(stdin=PIPE) has one
 
     def read(self):
         return self._stderr_text
@@ -1211,9 +1218,12 @@ class TestStreamClaude:
         )
 
         def _fake_popen(argv, **kwargs):
+            rec = _Argv(argv, kwargs)
             if seen is not None:
-                seen.append(argv)
-            return _FakePopenStream(lines, returncode=returncode, stderr_text=stderr_text)
+                seen.append(rec)
+            stream = _FakePopenStream(lines, returncode=returncode, stderr_text=stderr_text)
+            stream.stdin = _FakeStdin(rec)
+            return stream
 
         monkeypatch.setattr(code_backends.subprocess, "Popen", _fake_popen)
 
@@ -1538,6 +1548,7 @@ class TestCliResolutionSurvivesAGuiLaunch:
     working and returning real inbox rows the whole time.
     """
 
+    @pytest.mark.skipif(os.name == "nt", reason="macOS/POSIX Dock-launch scenario: HOME and an extensionless executable")
     def test_cli_is_found_without_the_users_shell_path(self, monkeypatch, tmp_path):
         """A macOS app launched from the Dock does not inherit the shell
         PATH. The dourmouse2.app server was measured running with
@@ -1562,6 +1573,7 @@ class TestCliResolutionSurvivesAGuiLaunch:
 
         assert general_roster._find_claude_cli() == str(cli)
 
+    @pytest.mark.skipif(os.name == "nt", reason="asserts a POSIX CLI path leads PATH")
     def test_child_env_keeps_the_parent_environment_and_widens_path(self):
         """The CLI resolves the user's subscription session itself, from the
         macOS Keychain ("Claude Code-credentials") or

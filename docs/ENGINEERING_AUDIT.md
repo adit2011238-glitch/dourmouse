@@ -4068,3 +4068,121 @@ Proven: lowering S110 and the mypy total by one in the baseline makes the check 
 regressions named, and `--update` refuses.
 
 Not done, owner's call: branch protection requiring these checks is a repository settings change.
+
+**3. What the first real runs found.** Run 1: all three suites stopped at collection (`fastapi`
+comes from `dell/requirements.txt`, which CI never installed); the ratchet saw mypy 353 on Linux
+against 352 in a clean Mac venv built from the same requirements; checkout warned because
+`atlas-strategy-lab` was a gitlink with no `.gitmodules` entry. Fixes: CI installs the dell
+requirements; the ratchet prints every mypy error on a mypy regression, which named the extra one
+(`google_auth.py` imported the gitignored `_builtin_oauth` statically, and the ignore comment
+named the wrong error code; it now uses `importlib.import_module`, so both machines count 352);
+`.gitmodules` declares the submodule at the commit already pinned. Run 2: the suites ran and
+failed on real portability defects, recorded as findings #087 and #088, plus three undeclared
+dependencies: `Pillow` is imported by `pdf_reader.py` and `tray.py` but no requirements file listed
+it (it only arrived on the dev Mac through other installs), and CI did not install the desktop or
+voice extras, whose macOS-only `pyobjc` line had no platform marker and so could not install on
+Linux or Windows. Pillow is now declared, the marker added, CI installs both extras (plus
+PortAudio on Linux for `sounddevice`).
+
+### 086 -- fetch_url's SSRF guard could be walked around three ways
+
+Status: DONE 2026-09-24. Phase 2 of the completion plan, first item (X-9, also tracked as R0-SEC).
+
+`_refuse_private_fetch_target()` (finding #003's follow-up) resolved the host once with
+`gethostbyname`, checked that one IPv4 answer against a list of ranges, then handed the URL to
+`urllib.request.urlopen`. Three real holes:
+
+**1. Redirects were never re-checked (HIGH).** `urlopen` follows redirects on its own. A public
+page answering `302 Location: http://169.254.169.254/...` or `http://127.0.0.1:8765/...` reached
+the internal address through a guard that had already passed. Demonstrated against a real local
+server: plain `urlopen` followed the 302 and tried to connect to 169.254.169.254 (it timed out
+only because this Mac has no metadata service; on a cloud host it would have answered).
+
+**2. DNS rebinding between check and connect.** The connection resolved the name a second time,
+so a name answering public for the check and internal for the connect got through. The old
+docstring named this limit honestly; it is now closed.
+
+**3. Incomplete address rule.** Only the first IPv4 answer was checked (a name returning one
+public and one internal address, or an IPv6-only internal name, was not caught), and the range
+list missed non-global space such as CGNAT 100.64.0.0/10.
+
+Fix: new `dourmouse/net_guard.py`. `guarded_urlopen` builds an opener whose HTTP and HTTPS
+connections resolve the host themselves, refuse the whole answer if any address fails
+`is_public_address` (`is_global`, unicast, IPv4-mapped IPv6 judged by the IPv4 inside), and
+connect to exactly the address they vetted; TLS still verifies the certificate against the
+hostname. Every redirect hop goes through the same connection path, non-web redirect schemes are
+refused, and the chain is capped at 5. Environment proxies are ignored, since through a proxy the
+real destination cannot be vetted. An unresolvable name is now reported as the network failure it
+is (`FETCH FAILED`), not as a refusal. `fetch_url` uses it; the old guard is removed.
+`security/reputation.py` now uses the same `is_public_address` rule, so a CGNAT peer is no longer
+sent to AbuseIPDB.
+
+Also found, not changed: `browser_pane.fetch_and_rewrite_for_proxy` and `check_frameable` fetch
+any URL with no guard. That pane is human-facing and may legitimately need LAN pages, so the right
+policy belongs to the OS-3 browser work in Phase 4; recorded there.
+
+Tests: `test_net_guard.py` (31): the address rule (CGNAT, metadata, mapped IPv6, public), every
+answer checked, redirects to 169.254.169.254 / 10.0.0.1 / [::1] refused after a real first hop,
+non-web scheme refused, chain cap, the connection pinned to the vetted address when the second
+resolution would rebind, proxies ignored, and `fetch_url` end to end. Five existing tests moved
+to the new seams.
+
+### 087 -- the security sentry's device view went blind whenever reverse DNS was slow
+
+Status: DONE 2026-09-24. Found by the full suite for #086: two `SentryRuntime` tests that passed an
+hour earlier failed in isolation. Measured: `get_arp_neighbors()` took exactly 5.00s and returned
+`available: False, "arp timed out after 5.0s"`. `arp -a` reverse-resolves every neighbour, and this
+LAN has 206 entries, so whenever reverse DNS was slow the whole ARP view came back unavailable and
+new-device detection saw nothing. It also sent one PTR query per LAN device on every scan.
+`arp -an` answers in 0.1s. Fix: the adapter runs `arp -an`; hostnames are therefore always None
+there (a display label only; devices are keyed by MAC), and `SentryStore.record_devices` now keeps
+a hostname recorded earlier (`COALESCE`) instead of erasing it on a nameless sighting. Tests: the
+command is numeric; a nameless sighting keeps the stored name. The security test files went from
+27s to 6s.
+
+### 088 -- Windows: the Claude backend could not run a first turn, plus six portability defects
+
+Status: DONE 2026-09-24, pending the Windows CI job to confirm. Found by the first Windows CI run
+(52 failures; 29 were the missing extras above).
+
+**1. Every first Claude turn failed on Windows (HIGH for Windows users).** The task went to the
+CLI as one argv element, and the first turn prepends the orchestrator preamble (16,508 chars, 104
+lines). On Windows the npm-installed `claude` is a `.cmd` shim run through cmd.exe, which caps a
+command line at 8191 characters and mangles newlines: CI reported "The command line is too long".
+Linux also caps one argument at 128 KB, so a large pasted task would fail there too. Fix: the task
+travels on stdin for `claude -p` (both the plain and the stream-json paths) and for `codex exec -`,
+in `code_backends.py` and in the `claude_code`/`codex_code` tools. Verified live on this Mac with
+the real CLIs: a new session and a resume both read stdin, stream-json too, and a first turn
+through `run_code_task` (preamble included) answered for both Claude and Codex. This also retires a
+live-caught v13 hazard where `--allowedTools` swallowed a trailing positional prompt.
+
+**2. Text-mode subprocess output was decoded as cp1252 on Windows.** 31 product `subprocess` calls
+used `text=True` with no encoding, so a UTF-8 character from a child (an em dash or emoji in a
+Claude reply, JSON-RPC from an MCP server) kills the reader thread and the output comes back as
+None. All 31 now pass `encoding="utf-8", errors="replace"` (no change on macOS or Linux, which are
+UTF-8 already); an AST guard fails on any new text-mode call without an encoding. Two tests read
+UTF-8 files the same way and were fixed.
+
+**3. A second server could share a listening port on Windows.** `ThreadingHTTPServer` sets
+SO_REUSEADDR, which on Windows lets another process bind a port already in use, so two servers
+share it and requests land on either. This is a plausible mechanism for the "stale Dourmouse.exe
+shadowing port 8765" seen on the desktop. New `http_server.DourmouseHTTPServer` binds with
+SO_EXCLUSIVEADDRUSE on Windows (POSIX unchanged); all four servers use it; a guard forbids plain
+construction and a test proves a second bind is refused.
+
+**4. Project context went blank on Windows.** `project_import` merges records under a
+`normpath`'d key, which on Windows rewrites separators, and `project_bookkeeper` then looked each
+tool up by that key (codex's exact `WHERE cwd = ?`, Claude's sanitized directory name), finding
+nothing. Merged projects now carry each tool's raw spelling and lookups use it.
+
+**5. CLI discovery and PATH on Windows.** The known-directory fallback looked for a bare `claude`,
+which is never runnable on Windows, and skipped npm's global shim folder; it now tries
+`.exe`/`.cmd`/`.bat` and `%APPDATA%\npm`. `_cli_env` put POSIX system dirs on the child PATH,
+which became junk like `D:\usr\bin`; those are now added off Windows only.
+
+**6. POSIX-only tests.** Three tests model POSIX behaviour (a Dock-launched HOME, an extensionless
+executable, a chmod-ed binary) and are now skipped on Windows with the reason stated.
+
+Tests: `test_windows_portability.py` (encoding guard, stdin guard, extension names, npm shim found
+outside PATH on the Windows runner, no POSIX dirs on the Windows PATH, double bind refused, server
+construction guard); 29 CLI backend tests moved from argv inspection to what was sent on stdin.

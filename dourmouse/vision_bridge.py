@@ -59,6 +59,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 
+from dourmouse.http_server import DourmouseHTTPServer
+
 _PORT_ENV = "DOURMOUSE_VISION_BRIDGE_PORT"
 _DEFAULT_PORT = 8766
 _HOST = "127.0.0.1"
@@ -209,7 +211,7 @@ class VisionBridgeServer:
             return True, f"already running on {self._host}:{self.port}"
         handler = _make_handler(self._state_reader)
         try:
-            server = ThreadingHTTPServer((self._host, self._port), handler)
+            server = DourmouseHTTPServer((self._host, self._port), handler)
         except OSError as exc:
             return False, f"could not bind {self._host}:{self._port}: {exc}"
         server._dourmouse_stop = self._stop_event  # type: ignore[attr-defined]

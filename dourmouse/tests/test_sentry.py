@@ -228,6 +228,16 @@ class TestSentryStore:
         assert rows[0]["first_seen"] == 1000.0
         assert rows[0]["last_seen"] == 2000.0
 
+    def test_a_nameless_sighting_keeps_the_stored_hostname(self, tmp_path):
+        """Finding #087: arp -an never reports names; a later sighting must
+        not erase one recorded earlier."""
+        store = SentryStore(tmp_path / "sentry.db")
+        store.record_devices([_NEIGHBOR_A], now=1000.0)
+        store.record_devices([{**_NEIGHBOR_A, "hostname": None, "ip": "192.168.1.99"}], now=2000.0)
+        row = store.devices_snapshot()[0]
+        assert row["hostname"] == "laptop.local"
+        assert row["ip"] == "192.168.1.99"
+
     def test_devices_snapshot_reflects_real_persisted_state(self, tmp_path):
         store = SentryStore(tmp_path / "sentry.db")
         store.record_devices([_NEIGHBOR_A], now=1000.0)

@@ -1014,3 +1014,14 @@ and a real build sequence, not just a requirement statement:
 - [ ] Phase 1 X-1 (finding #085) 2026-09-24 -- CI rewritten to actually run on the working branch
   (3-OS matrix, Python 3.14, one gated pytest run) plus a lint ratchet (ruff per-rule and mypy
   total may only go down; baseline ruff 447, mypy 352). Open until all runner jobs are green.
+  Runs 1-2 found missing CI deps (fastapi, desktop/voice extras), an undeclared Pillow dependency,
+  a Linux-only mypy error from a gitignored import, and the Windows defects in #087/#088.
+- [x] Phase 2 X-9 / R0-SEC (finding #086) 2026-09-24 -- fetch_url SSRF: new net_guard pins each
+  connection to the vetted address, re-checks every redirect hop (cap 5), checks every DNS answer
+  with is_global (CGNAT and mapped IPv6 caught), ignores proxies. Old path proven to follow a 302
+  to 169.254.169.254. reputation.py shares the rule.
+- [x] Security sentry ARP view (finding #087) 2026-09-24 -- `arp -a` reverse-resolved 206 LAN
+  names past its 5s timeout, blanking new-device detection; now `arp -an`, stored names kept.
+- [x] Windows portability (finding #088) 2026-09-24 -- coding-CLI task on stdin (first Claude turn
+  hit cmd.exe's 8191-char limit), UTF-8 on all 31 text subprocess calls, exclusive port bind,
+  project lookups by raw per-tool path, CLI discovery with extensions and npm folder.

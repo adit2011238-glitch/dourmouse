@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import Any
 
+from dourmouse.http_server import DourmouseHTTPServer
 from dourmouse.message_bus import get_message_bus
 from dourmouse.tradingview_ops import handle_tv_webhook
 
@@ -93,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=_DEFAULT_PORT)
     parsed, _ = parser.parse_known_args(args)
-    server = ThreadingHTTPServer(("127.0.0.1", parsed.port), _Handler)
+    server = DourmouseHTTPServer(("127.0.0.1", parsed.port), _Handler)
     print(f"tv-webhook listening on 127.0.0.1:{parsed.port}", flush=True)
     try:
         server.serve_forever()

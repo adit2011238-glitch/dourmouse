@@ -130,7 +130,7 @@ class McpClient:
                 self._process = subprocess.Popen(
                     [self._command, *self._args],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, text=True, env=full_env,
+                    stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", env=full_env,
                 )
             except OSError as exc:
                 raise McpClientError(f"failed to launch MCP server {self.name!r}: {exc}") from exc

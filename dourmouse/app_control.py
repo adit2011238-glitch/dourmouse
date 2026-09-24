@@ -103,7 +103,7 @@ def _run_osascript(script: str) -> str:
         proc = subprocess.run(
             ["osascript", "-e", script],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=_OSASCRIPT_TIMEOUT,
         )
     except subprocess.TimeoutExpired as exc:

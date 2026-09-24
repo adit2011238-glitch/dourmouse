@@ -47,6 +47,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from dourmouse.http_server import DourmouseHTTPServer
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
 
@@ -334,7 +336,7 @@ def _pkce_pair() -> tuple[str, str]:
 def _start_callback_server(port: int) -> ThreadingHTTPServer:
     _CallbackHandler.captured_code = None
     _CallbackHandler.captured_state = None
-    server = ThreadingHTTPServer(("127.0.0.1", port), _CallbackHandler)
+    server = DourmouseHTTPServer(("127.0.0.1", port), _CallbackHandler)
     server.timeout = 5.0  # let handle_request() return periodically to poll
     return server
 

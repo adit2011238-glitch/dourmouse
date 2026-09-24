@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib
 import json
 import os
 import secrets
@@ -150,8 +151,11 @@ urlopen = urllib.request.urlopen
 # (a power user's own client always wins), then this builtin module,
 # then honestly empty — never a fabricated value.
 def _builtin_oauth() -> tuple[str, str]:
+    # import_module, not a static import: the module is gitignored, so a
+    # static import type-checks differently on a machine without it (CI
+    # reported attr-defined there while this Mac reported nothing).
     try:
-        from dourmouse import _builtin_oauth as mod  # type: ignore[import-not-found]
+        mod = importlib.import_module("dourmouse._builtin_oauth")
     except ImportError:
         return "", ""
     return (

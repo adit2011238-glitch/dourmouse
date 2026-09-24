@@ -163,7 +163,7 @@ def run_sandboxed(
             [exe, "-f", profile_path, "/bin/sh", "-c", command],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:

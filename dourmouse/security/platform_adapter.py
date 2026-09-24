@@ -31,7 +31,7 @@ def _run(cmd: list[str], timeout: float = _DEFAULT_TIMEOUT_S) -> tuple[bool, str
     """Real subprocess call, argument-list only, always bounded. Returns
     (ok, stdout-or-honest-error-reason) — never raises."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except FileNotFoundError:
         return False, f"{cmd[0]} is not installed on this system"
     except subprocess.TimeoutExpired:
@@ -182,7 +182,13 @@ _ARP_RE = re.compile(r"^(\S+)\s+\(([\d.]+)\)\s+at\s+(\S+)\s+on\s+(\S+)")
 
 
 def get_arp_neighbors() -> dict[str, Any]:
-    ok, out = _run(["arp", "-a"])
+    # -n (finding #087): plain `arp -a` reverse-resolves every neighbour. On
+    # this Mac's LAN (206 entries) that ran past the 5s timeout, so the whole
+    # ARP view came back "unavailable" and new-device detection was blind;
+    # `arp -an` answers in 0.1s and sends no PTR query per LAN device.
+    # Hostnames are therefore always None here (a display label only; devices
+    # are keyed by MAC, and a stored name is kept, see SentryStore).
+    ok, out = _run(["arp", "-an"])
     if not ok:
         return _unavailable(out)
     neighbors = []

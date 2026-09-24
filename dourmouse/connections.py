@@ -73,7 +73,7 @@ def _cli_version(name: str) -> str | None:
         proc = subprocess.run(
             [path, "--version"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=10,
             check=False,  # version probes are best-effort; never raise
         )

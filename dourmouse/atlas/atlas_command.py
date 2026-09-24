@@ -43,7 +43,7 @@ def _run_script(args: list[str], timeout: int) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
             [sys.executable, *args],
-            cwd=str(root), capture_output=True, text=True, timeout=timeout,
+            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return -1, "", f"could not run {' '.join(args)}: {exc}"

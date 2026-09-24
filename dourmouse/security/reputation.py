@@ -8,9 +8,9 @@ Deliberately narrow scope: looks up a real IP already seen in this host's
 own real ``get_established_connections()`` telemetry (a genuinely observed
 peer), never scans, probes, or acts against anything. A private/loopback/
 link-local/reserved/multicast address is refused before any network call
--- the same real classification ``general_roster.py``'s own
-``_refuse_private_fetch_target`` already uses, reused here rather than
-re-derived, since asking a public reputation API about a LAN address is
+-- the same rule ``net_guard.is_public_address`` applies to fetch_url
+(finding #086: the old range list missed CGNAT and other non-global
+space), reused here rather than re-derived, since asking a public reputation API about a LAN address is
 meaningless (and would leak the user's own internal topology to a third
 party for no reason).
 """
@@ -24,6 +24,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
+
+from dourmouse.net_guard import is_public_address
 
 REPUTATION_API_KEY_ENV = "ABUSEIPDB_API_KEY"
 _DEFAULT_TIMEOUT_S = 10.0
@@ -43,7 +45,7 @@ def _reject_non_public(ip: str) -> str | None:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return f"{ip!r} is not a real, parseable IP address."
-    if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast:
+    if not is_public_address(addr):
         return f"{ip} is a private/loopback/reserved address -- reputation lookups are for real public peers only."
     return None
 

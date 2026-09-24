@@ -312,7 +312,7 @@ def _write_and_run_test(entry: dict[str, Any]) -> tuple[bool, str]:
         result = subprocess.run(
             [sys.executable, "-m", "pytest", str(test_path), "-q"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=60,
             cwd=str(Path(dourmouse.__file__).resolve().parent.parent),
             env=subprocess_env,

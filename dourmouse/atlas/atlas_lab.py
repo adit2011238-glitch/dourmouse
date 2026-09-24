@@ -173,7 +173,7 @@ def _ensure_repo() -> str | None:
             # Already cloned — pull latest.
             result = subprocess.run(
                 ["git", "-C", str(STRATEGY_LAB_DIR), "pull", "--ff-only"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             if result.returncode != 0:
                 return f"git pull failed: {result.stderr.strip() or result.stdout.strip()}"
@@ -182,7 +182,7 @@ def _ensure_repo() -> str | None:
             STRATEGY_LAB_DIR.parent.mkdir(parents=True, exist_ok=True)
             result = subprocess.run(
                 ["git", "clone", STRATEGY_LAB_REPO, str(STRATEGY_LAB_DIR)],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
             )
             if result.returncode != 0:
                 return f"git clone failed: {result.stderr.strip() or result.stdout.strip()}"

@@ -51,6 +51,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
+from dourmouse.http_server import DourmouseHTTPServer
+
 
 def _log_traceback(tag: str) -> None:
     """Write the active exception's traceback to stderr (captured by the
@@ -7442,7 +7444,7 @@ def run_server(
             "and shell."
         )
 
-    server = ThreadingHTTPServer((host, port), _Handler)
+    server = DourmouseHTTPServer((host, port), _Handler)
     # Fixed app-level role: the ceiling every conversation-level switch is
     # measured against (see _handle_role elevation gate).
     server.app_role = rbac.role

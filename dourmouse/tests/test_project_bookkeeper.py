@@ -30,6 +30,10 @@ from dourmouse.project_bookkeeper import (
     refresh,
 )
 
+# Merged project paths are normpath'd (native separators on Windows);
+# raw per-tool records keep the tool's own spelling (finding #088).
+_n = os.path.normpath
+
 
 def _write_claude_session(path, lines, mtime=None):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,7 +94,7 @@ class TestRefreshClaudeContext:
         )
         assert len(result["projects"]) == 1
         p = result["projects"][0]
-        assert p["path"] == "/Users/x/proj"
+        assert p["path"] == _n("/Users/x/proj")
         assert p["name"] == "proj"
         assert p["context"] == "Fix the login bug"
         assert p["context_source"] == "claude_code:custom_title"
@@ -187,10 +191,10 @@ class TestRefreshCodexContext:
         store = tmp_path / "store.json"
         result = refresh(claude_root=tmp_path / "no_claude", codex_db=codex_db, store_path=store)
         by_path = {p["path"]: p for p in result["projects"]}
-        assert by_path["/Users/x/a"]["context"] == "add tests for parser"
-        assert by_path["/Users/x/a"]["context_source"] == "codex_cli:first_user_message"
-        assert by_path["/Users/x/b"]["context"] == "just a preview line"
-        assert by_path["/Users/x/b"]["context_source"] == "codex_cli:preview"
+        assert by_path[_n("/Users/x/a")]["context"] == "add tests for parser"
+        assert by_path[_n("/Users/x/a")]["context_source"] == "codex_cli:first_user_message"
+        assert by_path[_n("/Users/x/b")]["context"] == "just a preview line"
+        assert by_path[_n("/Users/x/b")]["context_source"] == "codex_cli:preview"
 
     def test_no_jsonl_opened_for_codex_only_project(self, tmp_path):
         """Codex-only project: context must come purely from the threads
@@ -260,7 +264,7 @@ class TestIncrementalCheckpoint:
         on_disk = json.loads(store.read_text())
         assert on_disk["version"] == 1
         assert on_disk["last_refreshed"] is not None
-        rec = on_disk["projects"]["/Users/x/proj"]
+        rec = on_disk["projects"][_n("/Users/x/proj")]
         # the internal checkpoint field is real and visible on disk, even
         # though it is stripped from the public API response.
         assert "_checkpoint_last_active_epoch" in rec
@@ -368,7 +372,7 @@ class TestBookkeeperEndpoints:
             assert data["last_refreshed"] is not None
             assert data["context_method"] == "extractive"
             assert len(data["projects"]) == 1
-            assert data["projects"][0]["path"] == "/Users/x/proj"
+            assert data["projects"][0]["path"] == _n("/Users/x/proj")
             assert data["projects"][0]["context"] == "Endpoint title"
 
             # A new, newer session appears on disk; GET again must still be

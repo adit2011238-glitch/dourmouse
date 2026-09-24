@@ -32,12 +32,10 @@ untouched.
 from __future__ import annotations
 
 import difflib
-import ipaddress
 import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import threading
@@ -227,19 +225,34 @@ _CLI_SEARCH_DIRS: tuple[str, ...] = (
     "/opt/local/bin",
 )
 
+#: Windows install locations (finding #088): the native installer's
+#: %USERPROFILE%\.local\bin (already above) and npm's global shim folder.
+_CLI_SEARCH_DIRS_WINDOWS: tuple[str, ...] = ("~/AppData/Roaming/npm",)
+
+
+def _cli_names(name: str) -> list[str]:
+    """On Windows an executable carries an extension (claude.exe from the
+    native installer, claude.cmd from npm); a bare name is never runnable."""
+    if os.name == "nt":
+        return [name + ext for ext in (".exe", ".cmd", ".bat")]
+    return [name]
+
 
 def _search_known_cli_dirs(name: str) -> str | None:
     """Find an executable named ``name`` outside PATH, in the real install
     locations listed above, plus whichever Node version nvm currently has
     active (npm -g installs land in that version's own bin directory)."""
-    candidates: list[Path] = [Path(d).expanduser() / name for d in _CLI_SEARCH_DIRS]
+    dirs = _CLI_SEARCH_DIRS + (_CLI_SEARCH_DIRS_WINDOWS if os.name == "nt" else ())
+    candidates: list[Path] = [
+        Path(d).expanduser() / n for d in dirs for n in _cli_names(name)
+    ]
 
     nvm = Path("~/.nvm/versions/node").expanduser()
     if nvm.is_dir():
         try:
             # Newest version first, so a current install wins over a stale one.
             for version_dir in sorted(nvm.iterdir(), reverse=True):
-                candidates.append(version_dir / "bin" / name)
+                candidates.extend(version_dir / "bin" / n for n in _cli_names(name))
         except OSError:
             pass
 
@@ -280,6 +293,7 @@ def _run_cli_delegate(
     cwd: str,
     timeout: int,
     output_cap_attr: str,
+    stdin_text: str | None = None,
 ) -> str:
     """Run a headless coding CLI and format its REAL output (v5.3 — the
     shared engine behind the claude_code / codex_code tools). Never
@@ -291,9 +305,13 @@ def _run_cli_delegate(
         proc = subprocess.run(
             argv,
             cwd=cwd,
-            stdin=subprocess.DEVNULL,  # both CLIs wait on stdin otherwise
+            # The task rides on stdin, not argv (finding #088, see
+            # code_backends._run_claude_once). DEVNULL when there is none:
+            # both CLIs wait on an open stdin otherwise.
+            input=stdin_text,
+            stdin=subprocess.DEVNULL if stdin_text is None else None,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
             check=False,  # non-zero exits are surfaced, never raised
         )
@@ -322,7 +340,7 @@ def _run_cli_delegate(
 def _claude_code_tool(arguments: dict[str, Any]) -> str:
     """Run a coding task through the user's real Claude Code CLI.
 
-    Uses headless mode (`claude -p <task>`) so the task is executed and its
+    Uses headless mode (`claude -p`, task on stdin) so the task is executed and its
     REAL stdout/stderr are returned. Never fabricates a result: a missing
     CLI, a non-zero exit, or a timeout is reported honestly.
 
@@ -355,7 +373,8 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
     mcp_args = _claude_code_mcp_args()
     result = _run_cli_delegate(
         cli=cli,
-        argv=[cli, "-p", "--permission-mode", "bypassPermissions", *session_args, task, *mcp_args],
+        argv=[cli, "-p", "--permission-mode", "bypassPermissions", *session_args, *mcp_args],
+        stdin_text=task,
         cli_name="claude",
         tool_label="claude_code",
         display_name="Claude Code",
@@ -379,7 +398,8 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
         session_args = _claude_code_session_args(session_key)
         result = _run_cli_delegate(
             cli=cli,
-            argv=[cli, "-p", "--permission-mode", "bypassPermissions", *session_args, task, *mcp_args],
+            argv=[cli, "-p", "--permission-mode", "bypassPermissions", *session_args, *mcp_args],
+        stdin_text=task,
             cli_name="claude",
             tool_label="claude_code",
             display_name="Claude Code",
@@ -488,7 +508,8 @@ def _codex_code_tool(arguments: dict[str, Any]) -> str:
         pass
     return _run_cli_delegate(
         cli=cli,
-        argv=[cli, "exec", task, "--skip-git-repo-check"],
+        argv=[cli, "exec", "-", "--skip-git-repo-check"],
+        stdin_text=task,
         cli_name="codex",
         tool_label="codex_code",
         display_name="Codex",
@@ -664,42 +685,21 @@ def _strip_html(raw: str) -> str:
     return raw.strip()
 
 
-def _refuse_private_fetch_target(url: str) -> str | None:
-    """SSRF guard (engineering audit, 2026-09-17): fetch_url takes a
-    model-supplied URL, and per docs/ENGINEERING_AUDIT.md's own
-    prompt-injection finding (#003), a page this agent has already
-    visited could try to redirect a LATER fetch at an internal address
-    (a cloud metadata endpoint, this machine's own loopback services, a
-    router's admin page) rather than the public web the tool's own
-    description promises. Scheme validation alone (http/https only)
-    already blocks file://, but says nothing about the HOST. Resolves
-    the hostname once and refuses private/loopback/link-local/reserved
-    destinations; returns None when the target is a normal public
-    address. Not DNS-rebinding-proof (a second resolution at connect
-    time could differ) -- a real, meaningful improvement over no check
-    at all, not a complete guarantee."""
-    host = urllib.parse.urlparse(url).hostname
-    if not host:
-        return "ERROR: fetch_url could not determine a host from that URL."
-    try:
-        resolved = socket.gethostbyname(host)
-        addr = ipaddress.ip_address(resolved)
-    except (socket.gaierror, ValueError) as exc:
-        return f"ERROR: fetch_url could not resolve {host!r}: {exc}"
-    if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast:
-        return f"REFUSED: {host!r} resolves to {addr} (a private/internal address) -- fetch_url only fetches the public web."
-    return None
-
-
 def _fetch_url_tool(arguments: dict[str, Any]) -> str:
+    """SSRF guard (finding #003, hardened in #086): model-supplied URLs go
+    through net_guard.guarded_urlopen, which refuses any hop whose host
+    resolves to a non-public address, connects only to the address it
+    vetted (no DNS rebinding between check and connect), and re-checks
+    every redirect with a hop cap."""
+    from dourmouse.net_guard import FetchRefused, guarded_urlopen
+
     url = (arguments.get("url") or "").strip()
     if not url:
         return "ERROR: fetch_url requires a 'url'."
     if not url.lower().startswith(("http://", "https://")):
         return "ERROR: fetch_url only accepts http(s) URLs (got a non-web scheme)."
-    refusal = _refuse_private_fetch_target(url)
-    if refusal:
-        return refusal
+    if not urllib.parse.urlparse(url).hostname:
+        return "ERROR: fetch_url could not determine a host from that URL."
     try:
         max_chars = int(arguments.get("max_chars", 8000))
     except (TypeError, ValueError):
@@ -708,8 +708,10 @@ def _fetch_url_tool(arguments: dict[str, Any]) -> str:
         url, headers={"User-Agent": "dourmouse/0.1"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with guarded_urlopen(req, timeout=15) as resp:
             raw = resp.read(max_chars * 2 + 4096).decode("utf-8", errors="replace")
+    except FetchRefused as exc:
+        return f"REFUSED: {exc} -- fetch_url only fetches the public web."
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return net_errors.report(
             exc,
@@ -1234,7 +1236,7 @@ def _run_python_tool(arguments: dict[str, Any]) -> str:
             [sys.executable, "-c", code],
             cwd=str(_workspace_root()),
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -1288,7 +1290,7 @@ def _search_files_tool(arguments: dict[str, Any]) -> str:
             proc = subprocess.run(
                 [grep, "-rn", "--", query, str(target)],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=30,
             )
             raw = proc.stdout

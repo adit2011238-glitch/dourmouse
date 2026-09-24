@@ -61,7 +61,8 @@ def _bash_to_cmd(script: str) -> str:
         script = (
             "import sys,os; "
             "print('ARGV: ' + ' '.join(sys.argv[1:])); "
-            "print('CWD: ' + os.getcwd())"
+            "print('CWD: ' + os.getcwd()); "
+            "print('STDIN: ' + sys.stdin.read())"
         )
         body = ["@echo off", f'"{_sys.executable}" -c "{script}" %*']
     elif "boom" in s and ">&2" in s:
@@ -137,12 +138,15 @@ class TestToolBehavior:
             """#!/bin/sh
             echo "ARGV: $*"
             echo "CWD: $(pwd)"
+            echo "STDIN: $(cat)"
             """,
         )
         monkeypatch.setenv("CODEX_CLI", fake)
         result = run_tool({"task": "explain this bug", "cwd": str(tmp_path)})
         assert "EXIT CODE: 0" in result
-        assert "ARGV: exec explain this bug --skip-git-repo-check" in result
+        # The task goes on stdin; argv carries "-" (finding #088).
+        assert "ARGV: exec - --skip-git-repo-check" in result
+        assert "STDIN: explain this bug" in result
         assert f"CWD: {tmp_path}" in result
 
     def test_nonzero_exit_surfaces_stderr(self, tmp_path, monkeypatch):

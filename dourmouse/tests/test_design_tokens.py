@@ -28,7 +28,7 @@ SPACE_STEPS = [1, 2, 3, 4, 5, 6]
 
 @pytest.fixture(scope="module")
 def css() -> str:
-    return CSS.read_text()
+    return CSS.read_text(encoding="utf-8")
 
 
 def _token(css_text: str, name: str) -> str | None:
@@ -99,7 +99,7 @@ class TestTokensAreDocumented:
         # Two places that can drift is the exact bug class this codebase has
         # already been bitten by (console.html and workspace.html maintaining
         # separate copies of the same palette).
-        doc = (CSS.parent.parent.parent / "docs" / "DESIGN_SYSTEM.md").read_text()
+        doc = (CSS.parent.parent.parent / "docs" / "DESIGN_SYSTEM.md").read_text(encoding="utf-8")
         assert "4/8/12/16/24/32" in doc
 
     def test_the_scales_carry_a_real_rationale_not_just_values(self, css):

@@ -410,7 +410,7 @@ def _run_shell(command: str, cwd: str, timeout: int) -> str:
         shell=True,
         cwd=cwd,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=timeout,
     )
     out = (proc.stdout or "").strip()
@@ -522,7 +522,7 @@ def _system_info_tool(arguments: dict[str, Any]) -> str:
         if sys.platform == "darwin":
             mem = subprocess.run(
                 ["sysctl", "-n", "hw.memsize"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
             ).stdout.strip()
             if mem.isdigit():
                 info.append(f"MEMORY: {int(mem) / (1024 ** 3):.1f} GB")
@@ -673,7 +673,7 @@ def _clipboard_get_tool(arguments: dict[str, Any]) -> str:
         return "NOT CONFIGURED: clipboard read uses macOS pbpaste (this is not macOS)."
     try:
         proc = subprocess.run(
-            ["pbpaste"], capture_output=True, text=True, timeout=10
+            ["pbpaste"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
         )
     except (subprocess.SubprocessError, OSError) as exc:
         return f"ERROR: could not read clipboard: {exc}"
@@ -686,7 +686,7 @@ def _clipboard_set_tool(arguments: dict[str, Any]) -> str:
         return "NOT CONFIGURED: clipboard write uses macOS pbcopy (this is not macOS)."
     try:
         proc = subprocess.run(
-            ["pbcopy"], input=arguments.get("content", ""), text=True, timeout=10
+            ["pbcopy"], input=arguments.get("content", ""), text=True, encoding="utf-8", errors="replace", timeout=10
         )
     except (subprocess.SubprocessError, OSError) as exc:
         return f"ERROR: could not write clipboard: {exc}"

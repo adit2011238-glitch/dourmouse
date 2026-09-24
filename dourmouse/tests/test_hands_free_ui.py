@@ -55,7 +55,7 @@ pollHandsFreeStatus().then(() => {{
 """
     js_file = tmp_path / "poll_hf.js"
     js_file.write_text(harness, encoding="utf-8")
-    result = subprocess.run([node, str(js_file)], capture_output=True, text=True, timeout=10)
+    result = subprocess.run([node, str(js_file)], capture_output=True, text=True, encoding="utf-8", timeout=10)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -110,6 +110,6 @@ pollHandsFreeStatus().then(() => console.log(JSON.stringify({{ok: true}})));
 """
         js_file = tmp_path / "poll_hf_noop.js"
         js_file.write_text(harness, encoding="utf-8")
-        result = subprocess.run([node, str(js_file)], capture_output=True, text=True, timeout=10)
+        result = subprocess.run([node, str(js_file)], capture_output=True, text=True, encoding="utf-8", timeout=10)
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout.strip().splitlines()[-1]) == {"ok": True}

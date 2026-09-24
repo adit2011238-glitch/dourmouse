@@ -13,6 +13,8 @@ for a shell that is not there must say so rather than failing silently.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from dourmouse import desktop
@@ -50,6 +52,7 @@ class TestElectronShellArgv:
         fake_electron["binary"].unlink()
         assert desktop._electron_shell_argv() is None
 
+    @pytest.mark.skipif(os.name == "nt", reason="Windows has no exec bit; chmod cannot make a file non-runnable")
     def test_a_non_executable_binary_is_refused(self, fake_electron):
         # A half-finished or interrupted npm install leaves a file that is
         # not runnable. Handing that to execv would fail at launch.

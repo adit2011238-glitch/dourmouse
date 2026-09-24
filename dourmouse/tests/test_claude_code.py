@@ -69,7 +69,8 @@ def _bash_to_cmd(script: str) -> str:
         script = (
             "import sys,os; "
             "print('ARGV: ' + ' '.join(sys.argv[1:])); "
-            "print('CWD: ' + os.getcwd())"
+            "print('CWD: ' + os.getcwd()); "
+            "print('STDIN: ' + sys.stdin.read())"
         )
         body = ["@echo off", f'"{_sys.executable}" -c "{script}" %*']
     elif "boom" in s and ">&2" in s:
@@ -152,27 +153,21 @@ class TestToolBehavior:
             """#!/bin/sh
             echo "ARGV: $*"
             echo "CWD: $(pwd)"
+            echo "STDIN: $(cat)"
             """,
         )
         monkeypatch.setenv("CLAUDE_CODE_CLI", fake)
         result = run_tool({"task": "explain this bug", "cwd": str(tmp_path)})
         assert "EXIT CODE: 0" in result
         # First call for this cwd mints a real session id via --session-id
-        # (see TestSessionContinuity below) — assert the shape rather than
-        # a fixed string since the uuid is random each run. v13: real
-        # --mcp-config/--allowedTools args now ride along too (see
-        # _claude_code_mcp_args) — tolerate whatever lands between the
-        # session args and the task text rather than asserting their exact
-        # absence. v13.5: --permission-mode bypassPermissions now also
-        # rides between "-p" and "--session-id" (full terminal-parity
-        # permission mode, explicit user request — see general_roster.py's
-        # _claude_code_tool docstring) — tolerated the same way.
-        match = re.search(
-            r"ARGV: -p .*--session-id ([0-9a-f-]{36}) .*explain this bug", result
-        )
+        # (see TestSessionContinuity below); the uuid is random each run.
+        # The task itself goes on stdin, never argv (finding #088).
+        match = re.search(r"ARGV: -p .*--session-id ([0-9a-f-]{36})", result)
         assert match, result
         assert "--permission-mode bypassPermissions" in result
         assert uuid.UUID(match.group(1)).version == 4
+        assert "STDIN: explain this bug" in result
+        assert "explain this bug" not in result.split("STDIN:")[0]
         assert f"CWD: {tmp_path}" in result
 
     def test_nonzero_exit_surfaces_stderr(self, tmp_path, monkeypatch):
@@ -300,15 +295,18 @@ class TestSessionContinuity:
     argv shape and the multi-call session bookkeeping can be asserted
     precisely, the same way test_code_backends.py does it."""
 
-    def _fake_run_factory(self, seen: list, proc_factory):
+    def _fake_run_factory(self, seen: list, proc_factory, stdin_seen: list | None = None):
+        stdin_seen = stdin_seen if stdin_seen is not None else []
         def _fake_run(argv, **kwargs):
             seen.append(argv)
+            stdin_seen.append(kwargs.get("input"))
             return proc_factory(argv)
 
         return _fake_run
 
     def test_first_call_mints_a_fresh_session_id(self, monkeypatch):
         seen: list = []
+        stdin_seen: list = []
 
         class _Proc:
             returncode = 0
@@ -317,7 +315,7 @@ class TestSessionContinuity:
 
         monkeypatch.setattr(general_roster, "_find_claude_cli", lambda: "/usr/bin/claude")
         monkeypatch.setattr(
-            general_roster.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+            general_roster.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc(), stdin_seen)
         )
         run_tool({"task": "write add", "cwd": "/tmp/proj"})
         argv = seen[0]
@@ -327,19 +325,16 @@ class TestSessionContinuity:
         sid = argv[argv.index("--session-id") + 1]
         # a real UUID4, not a placeholder
         assert uuid.UUID(sid).version == 4
-        # v13: the task must land immediately after the session args — NOT
-        # necessarily last, since real --mcp-config/--allowedTools flags
-        # (see _claude_code_mcp_args) now ride after it. They must never
-        # ride BEFORE it: --allowedTools takes a variadic value list and a
-        # trailing prompt would be silently swallowed into it (live-caught:
-        # `claude -p --allowedTools "mcp__dourmouse__*" "say hello"` really
-        # does error "Input must be provided either through stdin or as a
-        # prompt argument" — the CLI ate "say hello" as another tool name).
-        assert argv[argv.index("--session-id") + 2] == "write add"
+        # The task goes on stdin (finding #088). That also retires a
+        # live-caught v13 hazard: --allowedTools takes a variadic value list
+        # and swallowed a trailing positional prompt as another tool name.
+        assert stdin_seen[0] == "write add"  # on stdin, never argv (finding #088)
+        assert "write add" not in argv
         assert general_roster._CLAUDE_CODE_SESSIONS["/tmp/proj"] == sid
 
     def test_second_call_same_cwd_resumes_the_same_session(self, monkeypatch):
         seen: list = []
+        stdin_seen: list = []
 
         class _Proc:
             returncode = 0
@@ -348,7 +343,7 @@ class TestSessionContinuity:
 
         monkeypatch.setattr(general_roster, "_find_claude_cli", lambda: "/usr/bin/claude")
         monkeypatch.setattr(
-            general_roster.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc())
+            general_roster.subprocess, "run", self._fake_run_factory(seen, lambda a: _Proc(), stdin_seen)
         )
         run_tool({"task": "first turn", "cwd": "/tmp/proj"})
         run_tool({"task": "second turn", "cwd": "/tmp/proj"})
@@ -357,7 +352,7 @@ class TestSessionContinuity:
         assert seen[1][seen[1].index("--resume") + 1] == first_sid
         # v13: task lands right after --resume's value, not necessarily
         # last — see the sibling test above for why order matters here.
-        assert seen[1][seen[1].index("--resume") + 2] == "second turn"
+        assert stdin_seen[1] == "second turn"
 
     def test_different_cwd_gets_a_different_session(self, monkeypatch):
         seen: list = []
@@ -489,7 +484,7 @@ class TestClaudeCodeMcpWiring:
 
         monkeypatch.setattr(code_backends, "user_config_dir", lambda: tmp_path)
         code_backends._mcp_config_path_cache = None
-        fake = _write_fake_cli(tmp_path, '#!/bin/sh\necho "ARGV: $*"')
+        fake = _write_fake_cli(tmp_path, '#!/bin/sh\necho "ARGV: $*"\necho "CWD: $(pwd)"')
         monkeypatch.setenv("CLAUDE_CODE_CLI", fake)
         result = run_tool({"task": "explain this bug", "cwd": str(tmp_path)})
         assert "--mcp-config" in result

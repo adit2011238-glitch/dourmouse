@@ -275,7 +275,16 @@ def _merge_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "session_counts": {},
             "last_active": None,
             "git_branch": "",
+            "raw_paths": {},
         })
+        # Each tool's path exactly as that tool recorded it (finding #088):
+        # the merge key above is normpath'd, which on Windows rewrites the
+        # separators, so a lookup back into a tool's own store (codex's
+        # `WHERE cwd = ?`, Claude's sanitized directory name) must use the
+        # tool's raw spelling or it silently finds nothing.
+        raws = entry["raw_paths"].setdefault(rec["tool"], [])
+        if rec["path"] not in raws:
+            raws.append(rec["path"])
         if rec["tool"] not in entry["sources"]:
             entry["sources"].append(rec["tool"])
         entry["session_counts"][rec["tool"]] = (
@@ -350,6 +359,7 @@ def get_imported_projects(
             "session_counts": p["session_counts"],
             "last_active": _iso(p["last_active"]),
             "git_branch": p["git_branch"],
+            "raw_paths": p["raw_paths"],
             "stat": _stat_label(p["session_counts"]),
             "exists": exists,
         })

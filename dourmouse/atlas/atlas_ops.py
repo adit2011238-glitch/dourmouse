@@ -60,7 +60,7 @@ def _git(repo: Path, *args: str) -> str:
         proc = subprocess.run(
             ["git", "-C", str(repo), *args],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):

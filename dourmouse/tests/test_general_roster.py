@@ -718,6 +718,16 @@ class TestCodeToolTabIsolation:
         assert seen["tab"] == "session_20260912_120000"
 
 
+def _resolves_to(ip):
+    """A getaddrinfo stand-in answering every name with one address."""
+    import socket as _s
+
+    def fake(host, port, *a, **k):
+        return [(_s.AF_INET, _s.SOCK_STREAM, 6, "", (ip, port or 80))]
+
+    return fake
+
+
 class TestResearchInfo:
     def test_web_search_network_error_reported_honestly(self, monkeypatch):
         import urllib.error
@@ -794,8 +804,7 @@ class TestResearchInfo:
             def read(self, n=None):
                 return b"<html><head><title>x</title></head><body><h1>Hi</h1><p>World &amp; more</p></body></html>"
 
-        monkeypatch.setattr("socket.gethostbyname", lambda host: "93.184.215.14")
-        monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _FakeResponse())
+        monkeypatch.setattr("dourmouse.net_guard.guarded_urlopen", lambda *a, **k: _FakeResponse())
         result = _fetch_url_tool({"url": "https://example.com/page"})
         assert "FETCHED" in result
         assert "Hi World & more" in result  # tags stripped, entities decoded
@@ -810,8 +819,7 @@ class TestResearchInfo:
         def fake_urlopen(*a, **k):
             raise urllib.error.URLError("down")
 
-        monkeypatch.setattr("socket.gethostbyname", lambda host: "93.184.215.14")
-        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr("dourmouse.net_guard.guarded_urlopen", fake_urlopen)
         result = _fetch_url_tool({"url": "https://example.com/"})
         assert "FETCH FAILED" in result
 
@@ -820,26 +828,28 @@ class TestResearchInfo:
         URL that resolves to an internal address must never be fetched,
         matching the docs/ENGINEERING_AUDIT.md #003 prompt-injection
         finding this closes a real residual gap on."""
-        monkeypatch.setattr("socket.gethostbyname", lambda host: "169.254.169.254")
+        monkeypatch.setattr("socket.getaddrinfo", _resolves_to("169.254.169.254"))
         result = _fetch_url_tool({"url": "http://metadata.internal/latest/"})
         assert result.startswith("REFUSED:")
         assert "private/internal address" in result
 
     def test_fetch_url_refuses_loopback(self, monkeypatch):
-        monkeypatch.setattr("socket.gethostbyname", lambda host: "127.0.0.1")
+        monkeypatch.setattr("socket.getaddrinfo", _resolves_to("127.0.0.1"))
         result = _fetch_url_tool({"url": "http://localhost:11434/api/tags"})
         assert result.startswith("REFUSED:")
 
     def test_fetch_url_honest_error_on_unresolvable_host(self, monkeypatch):
         import socket as socket_module
 
-        def fail(host):
+        def fail(*a, **k):
             raise socket_module.gaierror("nodename nor servname provided")
 
-        monkeypatch.setattr("socket.gethostbyname", fail)
+        monkeypatch.setattr("socket.getaddrinfo", fail)
         result = _fetch_url_tool({"url": "https://this-genuinely-does-not-exist.invalid/"})
-        assert result.startswith("ERROR:")
-        assert "could not resolve" in result
+        # An unresolvable name is a network failure, reported honestly, not
+        # a refusal (finding #086).
+        assert result.startswith("FETCH FAILED")
+        assert "REFUSED" not in result
 
     def test_open_url_opens_browser(self, monkeypatch):
         opened = {}

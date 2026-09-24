@@ -88,7 +88,7 @@ def run_atlas_cli(argv: list[str], timeout: int = _DEFAULT_TIMEOUT) -> tuple[int
         [str(python), "-m", "atlas.ops.cli", *argv],
         cwd=str(repo),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=timeout,
         check=False,  # non-zero exits are surfaced, never raised
         env=env,

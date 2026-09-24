@@ -193,7 +193,7 @@ def forex_strategy() -> dict[str, Any]:
     try:
         proc = subprocess.run(
             [sys.executable, "scripts/seasonal_calendar.py"],
-            cwd=str(root), capture_output=True, text=True, timeout=30,
+            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         calendar = (proc.stdout or "").strip()
         if proc.returncode != 0:

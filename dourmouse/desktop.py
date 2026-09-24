@@ -344,7 +344,7 @@ class DesktopBridge:
             return []
         try:
             proc = subprocess.run(
-                ["lsappinfo", "list"], capture_output=True, text=True, timeout=10,
+                ["lsappinfo", "list"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
         except (OSError, subprocess.TimeoutExpired):
             return []
@@ -433,7 +433,7 @@ class DesktopBridge:
                 "end tell"
             )
             proc = subprocess.run(
-                ["osascript", "-e", script], capture_output=True, text=True, timeout=15,
+                ["osascript", "-e", script], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
             )
             if proc.returncode == 0:
                 result["other_half"] = True
@@ -1217,7 +1217,7 @@ if __name__ == "__main__":
 
     pid_file = ".dourmouse-ui.pid"
     try:
-        with open(pid_file, "w") as fh:
+        with open(pid_file, "w", encoding="utf-8") as fh:
             fh.write(str(os.getpid()))
     except OSError:
         pass

@@ -8,4 +8,4 @@ pystray==0.19.5  # Vision stage 3 — system tray + camera/mic kill-switch (dour
 # Was genuinely missing from this venv before this pass (pyobjc-core and
 # pyobjc-framework-Cocoa/Quartz came in transitively via pywebview, but
 # ApplicationServices — the actual AXUIElement bindings — never did).
-pyobjc-framework-ApplicationServices==12.2.2
+pyobjc-framework-ApplicationServices==12.2.2; sys_platform == "darwin"  # macOS-only bindings (finding #085: unmarked, this file could not install on Linux or Windows)
