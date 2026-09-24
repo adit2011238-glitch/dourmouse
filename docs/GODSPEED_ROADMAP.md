@@ -1037,3 +1037,5 @@ and a real build sequence, not just a requirement statement:
   the page makes is served through the SSRF guard; rendered DOM stored linked to the server bytes.
 - [x] Tray on Linux (finding #093) 2026-09-24 -- an em dash in the tray title crashed pystray's
   X11 backend (Latin-1); title is ASCII now, all four states tested.
+- [x] Phase 2 R0-3 (finding #094) 2026-09-24 -- robots.txt honoured and per-host spacing (Crawl-delay,
+  capped) for every automated fetch. R0 acquisition complete.

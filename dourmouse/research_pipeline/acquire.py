@@ -37,6 +37,7 @@ from typing import Any
 from dourmouse import net_guard
 from dourmouse.config import workspace_dir
 
+from . import politeness
 from .extract_html import ExtractedDocument, extract_main
 
 #: Bytes read from one response. Past this the document is kept but marked
@@ -280,6 +281,7 @@ def fetch_document(
     cache: DocumentCache | None = None,
     use_cache: bool = True,
     render: bool = True,
+    polite: bool = True,
     timeout: float = DEFAULT_TIMEOUT,
     max_bytes: int = MAX_BYTES,
 ) -> FetchedDocument:
@@ -292,6 +294,10 @@ def fetch_document(
         if cached is not None:
             return cached
 
+    if polite:
+        # R0-3 (finding #094): robots.txt and per-host spacing. Raises
+        # politeness.RobotsDisallowed for a URL the site forbids.
+        politeness.POLITENESS.wait_turn(url)
     hops: list[str] = []
     # S310: the scheme is enforced by net_guard.guarded_urlopen (http/https only).
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})  # noqa: S310

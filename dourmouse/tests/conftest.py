@@ -264,6 +264,18 @@ def _goal_runtime_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_fetch_politeness(monkeypatch):
+    """Finding #094: the process-wide politeness gate caches robots.txt per
+    host and remembers when each host may next be fetched. Tests serve pages
+    from 127.0.0.1 on reused ports, so a shared gate would carry one test's
+    robots rules and delays into the next. Each test gets a fresh gate with
+    no minimum interval; the politeness tests configure their own."""
+    from dourmouse.research_pipeline import politeness
+
+    monkeypatch.setattr(politeness, "POLITENESS", politeness.Politeness(min_interval=0.0))
+
+
+@pytest.fixture(autouse=True)
 def _security_sentry_off(monkeypatch):
     """Finding #084: sentry_runtime_enabled() is default ON, so every test
     that built a real run_server() also started a real SentryRuntime that

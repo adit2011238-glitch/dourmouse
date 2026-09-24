@@ -128,17 +128,17 @@ class TestSemaphoreSerializesLocalCalls:
             _call_with_retry_inner(client, model="m", messages=[], tools=[], config=config)
 
         threads = [threading.Thread(target=run) for _ in range(2)]
-        start = time.monotonic()
         for t in threads:
             t.start()
         for t in threads:
             t.join(timeout=5)
-        elapsed = time.monotonic() - start
         assert len(windows) == 2
+        # The overlapping call windows ARE the proof of concurrency. A wall-clock
+        # upper bound (elapsed < 0.35) used to sit here too; it failed whenever
+        # the machine was busy (full suite, 2026-09-24) without saying anything
+        # about concurrency. A lower bound on the serial test is safe (load can
+        # only slow it down); an upper bound is not.
         assert _overlaps(windows), f"cloud calls should have run concurrently: {windows}"
-        # Real concurrency means total wall time is roughly ONE delay, not
-        # additive across both calls.
-        assert elapsed < 0.35
 
     def test_raised_env_limit_allows_that_many_concurrent_local_calls(self, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LOCAL_MODEL_MAX_CONCURRENT", "2")

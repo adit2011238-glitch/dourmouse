@@ -4355,3 +4355,35 @@ microphone kill switch, would crash at start or on the first state change. The t
 states and encodes each as Latin-1; verified to fail on the old title and pass on the new one.
 
 CI state after run 5: macOS and Windows green, Linux 5533 passed with only these five failing.
+
+### 094 -- automated fetches ignored robots.txt and hammered a host as fast as the loop ran
+
+Status: DONE 2026-09-24. Phase 2, R0-3 (RES-9). This closes R0 (acquisition).
+
+Twenty sources on one domain meant twenty requests back to back, and no fetch path read robots.txt.
+Both get a research tool blocked, and honouring robots.txt is the courtesy an automated reader of
+the public web owes.
+
+New `research_pipeline/politeness.py`. `Politeness.wait_turn(url)` runs before every network fetch
+in `acquire.fetch_document` (so both the research pipeline and the agents' `fetch_url`): it reads
+the host's robots.txt once per hour through the SSRF guard with the stdlib parser, raises
+`RobotsDisallowed` for a URL disallowed for our user agent (`dourmouse-research`), and spaces
+requests to the same host by at least `DOURMOUSE_FETCH_MIN_INTERVAL` (default 1s) or the site's
+`Crawl-delay` when longer, capped at 10s. Per the standard, a 4xx robots.txt allows everything and
+a 5xx is a temporary full disallow; an unreachable robots.txt is not enforced (the page fetch
+reports the real network problem). Cache hits wait for nothing and touch nothing. `fetch_url`
+returns "REFUSED BY ROBOTS.TXT: ...". A conftest fixture gives every test a fresh gate, because
+tests reuse 127.0.0.1 ports and a shared gate would carry one test's robots rules into the next.
+
+Verified live: Wikipedia's robots.txt disallows `/w/` for crawlers, and a history URL under it is
+now refused while its articles still fetch. Tests: `test_research_politeness.py` (9, real local
+server: disallowed path refused and never requested, a rule for our own agent honoured, missing
+robots allows, 5xx disallows, robots read once per host, spacing, capped Crawl-delay, cache hits
+free, fetch_url's refusal text).
+
+Also: the full suite for this finding failed once in
+`test_local_model_concurrency.py::test_two_cloud_calls_run_concurrently_unaffected`, which passes
+alone. It proved concurrency with overlapping call windows and then also asserted a wall-clock
+upper bound (`elapsed < 0.35`), which a busy machine breaks without saying anything about
+concurrency. The overlap assertion stays; the upper bound is gone (the serial test's lower bound
+is kept, since load can only slow it down).

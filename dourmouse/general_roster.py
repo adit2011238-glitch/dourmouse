@@ -684,6 +684,7 @@ def _fetch_url_tool(arguments: dict[str, Any]) -> str:
     every redirect with a hop cap."""
     from dourmouse.net_guard import FetchRefused
     from dourmouse.research_pipeline.acquire import UnsupportedContent, cut_at_word, fetch_document
+    from dourmouse.research_pipeline.politeness import RobotsDisallowed
 
     url = (arguments.get("url") or "").strip()
     if not url:
@@ -706,6 +707,8 @@ def _fetch_url_tool(arguments: dict[str, Any]) -> str:
         return f"REFUSED: {exc} -- fetch_url only fetches the public web."
     except UnsupportedContent as exc:
         return f"FETCH: {exc} (honest)."
+    except RobotsDisallowed as exc:
+        return f"REFUSED BY ROBOTS.TXT: {exc}."
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return net_errors.report(
             exc,
