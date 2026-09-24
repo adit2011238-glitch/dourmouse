@@ -1419,7 +1419,7 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
       <div class="panebody" id="agentSmithBody"></div></section>
     <section class="pane" id="pane-wiki"><div class="panehead">◆ WIKI · DEVICE KNOWLEDGE BASE</div>
       <div class="panebody" id="wikiBody"></div></section>
-    <section class="pane" id="pane-security"><div class="panehead">◆ SECURITY · RISK DASHBOARD</div>
+    <section class="pane" id="pane-security"><div class="panehead">◆ SECURITY · THIS MAC</div>
       <div class="panebody" id="securityBody"></div></section>
     <section class="pane" id="pane-office"><div class="panehead">◆ OFFICE · AGENT ECOSYSTEM</div>
       <div class="panebody" id="officeBody"></div></section>
@@ -6351,6 +6351,7 @@ function startNewsStream(){
       if(data.type === "browser_pane_open"){ openBrowserPane(data.url); return; }
       if(data.type === "agent_activity"){ orchApplyDelta(data.agents); return; }
       if(data.type === "delegate_fanout"){ orchApplyFanout(data); return; }
+      if(typeof data.type === "string" && data.type.startsWith("security_")){ secOnEvent(data); return; }
       if(data.type !== "news_item") return;  // the hub carries other event kinds too
       const item = data.item;
       newsFeed.unshift(item);
@@ -7130,108 +7131,340 @@ function paintWiki(){
 loadWiki();
 setInterval(() => { if(screen === "WIKI") loadWiki(); }, 5000);
 
-// 2026-09-21: the SECURITY screen -- Domain I's own dashboard UI (docs/
-// COMMERCIAL_GRADE_MASTER_REQUIREMENTS.md section 11, item 6, the last-
-// scoped Domain I piece, deliberately built AFTER the sentry itself was
-// proven real -- "after the sentry itself is real and tested"). Reads
-// /api/security_dashboard, a real, already-computed snapshot from the
-// server's own background SentryRuntime tick -- never triggers a scan
-// itself. A circular risk gauge (real SVG stroke-dasharray, no chart
-// library) plus real severity/incident bars -- the practical, calm,
-// non-decorative dashboard this section's own build plan asks for, not
-// the orbital/sphere concept from docs/DESIGN_SYSTEM.md.
-let _secDashboard = null;
+// 2026-09-25 (findings #105-#109): the SECURITY screen, rebuilt for the
+// Mac-only security plan. The old single risk-score gauge is gone: spec
+// item 25 forbids "a single magic number", so the top of the screen is
+// posture in areas, each with its own evidence, and an area that could not
+// be checked says UNKNOWN. Below: the findings with what to do, the AI
+// analyst's latest explanation, lockdown (the blocklist, start/stop, the
+// helper's one install command), response actions, quarantine, and the
+// connection doctor. The skeleton is built once and only the data parts
+// are repainted, so typing in a field is never wiped by the 5 s refresh.
+// Every action that changes the machine asks first.
+let _secDashboard = null, _secLockdown = null, _secQuarantine = [], _secAnalysis = null, _secNetwork = null;
+let _secBuilt = false, _secPrivacy = false;
+const _secOpenAreas = new Set();
 
-// Purely a visual scaling ceiling for the gauge's fill percentage --
-// the real risk_score itself (sentry.py's own _SEVERITY_WEIGHT sum) is
-// unbounded and reported verbatim in the center label; this constant
-// never changes what is scored, only how full the ring looks.
-const SECURITY_GAUGE_MAX = 40;
+const SEC_RATING = {
+  good: ["GOOD", "var(--ok)"], attention: ["NEEDS ATTENTION", "var(--warn)"],
+  at_risk: ["AT RISK", "var(--bad)"], unknown: ["UNKNOWN · NOT CHECKED", "var(--blue-deep)"],
+};
 
-function securityRiskColor(score){
-  if(score >= 20) return "var(--bad)";
-  if(score >= 8) return "var(--warn)";
-  return "var(--ok)";
-}
-function securityGaugeSvg(score){
-  const pct = Math.max(0, Math.min(1, score / SECURITY_GAUGE_MAX));
-  const r = 50, c = 2 * Math.PI * r;
-  const color = securityRiskColor(score);
-  return `<svg viewBox="0 0 120 120" width="140" height="140" style="display:block">
-    <circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--line)" stroke-width="10"></circle>
-    <circle cx="60" cy="60" r="${r}" fill="none" stroke="${color}" stroke-width="10"
-      stroke-linecap="round" stroke-dasharray="${(pct*c).toFixed(1)} ${c.toFixed(1)}"
-      transform="rotate(-90 60 60)"></circle>
-    <text x="60" y="56" text-anchor="middle" font-size="22" fill="${color}" font-family="inherit">${score.toFixed(1)}</text>
-    <text x="60" y="74" text-anchor="middle" font-size="8" fill="var(--blue-deep)" font-family="inherit">RISK SCORE</text>
-  </svg>`;
-}
-function securityBarHtml(label, count, max, color){
-  const pct = max > 0 ? Math.round((count / max) * 100) : 0;
-  return `<div style="margin-bottom:8px">
-    <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--blue-deep);margin-bottom:3px">
-      <span>${esc(label)}</span><span>${count}</span>
-    </div>
-    <div style="height:8px;background:var(--line);border-radius:4px;overflow:hidden">
-      <div style="height:100%;width:${pct}%;background:${color};transition:width .3s"></div>
-    </div>
-  </div>`;
-}
-async function loadSecurityDashboard(){
+async function secAction(body, question){
+  if(question && !confirm(question)) return null;
   try{
-    const r = await fetch("/api/security_dashboard");
-    _secDashboard = await r.json();
-  }catch{ _secDashboard = null; }
+    const r = await fetch("/api/security/action", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body)});
+    const j = await r.json();
+    if(!r.ok || j.ok === false){
+      alert((j && j.error) || (j && j.note ? j.note + "\n\n" + [].concat(j.needs_root||[]).join("\n") : "That did not work."));
+    }
+    return j;
+  }catch(e){ alert("Couldn't reach Dourmouse: " + e); return null; }
+}
+
+function secBuild(){
+  if(_secBuilt) return;
+  _secBuilt = true;
+  $("securityBody").innerHTML = `
+    <div id="secTop" class="note" style="padding:4px 0 8px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <button class="btn go" id="secScanBtn">SCAN NOW</button>
+      <button class="btn" id="secReportBtn">FULL REPORT</button>
+      <button class="btn" id="secAnalyzeBtn">EXPLAIN MY FINDINGS</button>
+    </div>
+    <div class="sec">POSTURE BY AREA</div>
+    <div id="secPosture" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px"></div>
+    <div class="sec">AI ANALYST</div>
+    <div id="secAnalyst"></div>
+    <div class="sec">FINDINGS</div>
+    <div id="secFindings"></div>
+    <div class="sec">LOCKDOWN</div>
+    <div id="secLockState"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
+      <input id="secLockEntry" placeholder="website or URL, or app name" autocomplete="off"
+        style="flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line-2);color:var(--blue-hi);padding:7px 9px;border-radius:2px;font:inherit;font-size:11px">
+      <button class="btn" id="secAddSite">+ WEBSITE</button>
+      <button class="btn" id="secAddApp">+ APP</button>
+    </div>
+    <div id="secLockLists"></div>
+    <div class="sec">RESPOND</div>
+    <div class="note" style="margin-bottom:6px">Each action asks first and can be undone from Quarantine (except stopping a process).</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px">
+      ${secRespondRow("secKillPid", "process id (pid)", "secKillBtn", "STOP PROCESS")}
+      ${secRespondRow("secQPath", "file or app path", "secQBtn", "QUARANTINE")}
+      ${secRespondRow("secStartupPath", "~/Library/LaunchAgents/….plist", "secStartupBtn", "DISABLE STARTUP ITEM")}
+      ${secRespondRow("secBlockDomain", "dangerous domain", "secBlockBtn", "BLOCK FOR GOOD")}
+    </div>
+    <div class="sec">QUARANTINE</div>
+    <div id="secQuarantine"></div>
+    <div class="sec">CONNECTION DOCTOR</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <input id="secDiagTarget" placeholder="a website that won't load, e.g. example.com" autocomplete="off"
+        style="flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line-2);color:var(--blue-hi);padding:7px 9px;border-radius:2px;font:inherit;font-size:11px">
+      <button class="btn" id="secDiagBtn">DIAGNOSE</button>
+    </div>
+    <div id="secDiag" style="margin-top:8px"></div>
+    <div class="sec">BROWSING · READ ON THIS MAC ONLY</div>
+    <button class="btn" id="secHistBtn">SHOW LAST 24 HOURS</button>
+    <div id="secHist" style="margin-top:8px"></div>
+    <div class="sec">DOURMOUSE ITSELF</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn" id="secAuditBtn">SELF-AUDIT</button>
+      <button class="btn" id="secPrivacyBtn">PRIVACY MODE: …</button>
+    </div>
+    <div id="secAudit" style="margin-top:8px"></div>
+    <div id="secReport"></div>`;
+  $("secScanBtn").onclick = async () => {
+    $("secScanBtn").textContent = "SCANNING…";
+    await secAction({action: "scan"});
+    $("secScanBtn").textContent = "SCAN NOW";
+    loadSecurityDashboard();
+  };
+  $("secReportBtn").onclick = async () => {
+    $("secReportBtn").textContent = "BUILDING…";
+    const j = await secAction({action: "report"});
+    $("secReportBtn").textContent = "FULL REPORT";
+    if(j && j.ok) paintSecReport(j.report, j.saved_to);
+  };
+  $("secAnalyzeBtn").onclick = async () => {
+    $("secAnalyzeBtn").textContent = "THINKING…";
+    const j = await secAction({action: "analyze"});
+    $("secAnalyzeBtn").textContent = "EXPLAIN MY FINDINGS";
+    if(j && j.analysis){ _secAnalysis = j.analysis; paintSecAnalyst(); }
+  };
+  const addEntry = async (kind) => {
+    const entry = $("secLockEntry").value.trim();
+    if(!entry) return;
+    const j = await secAction({action: "lockdown_add", kind, entry});
+    if(j && j.ok){ $("secLockEntry").value = ""; _secLockdown = j.lockdown; paintSecLockdown(); }
+  };
+  $("secAddSite").onclick = () => addEntry("site");
+  $("secAddApp").onclick = () => addEntry("app");
+  $("secKillBtn").onclick = async () => {
+    const pid = parseInt($("secKillPid").value, 10);
+    if(!pid) return;
+    const j = await secAction({action: "kill_process", pid}, `Stop process ${pid}? Unsaved work in it is lost.`);
+    if(j && j.ok){ $("secKillPid").value = ""; alert(`${j.name} (${j.pid}): ${j.result}`); }
+  };
+  $("secQBtn").onclick = async () => {
+    const path = $("secQPath").value.trim();
+    if(!path) return;
+    const j = await secAction({action: "quarantine", path, reason: "from the console"},
+      `Move ${path} into quarantine? It is not deleted and can be restored.`);
+    if(j && j.ok){ $("secQPath").value = ""; loadSecQuarantine(); }
+  };
+  $("secStartupBtn").onclick = async () => {
+    const path = $("secStartupPath").value.trim();
+    if(!path) return;
+    const j = await secAction({action: "disable_startup_item", path, reason: "from the console"},
+      `Stop ${path} from running at login? It can be restored.`);
+    if(j && j.ok){ $("secStartupPath").value = ""; loadSecQuarantine(); }
+  };
+  $("secBlockBtn").onclick = async () => {
+    const domain = $("secBlockDomain").value.trim();
+    if(!domain) return;
+    const j = await secAction({action: "block_domain", domain, reason: "from the console"},
+      `Block ${domain} on this Mac until you unblock it?`);
+    if(j && j.ok){ $("secBlockDomain").value = ""; _secLockdown = j.lockdown; paintSecLockdown(); }
+  };
+  $("secDiagBtn").onclick = async () => {
+    const target = $("secDiagTarget").value.trim();
+    if(!target) return;
+    $("secDiag").innerHTML = `<p class="note">Checking ${esc(target)}…</p>`;
+    const j = await secAction({action: "diagnose", target});
+    if(j && j.ok) paintSecDiag(j);
+    else $("secDiag").innerHTML = "";
+  };
+  $("secHistBtn").onclick = async () => {
+    $("secHist").innerHTML = `<p class="note">Reading browser history…</p>`;
+    const j = await secAction({action: "browser_history", hours: 24});
+    if(j && j.ok) paintSecHistory(j); else $("secHist").innerHTML = "";
+  };
+  $("secAuditBtn").onclick = async () => {
+    const j = await secAction({action: "self_audit"});
+    if(j && j.ok) paintSecAudit(j);
+  };
+  $("secPrivacyBtn").onclick = async () => {
+    const on = !_secPrivacy;
+    const j = await secAction({action: "privacy_mode", on},
+      on ? "Turn privacy mode on? The analyst stops sending findings to the cloud model." :
+           "Turn privacy mode off? The analyst will send findings to the cloud model to explain them.");
+    if(j && j.ok){ _secPrivacy = j.privacy_mode; paintSecPrivacy(); }
+  };
+  $("securityBody").addEventListener("click", async (ev) => {
+    const b = ev.target.closest("[data-sec]");
+    if(!b) return;
+    const kind = b.dataset.sec, val = b.dataset.val;
+    let j = null;
+    if(kind === "remove") j = await secAction({action: "lockdown_remove", entry: val});
+    else if(kind === "unblock") j = await secAction({action: "unblock_domain", domain: val}, `Unblock ${val}?`);
+    else if(kind === "restore"){ j = await secAction({action: "restore", id: val}, "Put this item back where it was?"); loadSecQuarantine(); return; }
+    else if(kind === "lockon") j = await secAction({action: "lockdown_start"},
+      "Start lockdown now? Everything on the blocklist is closed and blocked until you end it.");
+    else if(kind === "lockoff") j = await secAction({action: "lockdown_stop"}, "End lockdown now?");
+    else if(kind === "copy"){ try{ await navigator.clipboard.writeText(val); b.textContent = "COPIED"; }catch{} return; }
+    else if(kind === "area"){
+      if(_secOpenAreas.has(val)) _secOpenAreas.delete(val); else _secOpenAreas.add(val);
+      const el = $("secEv-" + val); if(el) el.style.display = _secOpenAreas.has(val) ? "" : "none"; return;
+    }
+    if(j && j.lockdown){ _secLockdown = j.lockdown; paintSecLockdown(); }
+  });
+}
+function secRespondRow(inputId, ph, btnId, label){
+  return `<div style="display:flex;gap:6px">
+    <input id="${inputId}" placeholder="${esc(ph)}" autocomplete="off"
+      style="flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line-2);color:var(--blue-hi);padding:7px 9px;border-radius:2px;font:inherit;font-size:11px">
+    <button class="btn" id="${btnId}" style="white-space:nowrap">${label}</button></div>`;
+}
+
+async function loadSecurityDashboard(){
+  const get = async (p) => { try{ const r = await fetch(p); return r.ok ? await r.json() : null; }catch{ return null; } };
+  const [d, l, n, a] = await Promise.all([get("/api/security_dashboard"), get("/api/security/lockdown"),
+    get("/api/security/network"), get("/api/security/analyst")]);
+  _secDashboard = d; _secNetwork = n;
+  if(l) _secLockdown = l;
+  if(a && a.analysis) _secAnalysis = a.analysis;
   if(screen === "SECURITY") paintSecurityDashboard();
 }
-function findingRowHtml(f){
-  const color = f.severity === "high" ? "var(--bad)" : f.severity === "med" ? "var(--warn)" : "var(--ok)";
-  return `<div class="row">
-    <span class="dot" style="background:${color}${f.is_new ? ";animation:pulse 1.2s ease-in-out infinite" : ""}"></span>
-    <div class="g">
-      <div class="n">${esc(f.title)} <span style="color:var(--blue-deep);font-weight:normal">· ${f.severity.toUpperCase()}${f.is_new ? " · NEW" : ""}</span></div>
-      <div class="d">${esc(f.detail)}</div>
-    </div>
-  </div>`;
+async function loadSecQuarantine(){
+  try{ const r = await fetch("/api/security/quarantine"); _secQuarantine = (await r.json()).items || []; }catch{}
+  if(screen === "SECURITY") paintSecQuarantine();
 }
+function secSevColor(s){ return s === "high" ? "var(--bad)" : s === "med" ? "var(--warn)" : "var(--ok)"; }
+
 function paintSecurityDashboard(){
-  const box = $("securityBody");
-  const d = _secDashboard;
-  if(!d){ box.innerHTML = `<p class="note" style="padding:8px 0">Couldn't reach the security dashboard.</p>`; return; }
-  if(!d.scanned){
-    box.innerHTML = `<p class="note" style="padding:8px 0">No real scan has completed yet -- the continuous sentry runs on its own interval (default every 5 minutes) and this dashboard shows its last real result.</p>`;
-    return;
+  secBuild();
+  const d = _secDashboard, n = _secNetwork;
+  const net = n && n.identity ? `${n.identity[2] || "network"} via ${n.identity[1]} (router ${n.identity[0] || "?"})` : "network watch off";
+  if(!d){ $("secTop").textContent = "Couldn't reach the security service."; }
+  else if(!d.scanned){ $("secTop").textContent = `No scan has finished yet (the sentry scans every few minutes, and at once when the network changes). ${net}.`; }
+  else{
+    const when = d.last_scan_at ? new Date(d.last_scan_at * 1000).toLocaleTimeString() : "?";
+    $("secTop").textContent = `Last scan ${when} · ${d.tick_count} scan(s) · ${d.known_device_count} known device(s) · ${net}`;
   }
-  const sev = d.findings_by_severity || {};
-  const inc = d.incidents_by_status || {};
-  const maxSev = Math.max(1, sev.high||0, sev.med||0, sev.low||0);
-  const maxInc = Math.max(1, inc.OPEN||0, inc.INVESTIGATING||0, inc.RESOLVED||0, inc.ACCEPTED_RISK||0);
-  box.innerHTML = `
-    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
-      <div style="display:flex;flex-direction:column;align-items:center">
-        ${securityGaugeSvg(d.risk_score)}
-        <div class="d" style="margin-top:6px">${d.tick_count} real scan(s) so far</div>
-      </div>
-      <div style="flex:1;min-width:220px">
-        <div class="sec">FINDINGS BY SEVERITY</div>
-        ${securityBarHtml("HIGH", sev.high||0, maxSev, "var(--bad)")}
-        ${securityBarHtml("MED", sev.med||0, maxSev, "var(--warn)")}
-        ${securityBarHtml("LOW", sev.low||0, maxSev, "var(--ok)")}
-        <div class="sec" style="margin-top:14px">INCIDENTS BY STATUS</div>
-        ${securityBarHtml("OPEN", inc.OPEN||0, maxInc, "var(--bad)")}
-        ${securityBarHtml("INVESTIGATING", inc.INVESTIGATING||0, maxInc, "var(--warn)")}
-        ${securityBarHtml("RESOLVED", inc.RESOLVED||0, maxInc, "var(--ok)")}
-        ${securityBarHtml("ACCEPTED RISK", inc.ACCEPTED_RISK||0, maxInc, "var(--blue-deep)")}
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-        <div style="font-size:22px;color:var(--ok)">${d.known_device_count}</div>
-        <div class="d">KNOWN DEVICES</div>
-      </div>
+  const areas = (d && d.posture) || [];
+  $("secPosture").innerHTML = areas.length ? areas.map(a => {
+    const [label, color] = SEC_RATING[a.rating] || SEC_RATING.unknown;
+    const ev = a.evidence.map(e => `<div class="d" style="margin-top:3px">· ${esc(e.title)}</div>`).join("");
+    const miss = a.not_checked.length ? `<div class="d" style="margin-top:3px">not checked: ${esc(a.not_checked.join(", "))}</div>` : "";
+    return `<div data-sec="area" data-val="${esc(a.dimension)}" style="cursor:pointer;border:1px solid var(--line-2);border-left:3px solid ${color};border-radius:2px;padding:8px 10px">
+      <div class="n" style="font-size:10.5px">${esc(a.label)}</div>
+      <div style="font-size:9px;letter-spacing:.14em;color:${color};margin-top:3px">${label}${a.evidence.length ? " · " + a.evidence.length : ""}</div>
+      <div id="secEv-${esc(a.dimension)}" style="display:${_secOpenAreas.has(a.dimension) ? "" : "none"}">${ev}${miss}</div></div>`;
+  }).join("") : `<p class="note">Posture appears after the first scan.</p>`;
+  const fs = (d && d.findings) || [];
+  $("secFindings").innerHTML = fs.length ? fs.map(f => `<div class="row">
+      <span class="dot" style="background:${secSevColor(f.severity)}${f.is_new ? ";animation:pulse 1.2s ease-in-out infinite" : ""}"></span>
+      <div class="g">
+        <div class="n">${esc(f.title)} <span style="color:var(--blue-deep);font-weight:normal">· ${f.severity.toUpperCase()}${f.is_new ? " · NEW" : ""}</span></div>
+        <div class="d">${esc(f.detail)}</div>
+        <div class="d" style="color:var(--blue-dim);margin-top:3px">What to do: ${esc(f.recommended_action)}</div>
+      </div></div>`).join("") : `<p class="note">Nothing found on the last scan.</p>`;
+  paintSecAnalyst();
+  paintSecLockdown();
+  paintSecQuarantine();
+}
+function paintSecAnalyst(){
+  const a = _secAnalysis, box = $("secAnalyst");
+  if(!box) return;
+  if(!a){ box.innerHTML = `<p class="note">The analyst explains new findings on its own when something medium or high appears, or press EXPLAIN MY FINDINGS.</p>`; return; }
+  if(!a.ok){ box.innerHTML = `<div class="errbox"><div class="t">ANALYST UNAVAILABLE</div>${esc(a.error || "")}</div>`; return; }
+  const when = a.at ? " · " + new Date(a.at * 1000).toLocaleString() : "";
+  box.innerHTML = `<div class="note" style="color:var(--blue-hi);font-size:11px;line-height:1.6">${esc(a.summary)}</div>
+    <div class="d" style="margin:4px 0 6px">worry: ${esc(a.worry)}${when}</div>
+    ${(a.points||[]).map(p => `<div class="row"><div class="g"><div class="n">${esc(p.titles.join(" + "))}</div>
+      <div class="d">${esc(p.meaning)}</div>${p.first_step ? `<div class="d" style="color:var(--amber)">First: ${esc(p.first_step)}</div>` : ""}</div></div>`).join("")}
+    ${a.dropped ? `<div class="d">${a.dropped} point(s) dropped because they did not cite a real finding.</div>` : ""}`;
+}
+function paintSecLockdown(){
+  const l = _secLockdown;
+  if(!$("secLockState")) return;
+  if(!l){ $("secLockState").innerHTML = `<p class="note">Lockdown status unavailable.</p>`; return; }
+  const on = l.active;
+  const needHelper = !l.helper_installed && (l.sites.length || (l.always_blocked||[]).length);
+  const cmd = (l.limits || []).find(x => x.includes("sudo "));
+  $("secLockState").innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:11px;letter-spacing:.16em;color:${on ? "var(--bad)" : "var(--blue-dim)"}">${on ? "● LOCKDOWN ON" : "○ LOCKDOWN OFF"}</span>
+      <button class="btn ${on ? "" : "go"}" data-sec="${on ? "lockoff" : "lockon"}">${on ? "END LOCKDOWN" : "START LOCKDOWN"}</button>
     </div>
-    <div class="sec" style="margin-top:16px">REAL FINDINGS (${d.findings.length})</div>
-    ${d.findings.length ? d.findings.map(findingRowHtml).join("") : '<p class="note" style="padding:8px 0">Nothing found on the last real scan.</p>'}`;
+    ${needHelper && cmd ? `<div class="errbox" style="margin-top:8px"><div class="t">WEBSITE BLOCKING NOT INSTALLED</div>
+      Apps are blocked already. For websites, run this once in Terminal (it asks for your password there, never here):
+      <div style="font-family:ui-monospace,monospace;font-size:10px;margin:6px 0;word-break:break-all">${esc(cmd.slice(cmd.indexOf("sudo ")))}</div>
+      <button class="btn" data-sec="copy" data-val="${esc(cmd.slice(cmd.indexOf("sudo ")))}">COPY COMMAND</button></div>` : ""}`;
+  const chip = (label, kind, val, extra) => `<span class="chip" style="cursor:default">${esc(label)}${extra||""}
+      <button data-sec="${kind}" data-val="${esc(val)}" title="remove" style="border:none;background:none;color:var(--blue-deep);cursor:pointer">✕</button></span>`;
+  const siteMark = (s) => "blocked_now" in s ? (s.blocked_now ? " · blocked" : " · NOT blocked") : "";
+  $("secLockLists").innerHTML = `
+    <div class="d" style="margin-bottom:4px">APPS</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${l.apps.map(a => chip(a.name, "remove", a.bundle_id || a.name)).join("") || '<span class="note">none</span>'}</div>
+    <div class="d" style="margin:8px 0 4px">WEBSITES</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${l.sites.map(s => chip(s.domain, "remove", s.domain, siteMark(s))).join("") || '<span class="note">none</span>'}</div>
+    <div class="d" style="margin:8px 0 4px">BLOCKED FOR GOOD (security)</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${(l.always_blocked||[]).map(s => chip(s.domain, "unblock", s.domain)).join("") || '<span class="note">none</span>'}</div>
+    <div class="d" style="margin-top:8px">${(l.limits||[]).filter(x => !x.includes("sudo ")).map(esc).join("<br>")}</div>`;
+}
+function paintSecQuarantine(){
+  const box = $("secQuarantine");
+  if(!box) return;
+  box.innerHTML = _secQuarantine.length ? _secQuarantine.map(m => `<div class="row"><div class="g">
+      <div class="n">${esc(m.name)}</div>
+      <div class="d">from ${esc(m.original_path)} · ${new Date(m.quarantined_at * 1000).toLocaleString()}${m.reason ? " · " + esc(m.reason) : ""}</div></div>
+      <button class="btn" data-sec="restore" data-val="${esc(m.id)}">RESTORE</button></div>`).join("")
+    : `<p class="note">Nothing in quarantine.</p>`;
+}
+function paintSecDiag(j){
+  const color = j.category === "OK" ? "var(--ok)" : j.category === "SERVER" || j.category === "UNKNOWN" ? "var(--warn)" : "var(--bad)";
+  $("secDiag").innerHTML = `<div style="border-left:3px solid ${color};padding:4px 10px">
+    <div class="n" style="color:${color};letter-spacing:.14em;font-size:10px">${esc(j.category)}</div>
+    <div class="d" style="color:var(--blue-hi)">${esc(j.why)}</div>
+    ${j.steps.map(s => `<div class="d">${s.ok ? "✓" : "✗"} ${esc(s.step)}: ${esc(s.detail)} (${s.ms} ms)</div>`).join("")}</div>`;
+}
+function paintSecPrivacy(){
+  const b = $("secPrivacyBtn");
+  if(b){ b.textContent = "PRIVACY MODE: " + (_secPrivacy ? "ON" : "OFF"); b.classList.toggle("go", _secPrivacy); }
+}
+function paintSecAudit(j){
+  _secPrivacy = j.privacy_mode; paintSecPrivacy();
+  $("secAudit").innerHTML = (j.findings.length ? j.findings.map(f => `<div class="row">
+      <span class="dot" style="background:${secSevColor(f.severity)}"></span>
+      <div class="g"><div class="n">${esc(f.title)}</div><div class="d">${esc(f.detail)}</div>
+      <div class="d" style="color:var(--blue-dim)">Fix: ${esc(f.fix)}</div></div></div>`).join("")
+    : `<p class="note">Nothing wrong in what was checked.</p>`)
+    + `<div class="d" style="margin-top:6px">Checked: ${esc(j.checked.join("; "))}</div>
+       <div class="d">Not checked: ${esc(j.not_checked.join("; "))}</div>`;
+}
+function paintSecHistory(j){
+  const src = j.sources.map(s => `<div class="d">${esc(s.source)}: ${esc(s.status)}${s.status !== "read" ? " · " + esc(s.detail) : ""}</div>`).join("");
+  const hits = j.blocked_visits.length ? j.blocked_visits.map(v => `<div class="d" style="color:var(--bad)">${esc(v.browser)} · ${esc(v.domain)} · ${new Date(v.at*1000).toLocaleString()}</div>`).join("")
+    : `<div class="d">none</div>`;
+  $("secHist").innerHTML = `<div class="d">${j.visits} visit(s), ${j.searches.length} typed search(es).</div>
+    <div class="d" style="margin-top:6px">VISITS TO BLOCKED DOMAINS</div>${hits}
+    <div class="d" style="margin-top:6px">MOST VISITED</div>
+    <div class="d">${j.top_domains.map(([d, n]) => esc(d) + " (" + n + ")").join(", ") || "none"}</div>
+    <div class="d" style="margin-top:6px">RECENT SEARCHES</div>
+    ${j.searches.map(s => `<div class="d">${esc(s.browser)} · ${esc(s.term)}</div>`).join("") || '<div class="d">none</div>'}
+    <div class="d" style="margin-top:6px">SOURCES</div>${src}`;
+}
+function paintSecReport(r, path){
+  const box = $("secReport");
+  box.innerHTML = `<div class="sec">REPORT</div>
+    <div class="note" style="color:var(--blue-hi);font-size:11px">${esc(r.headline)}</div>
+    <div class="d" style="margin:4px 0">Saved to ${esc(path)}</div>
+    <div class="d" style="margin-top:6px">WHAT THIS REPORT COULD NOT SEE</div>
+    ${r.unknowns.map(u => `<div class="d">· ${esc(u)}</div>`).join("")}`;
+  box.scrollIntoView({behavior: "smooth", block: "start"});
+}
+// Live: a scan, a network change, a new analysis or a download assessment
+// arrives on the shared /api/events stream (finding #108) and refreshes
+// this screen at once instead of waiting for the next 5 s poll.
+function secOnEvent(data){
+  if(data.type === "security_analysis"){ _secAnalysis = data.analysis; if(screen === "SECURITY") paintSecAnalyst(); return; }
+  if(data.type === "security_scan" || data.type === "security_network_change") loadSecurityDashboard();
 }
 loadSecurityDashboard();
+loadSecQuarantine();
+fetch("/api/security/privacy").then(r => r.json()).then(j => { _secPrivacy = !!j.privacy_mode; paintSecPrivacy(); }).catch(() => {});
 setInterval(() => { if(screen === "SECURITY") loadSecurityDashboard(); }, 5000);
 
 // 2026-09-18: the TIMETABLE screen -- Domain C (docs/

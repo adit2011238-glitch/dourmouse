@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from dourmouse.dispatch import run_dispatch, system_message
 from dourmouse.general_roster import build_general_registry
 from dourmouse.planner import build_plan, find_agents_for_query, looks_multi_step
@@ -571,3 +573,23 @@ class TestBringAppToFrontRouting:
         )
         apps = next((r for r in m if r["name"] == "apps"), None)
         assert apps is None or apps["score"] < 3, f"got {m}"
+
+
+class TestSecurityRouting:
+    """Findings #110-#112: the Mac security tools are reachable by plain
+    words, and adding them did not steal other agents' queries."""
+
+    @pytest.mark.parametrize("query", [
+        "start lockdown", "turn on privacy mode", "quarantine that app", "what did I search in chrome today",
+        "show my browsing history", "give me a security report of my mac", "explain my security findings",
+        "is my firewall on", "do I have malware",
+    ])
+    def test_security_queries_reach_security(self, query):
+        assert find_agents_for_query(build_general_registry(), query, limit=1)[0]["name"] == "security"
+
+    @pytest.mark.parametrize(("query", "agent"), [
+        ("search the web for mac firewall tips", "research_info"),
+        ("save it to a file named notes.txt in your workspace", "dev_coding"),
+    ])
+    def test_other_queries_keep_their_agent(self, query, agent):
+        assert find_agents_for_query(build_general_registry(), query, limit=1)[0]["name"] == agent

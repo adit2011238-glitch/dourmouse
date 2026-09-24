@@ -42,6 +42,10 @@ class TestBuildSecuritySubagent:
             "security_status", "list_exposed_services",
             "security_sentry_scan", "security_external_peers", "security_check_reputation",
             "security_known_devices", "security_sentry_dismiss", "security_downloads", "security_monitoring_check", "lockdown_status", "lockdown_edit", "lockdown_start", "lockdown_stop",
+            "security_diagnose_connection", "security_report", "security_analyze", "security_kill_process",
+            "security_quarantine_file", "security_disable_startup_item", "security_quarantine_list",
+            "security_restore", "security_block_domain", "security_unblock_domain",
+            "security_browser_history", "security_self_audit", "security_privacy_mode",
             "security_incident_open", "security_incident_update", "security_incidents",
         }
 
@@ -52,7 +56,10 @@ class TestBuildSecuritySubagent:
 
         subagent = sec_tools.build_security_subagent()
         gated = {t.name for t in subagent.tools if t.permission == Permission.REQUIRES_CONFIRMATION}
-        assert gated == {"lockdown_start", "lockdown_stop"}
+        # Everything that changes the machine needs the owner (findings #103, #106).
+        assert gated == {"lockdown_start", "lockdown_stop", "security_kill_process", "security_quarantine_file",
+                         "security_disable_startup_item", "security_restore", "security_block_domain",
+                         "security_unblock_domain", "security_privacy_mode"}
         assert all(t.confirm_prompt is not None for t in subagent.tools if t.name in gated)
 
 

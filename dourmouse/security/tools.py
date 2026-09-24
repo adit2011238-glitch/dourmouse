@@ -306,6 +306,152 @@ def _lockdown_stop(_arguments: dict[str, Any]) -> str:
     return _format_lockdown(lockdown.stop())
 
 
+def _security_diagnose_connection(arguments: dict[str, Any]) -> str:
+    from .connectivity import diagnose
+
+    r = diagnose(str(arguments.get("target") or ""))
+    lines = [f"{r['category']}: {r['why']}"]
+    lines.extend(f"  {'ok ' if s['ok'] else 'FAIL'} {s['step']}: {s['detail']} ({s['ms']} ms)" for s in r["steps"])
+    return "\n".join(lines)
+
+
+def _security_report(_arguments: dict[str, Any]) -> str:
+    from .report import build_report, save_report, to_markdown
+
+    r = build_report()
+    path = save_report(r)
+    return to_markdown(r) + f"\n(saved to {path})"
+
+
+def _security_analyze(_arguments: dict[str, Any]) -> str:
+    from .analyst import analyze
+
+    scan = run_scan(write_alerts=False)
+    findings = [{"kind": f.kind, "severity": f.severity, "title": f.title, "detail": f.detail,
+                 "recommended_action": f.recommended_action} for f in scan.all_findings]
+    r = analyze(findings)
+    if not r["ok"]:
+        return "The analyst could not run: " + r["error"]
+    lines = [f"Worry level: {r['worry']}", r["summary"], ""]
+    for p in r["points"]:
+        lines.append(f"- About {', '.join(p['titles'])}: {p['meaning']}")
+        if p["first_step"]:
+            lines.append(f"  First step: {p['first_step']}")
+    if r["dropped"]:
+        lines.append(f"({r['dropped']} point(s) dropped: they did not cite a real finding.)")
+    return "\n".join(lines)
+
+
+def _respond(fn: Any) -> str:
+    from .response import ResponseRefused
+
+    try:
+        r = fn()
+    except ResponseRefused as exc:
+        return f"Not done: {exc}"
+    if r.get("needs_root"):
+        cmds = r["needs_root"] if isinstance(r["needs_root"], list) else [r["needs_root"]]
+        return r["note"] + "\n" + "\n".join(cmds)
+    return "Done: " + ", ".join(f"{k}={v}" for k, v in r.items() if k in (
+        "name", "pid", "result", "original_path", "now_at", "id", "restored_to", "path", "quarantine_id"))
+
+
+def _security_kill_process(a: dict[str, Any]) -> str:
+    from .response import kill_process
+
+    return _respond(lambda: kill_process(int(a["pid"]), expect_name=a.get("expect_name") or None))
+
+
+def _security_quarantine_file(a: dict[str, Any]) -> str:
+    from .response import quarantine_file
+
+    return _respond(lambda: quarantine_file(str(a["path"]), reason=str(a.get("reason") or "")))
+
+
+def _security_restore(a: dict[str, Any]) -> str:
+    from .response import restore
+
+    return _respond(lambda: restore(str(a["id"])))
+
+
+def _security_disable_startup_item(a: dict[str, Any]) -> str:
+    from .response import disable_startup_item
+
+    return _respond(lambda: disable_startup_item(str(a["path"]), reason=str(a.get("reason") or "")))
+
+
+def _security_quarantine_list(_a: dict[str, Any]) -> str:
+    from .response import list_quarantine
+
+    items = list_quarantine()
+    if not items:
+        return "Quarantine is empty."
+    return "\n".join(f"{m['id']}: {m['original_path']} ({m.get('reason') or 'no reason given'})" for m in items)
+
+
+def _security_block_domain(a: dict[str, Any]) -> str:
+    from . import lockdown
+
+    try:
+        st = lockdown.block_domain_always(str(a["domain"]), str(a.get("reason") or ""))
+    except ValueError as exc:
+        return f"Not done: {exc}"
+    return _format_lockdown(st) + "\nBlocked for good: " + ", ".join(s["domain"] for s in st["always_blocked"])
+
+
+def _security_unblock_domain(a: dict[str, Any]) -> str:
+    from . import lockdown
+
+    st = lockdown.unblock_domain_always(str(a["domain"]))
+    return "Blocked for good now: " + (", ".join(s["domain"] for s in st["always_blocked"]) or "nothing")
+
+
+def _security_browser_history(a: dict[str, Any]) -> str:
+    from . import browser_history as bh
+    from . import lockdown
+    from .privacy import privacy_mode
+
+    hours = float(a.get("hours") or 24)
+    r = bh.recent_history(hours=hours)
+    bl = lockdown.Blocklist.load()
+    blocked = {s["domain"] for s in bl.always} | ({s["domain"] for s in bl.sites} if bl.active else set())
+    hits = bh.blocked_visits(r["visits"], blocked)
+    lines = [f"Last {hours:g} h: {len(r['visits'])} visit(s), {len(r['searches'])} typed search(es)."]
+    lines += [f"  {s['source']}: {s['status']} ({s['detail']})" for s in r["sources"] if s["status"] != "read" or s["detail"] != "0 visit(s)"]
+    lines.append(f"Visits to blocked domains: {len(hits)}")
+    if privacy_mode():  # finding #112: no URLs or search terms leave this Mac
+        lines.append("Privacy mode is on: URLs, domains and search terms are not shown to the chat.")
+        return "\n".join(lines)
+    lines += [f"  {v['browser']}: {v['domain']}" for v in hits[:20]]
+    lines.append("Most visited: " + ", ".join(f"{d} ({n})" for d, n in bh.top_domains(r["visits"])))
+    if r["searches"]:
+        lines.append("Recent searches: " + "; ".join(s["term"] for s in r["searches"][:15]))
+    return "\n".join(lines)
+
+
+def _security_self_audit(_a: dict[str, Any]) -> str:
+    from .self_audit import run_self_audit
+
+    r = run_self_audit()
+    lines = [f"Privacy mode: {'on' if r['privacy_mode'] else 'off'}"]
+    if not r["findings"]:
+        lines.append("Dourmouse's own security: nothing wrong in what was checked.")
+    for f in r["findings"]:
+        lines += [f"[{f['severity']}] {f['title']}", f"  {f['detail']}", f"  Fix: {f['fix']}"]
+    lines.append("Checked: " + "; ".join(r["checked"]))
+    lines.append("Not checked: " + "; ".join(r["not_checked"]))
+    return "\n".join(lines)
+
+
+def _security_privacy_mode(a: dict[str, Any]) -> str:
+    from .privacy import set_privacy_mode
+
+    on = bool(a.get("on"))
+    set_privacy_mode(on)
+    return ("Privacy mode ON: the analyst will not send findings to the cloud model, and browser history "
+            "stays on this Mac." if on else "Privacy mode OFF.")
+
+
 def build_security_subagent() -> Subagent:
     return Subagent(
         name="security",
@@ -485,6 +631,125 @@ def build_security_subagent() -> Subagent:
                 ),
                 parameters={"type": "object", "properties": {"path": {"type": "string", "default": ""}}},
                 handler=_security_downloads,
+            ),
+            ToolSpec(
+                name="security_diagnose_connection",
+                description=(
+                    "Diagnose why a website or service will not load: walks name lookup, connection, TLS and HTTP and "
+                    "names exactly one cause (OK, BLOCKED, DNS, ROUTING, UNREACHABLE, TIMEOUT, TLS, SERVER, UNKNOWN) "
+                    "with the evidence for each step."
+                ),
+                parameters={"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]},
+                handler=_security_diagnose_connection,
+            ),
+            ToolSpec(
+                name="security_report",
+                description=(
+                    "The one-button security report for this Mac: posture by area (never one magic number), every "
+                    "finding with what to do, monitoring indicators, downloads, lockdown, and what could not be "
+                    "checked. Kept on this Mac for later."
+                    # Not "saved to the workspace": the planner's routing scorer
+                    # read that as write intent and tied this agent with
+                    # dev_coding on "save it to a file" (finding #110).
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_security_report,
+            ),
+            ToolSpec(
+                name="security_analyze",
+                description=(
+                    "Ask the security analyst to explain the current findings together in plain English: how worried "
+                    "to be and what to do first. It only explains what the detectors found; it never adds findings."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_security_analyze,
+            ),
+            ToolSpec(
+                name="security_kill_process",
+                description="Stop a running process by pid (SIGTERM, then SIGKILL). Refuses macOS's own core processes.",
+                parameters={"type": "object", "properties": {
+                    "pid": {"type": "integer"},
+                    "expect_name": {"type": "string", "description": "the process name you expect; refused if the pid now belongs to something else"},
+                }, "required": ["pid"]},
+                handler=_security_kill_process,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: f"Stop process {a.get('pid')} ({a.get('expect_name') or 'name not given'})?",
+            ),
+            ToolSpec(
+                name="security_quarantine_file",
+                description="Move a suspicious file or app into quarantine (kept intact and restorable) and make it non-runnable.",
+                parameters={"type": "object", "properties": {"path": {"type": "string"}, "reason": {"type": "string"}},
+                            "required": ["path"]},
+                handler=_security_quarantine_file,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: f"Move {a.get('path')} into quarantine? It can be restored later.",
+            ),
+            ToolSpec(
+                name="security_disable_startup_item",
+                description="Stop a launch agent from running at login: unloads it and quarantines its plist (restorable).",
+                parameters={"type": "object", "properties": {"path": {"type": "string"}, "reason": {"type": "string"}},
+                            "required": ["path"]},
+                handler=_security_disable_startup_item,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: f"Disable the startup item {a.get('path')}? It can be restored later.",
+            ),
+            ToolSpec(
+                name="security_quarantine_list",
+                description="List what is in quarantine, with each item's id, original location and reason.",
+                parameters={"type": "object", "properties": {}},
+                handler=_security_quarantine_list,
+            ),
+            ToolSpec(
+                name="security_restore",
+                description="Put a quarantined file or startup item back where it was, by quarantine id.",
+                parameters={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+                handler=_security_restore,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: f"Restore quarantined item {a.get('id')} to its original place?",
+            ),
+            ToolSpec(
+                name="security_block_domain",
+                description="Block a dangerous domain for good (stays blocked with lockdown off), e.g. a phishing or malware site.",
+                parameters={"type": "object", "properties": {"domain": {"type": "string"}, "reason": {"type": "string"}},
+                            "required": ["domain"]},
+                handler=_security_block_domain,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: f"Block {a.get('domain')} on this Mac until you unblock it?",
+            ),
+            ToolSpec(
+                name="security_browser_history",
+                description=(
+                    "Browsing history and the exact queries typed into Chrome (all profiles), Arc, Brave, Edge, "
+                    "Safari (needs Full Disk Access) and Firefox, read locally, with visits to blocked domains "
+                    "flagged. Honours privacy mode."
+                ),
+                parameters={"type": "object", "properties": {"hours": {"type": "number", "default": 24}}},
+                handler=_security_browser_history,
+            ),
+            ToolSpec(
+                name="security_self_audit",
+                description=(
+                    "Dourmouse checks its own security: where it listens, auto-approve, key file permissions, "
+                    ".env in git, the root lockdown helper's integrity, and private folders."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_security_self_audit,
+            ),
+            ToolSpec(
+                name="security_privacy_mode",
+                description="Turn privacy mode on or off: when on, security data about this Mac is not sent to the cloud model.",
+                parameters={"type": "object", "properties": {"on": {"type": "boolean"}}, "required": ["on"]},
+                handler=_security_privacy_mode,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: f"Turn privacy mode {'on' if a.get('on') else 'off'}?",
+            ),
+            ToolSpec(
+                name="security_unblock_domain",
+                description="Remove a domain from the permanent security block list.",
+                parameters={"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]},
+                handler=_security_unblock_domain,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=lambda a: f"Unblock {a.get('domain')}?",
             ),
         ),
     )

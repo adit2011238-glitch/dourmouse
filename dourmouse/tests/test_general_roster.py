@@ -519,6 +519,16 @@ class TestRosterShape:
             # websites; switching it off lifts that. Both need the owner.
             "lockdown_start",
             "lockdown_stop",
+            # finding #106: response actions change the machine (each is
+            # restorable, but the owner still decides).
+            "security_kill_process",
+            "security_quarantine_file",
+            "security_disable_startup_item",
+            "security_restore",
+            "security_block_domain",
+            "security_unblock_domain",
+            # finding #112: privacy mode decides what leaves the Mac.
+            "security_privacy_mode",
         }
 
     def test_internet_tools_registered(self):

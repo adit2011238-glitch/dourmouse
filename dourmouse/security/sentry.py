@@ -64,6 +64,7 @@ close -- on top of what was previously just a flat findings table.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -233,9 +234,17 @@ def _detect_findings(
 
     lp = state.get("listening_ports") or {}
     if lp.get("available"):
+        # A service usually listens on an IPv4 and an IPv6 socket for the same
+        # port; that is one exposure, not two (finding #110, seen live as
+        # "rapportd listens on all interfaces" twice).
+        seen_ports: set[tuple[str, int, str]] = set()
         for port in lp["listening_ports"]:
             if port["exposure"] != "ALL_INTERFACES":
                 continue
+            port_key = (port["command"], port["port"], port["protocol"])
+            if port_key in seen_ports:
+                continue
+            seen_ports.add(port_key)
             findings.append(SentryFinding(
                 fingerprint=_fingerprint(
                     "exposed_port", port["command"], str(port["port"]), port["protocol"]
@@ -768,6 +777,10 @@ class SentryRuntime:
         self._state_fn = state_fn
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # The loop and the network watcher (MS-10) can both ask for a scan;
+        # one runs at a time, and each result goes to every listener.
+        self._scan_lock = threading.Lock()
+        self._listeners: list[Callable[[SentryScanResult, str], None]] = []
         self.last_result: SentryScanResult | None = None
         self.last_scan_at: float | None = None
         self.tick_count = 0
@@ -783,15 +796,23 @@ class SentryRuntime:
     def stop(self) -> None:
         self._stop.set()
 
-    def run_one_tick_now(self) -> SentryScanResult:
+    def add_listener(self, fn: Callable[[SentryScanResult, str], None]) -> None:
+        self._listeners.append(fn)
+
+    def run_one_tick_now(self, reason: str = "scheduled") -> SentryScanResult:
         """Real, synchronous, out-of-band scan -- used by the chat tool so
         a user asking "scan now" does not have to wait for the next
-        scheduled tick, and by tests that want a real tick without a real
-        threading.Event.wait delay."""
-        result = run_scan(state_fn=self._state_fn or collect_state, store=self._store)
-        self.last_result = result
-        self.last_scan_at = time.time()
-        self.tick_count += 1
+        scheduled tick, by the network watcher on a network change, and by
+        tests that want a real tick without a real threading.Event.wait
+        delay."""
+        with self._scan_lock:
+            result = run_scan(state_fn=self._state_fn or collect_state, store=self._store)
+            self.last_result = result
+            self.last_scan_at = time.time()
+            self.tick_count += 1
+        for fn in list(self._listeners):
+            with contextlib.suppress(Exception):  # a listener's bug never breaks the scan
+                fn(result, reason)
         return result
 
     def _loop(self) -> None:

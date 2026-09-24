@@ -293,3 +293,7 @@ def _security_sentry_off(monkeypatch):
     monkeypatch.setenv("DOURMOUSE_DOWNLOADS_WATCH", "0")
     # Finding #103: and the lockdown enforcer, which scans real processes.
     monkeypatch.setenv("DOURMOUSE_LOCKDOWN_ENFORCER", "0")
+    # Findings #107/#108: the network watcher and the AI analyst (which would
+    # call a real cloud model from every server a test builds).
+    monkeypatch.setenv("DOURMOUSE_NETWATCH", "0")
+    monkeypatch.setenv("DOURMOUSE_SECURITY_ANALYST", "0")

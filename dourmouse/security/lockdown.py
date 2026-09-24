@@ -89,6 +89,9 @@ class Blocklist:
     sites: list[dict[str, str]] = field(default_factory=list)  # normalize_site() rows
     active: bool = False
     started_at: float | None = None
+    # Security blocks (finding #106): domains blocked for good, whether or
+    # not a lockdown is on, e.g. a malware or phishing domain.
+    always: list[dict[str, str]] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path | None = None) -> Blocklist:
@@ -97,7 +100,7 @@ class Blocklist:
             return cls()
         d = json.loads(p.read_text(encoding="utf-8"))
         return cls(apps=d.get("apps", []), sites=d.get("sites", []), active=bool(d.get("active")),
-                   started_at=d.get("started_at"))
+                   started_at=d.get("started_at"), always=d.get("always", []))
 
     def save(self, path: Path | None = None) -> None:
         p = path or config_path()
@@ -239,7 +242,7 @@ def notify_user(message: str) -> None:
 def write_hosts_request(bl: Blocklist, path: Path | None = None) -> Path:
     p = path or hosts_request_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    domains = [s["domain"] for s in bl.sites] if bl.active else []
+    domains = sorted({s["domain"] for s in (bl.sites if bl.active else [])} | {s["domain"] for s in bl.always})
     p.write_text(json.dumps({"domains": domains, "written_at": time.time()}), encoding="utf-8")
     return p
 
@@ -298,12 +301,36 @@ def status(bl: Blocklist | None = None, *, check_sites: bool = True) -> dict[str
             row["blocked_now"] = site_is_blocked(s["domain"])
         sites.append(row)
     limits = ["Websites are blocked by domain; a URL's path cannot be blocked this way."]
-    if bl.active and bl.sites and not helper:
+    if ((bl.active and bl.sites) or bl.always) and not helper:
         limits.insert(0, "Websites are NOT blocked yet: the lockdown helper is not installed. Run once: "
                          + install_command())
     limits.append("A browser using its own DNS-over-HTTPS, or an app using a fixed IP address, can bypass a hosts block.")
     return {"active": bl.active, "started_at": bl.started_at, "apps": bl.apps, "sites": sites,
-            "helper_installed": helper, "limits": limits}
+            "always_blocked": bl.always, "helper_installed": helper, "limits": limits}
+
+
+def block_domain_always(entry: str, reason: str = "", bl: Blocklist | None = None) -> dict[str, Any]:
+    """Block a domain for good (a security response, not a lockdown): it
+    stays blocked when lockdown is off, until unblock_domain_always."""
+    bl = bl or Blocklist.load()
+    row = {**normalize_site(entry), "reason": reason, "blocked_at": str(int(time.time()))}
+    if all(s["domain"] != row["domain"] for s in bl.always):
+        bl.always.append(row)
+    bl.save()
+    write_hosts_request(bl)
+    return status(bl, check_sites=False)
+
+
+def unblock_domain_always(entry: str, bl: Blocklist | None = None) -> dict[str, Any]:
+    bl = bl or Blocklist.load()
+    try:
+        dom = normalize_site(entry)["domain"]
+    except ValueError:
+        dom = entry.strip().lower()
+    bl.always = [s for s in bl.always if s["domain"] != dom]
+    bl.save()
+    write_hosts_request(bl)
+    return status(bl, check_sites=False)
 
 
 def lockdown_enforcer_enabled() -> bool:

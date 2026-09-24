@@ -194,6 +194,11 @@ _DOMAIN_ROUTE: dict[str, str] = {
     "songs": "music",
     "playlist": "music",
     "playlists": "music",
+    # Findings #103-#112: words that only ever mean this Mac's security.
+    "lockdown": "security",
+    "quarantine": "security",
+    "quarantined": "security",
+    "privacy": "security",
 }
 
 # Stop words that are ALSO strong domain words must not be stripped — the
@@ -363,6 +368,17 @@ def find_agents_for_query(
     # together, naming a specific window/app, they unambiguously mean
     # window activation. Gated on the OWNING tool (activate_app), not a
     # vague description match, same as the other compounds.
+    # Finding #111: "what did I search in chrome today" names no security
+    # word, but a browser together with history/search words means the
+    # browser-history tool; plain "search" alone must stay web search.
+    compound_browser_history = bool(
+        tokens & {"chrome", "safari", "arc", "brave", "edge", "firefox", "browser", "browsing"}
+    ) and bool(tokens & {"history", "search", "searched", "searches", "visited", "visits"})
+    # "is my firewall on" is about this Mac; "search the web for firewall
+    # tips" is web research. A bare "firewall" domain word stole the second.
+    compound_mac_security = bool(tokens & {"firewall", "malware", "spyware", "hacked"}) and not bool(
+        tokens & {"search", "web", "google", "article", "articles", "news"}
+    )
     compound_bring_app_forward = bool(
         tokens & {"bring", "switch", "activate", "focus", "raise", "show"}
     ) and bool(tokens & {"front", "forward", "foreground"})
@@ -475,6 +491,10 @@ def find_agents_for_query(
             score += 3
         if compound_bring_app_forward and any(t.name == "activate_app" for t in sub.tools):
             score += 3
+        if compound_browser_history and any(t.name == "security_browser_history" for t in sub.tools):
+            score += 3
+        if compound_mac_security and any(t.name == "security_report" for t in sub.tools):
+            score += 4
         if nn is not None and sub.name in nn:
             score += _ROUTE_LAMBDA * max(0.0, nn[sub.name])
         if score > 0:

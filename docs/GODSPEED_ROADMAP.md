@@ -1060,3 +1060,21 @@ and a real build sequence, not just a requirement statement:
   evidence and confidence, and an explicit Unknowns list.
 - [x] Phase 3 MS-13 (finding #103) 2026-09-25 -- lockdown: blocklisted apps closed on launch, websites
   blocked system-wide via a minimal, validated root helper (one sudo install), approval-gated switches.
+- [x] Phase 3 MS-6 (finding #104) 2026-09-25 -- connection failure taxonomy: one named cause per
+  failure (BLOCKED / DNS / ROUTING / UNREACHABLE / TIMEOUT / TLS / SERVER) with step evidence.
+- [x] Phase 3 MS-7 (finding #105) 2026-09-25 -- posture in six areas (unknown never shown as good) and
+  the one-button report with an Unknowns section.
+- [x] Phase 3 MS-8 (finding #106) 2026-09-25 -- approval-gated response actions: kill, quarantine
+  (restorable), disable a startup item, block a domain for good.
+- [x] Phase 3 MS-9 (finding #107) 2026-09-25 -- AI analyst on a large cloud model: explains, must cite,
+  cannot invent findings; wakes once per new set.
+- [x] Phase 3 MS-10 (finding #108) 2026-09-25 -- immediate scan on network change; every scan live on
+  the event hub.
+- [x] Finding #109 2026-09-25 -- `/api/security/action` for the console.
+- [x] Finding #110 2026-09-25 -- SECURITY screen rebuilt around posture by area and one-click tools;
+  three root-cause fixes found doing it (IPv4/IPv6 duplicate findings, risk hidden as unknown,
+  routing leak).
+- [x] Phase 3 MS-11 (finding #111) 2026-09-25 -- browser history and typed searches, all Chromium
+  profiles plus Safari and Firefox, local only; Safari's TCC gap reported with the fix.
+- [x] Phase 3 MS-12 (finding #112) 2026-09-25 -- privacy mode, Dourmouse self-audit, threat model.
+  Mac-only security plan (MS-1..MS-13) complete.

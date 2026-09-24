@@ -4190,3 +4190,88 @@ class TestGeneratedImageEndpoint:
         resp.read()
         conn.close()
         assert resp.status == 404
+
+
+class TestSecurityConsoleEndpoints:
+    """Findings #105-#109: the console's security routes, end to end over
+    real HTTP. The lockdown files and quarantine live in tmp paths."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated(self, tmp_path, monkeypatch):
+        from dourmouse.security import lockdown
+
+        monkeypatch.setattr(lockdown, "config_path", lambda: tmp_path / "lockdown.json")
+        monkeypatch.setattr(lockdown, "hosts_request_path", lambda: tmp_path / "hosts-req.json")
+
+    def _post(self, port, body):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("POST", "/api/security/action", body=json.dumps(body),
+                     headers={"Content-Type": "application/json"})
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        return data
+
+    def _get(self, port, path):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", path)
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        return data
+
+    def test_blocklist_editing_and_permanent_blocks(self, server, tmp_path):
+        _, port = server
+        r = self._post(port, {"action": "lockdown_add", "kind": "site", "entry": "https://www.reddit.com/r/x"})
+        assert r["ok"] and r["added"]["domain"] == "reddit.com"
+        assert self._post(port, {"action": "lockdown_add", "kind": "nope", "entry": "x"}) == {
+            "ok": False, "error": "kind must be 'site' or 'app'"}
+        r = self._post(port, {"action": "block_domain", "domain": "phish.example", "reason": "phishing"})
+        assert [s["domain"] for s in r["lockdown"]["always_blocked"]] == ["phish.example"]
+        assert json.loads((tmp_path / "hosts-req.json").read_text())["domains"] == ["phish.example"]
+        assert self._post(port, {"action": "lockdown_remove", "entry": "reddit.com"})["ok"]
+
+    def test_quarantine_round_trip_and_refusals(self, server, tmp_path):
+        _, port = server
+        f = tmp_path / "dropper.sh"
+        f.write_text("echo", encoding="utf-8")
+        q = self._post(port, {"action": "quarantine", "path": str(f), "reason": "test"})
+        assert q["ok"] and not f.exists()
+        assert [i["id"] for i in self._get(port, "/api/security/quarantine")["items"]] == [q["id"]]
+        assert self._post(port, {"action": "restore", "id": q["id"]})["ok"] and f.exists()
+        assert not self._post(port, {"action": "quarantine", "path": "/etc/hosts"})["ok"]
+        assert not self._post(port, {"action": "kill_process", "pid": 1})["ok"]
+        assert self._post(port, {"action": "kill_process", "pid": "1"})["error"] == "pid must be a number"
+        assert self._post(port, {"action": "format_disk"})["error"] == "unknown action 'format_disk'"
+
+    def test_read_routes_are_honest_when_empty(self, server):
+        srv, port = server
+        assert self._get(port, "/api/security/report") == {"report": None}
+        assert self._get(port, "/api/security/analyst") == {"analysis": None}
+        assert self._get(port, "/api/security/network") == {"watching": False, "identity": None, "changes": 0}
+
+    def test_privacy_scan_and_posture(self, server, tmp_path, monkeypatch):
+        import dourmouse.security.sentry as sentry_module
+        from dourmouse.security.sentry import SentryRuntime, SentryStore
+
+        srv, port = server
+        assert self._get(port, "/api/security/privacy") == {"privacy_mode": False}
+        assert self._post(port, {"action": "privacy_mode", "on": True}) == {"ok": True, "privacy_mode": True}
+        assert self._get(port, "/api/security/privacy") == {"privacy_mode": True}
+        self._post(port, {"action": "privacy_mode", "on": False})
+        srv.security_sentry = None
+        assert self._post(port, {"action": "scan"})["error"] == "the security sentry is not running"
+
+        def state():
+            return {"interfaces": {"available": True, "interfaces": []},
+                    "default_gateway": {"available": True, "gateway": "10.0.0.1", "interface": "en0"},
+                    "dns": {"available": True, "resolvers": []}, "arp_neighbors": {"available": True, "neighbors": []},
+                    "listening_ports": {"available": True, "listening_ports": []},
+                    "firewall": {"available": True, "enabled": False}}
+
+        monkeypatch.setattr(sentry_module, "default_db", lambda: tmp_path / "sentry.db")
+        srv.security_sentry = SentryRuntime(store=SentryStore(tmp_path / "sentry.db"), state_fn=state)
+        assert self._post(port, {"action": "scan"})["ok"]
+        d = self._get(port, "/api/security_dashboard")
+        areas = {a["dimension"]: a["rating"] for a in d["posture"]}
+        assert areas["device_hardening"] == "at_risk"  # the firewall is off
+        assert areas["monitoring"] == "unknown"  # no report made yet: unknown, never good
+        assert areas["network_trust"] == "unknown"  # no Wi-Fi telemetry in this state

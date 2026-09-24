@@ -4721,3 +4721,187 @@ Found while testing: a copy of `/bin/sleep` is killed by macOS on launch (system
 from where they belong), and the venv's `python` re-executes the framework Python, so the
 enforcer test uses a copy of the real interpreter binary under the probe's name; and this Mac's
 Command Line Tools cannot link a C program (SDK mismatch), noted for later.
+
+### 104 -- connection failure taxonomy: "it won't load" names exactly one cause
+
+Status: DONE 2026-09-25. Phase 3, MS-6 (spec item 6).
+
+`security/connectivity.py` `diagnose(target)` walks a connection the way a network engineer would
+(name lookup, TCP, TLS, one HTTP HEAD) and stops at the first failing step, returning one of OK,
+BLOCKED (resolves to a sinkhole such as a lockdown's 0.0.0.0), DNS, ROUTING (ENETUNREACH /
+EHOSTUNREACH / ENETDOWN / EHOSTDOWN), UNREACHABLE (refused), TIMEOUT, TLS (certificate not trusted,
+with OpenSSL's own verify message, or the handshake failed), SERVER (HTTP 5xx) or UNKNOWN, with a
+timed step list as evidence. A category is only assigned from an observed failure. Internal
+addresses are refused as fetch_url refuses them (net_guard), loopback only when a test allows it.
+Live: example.com OK over TLSv1.3; expired.badssl.com and self-signed.badssl.com TLS with the real
+reason; a `.invalid` name DNS. Chat tool `security_diagnose_connection`. Tests:
+`test_security_connectivity.py` (10, real local sockets for OK / SERVER / UNREACHABLE).
+
+### 105 -- posture by area and the one-button security report
+
+Status: DONE 2026-09-25. Phase 3, MS-7 (spec items 25, 49, 50).
+
+`security/report.py`. Spec item 25 forbids "a single magic number", so posture is six areas (device
+hardening, exposure, trust in the current network, software integrity, downloads, signs of
+monitoring), each rated good / attention / at risk from its own findings with the evidence
+attached. An area whose telemetry could not be read is **unknown, never good**, and a finding no
+area claims gets an "other" area instead of vanishing. The same socket seen on IPv4 and IPv6 was
+reported twice live (rapportd); findings are now deduplicated by kind and detail. The report adds
+findings with what to do, monitoring indicators, risky downloads, lockdown state, and an explicit
+Unknowns section; `save_report` writes JSON and Markdown under the workspace. Live on this Mac:
+"1 area(s) at risk: Device hardening" (firewall off), exposure and monitoring need attention,
+network trust and software integrity good. Chat tool `security_report`, route
+`/api/security/report` (`?fresh=1` builds one). Tests: `test_security_report.py` (5).
+
+### 106 -- response actions: kill, quarantine, disable a startup item, block a domain
+
+Status: DONE 2026-09-25. Phase 3, MS-8 (spec items 30-33).
+
+`security/response.py`. Every action changes the machine, so every chat tool for one is
+REQUIRES_CONFIRMATION, and each is undoable or refused rather than risky:
+- `kill_process`: SIGTERM, SIGKILL after a grace period. Refuses pid 0/1, Dourmouse itself and its
+  parent, macOS core processes (WindowServer, loginwindow, launchd, ...), and a pid that now
+  belongs to a different program than the one approved (pid reuse). A root-owned process returns
+  the exact `sudo kill` for the owner; nothing here ever runs sudo.
+- `quarantine_file`: moves (never deletes) into `workspace/security/quarantine/<id>/` with a
+  manifest (original path, sha256, mode, reason) and makes it read-only; `restore` puts it back
+  with its mode and never overwrites something new at the original path. macOS itself (/System,
+  /usr except /usr/local, /bin, /sbin, /etc, /Applications/Utilities, ...), links, home folders
+  and disks are refused.
+- `disable_startup_item`: a user launch agent is unloaded (`launchctl bootout gui/<uid>`) and its
+  plist quarantined, so restore undoes it; a system-wide item returns the exact root commands.
+- `lockdown.block_domain_always`: a permanent security block that stays on with lockdown off,
+  through the same validated hosts helper (#103); `unblock_domain_always` lifts it.
+Tests: `test_security_response.py` (18: real processes stopped, one ignoring SIGTERM force-killed,
+pid reuse refused, quarantine round trip, refusals) and a lockdown test for permanent blocks.
+
+### 107 -- the AI security analyst explains findings and cannot invent one
+
+Status: DONE 2026-09-25. Phase 3, MS-9 (spec items 34-37).
+
+`security/analyst.py`. The detectors stay deterministic; the analyst only explains. It sees the
+numbered findings with their evidence and must answer JSON whose every point cites finding
+numbers; a point citing nothing, a number not given, or a non-integer is dropped and counted, and
+an unknown worry level becomes "unknown". A backend failure or a non-JSON answer is reported as
+such, never a made-up analysis. Model: Ollama Cloud (the owner's large-cloud-only policy), no
+token cap (this backend reasons in `content`; see the brevity finding). `Analyst` wakes only on
+new medium/high findings, at most once per 10 minutes and never twice for the same set, writes
+each analysis to the workspace, notifies, and runs in its own thread so the sentry never waits on
+a model. Live on this Mac with gpt-oss:120b: worry "medium", four points each citing real finding
+numbers (firewall and stealth together, SSH, Screen Sharing, rapportd and ARDAgent as normal
+system services best covered by the firewall), none dropped. Chat tool `security_analyze`, route
+`/api/security/analyst`. Tests: `test_security_analyst.py` (4).
+
+### 108 -- scan the moment the network changes; every scan pushed live
+
+Status: DONE 2026-09-25. Phase 3, MS-10 (spec items 9, 27, 29, 38).
+
+`security/netwatch.py` polls a cheap network identity (default gateway, interface, Wi-Fi name
+when macOS reveals it) every 5 s; a change broadcasts `security_network_change` and runs a sentry
+scan at once instead of waiting up to the next tick. `SentryRuntime` gained listeners (each scan
+goes to the live event hub as `security_scan` with counts and new findings, and to the analyst)
+and a scan lock, since the loop and the watcher can now both ask for a scan; a broken listener
+never breaks a scan. Route `/api/security/network`. Off in tests (`DOURMOUSE_NETWATCH=0`,
+`DOURMOUSE_SECURITY_ANALYST=0`, same convention as the sentry loop). Tests:
+`test_security_netwatch.py` (3: baseline then real changes only, listener isolation, one scan at a
+time under four concurrent requests).
+
+### 109 -- the console's security actions endpoint
+
+Status: DONE 2026-09-25 (the console panel that calls it is the next step).
+
+`security/web_actions.py` behind `POST /api/security/action` (normal auth): lockdown add / remove /
+start / stop, block and unblock a domain, kill, quarantine, restore, disable a startup item, build
+a report, diagnose a connection. Input is validated (a pid must be a real integer, not "1" or
+true), refusals come back as `{"ok": false, "error": ...}`, and an unknown action is named, never
+guessed. Tests in `test_webui.py::TestSecurityConsoleEndpoints` over real HTTP.
+
+### 110 -- the SECURITY screen rebuilt: posture by area, every tool one click away
+
+Status: DONE 2026-09-25. Verified in a real browser against a running server.
+
+The old screen was one risk-score gauge, the "single magic number" spec item 25 forbids. The new
+screen (`ui/console.html`) has, top to bottom:
+- scan / full report / explain buttons;
+- posture cards per area (click for the evidence and what was not checked);
+- the AI analyst's latest explanation;
+- findings with what to do;
+- lockdown: on/off, the blocklist with remove buttons, add site or app, the permanent security
+  blocks, and the helper's one install command with a copy button when websites are not yet
+  blockable;
+- respond: stop process, quarantine, disable startup item, block for good;
+- quarantine with restore;
+- the connection doctor;
+- local browsing history;
+- self-audit and the privacy toggle.
+
+The skeleton is built once and only data regions are repainted, so the 5 s refresh never wipes
+what the owner is typing. `security_*` events on the shared stream refresh it at once. Every action
+that changes the machine asks first.
+
+Server side:
+- `/api/security_dashboard` gains `posture`, whose monitoring area comes from the latest report
+  and is unknown before one.
+- The "scan" action runs this server's own sentry.
+
+Bugs found by doing this, all fixed at the root:
+1. The sentry emitted one finding per socket, so rapportd (IPv4 and IPv6, same port) was
+   reported twice everywhere, including the analyst's input. It now emits one per
+   (command, port, protocol). Test in `test_sentry.py`.
+2. The route test showed an area rated unknown while holding a high finding: the firewall was
+   off, but host protections could not be read. Known risk now always shows, and only "good"
+   needs complete telemetry. Test in `test_security_report.py`.
+3. The full suite caught a routing regression. "Saved to the workspace" in `security_report`'s
+   description made the planner tie security with dev_coding on "save it to a file", and "not
+   deleted" and "searches" were further leaks. The descriptions were reworded. Routing words
+   were added for lockdown, quarantine and privacy, and two compounds for browser history
+   (browser + history/search words) and Mac security (firewall/malware without web/search
+   words, so "search the web for firewall tips" stays web research). `TestSecurityRouting` pins
+   both directions.
+
+### 111 -- browser history and typed searches, read locally
+
+Status: DONE 2026-09-25. Phase 3, MS-11 (spec SEC-E1).
+
+`security/browser_history.py` reads each browser's own database:
+- Chrome, every profile, and the Chromium family (Arc, Brave, Edge): `urls`, `visits` and
+  `keyword_search_terms`, so the exact search terms come without any network interception.
+- Safari `History.db`.
+- Firefox `places.sqlite`.
+
+Each file is copied with its WAL before reading, because a running Chromium browser locks its
+database. Each browser's own time base is converted: Chromium microseconds since 1601, Safari
+seconds since 2001, Firefox microseconds since 1970. Every source is reported as read /
+not_found / no_access / unreadable. Safari's history is TCC-protected: live it is `no_access`
+with the Full Disk Access fix named, never silently skipped.
+
+Live on this Mac: 7 Chrome profiles read, and typed searches recovered.
+
+Visits to domains blocked for good (or on an active lockdown) are flagged. Chat tool
+`security_browser_history` honours privacy mode (#112); the console shows it locally. Tests:
+`test_security_browser_history.py` (4, synthetic databases in each browser's real schema,
+including one held under an exclusive lock).
+
+### 112 -- privacy mode, the security self-audit, and the threat model
+
+Status: DONE 2026-09-25. Phase 3, MS-12 (spec items 37, 42, 48).
+
+- **Privacy mode** (`security/privacy.py`, `security.json` 0600 in the user config dir): when on,
+  the analyst sends nothing to the cloud model and the browser-history tool gives the chat
+  counts only. Detection, the report, lockdown and response keep working. Switching it is an
+  approval-gated tool and a console toggle.
+- **Self-audit** (`security/self_audit.py`) checks Dourmouse as a target: its bind address and
+  token; auto-approve (HIGH when on, since it skips every gate); the permissions of both `.env`
+  files and `security.json`; `.env` tracked by git; and the root lockdown helper (the installed
+  copy must match the packaged one byte for byte, be root-owned and not writable by others, and
+  launchd must point at it). It also checks the permissions of the quarantine and security
+  folders. It lists what it cannot check.
+  Live it found a real issue: the security workspace was 0755, listable by other users.
+  `privacy.private_dir` now creates quarantine, reports and analyst folders 0700 and tightens
+  the security root.
+- **Threat model**: `docs/SECURITY_THREAT_MODEL.md`, covering assets, adversaries, what is and is
+  not defended against, Dourmouse's own attack surface with each mitigation, and exactly which
+  data leaves the Mac.
+
+Tests: `test_security_self_audit.py` (6, including a tampered helper and a redirected launchd
+job).

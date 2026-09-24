@@ -63,6 +63,15 @@ class TestDetectFindings:
         assert findings[0].kind == "exposed_port"
         assert "sshd" in findings[0].title
 
+    def test_one_service_on_ipv4_and_ipv6_is_one_finding(self):
+        """Finding #110, seen live: rapportd listens on * over IPv4 and IPv6
+        with the same port, and was reported twice."""
+        sock = {"command": "rapportd", "pid": 640, "protocol": "TCP", "port": 49152,
+                "bind_address": "*", "exposure": "ALL_INTERFACES"}
+        ports = {"available": True, "listening_ports": [sock, dict(sock), {**sock, "port": 49153}]}
+        findings = _detect_findings(_state(listening_ports=ports))
+        assert sorted(f.detail.split("port ")[1].split()[0] for f in findings) == ["49152", "49153"]
+
     def test_loopback_and_local_network_ports_are_no_finding(self):
         ports = {"available": True, "listening_ports": [
             {"command": "a", "pid": 1, "protocol": "TCP", "port": 1,

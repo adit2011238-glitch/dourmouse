@@ -154,3 +154,21 @@ class TestAppEnforcer:
         assert ld.process_matches(app, "/Applications/Discord.app/Contents/MacOS/Discord", "Discord")
         assert ld.process_matches(app, "/Applications/Discord.app/Contents/Frameworks/Helper.app/x", "Helper")
         assert not ld.process_matches(app, "/Applications/Slack.app/Contents/MacOS/Slack", "Slack")
+
+
+def test_a_security_block_stays_on_when_lockdown_is_off(tmp_path, monkeypatch):
+    """Finding #106: block_domain_always is independent of lockdown."""
+    monkeypatch.setattr(ld, "config_path", lambda: tmp_path / "l.json")
+    monkeypatch.setattr(ld, "hosts_request_path", lambda: tmp_path / "req.json")
+    bl = ld.Blocklist()
+    bl.add_site("youtube.com")
+    ld.block_domain_always("https://evil-phish.example/login", reason="phishing", bl=bl)
+    req = lambda: json.loads((tmp_path / "req.json").read_text())["domains"]  # noqa: E731
+    assert req() == ["evil-phish.example"]  # lockdown off: only the security block
+    ld.start(bl)
+    assert req() == ["evil-phish.example", "youtube.com"]
+    ld.stop(bl)
+    assert req() == ["evil-phish.example"]
+    assert ld.Blocklist.load(tmp_path / "l.json").always[0]["reason"] == "phishing"
+    ld.unblock_domain_always("evil-phish.example", bl=bl)
+    assert req() == []

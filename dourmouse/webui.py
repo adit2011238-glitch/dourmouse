@@ -983,6 +983,17 @@ class _SSEBroadcast:
             c.emit(payload)
 
 
+def _security_posture(findings: list[dict[str, Any]], result: Any) -> list[dict[str, Any]]:
+    """Finding #110: the dashboard's posture by area, from the sentry's last
+    scan; the monitoring area uses the latest saved report's indicators, and
+    is UNKNOWN until a report has been made."""
+    from dourmouse.security import report as _report
+
+    latest = _report.latest_saved()
+    monitoring = latest.get("monitoring") if latest else None
+    return _report.posture(findings, result.telemetry_available, monitoring)
+
+
 def _resolve_server_config(config: Any | None) -> Any | None:
     """v3.1: the real serving paths (serve_forever, desktop.launch) call
     run_server with config=None, which would leave server.config None and
@@ -2998,6 +3009,9 @@ class _Handler(BaseHTTPRequestHandler):
                 "known_device_count": len(store.get_known_device_keys()),
                 "incidents_by_status": incidents_by_status,
                 "telemetry_available": result.telemetry_available if result else {},
+                # Finding #110: posture by area (spec item 25: never one magic
+                # number); the monitoring area comes from the latest report.
+                "posture": _security_posture(findings_payload, result) if result else [],
             })
         elif path == "/api/device_wiki":
             # Domain E, step 6: read-only inspection of the device wiki's
@@ -3151,6 +3165,37 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.security.monitoring import analyze
 
             self._send_json(analyze())
+        elif path == "/api/security/report":
+            # MS-7 (finding #105): the latest saved report; ?fresh=1 builds one now.
+            from dourmouse.security import report as _report
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            if (qs.get("fresh") or [""])[0] == "1":
+                r = _report.build_report()
+                self._send_json({"report": r, "saved_to": str(_report.save_report(r))})
+            else:
+                self._send_json({"report": _report.latest_saved()})
+        elif path == "/api/security/analyst":
+            # MS-9 (finding #107): the analyst's most recent explanation.
+            from dourmouse.security import analyst as _analyst
+
+            self._send_json({"analysis": _analyst.latest()})
+        elif path == "/api/security/quarantine":
+            # MS-8 (finding #106): what is in quarantine (restorable).
+            from dourmouse.security import response as _response
+
+            self._send_json({"items": _response.list_quarantine()})
+        elif path == "/api/security/privacy":
+            # Finding #112: whether privacy mode is on.
+            from dourmouse.security.privacy import privacy_mode
+
+            self._send_json({"privacy_mode": privacy_mode()})
+        elif path == "/api/security/network":
+            # MS-10 (finding #108): the network the watcher sees right now.
+            watcher = getattr(self.server, "netwatch", None)
+            ident = watcher.current if watcher is not None else None
+            self._send_json({"watching": watcher is not None, "identity": ident,
+                             "changes": watcher.changes if watcher is not None else 0})
         elif path == "/api/security/downloads":
             # MS-4 (finding #101): the latest Downloads assessments.
             from dourmouse.security.sentry import SentryStore, default_db
@@ -3600,6 +3645,23 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_confirm()
         elif parsed.path == "/api/messages":
             self._handle_messages_post()
+        elif parsed.path == "/api/security/action":
+            # Finding #109: the console's security actions (lockdown, response
+            # actions, report, diagnose). The page confirms before each one.
+            from dourmouse.security.web_actions import handle_action
+
+            body = self._read_json_body()
+            if body.get("action") == "scan":
+                # Needs this server's own sentry, so it is handled here (#110).
+                sentry = getattr(self.server, "security_sentry", None)
+                if sentry is None:
+                    self._send_json({"ok": False, "error": "the security sentry is not running"})
+                else:
+                    scanned = sentry.run_one_tick_now("manual")
+                    self._send_json({"ok": True, "findings": len(scanned.all_findings),
+                                     "new": len(scanned.new_findings)})
+            else:
+                self._send_json(handle_action(body))
         elif parsed.path == "/api/attention/dismiss":
             body = self._read_json_body()
             try:
@@ -7750,6 +7812,38 @@ def run_server(
         lockdown_enforcer = AppEnforcer()
         lockdown_enforcer.start()
     setattr(server, "lockdown_enforcer", lockdown_enforcer)  # noqa: B010 -- read back in serve_forever's shutdown
+    # MS-10 (finding #108): every scan is pushed live; the analyst (MS-9,
+    # finding #107) wakes on new findings; a network change scans at once.
+    from dourmouse.security import netwatch as _netwatch
+
+    netwatch: _netwatch.NetworkWatcher | None = None
+    sentry_rt: SentryRuntime | None = getattr(server, "security_sentry", None)
+    if sentry_rt is not None:
+        sentry_rt.add_listener(lambda result, why: events_hub.broadcast(_netwatch.scan_event(result, why)))
+        if _netwatch.analyst_enabled():
+            from dourmouse.security.analyst import Analyst
+            from dourmouse.security.lockdown import notify_user
+
+            _analyst = Analyst(notify=notify_user)
+
+            def _analyze(result: Any, why: str) -> None:
+                def run() -> None:
+                    out = _analyst.on_scan(result)
+                    if out is not None:
+                        events_hub.broadcast({"type": "security_analysis", "analysis": out})
+                threading.Thread(target=run, daemon=True, name="dourmouse-security-analyst").start()
+
+            sentry_rt.add_listener(_analyze)
+        if _netwatch.netwatch_enabled():
+            def _on_network_change(before: Any, now: Any) -> None:
+                events_hub.broadcast({"type": "security_network_change", "from": _netwatch.describe(before)
+                                      if before else None, "to": _netwatch.describe(now)})
+                threading.Thread(target=sentry_rt.run_one_tick_now, args=("network_change",), daemon=True,
+                                 name="dourmouse-netchange-scan").start()
+
+            netwatch = _netwatch.NetworkWatcher(on_change=_on_network_change)
+            netwatch.start()
+    setattr(server, "netwatch", netwatch)  # noqa: B010 -- read back in serve_forever's shutdown and /api/security/network
     # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
     # HUD and the dedicated window listen to (live per-brain cards).
     from dourmouse import all_hands
@@ -8021,7 +8115,7 @@ def serve_forever(
             server.goal_runtime.stop()
         if server.security_sentry is not None:
             server.security_sentry.stop()
-        for attr in ("downloads_watch", "lockdown_enforcer"):
+        for attr in ("downloads_watch", "lockdown_enforcer", "netwatch"):
             runner = getattr(server, attr, None)
             if runner is not None:
                 runner.stop()
