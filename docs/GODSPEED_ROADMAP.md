@@ -1045,3 +1045,6 @@ and a real build sequence, not just a requirement statement:
 - [x] Phase 2 R3 (finding #096) 2026-09-24 -- the backward edge: contradiction spawns a follow-up
   task, evidence tagged with it enters after synthesis, revised synthesis kept alongside the old;
   stages forward-only; contradictions surfaced in synthesis; research_follow_up tool.
+- [x] Device network (finding #097) 2026-09-24 -- stdlib node service (data + compute roles, token
+  auth, Tailscale-only bind, per-job env strip + time + memory limits), Mac client and registry.
+  Desktop compute node live over Tailscale; Dell pending its SSH setup.

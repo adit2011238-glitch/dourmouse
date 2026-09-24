@@ -4476,3 +4476,61 @@ compatibility, the full backward edge end to end (discovery prompt carries the d
 new claim carries the task, the synthesis prompt lists the disagreement, only new pairs are
 re-judged), the no-op case costs no model call, the graph shows contradiction -> spawned task ->
 produced claim with both results, and the new tool's honest outputs.
+
+### 097 -- the device network: a node service for the desktop and the Dell, and the Mac's client
+
+Status: service DONE and verified live on the desktop 2026-09-24; network deployment (firewall,
+autostart, the Dell) pending the owner's machine-level steps. Owner decision the same day: the
+desktop is the Python compute workspace, the Dell holds the data, the Mac orchestrates, every model
+is cloud-hosted (REMAINING_WORK §3n, NET-1..4).
+
+Found first: nothing was wired, and the existing Dell code (`dell/dell_server.py`,
+`dell/compute_api.py`, and the Mac-side `remote_server.py`) was built for the opposite role,
+serving a LOCAL `qwen3:1.7b`, which breaks both halves of the model policy. It is superseded, not
+extended; retiring it is tracked separately.
+
+New `dourmouse/nodes/node_server.py`: one standard-library-only file, so a node needs nothing but
+Python (no pip, no Dourmouse checkout). Roles: **data** (blobs by SHA-256, verified on write and
+on read; JSON metadata beside a blob) and **compute** (Python jobs, each in its own folder with
+`in/` inputs fetched by hash from the data node, `out/` for artifacts and `metrics.json`, logs
+tailed into the status). Security: a bearer token is required on every request and compared in
+constant time (the old server's auth was optional), tokens under 32 characters are refused, and
+binding to all interfaces is refused (a node binds to its Tailscale address). Jobs get a stripped
+environment (no inherited secrets; a test proves a planted variable does not reach the job), a
+wall-clock limit, and a memory limit: a Windows Job Object (process created suspended, capped,
+then resumed, so it never runs a line uncapped) or RLIMIT_AS on Linux. macOS does not enforce
+RLIMIT_AS, so a job there records "NOT enforced" rather than pretending. Artifact paths cannot
+escape the job folder. It is process isolation, not a container, and the file says so: job code
+must come from Dourmouse's own agents.
+
+Found by the first test run: macOS refused `RLIMIT_AS` inside `preexec_fn`, the job thread died,
+and every job reported "running" forever. Any failure in a job's thread is now recorded as that
+job's failure. Also: 64-bit Windows `HANDLE`s would have been truncated by ctypes' default 32-bit
+return type; the Win32 calls declare their types, and the Windows-only code sits under a
+module-level platform check so Linux type-checking stays clean.
+
+`dourmouse/nodes/client.py`: the registry (`<user config dir>/nodes.json`, never `.env` or the
+repo), `NodeClient` (blobs, metadata, jobs, artifacts, all hash-verified on the Mac side too), and
+`network_status()`, which reports an offline node as offline rather than caching "online". It
+deliberately bypasses `net_guard`, since Tailscale addresses are exactly the non-public space the
+guard refuses; only registry addresses are ever contacted.
+
+Verified live on the desktop (Windows 10, Python 3.11.2, `D:\dourmouse-node`, bound to 127.0.0.1
+for the check): a job ran and returned metrics; a job allocating 600 MB under a 128 MB cap was
+stopped by the Job Object with a MemoryError before it could continue; a job past its time limit
+was killed. Tests: `test_nodes.py` (19; the memory-kill test runs on the Linux and Windows CI
+runners).
+
+**Deployed on the desktop the same day, with the owner's go-ahead.** The owner added a Windows
+firewall rule allowing TCP 8770 from 100.64.0.0/10 only, on both machines. Installed at
+`D:\dourmouse-node\` (C: has 6 GB free): the one file, a config holding a fresh 48-character token
+(ACL restricted to the user, SYSTEM and Administrators), and a scheduled task `\DOURMOUSE-Node`
+that starts it at logon as the user, windowless, the same shape as the existing
+`\DOURMOUSE-Desktop` task. The Mac's registry entry is in `~/Library/Application
+Support/Dourmouse/nodes.json` (mode 600). Verified from the Mac over Tailscale: the desktop reported
+online at 59 ms; a 2-million-sample Monte Carlo job ran under the Job Object memory limit and
+returned its metrics and artifact in 1.1s round trip; no token and a wrong token both got 401;
+the desktop's LAN address (192.168.1.242:8770) does not answer, only its Tailscale address.
+
+The Dell is not deployed yet: its SSH server is not running (port 22 closed), so the Mac cannot
+install anything there. The owner's SSH setup block is the remaining step.
