@@ -128,8 +128,6 @@ def is_configured() -> bool:
     """
     if os.environ.get("NVIDIA_API_KEY", "").strip():
         return True
-    if os.environ.get("DOURMOUSE_SERVER_URL", "").strip():
-        return True
     backend = os.environ.get("DOURMOUSE_LLM_BACKEND", "").strip().lower()
     if backend == "ollama":
         return True
@@ -1544,17 +1542,6 @@ def fast_lane_model() -> str:
     re-verified live in this pass via a real /api/chat call.
     """
     return os.environ.get("DOURMOUSE_FAST_MODEL", "qwen2.5:7b").strip() or "qwen2.5:7b"
-
-
-def fast_lane_server_enabled(value: str | None = None) -> bool:
-    """DOURMOUSE_FAST_LANE_SERVER: route pure-chat fast-lane turns to the
-    compute node (Dell) when it is online, falling back to the local fast
-    model on ANY failure. Default on — the real gate is that the operator
-    explicitly set DOURMOUSE_SERVER_URL (a dead/unconfigured node must
-    never add probe latency to every reply).
-    """
-    raw = value if value is not None else os.environ.get("DOURMOUSE_FAST_LANE_SERVER", "1")
-    return raw.strip().lower() not in ("0", "false", "no", "off", "")
 
 
 def brief_mode_enabled(value: str | None = None) -> bool:

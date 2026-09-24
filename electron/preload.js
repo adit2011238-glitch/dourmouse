@@ -21,3 +21,17 @@ contextBridge.exposeInMainWorld("pywebview", {
     open_external: (url) => ipcRenderer.invoke("bridge:open_external", url),
   },
 });
+
+// Finding #116 (OS-3): the console's browser pane drives the real
+// BrowserView through these, instead of an iframe plus a rewriting proxy.
+contextBridge.exposeInMainWorld("dourmouseShell", {
+  pane: {
+    navigate: (url) => ipcRenderer.invoke("pane:navigate", url),
+    nav: (what) => ipcRenderer.invoke("pane:nav", what),
+    bounds: (rect) => ipcRenderer.invoke("pane:bounds", rect),
+    show: () => ipcRenderer.invoke("pane:show"),
+    hide: () => ipcRenderer.invoke("pane:hide"),
+    state: () => ipcRenderer.invoke("pane:state"),
+    onState: (cb) => ipcRenderer.on("pane:state", (_evt, s) => cb(s)),
+  },
+});

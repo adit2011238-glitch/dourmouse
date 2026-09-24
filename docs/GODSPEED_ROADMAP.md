@@ -1078,3 +1078,17 @@ and a real build sequence, not just a requirement statement:
   profiles plus Safari and Firefox, local only; Safari's TCC gap reported with the fix.
 - [x] Phase 3 MS-12 (finding #112) 2026-09-25 -- privacy mode, Dourmouse self-audit, threat model.
   Mac-only security plan (MS-1..MS-13) complete.
+- [x] Finding #113 2026-09-25 -- Dell/qwen compute node retired (policy); `compute` runs sandboxed
+  Python jobs on this Mac; MODEL-2 verified and pinned by a policy test.
+- [x] INFRA-1 (finding #114) 2026-09-25 -- standing-agent runtime: inbox-woken loops, read/propose
+  leash, visible activity log.
+- [x] OS-5 (finding #115) 2026-09-25 -- always-on file librarian: incremental index, search for
+  chat and other agents, tidy proposals applied only on approval, undo.
+- [x] OS-3 (finding #116) 2026-09-25 -- the console's browser pane drives the real Electron
+  BrowserView (real cookies, real history, sized to the pane; agent and user share it).
+- [x] OS-10 (finding #117) 2026-09-25 -- every media format plays: ffmpeg remux first, transcode only
+  what needs it, cached; subtitles; remembered position.
+- [x] OS-6 (finding #118) 2026-09-25 -- a project's chat works inside its own folder (file and
+  coding tools scoped, parallel branches included).
+- [x] OS-8.1 (finding #119) 2026-09-25 -- notification center: bell, history, per-source mute; the
+  security, downloads, analyst and librarian events feed it.

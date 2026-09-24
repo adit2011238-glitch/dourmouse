@@ -357,7 +357,7 @@ class TestRosterShape:
             "docs",  # v5.x: Google Sheets/Drive link-shared access
             "browser",  # v5.25: real headless-Chrome agent (signup/login)
             "media",  # 2026-09-14: real image generation (Gemini)
-            "compute",  # v5.26: the Dell compute node (LAN inference + failover)
+            "compute",  # finding #113: Python jobs on this Mac (was the Dell node)
             "design_3d",  # 3D & UI Design — spec generation + manifest cataloguing
             "companion",  # world-monitor-expansion: friendly-persona counterpart
                           # to orchestrator, for the Vision workspace chat panel
@@ -529,6 +529,10 @@ class TestRosterShape:
             "security_unblock_domain",
             # finding #112: privacy mode decides what leaves the Mac.
             "security_privacy_mode",
+            # finding #115: the librarian moves files only when the owner
+            # approves a proposal, and putting them back is gated the same.
+            "librarian_apply",
+            "librarian_undo",
         }
 
     def test_internet_tools_registered(self):
@@ -1767,3 +1771,49 @@ class TestAppsToolsPreferTheRealAxPathWithAppleScriptFallback:
         result = tool.handler({"app_name": "Finder"})
         assert "Downloads" in result
         assert "Documents" in result
+
+
+class TestComputeIsThisMac:
+    """Finding #113: the Dell node (a 1.7B model on the LAN) is retired;
+    `compute` runs Python jobs on this Mac."""
+
+    def test_compute_tools_are_local_jobs(self):
+        registry = build_general_registry()
+        sub = next(s for s in registry.all_subagents() if s.name == "compute")
+        assert {t.name for t in sub.tools} - {"query_shared_memory", "query_desktop_vault"} == {"compute_run_python", "compute_job_status", "compute_jobs",
+                                               "compute_environment"}
+        assert "Dell" not in sub.description and "Qwen" not in sub.description
+
+    def test_a_job_runs_for_real(self):
+        registry = build_general_registry()
+        tool = registry.lookup("compute_run_python")
+        out = tool.handler({"code": "import json, os\nos.makedirs('out', exist_ok=True)\n"
+                                    "json.dump({'answer': 6 * 7}, open('out/metrics.json', 'w'))\nprint('done')",
+                            "wait_s": 30})
+        assert "succeeded (exit 0)" in out and "answer=42" in out and "done" in out
+
+
+def test_every_agent_resolves_to_a_large_cloud_model(monkeypatch):
+    """MODEL-2 (finding #113): the owner's policy is large cloud models only,
+    never local, never under 14B. With a cloud key configured, every agent,
+    including the privacy-pinned ones, must resolve to the cloud endpoint
+    and a large model."""
+    import re
+
+    from dourmouse.config import load_llm_config
+    from dourmouse.dispatch import _config_for_agent_model
+
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-cloud-key")
+    monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+    monkeypatch.setenv("OLLAMA_CLOUD_MODEL", "gpt-oss:120b")
+    for var in ("OLLAMA_BASE_URL", "OLLAMA_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    cfg = load_llm_config()
+    offenders = []
+    for sub in build_general_registry().all_subagents():
+        eff = _config_for_agent_model(cfg, sub.name)
+        model = eff.model_for_agent(sub.name)
+        size = re.search(r":(\d+(?:\.\d+)?)b\b", model or "")
+        if "ollama.com" not in str(getattr(eff, "base_url", "")) or (size and float(size.group(1)) < 14):
+            offenders.append((sub.name, getattr(eff, "base_url", ""), model))
+    assert offenders == []

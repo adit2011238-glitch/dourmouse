@@ -297,3 +297,6 @@ def _security_sentry_off(monkeypatch):
     # call a real cloud model from every server a test builds).
     monkeypatch.setenv("DOURMOUSE_NETWATCH", "0")
     monkeypatch.setenv("DOURMOUSE_SECURITY_ANALYST", "0")
+    # Findings #114/#115: the standing-agent runtime, whose librarian would
+    # walk the developer's real Documents from every server a test builds.
+    monkeypatch.setenv("DOURMOUSE_STANDING_AGENTS", "0")

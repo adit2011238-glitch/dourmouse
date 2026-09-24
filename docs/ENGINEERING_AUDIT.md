@@ -4905,3 +4905,176 @@ Status: DONE 2026-09-25. Phase 3, MS-12 (spec items 37, 42, 48).
 
 Tests: `test_security_self_audit.py` (6, including a tampered helper and a redirected launchd
 job).
+
+### 113 -- the Dell compute node is retired; `compute` is this Mac's job workspace
+
+Status: DONE 2026-09-25. Owner decisions 2026-09-24: "only for mac for everything", and large
+cloud models only, never local, never under 14B.
+
+The `compute` agent offloaded inference to a LAN Dell running Qwen3 1.7B (`remote_server.py`,
+`dell/`), with a fast lane in `dispatch.py` that tried the Dell first. That broke both rules.
+Removed:
+- the client module and the `dell/` server;
+- the dispatch server lane (context fields, model swap, Dell-first completion branch);
+- the health warmer, `fast_lane_server_enabled`, and the `DOURMOUSE_SERVER_URL` setup key;
+- four tests files that only covered the Dell, and fastapi from CI.
+
+`compute` now runs Python jobs on this Mac (`dourmouse/compute_local.py`) through the node
+server's `JobRunner` (#098): an own folder per job, a scrubbed environment, a timeout, and an
+RSS memory watchdog. Metrics come from `out/metrics.json`, artifacts are hashed, and the
+interpreter's environment hash is recorded. Tools: `compute_run_python`,
+`compute_job_status`, `compute_jobs`, `compute_environment`.
+
+`/api/server` and the connections list keep their shape and now report "THIS MAC" from the
+jobs folder, without probing. Live: a numpy job ran under the watchdog and returned its
+metrics and environment hash.
+
+MODEL-2 was verified at the same time. With the cloud key set, all 43 agents resolve to
+`ollama.com` `gpt-oss:120b`, including the privacy-pinned ones (`force_local` keeps a real
+key since 2026-09-14). `test_every_agent_resolves_to_a_large_cloud_model` pins that.
+
+### 114 -- the standing-agent runtime (INFRA-1)
+
+Status: DONE 2026-09-25.
+
+`dourmouse/standing_agents.py`. Agents opt in, and each gets its own loop:
+1. drain its bus inbox and answer each message addressed to it;
+2. do one bounded `tick`;
+3. sleep until its interval passes, or wake at once when a bus post for it arrives
+   (`MessageBus.on_post`).
+
+The leash is enforced at registration: capabilities beyond `read` and `propose` are refused,
+so a standing agent can only suggest changes, and a gated tool or a console click carries
+them out. Every tick, answer and error goes to a visible activity log and to `office_log`. A
+broken tick is recorded and the loop continues. Started by the server (`/api/standing` shows
+what each agent did unprompted); off in tests (`DOURMOUSE_STANDING_AGENTS=0`). Tests:
+`test_standing_agents.py` (4, including a bus post waking an agent whose timer is an hour
+away).
+
+### 115 -- the always-on file librarian (OS-5)
+
+Status: DONE 2026-09-25. The runtime's first tenant.
+
+`dourmouse/librarian.py` indexes an explicit allowlist (default ~/Documents, ~/Desktop and
+~/Downloads; `DOURMOUSE_LIBRARIAN_ROOTS` overrides; never the whole disk). It keeps one row per
+file (kind, size, mtime, first and last seen, missing), stats 2,000 files per tick, and resumes
+the walk across ticks. A file whose size and mtime are unchanged is not re-read. Only files
+that share a size with another (the only possible duplicates) are hashed, within a byte
+budget per tick.
+
+It proposes three things, and never acts on them itself:
+- byte-identical duplicates, keeping the original: the file not named like a copy, then the
+  oldest;
+- installers in Downloads older than 7 days;
+- top-level downloads older than 30 days, filed by type and month.
+
+`apply` (gated) only moves files into `Documents/Dourmouse Archive`, never overwrites, and
+records every move first; `undo` puts them back.
+
+Other agents ask it on the bus ("find ..."), and chat uses `librarian_find` / `_status` /
+`_proposals` / `_apply` / `_undo` on `admin_ops`. `/api/librarian` shows the index and the
+proposals. A folder macOS will not let it read is reported with the fix.
+
+Live, read-only on this Mac: 22,992 files (35.7 GB) indexed in 1.7 s, 2 old installers
+proposed, and search works. Bugs found while testing:
+1. The first keeper rule kept the shortest path, so "copy of chapter.docx" was kept and the
+   original moved.
+2. The admin_ops description said "Documents", which pulled "in my documents what is there"
+   away from `docs`. Reworded; the existing routing test holds.
+
+Tests: `test_librarian.py` (7, including incremental change and removal, batch resumption,
+apply and undo, and an unreadable root).
+
+### 116 -- the console's browser pane drives the real Electron BrowserView (OS-3)
+
+Status: DONE 2026-09-25 (code; visual check in the Electron shell recorded below when done).
+
+Finding #081 proved the fix: a BrowserView is a top-level browser, so `X-Frame-Options`/
+`frame-ancestors` do not apply, and it has real cookies and real history. But the console
+still framed pages in an iframe and fell back to the rewriting proxy, which is where the pane's
+errors came from.
+
+What changed:
+- `electron/main.js` gains IPC handlers (`pane:navigate/nav/bounds/show/hide/state`) and pushes
+  `pane:state` (url, title, loading, can go back/forward) on every navigation. Links that
+  open a new window load in the pane.
+- `electron/preload.js` exposes them as `window.dourmouseShell.pane`.
+- Inside Electron, `console.html` sends real web pages to the BrowserView:
+  - it is placed exactly over the pane's page area, following the resize handle, window
+    resizes and minimize/restore;
+  - back/forward/reload are the view's real history;
+  - the address bar shows where the page really is;
+  - when an agent navigates the same view through the bridge, the pane's chrome opens too
+    (one shared surface).
+- This app's own pages (file preview, media player) stay in the iframe, since they are
+  same-origin.
+- Outside Electron nothing changes: the iframe plus proxy is the fallback.
+
+Honest limit: a BrowserView draws above the page, so a toast that overlaps the pane area is
+hidden under it.
+
+### 117 -- every media format plays (OS-10)
+
+Status: DONE 2026-09-25.
+
+`dourmouse/media_convert.py`, with ffmpeg from the `imageio-ffmpeg` wheel (a bundled binary for
+each platform, pinned in requirements; no system install). Formats a browser cannot play
+(mkv, avi, wmv, flv, mpg, ts, 3gp, vob; flac, wma, aiff, ac3, dts, ape and more) are handled
+cheapest route first:
+- **remux** (stream copy into mp4) when the codecs are already browser-playable;
+- **transcode** only the stream that needs it (HEVC or MPEG-4 to H.264, AC3 or PCM to AAC), in
+  the background with progress.
+
+The result is cached by path, size and mtime and streamed by the existing byte-range route.
+`/api/files/media` answers 202 while converting and 415 with ffmpeg's own reason when it cannot.
+`/api/files/media-status` reports progress and sidecar subtitles; `/api/files/subtitle.vtt`
+serves .srt/.vtt as WebVTT. The preview page shows "Preparing... (repackaging, no quality
+change)" or "Converting... NN%", adds subtitle tracks, and remembers the playback position per
+file.
+
+Live: an H.264+AAC .mkv remuxed, an MPEG-4 .avi transcoded to H.264, and FLAC and AIFF became
+AAC, each verified by probing the output. A non-media file with a .mkv name fails with ffmpeg's
+reason. Tests: `test_media_convert.py` (6).
+
+### 118 -- a project's chat really works inside its folder (OS-6)
+
+Status: DONE 2026-09-25.
+
+Projects already had a folder (`~/Documents/Dourmouse Projects/<name>`) and their own chat, and
+the chat was told to use that path. But the file and coding tools were sandboxed to the global
+workspace and refused it, so the instruction could not be followed. `dourmouse/project_scope.py`
+now scopes a project's whole turn: `_workspace_root()` returns the project folder, so
+read_file, write_file, list_files and run_python work there. The sandbox's escape guard still
+applies at the project boundary.
+
+The scope is a context variable. `delegate_parallel` runs each branch in a copy of the turn's
+context, so the scope reaches every branch, and it is cleared in the request's `finally`. The
+seeded instruction now tells the model to use paths relative to the project. Tests:
+`test_project_scope.py` (3).
+
+### 119 -- a notification center (OS-8.1)
+
+Status: DONE 2026-09-25.
+
+The alert store already had history, dismiss and per-source mute; the console had no center.
+Now:
+- An ALERTS bell in the masthead shows the unread count.
+- Its panel lists alerts with severity, source and time, each with an OK button, plus CLEAR
+  ALL, HISTORY (dismissed ones too) and per-source mute chips. It refreshes on every
+  `state_change`/security event and every 15 s.
+- New sources:
+  - `security`: sentry findings moved from "system"; the analyst's explanation; risky
+    downloads.
+  - `files`: the librarian announces new kinds of suggestion once, after a full pass.
+
+Each source can be muted on its own. `/api/alerts` serves the list with `?history=1`. The
+desktop shell's existing macOS notifier fires on these, since they are ordinary alerts.
+
+Two regressions caught by the suite run for #113-#115 and fixed at the root:
+1. The new `compute` prompt did not open with the house "You are the Dourmouse [compute]
+   Agent," header.
+2. `test_plain_human_message_does_not_steal_toward_messenger` had only passed because the
+   Dell `compute` agent's own tie pushed `messenger` out of the top 3. With it gone, messenger
+   tied with comms and mail on "send a quick message to my landlord". The planner now applies
+   the other half of its existing compound rule: a message word with no agent/bus word
+   lowers the inter-agent bus.

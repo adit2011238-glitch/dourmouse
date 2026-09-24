@@ -44,6 +44,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -65,6 +66,7 @@ from dourmouse.device_wiki_tools import build_device_wiki_subagent
 from dourmouse.research_pipeline_tools import build_research_pipeline_subagent
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.security.tools import build_security_subagent
+from dourmouse.librarian import librarian_tools
 from dourmouse.system_access import build_system_subagent
 
 _DELEGATE_RESULT_CAP = 6_000
@@ -79,7 +81,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # --------------------------------------------------------------------------- #
 
 def _workspace_root() -> Path:
-    """Workspace root: DOURMOUSE_WORKSPACE env or <project>/workspace. Created."""
+    """Workspace root: DOURMOUSE_WORKSPACE env or <project>/workspace. Created.
+
+    Inside a bookshelf project's chat (OS-6, finding #118) it is that
+    project's own folder instead, so the sandboxed file and coding tools
+    work where the project lives."""
+    from dourmouse.project_scope import project_root
+
+    scoped = project_root()
+    if scoped is not None:
+        return scoped
     root = config.workspace_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root
@@ -3065,8 +3076,10 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
         max_workers = min(len(granted), _MAX_CONCURRENT_DELEGATES)
         results: list[dict[str, Any] | None] = [None] * len(granted)
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            # Each branch runs in a copy of this turn's context, so a
+            # project's scope (finding #118) reaches every branch.
             futures = {
-                pool.submit(_run_one, i, target, instructions): i
+                pool.submit(contextvars.copy_context().run, _run_one, i, target, instructions): i
                 for i, (target, instructions) in enumerate(granted)
             }
             for fut in as_completed(futures):
@@ -4307,7 +4320,8 @@ def build_general_registry() -> DispatchRegistry:
         _subagent(
             "admin_ops",
             "General",
-            "File organization, cleanup. Deletion requires per-item confirmation.",
+            "File organization, cleanup, and finding the user's files on this Mac (the always-on "
+            "librarian keeps an index). Deletion and moves require confirmation.",
             [
                 ToolSpec(
                     name="list_files",
@@ -4339,6 +4353,8 @@ def build_general_registry() -> DispatchRegistry:
                     permission=Permission.REQUIRES_CONFIRMATION,
                     confirm_prompt=lambda a: f"Permanently delete workspace file {a.get('path')!r}?",
                 ),
+                # Finding #115: the always-on file librarian's tools.
+                *librarian_tools(),
             ],
         )
     )
@@ -5611,177 +5627,100 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
-    # ---- Compute node (v5.26): the Dell is infrastructure, not DOURMOUSE --
-    def _server_status_h(arguments: dict[str, Any]) -> str:
-        from dourmouse.remote_server import server_status
+    # ---- Compute (finding #113): Python jobs on this Mac ----------------------
+    # The Dell LAN node (a 1.7B model) is retired: the owner moved everything
+    # onto this Mac and allows only large cloud models. `compute` now runs
+    # simulations and number crunching here, sandboxed and reproducible.
+    def _compute_run_python_h(arguments: dict[str, Any]) -> str:
+        from dourmouse import compute_local
+
+        code = str(arguments.get("code") or "")
+        if not code.strip():
+            return "ERROR: compute_run_python needs code."
+        try:
+            status = compute_local.run_job(
+                code, timeout_s=int(arguments.get("timeout_s") or 600),
+                memory_mb=int(arguments.get("memory_mb") or 4096),
+                wait_s=float(arguments.get("wait_s") or 60), label=str(arguments.get("label") or ""),
+            )
+        except ValueError as exc:
+            return f"ERROR: {exc}"
+        return compute_local.describe(status)
+
+    def _compute_job_status_h(arguments: dict[str, Any]) -> str:
+        from dourmouse import compute_local
 
         try:
-            s = server_status()
-        except Exception as exc:  # noqa: BLE001 - status must never raise
-            return f"SERVER STATUS FAILED: {type(exc).__name__}: {exc}"
-        if not s.get("online"):
-            return (
-                f"COMPUTE NODE OFFLINE ({s.get('url')}) — {s.get('error') or 'no response'}. "
-                "Local AI remains in charge (automatic failover)."
-            )
-        return (
-            f"COMPUTE NODE ONLINE ({s.get('url')})\n"
-            f"NODE: {s.get('node') or '?'}\n"
-            f"MODEL: {s.get('model') or '?'}\n"
-            f"OLLAMA: {'up' if s.get('ollama') else 'down'}\n"
-            f"VERSION: {s.get('version') or '?'}\n"
-            f"LATENCY: {s.get('latency_ms') or '?'}ms"
-        )
+            return compute_local.describe(compute_local.job_status(str(arguments.get("job_id") or "")))
+        except (ValueError, OSError) as exc:
+            return f"ERROR: no such job ({exc})"
 
-    def _server_generate_h(arguments: dict[str, Any]) -> str:
-        from dourmouse.remote_server import DourmouseServerClient
+    def _compute_jobs_h(arguments: dict[str, Any]) -> str:
+        from dourmouse import compute_local
 
-        try:
-            result = DourmouseServerClient().generate(
-                arguments.get("prompt", ""),
-                system=arguments.get("system"),
-                temperature=arguments.get("temperature"),
-                max_tokens=arguments.get("max_tokens"),
-            )
-        except Exception as exc:  # noqa: BLE001 - client never raises, belt+braces
-            return f"SERVER GENERATE FAILED: {type(exc).__name__}: {exc}"
-        if not result.get("success"):
-            return f"SERVER GENERATE (reported honestly): {result.get('error')}"
-        return (
-            f"COMPUTE NODE RESPONSE ({result.get('node') or '?'} · "
-            f"{result.get('model') or '?'} · {result.get('latency_ms') or '?'}ms):\n"
-            f"{result['response']}"
-        )
+        jobs = compute_local.list_jobs(int(arguments.get("limit") or 20))
+        if not jobs:
+            return "No compute jobs yet."
+        return "\n".join(f"{j['id']}  {j['state']:<10} {j.get('label') or ''}" for j in jobs)
 
-    def _server_chat_h(arguments: dict[str, Any]) -> str:
-        from dourmouse.remote_server import DourmouseServerClient
+    def _compute_environment_h(arguments: dict[str, Any]) -> str:
+        from dourmouse import compute_local
 
-        try:
-            result = DourmouseServerClient().chat(
-                arguments.get("messages", []),
-                temperature=arguments.get("temperature"),
-            )
-        except Exception as exc:  # noqa: BLE001
-            return f"SERVER CHAT FAILED: {type(exc).__name__}: {exc}"
-        if not result.get("success"):
-            return f"SERVER CHAT (reported honestly): {result.get('error')}"
-        return (
-            f"COMPUTE NODE RESPONSE ({result.get('node') or '?'} · "
-            f"{result.get('model') or '?'} · {result.get('latency_ms') or '?'}ms):\n"
-            f"{result['response']}"
-        )
-
-    def _server_offload_h(arguments: dict[str, Any]) -> str:
-        """Offload one inference to the compute node, falling back to the
-        LOCAL Ollama on any failure. This is the transparent failover seam:
-        the Dell offline never breaks a request, and the response says which
-        path served it (never a fabricated result)."""
-        from dourmouse.remote_server import generate_with_fallback, local_ollama_fallback
-
-        prompt = (arguments.get("prompt") or "").strip()
-        if not prompt:
-            return "ERROR: server_offload requires a prompt."
-        system = arguments.get("system")
-        temperature = arguments.get("temperature")
-        try:
-            result = generate_with_fallback(
-                prompt,
-                lambda p: local_ollama_fallback(p, system=system),
-                system=system,
-                temperature=temperature,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return f"SERVER OFFLOAD FAILED: {type(exc).__name__}: {exc}"
-        if not result.get("success"):
-            return f"SERVER OFFLOAD FAILED (both paths): {result.get('error')}"
-        via = "COMPUTE NODE" if result.get("via") == "server" else "LOCAL AI (Dell offline — failover)"
-        return (
-            f"OFFLOAD RESPONSE · {via} · {result.get('latency_ms') or '?'}ms:\n"
-            f"{result['response']}"
-        )
+        env = compute_local.environment()
+        if env.get("pending"):
+            return "The environment probe is still running; ask again in a few seconds."
+        if env.get("error"):
+            return "ERROR: " + env["error"]
+        pk = env.get("packages") or []
+        return (f"Python {env.get('python')} ({env.get('implementation')}) on {env.get('platform')}, "
+                f"{len(pk)} packages, environment hash {env.get('sha256', '')[:12]}.\n" + ", ".join(pk[:200]))
 
     registry.register_subagent(
         _subagent(
             "compute",
             "General",
-            "DOURMOUSE compute node (the Dell): LAN inference offload to "
-            "Qwen3 1.7B with automatic fallback to the local AI. The Dell "
-            "is infrastructure, never a second DOURMOUSE.",
+            "This Mac's compute workspace: runs Python simulations, experiments and number "
+            "crunching as sandboxed jobs (own folder, timeout, memory limit, metrics and "
+            "artifacts recorded, environment hashed for reproducibility).",
             [
                 ToolSpec(
-                    name="server_status",
+                    name="compute_run_python",
                     description=(
-                        "Report the DOURMOUSE compute node (Dell): online/offline, "
-                        "node name, model, Ollama status, version and response "
-                        "latency. Read-only, cached, never raises."
+                        "Run a Python job on this Mac and wait up to wait_s for it (longer jobs keep running; "
+                        "check them with compute_job_status). numpy/pandas are available. Write results to "
+                        "out/ (out/metrics.json becomes the job's metrics); print() goes to stdout."
                     ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "string"},
+                            "timeout_s": {"type": "integer", "default": 600},
+                            "memory_mb": {"type": "integer", "default": 4096},
+                            "wait_s": {"type": "number", "default": 60},
+                            "label": {"type": "string"},
+                        },
+                        "required": ["code"],
+                    },
+                    handler=_compute_run_python_h,
+                ),
+                ToolSpec(
+                    name="compute_job_status",
+                    description="Status, output, metrics and artifacts of one compute job by id.",
+                    parameters={"type": "object", "properties": {"job_id": {"type": "string"}},
+                                "required": ["job_id"]},
+                    handler=_compute_job_status_h,
+                ),
+                ToolSpec(
+                    name="compute_jobs",
+                    description="List recent compute jobs, newest first.",
+                    parameters={"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}},
+                    handler=_compute_jobs_h,
+                ),
+                ToolSpec(
+                    name="compute_environment",
+                    description="The Python the jobs run on: version, platform, installed packages, environment hash.",
                     parameters={"type": "object", "properties": {}},
-                    handler=_server_status_h,
-                ),
-                ToolSpec(
-                    name="server_generate",
-                    description=(
-                        "Generate text on the DOURMOUSE compute node (Dell): "
-                        "send a prompt (+ optional system instruction, "
-                        "temperature, max_tokens) to the LAN Qwen3 1.7B node "
-                        "and return its response with latency. Reports the "
-                        "node offline honestly when unreachable — use "
-                        "server_offload instead when a local fallback is wanted."
-                    ),
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "prompt": {"type": "string"},
-                            "system": {"type": "string"},
-                            "temperature": {"type": "number"},
-                            "max_tokens": {"type": "integer"},
-                        },
-                        "required": ["prompt"],
-                    },
-                    handler=_server_generate_h,
-                ),
-                ToolSpec(
-                    name="server_chat",
-                    description=(
-                        "Chat on the DOURMOUSE compute node (Dell): pass an "
-                        "OpenAI-format messages list to the LAN Qwen3 1.7B "
-                        "node and return its reply with latency. Honest error "
-                        "when the node is offline."
-                    ),
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "messages": {
-                                "type": "array",
-                                "items": {"type": "object"},
-                                "description": "[{role: system|user|assistant, content}]",
-                            },
-                            "temperature": {"type": "number"},
-                        },
-                        "required": ["messages"],
-                    },
-                    handler=_server_chat_h,
-                ),
-                ToolSpec(
-                    name="server_offload",
-                    description=(
-                        "Offload one inference to the compute node with AUTOMATIC "
-                        "fallback: tries the Dell Qwen3 1.7B; on ANY failure "
-                        "(offline, timeout, error) it transparently uses the "
-                        "LOCAL Ollama and says which path served the answer. "
-                        "Use for heavy or local-AI-inference requests the main "
-                        "machine should not spend its own tokens on."
-                    ),
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "prompt": {"type": "string"},
-                            "system": {"type": "string"},
-                            "temperature": {"type": "number"},
-                        },
-                        "required": ["prompt"],
-                    },
-                    handler=_server_offload_h,
+                    handler=_compute_environment_h,
                 ),
             ],
         )

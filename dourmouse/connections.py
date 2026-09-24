@@ -21,12 +21,9 @@ Dourmouse can actually reach today:
 - ``alpaca``   — Alpaca paper-trading keys present
 - ``atlas``    — ATLAS_REPO_PATH + ATLAS_VENV_PATH present and the repo
                  directory actually exists
-- ``server``   — the DOURMOUSE compute node (the Dell): reachable on the
-                 LAN at DOURMOUSE_SERVER_URL (default 192.168.1.108:8000)
-                 via its /v1/status endpoint. The ONE deliberate LAN HTTP
-                 probe in this module — cheap (1.5 s timeout), cached 30 s
-                 by dourmouse.remote_server, read-only, and the UI needs it
-                 to show the node online/latency (v5.26).
+- ``compute``  — this Mac's Python job workspace (finding #113; the LAN
+                 compute node it replaced is retired); reads a folder, no
+                 network probe.
 
 Every probe is cheap, read-only, and failure-safe: a dead probe reports
 ``offline`` with a hint — never a crash and never a fabricated success
@@ -186,31 +183,14 @@ def check_connections() -> dict[str, dict[str, Any]]:
         "hint": "add NVIDIA_API_KEY to .env",
     }
 
-    # v5.26: the DOURMOUSE compute node (Dell) — the one LAN HTTP probe.
+    # Finding #113: compute runs on this Mac (the Dell node is retired).
     try:
-        from dourmouse.remote_server import server_status
+        from dourmouse.compute_local import compute_status
 
-        srv = server_status()
-        out["server"] = {
-            "ok": bool(srv.get("online")),
-            "detail": (
-                f"{(srv.get('node') or 'node')} · {(srv.get('model') or '?')} · "
-                f"{srv.get('latency_ms')}ms"
-                if srv.get("online")
-                else f"offline — {srv.get('error') or 'no response'}"
-            ),
-            "hint": (
-                "compute node at "
-                + (srv.get("url") or "DOURMOUSE_SERVER_URL")
-                + " (set DOURMOUSE_SERVER_URL to change)"
-            ),
-        }
-    except Exception:  # noqa: BLE001 - a broken import never kills the report
-        out["server"] = {
-            "ok": False,
-            "detail": "server module unavailable",
-            "hint": "set DOURMOUSE_SERVER_URL",
-        }
+        cs = compute_status()
+        out["compute"] = {"ok": True, "detail": cs["detail"], "hint": ""}
+    except Exception as exc:  # noqa: BLE001 - a broken import never kills the report
+        out["compute"] = {"ok": False, "detail": f"compute workspace unavailable: {exc}", "hint": ""}
 
     claude = _cli_version("claude")
     signin = _claude_signin() if claude else "unknown"

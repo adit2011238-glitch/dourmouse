@@ -187,7 +187,12 @@ _MEDIA_CONTENT_TYPES = {
 # real way to kill it.
 _MEDIA_CHUNK = 256 * 1024
 
-_PREVIEWABLE_EXTS = _PREVIEWABLE_IMAGE_EXTS | _PREVIEWABLE_MEDIA_EXTS | {".pdf"}
+# OS-10 (finding #117): everything else ffmpeg can read is converted first
+# (remux when only the container is wrong) and then played by the same
+# byte-range player; see dourmouse/media_convert.py.
+from dourmouse.media_convert import CONVERT_EXTS as _CONVERTIBLE_MEDIA_EXTS  # noqa: E402
+
+_PREVIEWABLE_EXTS = _PREVIEWABLE_IMAGE_EXTS | _PREVIEWABLE_MEDIA_EXTS | _CONVERTIBLE_MEDIA_EXTS | {".pdf"}
 
 
 def _parse_byte_range(header: str | None, size: int) -> tuple[int, int] | None | str:
@@ -1079,7 +1084,7 @@ def _effective_model(config: Any | None, agent: str) -> str:
 # COMMS (Gmail inbox listing) and WORLD (world_pulse), refreshed on a
 # background interval so the UI reads a warm cache instantly instead of
 # paying a live IMAP/feed round trip on every screen open. Mirrors
-# remote_server.py's start_health_warmer() EXACTLY: module-level
+# the (since retired, #113) compute-node health warmer: module-level
 # lock + Event + Thread, an idempotent start_*(), a stop_*() that joins,
 # a loop that swallows every exception (a warmer crash must never take
 # the app down) and refreshes at TTL/2 (a full window of margin before
@@ -1403,9 +1408,8 @@ def build_setup_status(server) -> dict[str, Any]:
     preview"): a real GET /api/setup on this exact machine measured
     15.4s. build_setup_status() (the uncached implementation below) makes
     several real, synchronous network/subprocess probes with no caching
-    of its own — the compute-node health probe (dourmouse.remote_server.
-    server_status(), called TWICE per request: once directly here and
-    again inside connections.check_connections()), `claude --version`
+    of its own — the compute-node health probe (a LAN probe then; retired
+    in #113), `claude --version`
     (subprocess, up to a real 10s timeout), and a macOS Keychain lookup
     (subprocess, up to 5s). Each individual probe already has its own
     documented, deliberately-short timeout (world_pulse_status's own
@@ -1471,31 +1475,10 @@ def _build_setup_status_uncached(server) -> dict[str, Any]:
         ),
         "hint": "DOURMOUSE_LLM_BACKEND=ollama|omniroute|nvidia in .env",
     }
-    # v5.26: the DOURMOUSE compute node (Dell) — compute infrastructure,
-    # never a second DOURMOUSE. Honest online/offline from /v1/status.
-    try:
-        from dourmouse.remote_server import server_status
+    # Finding #113: compute runs on this Mac; the Dell node is retired.
+    from dourmouse.compute_local import compute_status
 
-        srv = server_status()
-        items["server"] = {
-            "configured": True,  # env default exists; the node is optional
-            "detail": (
-                f"{(srv.get('node') or 'node')} · {(srv.get('model') or '?')} · "
-                f"{srv.get('latency_ms')}ms ONLINE"
-                if srv.get("online")
-                else "compute node OFFLINE — local AI stays in charge"
-            ),
-            "hint": (
-                "DOURMOUSE_SERVER_URL (default http://192.168.1.108:8000) — "
-                "failover to local AI is automatic"
-            ),
-        }
-    except Exception:  # noqa: BLE001 -- a broken import never blocks setup
-        items["server"] = {
-            "configured": False,
-            "detail": "server module unavailable",
-            "hint": "set DOURMOUSE_SERVER_URL",
-        }
+    items["compute"] = {"configured": True, "detail": compute_status()["detail"], "hint": ""}
     # v5.27: the SELF-HOSTED world monitor (World Pulse).
     try:
         from dourmouse.world_pulse import world_pulse_status
@@ -2778,10 +2761,12 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({"ok": True, "text": text})
         elif path == "/api/server":
-            # v5.26: the DOURMOUSE compute node (Dell) health/latency report.
-            from dourmouse.remote_server import server_status
+            # Finding #113: the compute node is this Mac (the LAN Dell running
+            # a 1.7B model is retired: owner's Mac-only, large-cloud-only
+            # decisions). Same shape the console already reads.
+            from dourmouse.compute_local import compute_status
 
-            self._send_json(server_status())
+            self._send_json(compute_status())
         elif path == "/api/world/pulse":
             # v5.27: the SELF-HOSTED world monitor (World Pulse) snapshot.
             from dourmouse.world_pulse import world_pulse_snapshot
@@ -3185,6 +3170,26 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.security import response as _response
 
             self._send_json({"items": _response.list_quarantine()})
+        elif path == "/api/alerts":
+            # Finding #119: the notification center, history included.
+            store = self._state()
+            owner = self._state_owner()
+            history = (urllib.parse.parse_qs(parsed.query).get("history") or [""])[0] == "1"
+            from dourmouse.state_store import ALERT_KINDS
+
+            self._send_json({"alerts": store.alerts(owner, include_dismissed=history)[:200],
+                             "muted": store.muted_sources(owner), "sources": sorted(ALERT_KINDS)})
+        elif path == "/api/standing":
+            # Finding #114: what the standing agents did without being asked.
+            rt = getattr(self.server, "standing_agents", None)
+            self._send_json({"running": rt is not None, "agents": rt.status() if rt is not None else []})
+        elif path == "/api/librarian":
+            # Finding #115: the librarian's index and its (unapplied) proposals.
+            from dourmouse.librarian import get_librarian
+
+            lib = get_librarian()
+            self._send_json({"stats": lib.stats(), "proposals": [
+                {**p, "moves": p["moves"][:50], "move_count": len(p["moves"])} for p in lib.proposals()]})
         elif path == "/api/security/privacy":
             # Finding #112: whether privacy mode is on.
             from dourmouse.security.privacy import privacy_mode
@@ -3427,10 +3432,49 @@ class _Handler(BaseHTTPRequestHandler):
             # that is a requirement rather than an optimisation for media.
             qs = urllib.parse.parse_qs(parsed.query)
             target = _sandboxed_preview_path((qs.get("path") or [""])[0])
+            if target is not None and target.suffix.lower() in _CONVERTIBLE_MEDIA_EXTS:
+                from dourmouse.media_convert import ensure_playable
+
+                job = ensure_playable(target)
+                if job["state"] == "ready":
+                    self._send_media_file(Path(job["path"]), job["content_type"])
+                else:  # converting (202, poll /api/files/media-status) or failed (415)
+                    self._send_json_cors(job, status=202 if job["state"] == "converting" else 415)
+                return
             if target is None or target.suffix.lower() not in _PREVIEWABLE_MEDIA_EXTS:
                 self._send_error_cors(400, "bad or missing media path")
                 return
             self._send_media_file(target, _MEDIA_CONTENT_TYPES[target.suffix.lower()])
+        elif path == "/api/files/media-status":
+            # OS-10 (finding #117): conversion progress for the player.
+            from dourmouse.media_convert import ensure_playable, sidecar_subtitles
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            target = _sandboxed_preview_path((qs.get("path") or [""])[0])
+            if target is None:
+                self._send_json_cors({"state": "failed", "error": "bad or missing media path"}, status=400)
+                return
+            job = ({"state": "ready", "route": "native"} if target.suffix.lower() in _PREVIEWABLE_MEDIA_EXTS
+                   else ensure_playable(target))
+            job.pop("path", None)
+            job.pop("pid", None)
+            job["subtitles"] = [{"label": s["label"], "url": "/api/files/subtitle.vtt?path=" + urllib.parse.quote(s["path"])}
+                                for s in sidecar_subtitles(target)]
+            self._send_json_cors(job)
+        elif path == "/api/files/subtitle.vtt":
+            # A sidecar .srt/.vtt next to a media file, served as WebVTT.
+            from dourmouse.media_convert import subtitle_vtt
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            raw = (qs.get("path") or [""])[0]
+            try:
+                sub = Path(raw).expanduser().resolve()
+            except (OSError, RuntimeError):
+                sub = None
+            if sub is None or sub.suffix.lower() not in (".srt", ".vtt") or not sub.is_file():
+                self._send_error_cors(400, "bad or missing subtitle path")
+                return
+            self._send_bytes_cors(subtitle_vtt(sub).encode("utf-8"), "text/vtt; charset=utf-8")
         elif path == "/api/study/pdf-info":
             # Same real preview mechanism, sandboxed to the study folder
             # (study_agent._resolve_within_root, already real and
@@ -4752,11 +4796,12 @@ class _Handler(BaseHTTPRequestHandler):
                     context = (project.get("context") or "").strip()
                     seed = (
                         f"You are working inside the project \"{name}\" at the real "
-                        f"absolute path {project['path']}. Use this exact path as the "
-                        f"working directory for every file read/write, run_command, or "
-                        f"coding-tool call in this conversation — never the Dourmouse "
-                        f"app's own source directory. This is real work in the user's "
-                        f"actual project, the same as opening it in an IDE.\n\n"
+                        f"absolute path {project['path']}. Your file tools (read_file, "
+                        f"write_file, list_files, run_python) already work inside this "
+                        f"folder for this conversation: pass paths RELATIVE to it. "
+                        f"Never use the Dourmouse app's own source directory. This is "
+                        f"real work in the user's actual project, the same as opening "
+                        f"it in an IDE.\n\n"
                         f"If asked what project this is (or anything answerable from "
                         f"the name/path/context right here), answer directly from "
                         f"THIS message — no tool call needed, and none of your "
@@ -4798,10 +4843,13 @@ class _Handler(BaseHTTPRequestHandler):
         # Reviewer-caught: the thread-local MUST be cleared even on the early
         # returns below — one future refactor to a shared-thread server and
         # a leaked user would route user A's chat into user B's account.
+        from dourmouse import project_scope
+
         try:
             return self._handle_chat_authed()
         finally:
             google_auth.set_current_user(None)
+            project_scope.leave()  # finding #118: never leak a project into the next request
 
     def _handle_chat_authed(self) -> None:
         """The authorized half of /api/chat (user bound; thread-local cleared
@@ -4816,6 +4864,16 @@ class _Handler(BaseHTTPRequestHandler):
         # exactly the old single shared session; see
         # _session_gate_lock_for_tab's own docstring.
         tab_id = (body.get("tab_id") or "").strip()
+        # OS-6 (finding #118): a project's tab works inside the project's
+        # own folder for this whole turn (file and coding tools included).
+        if tab_id:
+            from dourmouse import project_scope
+            from dourmouse.project_bookkeeper import find_project_by_tab_id
+
+            try:
+                project_scope.enter(find_project_by_tab_id(tab_id))
+            except Exception:  # noqa: BLE001 - a bookkeeper read must never break chat
+                project_scope.enter(None)
         # Phase 5 (bounded autonomous multi-step execution): a real, explicit,
         # off-by-default opt-in — console.html's composer toggle sends this
         # only when the user turned it on for this specific turn. Missing/
@@ -7790,6 +7848,15 @@ def run_server(
     from dourmouse.security.sentry import SentryStore as _SentryStore
     from dourmouse.security.sentry import default_db as _sentry_db
 
+    def _alert(kind: str, title: str, detail: str, severity: str) -> None:
+        """Finding #119: background events land in the notification center
+        (and so in the macOS notification the desktop shell fires)."""
+        import contextlib
+
+        with contextlib.suppress(Exception):  # an alert must never break its producer
+            server.state.add_alert(kind=kind, title=title[:160], detail=detail[:400], severity=severity)
+            events_hub.broadcast({"type": "state_change", "section": "alerts"})
+
     downloads_watch: DownloadsWatcher | None = None
     if downloads_watch_enabled():
         _dl_store = _SentryStore(_sentry_db())
@@ -7799,6 +7866,8 @@ def run_server(
 
             a = handle_new_file(path, _dl_store, time.time())
             events_hub.broadcast({"type": "security_download", "assessment": dataclasses.asdict(a)})
+            if a.risk in ("high", "med"):
+                _alert("security", f"Risky download: {a.name}", "; ".join(a.reasons)[:400], a.risk)
 
         downloads_watch = DownloadsWatcher(on_file=_on_download)
         downloads_watch.start()
@@ -7831,6 +7900,9 @@ def run_server(
                     out = _analyst.on_scan(result)
                     if out is not None:
                         events_hub.broadcast({"type": "security_analysis", "analysis": out})
+                        if out.get("ok"):
+                            _alert("security", "Security analyst: " + out["summary"],
+                                   "Worry: " + str(out.get("worry")), "high" if out.get("worry") == "high" else "med")
                 threading.Thread(target=run, daemon=True, name="dourmouse-security-analyst").start()
 
             sentry_rt.add_listener(_analyze)
@@ -7844,6 +7916,26 @@ def run_server(
             netwatch = _netwatch.NetworkWatcher(on_change=_on_network_change)
             netwatch.start()
     setattr(server, "netwatch", netwatch)  # noqa: B010 -- read back in serve_forever's shutdown and /api/security/network
+    # INFRA-1 (finding #114): agents that run without prompting. The first
+    # tenant is the file librarian (OS-5, finding #115): it indexes, answers
+    # other agents on the bus, and proposes tidying; it never moves a file
+    # on its own.
+    from dourmouse.standing_agents import StandingRuntime, standing_agents_enabled
+
+    standing: StandingRuntime | None = None
+    if standing_agents_enabled():
+        from dourmouse.librarian import get_librarian, librarian_enabled
+
+        standing = StandingRuntime(getattr(server, "bus", None) or get_message_bus(),
+                                   log=getattr(server, "office_log", None))
+        if librarian_enabled():
+            _lib = get_librarian()
+            _lib.on_new_proposals = lambda props: _alert(
+                "files", "The librarian has " + "; ".join(p["title"] for p in props)[:140],
+                "Suggestions only: nothing moves until you approve it (ask for librarian_proposals).", "low")
+            standing.register(_lib)
+        standing.start()
+    setattr(server, "standing_agents", standing)  # noqa: B010 -- read back in shutdown and /api/standing
     # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
     # HUD and the dedicated window listen to (live per-brain cards).
     from dourmouse import all_hands
@@ -7867,18 +7959,6 @@ def run_server(
         from dourmouse.atlas import atlas_generator
 
         atlas_generator.start_idea_generator()
-        # v5.32: keep the compute-node health probe warm. The fast lane reads
-        # ONLY a cached probe (it never probes itself, by design), and the only
-        # thing populating that cache was the /api/connections call inside the
-        # World/Settings view renderers — which run once at page load, not on a
-        # timer. With a 30s TTL the Dell therefore served just the chats sent in
-        # the first 30 seconds after a page load and was silently unused after
-        # that, despite answering ~3x faster than the local fast model. Gated
-        # behind ``reporting`` like the other background threads so the test
-        # suite never opens a socket.
-        from dourmouse.remote_server import start_health_warmer
-
-        start_health_warmer()
     server.freebuff_watcher = None
     if freebuff_events:
         from dourmouse.freebuff_events import FreebuffEventWatcher
@@ -8115,7 +8195,7 @@ def serve_forever(
             server.goal_runtime.stop()
         if server.security_sentry is not None:
             server.security_sentry.stop()
-        for attr in ("downloads_watch", "lockdown_enforcer", "netwatch"):
+        for attr in ("downloads_watch", "lockdown_enforcer", "netwatch", "standing_agents"):
             runner = getattr(server, attr, None)
             if runner is not None:
                 runner.stop()

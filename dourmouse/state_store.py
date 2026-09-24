@@ -65,7 +65,8 @@ from typing import Any
 
 #: Allowed alert kinds (the DOURMOUSE ALERTS types). Anything else is
 #: rejected — never silently persisted under a made-up kind.
-ALERT_KINDS = frozenset({"atlas", "world", "market", "system", "agent"})
+# "security" and "files" (finding #119): their own sources, so each can be muted on its own.
+ALERT_KINDS = frozenset({"atlas", "world", "market", "system", "agent", "security", "files"})
 #: Allowed severities.
 SEVERITIES = frozenset({"low", "med", "high"})
 

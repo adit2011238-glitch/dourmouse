@@ -235,14 +235,19 @@ class TestMediaRouteRefusesHonestly:
     def test_an_undecodable_container_is_refused_rather_than_half_served(
         self, server, tmp_path
     ):
-        # .mkv is a real media file a browser cannot natively decode. Serving
-        # it would produce a silently blank player, which is the fabrication
-        # this codebase refuses everywhere else.
+        # Serving bytes the player cannot decode would produce a silently
+        # blank player, the fabrication this codebase refuses everywhere else.
+        # Since OS-10 (finding #117) a real .mkv is converted by ffmpeg; one
+        # whose bytes are not media is refused with ffmpeg's own reason.
+        from dourmouse import media_convert
+
+        if media_convert.ffmpeg_exe() is None:
+            pytest.skip("ffmpeg not installed")
         mkv = tmp_path / "movie.mkv"
         mkv.write_bytes(_BODY)
         _, port = server
-        status, _, _ = _get(port, _media_url(mkv))
-        assert status == 400
+        status, body, _ = _get(port, _media_url(mkv))
+        assert status == 415 and b"cannot read this file" in body
 
 
 class TestMediaExtensionsAreInternallyConsistent:
@@ -277,11 +282,13 @@ class TestMediaExtensionsAreInternallyConsistent:
 
 class TestOpenFilePreviewToolHandlesMedia:
     def test_it_refuses_an_undecodable_container_and_names_the_alternative(self, tmp_path):
+        # .mkv now previews (converted, finding #117); a format neither the
+        # browser nor ffmpeg plays is still refused with the alternative named.
         from dourmouse.system_access import _open_file_preview_tool
 
-        mkv = tmp_path / "movie.mkv"
-        mkv.write_bytes(b"x")
-        out = _open_file_preview_tool({"path": str(mkv)})
+        psd = tmp_path / "artwork.psd"
+        psd.write_bytes(b"x")
+        out = _open_file_preview_tool({"path": str(psd)})
         assert out.startswith("REFUSED:")
         assert "open_path" in out
 

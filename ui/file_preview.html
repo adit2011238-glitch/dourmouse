@@ -75,8 +75,14 @@
   var AUDIO_EXTS = ["mp3","m4a","aac","wav","oga","ogg","opus","weba"];
   var VIDEO_EXTS = ["mp4","m4v","webm","ogv","mov"];
   var IMAGE_EXTS = ["png","jpg","jpeg","gif","webp","svg","bmp"];
-  var isAudio = AUDIO_EXTS.indexOf(ext) !== -1;
-  var isVideo = VIDEO_EXTS.indexOf(ext) !== -1;
+  // OS-10 (finding #117): these play after the server converts them with
+  // ffmpeg (a remux when only the container is wrong). Kept in step with
+  // dourmouse/media_convert.py's CONVERT_* sets.
+  var CONVERT_VIDEO = ["mkv","avi","wmv","flv","mpg","mpeg","ts","m2ts","mts","3gp","vob","divx","asf","f4v"];
+  var CONVERT_AUDIO = ["flac","wma","aiff","aif","ac3","dts","amr","ape","mka","alac","caf"];
+  var needsConvert = CONVERT_VIDEO.indexOf(ext) !== -1 || CONVERT_AUDIO.indexOf(ext) !== -1;
+  var isAudio = AUDIO_EXTS.indexOf(ext) !== -1 || CONVERT_AUDIO.indexOf(ext) !== -1;
+  var isVideo = VIDEO_EXTS.indexOf(ext) !== -1 || CONVERT_VIDEO.indexOf(ext) !== -1;
   var isImage = IMAGE_EXTS.indexOf(ext) !== -1;
   var displayName = path.split("/").pop() || path;
   nameEl.textContent = displayName;
@@ -124,6 +130,8 @@
       if (state.page < state.pageCount - 1) { state.page++; loadPage(); }
     });
   } else if (isAudio || isVideo) {
+    var statusUrl = prefix + "/media-status?" + pathParam + "=" + encodeURIComponent(path);
+    function startPlayer(info){
     // No cache-busting timestamp here, unlike the image and PDF-page routes:
     // /api/files/media answers real range requests and is served cacheable on
     // purpose, and a URL that changes every load would defeat both.
@@ -131,6 +139,27 @@
     media.controls = true;
     media.preload = "metadata";
     media.src = prefix + "/media?" + pathParam + "=" + encodeURIComponent(path);
+    // Sidecar subtitles (movie.srt / movie.en.srt next to the file).
+    ((info && info.subtitles) || []).forEach(function(s, i){
+      var t = document.createElement("track");
+      t.kind = "subtitles"; t.label = s.label; t.src = s.url; if (i === 0) t.default = true;
+      media.appendChild(t);
+    });
+    // Remember where playback stopped, per file.
+    var posKey = "dm_media_pos:" + path;
+    media.addEventListener("loadedmetadata", function(){
+      try {
+        var at = parseFloat(localStorage.getItem(posKey) || "0");
+        if (at > 5 && at < media.duration - 5) media.currentTime = at;
+      } catch (e) {}
+    });
+    var lastSave = 0;
+    media.addEventListener("timeupdate", function(){
+      if (Date.now() - lastSave < 2000) return;
+      lastSave = Date.now();
+      try { localStorage.setItem(posKey, String(media.currentTime)); } catch (e) {}
+    });
+    media.addEventListener("ended", function(){ try { localStorage.removeItem(posKey); } catch (e) {} });
     media.onerror = function(){
       // Report what the browser actually said rather than a generic line.
       // MEDIA_ERR_SRC_NOT_SUPPORTED (4) is deliberately NOT described as "the
@@ -163,6 +192,26 @@
     };
     stage.innerHTML = "";
     stage.appendChild(media);
+    }
+    function poll(){
+      fetchJson(statusUrl).then(function(info){
+        if (info.state === "ready") { startPlayer(info); return; }
+        if (info.state === "failed") {
+          stage.innerHTML = '<div class="msg err">Could not play ' + displayName + '.</div><div class="hint">' +
+            String(info.error || "").replace(/</g, "&lt;") + '</div>';
+          return;
+        }
+        var pct = Math.round((info.progress || 0) * 100);
+        stage.innerHTML = '<div class="msg">' + (info.route === "remux"
+          ? "Preparing " + displayName + " (repackaging, no quality change)\u2026"
+          : "Converting " + displayName + " for playback\u2026 " + pct + "%") + '</div>';
+        setTimeout(poll, 700);
+      }).catch(function(){
+        stage.innerHTML = '<div class="msg err">Could not reach the preview server.</div>';
+      });
+    }
+    if (needsConvert) { poll(); }
+    else { fetchJson(statusUrl).then(startPlayer).catch(function(){ startPlayer(null); }); }
   } else if (isImage) {
     var img = document.createElement("img");
     img.alt = displayName;

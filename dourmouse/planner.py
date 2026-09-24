@@ -489,6 +489,14 @@ def find_agents_for_query(
             t.name in ("send_message", "read_agent_inbox") for t in sub.tools
         ):
             score += 3
+        # The other half of the same rule (finding #113): a message word
+        # with NO agent/bus word is human correspondence, so the inter-agent
+        # bus must not tie with comms/mail on it. It used to be pushed out of
+        # the top 3 only by accident, by the Dell compute agent's own tie.
+        elif bool(tokens & {"message", "messages"}) and any(
+            t.name in ("send_message", "read_agent_inbox") for t in sub.tools
+        ):
+            score -= 2
         if compound_bring_app_forward and any(t.name == "activate_app" for t in sub.tools):
             score += 3
         if compound_browser_history and any(t.name == "security_browser_history" for t in sub.tools):

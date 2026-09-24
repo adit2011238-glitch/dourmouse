@@ -61,7 +61,6 @@ from dourmouse.config import (
     fast_lane_enabled,
     fast_lane_model,
     fast_lane_model_swap_enabled,
-    fast_lane_server_enabled,
 )
 from dourmouse.governance import (
     BudgetTracker,
@@ -3370,12 +3369,6 @@ class DispatchContext:
     # Shared truth: the parent run's recent context, passed into nested runs
     # so delegated agents see what the parent already learned/decided.
     parent_context: str = ""
-    # v5.30: server fast lane. True when this run's first completion should
-    # go to the compute node (Dell) with automatic local fallback;
-    # ``server_fallback_model`` is the local fast model used when the node
-    # is down. The brain label stays honest: it reports the Dell model.
-    server_lane: bool = False
-    server_fallback_model: str = ""
     # v8.10: this turn is a LOOKUP — the API boundary marks the user turn
     # with the brevity rule. Set once in dispatch() from the deterministic
     # prompt shape, and inherited by nested runs so a delegate answering a
@@ -3778,38 +3771,11 @@ def run_dispatch_messages(
         and fast_lane_enabled()
         and _is_pure_chat(str(last_user), registry)
     )
-    # v5.30: when the compute node (Dell) is EXPLICITLY configured and a
-    # FRESH cached probe says online, the fast lane's single completion goes
-    # to the Dell (Qwen3 1.7B — smaller than the local fast model, so the
-    # first token lands sooner and the M3 stays free). server_online_cached
-    # NEVER probes, so a dead node costs zero extra latency: the lane just
-    # stays local. Any failure falls back to the local fast model inside the
-    # loop, and the brain label reports the Dell model only when the lane
-    # actually engaged. Only pure chat reaches the lane; agentic turns keep
-    # the resolved brain + full loop.
-    server_lane = False
     if fast_lane and _fast_lane_model_is_servable(client) and fast_lane_model_swap_enabled():
         model = fast_lane_model()
-        from dourmouse.remote_server import server_model, server_online_cached, server_url_configured
-
-        server_lane = (
-            fast_lane_server_enabled()
-            and server_url_configured()
-            and server_online_cached()
-        )
-        if server_lane:
-            model = f"server:{server_model()}"
     # world-monitor-expansion (UX pass item 1): real backend identity for
-    # the console's per-response model/local indicator. The Dell compute
-    # node (server_lane) is a special case backend_identity() can't see
-    # from ``config`` alone — the config object is whatever the MAIN
-    # backend is (often NVIDIA), but the Dell literally runs Ollama (see
-    # remote_server.py's own docstring: "MAIN DOURMOUSE -> ... -> Ollama"),
-    # so it is reported local exactly like any other Ollama call.
-    if server_lane:
-        backend_name, backend_local = "ollama", True
-    else:
-        backend_name, backend_local = backend_identity(config)
+    # the console's per-response model/local indicator.
+    backend_name, backend_local = backend_identity(config)
     # v13 (real bug, self-caught): the orchestrator-backend experiment
     # swaps the CLIENT in _build_client() but backend_identity() above
     # only ever looks at `config`, which never changes — so the "brain"
@@ -3936,9 +3902,6 @@ def run_dispatch_messages(
         # keeps the full prompt so an agentic turn later in the session
         # still routes tools correctly.
         ctx.compact_system = True
-        if server_lane:
-            ctx.server_lane = True
-            ctx.server_fallback_model = fast_lane_model()
     stack.append(ctx)
     try:
         report = _run_dispatch_loop(messages, registry, max_turns, ctx)
@@ -4910,50 +4873,17 @@ def _run_dispatch_loop(
         # three can stack on the same turn without clobbering each other.
         if memory_context and bounded:
             bounded = _append_memory_context(bounded, memory_context)
-        # v5.30: the server fast lane tries the Dell first; ANY failure
-        # (unreachable, timeout, 500, malformed) falls back to the local
-        # fast model — the node can never take the reply down.
-        if getattr(ctx, "server_lane", False):
-            try:
-                from dourmouse.remote_server import DourmouseServerClient
-
-                response = DourmouseServerClient().chat_completions_create(
-                    messages=bounded
-                )
-            except Exception:  # noqa: BLE001 - any Dell failure -> local
-                ctx.server_lane = False  # keep the rest of this run local
-                if event_sink is not None:
-                    _emit_event(
-                        event_sink,
-                        {
-                            "type": "assistant_text",
-                            "text": "[compute node offline — answered by the local fast model]",
-                        },
-                        ctx=ctx,
-                    )
-                response = _call_with_retry(
-                    client,
-                    model=ctx.server_fallback_model or model,
-                    messages=bounded,
-                    tools=scoped_tools,
-                    config=ctx.config,
-                    on_delta=on_delta,
-                    on_thinking=on_thinking,
-                    event_sink=event_sink,
-                    client_factory=client_factory,
-                )
-        else:
-            response = _call_with_retry(
-                client,
-                model=model,
-                messages=bounded,
-                tools=scoped_tools,
-                config=ctx.config,
-                on_delta=on_delta,
-                on_thinking=on_thinking,
-                event_sink=event_sink,
-                client_factory=client_factory,
-            )
+        response = _call_with_retry(
+            client,
+            model=model,
+            messages=bounded,
+            tools=scoped_tools,
+            config=ctx.config,
+            on_delta=on_delta,
+            on_thinking=on_thinking,
+            event_sink=event_sink,
+            client_factory=client_factory,
+        )
         message = response.choices[0].message
 
         # Real fix for a live-reproduced Grounded Mode false positive:

@@ -371,10 +371,19 @@ const PANE_WIDTH_FRACTION = 0.45; // right ~45% of the main window, adjustable l
 
 let paneView = null;
 let paneVisible = false;
+// Finding #116 (OS-3): the console tells us exactly where its pane's page
+// area is, so the BrowserView sits inside the pane's own chrome (address
+// bar, back/forward, resize handle) instead of a fixed 45% of the window.
+let paneRendererBounds = null;
 
 function paneBounds() {
   if (!mainWindow || mainWindow.isDestroyed()) return { x: 0, y: 0, width: 0, height: 0 };
   const { width, height } = mainWindow.getContentBounds();
+  if (paneRendererBounds) {
+    const b = paneRendererBounds;
+    const x = Math.max(0, Math.min(width - 1, b.x)), y = Math.max(0, Math.min(height - 1, b.y));
+    return { x, y, width: Math.max(1, Math.min(width - x, b.width)), height: Math.max(1, Math.min(height - y, b.height)) };
+  }
   const paneWidth = Math.round(width * PANE_WIDTH_FRACTION);
   return { x: width - paneWidth, y: 0, width: paneWidth, height };
 }
@@ -393,7 +402,37 @@ function ensurePaneView() {
   // not an ongoing identity check -- see browser_agent.py's own comment
   // on _ensure_browser_via_electron_pane for the full reasoning.
   paneView.webContents.loadURL("about:blank");
+  const wc = paneView.webContents;
+  for (const ev of ["did-navigate", "did-navigate-in-page", "page-title-updated", "did-start-loading",
+                    "did-stop-loading", "did-fail-load"]) {
+    wc.on(ev, pushPaneState);
+  }
+  // A link that opens a new window opens in the pane instead (one shared
+  // surface); only http(s), same rule as /navigate.
+  wc.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) wc.loadURL(url);
+    return { action: "deny" };
+  });
   return paneView;
+}
+
+function paneState() {
+  const wc = paneView && !paneView.webContents.isDestroyed() ? paneView.webContents : null;
+  const nav = wc && wc.navigationHistory;
+  const can = (fn, legacy) => {
+    try { return nav && typeof nav[fn] === "function" ? nav[fn]() : wc[legacy](); } catch { return false; }
+  };
+  const url = wc ? wc.getURL() : "";
+  return {
+    open: paneVisible, url: url === "about:blank" ? "" : url, title: wc ? wc.getTitle() : "",
+    loading: wc ? wc.isLoading() : false,
+    canGoBack: wc ? can("canGoBack", "canGoBack") : false,
+    canGoForward: wc ? can("canGoForward", "canGoForward") : false,
+  };
+}
+
+function pushPaneState() {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pane:state", paneState());
 }
 
 function showPane() {
@@ -401,8 +440,9 @@ function showPane() {
   const view = ensurePaneView();
   mainWindow.addBrowserView(view);
   view.setBounds(paneBounds());
-  view.setAutoResize({ width: false, height: true }); // width recalculated explicitly on resize below
+  view.setAutoResize({ width: false, height: !paneRendererBounds }); // explicit bounds win when the console sends them
   paneVisible = true;
+  pushPaneState();
   return true;
 }
 
@@ -417,8 +457,36 @@ function hidePane() {
     /* already removed -- fine */
   }
   paneVisible = false;
+  pushPaneState();
   return true;
 }
+
+// The console's own controls (finding #116). Same URL rule as the bridge.
+ipcMain.handle("pane:navigate", (_evt, url) => {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return { ok: false, error: "url must be a real http(s) URL" };
+  const view = ensurePaneView();
+  if (!paneVisible) showPane();
+  view.webContents.loadURL(url);
+  return { ok: true };
+});
+ipcMain.handle("pane:nav", (_evt, what) => {
+  if (!paneView) return false;
+  const wc = paneView.webContents, nav = wc.navigationHistory;
+  if (what === "back" && paneState().canGoBack) (nav && nav.goBack ? nav.goBack() : wc.goBack());
+  else if (what === "forward" && paneState().canGoForward) (nav && nav.goForward ? nav.goForward() : wc.goForward());
+  else if (what === "reload") wc.reload();
+  else if (what === "stop") wc.stop();
+  return true;
+});
+ipcMain.handle("pane:bounds", (_evt, r) => {
+  const ok = r && ["x", "y", "width", "height"].every((k) => Number.isFinite(r[k]));
+  paneRendererBounds = ok ? { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) } : null;
+  if (paneView && paneVisible) paneView.setBounds(paneBounds());
+  return true;
+});
+ipcMain.handle("pane:show", () => showPane());
+ipcMain.handle("pane:hide", () => hidePane());
+ipcMain.handle("pane:state", () => paneState());
 
 function startPaneBridge() {
   const server = http.createServer((req, res) => {

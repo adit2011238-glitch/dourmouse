@@ -600,7 +600,7 @@ def _write_alert(finding: SentryFinding) -> bool:
         from dourmouse.state_store import default_store
 
         default_store().add_alert(
-            kind="system",
+            kind="security",
             title=f"Security: {finding.title}"[:160],
             detail=finding.detail[:400],
             severity="high",

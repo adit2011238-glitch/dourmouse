@@ -4275,3 +4275,75 @@ class TestSecurityConsoleEndpoints:
         assert areas["device_hardening"] == "at_risk"  # the firewall is off
         assert areas["monitoring"] == "unknown"  # no report made yet: unknown, never good
         assert areas["network_trust"] == "unknown"  # no Wi-Fi telemetry in this state
+
+
+class TestComputeAndLibrarianRoutes:
+    """Findings #113-#115 over real HTTP."""
+
+    def _get(self, port, path):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", path)
+        data = json.loads(conn.getresponse().read())
+        conn.close()
+        return data
+
+    def test_the_compute_node_is_this_mac(self, server):
+        _, port = server
+        d = self._get(port, "/api/server")
+        assert d["online"] is True and d["node"] == "THIS MAC" and d["jobs"] == 0
+
+    def test_standing_agents_off_in_tests_and_librarian_honest_when_empty(self, server):
+        _, port = server
+        assert self._get(port, "/api/standing") == {"running": False, "agents": []}
+        lib = self._get(port, "/api/librarian")
+        assert lib["stats"]["files"] == 0 and lib["proposals"] == []
+
+
+class TestMediaAndAlertRoutes:
+    """Findings #117 and #119 over real HTTP."""
+
+    def _get(self, port, path):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        return resp.status, resp.getheader("Content-Type"), body
+
+    def test_an_mkv_converts_then_streams_with_subtitles(self, server, tmp_path):
+        import subprocess
+        import urllib.parse
+
+        from dourmouse import media_convert as mc
+
+        if mc.ffmpeg_exe() is None:
+            pytest.skip("ffmpeg not installed")
+        src = tmp_path / "clip.mkv"
+        subprocess.run([mc.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                        "testsrc=duration=1:size=160x120:rate=10", "-c:v", "libx264", str(src)], check=True)
+        (tmp_path / "clip.srt").write_text("1\n00:00:00,100 --> 00:00:00,900\nHi\n", encoding="utf-8")
+        _, port = server
+        q = urllib.parse.quote(str(src))
+        deadline = time.time() + 60
+        while True:
+            status, _, body = self._get(port, f"/api/files/media-status?path={q}")
+            info = json.loads(body)
+            if info["state"] != "converting" or time.time() > deadline:
+                break
+            time.sleep(0.2)
+        assert info["state"] == "ready" and info["route"] == "remux" and "path" not in info
+        status, ctype, body = self._get(port, f"/api/files/media?path={q}")
+        assert status in (200, 206) and ctype == "video/mp4" and len(body) > 0
+        sub_url = info["subtitles"][0]["url"]
+        status, ctype, body = self._get(port, sub_url)
+        assert status == 200 and ctype.startswith("text/vtt") and body.startswith(b"WEBVTT")
+
+    def test_the_notification_center_lists_sources_and_history(self, server):
+        srv, port = server
+        srv.state.add_alert(kind="security", title="Security: test finding", severity="high")
+        status, _, body = self._get(port, "/api/alerts")
+        d = json.loads(body)
+        assert {"security", "files"} <= set(d["sources"]) and d["alerts"][0]["title"] == "Security: test finding"
+        srv.state.dismiss_alert(d["alerts"][0]["id"])
+        assert json.loads(self._get(port, "/api/alerts")[2])["alerts"] == []
+        assert json.loads(self._get(port, "/api/alerts?history=1")[2])["alerts"][0]["dismissed"] is True

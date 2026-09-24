@@ -606,8 +606,12 @@ def _open_path_tool(arguments: dict[str, Any]) -> str:
 _PREVIEWABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
 _PREVIEWABLE_AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".wav", ".oga", ".ogg", ".opus", ".weba"}
 _PREVIEWABLE_VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".ogv", ".mov"}
+# OS-10 (finding #117): formats a browser cannot decode are converted by
+# ffmpeg first (dourmouse/media_convert.py), so they preview too.
+from dourmouse.media_convert import CONVERT_EXTS as _CONVERTIBLE_EXTS  # noqa: E402
+
 _PREVIEWABLE_EXTS = (
-    _PREVIEWABLE_IMAGE_EXTS | _PREVIEWABLE_AUDIO_EXTS | _PREVIEWABLE_VIDEO_EXTS | {".pdf"}
+    _PREVIEWABLE_IMAGE_EXTS | _PREVIEWABLE_AUDIO_EXTS | _PREVIEWABLE_VIDEO_EXTS | _CONVERTIBLE_EXTS | {".pdf"}
 )
 
 

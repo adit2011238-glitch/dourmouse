@@ -980,6 +980,25 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .liveempty{font-size:9px;color:var(--blue-deep);padding:11px;text-align:center;letter-spacing:.1em}
 
 .note{font-size:9.5px;color:var(--blue-deep);line-height:1.65;letter-spacing:.04em}
+/* Finding #119: notification center */
+.bell{background:none;border:1px solid var(--line-2);color:var(--blue-dim);font:inherit;font-size:9px;
+  letter-spacing:.14em;padding:2px 8px;border-radius:2px;cursor:pointer;margin-right:10px}
+.bell b{color:var(--blue-hi)} .bell.hot{border-color:var(--amber);color:var(--amber)} .bell.hot b{color:var(--amber)}
+.bellpanel{position:fixed;top:44px;right:14px;width:min(430px,calc(100vw - 28px));max-height:70vh;overflow:auto;
+  z-index:9000;background:var(--panel);border:1px solid var(--line-2);border-radius:4px;padding:10px 12px;
+  box-shadow:0 10px 40px rgba(0,0,0,.45)}
+.bellhead{display:flex;justify-content:space-between;align-items:center;font-size:9px;letter-spacing:.18em;
+  color:var(--amber);margin-bottom:8px}
+.bellbtn{background:none;border:1px solid var(--line-2);color:var(--blue-dim);font:inherit;font-size:8.5px;
+  letter-spacing:.12em;padding:3px 7px;border-radius:2px;cursor:pointer}
+.bellbtn:hover{border-color:var(--amber);color:var(--amber)}
+.bellsources{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px}
+.bellsrc{font-size:8.5px;letter-spacing:.1em;padding:2px 7px;border:1px solid var(--line-2);border-radius:10px;
+  color:var(--blue-dim);cursor:pointer;background:none;font-family:inherit}
+.bellsrc.muted{opacity:.45;text-decoration:line-through}
+.bellitem{display:flex;gap:9px;padding:7px 0;border-bottom:1px solid rgba(120,175,210,.08)}
+.bellitem.done{opacity:.5}
+.bellitem .t{font-size:10.5px;color:var(--blue-hi)} .bellitem .d{font-size:9.5px;color:var(--blue-deep);margin-top:2px}
 .sec{font-size:9px;letter-spacing:.18em;color:var(--amber);margin:16px 0 9px;
   padding-bottom:6px;border-bottom:1px solid var(--line)}
 .sec:first-child{margin-top:0}
@@ -1246,6 +1265,15 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
      whole app (the "Global Panel Manager" from the user's own spec), not
      one per tab. Opened via openBrowserPane(url), triggered either by the
      model (open_browser_pane tool -> SSE) or the user's own address bar. -->
+<!-- Finding #119: the notification center. -->
+<div id="bellPanel" class="bellpanel" hidden>
+  <div class="bellhead"><span>NOTIFICATIONS</span>
+    <span><button id="bellHistory" class="bellbtn" type="button">HISTORY</button>
+    <button id="bellClear" class="bellbtn" type="button">CLEAR ALL</button>
+    <button id="bellClose" class="bellbtn" type="button">&times;</button></span></div>
+  <div id="bellSources" class="bellsources"></div>
+  <div id="bellList" class="belllist"></div>
+</div>
 <div id="browserPane" class="bp-pane" hidden>
   <!-- v14: drag to resize (persisted), same idea as Claude Desktop's own
        side panel -- see the CSS block above for the --bp-width custom
@@ -1314,6 +1342,7 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
     </span>
     <span id="mastScreen">HOME</span>
     <span class="right">
+      <button id="bellBtn" class="bell" type="button" title="Notifications" aria-label="Notifications">ALERTS <b id="bellCount">0</b></button>
       <span>MEM_LOAD: <b id="mMem">-</b></span>
       <span>SESSION: <b id="mSess">-</b></span>
       <span><b id="mClock">--:--:--</b></span>
@@ -2076,7 +2105,7 @@ function bootLines(){
                  : `CORE  :: roster unavailable <span class="dn">DOWN</span>`);
   L.push(b.model ? `BRAIN :: ${String(b.model).split("/").pop()} <b>ONLINE</b>`
                  : `BRAIN :: backend unreported <span class="dn">DOWN</span>`);
-  L.push(s.online ? `NODE  :: ${s.node} · ${s.latency_ms}ms <b>SYNCED</b>`
+  L.push(s.online ? `NODE  :: ${s.node} · ${s.detail || ""} <b>READY</b>`
                   : `NODE  :: offline, using fallback <span class="dn">OFFLINE</span>`);
   /* /api/memory returns {active, count, gate} — NOT `facts`. Reading the
      wrong key made the boot report "memory unavailable DOWN" while the
@@ -2156,7 +2185,7 @@ function paintMast(){
   const t = sys.telemetry||{}, b = sys.backend||{}, s = sys.server||{};
   $("mMem").textContent = (t.mem_used_gb!=null) ? `${t.mem_used_gb}GB / ${t.mem_total_gb}GB` : "-";
   $("footBackend").textContent = b.model ? b.model.split("/").pop() : "-";
-  $("footNode").textContent = s.online ? `${s.node} ${s.latency_ms}ms` : "OFFLINE";
+  $("footNode").textContent = s.online ? s.node + (s.latency_ms != null ? ` ${s.latency_ms}ms` : "") : "OFFLINE";
   const r = sys.roster ? (sys.roster.subagents||[]).length : 0;
   $("railFoot").textContent = `${r} AGENTS / ${liveEvents.length} EVENTS`;
 }
@@ -2199,7 +2228,7 @@ function paintHome(){
   const c = sys.conns||{}; const okN = Object.values(c).filter(x=>x&&x.ok).length;
   $("homeBody").innerHTML = `
     <p class="lede">${rost.length} AGENTS MOUNTED. ${okN} OF ${Object.keys(c).length} CONNECTIONS LIVE.
-      ${s.online?`COMPUTE NODE ${esc(s.node)} ONLINE AT ${s.latency_ms}MS.`:"COMPUTE NODE OFFLINE. RUNNING ON THE CONFIGURED BACKEND."}</p>
+      ${s.online?`COMPUTE: ${esc(s.node)}, ${esc(s.detail||"")}.`:"COMPUTE WORKSPACE UNAVAILABLE."}</p>
     <div class="metrics">
       <div class="metric"><span class="k">MEMORY</span><span class="v">${m.count??"-"} FACTS</span></div>
       ${memoryStoreMetric(m)}
@@ -2502,9 +2531,8 @@ const WORK = {
   claude:["Working in Claude Code",""],
   codex:["Working in Codex",""],
   server_status:["Checking the compute node",""],
-  server_chat:["Asking the compute node",""],
-  server_generate:["Generating on the compute node",""],
-  server_offload:["Offloading to the compute node",""],
+  compute_run_python:["Running a Python job on this Mac",""],
+  compute_job_status:["Checking a compute job",""],
   spotify_search:["Searching Spotify",""],
   spotify_play:["Starting playback",""],
   spotify_now_playing:["Checking what's playing",""],
@@ -6352,6 +6380,7 @@ function startNewsStream(){
       if(data.type === "agent_activity"){ orchApplyDelta(data.agents); return; }
       if(data.type === "delegate_fanout"){ orchApplyFanout(data); return; }
       if(typeof data.type === "string" && data.type.startsWith("security_")){ secOnEvent(data); return; }
+      if(data.type === "state_change" && data.section === "alerts"){ if(typeof loadBell === "function") loadBell(); return; }
       if(data.type !== "news_item") return;  // the hub carries other event kinds too
       const item = data.item;
       newsFeed.unshift(item);
@@ -6383,6 +6412,29 @@ function startNewsStream(){
 const BP_LOAD_TIMEOUT_MS = 6000;
 let _bpLoadTimer = null;
 let _bpOpenSeq = 0;
+/* Finding #116 (OS-3): inside the Electron shell a real web page goes to
+   the shell's BrowserView, a top-level browser (so X-Frame-Options does not
+   apply, cookies and logins are real, back/forward is real history), placed
+   exactly over this pane's page area. The iframe + proxy stays as the
+   fallback outside Electron, and for this app's own pages (file preview,
+   media player), which are same-origin anyway. */
+const SHELL_PANE = (window.dourmouseShell && window.dourmouseShell.pane) || null;
+let _bpShellMode = false;
+function bpSyncBounds(){
+  if(!SHELL_PANE || !_bpShellMode) return;
+  const pane = $("browserPane"), frame = $("bpFrame");
+  if(!pane || pane.hidden || pane.classList.contains("bp-min")){ SHELL_PANE.hide(); return; }
+  const r = frame.getBoundingClientRect();
+  SHELL_PANE.bounds({x: r.left, y: r.top, width: r.width, height: r.height});
+}
+function bpEnterShellMode(){
+  _bpShellMode = true;
+  const frame = $("bpFrame");
+  frame.src = "about:blank"; frame.hidden = false;
+  $("bpFallback").hidden = true;
+  const note = $("bpProxyNote"); if(note) note.hidden = true;
+  bpSyncBounds();
+}
 async function openBrowserPane(url){
   const pane = $("browserPane"), frame = $("bpFrame"), addr = $("bpAddr"), fb = $("bpFallback"),
         note = $("bpProxyNote");
@@ -6400,6 +6452,13 @@ async function openBrowserPane(url){
   if(note) note.hidden = true;
   frame.hidden = false;
   clearTimeout(_bpLoadTimer);
+  if(SHELL_PANE && /^https?:\/\//i.test(url)){
+    bpEnterShellMode();
+    await SHELL_PANE.navigate(url);
+    bpSyncBounds();
+    return;
+  }
+  if(_bpShellMode){ _bpShellMode = false; SHELL_PANE.hide(); }
   // 2026-09-23 (OS-1): a root-relative URL is one of THIS app's own pages,
   // served by this same server. It is same-origin by construction, this
   // server never sends X-Frame-Options against itself, and /api/browser-pane/
@@ -6444,6 +6503,7 @@ function closeBrowserPane(){
   if(!pane || !frame) return;
   _bpOpenSeq++;  // invalidate any in-flight check_frameable() from a pending openBrowserPane()
   clearTimeout(_bpLoadTimer);
+  if(SHELL_PANE){ _bpShellMode = false; SHELL_PANE.hide(); }
   frame.src = "";  // real unload, not just hiding a live page
   pane.hidden = true;
   pane.classList.remove("bp-min");  // v14: closing always clears a minimized state
@@ -6456,12 +6516,40 @@ function closeBrowserPane(){
     if(frame.src){ clearTimeout(_bpLoadTimer); $("bpFallback").hidden = true; frame.hidden = false; }
   });
   $("bpClose")?.addEventListener("click", closeBrowserPane);
-  $("bpReload")?.addEventListener("click", () => { if(frame.src) frame.src = frame.src; });
+  $("bpReload")?.addEventListener("click", () => {
+    if(_bpShellMode){ SHELL_PANE.nav("reload"); return; }
+    if(frame.src) frame.src = frame.src;
+  });
   // Cross-origin same-tab history isn't reachable from the parent page —
   // these best-effort it via contentWindow where the framed page happens
   // to be same-origin, and no-op silently otherwise rather than throwing.
-  $("bpBack")?.addEventListener("click", () => { try{ frame.contentWindow.history.back(); }catch{} });
-  $("bpFwd")?.addEventListener("click", () => { try{ frame.contentWindow.history.forward(); }catch{} });
+  $("bpBack")?.addEventListener("click", () => {
+    if(_bpShellMode){ SHELL_PANE.nav("back"); return; }
+    try{ frame.contentWindow.history.back(); }catch{}
+  });
+  $("bpFwd")?.addEventListener("click", () => {
+    if(_bpShellMode){ SHELL_PANE.nav("forward"); return; }
+    try{ frame.contentWindow.history.forward(); }catch{}
+  });
+  if(SHELL_PANE){
+    // The BrowserView follows the pane: resize handle, window resize,
+    // minimize/restore all move it.
+    try{ new ResizeObserver(bpSyncBounds).observe(frame); }catch{}
+    window.addEventListener("resize", bpSyncBounds);
+    // Where the page really is (links, redirects, the agent navigating the
+    // same pane through the bridge) shows in the address bar, and an agent
+    // opening the pane opens its chrome here too: one shared surface.
+    SHELL_PANE.onState((s) => {
+      const pane = $("browserPane");
+      if(s.open && pane.hidden){
+        pane.hidden = false; document.body.classList.add("bp-open"); bpEnterShellMode();
+      }
+      if(s.url && document.activeElement !== addr) addr.value = s.url;
+      $("bpBack").disabled = _bpShellMode && !s.canGoBack;
+      $("bpFwd").disabled = _bpShellMode && !s.canGoForward;
+      const lbl = $("bpMinLabel"); if(lbl && s.title) lbl.textContent = s.title.slice(0, 40);
+    });
+  }
   $("bpGo")?.addEventListener("click", () => { const v = addr.value.trim(); if(v) openBrowserPane(/^https?:\/\//i.test(v) ? v : "https://" + v); });
   addr?.addEventListener("keydown", (ev) => { if(ev.key === "Enter") $("bpGo").click(); });
 
@@ -6526,6 +6614,7 @@ function closeBrowserPane(){
     pane.classList.toggle("bp-min", min);
     document.body.classList.toggle("bp-pane-min", min);
     $("bpMin").setAttribute("aria-pressed", String(min));
+    if(_bpShellMode){ if(min) SHELL_PANE.hide(); else { SHELL_PANE.show(); requestAnimationFrame(bpSyncBounds); } }
   }
   $("bpMin")?.addEventListener("click", () => setMinimized(true));
   $("bpMinbar")?.addEventListener("click", () => setMinimized(false));
@@ -7459,9 +7548,56 @@ function paintSecReport(r, path){
 // arrives on the shared /api/events stream (finding #108) and refreshes
 // this screen at once instead of waiting for the next 5 s poll.
 function secOnEvent(data){
+  if(typeof loadBell === "function") loadBell();
   if(data.type === "security_analysis"){ _secAnalysis = data.analysis; if(screen === "SECURITY") paintSecAnalyst(); return; }
   if(data.type === "security_scan" || data.type === "security_network_change") loadSecurityDashboard();
 }
+// Finding #119: the notification center. The bell shows unread alerts
+// (security findings, the analyst, risky downloads, goals, the librarian);
+// the panel lists them with dismiss, per-source mute, and history.
+let _bellHistory = false, _bellData = null;
+async function loadBell(){
+  try{ _bellData = await api("/api/alerts" + (_bellHistory ? "?history=1" : "")); }catch{ return; }
+  const unread = (_bellData.alerts || []).filter(a => !a.dismissed).length;
+  $("bellCount").textContent = String(unread);
+  $("bellBtn").classList.toggle("hot", unread > 0);
+  if(!$("bellPanel").hidden) paintBell();
+}
+function paintBell(){
+  const d = _bellData || {alerts: [], muted: [], sources: []};
+  $("bellSources").innerHTML = d.sources.map(s => `<button class="bellsrc${d.muted.includes(s) ? " muted" : ""}"
+    data-src="${esc(s)}" title="${d.muted.includes(s) ? "Muted: click to unmute" : "Click to mute"}">${esc(s.toUpperCase())}</button>`).join("");
+  $("bellHistory").textContent = _bellHistory ? "UNREAD ONLY" : "HISTORY";
+  $("bellList").innerHTML = d.alerts.length ? d.alerts.map(a => `<div class="bellitem${a.dismissed ? " done" : ""}">
+      <span class="dot" style="background:${a.severity === "high" ? "var(--bad)" : a.severity === "med" ? "var(--warn)" : "var(--ok)"}"></span>
+      <div style="flex:1;min-width:0"><div class="t">${esc(a.title)}</div>
+        ${a.detail ? `<div class="d">${esc(a.detail)}</div>` : ""}
+        <div class="d">${esc(a.kind.toUpperCase())} · ${esc(String(a.created || "").replace("T", " ").slice(0, 16))}</div></div>
+      ${a.dismissed ? "" : `<button class="bellbtn" data-dismiss="${a.id}">OK</button>`}</div>`).join("")
+    : `<p class="note">${_bellHistory ? "No notifications yet." : "Nothing new."}</p>`;
+}
+async function bellPost(body){
+  try{ await fetch("/api/state/alerts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)}); }catch{}
+  loadBell();
+}
+$("bellBtn").addEventListener("click", () => { const p = $("bellPanel"); p.hidden = !p.hidden; if(!p.hidden){ paintBell(); loadBell(); } });
+$("bellClose").addEventListener("click", () => { $("bellPanel").hidden = true; });
+$("bellHistory").addEventListener("click", () => { _bellHistory = !_bellHistory; loadBell(); });
+$("bellClear").addEventListener("click", async () => {
+  for(const a of ((_bellData && _bellData.alerts) || []).filter(x => !x.dismissed)){
+    try{ await fetch("/api/state/alerts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action:"dismiss", id:a.id})}); }catch{}
+  }
+  loadBell();
+});
+$("bellPanel").addEventListener("click", (ev) => {
+  const d = ev.target.closest("[data-dismiss]");
+  if(d){ bellPost({action: "dismiss", id: Number(d.dataset.dismiss)}); return; }
+  const s = ev.target.closest("[data-src]");
+  if(s){ const muted = ((_bellData && _bellData.muted) || []).includes(s.dataset.src);
+         bellPost({action: muted ? "unmute" : "mute", kind: s.dataset.src}); }
+});
+loadBell();
+setInterval(loadBell, 15000);
 loadSecurityDashboard();
 loadSecQuarantine();
 fetch("/api/security/privacy").then(r => r.json()).then(j => { _secPrivacy = !!j.privacy_mode; paintSecPrivacy(); }).catch(() => {});
