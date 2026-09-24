@@ -2965,12 +2965,12 @@ class _Handler(BaseHTTPRequestHandler):
             # just started, or DOURMOUSE_SECURITY_SENTRY_LOOP=0) is an
             # honest "no scan yet" response, never a fabricated zero-risk
             # snapshot.
-            from dourmouse.security.sentry import DEFAULT_DB as _SENTRY_DEFAULT_DB
             from dourmouse.security.sentry import SentryStore
+            from dourmouse.security.sentry import default_db as _sentry_default_db
 
             runtime = getattr(self.server, "security_sentry", None)
             result = runtime.last_result if runtime else None
-            store = SentryStore(_SENTRY_DEFAULT_DB)
+            store = SentryStore(_sentry_default_db())
             by_severity = {"high": 0, "med": 0, "low": 0}
             findings_payload: list[dict[str, Any]] = []
             if result is not None:
@@ -3007,12 +3007,12 @@ class _Handler(BaseHTTPRequestHandler):
             # device_wiki subagent's own chat tools -- this route never
             # triggers a real scan itself, matching /api/goals's own
             # "read-only inspection, writes go through chat tools" note.
-            from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+            from dourmouse.device_wiki.store import WikiStore, default_db
             from dourmouse.device_wiki.walker import configured_roots
 
             qs = urllib.parse.parse_qs(parsed.query)
             wiki_path = (qs.get("path") or [""])[0].strip()
-            store = WikiStore(DEFAULT_DB)
+            store = WikiStore(default_db())
             if wiki_path:
                 entry = store.get(wiki_path)
                 if entry is None:
@@ -7491,13 +7491,12 @@ def run_server(
     # Finding #066: a real, persistent, workspace-relative log of message_bus
     # traffic and delegate_parallel fan-out lifecycle events -- closes the
     # "message_bus dies on restart" gap. Defaults to the process-wide
-    # DEFAULT_DB like every other real store here; tests pass an isolated
+    # default_db() like every other real store here; tests pass an isolated
     # instance the same way they already do for bus/state.
     if office_log is None:
-        from dourmouse.office_logger import DEFAULT_DB as _OFFICE_LOG_DB
         from dourmouse.office_logger import OfficeLogger
 
-        office_log = OfficeLogger(_OFFICE_LOG_DB)
+        office_log = OfficeLogger()
     server.office_log = office_log
     server.bus.on_post(server.office_log.log_message)
 
@@ -7973,6 +7972,8 @@ def serve_forever(
             server.scheduler_runner.stop()
         if server.goal_runtime is not None:
             server.goal_runtime.stop()
+        if server.security_sentry is not None:
+            server.security_sentry.stop()
         if server.daily_reporter is not None:
             server.daily_reporter.stop()
         if server.freebuff_watcher is not None:

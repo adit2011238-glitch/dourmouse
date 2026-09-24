@@ -1,6 +1,6 @@
 """dourmouse/research_pipeline_tools.py -- the evidence_pipeline subagent,
 chat-reachable wiring over Domain G's already-tested stage functions. Real
-persistence (a real SQLite file per test via monkeypatched DEFAULT_DB),
+persistence (a real SQLite file per test via monkeypatched default_db()),
 real doubles for the model/dispatch layer -- same conventions as
 test_research_pipeline.py, not re-derived."""
 
@@ -37,7 +37,7 @@ def _install_chat_fake(monkeypatch, responses: list[str]):
 
 @pytest.fixture(autouse=True)
 def _isolated_store(tmp_path, monkeypatch):
-    monkeypatch.setattr(rpt, "DEFAULT_DB", tmp_path / "research.db")
+    monkeypatch.setattr(rpt, "default_db", lambda: tmp_path / "research.db")
 
 
 def _registry():
@@ -72,7 +72,7 @@ class TestResearchPlanTool:
         out = rpt._research_plan_tool({"question": "Is Z real?"})
         assert "What is X?" in out
         assert "What is Y?" in out
-        loaded = ResearchStore(rpt.DEFAULT_DB).load("Is Z real?")
+        loaded = ResearchStore(rpt.default_db()).load("Is Z real?")
         assert loaded is not None
         assert loaded.plan == ("What is X?", "What is Y?")
 
@@ -111,7 +111,7 @@ class TestResearchDiscoverSourcesTool:
         tool = rpt._build_discover_sources_tool(_registry())
         out = tool.handler({"question": "Is Z real?"})
         assert "example.com/hit1" in out
-        loaded = ResearchStore(rpt.DEFAULT_DB).load("Is Z real?")
+        loaded = ResearchStore(rpt.default_db()).load("Is Z real?")
         assert loaded.sources == ("https://example.com/hit1",)
 
 
@@ -137,9 +137,9 @@ class TestResearchExtractEvidenceTool:
                                  "text": "FETCHED https://example.com/hit1 (20 chars):\nreal page content here"}],
             },
         )
-        record = ResearchStore(rpt.DEFAULT_DB).load("Is Z real?")
+        record = ResearchStore(rpt.default_db()).load("Is Z real?")
         record.add_sources(["https://example.com/hit1"])
-        ResearchStore(rpt.DEFAULT_DB).save(record, now=1.0)
+        ResearchStore(rpt.default_db()).save(record, now=1.0)
 
         tool = rpt._build_extract_evidence_tool(_registry())
         out = tool.handler({"question": "Is Z real?"})
@@ -190,7 +190,7 @@ class TestResearchRunPipelineTool:
         out = tool.handler({"question": "Is Z real?"})
         assert "Sources: 0 -> 2" in out
         assert "Claims: 0 -> 2" in out
-        loaded = ResearchStore(rpt.DEFAULT_DB).load("Is Z real?")
+        loaded = ResearchStore(rpt.default_db()).load("Is Z real?")
         assert len(loaded.claims) == 2
 
     def test_empty_question_is_an_honest_error(self):
@@ -205,7 +205,7 @@ class TestResearchDetectContradictionsTool:
         record = ResearchRecord(question="Is Z real?")
         record.set_plan(["sub-question"])
         record.add_sources(["https://a.com"])
-        ResearchStore(rpt.DEFAULT_DB).save(record, now=1.0)
+        ResearchStore(rpt.default_db()).save(record, now=1.0)
         out = rpt._research_detect_contradictions_tool({"question": "Is Z real?"})
         assert "No real contradictions" in out
 
@@ -222,11 +222,11 @@ class TestResearchSynthesizeTool:
             document_hash="h", location="p1", passage="Z is real",
             retrieved_at=1.0, agent="research_info",
         ))
-        ResearchStore(rpt.DEFAULT_DB).save(record, now=1.0)
+        ResearchStore(rpt.default_db()).save(record, now=1.0)
         _install_chat_fake(monkeypatch, ["Yes, Z is real."])
         out = rpt._research_synthesize_tool({"question": "Is Z real?"})
         assert out == "Yes, Z is real."
-        loaded = ResearchStore(rpt.DEFAULT_DB).load("Is Z real?")
+        loaded = ResearchStore(rpt.default_db()).load("Is Z real?")
         assert loaded.stage is Stage.SYNTHESIZED
 
 

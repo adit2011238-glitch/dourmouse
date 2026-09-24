@@ -17,7 +17,7 @@ so this client and that server can talk to each other directly (verified
 in tests: a real ``McpClient`` connects to a real ``McpBridgeServer``
 subprocess and calls a real tool through it end to end).
 
-Config format (workspace-relative, ``DEFAULT_CONFIG`` below), the SAME
+Config format (workspace-relative, ``default_config()`` below), the SAME
 ``mcpServers`` shape ``mcp_bridge.build_mcp_config_file`` writes for Claude
 Code and Claude Code's own ``.mcp.json`` uses -- an existing Claude Code
 MCP server config can be pointed at directly, not a second bespoke format::
@@ -57,11 +57,17 @@ from typing import Any
 from dourmouse.config import workspace_dir
 from dourmouse.dispatch import Permission, Subagent, ToolSpec
 
+
 #: Workspace-relative default -- a user-editable JSON file, not a
 #: database: this is small, human-authored configuration, matching the
 #: shape of the config itself rather than this codebase's usual
-#: DEFAULT_DB/SQLite convention for actual DATA.
-DEFAULT_CONFIG = workspace_dir() / "mcp_servers.json"
+#: default_db()/SQLite convention for actual DATA.
+def default_config() -> Path:
+    """Resolved on every call, never at import time (finding #084): an
+    import-time constant froze whatever DOURMOUSE_WORKSPACE was when the
+    module was first imported, which let the test suite write into the
+    real workspace."""
+    return workspace_dir() / "mcp_servers.json"
 
 _PROTOCOL_VERSION = "2024-11-05"
 _CLIENT_NAME = "dourmouse"
@@ -223,7 +229,7 @@ def load_external_mcp_servers(path: str | Path | None = None) -> dict[str, dict[
     """The real ``mcpServers`` config, or ``{}`` when the file is missing
     or malformed -- a fresh workspace with no external servers configured
     is the normal, common case, never an error."""
-    p = Path(path) if path is not None else DEFAULT_CONFIG
+    p = Path(path) if path is not None else default_config()
     if not p.is_file():
         return {}
     try:
@@ -296,7 +302,7 @@ if __name__ == "__main__":
     subagent, clients = build_external_mcp_subagent()
     if subagent is None:
         print("no external MCP servers configured or reachable "
-              f"(edit {DEFAULT_CONFIG} to add one)")
+              f"(edit {default_config()} to add one)")
     else:
         print(subagent.roster_line())
     for c in clients:

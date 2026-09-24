@@ -3954,3 +3954,93 @@ foundation (MODEL-1, INFRA-1) in the tracking folder's `REMAINING_WORK.md`. A CS
 briefly lost to a bad edit anchor mid-session (the browser rendered unstyled), caught by a
 live screenshot and fixed; recorded here because "the screenshot caught it, the assertion
 did not" is the reason edits to this file assert their anchors.
+
+### 084 -- the "flaky" tests were real bugs, the suite leaked into the real workspace, and 112 tests had never been in the gate
+
+Status: DONE 2026-09-24. Phase 1 of the completion plan (items X-7 and X-4).
+
+Both tests tracked as "load-dependent, not a regression" (X-7) turned out to hide real defects.
+Chasing X-4 then found a whole test tree that the documented suite command never ran.
+
+**1. Atlas leaderboard: a request lock held across a network git pull (product bug, HIGH for
+the Atlas window).** `atlas_lab._sync()` ran `_ensure_repo()` (a `git pull`, 60s timeout, or a
+`git clone`, 120s) while holding `_LAB_LOCK`, and every reader (`get_state()`, the leaderboard,
+the whole Atlas API) takes that lock first. So any request arriving mid-sync blocked for the
+entire git operation, contradicting `get_state()`'s own docstring ("the API must never block on a
+git pull"). Under full-suite load the pull was slow enough to push the leaderboard request past
+its 5s client timeout: that is the real X-7 failure. Fix: a separate `_SYNC_LOCK` serialises the
+slow work (git, then parsing); `_LAB_LOCK` is now held only for the in-memory swap. Measured
+against the real old code with a stubbed 3s pull: a reader waited **3.00s** before, **0.00s**
+after. Regression tests: `TestSyncNeverBlocksReaders` (a reader returns in under 1s while git is
+in flight; four concurrent syncs never run git at once).
+
+**2. The Atlas test fixture let the suite do real network git (test hermeticity).** The autouse
+fixture reset `_LAB_STATE` to None and nothing else, so every test that reached `get_state()`
+started a real background `git pull` of the GitHub strategy repo into `/tmp/atlas-strategy-lab`
+(which exists on this machine because of it), plus a real auto-sync daemon. That daemon was an
+unstoppable `while True` that woke 300s later, after the test's stubs had been undone, and pulled
+again mid-suite. Fix: `_auto_sync_loop` takes a stop `Event` and `stop_auto_sync()` exists; the
+fixture stubs `_ensure_repo` for every test and stops any daemon at teardown. The loop-retry test
+was rewritten to drive the real loop with its own stop signal and assert the thread actually ends.
+A clean-shutdown hook is now available for X-3; it is not wired into server shutdown yet.
+
+**3. activate_app_fast asserted the OS always obeys (test defect, no product change).** macOS 14+
+cooperative activation lets the OS refuse an activation requested by a process that is not itself
+frontmost. Live-checked from a background shell: the same call was refused once, accepted and
+applied late once, and accepted but ignored once; the AppleScript path behaved the same, so an
+AppleScript fallback would NOT have helped (and Finder is on the app-control blocklist anyway).
+The product already reports this honestly: `ERROR` on refusal, and `_verify_activation_result`
+checks the real frontmost state after an accepted request. The test now accepts exactly the two
+honest outcomes and nothing else.
+
+**4. A second test tree that was never in the gate (X-4).** A top-level `tests/` directory held
+112 tests. The documented full-suite command, `pytest dourmouse/tests`, never ran it, so its
+5 failures were invisible and 107 passing tests guarded nothing. It also had one autouse isolation
+fixture where `dourmouse/tests/conftest.py` has twelve, so it ran against the developer's real
+settings. The 5 failures: 2 read `GOOGLE_OAUTH_FULL_SCOPES=1` from the real persisted user config
+file (the env var was deleted but `config.google_oauth_full_scopes_enabled()` also reads the
+file); 2 were not isolated from the gitignored built-in OAuth client, so "no env" no longer meant
+"unconfigured"; 1 asserted a deeplink redirect target from before v8.7 moved the hash router to
+`/index.html`. Fix: the six files were `git mv`d into `dourmouse/tests` (two renamed to avoid
+collisions: `test_desktop_bridge_and_launch.py`, `test_google_auth_flow.py`), where the full
+conftest applies; the built-in-client isolation became a `no_builtin_oauth` fixture reusing the
+existing `_remove_builtin_module` technique; the stale deeplink assertion was updated with the
+reason. `tests/` is retired. All 112 pass, in both orders relative to `test_google_auth.py`.
+
+**5. Every server test started a real security scanner against the Mac, and none ever stopped
+(test hermeticity, found by the first full run of this commit).** That run stalled at 94% and
+showed one failure. `ps` showed pytest spawning `arp -a` every few seconds. Root cause:
+`sentry_runtime_enabled()` is default ON, and `run_server()` starts a real `SentryRuntime`, so
+every test that built a server also started a daemon that shells out to arp, lsof and the
+firewall tool on its 300s interval. `conftest.py` already turned the goal runtime off for exactly
+this reason but not the sentry, so hundreds of scanners piled up over one run and loaded the
+machine until timing-sensitive tests failed. Fix: autouse `_security_sentry_off` fixture, same
+convention as `_goal_runtime_off`. Also a product fix found on the way: `serve_forever`'s
+shutdown stopped every other background runtime but never the sentry; it now stops it too.
+
+**6. Import-time store paths let the suite write into the real workspace (test hermeticity,
+HIGH for data integrity).** `lsof` showed the pytest process holding the real
+`workspace/security/sentry.db` open. Six modules computed their default path once at import:
+`DEFAULT_DB = workspace_dir() / ...` in `office_logger`, `security/sentry`,
+`research_pipeline/store`, `research_mesh/pipeline`, `device_wiki/store`, and `DEFAULT_CONFIG` in
+`mcp_client`. They are first imported during test collection, before the autouse fixture points
+`DOURMOUSE_WORKSPACE` at a tmp dir, so the frozen value was the real one. Evidence in the real
+dev `workspace/office/office_log.db`: 9021 messages and 2902 agent events, dominated by fixture
+output ("REAL NEWS: markets steady" 4076 times, "ECHOED: x" 640, "GATED-EXECUTED: secret" 40).
+Fix: each module now has `default_db()` (or `default_config()`) resolved on every call; stores
+take `path=None` and resolve at construction; every importer and test was moved to the function.
+Regression tests in `test_workspace_paths_are_lazy.py`: each default follows a workspace changed
+after import, and an AST guard fails if any module-level assignment in the package calls
+`workspace_dir()` again. The polluted rows were left in place: that database also holds the
+owner's real history and deleting from it is the owner's call.
+
+**7. The one failure itself: a client timeout shorter than the server's own budget (test
+defect).** `test_approve_over_real_http_makes_a_genuinely_working_extension` passes alone. The
+approve endpoint really runs the draft's tests in a pytest subprocess with a 60s budget
+(`self_extensions.py`), but the test's HTTP client gave up after 5s, so it failed whenever the
+machine was busy (item 5 made it busy). The client timeout is now 90s.
+
+Suite after all seven: **5565 passed, 10 skipped, 0 failed** in 727s (was 5442 on HEAD; +112 moved, +11 new).
+No new ruff findings in any touched file (four import-spacing findings the refactor introduced were fixed).
+Lint: `atlas_lab.py` ruff findings went from 15 to 14 (one S110 removed, zero added); mypy
+unchanged at 79 repo-wide for that file's import graph.

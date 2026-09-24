@@ -14,12 +14,12 @@ sequence `research_pipeline` was built in (finding #042 onward).
 
 from .core import WikiEntry, mark_missing, reconcile, with_failed_summary, with_new_entry, with_summary
 from .stages import read_file_for_summary, summarize_entry, summarize_file
-from .store import DEFAULT_DB, WikiStore
+from .store import WikiStore, default_db
 from .walker import ROOTS_ENV, configured_roots, scan, walk_roots
 
 __all__ = [
     "WikiEntry", "mark_missing", "reconcile", "with_failed_summary", "with_new_entry", "with_summary",
     "read_file_for_summary", "summarize_entry", "summarize_file",
-    "DEFAULT_DB", "WikiStore",
+    "WikiStore", "default_db",
     "ROOTS_ENV", "configured_roots", "scan", "walk_roots",
 ]

@@ -27,7 +27,7 @@ import time
 from typing import Any
 
 from dourmouse.device_wiki.stages import summarize_file
-from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+from dourmouse.device_wiki.store import WikiStore, default_db
 from dourmouse.device_wiki.walker import configured_roots, scan
 from dourmouse.dispatch import Subagent, ToolSpec
 
@@ -35,7 +35,7 @@ _DEFAULT_MAX_FILES_TO_SUMMARIZE = 20
 
 
 def _store() -> WikiStore:
-    return WikiStore(DEFAULT_DB)
+    return WikiStore(default_db())
 
 
 def _device_wiki_scan_tool(arguments: dict[str, Any]) -> str:

@@ -51,7 +51,12 @@ from .study import FieldCorpus, StudyEngine, load_corpus
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PAPERS_ROOT = _REPO_ROOT / "jarvis" / "research_mesh" / "fields" / "exams" / "papers"
 
-DEFAULT_DB = workspace_dir() / "research_mesh" / "qualification.db"
+def default_db() -> Path:
+    """Resolved on every call, never at import time (finding #084): an
+    import-time constant froze whatever DOURMOUSE_WORKSPACE was when the
+    module was first imported, which let the test suite write into the
+    real workspace."""
+    return workspace_dir() / "research_mesh" / "qualification.db"
 
 
 class QualificationPipeline:
@@ -157,7 +162,7 @@ def _load_all_fields() -> list[tuple[str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Research-mesh qualification pipeline")
-    ap.add_argument("--db", default=str(DEFAULT_DB))
+    ap.add_argument("--db", default=str(default_db()))
     ap.add_argument("--domain")
     ap.add_argument("--field")
     ap.add_argument("--mock", action="store_true",

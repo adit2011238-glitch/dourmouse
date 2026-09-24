@@ -19,15 +19,18 @@ from dourmouse.config import workspace_dir
 
 from .core import Claim, Contradiction, ResearchRecord, Stage
 
+
 # Real gap closed (2026-09-20, named in the standing status report): every
 # other domain's own store resolves a workspace-relative default the same
-# way (security/sentry.py's own DEFAULT_DB) -- this pipeline's ResearchStore
+# way (security/sentry.py's own default_db()) -- this pipeline's ResearchStore
 # previously had no such default, so nothing persisted anywhere unless a
-# caller built its own path by hand. Computed once at import time, same as
-# sentry.py's own DEFAULT_DB -- callers that need per-test isolation build
-# their own ResearchStore(tmp_path) explicitly, same convention already
-# established there.
-DEFAULT_DB = workspace_dir() / "research_pipeline" / "research.db"
+# caller built its own path by hand.
+def default_db() -> Path:
+    """Resolved on every call, never at import time (finding #084): an
+    import-time constant froze whatever DOURMOUSE_WORKSPACE was when the
+    module was first imported, which let the test suite write into the
+    real workspace."""
+    return workspace_dir() / "research_pipeline" / "research.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS research_records (

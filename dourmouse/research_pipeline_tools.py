@@ -50,11 +50,11 @@ from dourmouse.research_pipeline.stages import (
     run_full_pipeline,
     synthesize,
 )
-from dourmouse.research_pipeline.store import DEFAULT_DB, ResearchStore
+from dourmouse.research_pipeline.store import ResearchStore, default_db
 
 
 def _store() -> ResearchStore:
-    return ResearchStore(DEFAULT_DB)
+    return ResearchStore(default_db())
 
 
 def _load_or_start(question: str) -> ResearchRecord:

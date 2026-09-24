@@ -16,12 +16,12 @@ Everything is async (threaded) and pollable — the UI never blocks.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import json
 import os
 import subprocess
 import threading
-import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -119,15 +119,26 @@ class StrategyLabState:
     version: str = ""
 
 
-# In-memory state (thread-safe via the GIL + single-threaded access pattern).
+# In-memory state. _LAB_LOCK guards the in-memory state only and is only ever
+# held for a brief read or swap. _SYNC_LOCK serialises the slow work of a sync
+# (the git pull/clone over the network, then re-parsing files) so two syncs
+# never run git on the same checkout at once. A request thread only ever
+# takes _LAB_LOCK, so it can never wait on the network. (Finding #084: the
+# old code held _LAB_LOCK across the whole git pull, so any request arriving
+# mid-sync blocked for up to the 60s git timeout, which is the real cause of
+# the load-dependent leaderboard-test timeout tracked as X-7.)
 _LAB_STATE: StrategyLabState | None = None
 _LAB_LOCK = threading.Lock()
+_SYNC_LOCK = threading.Lock()
 
 #: Auto-sync: the Atlas window is a LIVE leaderboard — every N seconds a
 #: daemon thread pulls the GitHub repo and re-parses, so strategies pushed
 #: from the other desktop's atlas-strategy-lab flow in with zero user steps.
 _AUTO_SYNC_INTERVAL_SECONDS = float(os.environ.get("ATLAS_LAB_SYNC_INTERVAL", "300"))
 _auto_sync_started = False
+#: The running daemon's own stop signal. One Event per start, so stopping and
+#: restarting never revives an old loop. None until the first start.
+_auto_sync_stop: threading.Event | None = None
 
 #: SSE events hub (set by run_server at mount — same hub the HUD reads, so
 #: fresh strategy syncs appear as live cards in the app without any refresh).
@@ -419,30 +430,38 @@ def get_state() -> StrategyLabState:
 
 
 def _initial_sync_worker() -> None:
-    """Background first sync (never on the request thread)."""
-    try:
-        with _LAB_LOCK:
-            _sync()
-    except Exception:  # noqa: BLE001 -- a failed first sync surfaces via state
-        pass
+    """Background first sync (never on the request thread). A failure is
+    not lost: _sync() records it on state.sync_error, which the window shows."""
+    with contextlib.suppress(Exception):
+        _sync()
 
 
 def sync() -> dict[str, Any]:
     """Force a sync of the strategy lab repo. Returns a status dict."""
-    global _LAB_STATE
-    with _LAB_LOCK:
-        result = _sync()
-        return result
+    return _sync()
 
 
 def _sync() -> dict[str, Any]:
-    """Internal: sync the repo and re-parse all data. Caller must hold _LAB_LOCK."""
-    global _LAB_STATE
-    assert _LAB_STATE is not None
+    """Internal: sync the repo and re-parse all data.
+
+    Caller must NOT hold _LAB_LOCK (it is not re-entrant, and holding it here
+    is exactly what used to block every request for the length of a git pull).
+    The network and disk work runs under _SYNC_LOCK; _LAB_LOCK is taken only
+    for the final in-memory swap."""
+    with _SYNC_LOCK:
+        return _sync_locked()
+
+
+def _sync_locked() -> dict[str, Any]:
+    """Body of _sync(). Runs with _SYNC_LOCK held and _LAB_LOCK NOT held."""
+    with _LAB_LOCK:
+        state = _LAB_STATE
+    assert state is not None
 
     error = _ensure_repo()
     if error:
-        _LAB_STATE.sync_error = error
+        with _LAB_LOCK:
+            state.sync_error = error
         return {"ok": False, "error": error}
 
     # Parse all sources. Strict batteries last: they carry every strategy
@@ -473,11 +492,13 @@ def _sync() -> dict[str, Any]:
     except Exception:
         pass  # a missing or malformed catalog just leaves the version blank
 
-    _LAB_STATE.strategies = strategies
-    _LAB_STATE.recent_reports = reports
-    _LAB_STATE.last_sync = datetime.now(timezone.utc).isoformat()
-    _LAB_STATE.sync_error = ""
-    _LAB_STATE.version = version
+    last_sync = datetime.now(timezone.utc).isoformat()
+    with _LAB_LOCK:
+        state.strategies = strategies
+        state.recent_reports = reports
+        state.last_sync = last_sync
+        state.sync_error = ""
+        state.version = version
 
     # Broadcast to the SSE hub so every connected HUD sees the update live.
     try:
@@ -485,7 +506,7 @@ def _sync() -> dict[str, Any]:
             _hub.broadcast({
                 "type": "strategies_synced",
                 "count": len(strategies),
-                "last_sync": _LAB_STATE.last_sync,
+                "last_sync": last_sync,
             })
     except Exception:  # noqa: BLE001 -- a broadcast failure never kills sync
         pass
@@ -493,7 +514,7 @@ def _sync() -> dict[str, Any]:
     return {
         "ok": True,
         "strategy_count": len(strategies),
-        "last_sync": _LAB_STATE.last_sync,
+        "last_sync": last_sync,
         "version": version,
     }
 
@@ -545,7 +566,7 @@ def leaderboard(include_description: bool = True) -> list[dict]:
     return result
 
 
-def _auto_sync_loop() -> None:
+def _auto_sync_loop(stop: threading.Event | None = None) -> None:
     """Daemon: pull the GitHub repo every N seconds and re-parse.
 
     Deliberately silent on success (a background refresh must never spam),
@@ -555,29 +576,48 @@ def _auto_sync_loop() -> None:
 
     Guarantees _LAB_STATE is initialized on first tick (safe to start the
     auto-sync loop at boot, before any API call — v5.22.14).
+
+    ``stop`` ends the loop at its next wait. It used to be an unstoppable
+    ``while True``, so a loop started inside a test kept running after that
+    test's stubs were undone and did a REAL git pull minutes later, in the
+    middle of the rest of the suite (finding #084).
     """
-    while True:
-        time.sleep(_AUTO_SYNC_INTERVAL_SECONDS)
+    stop = stop if stop is not None else threading.Event()
+    while not stop.wait(_AUTO_SYNC_INTERVAL_SECONDS):
         try:
             # Ensure state is initialized before the first real sync.
-            global _LAB_STATE
             if _LAB_STATE is None:
                 get_state()  # initializes + arms (redundant, but honest)
-            with _LAB_LOCK:
-                if _LAB_STATE is not None:
-                    _sync()
+            if _LAB_STATE is not None:
+                _sync()
         except Exception:  # noqa: BLE001 -- a background refresh never kills the app
             pass
 
 
 def start_auto_sync() -> None:
     """Start the background GitHub auto-sync once (idempotent)."""
-    global _auto_sync_started
+    global _auto_sync_started, _auto_sync_stop
     with _LAB_LOCK:
         if _auto_sync_started:
             return
         _auto_sync_started = True
-    threading.Thread(target=_auto_sync_loop, daemon=True, name="atlas-lab-auto-sync").start()
+        _auto_sync_stop = stop = threading.Event()
+    threading.Thread(target=_auto_sync_loop, args=(stop,), daemon=True,
+                     name="atlas-lab-auto-sync").start()
+
+
+def stop_auto_sync() -> None:
+    """Stop the background auto-sync loop at its next wait (idempotent).
+
+    Lets a clean shutdown end the daemon rather than abandon it mid-git-pull,
+    and lets the test suite guarantee no loop outlives the test that
+    started it. A later start_auto_sync() starts a fresh loop with its own
+    stop signal, so this never revives the old one."""
+    global _auto_sync_started
+    with _LAB_LOCK:
+        if _auto_sync_stop is not None:
+            _auto_sync_stop.set()
+        _auto_sync_started = False
 
 
 def get_strategy_detail(strategy_id: str) -> dict | None:

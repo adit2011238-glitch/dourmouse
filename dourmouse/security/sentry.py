@@ -79,7 +79,12 @@ from dourmouse.security import platform_adapter as pa
 
 _DEFAULT_SCAN_INTERVAL_SECONDS = 300.0
 
-DEFAULT_DB = workspace_dir() / "security" / "sentry.db"
+def default_db() -> Path:
+    """Resolved on every call, never at import time (finding #084): an
+    import-time constant froze whatever DOURMOUSE_WORKSPACE was when the
+    module was first imported, which let the test suite write into the
+    real workspace."""
+    return workspace_dir() / "security" / "sentry.db"
 
 #: Real incident lifecycle (Phase 2 step 3) -- mirrors goals.py's own
 #: "terminal states never silently reopen" discipline (GOAL_TERMINAL_
@@ -528,7 +533,7 @@ def run_scan(
     the very first scan ever run seeds the baseline silently instead of
     reporting every device already on the LAN as "new" -- see that
     function's own docstring for why."""
-    store = store or SentryStore(DEFAULT_DB)
+    store = store or SentryStore(default_db())
     state = state_fn()
     known_keys_before = store.get_known_device_keys()
     raw_findings = _detect_findings(
@@ -607,7 +612,7 @@ class SentryRuntime:
         # Never faster than once a minute -- a real scan shells out to
         # several real system commands per tick, not a free in-memory check.
         self._interval = max(60.0, float(interval_seconds))
-        self._store = store or SentryStore(DEFAULT_DB)
+        self._store = store or SentryStore(default_db())
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.last_result: SentryScanResult | None = None

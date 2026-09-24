@@ -21,8 +21,8 @@ from typing import Any
 from dourmouse.dispatch import Subagent, ToolSpec
 from dourmouse.security import platform_adapter as pa
 from dourmouse.security import reputation as rep
-from dourmouse.security.sentry import DEFAULT_DB as _SENTRY_DB
 from dourmouse.security.sentry import SentryStore, run_scan
+from dourmouse.security.sentry import default_db as _sentry_db
 
 
 def _format_interfaces(result: dict[str, Any]) -> str:
@@ -141,7 +141,7 @@ def _security_check_reputation(arguments: dict[str, Any]) -> str:
 
 
 def _security_known_devices(_arguments: dict[str, Any]) -> str:
-    rows = SentryStore(_SENTRY_DB).devices_snapshot()
+    rows = SentryStore(_sentry_db()).devices_snapshot()
     if not rows:
         return "No real device baseline recorded yet -- run security_sentry_scan first."
     lines = [f"{len(rows)} real known device(s) in the baseline:"]
@@ -156,7 +156,7 @@ def _security_incident_open(arguments: dict[str, Any]) -> str:
     if not fingerprint:
         return "ERROR: security_incident_open requires a non-empty 'fingerprint'."
     note = str(arguments.get("note") or "").strip()
-    result = SentryStore(_SENTRY_DB).open_incident(fingerprint, note, now=time.time())
+    result = SentryStore(_sentry_db()).open_incident(fingerprint, note, now=time.time())
     if result == "unknown_fingerprint":
         return f"ERROR: no known finding with fingerprint {fingerprint!r} (run security_sentry_scan first)."
     if result == "already_open":
@@ -171,20 +171,20 @@ def _security_incident_update(arguments: dict[str, Any]) -> str:
     status = str(arguments.get("status") or "").strip().upper() or None
     note = str(arguments.get("note") or "").strip() or None
     try:
-        result = SentryStore(_SENTRY_DB).update_incident(fingerprint, status, note, now=time.time())
+        result = SentryStore(_sentry_db()).update_incident(fingerprint, status, note, now=time.time())
     except ValueError as exc:
         return f"ERROR: {exc}"
     if result == "not_found":
         return f"ERROR: no open incident for {fingerprint} (run security_incident_open first)."
     if result == "terminal":
         return f"ERROR: incident {fingerprint} is already closed -- open a new incident for a recurrence."
-    incident = SentryStore(_SENTRY_DB).get_incident(fingerprint)
+    incident = SentryStore(_sentry_db()).get_incident(fingerprint)
     return f"Incident {fingerprint} updated: status={incident['status']}, {len(incident['notes'])} note(s)."
 
 
 def _security_incidents(arguments: dict[str, Any]) -> str:
     status = str(arguments.get("status") or "").strip().upper() or None
-    rows = SentryStore(_SENTRY_DB).list_incidents(status)
+    rows = SentryStore(_sentry_db()).list_incidents(status)
     if not rows:
         return "No real incidents" + (f" with status {status}" if status else "") + "."
     lines = [f"{len(rows)} real incident(s):"]
@@ -197,7 +197,7 @@ def _security_sentry_dismiss(arguments: dict[str, Any]) -> str:
     fingerprint = str(arguments.get("fingerprint") or "").strip()
     if not fingerprint:
         return "ERROR: security_sentry_dismiss requires a non-empty 'fingerprint'."
-    ok = SentryStore(_SENTRY_DB).mark_false_positive(fingerprint)
+    ok = SentryStore(_sentry_db()).mark_false_positive(fingerprint)
     if not ok:
         return f"ERROR: no known finding with fingerprint {fingerprint!r} (run security_sentry_scan first)."
     return f"Marked {fingerprint} as a false positive -- it will not be reported as a new finding again."

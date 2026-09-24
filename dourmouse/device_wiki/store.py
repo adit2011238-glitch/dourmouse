@@ -19,10 +19,13 @@ from dourmouse.config import workspace_dir
 
 from .core import WikiEntry
 
-#: Workspace-relative default, applied from the start (finding #028's own
-#: lesson, matching research_pipeline/store.py's and sentry.py's own
-#: DEFAULT_DB convention) -- never retrofitted.
-DEFAULT_DB = workspace_dir() / "device_wiki" / "wiki.db"
+
+def default_db() -> Path:
+    """Resolved on every call, never at import time (finding #084): an
+    import-time constant froze whatever DOURMOUSE_WORKSPACE was when the
+    module was first imported, which let the test suite write into the
+    real workspace."""
+    return workspace_dir() / "device_wiki" / "wiki.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS wiki_entries (

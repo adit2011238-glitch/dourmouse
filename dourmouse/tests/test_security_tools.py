@@ -165,12 +165,12 @@ _FAKE_FINDING = SentryFinding(
 class TestSecurityIncidentTools:
     def _seeded_db(self, tmp_path, monkeypatch):
         db = tmp_path / "sentry.db"
-        monkeypatch.setattr(sec_tools, "_SENTRY_DB", db)
+        monkeypatch.setattr(sec_tools, "_sentry_db", lambda: db)
         SentryStore(db).record_and_classify(_FAKE_FINDING, now=1000.0)
         return db
 
     def test_opening_an_incident_for_an_unknown_fingerprint_is_honest(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(sec_tools, "_SENTRY_DB", tmp_path / "sentry.db")
+        monkeypatch.setattr(sec_tools, "_sentry_db", lambda: tmp_path / "sentry.db")
         result = _tool("security_incident_open").handler({"fingerprint": "never-seen"})
         assert "ERROR" in result
 
@@ -226,12 +226,12 @@ class TestSecurityIncidentTools:
 
 class TestSecurityKnownDevices:
     def test_empty_baseline_is_an_honest_message(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(sec_tools, "_SENTRY_DB", tmp_path / "sentry.db")
+        monkeypatch.setattr(sec_tools, "_sentry_db", lambda: tmp_path / "sentry.db")
         result = _tool("security_known_devices").handler({})
         assert "No real device baseline" in result
 
     def test_a_real_baseline_is_listed(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(sec_tools, "_SENTRY_DB", tmp_path / "sentry.db")
+        monkeypatch.setattr(sec_tools, "_sentry_db", lambda: tmp_path / "sentry.db")
         SentryStore(tmp_path / "sentry.db").record_devices(
             [{"hostname": "router", "ip": "192.168.1.1", "mac": "e8:9f", "interface": "en0"}],
             now=1000.0,

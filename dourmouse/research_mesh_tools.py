@@ -29,7 +29,7 @@ from dourmouse.dispatch import Subagent, ToolSpec
 from dourmouse.research_mesh.brain import BrainNotConfigured, RealBrain
 from dourmouse.research_mesh.core import AgentRecord
 from dourmouse.research_mesh.exams import pending_iterations
-from dourmouse.research_mesh.pipeline import DEFAULT_DB, PAPERS_ROOT, QualificationPipeline
+from dourmouse.research_mesh.pipeline import PAPERS_ROOT, QualificationPipeline, default_db
 from dourmouse.research_mesh.store import AgentStore
 from dourmouse.research_mesh.study import load_corpus
 
@@ -47,7 +47,7 @@ def _all_fields() -> list[tuple[str, str]]:
 def _research_mesh_status(arguments: dict[str, Any]) -> str:
     domain = str(arguments.get("domain") or "").strip()
     field = str(arguments.get("field") or "").strip()
-    store = AgentStore(DEFAULT_DB)
+    store = AgentStore(default_db())
 
     if domain and field:
         corpus = load_corpus(PAPERS_ROOT, domain, field)
@@ -107,7 +107,7 @@ def _research_mesh_qualify(arguments: dict[str, Any]) -> str:
             "Call research_mesh_status with no arguments to see which fields have real papers."
         )
 
-    store = AgentStore(DEFAULT_DB)
+    store = AgentStore(default_db())
     record = store.load(domain, field) or AgentRecord(domain=domain, field=field)
     if record.status.terminal:
         return (

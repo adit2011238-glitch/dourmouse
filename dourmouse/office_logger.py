@@ -29,7 +29,7 @@ messages, resolving a meeting's several concurrent call_ids into one
 timeline) -- that assembly is a read-side/UI concern layered on top of this
 real, ordered, durable data.
 
-Same one-connection-per-operation, WAL-mode, workspace-relative-DEFAULT_DB
+Same one-connection-per-operation, WAL-mode, workspace-relative default_db()
 discipline as every other real store in this codebase (device_wiki/store.py,
 research_pipeline/store.py, sentry.py's SentryStore).
 """
@@ -44,7 +44,13 @@ from typing import Any
 
 from dourmouse.config import workspace_dir
 
-DEFAULT_DB = workspace_dir() / "office" / "office_log.db"
+
+def default_db() -> Path:
+    """Resolved on every call, never at import time (finding #084): an
+    import-time constant froze whatever DOURMOUSE_WORKSPACE was when the
+    module was first imported, which let the test suite write into the
+    real workspace."""
+    return workspace_dir() / "office" / "office_log.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -109,8 +115,8 @@ class OfficeLogger:
     write must never break the real bus post or the real chat turn it came
     from, so every public write method swallows its own exceptions."""
 
-    def __init__(self, path: str | Path = DEFAULT_DB) -> None:
-        self._path = Path(path)
+    def __init__(self, path: str | Path | None = None) -> None:
+        self._path = Path(path) if path is not None else default_db()
         self._lock = threading.Lock()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, self._conn() as conn:

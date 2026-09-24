@@ -166,9 +166,15 @@ def test_route_redirects_to_validated_href(server):
     with pytest.raises(urllib.error.HTTPError) as exc:
         opener.open(server + "/api/deeplink?to=" + urllib.parse.quote("dourmouse://atlas/research"))
     assert exc.value.code == 302
-    # the Location resolves to the SPA ROOT + hash (a fragment-only Location
-    # would resolve against /api/deeplink and redirect-loop forever)
-    assert exc.value.headers["Location"] == "/#/atlas/research"
+    # The Location must be an absolute path plus the hash (a fragment-only
+    # Location would resolve against /api/deeplink and redirect-loop forever).
+    # It targets /index.html, not "/": since v8.7 "/" serves the console,
+    # which has no hash router, so "/#/atlas/research" would silently land
+    # on the home screen and drop the destination. The hash router lives in
+    # the HUD at /index.html (webui.py, the GET /api/deeplink handler).
+    # Finding #084 (X-4): this assertion predated v8.7 and was never updated
+    # because this tree was not part of the documented suite command.
+    assert exc.value.headers["Location"] == "/index.html#/atlas/research"
 
 
 def test_route_json_format(server):

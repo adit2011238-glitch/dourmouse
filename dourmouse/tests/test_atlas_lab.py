@@ -25,13 +25,26 @@ from dourmouse.tests.test_webui import server  # noqa: F401, E402
 
 
 @pytest.fixture(autouse=True)
-def _fresh_state():
-    """Reset the module state per test so nothing leaks between tests."""
+def _fresh_state(monkeypatch):
+    """Reset the module state per test so nothing leaks between tests, and
+    keep every test off the network.
+
+    Finding #084: this fixture used to reset _LAB_STATE to None and nothing
+    else, so any test that reached get_state() (the route tests, and every
+    helper that reads state) started a REAL background git pull of the
+    GitHub strategy repo into /tmp/atlas-strategy-lab, plus a REAL auto-sync
+    daemon that woke 300s later and pulled again after this test's stubs had
+    been undone. That real, load-slowed git pull, held under the old
+    request-blocking lock, is what timed out test_leaderboard_endpoint under
+    full-suite load (X-7). Now: git is stubbed for every test, and any
+    daemon a test started is stopped before the next test runs."""
     old_state = al._LAB_STATE
     old_started = al._auto_sync_started
     al._LAB_STATE = None
     al._auto_sync_started = False
+    monkeypatch.setattr(al, "_ensure_repo", lambda: "git is disabled in the test suite (hermetic)")
     yield
+    al.stop_auto_sync()
     al._LAB_STATE = old_state
     al._auto_sync_started = old_started
 
@@ -173,8 +186,7 @@ class TestAutoSync:
         monkeypatch.setattr(al, "_read_report_md", lambda p: "")
         # Initialize state so _sync can run.
         al._LAB_STATE = al.StrategyLabState()
-        with al._LAB_LOCK:
-            result = al._sync()
+        result = al._sync()  # contract: caller must NOT hold _LAB_LOCK
         assert result["ok"] is True
         assert any(e.get("type") == "strategies_synced" for e in events), \
             f"expected strategies_synced broadcast, got {events}"
@@ -191,25 +203,103 @@ class TestAutoSync:
 
         monkeypatch.setattr(al, "_sync", _flaky_sync)
         monkeypatch.setattr(al, "_AUTO_SYNC_INTERVAL_SECONDS", 0.02)
-        # Run the loop briefly on a thread; it must keep ticking after a raise.
+        al._LAB_STATE = al.StrategyLabState()
+        # Run the REAL loop on a thread with its own stop signal. It used to be
+        # an unstoppable while-True, so this test leaked a live daemon that
+        # kept running after the monkeypatches were undone (finding #084).
         stop = threading.Event()
-        errors = []
+        errors: list[BaseException] = []
 
         def runner():
-            while not stop.is_set():
-                try:
-                    al._auto_sync_loop()
-                except Exception as exc:  # pragma: no cover - safety net
-                    errors.append(exc)
+            try:
+                al._auto_sync_loop(stop)
+            except Exception as exc:  # pragma: no cover - safety net
+                errors.append(exc)
 
         t = threading.Thread(target=runner, daemon=True)
         t.start()
         import time
         time.sleep(0.15)
         stop.set()
-        time.sleep(0.05)
+        t.join(timeout=2)
+        assert not t.is_alive(), "the loop must actually end when stopped"
         assert calls["n"] >= 2, "loop must retry after the failure"
         assert errors == []
+
+    def test_stop_auto_sync_ends_a_started_loop(self, monkeypatch):
+        """stop_auto_sync() must genuinely end the daemon start_auto_sync()
+        began, and a later start must be a fresh loop, not the old one."""
+        monkeypatch.setattr(al, "_AUTO_SYNC_INTERVAL_SECONDS", 0.02)
+        monkeypatch.setattr(al, "_sync", lambda: {"ok": True})
+        al._LAB_STATE = al.StrategyLabState()
+        al.start_auto_sync()
+        first_stop = al._auto_sync_stop
+        assert al._auto_sync_started is True
+        al.stop_auto_sync()
+        assert al._auto_sync_started is False
+        assert first_stop is not None and first_stop.is_set()
+        al.start_auto_sync()
+        assert al._auto_sync_stop is not first_stop, "a restart must not reuse the old stop signal"
+        assert not al._auto_sync_stop.is_set()
+
+
+class TestSyncNeverBlocksReaders:
+    """Finding #084 regression. The old _sync() ran the git pull while
+    holding _LAB_LOCK, and every reader (get_state, leaderboard, the whole
+    Atlas API) takes that lock, so a request that arrived mid-sync waited
+    for the entire git operation, up to its 60s timeout. That is the real
+    cause of the load-dependent leaderboard timeout tracked as X-7."""
+
+    def test_a_reader_is_not_blocked_while_git_is_slow(self, monkeypatch):
+        in_git = threading.Event()
+        release = threading.Event()
+
+        def slow_git():
+            in_git.set()
+            release.wait(timeout=10)  # stands in for a slow network pull
+            return "stubbed slow git"
+
+        monkeypatch.setattr(al, "_ensure_repo", slow_git)
+        al._LAB_STATE = al.StrategyLabState()
+        al._auto_sync_started = True  # no daemon for this test
+        syncer = threading.Thread(target=al._sync, daemon=True)
+        syncer.start()
+        assert in_git.wait(timeout=5), "the sync never reached the git step"
+        try:
+            import time
+            t0 = time.perf_counter()
+            board = al.leaderboard()
+            elapsed = time.perf_counter() - t0
+            assert isinstance(board, list)
+            assert elapsed < 1.0, f"reader waited {elapsed:.2f}s on an in-flight git pull"
+        finally:
+            release.set()
+            syncer.join(timeout=5)
+
+    def test_two_syncs_never_run_git_at_the_same_time(self, monkeypatch):
+        """_SYNC_LOCK must still serialise the slow work, so two syncs can
+        never run git on the same checkout concurrently."""
+        active = {"now": 0, "peak": 0}
+        guard = threading.Lock()
+
+        def counting_git():
+            with guard:
+                active["now"] += 1
+                active["peak"] = max(active["peak"], active["now"])
+            import time
+            time.sleep(0.05)
+            with guard:
+                active["now"] -= 1
+            return "stubbed"
+
+        monkeypatch.setattr(al, "_ensure_repo", counting_git)
+        al._LAB_STATE = al.StrategyLabState()
+        threads = [threading.Thread(target=al._sync, daemon=True) for _ in range(4)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join(timeout=5)
+        assert active["peak"] == 1, f"{active['peak']} syncs ran git at once"
 
 
 class TestLatestBacktest:

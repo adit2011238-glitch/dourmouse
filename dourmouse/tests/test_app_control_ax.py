@@ -422,11 +422,26 @@ class TestRealLiveIntegration:
         assert isinstance(ax.ax_trusted(), bool)
 
     def test_activate_app_fast_really_works_against_finder(self):
-        """Live-verified this session: needs no Accessibility permission
-        at all. Finder is always running on any real Mac, so this is
-        safe to exercise for real in CI on a real Mac runner too."""
-        result = ax.activate_app_fast("Finder")
-        assert result == "ACTIVATED: Finder"
+        """A real, non-mocked call; needs no Accessibility permission.
+
+        Finding #084 (X-7): this used to assert the OS always accepts the
+        request, and failed whenever another app held focus during the run.
+        macOS 14+ cooperative activation lets the OS refuse an activation
+        requested by a process that is not itself frontmost
+        (activateWithOptions_ returns false), and that is the OS's call, not
+        a bug. Live-checked 2026-09-24 from a background shell: the same
+        call was refused once, accepted-and-applied late once, and
+        accepted-but-ignored once. So both honest outcomes are accepted and
+        NOTHING else: never an unhandled exception, never NOT RUNNING for an
+        app that is always running, never an invented success string.
+        Whether the app actually came forward is checked by the tool
+        handler's own _verify_activation_result, not by this function."""
+        try:
+            result = ax.activate_app_fast("Finder")
+        except ax.AXControlError as exc:
+            assert "macOS refused to activate 'Finder'" in str(exc), str(exc)
+        else:
+            assert result == "ACTIVATED: Finder"
 
     def test_activate_app_fast_dry_run_is_side_effect_free(self):
         result = ax.activate_app_fast("Finder", dry_run=True)

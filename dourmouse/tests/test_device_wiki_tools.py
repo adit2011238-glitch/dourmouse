@@ -1,6 +1,6 @@
 """dourmouse/device_wiki_tools.py -- the device_wiki subagent, chat-
 reachable wiring over Domain E's already-tested stages/store/walker.
-Real store (a real SQLite file per test via monkeypatched DEFAULT_DB) and
+Real store (a real SQLite file per test via monkeypatched default_db()) and
 real temp directories; the model call itself is mocked (same
 _FakeSession/_install_chat_fake convention as test_research_pipeline.py)."""
 
@@ -36,7 +36,7 @@ def _install_chat_fake(monkeypatch, responses: list[str]):
 
 @pytest.fixture(autouse=True)
 def _isolated_store(tmp_path, monkeypatch):
-    monkeypatch.setattr(dwt, "DEFAULT_DB", tmp_path / "wiki.db")
+    monkeypatch.setattr(dwt, "default_db", lambda: tmp_path / "wiki.db")
 
 
 def _tool(name: str):
@@ -105,7 +105,7 @@ class TestDeviceWikiStatusTool:
         from dourmouse.device_wiki.core import with_new_entry, with_summary
 
         store = WikiStore(tmp_path / "wiki.db")
-        monkeypatch.setattr(dwt, "DEFAULT_DB", tmp_path / "wiki.db")
+        monkeypatch.setattr(dwt, "default_db", lambda: tmp_path / "wiki.db")
         store.save_entry(with_summary(with_new_entry("/a.txt", "h1", 1, now=1000.0), "s", now=1000.0))
         store.save_entry(with_new_entry("/b.txt", "h2", 2, now=1000.0))
         out = _tool("device_wiki_status").handler({})
@@ -125,7 +125,7 @@ class TestDeviceWikiGetTool:
         from dourmouse.device_wiki.core import with_new_entry, with_summary
 
         store = WikiStore(tmp_path / "wiki.db")
-        monkeypatch.setattr(dwt, "DEFAULT_DB", tmp_path / "wiki.db")
+        monkeypatch.setattr(dwt, "default_db", lambda: tmp_path / "wiki.db")
         store.save_entry(with_summary(with_new_entry("/a.txt", "h1", 1, now=1000.0), "a real summary", now=1000.0))
         out = _tool("device_wiki_get").handler({"path": "/a.txt"})
         assert "SUMMARIZED" in out

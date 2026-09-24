@@ -261,3 +261,18 @@ def _goal_runtime_off(monkeypatch):
     directly and are unaffected by this) set the env var themselves.
     """
     monkeypatch.setenv("DOURMOUSE_GOAL_RUNTIME", "0")
+
+
+@pytest.fixture(autouse=True)
+def _security_sentry_off(monkeypatch):
+    """Finding #084: sentry_runtime_enabled() is default ON, so every test
+    that built a real run_server() also started a real SentryRuntime that
+    shelled out to arp, lsof and the firewall tool against the real Mac
+    and never stopped. Hundreds of them piled up across one suite run
+    (arp -a was being spawned every few seconds by the end), loading the
+    machine enough to fail timing-sensitive tests, and they wrote into
+    the real workspace sentry.db. Same hermetic-by-default convention as
+    _goal_runtime_off above: tests of the runtime itself construct
+    SentryRuntime directly or set the variable themselves.
+    """
+    monkeypatch.setenv("DOURMOUSE_SECURITY_SENTRY_LOOP", "0")

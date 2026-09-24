@@ -28,6 +28,26 @@ GOOGLE_CLIENT_ID = "test-client-123.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET = "test-secret"
 
 
+
+@pytest.fixture
+def no_builtin_oauth(monkeypatch):
+    """Hide the gitignored built-in shared Google OAuth client
+    (dourmouse/_builtin_oauth.py) so a test can exercise the env-only path.
+
+    client_id()/client_secret() are "env, else the built-in client". On a
+    machine where that module exists, deleting GOOGLE_CLIENT_ID from the
+    environment no longer means "unconfigured", so these env-only tests
+    failed there and passed on a fresh clone. Same fix as
+    test_google_auth.py's _remove_builtin_module: poison the import AND drop
+    the attribute Python caches on the package once any earlier test
+    imported the real module. Finding #084 (X-4)."""
+    import sys
+
+    import dourmouse
+
+    monkeypatch.setitem(sys.modules, "dourmouse._builtin_oauth", None)
+    monkeypatch.delattr(dourmouse, "_builtin_oauth", raising=False)
+
 @pytest.fixture()
 def google_env(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID)
@@ -126,7 +146,7 @@ def test_authorization_url_default_scopes_identity_only(google_env):
     assert google_auth.status()["scopes"] == "identity-only"
 
 
-def test_google_configured_requires_both(monkeypatch):
+def test_google_configured_requires_both(monkeypatch, no_builtin_oauth):
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
     assert not google_auth.google_configured()
@@ -564,7 +584,7 @@ def _get(base, path, cookie=None):
         return json.loads(resp.read().decode())
 
 
-def test_auth_status_not_configured_when_no_client(server, monkeypatch):
+def test_auth_status_not_configured_when_no_client(server, monkeypatch, no_builtin_oauth):
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
     base, _ = server

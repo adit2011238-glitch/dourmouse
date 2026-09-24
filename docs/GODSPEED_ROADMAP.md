@@ -1003,3 +1003,11 @@ and a real build sequence, not just a requirement statement:
   Notification Centre, live accent theming), Research and Security drawn as flowcharts,
   a Claude-preview-style resizable Browser, two gimmick screens removed. Prototype only,
   wired to nothing; live wiring waits behind the §0 foundation (see the tracking folder).
+- [x] Phase 1 X-7 + X-4 (finding #084) 2026-09-24 -- both "flaky" tests were real bugs (Atlas
+  request lock held across a network git pull; test fixture doing real git), the activate test
+  now accepts the OS's honest refusal, and a 112-test orphan `tests/` tree that the suite command
+  never ran was consolidated into `dourmouse/tests` with its 5 failures fixed at the root.
+  Same finding: every server test leaked a real security scanner (now off in tests, and stopped on
+  real shutdown), six import-time store paths let the suite write into the real workspace (now
+  resolved per call, AST-guarded), and one approve test timed out before the server's own budget.
+  Suite 5565 passed, 0 failed.

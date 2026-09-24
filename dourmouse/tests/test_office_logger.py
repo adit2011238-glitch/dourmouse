@@ -1,7 +1,7 @@
 """Tests for dourmouse/office_logger.py (finding #066) -- the persistent,
 append-only log of real message_bus traffic and delegate_parallel fan-out
 lifecycle events. Hermetic: every test gets its own on-disk SQLite file
-under tmp_path, never DEFAULT_DB.
+under tmp_path, never default_db().
 """
 
 from __future__ import annotations

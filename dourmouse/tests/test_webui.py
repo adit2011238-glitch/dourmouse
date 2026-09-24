@@ -402,7 +402,7 @@ class TestSecurityDashboardEndpoint:
     def _isolated_sentry_store(self, tmp_path, monkeypatch):
         import dourmouse.security.sentry as sentry_module
 
-        monkeypatch.setattr(sentry_module, "DEFAULT_DB", tmp_path / "sentry.db")
+        monkeypatch.setattr(sentry_module, "default_db", lambda: tmp_path / "sentry.db")
 
     def test_no_scan_yet_is_honest(self, server):
         srv, port = server
@@ -442,9 +442,9 @@ class TestSecurityDashboardEndpoint:
         conn.close()
 
     def test_known_device_count_is_reported(self, server):
-        from dourmouse.security.sentry import DEFAULT_DB, SentryStore
+        from dourmouse.security.sentry import SentryStore, default_db
 
-        SentryStore(DEFAULT_DB).record_devices(
+        SentryStore(default_db()).record_devices(
             [{"hostname": "a", "ip": "1.2.3.4", "mac": "aa:aa:aa:aa:aa:aa", "interface": "en0"}], now=1000.0,
         )
         srv, port = server
@@ -456,9 +456,9 @@ class TestSecurityDashboardEndpoint:
         conn.close()
 
     def test_incidents_by_status_counts_real_incidents(self, server):
-        from dourmouse.security.sentry import DEFAULT_DB, SentryFinding, SentryStore
+        from dourmouse.security.sentry import SentryFinding, SentryStore, default_db
 
-        store = SentryStore(DEFAULT_DB)
+        store = SentryStore(default_db())
         finding = SentryFinding(fingerprint="fp1", kind="k", severity="med", title="t", detail="d", recommended_action="a")
         store.record_and_classify(finding, now=1000.0)
         store.open_incident("fp1", "", now=1000.0)
@@ -629,7 +629,7 @@ class TestDeviceWikiEndpoint:
     def _isolated_wiki_store(self, tmp_path, monkeypatch):
         import dourmouse.device_wiki.store as wiki_store_module
 
-        monkeypatch.setattr(wiki_store_module, "DEFAULT_DB", tmp_path / "wiki.db")
+        monkeypatch.setattr(wiki_store_module, "default_db", lambda: tmp_path / "wiki.db")
 
     def test_no_entries_yet_is_an_honest_empty_list(self, server):
         srv, port = server
@@ -643,9 +643,9 @@ class TestDeviceWikiEndpoint:
 
     def test_lists_a_real_entry(self, server, tmp_path):
         from dourmouse.device_wiki.core import with_new_entry, with_summary
-        from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+        from dourmouse.device_wiki.store import WikiStore, default_db
 
-        WikiStore(DEFAULT_DB).save_entry(
+        WikiStore(default_db()).save_entry(
             with_summary(with_new_entry("/a.txt", "h1", 10, now=1000.0), "a real summary", now=1000.0)
         )
         srv, port = server
@@ -660,9 +660,9 @@ class TestDeviceWikiEndpoint:
 
     def test_path_returns_one_real_entry(self, server):
         from dourmouse.device_wiki.core import with_new_entry
-        from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+        from dourmouse.device_wiki.store import WikiStore, default_db
 
-        WikiStore(DEFAULT_DB).save_entry(with_new_entry("/a.txt", "h1", 10, now=1000.0))
+        WikiStore(default_db()).save_entry(with_new_entry("/a.txt", "h1", 10, now=1000.0))
         srv, port = server
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request("GET", "/api/device_wiki?path=/a.txt")
@@ -681,9 +681,9 @@ class TestDeviceWikiEndpoint:
 
     def test_status_filter_is_applied(self, server):
         from dourmouse.device_wiki.core import with_new_entry, with_summary
-        from dourmouse.device_wiki.store import DEFAULT_DB, WikiStore
+        from dourmouse.device_wiki.store import WikiStore, default_db
 
-        store = WikiStore(DEFAULT_DB)
+        store = WikiStore(default_db())
         store.save_entry(with_summary(with_new_entry("/keep.txt", "h1", 1, now=1000.0), "s", now=1000.0))
         store.save_entry(with_new_entry("/drop.txt", "h2", 2, now=1000.0))
         srv, port = server
@@ -1172,7 +1172,10 @@ class TestSelfExtensionsEndpoints:
             handler_source=self._HANDLER, test_source=self._TEST_OK,
         )
         srv, port = server
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        # approve really runs the draft's own tests in a pytest subprocess
+        # with a 60s budget (self_extensions.py); a client that gives up
+        # after 5s failed this test whenever the machine was busy.
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=90)
         conn.request(
             "POST", "/api/self_extensions/approve",
             body=json.dumps({"id": entry["id"]}),
