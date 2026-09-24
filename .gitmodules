@@ -1,0 +1,3 @@
+[submodule "atlas-strategy-lab"]
+	path = atlas-strategy-lab
+	url = https://github.com/valerygordon200-byte/atlas-strategy-lab.git

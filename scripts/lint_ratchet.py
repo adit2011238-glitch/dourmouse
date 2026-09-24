@@ -41,6 +41,9 @@ def ruff_counts() -> dict[str, int]:
     return dict(collections.Counter(i.get("code") or "SYNTAX-ERROR" for i in items))
 
 
+_MYPY_ERRORS: list[str] = []
+
+
 def mypy_total() -> int:
     proc = subprocess.run(
         # --platform pins sys.platform branches so a Mac and the Linux CI
@@ -53,6 +56,7 @@ def mypy_total() -> int:
     if proc.returncode == 2:
         print(proc.stdout, proc.stderr, sep="\n", file=sys.stderr)
         raise SystemExit(2)
+    _MYPY_ERRORS[:] = [ln for ln in proc.stdout.splitlines() if ": error:" in ln]
     m = re.search(r"Found (\d+) errors? in", proc.stdout)
     if m:
         return int(m.group(1))
@@ -87,6 +91,11 @@ def main() -> int:
             better.append(f"ruff {code}: {was} -> {now}")
     if current["mypy_errors"] > base["mypy_errors"]:
         worse.append(f"mypy errors: {base['mypy_errors']} -> {current['mypy_errors']}")
+        # The total alone cannot say WHICH error is new; print them all so the
+        # new one can be found by diffing against a local run.
+        print("mypy errors (all):")
+        for ln in _MYPY_ERRORS:
+            print("  " + ln)
     elif current["mypy_errors"] < base["mypy_errors"]:
         better.append(f"mypy errors: {base['mypy_errors']} -> {current['mypy_errors']}")
 
