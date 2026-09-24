@@ -289,7 +289,9 @@ class TrayApp:
         s = self._kill_switch.state
         mic = "mic on" if s.mic_enabled else "MIC KILLED"
         cam = "cam on" if s.camera_enabled else "CAM KILLED"
-        return f"DourMouse — {mic} / {cam}"
+        # ASCII only (finding #093): pystray's X11 backend encodes the title
+        # as Latin-1, and an em dash here crashed the tray on Linux.
+        return f"DourMouse: {mic} / {cam}"
 
     def _refresh_icon(self) -> None:
         if self._icon is None:

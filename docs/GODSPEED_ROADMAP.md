@@ -1035,3 +1035,5 @@ and a real build sequence, not just a requirement statement:
   article picked, heading paths kept; claim location computed from the document, not guessed.
 - [x] Phase 2 R0-2 (finding #092) 2026-09-24 -- headless render for JS-only pages; every request
   the page makes is served through the SSRF guard; rendered DOM stored linked to the server bytes.
+- [x] Tray on Linux (finding #093) 2026-09-24 -- an em dash in the tray title crashed pystray's
+  X11 backend (Latin-1); title is ASCII now, all four states tested.

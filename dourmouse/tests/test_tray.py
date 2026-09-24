@@ -265,6 +265,21 @@ class TestBuildIconImage:
 # --------------------------------------------------------------------------- #
 
 class TestTrayApp:
+    def test_every_title_state_survives_x11_latin1(self, tmp_path):
+        """Finding #093: pystray's X11 backend encodes the title as Latin-1;
+        an em dash in it crashed the tray on Linux (first run under Xvfb)."""
+        ks = tray.KillSwitch(path=tmp_path / "state.json")
+        app = tray.TrayApp(kill_switch=ks)
+        titles = set()
+        for mic in (True, False):
+            for cam in (True, False):
+                ks.set_mic(mic)
+                ks.set_camera(cam)
+                titles.add(app._title())
+        assert len(titles) == 4
+        for title in titles:
+            title.encode("latin-1")  # raises on anything X11 cannot carry
+
     def test_build_icon_reflects_current_state(self, tmp_path):
         ks = tray.KillSwitch(path=tmp_path / "state.json")
         app = tray.TrayApp(kill_switch=ks)
@@ -493,3 +508,4 @@ class TestRunDetached:
         ks = tray.KillSwitch(path=tmp_path / "state.json")
         app = tray.TrayApp(kill_switch=ks)
         app.stop_detached()  # no icon, no bridge -- must be a clean no-op
+

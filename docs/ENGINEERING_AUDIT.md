@@ -4342,3 +4342,16 @@ recorded). They skip where Chrome cannot start.
 Noticed, not changed: react.dev's extraction still leads with some header chrome ("Search ⌘ Ctrl K
 / Learn / Reference"), because that site marks it with neither `<nav>` nor a recognisable class.
 Extraction quality tuning is a follow-on, measured against real pages.
+
+### 093 -- the system tray crashed on Linux over one character
+
+Status: DONE 2026-09-24. Found by the fifth CI run, the first to run the real tray code under a
+virtual X display (added in #091). Five tray tests failed with
+`UnicodeEncodeError: 'latin-1' codec can't encode character '—'`: pystray's X11 backend
+encodes the icon title as Latin-1, and `TrayApp._title()` put an em dash in it
+("DourMouse — mic on / cam on"). On any Linux desktop the tray, which carries the camera and
+microphone kill switch, would crash at start or on the first state change. The title is now
+"DourMouse: mic on / cam on" (ASCII). A test builds the real title for all four kill-switch
+states and encodes each as Latin-1; verified to fail on the old title and pass on the new one.
+
+CI state after run 5: macOS and Windows green, Linux 5533 passed with only these five failing.
