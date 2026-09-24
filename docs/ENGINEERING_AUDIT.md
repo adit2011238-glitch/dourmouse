@@ -4431,3 +4431,48 @@ checks every field of every claim, and runs automatically and non-destructively 
 existing database is opened, including the desktop's if it has one.
 
 Tests: `test_research_graph.py` (24).
+
+### 096 -- the research pipeline was a report generator: once it answered, nothing could change it
+
+Status: DONE 2026-09-24. Phase 2, R3 (RES-19, "the backward edge").
+
+The spec: "contradiction discovered, new research task, new experiment, new evidence, revised
+synthesis. This is what turns the system into a research network rather than a report generator."
+Verified in code: `set_synthesis()` moved the record to SYNTHESIZED and `add_claim()` raised from
+there, so no evidence could ever enter after an answer existed. And the spec does not ask for
+looser guards: the project only moves forward and the work grows.
+
+- **Tasks** (`core.Task`). A contradiction spawns exactly one follow-up task
+  (`spawn_task_for`, idempotent), at stage SOURCE_DISCOVERY, carrying the sub-question and the
+  contradiction it came from. Evidence may enter after synthesis only as a claim tagged with an
+  OPEN task (`Claim.task_id`); a closed or unknown task is refused.
+- **Forward-only stages.** `add_sources` and `add_claim` used to set the stage unconditionally,
+  so follow-up evidence would have dragged a synthesized record back to SOURCES_DISCOVERED; stages
+  now only advance.
+- **Revised synthesis.** Allowed from SYNTHESIZED once no follow-up task is open; every synthesis
+  is kept in `synthesis_history` (records saved before this get their one synthesis as history).
+- **Contradictions surfaced.** `synthesize()` never showed the model the recorded
+  contradictions, although the core's own docstring promised they are "surfaced in synthesis rather
+  than one side being silently dropped". The prompt now lists every known disagreement and asks for
+  each to be stated with which side the evidence favours, or that it is unsettled.
+- **No double counting.** `add_contradiction` is idempotent in either claim order, and
+  `detect_contradictions` no longer re-asks the model about pairs already recorded, so a follow-up
+  round costs only the new pairs.
+- **The loop** (`stages.run_backward_edge`): spawn follow-ups, work each (discovery aimed at
+  settling the disagreement: "find sources that settle it, primary sources, specifications", then
+  evidence tagged with the task), close them, re-detect, write the revised synthesis. Bounded to 3
+  follow-ups per call; with nothing unsettled it spends nothing. Exposed as the
+  `research_follow_up` chat tool; `research_status` reports tasks and synthesis versions.
+- **In the graph** (#095): follow-up tasks become task objects, the contradiction `spawned` its
+  task, the task `produced` its claims, and every synthesis version is a result answering the
+  question.
+- Also: `store.py` serialised claims with a hand-listed field copy (the same pattern that nearly
+  dropped `final_url` in `reject_claim`); it now uses the dataclass's own field list in both
+  directions.
+
+Tests: forward-only stages, task gating, one task per contradiction, order-independent
+contradiction dedupe, revision gating and history, save/load round trip and old-record
+compatibility, the full backward edge end to end (discovery prompt carries the disagreement, the
+new claim carries the task, the synthesis prompt lists the disagreement, only new pairs are
+re-judged), the no-op case costs no model call, the graph shows contradiction -> spawned task ->
+produced claim with both results, and the new tool's honest outputs.

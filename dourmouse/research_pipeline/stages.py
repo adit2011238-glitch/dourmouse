@@ -48,7 +48,7 @@ import time
 from itertools import combinations
 from typing import Any
 
-from .core import Claim, Contradiction, ResearchRecord
+from .core import Claim, Contradiction, ResearchRecord, Stage, Task, contradiction_key
 
 _URL_RE = re.compile(r"https?://[^\s)\]>\"']+")
 _CLAIM_RE = re.compile(r"CLAIM:\s*(.*?)\s*PASSAGE:\s*(.*?)\s*LOCATION:\s*(.*)", re.DOTALL)
@@ -92,9 +92,22 @@ _SYNTHESIS_PROMPT = (
     "claims do not support, and never fill a gap from outside knowledge.\n\n"
     "QUESTION: {question}\n\n"
     "REAL CLAIMS (each with its real source):\n{claims_block}\n\n"
+    "{disagreements_block}"
     "Write a real, cohesive answer. Cite each claim by its real source URL "
     "inline. If the claims do not fully answer the question, say so honestly "
     "rather than guessing at the rest."
+)
+
+_DISAGREEMENTS = (
+    "KNOWN DISAGREEMENTS between the claims (state each one plainly in the "
+    "answer and say which side the evidence favours, or that it is unsettled; "
+    "never quietly pick one side):\n{items}\n\n"
+)
+
+_FOLLOW_UP_DISCOVERY = (
+    "{sub_question}\n\nTwo sources disagree on this: {note}. Find sources "
+    "that settle it (primary sources, specifications, official documentation "
+    "or data), not more of the same claims."
 )
 
 _NO_EVIDENCE_SYNTHESIS = (
@@ -199,6 +212,7 @@ def discover_sources(
     registry: Any,
     *,
     sub_question_index: int = 0,
+    query: str | None = None,
     **dispatch_kwargs: Any,
 ) -> ResearchRecord:
     """Real source discovery: a real nested dispatch run forced to the
@@ -212,7 +226,7 @@ def discover_sources(
 
     if not record.plan:
         raise ValueError("cannot discover sources before a real plan exists")
-    sub_question = record.plan[sub_question_index]
+    sub_question = query or record.plan[sub_question_index]
     messages = [
         {"role": "user", "content": _DISCOVERY_INSTRUCTIONS.format(question=sub_question)},
     ]
@@ -243,6 +257,8 @@ def extract_evidence(
     *,
     source_index: int = 0,
     sub_question_index: int = 0,
+    sub_question: str | None = None,
+    task_id: str = "",
     **dispatch_kwargs: Any,
 ) -> ResearchRecord:
     """Real per-source evidence extraction. The source is fetched directly
@@ -274,7 +290,7 @@ def extract_evidence(
     if not record.sources:
         raise ValueError("cannot extract evidence before real sources exist")
     url = record.sources[source_index]
-    sub_question = record.plan[sub_question_index]
+    sub_question = sub_question or record.plan[sub_question_index]
 
     try:
         doc = fetch_document(url)
@@ -326,6 +342,7 @@ def extract_evidence(
         agent="research_info",
         sub_question=sub_question,
         final_url=doc.final_url,
+        task_id=task_id,
     )
     record.add_claim(claim)
     return record
@@ -354,9 +371,20 @@ def synthesize(record: ResearchRecord) -> ResearchRecord:
     claims_block = "\n".join(
         f"{i}. {c.claim} (source: {c.url})" for i, c in enumerate(active, 1)
     )
+    # Contradictions are surfaced, never silently resolved by omission
+    # (harsh acceptance test 2; finding #096: synthesis used to ignore them).
+    by_fp = {_claim_fingerprint(c): c for c in active}
+    items = [
+        f"- {by_fp[k.claim_a_id].claim} VERSUS {by_fp[k.claim_b_id].claim} ({k.note})"
+        for k in record.contradictions
+        if k.claim_a_id in by_fp and k.claim_b_id in by_fp
+    ]
+    disagreements = _DISAGREEMENTS.format(items="\n".join(items)) if items else ""
     session = ChatSession(DispatchRegistry(), session_file=None)
     result = session.ask(
-        _SYNTHESIS_PROMPT.format(question=record.question, claims_block=claims_block),
+        _SYNTHESIS_PROMPT.format(
+            question=record.question, claims_block=claims_block, disagreements_block=disagreements,
+        ),
         force_plain_dispatch=True,
     )
     text = _strip_internal_diagnostics((result.get("final_text") or "").strip())
@@ -471,11 +499,15 @@ def detect_contradictions(record: ResearchRecord) -> ResearchRecord:
         if c.sub_question:
             groups.setdefault(c.sub_question, []).append(c)
 
+    # Pairs already recorded as contradicting are not asked again: re-running
+    # detection after a follow-up round must cost only the NEW pairs.
+    known = {frozenset((k.claim_a_id, k.claim_b_id)) for k in record.contradictions}
     pairs_to_check = [
         (sub_question, a, b)
         for sub_question, claims in groups.items()
         if len(claims) >= 2
         for a, b in combinations(claims, 2)
+        if frozenset((_claim_fingerprint(a), _claim_fingerprint(b))) not in known
     ]
     if not pairs_to_check:
         return record
@@ -505,4 +537,72 @@ def detect_contradictions(record: ResearchRecord) -> ResearchRecord:
                     note=note,
                 )
             )
+    return record
+
+
+def spawn_follow_ups(record: ResearchRecord) -> tuple[Task, ...]:
+    """The backward edge (R3, finding #096): every contradiction without
+    follow-up work spawns a Task to settle it. Returns the tasks still open."""
+    for k in record.contradictions:
+        record.spawn_task_for(k)
+    return record.open_tasks()
+
+
+def run_follow_up(
+    record: ResearchRecord,
+    registry: Any,
+    task_id: str,
+    *,
+    max_sources: int = 2,
+    **dispatch_kwargs: Any,
+) -> ResearchRecord:
+    """Work one follow-up task: discover sources aimed at settling its
+    contradiction, extract evidence tagged with the task, then close it.
+    One bad source never blocks the rest (same rule as run_full_pipeline).
+    The record's own stage does not move: the project only goes forward and
+    the evidence grows."""
+    task = next(t for t in record.tasks if t.task_id == task_id)
+    if task.status != "OPEN":
+        raise ValueError(f"task {task_id} is not open")
+    contradiction = next(
+        (k for k in record.contradictions if contradiction_key(k) == task.spawned_by), None,
+    )
+    note = contradiction.note if contradiction is not None else task.title
+    before = len(record.sources)
+    discover_sources(
+        record, registry,
+        query=_FOLLOW_UP_DISCOVERY.format(sub_question=task.sub_question or record.question, note=note),
+        **dispatch_kwargs,
+    )
+    for source_index in list(range(before, len(record.sources)))[:max_sources]:
+        try:
+            extract_evidence(
+                record, registry, source_index=source_index,
+                sub_question=task.sub_question or record.question, task_id=task_id,
+                **dispatch_kwargs,
+            )
+        except ValueError:
+            continue
+    record.complete_task(task_id)
+    return record
+
+
+def run_backward_edge(
+    record: ResearchRecord, registry: Any, *, max_tasks: int = 3, **dispatch_kwargs: Any,
+) -> ResearchRecord:
+    """Contradiction -> new task -> new evidence -> revised synthesis, once.
+    Bounded: at most ``max_tasks`` follow-ups per call, so a pile of
+    contradictions cannot become an unbounded spend. Needs a synthesis to
+    revise; a record not yet synthesized has nothing to go back from."""
+    if record.stage is not Stage.SYNTHESIZED:
+        raise ValueError("the backward edge starts from a synthesized record")
+    ran = spawn_follow_ups(record)[:max_tasks]
+    if not ran:
+        return record  # nothing unsettled: re-synthesizing would only cost a call
+    for task in ran:
+        run_follow_up(record, registry, task.task_id, **dispatch_kwargs)
+    if record.open_tasks():
+        return record  # over the bound: the rest wait for the next call
+    detect_contradictions(record)
+    synthesize(record)
     return record

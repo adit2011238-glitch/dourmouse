@@ -47,6 +47,7 @@ from dourmouse.research_pipeline.stages import (
     discover_sources,
     extract_evidence,
     plan,
+    run_backward_edge,
     run_full_pipeline,
     synthesize,
 )
@@ -225,6 +226,50 @@ def _build_run_pipeline_tool(registry: DispatchRegistry) -> ToolSpec:
     )
 
 
+def _build_follow_up_tool(registry: DispatchRegistry) -> ToolSpec:
+    def handler(arguments: dict[str, Any]) -> str:
+        question = (arguments.get("question") or "").strip()
+        err = _require_question(arguments, "research_follow_up")
+        if err:
+            return err
+        record = _store().load(question)
+        if record is None:
+            return f"No real research record exists yet for {question!r}."
+        before_claims, before_syn = len(record.claims), len(record.synthesis_history)
+        try:
+            run_backward_edge(record, registry)
+        except ValueError as exc:
+            return f"ERROR: {exc}"
+        _save(record)
+        done = [t for t in record.tasks if t.status == "DONE"]
+        if len(record.synthesis_history) == before_syn and not record.open_tasks():
+            return "Nothing to follow up: no unsettled contradiction on this record."
+        lines = [
+            f"Follow-up tasks worked: {len(done)} done, {len(record.open_tasks())} still open.",
+            f"Claims: {before_claims} -> {len(record.claims)}.",
+        ]
+        if len(record.synthesis_history) > before_syn:
+            lines.append(f"Revised synthesis (version {len(record.synthesis_history)}):\n{record.synthesis}")
+        return "\n".join(lines)
+
+    return ToolSpec(
+        name="research_follow_up",
+        description=(
+            "The backward edge: for every contradiction on a synthesized "
+            "research record, spawn a follow-up task, look for sources that "
+            "settle it, extract that evidence, then re-check contradictions "
+            "and write a REVISED synthesis (the earlier one is kept). Call "
+            "after research_synthesize when contradictions were found."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": ["question"],
+        },
+        handler=handler,
+    )
+
+
 def _research_detect_contradictions_tool(arguments: dict[str, Any]) -> str:
     question = (arguments.get("question") or "").strip()
     err = _require_question(arguments, "research_detect_contradictions")
@@ -273,6 +318,8 @@ def _research_status_tool(arguments: dict[str, Any]) -> str:
         f"sources: {len(record.sources)} real URL(s)",
         f"claims: {len(record.claims)} total, {len(active)} active",
         f"contradictions: {len(record.contradictions)}",
+        f"follow-up tasks: {len(record.tasks)} ({len(record.open_tasks())} open)",
+        f"synthesis versions: {len(record.synthesis_history)}",
     ]
     if record.synthesis:
         lines.append(f"synthesis: {record.synthesis}")
@@ -309,6 +356,7 @@ def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
             _build_discover_sources_tool(registry),
             _build_extract_evidence_tool(registry),
             _build_run_pipeline_tool(registry),
+            _build_follow_up_tool(registry),
             ToolSpec(
                 name="research_detect_contradictions",
                 description=(

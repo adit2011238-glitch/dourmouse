@@ -34,7 +34,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from dourmouse.research_pipeline.core import Claim, ResearchRecord
+from dourmouse.research_pipeline.core import Claim, ResearchRecord, contradiction_key
 
 from .model import OBJECT_TYPES, Mutability
 from .store import GraphStore
@@ -100,6 +100,7 @@ def _sync_record(store: GraphStore, record: ResearchRecord, *, by: str) -> dict[
         _ensure(store, "source", "src-" + _h(url), {"url": url}, by=by, project_id=pid)
 
     claim_ids: dict[str, str] = {}
+    claim_tasks: list[tuple[str, str]] = []
     for c in record.claims:
         author = c.agent or by
         src_id = "src-" + _h(c.url)
@@ -145,10 +146,14 @@ def _sync_record(store: GraphStore, record: ResearchRecord, *, by: str) -> dict[
             _ensure(store, "research_question", target, {"text": c.sub_question}, by=by, project_id=pid)
             store.link(("research_question", ids["question"]), "decomposes_into", ("research_question", target), created_by=by)
         store.link(("claim", clm_id), "answers", ("research_question", target or ids["question"]), created_by=author)
+        if c.task_id:
+            claim_tasks.append((c.task_id, clm_id))
 
+    con_ids: dict[str, str] = {}
     for k in record.contradictions:
         a, b = claim_ids.get(k.claim_a_id), claim_ids.get(k.claim_b_id)
         con_id = "con-" + _h(k.claim_a_id, k.claim_b_id, k.sub_question)
+        con_ids[contradiction_key(k)] = con_id
         body = {"note": k.note or "(no note recorded)"}
         if k.sub_question:
             body["sub_question"] = k.sub_question
@@ -158,10 +163,31 @@ def _sync_record(store: GraphStore, record: ResearchRecord, *, by: str) -> dict[
             store.link(("contradiction", con_id), "about", ("claim", b), created_by=by)
             store.link(("claim", a), "contradicted_by", ("claim", b), created_by=by)
 
-    if record.synthesis.strip():
-        res_id = "res-" + _h(record.question, record.synthesis)
-        _ensure(store, "result", res_id, {"summary": record.synthesis}, by=by, project_id=pid)
-        store.link(("result", res_id), "answers", ("research_question", ids["question"]), created_by=by)
+    # R3 (finding #096): follow-up tasks, the backward edge made visible.
+    task_ids: dict[str, str] = {}
+    for t in record.tasks:
+        tid = "task-" + _h(record.question, t.task_id)
+        task_ids[t.task_id] = tid
+        _ensure(store, "task", tid, {"title": t.title, "stage": t.stage, "status": t.status}, by=by, project_id=pid)
+        if t.sub_question:
+            sq = sub_ids.get(t.sub_question) or "q-" + _h(record.question, t.sub_question)
+            try:
+                store.link(("task", tid), "about", ("research_question", sq), created_by=by)
+            except KeyError:
+                store.link(("task", tid), "about", ("research_question", ids["question"]), created_by=by)
+        if t.spawned_by and t.spawned_by in con_ids:
+            store.link(("contradiction", con_ids[t.spawned_by]), "spawned", ("task", tid), created_by=by)
+    for task_id, clm_id in claim_tasks:
+        if task_id in task_ids:
+            store.link(("task", task_ids[task_id]), "produced", ("claim", clm_id), created_by=by)
+
+    # Every synthesis the record has had: a revised answer never erases the
+    # earlier one, and each stays linked to the question it answered.
+    for text in dict.fromkeys(record.synthesis_history or ((record.synthesis,) if record.synthesis else ())):
+        if text.strip():
+            res_id = "res-" + _h(record.question, text)
+            _ensure(store, "result", res_id, {"summary": text}, by=by, project_id=pid)
+            store.link(("result", res_id), "answers", ("research_question", ids["question"]), created_by=by)
     return ids
 
 

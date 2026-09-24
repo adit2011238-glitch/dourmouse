@@ -1042,3 +1042,6 @@ and a real build sequence, not just a requirement statement:
 - [x] Phase 2 R1 + R2 (finding #095) 2026-09-24 -- research_graph: 21 typed objects (immutable
   evidence chain, versioned interpretations with as_of), typed edges, all-or-nothing sync, one-time
   non-destructive migration off the JSON blob; ResearchStore keeps the graph in step.
+- [x] Phase 2 R3 (finding #096) 2026-09-24 -- the backward edge: contradiction spawns a follow-up
+  task, evidence tagged with it enters after synthesis, revised synthesis kept alongside the old;
+  stages forward-only; contradictions surfaced in synthesis; research_follow_up tool.

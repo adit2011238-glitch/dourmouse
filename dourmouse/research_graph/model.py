@@ -94,7 +94,7 @@ RELATIONS: frozenset[str] = frozenset({
     "about",            # contradiction/task/result about an object
     "spawned",          # contradiction spawned task (the backward edge, R3)
     "assigned_to",      # task assigned_to agent
-    "produced",         # experiment_run produced result/metric/artifact
+    "produced",         # experiment_run produced result/metric/artifact; task produced claim
     "run_of",           # experiment_run run_of experiment
     "uses",             # experiment uses dataset
     "replicates",       # experiment_run replicates experiment_run

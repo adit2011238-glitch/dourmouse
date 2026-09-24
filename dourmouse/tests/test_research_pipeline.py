@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -943,3 +944,156 @@ class TestExtractEvidenceLocationComesFromTheDocument:
         ])
         extract_evidence(record, _research_info_registry())
         assert record.claims[0].location == "Guide > Setup, paragraph 1"
+
+
+# --------------------------------------------------------------------------- #
+# R3 (finding #096): the backward edge
+# --------------------------------------------------------------------------- #
+
+def _synthesized_with_contradiction() -> ResearchRecord:
+    from dourmouse.research_pipeline.stages import _claim_fingerprint
+
+    r = ResearchRecord(question="Does MCP support HTTP?")
+    r.set_plan(["Which transports?"])
+    r.add_sources(["https://a.example/1", "https://b.example/1"])
+    a = _claim("MCP supports HTTP", source="a1", sub_question="Which transports?")
+    b = _claim("MCP is stdio only", source="b1", sub_question="Which transports?")
+    r.add_claim(a)
+    r.add_claim(b)
+    r.add_contradiction(Contradiction(_claim_fingerprint(a), _claim_fingerprint(b), "Which transports?", "HTTP vs stdio only"))
+    r.set_synthesis("First answer: unclear.")
+    return r
+
+
+class TestForwardOnlyStagesAndTasks:
+    def test_new_sources_after_synthesis_never_drag_the_stage_back(self):
+        r = _synthesized_with_contradiction()
+        r.add_sources(["https://c.example/1"])
+        assert r.stage is Stage.SYNTHESIZED
+
+    def test_evidence_after_synthesis_needs_an_open_follow_up_task(self):
+        r = _synthesized_with_contradiction()
+        with pytest.raises(ValueError):
+            r.add_claim(_claim("late claim", source="c1"))
+        task = r.spawn_task_for(r.contradictions[0])
+        r.add_claim(replace(_claim("settling claim", source="c1"), task_id=task.task_id))
+        assert r.stage is Stage.SYNTHESIZED
+        r.complete_task(task.task_id)
+        with pytest.raises(ValueError, match="not open"):
+            r.add_claim(replace(_claim("too late", source="d1"), task_id=task.task_id))
+
+    def test_one_task_per_contradiction(self):
+        r = _synthesized_with_contradiction()
+        assert r.spawn_task_for(r.contradictions[0]) == r.spawn_task_for(r.contradictions[0])
+        assert len(r.tasks) == 1
+        with pytest.raises(ValueError):
+            r.spawn_task_for(Contradiction("x", "y", "z"))
+
+    def test_the_same_contradiction_is_recorded_once_in_either_order(self):
+        r = _synthesized_with_contradiction()
+        k = r.contradictions[0]
+        r.add_contradiction(k)
+        r.add_contradiction(Contradiction(k.claim_b_id, k.claim_a_id, k.sub_question, "flipped"))
+        assert len(r.contradictions) == 1
+
+    def test_a_revised_synthesis_waits_for_open_tasks_and_keeps_the_old_one(self):
+        r = _synthesized_with_contradiction()
+        task = r.spawn_task_for(r.contradictions[0])
+        with pytest.raises(ValueError, match="still open"):
+            r.set_synthesis("Second answer")
+        r.complete_task(task.task_id)
+        r.set_synthesis("Second answer: HTTP is supported.")
+        assert r.synthesis_history == ("First answer: unclear.", "Second answer: HTTP is supported.")
+
+    def test_tasks_history_and_task_ids_survive_save_and_load(self, tmp_path):
+        from dourmouse.research_pipeline.store import ResearchStore
+
+        r = _synthesized_with_contradiction()
+        task = r.spawn_task_for(r.contradictions[0])
+        r.add_claim(replace(_claim("settling", source="c1"), task_id=task.task_id))
+        store = ResearchStore(tmp_path / "research.db")
+        store.save(r, now=1.0)
+        loaded = store.load(r.question)
+        assert loaded.tasks == r.tasks
+        assert loaded.synthesis_history == r.synthesis_history
+        assert loaded.claims[-1].task_id == task.task_id
+
+    def test_a_record_saved_before_096_gets_its_synthesis_as_history(self):
+        from dourmouse.research_pipeline.store import _record_from_dict
+
+        old = {"question": "q", "stage": "SYNTHESIZED", "plan": ["s"], "sources": [], "claims": [],
+               "contradictions": [], "synthesis": "the old answer"}
+        assert _record_from_dict(old).synthesis_history == ("the old answer",)
+
+
+class TestBackwardEdge:
+    def test_contradiction_spawns_work_that_revises_the_synthesis(self, monkeypatch):
+        import dourmouse.dispatch as dispatch_module
+        from dourmouse.research_pipeline.stages import run_backward_edge
+
+        r = _synthesized_with_contradiction()
+        discovery_prompts = []
+
+        def _dispatch(messages, registry, **kw):
+            discovery_prompts.append(messages[0]["content"])
+            return {"final_text": "ok", "transcript": [
+                {"type": "tool_use", "name": "fetch_url", "raw_arguments": json.dumps({"url": "https://spec.example/mcp"})},
+            ]}
+
+        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_fetch(monkeypatch, {"https://spec.example/mcp": "The specification defines stdio and Streamable HTTP."})
+        _install_chat_fake(monkeypatch, [
+            "CLAIM: The spec defines HTTP.\nPASSAGE: The specification defines stdio and Streamable HTTP.\nLOCATION: top",
+            "CONTRADICTION: no\nNOTE: consistent",
+            "CONTRADICTION: yes\nNOTE: spec shows HTTP exists",
+            "Revised: MCP supports HTTP per the specification.",
+        ])
+        run_backward_edge(r, _research_info_registry())
+
+        assert "HTTP vs stdio only" in discovery_prompts[0]  # discovery aimed at settling it
+        (task,) = r.tasks
+        assert task.status == "DONE"
+        assert r.claims[-1].task_id == task.task_id
+        assert r.stage is Stage.SYNTHESIZED
+        assert r.synthesis_history[-1] == "Revised: MCP supports HTTP per the specification."
+        assert len(r.synthesis_history) == 2
+        synthesis_prompt = _FakeSession.calls[-1]
+        assert "KNOWN DISAGREEMENTS" in synthesis_prompt and "HTTP vs stdio only" in synthesis_prompt
+        # Detection only asked about the NEW pairs, never the known one again.
+        assert len([c for c in _FakeSession.calls if "CONTRADICTION: yes or no" in c]) == 2
+
+    def test_nothing_unsettled_costs_nothing(self, monkeypatch):
+        from dourmouse.research_pipeline.stages import run_backward_edge
+
+        r = _synthesized_with_contradiction()
+        r.complete_task(r.spawn_task_for(r.contradictions[0]).task_id)
+        _install_chat_fake(monkeypatch, ["should never be used"])
+        run_backward_edge(r, _research_info_registry())
+        assert _FakeSession.calls == []
+        assert len(r.synthesis_history) == 1
+
+    def test_the_backward_edge_needs_a_synthesis(self):
+        from dourmouse.research_pipeline.stages import run_backward_edge
+
+        r = ResearchRecord(question="q")
+        r.set_plan(["s"])
+        with pytest.raises(ValueError, match="synthesized"):
+            run_backward_edge(r, _research_info_registry())
+
+    def test_the_graph_shows_contradiction_spawned_task_produced_claim(self, tmp_path):
+        from dourmouse.research_graph.store import GraphStore
+        from dourmouse.research_graph.sync import sync_record
+
+        r = _synthesized_with_contradiction()
+        task = r.spawn_task_for(r.contradictions[0])
+        r.add_claim(replace(_claim("settling", source="c1", sub_question="Which transports?"), task_id=task.task_id))
+        r.complete_task(task.task_id)
+        r.set_synthesis("Second answer")
+        g = GraphStore(tmp_path / "g.db")
+        sync_record(g, r)
+        (con,) = g.find("contradiction")
+        (spawned,) = g.related(con.ref, "spawned")
+        assert spawned.body["status"] == "DONE"
+        (produced,) = g.related(spawned.ref, "produced")
+        assert produced.body["text"] == "settling"
+        assert sorted(o.body["summary"] for o in g.find("result")) == ["First answer: unclear.", "Second answer"]

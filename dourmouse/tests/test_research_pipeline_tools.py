@@ -249,6 +249,30 @@ class TestBuildResearchPipelineSubagent:
         names = {t.name for t in sub.tools}
         assert names == {
             "research_plan", "research_discover_sources", "research_extract_evidence",
-            "research_run_pipeline", "research_detect_contradictions",
+            "research_run_pipeline", "research_follow_up", "research_detect_contradictions",
             "research_synthesize", "research_status",
         }
+
+
+class TestResearchFollowUpTool:
+    def test_reports_nothing_to_do_honestly(self, monkeypatch, tmp_path):
+        from dourmouse.research_pipeline.store import ResearchStore
+        from dourmouse.tests.test_research_pipeline import _synthesized_with_contradiction
+
+        monkeypatch.setattr(rpt, "default_db", lambda: tmp_path / "research.db")
+        r = _synthesized_with_contradiction()
+        r.complete_task(r.spawn_task_for(r.contradictions[0]).task_id)
+        ResearchStore(tmp_path / "research.db").save(r, now=1.0)
+        tool = rpt._build_follow_up_tool(_registry())
+        assert tool.handler({"question": r.question}).startswith("Nothing to follow up")
+
+    def test_an_unsynthesized_record_is_an_honest_error(self, monkeypatch, tmp_path):
+        from dourmouse.research_pipeline.core import ResearchRecord
+        from dourmouse.research_pipeline.store import ResearchStore
+
+        monkeypatch.setattr(rpt, "default_db", lambda: tmp_path / "research.db")
+        r = ResearchRecord(question="half done")
+        r.set_plan(["s"])
+        ResearchStore(tmp_path / "research.db").save(r, now=1.0)
+        out = rpt._build_follow_up_tool(_registry()).handler({"question": "half done"})
+        assert out.startswith("ERROR:") and "synthesized" in out

@@ -13,12 +13,13 @@ import json
 import sqlite3
 import threading
 import time
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any, Optional
 
 from dourmouse.config import workspace_dir
 
-from .core import Claim, Contradiction, ResearchRecord, Stage
+from .core import Claim, Contradiction, ResearchRecord, Stage, Task
 
 
 # Real gap closed (2026-09-20, named in the standing status report): every
@@ -114,6 +115,8 @@ def _record_to_dict(r: ResearchRecord) -> dict[str, Any]:
         "claims": [_claim_to_dict(c) for c in r.claims],
         "contradictions": [_contradiction_to_dict(c) for c in r.contradictions],
         "synthesis": r.synthesis,
+        "synthesis_history": list(r.synthesis_history),
+        "tasks": [asdict(t) for t in r.tasks],
     }
 
 
@@ -126,28 +129,28 @@ def _record_from_dict(d: dict[str, Any]) -> ResearchRecord:
         claims=tuple(_claim_from_dict(c) for c in d.get("claims", [])),
         contradictions=tuple(_contradiction_from_dict(c) for c in d.get("contradictions", [])),
         synthesis=d.get("synthesis", ""),
+        # Records saved before #096 have no history: their one synthesis is it.
+        synthesis_history=tuple(d.get("synthesis_history") or ([d["synthesis"]] if d.get("synthesis") else [])),
+        tasks=tuple(_from_fields(Task, t) for t in d.get("tasks", [])),
     )
+
+
+def _from_fields(cls: Any, d: dict[str, Any]) -> Any:
+    """Build a dataclass from a stored dict, ignoring keys it no longer has
+    and letting fields added since default. Driven by the class's own field
+    list (finding #096): the old hand-listed copies were how new fields got
+    silently dropped (final_url nearly was, in reject_claim)."""
+    names = {f.name for f in fields(cls)}
+    return cls(**{k: v for k, v in d.items() if k in names})
 
 
 def _claim_to_dict(c: Claim) -> dict[str, Any]:
-    return {
-        "claim": c.claim, "source_id": c.source_id, "url": c.url,
-        "document_hash": c.document_hash, "location": c.location,
-        "passage": c.passage, "retrieved_at": c.retrieved_at,
-        "agent": c.agent, "status": c.status, "sub_question": c.sub_question,
-        "final_url": c.final_url,
-    }
+    return asdict(c)
 
 
 def _claim_from_dict(d: dict[str, Any]) -> Claim:
-    return Claim(
-        claim=d["claim"], source_id=d["source_id"], url=d["url"],
-        document_hash=d["document_hash"], location=d["location"],
-        passage=d["passage"], retrieved_at=d["retrieved_at"],
-        agent=d["agent"], status=d.get("status", "ACTIVE"),
-        sub_question=d.get("sub_question", ""),
-        final_url=d.get("final_url", ""),
-    )
+    claim: Claim = _from_fields(Claim, d)
+    return claim
 
 
 def _contradiction_to_dict(c: Contradiction) -> dict[str, Any]:
