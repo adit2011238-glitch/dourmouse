@@ -51,7 +51,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-VERSION = "1"
+VERSION = "2"
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 _JOB_RE = re.compile(r"^[0-9a-f]{32}$")
 MAX_BLOB_BYTES = 512 * 1024 * 1024
@@ -138,7 +138,11 @@ class BlobStore:
 def _job_environment() -> dict[str, str]:
     """Only what Python needs to start; never the node's own environment,
     which may hold tokens and keys."""
-    keep = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "PATH", "LANG", "LC_ALL", "HOME", "USERPROFILE")
+    # PROCESSOR_ARCHITECTURE / NUMBER_OF_PROCESSORS: Windows' platform.machine()
+    # and numerical libraries read them (live, machine() came back empty
+    # without it); they hold no secrets.
+    keep = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "PATH", "LANG", "LC_ALL", "HOME", "USERPROFILE",
+            "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS")
     env = {k: v for k, v in os.environ.items() if k.upper() in keep}
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONNOUSERSITE"] = "1"
@@ -221,6 +225,46 @@ class JobRunner:
         self.python = python
         self.blob_fetch = blob_fetch  # callable(sha) -> bytes, for job inputs
         self._lock = threading.Lock()
+        self._environment: dict[str, Any] | None = None
+        self._env_ready = threading.Event()
+        # Probed in the background from startup: listing the interpreter's
+        # packages takes seconds, and a health check must never wait on it.
+        threading.Thread(target=self._probe_environment, daemon=True, name="env-probe").start()
+
+    def environment(self, wait_s: float = 120.0) -> dict[str, Any]:
+        """What the job interpreter actually is (version, platform, installed
+        packages), plus a hash of it: the experiment record's "environment
+        hash" (finding #098). A run is only reproducible if you know what it
+        ran on."""
+        if not self._env_ready.wait(wait_s):
+            return {"pending": True}
+        assert self._environment is not None
+        return self._environment
+
+    def _probe_environment(self) -> None:
+        try:
+            self._environment = self._run_probe()
+        finally:
+            self._env_ready.set()
+
+    def _run_probe(self) -> dict[str, Any]:
+        probe = (
+            "import json, platform, sys\n"
+            "from importlib import metadata\n"
+            "pk = sorted(f\"{d.metadata['Name']}=={d.version}\" for d in metadata.distributions() if d.metadata['Name'])\n"
+            "print(json.dumps({'python': sys.version.split()[0], 'implementation': platform.python_implementation(),"
+            " 'platform': platform.platform(), 'machine': platform.machine(), 'packages': pk}))"
+        )
+        try:
+            out = subprocess.run(  # noqa: S603 -- fixed interpreter, fixed probe
+                [self.python, "-I", "-c", probe], capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=60, env=_job_environment(), check=True,
+            ).stdout
+            env: dict[str, Any] = json.loads(out)
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            env = {"error": f"environment probe failed: {type(exc).__name__}: {exc}"}
+        env["sha256"] = hashlib.sha256(json.dumps(env, sort_keys=True).encode("utf-8")).hexdigest()
+        return env
 
     def _dir(self, job_id: str) -> Path:
         return self.root / job_id
@@ -262,6 +306,7 @@ class JobRunner:
             "id": job_id, "state": "queued", "submitted_at": time.time(), "timeout_s": timeout,
             "memory_mb": memory_mb, "inputs": inputs, "label": str(spec.get("label", ""))[:200],
             "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+            "environment": {k: v for k, v in self.environment().items() if k != "packages"},
         }
         self._write_status(job_id, status)
         threading.Thread(target=self._run, args=(job_id,), daemon=True, name=f"job-{job_id[:8]}").start()
@@ -311,9 +356,13 @@ class JobRunner:
             kwargs["preexec_fn"] = _limits
             status["memory_limit"] = "enforced (RLIMIT_AS)"
         else:
-            # macOS does not enforce RLIMIT_AS (setrlimit refuses it); say so
-            # on the job rather than pretend. Nodes run on Windows anyway.
-            status["memory_limit"] = f"NOT enforced on {sys.platform}"
+            # macOS does not enforce RLIMIT_AS (setrlimit refuses it). Dourmouse
+            # runs on the Mac alone (owner, 2026-09-24), so the limit is
+            # enforced here by a resident-memory watchdog instead (finding
+            # #098); without psutil the job says so rather than pretend.
+            status["memory_limit"] = (
+                "enforced (RSS watchdog, 250 ms)" if _psutil() is not None else f"NOT enforced on {sys.platform}"
+            )
         self._write_status(job_id, status)
         with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:
             proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter, job's own file
@@ -326,6 +375,11 @@ class JobRunner:
                     job_handle = _limit_memory_windows(proc.pid, status["memory_mb"])
                 finally:
                     _resume_windows(proc.pid)
+            over_limit = threading.Event()
+            if status["memory_limit"].startswith("enforced (RSS"):
+                threading.Thread(
+                    target=_rss_watchdog, args=(proc, status["memory_mb"], over_limit), daemon=True,
+                ).start()
             try:
                 code = proc.wait(timeout=status["timeout_s"])
                 state = "succeeded" if code == 0 else "failed"
@@ -333,6 +387,9 @@ class JobRunner:
                 proc.kill()
                 code = proc.wait()
                 state = "timed_out"
+            if over_limit.is_set():
+                state = "failed"
+                status["error"] = f"memory limit exceeded ({status['memory_mb']} MB)"
             if sys.platform == "win32" and job_handle is not None:
                 import ctypes
                 from ctypes import wintypes
@@ -363,6 +420,40 @@ class JobRunner:
         if base not in target.parents:
             raise ValueError("artifact path escapes the job's output folder")
         return target.read_bytes()
+
+
+def _psutil() -> Any:
+    try:
+        import psutil
+    except ImportError:
+        return None
+    return psutil
+
+
+def _rss_watchdog(proc: subprocess.Popen[bytes], memory_mb: int, over: threading.Event) -> None:
+    """Kill the job (and its children) once their combined resident memory
+    passes the limit. Polls every 250 ms, so a burst faster than that can
+    overshoot briefly before the kill; that is the honest limit of this
+    method, and the only one macOS allows."""
+    psutil = _psutil()
+    limit = memory_mb * 1024 * 1024
+    try:
+        root = psutil.Process(proc.pid)
+        while proc.poll() is None:
+            procs = [root, *root.children(recursive=True)]
+            rss = 0
+            for p in procs:
+                with contextlib.suppress(psutil.Error):
+                    rss += p.memory_info().rss
+            if rss > limit:
+                over.set()
+                for p in reversed(procs):
+                    with contextlib.suppress(psutil.Error):
+                        p.kill()
+                return
+            time.sleep(0.25)
+    except psutil.Error:
+        return
 
 
 def _tail(path: Path) -> str:
@@ -397,6 +488,7 @@ class NodeApp:
             out["free_bytes"] = self.blobs.free_bytes()
         if self.jobs is not None:
             out["python"] = self.jobs.python
+            out["environment"] = self.jobs.environment(wait_s=0)  # never block a health check
         return out
 
 

@@ -1048,3 +1048,5 @@ and a real build sequence, not just a requirement statement:
 - [x] Device network (finding #097) 2026-09-24 -- stdlib node service (data + compute roles, token
   auth, Tailscale-only bind, per-job env strip + time + memory limits), Mac client and registry.
   Desktop compute node live over Tailscale; Dell pending its SSH setup.
+- [x] Mac-only + job environment (finding #098) 2026-09-24 -- owner scrapped other devices; job runner
+  becomes the Mac's sandbox with a real memory limit (RSS watchdog) and an environment hash per job.

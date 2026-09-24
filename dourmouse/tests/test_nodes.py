@@ -119,8 +119,7 @@ class TestComputeRole:
     def test_the_job_says_whether_its_memory_limit_is_enforced(self, node):
         client, _ = node
         st = client.wait_job(client.submit_job("print(1)")["id"], poll_s=0.1, max_wait_s=30)
-        expected = "NOT enforced" if sys.platform == "darwin" else "enforced ("
-        assert expected in st["memory_limit"]
+        assert st["memory_limit"].startswith("enforced (")
 
     def test_a_job_that_cannot_start_is_recorded_as_failed_not_left_running(self, tmp_path):
         runner = node_server.JobRunner(tmp_path / "jobs", "/no/such/python", lambda sha: b"")
@@ -132,10 +131,12 @@ class TestComputeRole:
         st = runner.status(job_id)
         assert st["state"] == "failed" and "error" in st
 
-    @pytest.mark.skipif(sys.platform == "darwin", reason="macOS does not enforce RLIMIT_AS")
     def test_a_job_over_its_memory_limit_is_stopped(self, node):
         client, _ = node
-        code = "x = bytearray(600 * 1024 * 1024)\nprint('allocated')"
+        # Grows gradually (as real workloads do) so the Mac's 250 ms RSS
+        # watchdog sees it; Windows and Linux stop it at the OS level.
+        code = ("import time\nchunks = []\nfor _ in range(60):\n"
+                "    chunks.append(bytearray(20 * 1024 * 1024)); time.sleep(0.05)\nprint('allocated')")
         st = client.wait_job(client.submit_job(code, memory_mb=128)["id"], poll_s=0.1, max_wait_s=60)
         assert st["state"] == "failed"
         assert "allocated" not in st["stdout_tail"]
@@ -170,3 +171,13 @@ class TestRegistry:
 
     def test_no_registry_means_no_nodes(self, tmp_path):
         assert load_registry(tmp_path / "missing.json") == {}
+
+
+def test_every_job_records_the_environment_it_ran_on(node):
+    client, _ = node
+    st = client.wait_job(client.submit_job("print(1)")["id"], poll_s=0.1, max_wait_s=30)
+    env = st["environment"]
+    assert env["python"] == sys.version.split()[0]
+    assert len(env["sha256"]) == 64
+    health_env = client.health()["environment"]
+    assert health_env["sha256"] == env["sha256"] and isinstance(health_env["packages"], list)

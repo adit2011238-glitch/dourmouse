@@ -4534,3 +4534,32 @@ the desktop's LAN address (192.168.1.242:8770) does not answer, only its Tailsca
 
 The Dell is not deployed yet: its SSH server is not running (port 22 closed), so the Mac cannot
 install anything there. The owner's SSH setup block is the remaining step.
+
+### 098 -- every job records what it ran on; the Mac's job sandbox gets a real memory limit; Mac-only
+
+Status: DONE 2026-09-24.
+
+**Owner decision the same day: "scrap all plans for other device control, only for mac for
+everything".** The desktop and the Dell are out of the plan (REMAINING_WORK §3n kept as history).
+Dourmouse runs on this Mac alone, so the job runner from #097 becomes the Mac's local experiment
+sandbox; its network parts are dormant. On the owner's earlier instruction, the old desktop
+Dourmouse tasks were disabled (not deleted) and ollama stopped; the `\DOURMOUSE-Node` task there was
+left running when the network dropped (the owner can disable it on the desktop). Tailscale is
+dropped too: the owner saw internet problems with it, most likely because the Mac was routing all
+its traffic through the Dell as an exit node.
+
+**Environment hash (R5 prerequisite).** The spec's experiment record needs the environment a run
+used. The job runner now probes its interpreter once, in the background from startup (listing
+packages takes seconds and a health check must never wait on it; the first version did, and a
+5-second health check timed out), records Python version, implementation, platform, machine and
+the installed packages, and stamps a SHA-256 of that on every job. Live on the desktop before the
+network dropped: CPython 3.11.2 on Windows 10 with 242 packages. That run also showed
+`platform.machine()` empty, because Windows reads it from `PROCESSOR_ARCHITECTURE`, which the
+stripped job environment dropped; that variable and `NUMBER_OF_PROCESSORS` (no secrets) are kept.
+
+**Memory limit on macOS.** macOS refuses `RLIMIT_AS`, so on the Mac, now the only machine, jobs
+had no memory cap at all (they said "NOT enforced", honestly). A resident-memory watchdog now
+samples the job and its children every 250 ms through psutil (already a dependency) and kills them
+past the limit, recording "memory limit exceeded". The honest limit of the method is in the code:
+a burst faster than 250 ms can overshoot briefly before the kill. The memory test now runs on
+macOS too (a job growing to 1.2 GB under a 128 MB cap is stopped).
