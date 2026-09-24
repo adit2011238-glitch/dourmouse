@@ -4,13 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DOURMOUSE OS · interactive mockup</title>
-<!-- 2026-09-23, finding #080. An INTERACTIVE PROTOTYPE, not a picture, and
-     not wired to anything. All 20 real screens from console.html's own
-     SCREENS array, each with realistic content. Every interactive element
-     carries a data-spec attribute describing exactly what it does; press A
-     or use the SPEC button to overlay those on screen.
-     It fetches nothing and writes nothing. Numbers shown are real observed
-     values from this machine so layouts are judged against real content. -->
+<!-- INTERACTIVE PROTOTYPE, not a picture, not wired to anything. Approved
+     as the reference OS design 2026-09-24 (finding #083). 18 screens plus a
+     real OS shell: window chrome, a Control Centre, a Notification Centre,
+     live accent theming and wallpapers. Research and Security are drawn as
+     flowcharts; the Browser mirrors the Claude preview pane and is resizable.
+     Every interactive element carries a data-spec of exactly what it does;
+     press A or the SPEC button to overlay them. It fetches nothing and writes
+     nothing. Numbers shown are real observed values so layout is judged
+     against real content. Supersedes the earlier 20-screen pass (finding #080). -->
 <link rel="stylesheet" href="/assets/dourmouse-ui.css">
 <link rel="stylesheet" href="/assets/dourmouse-os.css">
 <style>
@@ -148,6 +150,112 @@
   @keyframes os-seat-in{from{opacity:0;transform:translate(-26px,16px) scale(.6)}
                         to{opacity:1;transform:none}}
   @media (prefers-reduced-motion: reduce){ .seat .av{animation-duration:1ms} }
+
+  /* ---- window chrome: traffic lights on the stage bar ---- */
+  .os-lights{display:flex;gap:7px;align-items:center;margin-right:4px}
+  .os-lights i{width:11px;height:11px;border-radius:999px;display:block;position:relative}
+  .os-lights .r{background:#ff5f57;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.2)}
+  .os-lights .y{background:#febc2e}
+  .os-lights .g{background:#28c840}
+  #shell #stagebar{gap:10px}
+
+  /* ---- menubar clickable status cluster ---- */
+  .os-mb-cluster{display:flex;align-items:center;gap:12px;cursor:pointer;padding:3px 8px;border-radius:7px;
+    transition:background var(--os-dur-fast) linear}
+  .os-mb-cluster:hover{background:rgba(255,255,255,.08)}
+  .os-mb-cluster.is-on{background:rgba(255,255,255,.12)}
+  .os-mb-ico{display:flex;align-items:center;gap:5px}
+  .os-mb-ico svg{width:14px;height:14px}
+
+  /* ---- floating panels (control + notifications + appearance share the look) ---- */
+  .os-panel{position:fixed;top:38px;z-index:60;width:300px;border-radius:16px;padding:14px;
+    background:var(--os-mat-thick);-webkit-backdrop-filter:var(--os-blur-thick);backdrop-filter:var(--os-blur-thick);
+    border:1px solid var(--os-edge-hi);box-shadow:var(--os-elev-float,0 20px 60px rgba(0,0,0,.5));
+    animation:os-pop var(--os-dur) var(--os-spring) both}
+  @keyframes os-pop{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
+  .os-panel[hidden]{display:none}
+  #controlcenter{right:14px} #notifcenter{right:14px} 
+  .cc-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .cc-tile{grid-column:span 1;border-radius:12px;padding:11px 12px;background:rgba(255,255,255,.05);
+    border:1px solid var(--os-edge-lo);cursor:pointer;transition:background var(--os-dur-fast) linear}
+  .cc-tile:hover{background:rgba(255,255,255,.09)}
+  .cc-tile.wide{grid-column:span 2}
+  .cc-tile.act{background:rgba(245,158,11,.16);border-color:rgba(245,158,11,.4)}
+  .cc-tile .t{font-size:var(--dm-text-xs);color:var(--dm-fg-dim);text-transform:uppercase;letter-spacing:.06em}
+  .cc-tile .v{font-size:var(--dm-text-base);color:var(--dm-fg);margin-top:3px;display:flex;align-items:center;gap:6px}
+  .cc-tile .v .dot{width:7px;height:7px;border-radius:999px;background:var(--dm-ok)}
+  .cc-head{font-size:var(--dm-text-xs);color:var(--dm-fg-dim);text-transform:uppercase;letter-spacing:.08em;margin:4px 2px 8px}
+  .cc-slider{display:flex;align-items:center;gap:8px;padding:4px 2px}
+  .cc-slider input[type=range]{flex:1;accent-color:var(--dm-active)}
+
+  /* accent swatches */
+  .accents{display:flex;gap:8px;padding:4px 2px 2px}
+  .accents .sw{width:24px;height:24px;border-radius:999px;cursor:pointer;border:2px solid transparent;
+    transition:transform var(--os-dur-fast) var(--os-spring)}
+  .accents .sw:hover{transform:scale(1.15)}
+  .accents .sw[aria-current="true"]{border-color:var(--dm-fg);box-shadow:0 0 0 2px rgba(0,0,0,.3)}
+
+  /* notification center */
+  .nc-item{display:flex;gap:10px;padding:10px;border-radius:11px;background:rgba(255,255,255,.04);
+    border:1px solid var(--os-edge-lo);margin-bottom:8px}
+  .nc-item .ic{width:26px;height:26px;border-radius:8px;flex:0 0 auto;display:grid;place-items:center;
+    background:rgba(255,255,255,.06)}
+  .nc-item .ic svg{width:15px;height:15px}
+  .nc-item.unread{border-left:2px solid var(--dm-active)}
+  .nc-item .nt{font-size:var(--dm-text-sm);color:var(--dm-fg)}
+  .nc-item .nm{font-size:var(--dm-text-xs);color:var(--dm-fg-body);margin-top:2px}
+  .nc-item .tm{font-size:var(--dm-text-xs);color:var(--dm-fg-dim);margin-left:auto;white-space:nowrap}
+
+  /* security fleet + lockdown */
+  .fleet{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .mach{border-radius:12px;padding:12px;background:rgba(255,255,255,.04);border:1px solid var(--os-edge-lo);
+    cursor:pointer;transition:border-color var(--os-dur-fast) linear}
+  .mach:hover{border-color:var(--dm-active)}
+  .mach .mh{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+  .mach .mh svg{width:16px;height:16px;color:var(--dm-fg-dim)}
+  .mach .mh b{font-size:var(--dm-text-base);color:var(--dm-fg);flex:1}
+  .mach .kv{font-size:var(--dm-text-xs);color:var(--dm-fg-body);display:flex;justify-content:space-between;padding:2px 0}
+  .desk.live .badge,.desk .badge{position:absolute;top:5px;right:5px;font-size:7px;font-family:var(--dm-font-mono);
+    padding:1px 4px;border-radius:6px;background:var(--dm-active);color:#1a1205;letter-spacing:.04em}
+  .desk{position:relative}  /* embedded browser, modelled on the Claude preview pane */
+  .cb-wrap{position:relative;margin:0 auto;max-width:100%}
+  .cb-frame{display:flex;flex-direction:column;border:1px solid var(--os-edge-hi);border-radius:12px;
+    overflow:hidden;background:#0b120f;box-shadow:var(--os-elev-rest,0 8px 30px rgba(0,0,0,.35))}
+  .cb-tabs{display:flex;align-items:flex-end;gap:2px;padding:6px 8px 0;background:rgba(255,255,255,.02)}
+  .cb-tab{display:flex;align-items:center;gap:7px;padding:7px 12px;font-size:12px;color:var(--dm-fg-dim);
+    border-radius:9px 9px 0 0;max-width:190px;white-space:nowrap;overflow:hidden;cursor:default}
+  .cb-tab.on{background:var(--os-mat-regular);color:var(--dm-fg)}
+  .cb-tab .fav{width:13px;height:13px;border-radius:3px;flex:0 0 auto}
+  .cb-tab .cx{margin-left:2px;color:var(--dm-fg-dim);font-size:15px;line-height:1}
+  .cb-new{padding:6px 10px;color:var(--dm-fg-dim);font-size:16px;cursor:pointer}
+  .cb-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--os-mat-regular);
+    border-bottom:1px solid var(--os-edge-lo)}
+  .cb-nav{display:flex;gap:1px}
+  .cb-ico{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--dm-fg-body);cursor:pointer;flex:0 0 auto}
+  .cb-ico:hover{background:rgba(255,255,255,.08);color:var(--dm-fg)}
+  .cb-ico svg{width:16px;height:16px}
+  .cb-addr{flex:1;display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:8px;min-width:0;
+    background:rgba(0,0,0,.28);border:1px solid var(--os-edge-lo);color:var(--dm-fg-body);font-size:12.5px}
+  .cb-addr .u{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cb-addr svg{width:13px;height:13px;flex:0 0 auto}
+  .cb-size{font-family:var(--dm-font-mono);font-size:11px;color:var(--dm-fg-dim);white-space:nowrap}
+  .cb-vp{display:flex;align-items:center;gap:1px;background:rgba(0,0,0,.24);border:1px solid var(--os-edge-lo);border-radius:8px;padding:2px}
+  .cb-vp button{width:27px;height:23px;border-radius:6px;display:grid;place-items:center;color:var(--dm-fg-dim);cursor:pointer}
+  .cb-vp button svg{width:14px;height:14px}
+  .cb-vp button:hover{color:var(--dm-fg)}
+  .cb-vp button.on{background:var(--dm-active);color:#1a1205}
+  .cb-page{flex:1;overflow:auto;background:#fff;color:#111}
+  .cb-watch{display:flex;align-items:center;gap:8px;padding:7px 12px;background:rgba(245,158,11,.1);
+    color:var(--dm-active);font-size:11.5px;border-top:1px solid var(--os-edge-lo)}
+  .bres{position:absolute}
+  .cb-div{top:10px;bottom:10px;right:1px;width:9px;cursor:ew-resize;display:flex;align-items:center;justify-content:center}
+  .cb-div::before{content:"";width:3px;height:38px;border-radius:3px;background:var(--os-edge-hi);transition:background .1s}
+  .cb-div:hover::before,.cb-div.drag::before{background:var(--dm-active)}
+  .cb-divb{left:10px;right:10px;bottom:1px;height:9px;cursor:ns-resize;display:flex;align-items:center;justify-content:center}
+  .cb-divb::before{content:"";height:3px;width:38px;border-radius:3px;background:var(--os-edge-hi);transition:background .1s}
+  .cb-divb:hover::before,.cb-divb.drag::before{background:var(--dm-active)}
+
+
 </style>
 </head>
 <body>
@@ -158,15 +266,50 @@
   <b>DOURMOUSE</b>
   <button class="os-btn" id="wallBtn" data-spec="Opens the wallpaper picker: four built-in gradients plus your own photo.">WALLPAPER</button>
   <span class="os-menubar-spacer"></span>
-  <span data-spec="Live agent count from GET /api/roster. Green dot = all reachable.">&#9679; 49 agents</span>
-  <span data-spec="Security risk score from the sentry. Click opens SECURITY.">&#9679; risk 21</span>
+  <span class="os-mb-cluster" id="ccBtn" data-spec="Control Centre. Quick toggles for agents, security, network, the model backend, do-not-disturb and appearance, exactly like the macOS control centre.">
+    <span class="os-mb-ico" title="agents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.2"/><path d="M6 20c0-3.5 2.7-5.5 6-5.5s6 2 6 5.5"/></svg>49</span>
+    <span class="os-mb-ico" title="security"><svg viewBox="0 0 24 24" fill="none" stroke="var(--dm-ok)" stroke-width="1.6"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg></span>
+    <span class="os-mb-ico" title="network"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9c5-5 13-5 18 0M6 12.5c3.5-3.5 8.5-3.5 12 0M9 16c1.7-1.7 4.3-1.7 6 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg></span>
+  </span>
   <span id="clock" style="font-variant-numeric:tabular-nums"></span>
+</div>
+
+<div class="os-panel" id="controlcenter" hidden>
+  <div class="cc-grid">
+    <div class="cc-tile act" id="ccAgents"><div class="t">Agents</div><div class="v"><span class="dot"></span>49 online</div></div>
+    <div class="cc-tile act" id="ccSec"><div class="t">Security</div><div class="v"><span class="dot"></span>Guarding</div></div>
+    <div class="cc-tile" id="ccNet"><div class="t">Network</div><div class="v">home-wifi</div></div>
+    <div class="cc-tile" id="ccModel" data-spec="The active brain. Large cloud only."><div class="t">Brain</div><div class="v">sonnet-5</div></div>
+    <div class="cc-tile" id="ccDnd"><div class="t">Do not disturb</div><div class="v">Off</div></div>
+    <div class="cc-tile" id="ccAuto"><div class="t">Autonomous</div><div class="v">Off</div></div>
+  </div>
+  <div class="cc-head">Brightness</div>
+  <div class="cc-slider">&#9728;<input type="range" min="20" max="100" value="90" data-spec="Wallpaper brightness. A readability control: body text needs 4.5:1 over whatever is behind it."></div>
+  <div class="cc-head">Accent</div>
+  <div class="accents" id="accents">
+    <span class="sw" data-accent="#F59E0B" aria-current="true" style="background:#F59E0B" data-spec="Amber. The product default."></span>
+    <span class="sw" data-accent="#34d399" style="background:#34d399" data-spec="Emerald."></span>
+    <span class="sw" data-accent="#60a5fa" style="background:#60a5fa" data-spec="Azure."></span>
+    <span class="sw" data-accent="#a78bfa" style="background:#a78bfa" data-spec="Violet."></span>
+    <span class="sw" data-accent="#fb7185" style="background:#fb7185" data-spec="Rose."></span>
+  </div>
+</div>
+
+<div class="os-panel" id="notifcenter" hidden>
+  <div class="cc-head" style="display:flex;justify-content:space-between"><span>Notifications</span><span id="ncClear" style="cursor:pointer;color:var(--dm-active)">Clear</span></div>
+  <div id="nclist">
+    <div class="nc-item unread"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="var(--dm-active)" stroke-width="1.6"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg></div><div><div class="nt">New listening service on desktop</div><div class="nm">Port 5051 exposed beyond loopback. Investigating.</div></div><span class="tm">now</span></div>
+    <div class="nc-item unread"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="var(--dm-ok)" stroke-width="1.6"><path d="M20 6L9 17l-5-5"/></svg></div><div><div class="nt">Download scanned: installer.dmg</div><div class="nm">Clean. No signatures matched.</div></div><span class="tm">2m</span></div>
+    <div class="nc-item"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h16v12H5.2L4 17.5z"/></svg></div><div><div class="nt">Researcher finished a branch</div><div class="nm">3 sources read, 1 contradiction flagged.</div></div><span class="tm">6m</span></div>
+    <div class="nc-item"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg></div><div><div class="nt">Routine ran: History sync</div><div class="nm">Desktop, 41 new facts.</div></div><span class="tm">18m</span></div>
+  </div>
 </div>
 
 <div id="shell">
   <nav id="sidebar" aria-label="Screens"></nav>
   <section id="stage">
     <div id="stagebar">
+      <span class="os-lights" data-spec="Window controls. Close, minimise, zoom, exactly like a native window."><i class="r"></i><i class="y"></i><i class="g"></i></span>
       <span id="stagetitle">HOME</span>
       <span id="stagesub"></span>
       <span style="flex:1"></span>
@@ -222,6 +365,87 @@ var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;
 function row(a,b,c){ return '<div class="kv"><span>'+a+'</span><b>'+b+'</b></div>'; }
 function btn(label, spec, cls){ return '<button class="os-btn '+(cls||'')+'" data-spec="'+spec+'">'+label+'</button>'; }
 
+/* ---- SVG builders for the visual Research and Security screens ---- */
+function rflow(){
+  var S=[['Question',1],['Decomposition',1],['Research plan',1],['Source discovery',1],['Source validation',0],
+    ['Evidence extraction',1],['Hypothesis gen',0],['Criticism',0],['Experiment design',0],['Experiment run',0],
+    ['Statistics',0],['Replication',0],['Contradiction',0],['Revision',0],['Synthesis',1]];
+  var cols=5, bw=132, bh=44, gx=20, gy=34, sx=152, sy=86;
+  function pos(i){ var r=Math.floor(i/cols), c=i%cols; if(r%2===1) c=cols-1-c; return {x:gx+c*sx, y:gy+r*sy}; }
+  var boxes='', arrows='';
+  for(var i=0;i<S.length;i++){
+    var p=pos(i), built=S[i][1];
+    var stroke=built?'var(--dm-ok)':'var(--os-edge-hi)';
+    var fill=built?'rgba(52,211,153,.10)':'rgba(255,255,255,.025)';
+    var tcol=built?'var(--dm-fg)':'var(--dm-fg-dim)';
+    boxes+='<rect x="'+p.x+'" y="'+p.y+'" width="'+bw+'" height="'+bh+'" rx="9" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.2"/>'+
+      '<text x="'+(p.x+bw/2)+'" y="'+(p.y+bh/2+4)+'" text-anchor="middle" fill="'+tcol+'" font-size="10.5" font-family="var(--dm-font-mono)">'+S[i][0]+'</text>';
+    if(i>0){ var a=pos(i-1), b=p, d;
+      if(a.y===b.y){ if(b.x>a.x) d='M'+(a.x+bw)+' '+(a.y+bh/2)+' L'+b.x+' '+(b.y+bh/2);
+                     else d='M'+a.x+' '+(a.y+bh/2)+' L'+(b.x+bw)+' '+(b.y+bh/2); }
+      else d='M'+(a.x+bw/2)+' '+(a.y+bh)+' L'+(b.x+bw/2)+' '+b.y;
+      arrows+='<path d="'+d+'" stroke="var(--os-edge-hi)" stroke-width="1.3" fill="none" marker-end="url(#ah)"/>';
+    }
+  }
+  var syn=pos(14), q=pos(0), lane=gy+2*sy+bh+22, top=12, lx=8;
+  var back='<path d="M'+(syn.x+bw/2)+' '+(syn.y+bh)+' L'+(syn.x+bw/2)+' '+lane+' L'+lx+' '+lane+' L'+lx+' '+top+' L'+(q.x+bw/2)+' '+top+' L'+(q.x+bw/2)+' '+q.y+'" '+
+    'fill="none" stroke="var(--dm-active)" stroke-width="1.7" stroke-dasharray="6 4" marker-end="url(#aha)"/>'+
+    '<text x="'+(gx+2.4*sx)+'" y="'+(lane+16)+'" text-anchor="middle" fill="var(--dm-active)" font-size="10" font-family="var(--dm-font-mono)">backward edge: a contradiction reopens the question &mdash; not built yet</text>';
+  var h=lane+26;
+  return '<svg viewBox="0 0 784 '+h+'" style="width:100%;height:auto;margin:8px 0">'+
+    '<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7z" fill="var(--dm-fg-dim)"/></marker>'+
+    '<marker id="aha" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="var(--dm-active)"/></marker></defs>'+
+    arrows+back+boxes+'</svg>';
+}
+function egraph(){
+  var N={H1:[160,26,'H1  hypothesis','hyp'],E1:[36,86,'E1','ok'],E4:[160,120,'E4','ok'],
+    E9:[292,86,'E9','bad'],X3:[36,150,'X3 experiment','mut'],D7:[292,150,'D7 decision','act']};
+  function c(k){var n=N[k];return {x:n[0],y:n[1]};}
+  function edge(a,b,lab,col){var p=c(a),q=c(b);
+    return '<path d="M'+p.x+' '+p.y+' L'+q.x+' '+q.y+'" stroke="'+col+'" stroke-width="1.1" opacity=".6"/>'+
+      '<text x="'+((p.x+q.x)/2)+'" y="'+((p.y+q.y)/2-2)+'" text-anchor="middle" fill="'+col+'" font-size="7.5" font-family="var(--dm-font-mono)">'+lab+'</text>';}
+  var edges=edge('H1','E1','supported',' var(--dm-ok)')+edge('H1','E4','supported','var(--dm-ok)')+
+    edge('H1','E9','contradicted','var(--dm-error)')+edge('H1','X3','tested','var(--dm-fg-dim)')+edge('H1','D7','revised','var(--dm-active)');
+  var col={hyp:'var(--dm-active)',ok:'var(--dm-ok)',bad:'var(--dm-error)',mut:'var(--dm-fg-dim)',act:'var(--dm-active)'};
+  var nodes='';
+  for(var k in N){var n=N[k];nodes+='<g><rect x="'+(n[0]-30)+'" y="'+(n[1]-11)+'" width="60" height="22" rx="6" fill="rgba(255,255,255,.05)" stroke="'+col[n[3]]+'" stroke-width="1.1"/>'+
+    '<text x="'+n[0]+'" y="'+(n[1]+3.5)+'" text-anchor="middle" fill="var(--dm-fg)" font-size="7.5" font-family="var(--dm-font-mono)">'+n[2]+'</text></g>';}
+  return '<svg viewBox="0 0 330 180" style="width:100%;height:auto">'+edges+nodes+'</svg>';
+}
+function sflow(){
+  var L=[['OS + network telemetry','ss  lsof  arp  dns  firewall','det'],
+    ['Deterministic analyzers','pure code, no model','det'],
+    ['Baseline engine','learns normal, per network','det'],
+    ['Event engine','structured findings + evidence','det'],
+    ['AI sentries','correlate & explain (large cloud)','ai'],
+    ['Correlation','weak signals seen together','ai'],
+    ['Dashboard','click into the evidence','ui'],
+    ['Response','suggest, then ask you','act']];
+  var bx=210, bw=300, bh=40, gy=16, sy=54, y0=14;
+  var C={det:['rgba(52,211,153,.10)','var(--dm-ok)'],ai:['rgba(245,158,11,.13)','var(--dm-active)'],
+    ui:['rgba(255,255,255,.05)','var(--os-edge-hi)'],act:['rgba(251,113,133,.12)','#fb7185']};
+  var boxes='',arrows='';
+  for(var i=0;i<L.length;i++){
+    var y=y0+i*sy, c=C[L[i][2]];
+    boxes+='<rect x="'+bx+'" y="'+y+'" width="'+bw+'" height="'+bh+'" rx="9" fill="'+c[0]+'" stroke="'+c[1]+'" stroke-width="1.3"/>'+
+      '<text x="'+(bx+14)+'" y="'+(y+17)+'" fill="var(--dm-fg)" font-size="11" font-family="var(--dm-font-mono)">'+L[i][0]+'</text>'+
+      '<text x="'+(bx+14)+'" y="'+(y+31)+'" fill="var(--dm-fg-dim)" font-size="8.5" font-family="var(--dm-font-mono)">'+L[i][1]+'</text>';
+    if(i>0) arrows+='<path d="M'+(bx+bw/2)+' '+(y-sy+bh)+' L'+(bx+bw/2)+' '+y+'" stroke="var(--os-edge-hi)" stroke-width="1.3" marker-end="url(#sh)"/>';
+  }
+  var b0=y0, b1=y0+4*sy-14;
+  var bracket='<path d="M60 '+b0+' L48 '+b0+' L48 '+b1+' L60 '+b1+'" fill="none" stroke="var(--dm-ok)" stroke-width="1.3"/>'+
+    '<text x="30" y="'+((b0+b1)/2)+'" fill="var(--dm-ok)" font-size="9" font-family="var(--dm-font-mono)" transform="rotate(-90 30 '+((b0+b1)/2)+')" text-anchor="middle">DETECTION &mdash; no model, cannot fabricate</text>';
+  var lx=530, leg=[['confirmed','var(--dm-ok)'],['strong','var(--dm-active)'],['weak','#fb7185'],['unknown','var(--dm-fg-dim)']];
+  var legend='<text x="'+lx+'" y="'+(y0+8)+'" fill="var(--dm-fg-dim)" font-size="8.5" font-family="var(--dm-font-mono)">confidence</text>';
+  for(var j=0;j<leg.length;j++){legend+='<circle cx="'+(lx+6)+'" cy="'+(y0+24+j*18)+'" r="4" fill="'+leg[j][1]+'"/>'+
+    '<text x="'+(lx+16)+'" y="'+(y0+27+j*18)+'" fill="var(--dm-fg-body)" font-size="9" font-family="var(--dm-font-mono)">'+leg[j][0]+'</text>';}
+  var h=y0+L.length*sy;
+  return '<svg viewBox="0 0 700 '+h+'" style="width:100%;height:auto;margin:6px 0">'+
+    '<defs><marker id="sh" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7z" fill="var(--dm-fg-dim)"/></marker></defs>'+
+    arrows+boxes+bracket+legend+'</svg>';
+}
+
+
 
 /* One custom icon per screen. Stroke-based, 24x24, 1.5 weight, all drawn on
    the same grid so they read as one family rather than twenty borrowings.
@@ -232,14 +456,12 @@ var ICON = {
  COMMS:'M3 6.5A1.5 1.5 0 014.5 5h15A1.5 1.5 0 0121 6.5v11a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5zM3.5 7l8.5 6 8.5-6',
  RESEARCH:'M9 3v5.5L4.5 17A2 2 0 006.3 20h11.4a2 2 0 001.8-3L15 8.5V3M8 3h8M7.5 14h9',
  CODE:'M8.5 8.5L5 12l3.5 3.5M15.5 8.5L19 12l-3.5 3.5M13.5 6l-3 12',
- VISION:'M2 12s3.8-6 10-6 10 6 10 6-3.8 6-10 6-10-6-10-6zM12 9.5a2.5 2.5 0 110 5 2.5 2.5 0 010-5z',
  MEDIA:'M3 6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2zM10 9l5 3-5 3zM3 8h18',
  PROJECTS:'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2zM3 11h18',
  SETTINGS:'M12 9a3 3 0 110 6 3 3 0 010-6M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M19.8 4.2l-2.1 2.1M6.3 17.7l-2.1 2.1',
  ATLAS:'M12 2a10 10 0 100 20 10 10 0 000-20M2 12h20M12 2c3 3.6 3 14.4 0 20M5 6c2 1.2 12 1.2 14 0M5 18c2-1.2 12-1.2 14 0',
- GLOBE:'M12 2a10 10 0 100 20 10 10 0 000-20M12 2c3.2 3.4 3.2 14.6 0 20M12 2c-3.2 3.4-3.2 14.6 0 20M2.5 9h19M2.5 15h19',
+ BROWSER:'M12 3a9 9 0 100 18 9 9 0 000-18M3 12h18M12 3c3 3.6 3 14.4 0 18M12 3c-3 3.6-3 14.4 0 18',
  NEWS:'M4 5h13v14H5a1 1 0 01-1-1zM17 9h3v8a2 2 0 01-2 2M7 8.5h7M7 12h7M7 15.5h4',
- DESIGN3D:'M12 2.5l8.5 4.9v9.2L12 21.5 3.5 16.6V7.4zM12 2.5v19M3.5 7.4l8.5 4.9 8.5-4.9',
  VOICE:'M12 3a3 3 0 013 3v6a3 3 0 01-6 0V6a3 3 0 013-3M5.5 11.5a6.5 6.5 0 0013 0M12 18v3M9 21h6',
  ORCHESTRATION:'M12 3.5a2 2 0 110 4 2 2 0 010-4M5 16.5a2 2 0 110 4 2 2 0 010-4M19 16.5a2 2 0 110 4 2 2 0 010-4M12 7.5v4M12 11.5l-6 5M12 11.5l6 5',
  GOALS:'M12 2.5a9.5 9.5 0 100 19 9.5 9.5 0 000-19M12 7a5 5 0 100 10 5 5 0 000-10M12 11a1 1 0 110 2 1 1 0 010-2',
@@ -302,23 +524,20 @@ COMMS: { sub:'real gmail inbox', live:1, composer:true,
    '<div class="os-row" aria-selected="true"><b style="color:var(--dm-fg);font-size:var(--dm-text-base)">School</b><span class="muted" style="flex:1">MYP personal project checkpoint</span><span class="muted">11:20</span></div>'+
    '<div class="muted" style="margin-top:14px">Sending, deleting and flagging are all confirmation-gated. Reading is not.</div>' },
 
-RESEARCH: { sub:'pipeline &middot; 4 of 14 stages', composer:true,
+RESEARCH: { sub:'pipeline &middot; 4 of 14 stages built', composer:true,
   actions:[ btn('NEW QUESTION','Creates a ResearchRecord and runs plan(), which decomposes it into real sub-questions.','os-btn--primary'),
             btn('EXPORT','Writes the record plus every surviving claim and its source URL to a file.') ],
   body:
-   '<div class="grid2"><div class="card"><div class="lbl">Current question</div>'+
-   '<div style="color:var(--dm-fg);font-size:var(--dm-text-md);line-height:1.5">Does byte-range streaming meaningfully change perceived video start time?</div>'+
-   '<div class="bar"><i style="width:28%"></i></div>'+
-   '<div class="muted" style="margin-top:8px">stage 4 of 14 &middot; synthesized</div></div>'+
-   '<div class="card"><div class="lbl">Stages</div>'+
-   '<span class="tag ok">plan</span><span class="tag ok">discover_sources</span><span class="tag ok">extract_evidence</span><span class="tag ok">synthesize</span>'+
-   '<span class="tag">source validation</span><span class="tag">hypothesis</span><span class="tag">criticism</span><span class="tag">experiment</span>'+
-   '<span class="tag">statistics</span><span class="tag">replication</span><span class="tag">contradiction</span><span class="tag">revision</span>'+
-   '<div class="muted" style="margin-top:8px">Greyed stages are not built. The loop also cannot yet run backwards.</div></div></div>'+
-   '<div class="card" style="margin-top:12px"><div class="lbl">Claims &middot; every quote verified as an exact substring of the real page</div>'+
-   '<div class="os-row" data-spec="Click opens the claim: its exact supporting quote, the source URL, the document hash, and the stage that produced it."><span class="tag ok">verified</span><span class="muted" style="flex:1">Range requests let a player begin decoding before the full file arrives</span><span class="os-row-actions">'+btn('SOURCE','Opens the cached document at the hash this claim was extracted from.')+btn('REJECT','Marks the claim rejected with a reason. It stays in the record, never deleted.','os-btn--danger')+'</span></div>'+
-   '<div class="os-row"><span class="tag ok">verified</span><span class="muted" style="flex:1">A 206 response is required for a media element to seek at all</span></div>'+
-   '<div class="os-row"><span class="tag warn">contested</span><span class="muted" style="flex:1">Chunk size materially affects start latency</span></div></div>' },
+   '<div class="card"><div class="lbl">The research loop</div>'+ rflow() +
+   '<div class="muted" style="margin-top:4px">Green stages are built (4 of 14). The dashed amber loop is the backward edge, the one thing that turns this from a report generator into a research network. It does not exist yet: today the state machine can only move forwards.</div></div>'+
+   '<div class="grid2" style="margin-top:12px">'+
+   '<div class="card"><div class="lbl">Evidence graph &middot; relationships are the point</div>'+ egraph() +
+   '<div class="muted">A hypothesis, its supporting and contradicting evidence, the experiment that tested it and the decision that revised it. A vector store cannot answer \'what contradicted this, and when did we learn it\'. A graph can.</div></div>'+
+   '<div class="card"><div class="lbl">Claims &middot; every quote an exact substring of the real page</div>'+
+     '<div class="os-row"><span class="tag ok">verified</span><span class="muted" style="flex:1">Range requests let a player begin decoding before the full file arrives</span></div>'+
+     '<div class="os-row"><span class="tag ok">verified</span><span class="muted" style="flex:1">A 206 response is required for a media element to seek at all</span></div>'+
+     '<div class="os-row"><span class="tag warn">contested</span><span class="muted" style="flex:1">Chunk size materially affects start latency</span></div>'+
+     '<div class="muted" style="margin-top:6px">A contested claim is exactly what should spawn a backward loop. The original quoted passage is stored immutably, so a conclusion can always be re-checked against what was actually known.</div></div></div>' },
 
 CODE: { sub:'diff and run', composer:true,
   actions:[ btn('RUN TESTS','Runs the real suite in a subprocess and streams output. Never fabricates a pass.','os-btn--primary'),
@@ -330,15 +549,6 @@ CODE: { sub:'diff and run', composer:true,
    '<div class="card" style="margin-top:12px"><div class="lbl">Last run</div>'+
    '<div class="big" style="color:var(--dm-ok)">5442</div><div class="muted">passed &middot; 10 skipped &middot; 0 failed &middot; 460s</div></div>' },
 
-VISION: { sub:'camera and hand control', live:1,
-  actions:[ btn('KILL SWITCH','Hard-stops the camera at the tray process. Overrides every other setting.','os-btn--danger') ],
-  body:
-   '<div class="grid2"><div class="card"><div class="lbl">Hand control</div>'+
-   row('Gesture','none')+row('Focused window','WORLD MAP')+row('Signal','&mdash;')+row('Delegate','CPU')+
-   '<div style="margin-top:10px">'+btn('ENABLE HAND CONTROL','Starts MediaPipe tracking. Requires the camera grant; refused honestly if the kill switch is on.','os-btn--primary')+'</div></div>'+
-   '<div class="card"><div class="lbl">Camera</div><div class="muted">Pinch a titlebar with one hand to drag it. Pinch with both hands and change the distance to resize, or the angle to tilt.</div>'+
-   '<div style="margin-top:10px;display:flex;align-items:center;gap:8px"><span class="muted" style="flex:1">Camera access</span>'+
-   '<button class="os-switch" role="switch" aria-checked="false" data-spec="Per-session camera grant. Off by default. The tray kill switch can override this to off but never to on."></button></div></div></div>' },
 
 MEDIA: { sub:'player and library', composer:true,
   actions:[ btn('OPEN FILE','Opens any pdf, image, audio or video in the pane. Refuses a container the browser cannot decode, and names open_path instead.','os-btn--primary') ],
@@ -371,9 +581,12 @@ SETTINGS: { sub:'preferences',
    '<div class="kv"><span>Native shell</span><span class="os-seg"><button aria-selected="true" data-spec="Electron. The CDP BrowserView shell. Default when electron/node_modules is present.">ELECTRON</button><button data-spec="pywebview. The older shell. Always available, no install needed.">PYWEBVIEW</button></span></div>'+
    '<div class="kv"><span>Reduced motion</span><button class="os-switch" role="switch" aria-checked="false" data-spec="Follows the OS setting by default. Forcing it on collapses every animation to 1ms but keeps hover and focus feedback."></button></div>'+
    '<div class="kv"><span>Auto approve</span><button class="os-switch" role="switch" aria-checked="false" data-spec="Skips confirmation cards for gated tools. Persisted to a 0600 file, no restart needed. Off is the safe default."></button></div></div>'+
-   '<div class="card"><div class="lbl">Backends</div>'+
-   row('Ollama','<span class="tag ok">local</span>')+row('NVIDIA NIM','<span class="tag ok">key set</span>')+
-   row('Claude Code CLI','<span class="tag ok">auth ok</span>')+row('Codex CLI','<span class="tag warn">rate limited</span>')+
+   '<div class="card"><div class="lbl">Models &middot; large cloud only</div>'+
+   row('Orchestrator brain','<span class="tag ok">claude-sonnet-5</span>')+
+   row('Researcher','<span class="tag ok">gpt-oss:120b</span>')+
+   row('Ollama Cloud','<span class="tag ok">key set</span>')+
+   row('Local / small models','<span class="tag bad">blocked</span>')+
+   '<div class="muted" style="margin-top:6px">Small and local models are disabled by policy: too slow, and unreliable at calling tools.</div>'+
    '<div style="margin-top:8px">'+btn('TEST ALL','Makes one real call per backend and reports the provider\'s real error on failure. Never a fabricated success.')+'</div></div></div>'+
    '<div class="card" style="margin-top:12px"><div class="lbl">Remote access</div>'+
    row('Bind host','127.0.0.1')+row('Access token','<span class="tag ok">set</span>')+
@@ -389,16 +602,46 @@ ATLAS: { sub:'world monitor', live:1,
    '<div class="muted">44 events across 8 channels</div>'+
    '<div class="muted" style="margin-top:10px">Every channel is a real public feed with no API key. A feed that fails reports the real error rather than showing stale numbers.</div></div></div>' },
 
-GLOBE: { sub:'world map', live:1, actions:[],
-  body:'<div class="card" style="height:300px;display:grid;place-items:center">'+
-   '<div class="os-stage-3d" style="width:100%;display:grid;place-items:center">'+
-   '<div style="position:relative;width:260px;height:150px" class="os-tiers">'+
-   '<div class="os-tier"></div></div></div>'+
-   '<div class="muted" style="margin-top:14px">Orthographic SVG projection with 8 live channels plotted. Click a marker to open the underlying event.</div></div>'+
-   '<div class="grid3" style="margin-top:12px">'+
-   '<div class="card"><div class="lbl">Projection</div><div class="muted">Orthographic. Drag to rotate, scroll to zoom. Renders as SVG, not a tile service, so it works with no network.</div></div>'+
-   '<div class="card"><div class="lbl">Markers</div><div class="muted">One per real event across the 8 channels. Colour is the channel, never severity, because severity is not comparable between them.</div></div>'+
-   '<div class="card"><div class="lbl">Click</div><div class="muted">Opens the underlying record: source feed, timestamp, coordinates and the raw payload.</div></div></div>' },
+BROWSER: { sub:'real browser, shared with the AI', live:1, actions:[
+    btn('NEW TAB','Opens a real BrowserView tab. A top-level browsing context, so X-Frame-Options never applies and there are no proxy errors.','os-btn--primary'),
+    btn('POP OUT','Detaches the pane into its own window, the same way the Claude preview pops out.') ],
+  body:
+   '<div class="cb-wrap" id="bwrap" style="width:100%">'+
+     '<div class="cb-frame" id="bframe" style="height:540px">'+
+       '<div class="cb-tabs">'+
+         '<div class="cb-tab on"><span class="fav" style="background:linear-gradient(135deg,#b1361f,#7a2417)"></span>Illiquidity and Expected Returns<span class="cx">&times;</span></div>'+
+         '<div class="cb-tab"><span class="fav" style="background:linear-gradient(135deg,#2d6cb5,#1a3f6e)"></span>Federal Reserve<span class="cx">&times;</span></div>'+
+         '<div class="cb-new" data-spec="Opens a new BrowserView tab.">+</div>'+
+       '</div>'+
+       '<div class="cb-bar">'+
+         '<div class="cb-nav"><span class="cb-ico" data-spec="Back through the real BrowserView history."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></span>'+
+           '<span class="cb-ico" data-spec="Forward."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>'+
+           '<span class="cb-ico" data-spec="Reload the page."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 018-8c3 0 5.5 1.6 7 4M20 4v4h-4"/></svg></span></div>'+
+         '<div class="cb-addr" data-spec="The real current URL. Editing it navigates the BrowserView."><svg viewBox="0 0 24 24" fill="none" stroke="var(--dm-ok)" stroke-width="1.7"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg><span class="u">arxiv.org/abs/2401.09876</span></div>'+
+         '<span class="cb-size" id="bsize">Fill</span>'+
+         '<div class="cb-vp" id="bpreset" data-spec="Viewport size, exactly like the Claude preview. Pick a device, or drag the divider on the edge.">'+
+           '<button data-w="380" title="Phone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="8" y="3" width="8" height="18" rx="2"/><path d="M11 18h2"/></svg></button>'+
+           '<button data-w="560" title="Tablet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M11 18h2"/></svg></button>'+
+           '<button data-w="840" title="Desktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg></button>'+
+           '<button data-w="100%" class="on" title="Fill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 9V4h5M20 15v5h-5M4 15v5h5M20 9V4h-5"/></svg></button></div>'+
+         '<span class="cb-ico" data-spec="Pop the pane out into its own window."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/></svg></span>'+
+       '</div>'+
+       '<div class="cb-page">'+
+         '<div style="padding:26px 26px;max-width:640px">'+
+         '<div style="font-family:var(--dm-font-mono);font-size:11px;color:#8a8a8a">arXiv:2401.09876 [q-fin]</div>'+
+         '<div style="font-size:19px;font-weight:600;margin:7px 0 12px;color:#111">Illiquidity and Expected Returns</div>'+
+         '<div style="font-size:13.5px;line-height:1.65;color:#333">A real embedded page. Logins and modern sites work because this is a browser engine, not a rewriting proxy. There are no proxy errors.</div>'+
+         '<div style="font-size:13.5px;line-height:1.65;color:#333;margin-top:10px">Drag the divider on the right edge to resize, or pick a device above. The page reflows live, exactly like the Claude preview.</div></div></div>'+
+       '<div class="cb-watch"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.5"/></svg>Dourmouse is watching this tab &middot; the researcher agent is reading it for your question</div>'+
+     '</div>'+
+     '<div class="bres cb-div" id="bresR" data-spec="Drag to change the width. The embedded page reflows live, exactly like dragging the Claude preview divider."></div>'+
+     '<div class="bres cb-divb" id="bresB" data-spec="Drag to change the height."></div>'+
+   '</div>'+
+   '<div style="display:flex;gap:18px;margin-top:12px;flex-wrap:wrap;font-size:var(--dm-text-xs);color:var(--dm-fg-dim)">'+
+   '<span data-spec="Drag the right edge, or pick a device, to test a site at any width. The page reflows live, exactly like the Claude preview."><b style="color:var(--dm-fg-body)">Adjustable</b> &middot; drag the edge or pick a device, reflows live</span>'+
+   '<span data-spec="You browse; Dourmouse drives the SAME BrowserView through the bridge and reads it over CDP. One surface, and the research scraper reuses it."><b style="color:var(--dm-fg-body)">Shared with the AI</b> &middot; one surface, driven over CDP</span>'+
+   '<span data-spec="A BrowserView is a top-level browsing context, so X-Frame-Options and CSP frame-ancestors never apply. The old rewriting proxy is gone."><b style="color:var(--dm-fg-body)">No proxy errors</b> &middot; real engine, not a rewriting proxy</span>'+
+   '</div>' },
 
 NEWS: { sub:'live headlines', live:1, composer:true, actions:[],
   body:
@@ -407,17 +650,6 @@ NEWS: { sub:'live headlines', live:1, composer:true, actions:[],
    '<div class="os-row"><span class="tag">bbc</span><span class="muted" style="flex:1;color:var(--dm-fg-body)">Air quality advisories issued in four cities</span></div>'+
    '<div class="muted" style="margin-top:12px">Keyless RSS. Polls every 120s.</div>' },
 
-DESIGN3D: { sub:'scene editor', composer:true,
-  actions:[ btn('ADD MESH','Inserts a primitive into the real Three.js scene graph.','os-btn--primary'), btn('EXPORT','Writes the scene to glTF.') ],
-  body:'<div class="card os-stage-3d" style="height:230px;display:grid;place-items:center">'+
-   '<div style="position:relative;width:200px;height:120px" class="os-tiers">'+
-   '<div class="os-tier" style="transform:translateZ(50px)"></div><div class="os-tier" style="transform:translateZ(0)"></div>'+
-   '<div class="os-tier" style="transform:translateZ(-50px)"></div></div></div>'+
-   '<div class="muted" style="margin-top:10px">A real Three.js scene with its own graph, not a render. Orbit with drag, zoom with scroll.</div>'+
-   '<div class="grid3" style="margin-top:12px">'+
-   '<div class="card"><div class="lbl">Scene graph</div><div class="muted">Real nodes with transforms and materials. Selecting a mesh shows its live properties rather than a cached snapshot.</div></div>'+
-   '<div class="card"><div class="lbl">Camera</div><div class="muted">Drag orbits, scroll dollies, shift-drag pans. Double click frames the selection.</div></div>'+
-   '<div class="card"><div class="lbl">Export</div><div class="muted">Writes glTF to the workspace. Nothing leaves the machine.</div></div></div>' },
 
 VOICE: { sub:'speech in and out', live:1,
   actions:[ btn('LISTEN','Starts capture. Wakeword is separate and off by default.','os-btn--primary') ],
@@ -486,16 +718,21 @@ WIKI: { sub:'device wiki', live:1,
 SECURITY: { sub:'defensive posture', live:1,
   actions:[ btn('SCAN NOW','Runs the deterministic scan. There is no model call anywhere in the detection path.','os-btn--primary') ],
   body:
-   '<div class="grid2"><div class="card" style="display:grid;place-items:center">'+
-   '<svg width="120" height="120" viewBox="0 0 120 120"><circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="9"/>'+
-   '<circle cx="60" cy="60" r="50" fill="none" stroke="var(--dm-ok)" stroke-width="9" stroke-linecap="round" stroke-dasharray="314" stroke-dashoffset="248" transform="rotate(-90 60 60)"/>'+
-   '<text x="60" y="66" text-anchor="middle" fill="var(--dm-fg)" font-size="26" font-family="var(--dm-font-mono)">21</text></svg>'+
-   '<div class="muted">risk score</div></div>'+
-   '<div class="card"><div class="lbl">Findings</div>'+
-   '<div class="os-row"><span class="tag bad">high</span><span class="muted" style="flex:1">Application Firewall disabled</span><span class="os-row-actions">'+btn('REMEDIATE','Suggests the fix and routes it through the same human approval gate as self-extension. Never auto-applies.')+'</span></div>'+
+   '<div class="grid2" style="grid-template-columns:1.35fr 1fr"><div class="card"><div class="lbl">How a finding is made</div>'+ sflow() +'</div>'+
+   '<div class="card"><div class="lbl">Your fleet</div>'+
+   '<div class="fleet" style="grid-template-columns:1fr">'+
+   '<div class="mach"><div class="mh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="5" width="16" height="10" rx="1.5"/><path d="M2 19h20"/></svg><b>MacBook</b><span class="tag ok">OK</span></div><div class="kv"><span>Firewall</span><b>on</b></div><div class="kv"><span>Exposure</span><b>2 ports</b></div><div class="kv"><span>Risk</span><b style="color:var(--dm-active)">21</b></div></div>'+
+   '<div class="mach"><div class="mh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg><b>Desktop</b><span class="tag warn">watch</span></div><div class="kv"><span>Exposure</span><b>5 ports</b></div><div class="kv"><span>New device</span><b>1</b></div></div>'+
+   '<div class="mach"><div class="mh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="5" width="16" height="10" rx="1.5"/><path d="M2 19h20"/></svg><b>Dell</b><span class="tag">offline</span></div><div class="kv"><span>Last seen</span><b>2d ago</b></div></div>'+
+   '</div>'+
+   '<div style="display:flex;gap:8px;margin-top:10px">'+btn('LOCK','Immediate lockdown over Tailscale. macOS deep locks refused honestly under SIP.','os-btn--danger')+btn('INVESTIGATE','Bounded workflow, then an evidence-backed report with an explicit Unknowns section.','os-btn--primary')+'</div></div></div>'+
+   '<div class="grid2" style="margin-top:12px"><div class="card"><div class="lbl">Findings on this Mac</div>'+
+   '<div class="os-row"><span class="tag bad">high</span><span class="muted" style="flex:1">Application Firewall disabled</span><span class="os-row-actions">'+btn('REMEDIATE','Suggests the fix and routes it through the human approval gate. Never auto-applies.')+'</span></div>'+
    '<div class="os-row"><span class="tag warn">medium</span><span class="muted" style="flex:1">3 ports exposed beyond loopback</span></div>'+
-   '<div class="os-row"><span class="tag">info</span><span class="muted" style="flex:1">New device on the tailnet</span></div>'+
-   '<div class="muted" style="margin-top:8px">8 of the founding spec\'s 54 items are built. The score never hides the evidence behind it.</div></div></div>' },
+   '<div class="os-row"><span class="tag">info</span><span class="muted" style="flex:1">New device on the tailnet</span></div></div>'+
+   '<div class="card"><div class="lbl">Live activity</div><div style="font-family:var(--dm-font-mono);font-size:var(--dm-text-xs);color:var(--dm-fg-body);line-height:1.9">'+
+   '<div>21:04:02 &nbsp; new service on desktop:5051</div><div>21:03:18 &nbsp; download scanned &middot; clean</div><div>21:03:12 &nbsp; command on desktop: brew install</div><div>21:02:57 &nbsp; DNS baseline unchanged</div></div>'+
+   '<div class="muted" style="margin-top:6px">Confirmed vs suspected vs unknown is always separated. Never a fake all-clear.</div></div></div>' },
 
 OFFICE: { sub:'5 floors + lounge &middot; 43 agents &middot; live', live:1, actions:[
     btn('FOLLOW','Pins the view to whichever floor has activity, so the building follows the work instead of you hunting for it.'),
@@ -530,14 +767,14 @@ OFFICE: { sub:'5 floors + lounge &middot; 43 agents &middot; live', live:1, acti
 };
 
 
-var ORDER = ["HOME","COMMS","RESEARCH","CODE","VISION","MEDIA","PROJECTS","SETTINGS","ATLAS","GLOBE","NEWS","DESIGN3D","VOICE","ORCHESTRATION","GOALS","TIMETABLE","AGENTSMITH","WIKI","SECURITY","OFFICE"];
+var ORDER = ["HOME","COMMS","RESEARCH","BROWSER","MEDIA","CODE","PROJECTS","WIKI","GOALS","TIMETABLE","ORCHESTRATION","AGENTSMITH","VOICE","ATLAS","NEWS","SECURITY","SETTINGS","OFFICE"];
 
 var DOCK = [
   ['HOME','Console','M4 17l6-5-6-5 M12 19h8'],
   ['OFFICE','Agents','M12 5a3 3 0 110 6 3 3 0 010-6 M5.5 20a6.5 6.5 0 0113 0'],
   ['RESEARCH','Research','M11 5a6 6 0 110 12 6 6 0 010-12 M20 20l-4.5-4.5'],
   ['SECURITY','Security','M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z'],
-  ['GLOBE','Browser','M12 3a9 9 0 110 18 9 9 0 010-18 M3 12h18 M12 3c3 3.5 3 14 0 18-3-4-3-14.5 0-18z'],
+  ['BROWSER','Browser','M12 3a9 9 0 110 18 9 9 0 010-18 M3 12h18 M12 3c3 3.5 3 14 0 18-3-4-3-14.5 0-18z'],
   ['MEDIA','Media','M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z M10 9l5 3-5 3z'],
   ['WIKI','Wiki','M4 5.5A2.5 2.5 0 016.5 3H20v16H6.5A2.5 2.5 0 004 21.5z'],
   ['GOALS','Goals','M12 3v18 M5 8l7-5 7 5'],
@@ -551,7 +788,7 @@ function renderNav(){
     var s = SCREENS[k];
     return '<button class="navitem" data-go="'+k+'" data-live="'+(s.live?1:0)+'" '+
       'aria-current="'+(k===cur)+'" data-spec="Switches the stage to '+k+'. '+
-      (['HOME','RESEARCH','CODE','MEDIA','NEWS','DESIGN3D','COMMS'].indexOf(k)>=0
+      (['HOME','RESEARCH','CODE','MEDIA','NEWS','COMMS'].indexOf(k)>=0
         ? 'Has its own independent thread.' : 'Directives typed here fall back to HOME\'s thread.')+'">'+
       '<svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" '+
       'stroke-linecap="round" stroke-linejoin="round"><path d="'+ICON[k]+'"/></svg>'+
@@ -580,9 +817,10 @@ function paintFloor(i){
   document.getElementById('desks').innerHTML = f.agents.map(function(a){
     var label = a[1]==='meet' ? 'in meeting' : a[1]==='work' ? 'working'
               : a[1]==='live' ? 'live' : 'idle';
-    return '<div class="desk '+a[1]+'" data-spec="'+a[0]+'. Click opens this agent\'s live '+
+    var badge = a[1]==='live' ? '<span class="badge">AUTO</span>' : '';
+    return '<div class="desk '+a[1]+'" data-spec="'+a[0]+'. '+(a[1]==='live'?'Always-on night-shift agent: runs without being asked. ':'')+'Click opens this agent\'s live '+
       'reasoning stream, tagged by call_id so two concurrent runs never merge.">'+
-      '<div class="av"></div><div class="who">'+a[0]+'</div>'+
+      badge+'<div class="av"></div><div class="who">'+a[0]+'</div>'+
       '<div class="st">'+label+'</div></div>';
   }).join('');
   var inMeeting = f.agents.filter(function(a){ return a[1]==='meet'; });
@@ -620,6 +858,46 @@ document.addEventListener('click', function(e){
   var seg = e.target.closest('.os-seg button');
   if(seg){ [].forEach.call(seg.parentNode.children, function(b){ b.setAttribute('aria-selected','false'); });
            seg.setAttribute('aria-selected','true'); return; }
+  // Control Centre
+  if(e.target.closest('#ccBtn')){
+    var cc=document.getElementById('controlcenter'); var nc=document.getElementById('notifcenter');
+    nc.hidden=true; cc.hidden=!cc.hidden;
+    document.getElementById('ccBtn').classList.toggle('is-on', !cc.hidden); return;
+  }
+  // Notification Centre (the Alerts dock item, which carries no data-go)
+  var alertsBtn = e.target.closest('.os-dock-item[aria-label="Alerts"]');
+  if(alertsBtn){
+    var nc2=document.getElementById('notifcenter'); var cc2=document.getElementById('controlcenter');
+    cc2.hidden=true; document.getElementById('ccBtn').classList.remove('is-on');
+    nc2.hidden=!nc2.hidden; return;
+  }
+  // accent swatch: live-recolour the whole OS
+  var sw=e.target.closest('.accents .sw');
+  if(sw){
+    document.documentElement.style.setProperty('--dm-active', sw.dataset.accent);
+    document.querySelectorAll('.accents .sw').forEach(function(b){ b.setAttribute('aria-current', String(b===sw)); });
+    try{ localStorage.setItem('dm.accent', sw.dataset.accent); }catch(_){}
+    return;
+  }
+  // control-centre toggle tiles
+  var tile=e.target.closest('.cc-tile');
+  if(tile && (tile.id==='ccDnd'||tile.id==='ccAuto'||tile.id==='ccNet')){
+    tile.classList.toggle('act');
+    var v=tile.querySelector('.v'); var on=tile.classList.contains('act');
+    if(tile.id==='ccDnd') v.textContent = on?'On':'Off';
+    if(tile.id==='ccAuto') v.textContent = on?'On':'Off';
+    return;
+  }
+  if(e.target.closest('#ncClear')){
+    document.querySelectorAll('#nclist .nc-item').forEach(function(n){ n.classList.remove('unread'); });
+    return;
+  }
+  // close panels on outside click
+  if(!e.target.closest('.os-panel') && !e.target.closest('#ccBtn') && !e.target.closest('.os-dock-item[aria-label=\"Alerts\"]')){
+    var p1=document.getElementById('controlcenter'), p2=document.getElementById('notifcenter');
+    if(p1&&!p1.hidden){ p1.hidden=true; document.getElementById('ccBtn').classList.remove('is-on'); }
+    if(p2&&!p2.hidden){ p2.hidden=true; }
+  }
   if(e.target.closest('#specBtn')){ toggleSpec(); return; }
   if(e.target.closest('#wallBtn')){
     var pk=document.getElementById('wallpicker'); pk.hidden=!pk.hidden;
@@ -703,10 +981,49 @@ try {
   });
 } catch(_){}
 
+try{ var acc=localStorage.getItem('dm.accent'); if(acc){ document.documentElement.style.setProperty('--dm-active', acc);
+  document.querySelectorAll('.accents .sw').forEach(function(b){ b.setAttribute('aria-current', String(b.dataset.accent===acc)); }); } }catch(_){}
 tick(); setInterval(tick, 10000);
 // Render the chrome ONCE. show() only moves the selection after this.
 renderNav(); renderDock();
 show('HOME');
+
+/* ---- embedded-browser resize, mirrors the Claude preview divider ---- */
+(function(){
+  function frame(){ return document.getElementById('bframe'); }
+  function wrap(){ return document.getElementById('bwrap'); }
+  function sizeTag(){ return document.getElementById('bsize'); }
+  function report(){
+    var w=wrap(), fr=frame(); if(!w||!fr) return;
+    var ww = w.style.width.indexOf('%')>=0 ? w.getBoundingClientRect().width : parseInt(w.style.width,10);
+    sizeTag().textContent = Math.round(ww)+' \u00d7 '+parseInt(fr.style.height,10);
+  }
+  var drag=null;
+  document.addEventListener('mousedown', function(e){
+    var h=e.target.closest('.bres'); if(!h) return;
+    var w=wrap(), fr=frame();
+    drag={h:h, x:e.clientX, y:e.clientY, w:w.getBoundingClientRect().width, ht:parseInt(fr.style.height,10),
+          rx:h.id==='bresR'||h.id==='bresC', ry:h.id==='bresB'||h.id==='bresC'};
+    h.classList.add('drag'); e.preventDefault();
+  });
+  document.addEventListener('mousemove', function(e){
+    if(!drag) return; var w=wrap(), fr=frame();
+    if(drag.rx){ var nw=Math.max(320,Math.min(1100,drag.w+(e.clientX-drag.x)));
+      w.style.width=nw+'px'; document.querySelectorAll('#bpreset button').forEach(function(b){b.classList.remove('on');}); }
+    if(drag.ry){ var nh=Math.max(240,Math.min(760,drag.ht+(e.clientY-drag.y))); fr.style.height=nh+'px'; }
+    report();
+  });
+  document.addEventListener('mouseup', function(){ if(drag){ drag.h.classList.remove('drag'); drag=null; } });
+  document.addEventListener('click', function(e){
+    var p=e.target.closest('#bpreset button'); if(!p) return;
+    var w=wrap(); if(!w) return;
+    document.querySelectorAll('#bpreset button').forEach(function(b){b.classList.remove('on');}); p.classList.add('on');
+    w.style.width = p.dataset.w==='100%' ? '100%' : p.dataset.w+'px'; report();
+  });
+  // report the size whenever BROWSER is shown
+  var _mo=new MutationObserver(function(){ if(document.getElementById('bwrap')) report(); });
+  _mo.observe(document.getElementById('body'), {childList:true});
+})();
 })();
 </script>
 </body>

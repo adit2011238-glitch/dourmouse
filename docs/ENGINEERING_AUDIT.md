@@ -3902,3 +3902,55 @@ individually fixed — deliberately, not an oversight:
   assignment, ambiguous single-letter names, loop-variable reuse,
   `zip()` without `strict=`, `raise` losing exception context). Real,
   low-severity, genuinely not reviewed individually yet.
+
+### 083 -- the OS mockup, redesigned and approved as the reference UI
+
+Status: DONE, owner-approved 2026-09-24. UI only, wired to nothing.
+
+The 20-screen mockup from finding #080 was reworked in a live design session and
+approved as the reference OS design. Same green Hermes design language, but the shell
+now behaves like a real desktop OS and two data-heavy screens became diagrams.
+
+What changed, in `ui/os_mockup.html`:
+
+- **Dead features removed.** VISION (camera/hand control) and DESIGN3D (3D scene editor)
+  were gimmicks that do not serve the "replace every app / act as an OS" north star, so
+  both screens, their icons and their nav entries are gone. The redundant GLOBE world-map
+  screen was repurposed into a real BROWSER screen. Nav is 18 focused screens, not 20.
+
+- **Real OS chrome.** Window traffic lights on every window bar. A macOS-style Control
+  Centre (click the menubar status cluster): Agents, Security, Network, Brain, Do Not
+  Disturb and Autonomous tiles, a brightness slider, and accent swatches that live-recolour
+  the whole OS through `--dm-active` and persist to localStorage. A Notification Centre on
+  the dock's Alerts button with unread state and Clear.
+
+- **Research is a flowchart.** `rflow()` draws the full 15-stage loop as a serpentine, green
+  for the 4 built stages and grey for the rest, with the backward edge drawn as a dashed
+  amber loop around the whole diagram and labelled as not built. `egraph()` draws the
+  first-class-object graph (a hypothesis with supported / contradicted / tested / revised
+  edges). This is finding #083's honest picture of Domain G: mostly not built, and the one
+  thing that matters most (the backward edge) drawn as absent.
+
+- **Security is a flowchart.** `sflow()` draws the layered pipeline telemetry -> deterministic
+  analyzers -> baseline -> event engine -> AI sentries -> correlation -> dashboard -> response,
+  with a bracket over the first four reading "DETECTION -- no model, cannot fabricate" and a
+  confidence-band legend (confirmed / strong / weak / unknown). The fleet (three machines with
+  a lockdown control) sits alongside.
+
+- **The Browser mirrors the Claude preview pane.** Chrome-style tabs with favicons, a clean
+  toolbar (ghost back / forward / reload, a pill address bar with a lock and the real URL), a
+  device viewport switcher (phone / tablet / desktop / fill) with a live size readout, a popout
+  control, and a drag divider on the edge. It defaults to filling the window and reflows live
+  when resized. The screen states the real architecture honestly: a BrowserView is a top-level
+  context so X-Frame-Options never applies, which is why the old rewriting proxy (the real
+  source of the proxy errors, finding #081) is gone on the Electron shell.
+
+- **Settings** shows the model policy from the 2026-09-24 planning pass: large cloud models
+  only, small/local marked blocked.
+
+Honest limits, unchanged from #080: this is a prototype, wired to nothing, and is not the
+live console. Wiring any of it into a real surface is separate work and waits behind the §0
+foundation (MODEL-1, INFRA-1) in the tracking folder's `REMAINING_WORK.md`. A CSS block was
+briefly lost to a bad edit anchor mid-session (the browser rendered unstyled), caught by a
+live screenshot and fixed; recorded here because "the screenshot caught it, the assertion
+did not" is the reason edits to this file assert their anchors.

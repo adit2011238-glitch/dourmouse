@@ -997,3 +997,9 @@ and a real build sequence, not just a requirement statement:
 - 2026-09-16: Declined the spec's literal `src/core/agents/tools/...` directory reorg as a
   big-bang move — too risky against a live, daily-used app. Reorganizing incrementally per
   subsystem as each is touched instead.
+
+- [x] Domain J, OS mockup redesigned and owner-approved as the reference UI 2026-09-24
+  (finding #083) -- `ui/os_mockup.html`. Real OS shell (window chrome, Control Centre,
+  Notification Centre, live accent theming), Research and Security drawn as flowcharts,
+  a Claude-preview-style resizable Browser, two gimmick screens removed. Prototype only,
+  wired to nothing; live wiring waits behind the §0 foundation (see the tracking folder).
