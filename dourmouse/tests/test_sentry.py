@@ -514,6 +514,13 @@ class TestSentryRuntimeEnabled:
         assert sentry_runtime_enabled() is True
 
 
+def _fast_state():
+    """A real-shaped snapshot for tests of the runtime LOOP: they check tick
+    and stop behaviour, not telemetry, and a real cold scan takes about 10 s."""
+    return {"firewall": {"available": True, "enabled": True}, "listening_ports": {"available": True, "listening_ports": []},
+            "arp_neighbors": {"available": True, "neighbors": []}}
+
+
 class TestSentryRuntime:
     def test_interval_is_never_faster_than_one_minute(self, tmp_path):
         rt = SentryRuntime(interval_seconds=1.0, store=SentryStore(tmp_path / "s.db"))
@@ -524,7 +531,7 @@ class TestSentryRuntime:
         assert rt._interval == 300.0
 
     def test_run_one_tick_now_is_real_and_synchronous(self, tmp_path):
-        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"), state_fn=_fast_state)
         assert rt.last_result is None
         assert rt.tick_count == 0
         result = rt.run_one_tick_now()
@@ -539,7 +546,7 @@ class TestSentryRuntime:
         threading.Event.wait(), so even a long real interval does not
         delay the first real scan -- a genuinely "always running" sentry
         must not wait 5 minutes to say anything for the first time."""
-        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"), state_fn=_fast_state)
         rt.start()
         try:
             deadline = time.time() + 5.0
@@ -551,7 +558,7 @@ class TestSentryRuntime:
             rt.stop()
 
     def test_start_is_idempotent(self, tmp_path):
-        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"), state_fn=_fast_state)
         rt.start()
         try:
             first_thread = rt._thread
@@ -561,7 +568,7 @@ class TestSentryRuntime:
             rt.stop()
 
     def test_stop_lets_the_daemon_thread_exit_promptly(self, tmp_path):
-        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"), state_fn=_fast_state)
         rt.start()
         thread = rt._thread
         rt.stop()
@@ -571,7 +578,7 @@ class TestSentryRuntime:
     def test_a_broken_tick_never_kills_the_runtime(self, tmp_path, monkeypatch):
         """Same discipline as GoalRuntime._loop: a bug in one tick must
         never stop future ticks from happening."""
-        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"))
+        rt = SentryRuntime(store=SentryStore(tmp_path / "s.db"), state_fn=_fast_state)
         calls = []
 
         def _flaky_tick():

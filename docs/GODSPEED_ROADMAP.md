@@ -1050,3 +1050,11 @@ and a real build sequence, not just a requirement statement:
   Desktop compute node live over Tailscale; Dell pending its SSH setup.
 - [x] Mac-only + job environment (finding #098) 2026-09-24 -- owner scrapped other devices; job runner
   becomes the Mac's sandbox with a real memory limit (RSS watchdog) and an environment hash per job.
+- [x] Phase 3 MS-1 (finding #099) 2026-09-24 -- Mac telemetry: Wi-Fi security, host protections,
+  process identity and code signatures, persistence, diagnostics.
+- [x] Phase 3 MS-2 + MS-3 (finding #100) 2026-09-24 -- baseline engine (per network, learning period)
+  and Mac detectors (posture and change); live scan of this Mac reports its real posture.
+- [x] Phase 3 MS-4 (finding #101) 2026-09-24 -- Downloads watch and file assessment (type by bytes,
+  origin, signature, Gatekeeper, decoy tricks); honest "not malware-scanned" without ClamAV.
+- [x] Phase 3 MS-5 (finding #102) 2026-09-24 -- "am I being monitored?": eight indicators with
+  evidence and confidence, and an explicit Unknowns list.

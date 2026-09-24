@@ -3141,6 +3141,16 @@ class _Handler(BaseHTTPRequestHandler):
             from dourmouse.security.platform_adapter import get_system_security_state
 
             self._send_json(get_system_security_state())
+        elif path == "/api/security/monitoring":
+            # MS-5 (finding #102): "am I being monitored?" indicators.
+            from dourmouse.security.monitoring import analyze
+
+            self._send_json(analyze())
+        elif path == "/api/security/downloads":
+            # MS-4 (finding #101): the latest Downloads assessments.
+            from dourmouse.security.sentry import SentryStore, default_db
+
+            self._send_json({"downloads": SentryStore(default_db()).recent_downloads(50)})
         elif path == "/api/state":
             # v5.14 Phase R0: the cross-device state snapshot — watchlist,
             # alerts inbox, prefs, recent activity, per-device workspaces.
@@ -7654,7 +7664,8 @@ def run_server(
     # when freebuff_events=True — tests keep it off so nothing touches the
     # Freebuff app. The watcher emits into the hub, the hub pushes to every
     # connected HUD stream.
-    server.events_broadcast = _SSEBroadcast()
+    events_hub = _SSEBroadcast()
+    server.events_broadcast = events_hub
     # v13.6: real push for the agent-swarm graph (Vision OS item 7's own
     # flagged gap — "the current implementation polls a snapshot every
     # 2s, not a genuine SSE event stream"). ActivityTracker now emits a
@@ -7705,6 +7716,26 @@ def run_server(
     if sentry_runtime_enabled():
         server.security_sentry = SentryRuntime()
         server.security_sentry.start()
+    # MS-4 (finding #101): every file that lands in ~/Downloads is assessed
+    # (type by bytes, origin, signature, Gatekeeper, known tricks) and a risky
+    # one becomes a sentry finding; each assessment is also pushed live.
+    from dourmouse.security.downloads import DownloadsWatcher, downloads_watch_enabled, handle_new_file
+    from dourmouse.security.sentry import SentryStore as _SentryStore
+    from dourmouse.security.sentry import default_db as _sentry_db
+
+    downloads_watch: DownloadsWatcher | None = None
+    if downloads_watch_enabled():
+        _dl_store = _SentryStore(_sentry_db())
+
+        def _on_download(path: Path) -> None:
+            import dataclasses
+
+            a = handle_new_file(path, _dl_store, time.time())
+            events_hub.broadcast({"type": "security_download", "assessment": dataclasses.asdict(a)})
+
+        downloads_watch = DownloadsWatcher(on_file=_on_download)
+        downloads_watch.start()
+    setattr(server, "downloads_watch", downloads_watch)  # noqa: B010 -- read back in serve_forever's shutdown
     # v5.22.9: All-Hands runs broadcast their progress on the SAME hub the
     # HUD and the dedicated window listen to (live per-brain cards).
     from dourmouse import all_hands
@@ -7976,6 +8007,9 @@ def serve_forever(
             server.goal_runtime.stop()
         if server.security_sentry is not None:
             server.security_sentry.stop()
+        watch = getattr(server, "downloads_watch", None)
+        if watch is not None:
+            watch.stop()
         if server.daily_reporter is not None:
             server.daily_reporter.stop()
         if server.freebuff_watcher is not None:

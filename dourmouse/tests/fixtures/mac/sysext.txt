@@ -1,0 +1,4 @@
+1 extension(s)
+--- com.apple.system_extension.network_extension (Go to 'System Settings > General > Login Items & Extensions > Network Extensions' to modify these system extension(s))
+enabled	active	teamID	bundleID (version)	name	[state]
+*	*	W5364U7YZB	io.tailscale.ipn.macsys.network-extension (1.102.2/101.102.2)	Tailscale Network Extension	[activated enabled]

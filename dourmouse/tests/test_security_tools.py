@@ -41,7 +41,7 @@ class TestBuildSecuritySubagent:
         assert {t.name for t in subagent.tools} == {
             "security_status", "list_exposed_services",
             "security_sentry_scan", "security_external_peers", "security_check_reputation",
-            "security_known_devices", "security_sentry_dismiss",
+            "security_known_devices", "security_sentry_dismiss", "security_downloads", "security_monitoring_check",
             "security_incident_open", "security_incident_update", "security_incidents",
         }
 

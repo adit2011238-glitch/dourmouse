@@ -15,6 +15,7 @@ anything") will need REQUIRES_CONFIRMATION when they exist.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from typing import Any
 
@@ -203,6 +204,48 @@ def _security_sentry_dismiss(arguments: dict[str, Any]) -> str:
     return f"Marked {fingerprint} as a false positive -- it will not be reported as a new finding again."
 
 
+def _security_downloads(arguments: dict[str, Any]) -> str:
+    from pathlib import Path
+
+    from .downloads import assess
+
+    target = (arguments.get("path") or "").strip()
+    if target:
+        p = Path(target).expanduser()
+        if not p.exists():
+            return f"ERROR: no such file: {p}"
+        rows = [dataclasses.asdict(assess(p))]
+    else:
+        rows = SentryStore(_sentry_db()).recent_downloads(20)
+        if not rows:
+            return "No downloads have been assessed yet (the watcher reports files that arrive after it starts)."
+    lines = []
+    for r in rows:
+        lines.append(f"[{r['risk']}] {r['name']} ({r['kind']}, {r['size']} bytes)")
+        for reason in r.get("reasons") or []:
+            lines.append(f"    - {reason}")
+        if r.get("where_from"):
+            lines.append(f"    from: {r['where_from'][0]}")
+        lines.append(f"    {r.get('confidence', '')}")
+    return "\n".join(lines)
+
+
+def _security_monitoring_check(_arguments: dict[str, Any]) -> str:
+    from .monitoring import analyze
+
+    r = analyze()
+    lines = [r["summary"], ""]
+    for i in r["indicators"]:
+        lines.append(f"[{i['status'].upper()}] {i['name'].replace('_', ' ')}: {i['evidence']}")
+        if i["status"] == "present":
+            lines.append(f"    what it means: {i['meaning']}")
+        lines.append(f"    confidence: {i['confidence']}")
+    lines.append("")
+    lines.append("Could not be checked:")
+    lines.extend(f"  - {u}" for u in r["unknowns"])
+    return "\n".join(lines)
+
+
 def build_security_subagent() -> Subagent:
     return Subagent(
         name="security",
@@ -327,6 +370,26 @@ def build_security_subagent() -> Subagent:
                 description="List real tracked incidents, optionally filtered by status.",
                 parameters={"type": "object", "properties": {"status": {"type": "string", "default": ""}}},
                 handler=_security_incidents,
+            ),
+            ToolSpec(
+                name="security_monitoring_check",
+                description=(
+                    "Answer 'am I being monitored?' honestly: proxies, MDM, configuration profiles, extra trusted "
+                    "root certificates, VPNs, network and endpoint-security extensions, remote access services, and "
+                    "remote-control software. Each indicator is present, absent or unknown with its evidence, and "
+                    "what could not be checked is listed."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_security_monitoring_check,
+            ),
+            ToolSpec(
+                name="security_downloads",
+                description=(
+                    "List what recently landed in ~/Downloads with each file's assessment (real type, origin, "
+                    "signature, Gatekeeper verdict, risk and the reasons), or assess one file by path."
+                ),
+                parameters={"type": "object", "properties": {"path": {"type": "string", "default": ""}}},
+                handler=_security_downloads,
             ),
         ),
     )

@@ -288,3 +288,6 @@ def _security_sentry_off(monkeypatch):
     SentryRuntime directly or set the variable themselves.
     """
     monkeypatch.setenv("DOURMOUSE_SECURITY_SENTRY_LOOP", "0")
+    # Finding #101: the same for the Downloads watcher, which would otherwise
+    # poll the developer's real ~/Downloads from every server a test builds.
+    monkeypatch.setenv("DOURMOUSE_DOWNLOADS_WATCH", "0")

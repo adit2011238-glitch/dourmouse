@@ -1,0 +1,12 @@
+
+	disabled services = {
+		"com.avid.sibelius" => enabled
+		"com.apple.AEServer" => enabled
+		"com.apple.screensharing" => enabled
+		"com.apple.CSCSupportd" => disabled
+		"com.apple.ftpd" => disabled
+		"com.apple.mdmclient.daemon.runatboot" => disabled
+		"com.openssh.sshd" => enabled
+		"com.muse.authservice" => enabled
+		"com.apple.smbd" => enabled
+	}

@@ -1,0 +1,1 @@
+/tmp/unsigned_probe.sh: code object is not signed at all

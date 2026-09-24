@@ -4563,3 +4563,121 @@ samples the job and its children every 250 ms through psutil (already a dependen
 past the limit, recording "memory limit exceeded". The honest limit of the method is in the code:
 a burst faster than 250 ms can overshoot briefly before the kill. The memory test now runs on
 macOS too (a job growing to 1.2 GB under a 128 MB cap is stopped).
+
+### 099 -- the security sentry could not see the Mac's own defences, its Wi-Fi, or who its network processes were
+
+Status: DONE 2026-09-24. Phase 3 (Mac only, owner decision), MS-1.
+
+`platform_adapter` read interfaces, routes, DNS, ARP, sockets and the firewall state, and nothing
+about the machine itself. New `security/mac_telemetry.py`, measured on this Mac (macOS 26.6.2)
+before it was written:
+
+- **Wi-Fi link security** from `ipconfig getsummary` (about 10 ms; `system_profiler` takes about
+  5 s and is kept for signal and channel on demand). macOS redacts the SSID and BSSID without
+  Location permission; they are reported as redacted, never guessed.
+- **Host protections**: firewall, stealth mode, FileVault, SIP, Gatekeeper, and whether Remote
+  Login and Screen Sharing are enabled (`launchctl print-disabled`) and actually accepting
+  connections. A check that could not run is `None`, never "off".
+- **Who a network process is**: executable path, parent, user, start time, a location class
+  (system, applications, downloads, temporary), and its code signature (Apple, Developer ID,
+  development, ad hoc, unsigned) with the Gatekeeper verdict for its bundle. Signature checks cost
+  about 2 s each cold (spctl can consult the notarization service), so they run concurrently and
+  are cached by path, mtime and size: a full cold scan went from 20 s to 10 s, a warm one takes
+  0.18 s.
+- **Persistence**: every LaunchAgent and LaunchDaemon with its program, run-at-load flag and hash;
+  the root-only login-item database (`sfltool dumpbtm`) is named as a gap.
+- **Diagnostics**: latency, jitter and loss to the router and to 1.1.1.1, and DNS lookup time.
+
+The real state it reports on this Mac: FileVault, SIP and Gatekeeper on; the firewall and stealth
+mode OFF; Remote Login and Screen Sharing both enabled and accepting connections; 19 persistence
+items. Nothing was changed: those are the owner's settings and need admin rights.
+
+Parsers are pure and tested against output captured from this Mac; the fixtures were stripped of
+nearby networks, the Wi-Fi card's MAC and DHCP details before going into the public repo.
+
+### 100 -- the sentry could say "this exists" but never "this changed": the baseline engine and the Mac detectors
+
+Status: DONE 2026-09-24. Phase 3, MS-2 (spec items 9, 18) and MS-3 (items 8, 10, 11, 13, 14, 15).
+
+**Baseline engine** (`security/baseline.py`, pure). Each scan is reduced to observations in two
+scopes: host-level (listening ports, persistence items, protections, which programs talk to the
+network) and per-network (the router's MAC, DNS resolvers, Wi-Fi security). They are compared with
+what this Mac has seen before; new keys, changed values and (for persistence) removed items are
+anomalies. A scope stays silent until it has learned (3 scans over at least 30 minutes), so a
+fresh install or a new network seeds itself instead of calling everything new. Stored in two new
+sentry tables (`baseline`, `baseline_meta`).
+
+Bug caught while building it: the first network id was anchored on the router's MAC address. A
+changed router MAC is exactly what the ARP-spoofing check looks for, and a spoofer changes it, so
+the attack would have been filed under a brand-new, silently learning network and never reported.
+The id now uses the gateway address, Wi-Fi security, SSID when macOS reveals it, and the DHCP search
+domains; the finding text names the benign explanation (a different network using the same router
+address).
+
+**Mac detectors** (`security/mac_detectors.py`, pure, feeding the existing store, alerts and scoring):
+posture every scan (FileVault, SIP, Gatekeeper off; stealth mode off; Remote Login or Screen
+Sharing on and accepting; open, WEP or legacy WPA Wi-Fi; another device claiming the router's MAC;
+a network-active program running from Downloads or a temp folder) and change after learning (router
+MAC changed, DNS resolvers changed, Wi-Fi security changed, a protection turned off, a new or changed
+listening port, a new or modified persistence item (high when it runs from a hidden or temporary
+location), a new unsigned program talking to the network). Noise rule for a developer's Mac:
+Homebrew and virtualenv binaries are ad hoc signed, so an unsigned program is reported only when it
+is new to the network after learning or runs from Downloads or temp.
+
+`sentry.collect_state()` now gathers the Mac telemetry for every scan; `SentryRuntime` takes an
+injectable state source so the tests of its loop no longer depend on a 10-second real scan.
+
+Live scan of this Mac: all nine telemetry sources available, 10.2 s cold; findings: firewall off
+(high), Remote Login and Screen Sharing on and accepting (med), rapportd and ARDAgent listening on
+all interfaces (med), stealth mode off (low). Tests: `test_mac_telemetry.py` (28),
+`test_security_baseline.py` (13, including a full-path scenario: three silent learning scans, then a
+spoofed router MAC, a new listener and a hidden persistence item are each reported, and the next
+identical scan reports nothing new).
+
+### 101 -- nothing looked at what landed in Downloads
+
+Status: DONE 2026-09-24. Phase 3, MS-4 (the Mac part of the fleet spec's SEC-E2).
+
+New `security/downloads.py`. A watcher (polling every 2 s, no extra dependency; it waits for a
+file's size to settle and skips in-progress `.crdownload`/`.download`/`.part` files) hands each new
+file to an assessment: what it really is by its bytes (Mach-O, fat binary, pkg by its `xar!` magic,
+DMG by its `koly` trailer, script, JAR, Office macro format, zip, PDF), where it came from and which
+app fetched it (`com.apple.quarantine`, `kMDItemWhereFroms`), its code signature and Gatekeeper
+verdict (install assessment for packages), and the known tricks: a double extension
+("invoice.pdf.command"), padding spaces hiding an executable extension, a stripped quarantine flag on
+an executable (Gatekeeper then never checks it), an app or script inside a zip. High risk: unsigned,
+ad hoc or Gatekeeper-rejected executables, decoy names, a scanner hit; medium: other executables,
+macro documents, archives carrying apps. Recorded in a new `downloads` sentry table; medium and high
+become `risky_download` findings (high also alerts); each assessment is pushed on the SSE hub; chat
+tool `security_downloads`, API `/api/security/downloads`. Started by the server beside the sentry,
+off in tests (conftest), stopped at shutdown.
+
+Honesty: ClamAV is not installed on this Mac, so every verdict says the contents were not scanned
+for known malware or document exploits, and rests on type, signature, Gatekeeper and origin; when
+ClamAV is present it is used (clamdscan first) and named as a low-detection engine.
+
+Found live and fixed: `spctl`'s execute assessment answers "rejected (the code is valid but does
+not seem to be an app)" for every bare command-line binary, even a copy of Apple-signed `/bin/echo`.
+That is not a security verdict; it is now `not_an_app` and such files are judged by signature,
+otherwise every downloaded CLI tool would have been "high". Also narrowed the padding-space rule,
+which first flagged an odd but harmless "report   .pdf". Live on the owner's latest download: a PDF
+from Google Drive, info, with the unscanned-contents caveat.
+
+### 102 -- "am I being monitored?" had no answer
+
+Status: DONE 2026-09-24. Phase 3, MS-5 (spec item 24).
+
+New `security/monitoring.py`: eight indicators, each PRESENT, ABSENT or UNKNOWN with its evidence,
+what it would mean, and its confidence: system proxy or PAC, MDM enrollment, this user's
+configuration profiles, user/admin-added trusted root certificates (TLS interception), VPN
+connections, active network and endpoint-security system extensions, Remote Login and Screen
+Sharing, and remote-control software (18 known tools, matched in running processes and startup
+items; a renamed tool would be missed and the confidence says so). What cannot be checked without
+Full Disk Access or root (privacy permissions for screen recording, accessibility and input
+monitoring; device-wide profiles and login items; anything outside the Mac) is listed as Unknowns,
+never implied clean. Chat tool `security_monitoring_check`, API `/api/security/monitoring`.
+
+Live on this Mac: no proxy, not MDM-enrolled, no profiles, no added root certificates; present: the
+Tailscale VPN and its network extension, Remote Login and Screen Sharing, and two remote-control
+tools running (Splashtop XDisplay and Parsec), each shown with its evidence and its common
+legitimate explanation.

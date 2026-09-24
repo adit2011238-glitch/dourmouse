@@ -126,6 +126,32 @@ CREATE TABLE IF NOT EXISTS incidents (
     opened_at   REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS baseline (
+    scope      TEXT NOT NULL,
+    category   TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    first_seen REAL NOT NULL,
+    last_seen  REAL NOT NULL,
+    times_seen INTEGER NOT NULL,
+    PRIMARY KEY (scope, category, key)
+);
+CREATE TABLE IF NOT EXISTS downloads (
+    sha256     TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    risk       TEXT NOT NULL,
+    assessment TEXT NOT NULL,
+    seen_at    REAL NOT NULL,
+    PRIMARY KEY (sha256, path)
+);
+CREATE TABLE IF NOT EXISTS baseline_meta (
+    scope      TEXT PRIMARY KEY,
+    first_seen REAL NOT NULL,
+    last_seen  REAL NOT NULL,
+    scans      INTEGER NOT NULL
+);
 """
 
 
@@ -480,6 +506,69 @@ class SentryStore:
             for r in rows
         ]
 
+    # -- baseline (MS-2, finding #100) ------------------------------------ #
+
+    def load_baseline(self, scopes: set[str]) -> dict[tuple[str, str, str], str]:
+        marks = ",".join("?" * len(scopes))
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT scope, category, key, value FROM baseline WHERE scope IN ({marks})",  # noqa: S608 -- placeholders only
+                tuple(scopes),
+            ).fetchall()
+        return {(r[0], r[1], r[2]): r[3] for r in rows}
+
+    def baseline_meta(self, scope: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT first_seen, last_seen, scans FROM baseline_meta WHERE scope=?", (scope,)
+            ).fetchone()
+        return {"first_seen": row[0], "last_seen": row[1], "scans": row[2]} if row else None
+
+    def update_baseline(self, observations: list[Any], scopes: set[str], now: float) -> None:
+        """Record this scan's observations and count the scan for each scope
+        (a scope with nothing observed still counts: an empty Mac is a real
+        baseline). Values are overwritten with the latest; the change itself
+        was already reported as an anomaly before this runs."""
+        with self._conn() as conn:
+            for o in observations:
+                conn.execute(
+                    "INSERT INTO baseline (scope, category, key, value, first_seen, last_seen, times_seen) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT(scope, category, key) DO UPDATE SET "
+                    "value=excluded.value, last_seen=excluded.last_seen, times_seen=times_seen+1",
+                    (o.scope, o.category, o.key, o.value, now, now),
+                )
+            for scope in scopes:
+                conn.execute(
+                    "INSERT INTO baseline_meta (scope, first_seen, last_seen, scans) VALUES (?, ?, ?, 1) "
+                    "ON CONFLICT(scope) DO UPDATE SET last_seen=excluded.last_seen, scans=scans+1",
+                    (scope, now, now),
+                )
+            conn.commit()
+
+    # -- downloads (MS-4, finding #101) ----------------------------------- #
+
+    def record_download(self, assessment: dict[str, Any], now: float) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO downloads (sha256, path, name, kind, risk, assessment, seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (assessment["sha256"], assessment["path"], assessment["name"], assessment["kind"],
+                 assessment["risk"], json.dumps(assessment), now),
+            )
+            conn.commit()
+
+    def recent_downloads(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT assessment, seen_at FROM downloads ORDER BY seen_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [{**json.loads(r[0]), "seen_at": r[1]} for r in rows]
+
+    def forget_baseline_item(self, scope: str, category: str, key: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM baseline WHERE scope=? AND category=? AND key=?", (scope, category, key))
+            conn.commit()
+
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
@@ -513,8 +602,35 @@ def _write_alert(finding: SentryFinding) -> bool:
         return False
 
 
+def collect_state() -> dict[str, Any]:
+    """Everything one scan looks at: the network basics from platform_adapter
+    plus the Mac telemetry (MS-1): Wi-Fi, host protections, persistence, and
+    who each network-active process really is (path, parent, signature)."""
+    from . import mac_telemetry as mt
+
+    state = pa.get_system_security_state()
+    state["wifi"] = mt.get_wifi()
+    state["host_protections"] = mt.get_host_protections()
+    state["persistence"] = mt.get_persistence_items()
+    est = state.get("established_connections") or {}
+    procs = [mt.process_details(int(pid)) for pid in sorted({c.get("pid") for c in est.get("connections", []) if c.get("pid")})]
+    # Signature checks run concurrently: spctl takes about 2 s per program
+    # cold (it can consult Apple's notarization service), 15 s for 8 programs
+    # measured serially on this Mac; results are cached by path, mtime, size.
+    from concurrent.futures import ThreadPoolExecutor
+
+    exes = sorted({d["exe"] for d in procs if d.get("available") and d.get("exe")})
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sigs = dict(zip(exes, pool.map(mt.code_signature, exes), strict=True))
+    for d in procs:
+        if d.get("exe") in sigs:
+            d["signature"] = sigs[d["exe"]]
+    state["network_processes"] = procs
+    return state
+
+
 def run_scan(
-    state_fn: Callable[[], dict[str, Any]] = pa.get_system_security_state,
+    state_fn: Callable[[], dict[str, Any]] = collect_state,
     store: SentryStore | None = None,
     now: Callable[[], float] = time.time,
     write_alerts: bool = True,
@@ -576,14 +692,43 @@ def run_scan(
         if write_alerts and _write_alert(correlation):
             alerts_written += 1
 
+    # MS-2/MS-3 (finding #100): compare with the baseline, then learn from
+    # this scan. Anomalies from a scope still in its learning period are
+    # dropped, so a fresh install or a new network seeds silently.
+    from . import baseline as bl
+    from .mac_detectors import detect_mac_findings
+    from .mac_telemetry import network_id
+
+    gw_ip = (state.get("default_gateway") or {}).get("gateway")
+    domains = sorted({d for r in (state.get("dns") or {}).get("resolvers", []) for d in r.get("search_domains", [])})
+    net = network_id(gw_ip, state.get("wifi") or {}, domains)
+    observations = bl.observations(state, net)
+    scopes = {bl.HOST, net}
+    known = store.load_baseline(scopes)
+    learning = {sc for sc in scopes if bl.is_learning(store.baseline_meta(sc), ts)}
+    anomalies = [a for a in bl.compare(observations, known) if a.observation.scope not in learning]
+    for finding in detect_mac_findings(state, anomalies):
+        status = store.record_and_classify(finding, ts)
+        if status == "dismissed":
+            suppressed.append(finding)
+            continue
+        all_findings.append(finding)
+        risk_score += _SEVERITY_WEIGHT.get(finding.severity, 0.0)
+        if status == "new":
+            new_findings.append(finding)
+            if write_alerts and finding.severity == "high" and _write_alert(finding):
+                alerts_written += 1
+    store.update_baseline(observations, scopes, ts)
+
     arp = state.get("arp_neighbors") or {}
     if arp.get("available"):
         store.record_devices(arp["neighbors"], ts)
 
-    telemetry_available = {
+    base_keys = ("interfaces", "default_gateway", "dns", "arp_neighbors", "listening_ports", "firewall")
+    telemetry_available: dict[str, bool] = {
         key: bool((state.get(key) or {}).get("available"))
-        for key in ("interfaces", "default_gateway", "dns", "arp_neighbors",
-                    "listening_ports", "firewall")
+        for key in base_keys + ("wifi", "host_protections", "persistence")
+        if key in state or key in base_keys
     }
     return SentryScanResult(
         all_findings=all_findings,
@@ -611,11 +756,16 @@ class SentryRuntime:
         self,
         interval_seconds: float = _DEFAULT_SCAN_INTERVAL_SECONDS,
         store: SentryStore | None = None,
+        state_fn: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         # Never faster than once a minute -- a real scan shells out to
         # several real system commands per tick, not a free in-memory check.
         self._interval = max(60.0, float(interval_seconds))
         self._store = store or SentryStore(default_db())
+        # None: the real Mac telemetry (collect_state). Injected in tests of
+        # the loop itself, which must not depend on a real scan's cost (a
+        # cold scan with signature checks takes about 10 s on this Mac).
+        self._state_fn = state_fn
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.last_result: SentryScanResult | None = None
@@ -638,7 +788,7 @@ class SentryRuntime:
         a user asking "scan now" does not have to wait for the next
         scheduled tick, and by tests that want a real tick without a real
         threading.Event.wait delay."""
-        result = run_scan(store=self._store)
+        result = run_scan(state_fn=self._state_fn or collect_state, store=self._store)
         self.last_result = result
         self.last_scan_at = time.time()
         self.tick_count += 1
