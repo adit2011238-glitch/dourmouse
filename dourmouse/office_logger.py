@@ -122,6 +122,7 @@ class OfficeLogger:
         with self._lock, self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+        self._migrate()
 
     def _conn(self) -> sqlite3.Connection:
         return sqlite3.connect(str(self._path), timeout=30.0)
@@ -167,12 +168,23 @@ class OfficeLogger:
         except Exception:
             pass  # an observer must never break a real chat turn
 
+    def _migrate(self) -> None:
+        """Finding #123: fan-out rows carry the branch's call_id (to join its
+        transcript), the caller's, and the branch's task. Older logs gain
+        the columns in place; their existing rows simply have them empty."""
+        with self._lock, self._conn() as conn:
+            have = {r[1] for r in conn.execute("PRAGMA table_info(fanout_events)")}
+            for col in ("call_id", "parent_call_id", "task"):
+                if col not in have:
+                    conn.execute(f"ALTER TABLE fanout_events ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+
     def _log_fanout(self, entry: dict[str, Any]) -> None:
         with self._lock, self._conn() as conn:
             conn.execute(
                 "INSERT INTO fanout_events "
-                "(run_id, phase, branch_index, total, agent, ok, error, elapsed_s, ts) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(run_id, phase, branch_index, total, agent, ok, error, elapsed_s, ts, call_id, parent_call_id, task) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     str(entry.get("run_id", "")),
                     str(entry.get("phase", "")),
@@ -183,6 +195,9 @@ class OfficeLogger:
                     str(entry.get("error", "")),
                     entry.get("elapsed_s"),
                     time.time(),
+                    str(entry.get("call_id", "")),
+                    str(entry.get("parent_call_id", "")),
+                    str(entry.get("task", ""))[:2000],
                 ),
             )
             conn.commit()
@@ -242,6 +257,68 @@ class OfficeLogger:
             }
             for r in rows
         ]
+
+    def recent_meetings(self, limit: int = 30) -> list[dict[str, Any]]:
+        """Finding #123 (A1): recent multi-agent runs, newest first."""
+        limit = max(1, min(int(limit), 200))
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT run_id, MIN(ts), MAX(ts), GROUP_CONCAT(DISTINCT agent), MAX(total), "
+                "SUM(CASE WHEN phase='result' AND ok=1 THEN 1 ELSE 0 END), "
+                "SUM(CASE WHEN phase='result' THEN 1 ELSE 0 END) "
+                "FROM fanout_events GROUP BY run_id ORDER BY MAX(id) DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [{"run_id": r[0], "started": r[1], "ended": r[2], "agents": sorted((r[3] or "").split(",")),
+                 "branches": r[4], "succeeded": r[5], "finished": r[6]} for r in rows]
+
+    def meeting(self, run_id: str, max_lines: int = 600) -> dict[str, Any]:
+        """Finding #123 (A1): one fan-out "meeting" as a single readable
+        conversation. Each branch's events (joined by the call_id the branch
+        announced) are merged in time order, streamed deltas are folded into
+        whole lines, and each branch's task and outcome frame its part."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT phase, branch_index, agent, ok, error, elapsed_s, ts, call_id, parent_call_id, task "
+                "FROM fanout_events WHERE run_id=? ORDER BY id ASC", (run_id,),
+            ).fetchall()
+            branches: dict[str, dict[str, Any]] = {}
+            for phase, idx, agent, ok, error, elapsed, ts, cid, parent, task in rows:
+                b = branches.setdefault(cid or f"branch-{idx}", {"index": idx, "agent": agent, "call_id": cid,
+                                                               "parent_call_id": parent, "task": "", "started": ts})
+                if phase == "start":
+                    b["task"], b["started"] = task, ts
+                else:
+                    b.update(ok=None if ok is None else bool(ok), error=error, elapsed_s=elapsed, ended=ts)
+            ids = [c for c in branches if c and not c.startswith("branch-")]
+            marks = ",".join("?" * len(ids))  # placeholders only; every value is bound
+            query = "SELECT agent, call_id, type, name, text, ts FROM agent_events WHERE call_id IN (" + marks + ") ORDER BY id ASC"  # noqa: S608
+            events = conn.execute(query, ids).fetchall() if ids else []
+        lines: list[dict[str, Any]] = []
+        for b in sorted(branches.values(), key=lambda x: x["started"] or 0):
+            lines.append({"agent": b["agent"], "call_id": b["call_id"], "kind": "task", "text": b["task"],
+                          "ts": b["started"]})
+        last_by_call: dict[str, dict[str, Any]] = {}
+        for agent, cid, typ, name, text, ts in events:
+            kind = {"assistant_delta": "says", "assistant_text": "says", "thinking_delta": "thinks",
+                    "tool_use": "uses", "tool_result": "gets", "brain": "brain"}.get(typ, typ)
+            last = last_by_call.get(cid)
+            if last and kind in ("says", "thinks") and last["kind"] == kind:
+                last["text"] += text  # fold this branch's stream of deltas into one line
+                continue
+            line = {"agent": agent, "call_id": cid, "kind": kind,
+                    "text": (name + ": " if name and kind in ("uses", "gets") else "") + text, "ts": ts}
+            lines.append(line)
+            last_by_call[cid] = line
+        for b in branches.values():
+            if "ended" in b:
+                lines.append({"agent": b["agent"], "call_id": b["call_id"], "kind": "done",
+                              "text": ("finished" if b.get("ok") else "failed: " + (b.get("error") or "")) +
+                                      (f" in {b['elapsed_s']}s" if b.get("elapsed_s") is not None else ""),
+                              "ts": b["ended"]})
+        lines.sort(key=lambda x: x["ts"] or 0)
+        return {"run_id": run_id, "branches": sorted(branches.values(), key=lambda x: x["index"] or 0),
+                "lines": lines[:max_lines], "truncated": len(lines) > max_lines}
 
     def transcript(
         self, *, agent: str | None = None, call_id: str | None = None, limit: int = 200

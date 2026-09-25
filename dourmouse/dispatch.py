@@ -3600,6 +3600,7 @@ def run_dispatch_messages(
     voice: bool = False,
     should_stop: Callable[[], bool] | None = None,
     force_plain_dispatch: bool = False,
+    call_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -3836,6 +3837,10 @@ def run_dispatch_messages(
         forced_agent=forced_agent,
         session_stem=session_stem,
         force_plain_dispatch=force_plain_dispatch,
+        # Finding #123 (A0): a caller that already announced this run (a
+        # delegate_parallel branch) passes the id it announced, so the
+        # branch's fan-out events and every event of its run share one id.
+        call_id=call_id or uuid.uuid4().hex[:12],
         # v8.30: pinned whenever anything more specific than the plain
         # generic default already claimed this model — an explicit caller
         # override, brain escalation, or the fast lane's own deliberate

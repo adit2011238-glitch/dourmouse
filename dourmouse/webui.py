@@ -3045,6 +3045,12 @@ class _Handler(BaseHTTPRequestHandler):
             office_log = getattr(self.server, "office_log", None)
             if office_log is None:
                 self._send_json({"error": "office_log not configured"}, status=404)
+            elif (urllib.parse.parse_qs(parsed.query).get("meeting") or [""])[0]:
+                # Finding #123 (A1): one multi-agent run as a single conversation.
+                run = urllib.parse.parse_qs(parsed.query)["meeting"][0]
+                self._send_json(office_log.meeting(run))
+            elif (urllib.parse.parse_qs(parsed.query).get("meetings") or [""])[0] == "1":
+                self._send_json({"meetings": office_log.recent_meetings()})
                 return
             qs = urllib.parse.parse_qs(parsed.query)
             kind = (qs.get("kind") or ["messages"])[0].strip().lower()

@@ -1832,6 +1832,53 @@ def _sheets_create_oauth(token: str, title: str, rows: list[list[Any]] | None) -
     return f"SHEETS CREATED: {title!r} (id {sid}) — {url}{row_note}."
 
 
+def _sheets_append_oauth(token: str, spreadsheet_id: str, rng: str, rows: list[list[Any]]) -> str:
+    try:
+        resp = _http_json(
+            "POST",
+            f"{_SHEETS_API}/{spreadsheet_id}/values/{urllib.parse.quote(rng, safe='!:')}:append"
+            "?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS",
+            token,
+            {"values": rows},
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "403" in msg:
+            raise RuntimeError(
+                msg + " — appending to a Sheet needs the spreadsheets scope: sign in again at /login "
+                "after enabling GOOGLE OAUTH FULL ACCESS in Settings. Nothing was written."
+            ) from exc
+        raise
+    updates = resp.get("updates") or {}
+    where = updates.get("updatedRange") or rng
+    return f"SHEETS APPENDED: {updates.get('updatedRows', len(rows))} row(s) to {where} in {spreadsheet_id}."
+
+
+def sheets_append(spreadsheet_id: str, rows: list[list[Any]], sheet_range: str = "Sheet1") -> str:
+    """Append rows to an EXISTING Google Sheet the signed-in user can edit
+    (finding #122). Rows go after the last row of data in ``sheet_range``;
+    formulas and numbers are interpreted as if typed. A real write:
+    confirmation-gated upstream."""
+    spreadsheet_id = (spreadsheet_id or "").strip()
+    if not _valid_google_id(spreadsheet_id, "spreadsheet"):
+        return "ERROR: sheets_append needs a real spreadsheet id (the long id in the sheet's URL)."
+    if not isinstance(rows, list) or not rows or not all(isinstance(r, list) for r in rows):
+        return "ERROR: sheets_append needs rows: a list of rows, each a list of cell values."
+    if len(rows) > 5000:
+        return "ERROR: sheets_append takes at most 5000 rows per call."
+    token = _oauth_access_token()
+    if token:
+        try:
+            return _sheets_append_oauth(token, spreadsheet_id, (sheet_range or "Sheet1").strip(), rows)
+        except RuntimeError as exc:
+            return f"SHEETS APPEND (reported honestly): {exc}"
+    reauth = _oauth_user_needs_reauth("SHEETS WRITE")
+    if reauth:
+        return reauth
+    return ("NOT CONFIGURED: appending to a Google Sheet needs the signed-in Google user's OAuth session "
+            "with Sheets write scope. Sign in at /login, then retry. Nothing was written.")
+
+
 def sheets_create(title: str, rows: list[list[Any]] | None = None) -> str:
     """Create a REAL Google Sheet in the signed-in user's Drive (write).
     ``rows`` (optional) is a list of rows, each a list of cell values,

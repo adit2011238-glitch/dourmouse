@@ -533,6 +533,8 @@ class TestRosterShape:
             # approves a proposal, and putting them back is gated the same.
             "librarian_apply",
             "librarian_undo",
+            # finding #122: appending to a user's existing Google Sheet.
+            "sheets_append",
         }
 
     def test_internet_tools_registered(self):

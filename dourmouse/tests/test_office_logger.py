@@ -123,3 +123,96 @@ class TestOfficeLoggerFanoutEvents:
         log.on_event({"type": "delegate_parallel_branch", "phase": "start", "run_id": "run-b", "agent": "y"})
         assert len(log.recent_fanout_events(run_id="run-a")) == 1
         assert len(log.recent_fanout_events()) == 2
+
+
+class TestMeetings:
+    """Finding #123 (Phase 5 A0 + A1): a fan-out branch carries the call_id
+    of its own run, so a whole meeting reads as one conversation."""
+
+    def test_a_meeting_reads_as_one_conversation(self, tmp_path):
+        from dourmouse.office_logger import OfficeLogger
+
+        log = OfficeLogger(tmp_path / "office.db")
+        for i, (agent, cid) in enumerate((("research_info", "aaa111"), ("markets", "bbb222"))):
+            log.on_event({"type": "delegate_parallel_branch", "phase": "start", "run_id": "run1", "index": i,
+                          "total": 2, "agent": agent, "call_id": cid, "parent_call_id": "root", "task": f"task {i}"})
+        # interleaved streaming from both branches, as real concurrency produces
+        for agent, cid, text in (("research_info", "aaa111", "Rates "), ("markets", "bbb222", "EUR "),
+                                 ("research_info", "aaa111", "are up."), ("markets", "bbb222", "fell.")):
+            log.on_event({"type": "assistant_delta", "agent": agent, "call_id": cid, "text": text})
+        log.on_event({"type": "tool_use", "agent": "markets", "call_id": "bbb222", "name": "quote", "text": "EURUSD"})
+        for i, (agent, cid) in enumerate((("research_info", "aaa111"), ("markets", "bbb222"))):
+            log.on_event({"type": "delegate_parallel_branch", "phase": "result", "run_id": "run1", "index": i,
+                          "total": 2, "agent": agent, "call_id": cid, "ok": True, "elapsed_s": 1.5})
+        m = log.meeting("run1")
+        says = {(line["agent"], line["text"]) for line in m["lines"] if line["kind"] == "says"}
+        assert says == {("research_info", "Rates are up."), ("markets", "EUR fell.")}
+        kinds = [(line["agent"], line["kind"]) for line in m["lines"]]
+        assert kinds[:2] == [("research_info", "task"), ("markets", "task")]
+        assert ("markets", "uses") in kinds and kinds.count(("markets", "done")) == 1
+        assert [b["call_id"] for b in m["branches"]] == ["aaa111", "bbb222"]
+        meetings = log.recent_meetings()
+        assert meetings[0]["run_id"] == "run1" and meetings[0]["agents"] == ["markets", "research_info"]
+        assert meetings[0]["succeeded"] == 2
+
+    def test_an_old_log_gains_the_new_columns(self, tmp_path):
+        import sqlite3
+
+        from dourmouse.office_logger import OfficeLogger
+
+        db = tmp_path / "old.db"
+        with sqlite3.connect(db) as c:
+            c.execute("CREATE TABLE fanout_events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, "
+                      "phase TEXT NOT NULL, branch_index INTEGER, total INTEGER, agent TEXT NOT NULL DEFAULT '', "
+                      "ok INTEGER, error TEXT NOT NULL DEFAULT '', elapsed_s REAL, ts REAL NOT NULL)")
+            c.execute("INSERT INTO fanout_events (run_id, phase, agent, ts) VALUES ('old', 'start', 'a', 1)")
+        log = OfficeLogger(db)
+        assert log.meeting("old")["branches"][0]["call_id"] == ""
+
+
+def test_delegate_parallel_branches_announce_the_id_their_run_uses(monkeypatch):
+    """A0 end to end: the call_id on a branch's fan-out event is the call_id
+    every event of that branch's own run carries."""
+    import json
+
+    from dourmouse.dispatch import run_dispatch_messages, system_message
+    from dourmouse.general_roster import build_general_registry
+
+    class _Fn:
+        def __init__(self, n, a):
+            self.name, self.arguments = n, a
+
+    class _Call:
+        def __init__(self, cid, n, a):
+            self.id, self.function = cid, _Fn(n, json.dumps(a))
+
+    class _Msg:
+        def __init__(self, content=None, tool_calls=None):
+            self.content, self.tool_calls = content, tool_calls
+
+    class _Comp:
+        def __init__(self):
+            self.n = 0
+
+        def create(self, **kw):
+            self.n += 1
+            if self.n == 1:
+                msg = _Msg(tool_calls=[_Call("c1", "delegate_parallel", {"branches": [
+                    {"agent_or_task": "research_info", "instructions": "say hi"}]})])
+            else:
+                msg = _Msg(content="hi")
+            return type("R", (), {"choices": [type("C", (), {"message": msg})()]})()
+
+    client = type("Cl", (), {})()
+    client.chat = type("Ch", (), {})()
+    client.chat.completions = _Comp()
+    events = []
+    registry = build_general_registry()
+    run_dispatch_messages([{"role": "system", "content": system_message(registry)},
+                           {"role": "user", "content": "split this across agents in parallel"}],
+                          registry, client=client, event_sink=events.append)
+    branch = [e for e in events if e.get("type") == "delegate_parallel_branch" and e.get("phase") == "start"]
+    assert branch, "no branch ran"
+    cid = branch[0]["call_id"]
+    nested = [e for e in events if e.get("call_id") == cid and e.get("type") != "delegate_parallel_branch"]
+    assert nested, "the branch's own run did not carry the id it announced"

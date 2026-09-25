@@ -78,9 +78,16 @@ _FULL_SCOPES = (
     # the separate mail.google.com scope and is deliberately not requested.
     "https://www.googleapis.com/auth/gmail.modify "
     "https://www.googleapis.com/auth/calendar.readonly "
+    # Finding #122: create_calendar_event was a registered tool whose write
+    # scope was never requested, so it could only ever 403. calendar.events
+    # covers creating and editing events (not calendar settings/sharing).
+    "https://www.googleapis.com/auth/calendar.events "
     "https://www.googleapis.com/auth/drive.readonly "
     "https://www.googleapis.com/auth/drive.file "
-    "https://www.googleapis.com/auth/documents"
+    "https://www.googleapis.com/auth/documents "
+    # Finding #122: sheets_append writes to the user's EXISTING sheets;
+    # drive.file only covers files this app created.
+    "https://www.googleapis.com/auth/spreadsheets"
 )
 
 

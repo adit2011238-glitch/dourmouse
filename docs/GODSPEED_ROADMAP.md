@@ -1095,3 +1095,9 @@ and a real build sequence, not just a requirement statement:
 - [x] OS-8.3 (finding #120) 2026-09-25 -- every background switch settable from the console.
 - [x] OS-8.2 + OS-9 (finding #121) 2026-09-25 -- Cmd+K launcher; app.html and os.html retired into
   the console; service worker made network-first (stale console after updates fixed).
+- [x] OS-7 (finding #122) 2026-09-25 -- Calendar write scope actually requested (create_calendar_event
+  used to 403 forever); sheets_append for existing Sheets.
+- [x] Phase 5 A0 + A1 (finding #123) 2026-09-25 -- fan-out branches carry their run's call_id; a
+  meeting reads as one conversation in the OFFICE screen.
+- [x] Phase 5 A4 (finding #124) 2026-09-25 -- hostile bus broadcast: data envelope plus the approval
+  gate proven to stop an obedient model.

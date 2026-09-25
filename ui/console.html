@@ -1474,7 +1474,8 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
     <section class="pane" id="pane-security"><div class="panehead">◆ SECURITY · THIS MAC</div>
       <div class="panebody" id="securityBody"></div></section>
     <section class="pane" id="pane-office"><div class="panehead">◆ OFFICE · AGENT ECOSYSTEM</div>
-      <div class="panebody" id="officeBody"></div></section>
+      <div class="panebody" id="officeBody"></div>
+      <div class="panebody" id="officeMeetings"></div></section>
 
     <section class="pane" id="pane-news"><div class="panehead">◆ NEWS · LIVE FEED</div>
       <div class="panebody" id="newsBody"></div>
@@ -7042,6 +7043,35 @@ function paintOffice(){
 async function loadOffice(){
   await loadOrchestrationSnapshot();
   paintOffice();
+  loadMeetings();
+}
+// Finding #123 (Phase 5 A1): every multi-agent run ("meeting") is kept, and
+// any one reads as a single conversation: each agent's task, what it
+// thought, which tools it used and what came back, and how it finished.
+let _openMeeting = null;
+async function loadMeetings(){
+  const box = $("officeMeetings");
+  if(!box) return;
+  let d;
+  try{ d = await api("/api/office_log?meetings=1"); }catch{ return; }
+  const ms = d.meetings || [];
+  box.innerHTML = `<div class="sec">MEETINGS</div>` + (ms.length ? ms.map(m => `<div class="row" data-meeting="${esc(m.run_id)}" style="cursor:pointer">
+      <div class="g"><div class="n">${esc(m.agents.join(", "))}</div>
+      <div class="d">${new Date(m.started * 1000).toLocaleString()} · ${m.finished}/${m.branches} finished, ${m.succeeded} succeeded</div></div></div>`).join("")
+    : `<p class="note">No multi-agent runs yet. One is recorded every time Dourmouse splits work across agents.</p>`) +
+    `<div id="meetingView"></div>`;
+  box.querySelectorAll("[data-meeting]").forEach(el => el.onclick = () => openMeeting(el.dataset.meeting));
+  if(_openMeeting) openMeeting(_openMeeting);
+}
+async function openMeeting(runId){
+  _openMeeting = runId;
+  let m;
+  try{ m = await api("/api/office_log?meeting=" + encodeURIComponent(runId)); }catch{ return; }
+  const verb = {task: "was asked", thinks: "thinks", says: "says", uses: "uses", gets: "gets back", done: "", brain: "runs on"};
+  $("meetingView").innerHTML = `<div class="sec">MEETING ${esc(runId.slice(0, 8))}</div>` + m.lines.map(l => `<div class="row">
+      <div class="g"><div class="n">${esc(l.agent)} <span style="color:var(--blue-deep);font-weight:normal">${esc(verb[l.kind] ?? l.kind)}</span></div>
+      <div class="d" style="white-space:pre-wrap;color:${l.kind === "says" ? "var(--blue-hi)" : ""}">${esc(String(l.text || "").slice(0, 1500))}</div></div></div>`).join("")
+    + (m.truncated ? `<p class="note">Long meeting: the first 600 lines are shown.</p>` : "");
 }
 
 // 2026-09-18: the GOALS screen -- the autonomous Goal/Task runtime
