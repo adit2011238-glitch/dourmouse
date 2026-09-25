@@ -5320,3 +5320,50 @@ Fixes:
 
 Tests: every split-"gemini" agent gets a non-Gemini client, the configured model is both label
 and request, and root-level metrics are recorded.
+
+### 131 -- the remaining research stages: hypotheses, criticism, experiment design, statistics (R4)
+
+Status: DONE 2026-09-25. Verified live with the real cloud model.
+
+`research_pipeline/hypotheses.py`, linked into the graph:
+- **RES-13, hypothesis generation.** Hypotheses come from a question's own sourced claims, and
+  each must cite claim numbers that exist. Proposals citing none, or nonexistent ones, are
+  dropped and counted. Kept hypotheses are linked `derived_from` their claims and `about` the
+  question.
+- **RES-14, criticism.** A critic's review (weakest assumption, alternative explanation, what
+  would refute it, verdict) is recorded as a `decision` the hypothesis is `revised_by`, and the
+  hypothesis status becomes the verdict.
+- **RES-15, experiment design.** The model writes a protocol, code and the null value, and the
+  experiment runs for real through #127.
+- **RES-17, statistical analysis.** Deterministic, no model: n, mean, standard deviation, 95%
+  confidence interval, and a one-sample t test against the stated null. It is stored as a result
+  about the run.
+
+Live run: the hypothesis "averaging more fair dice rolls approaches 3.5" got a specific review
+(verdict plausible). Its designed experiment ran 70,000 simulated means; tested against the
+stated null of 3.5, the mean was 3.4985 (95% CI [3.492, 3.505], p = 0.65).
+
+Problems found by the live run and fixed:
+1. The critic echoed the prompt's placeholder template (`"..."`, `"plausible|weak|untestable"`),
+   which was accepted as a review. The prompt now describes the fields without placeholders, and
+   placeholder answers are refused.
+2. With no stated null, the statistics tested against 0, which is meaningless for a dice
+   average. The design now names its null value, and without one only a description is
+   reported: no t, no p-value claimed.
+3. A design wrapped in a ```json fence with prose after it failed to parse, because extraction
+   sliced to the reply's last brace. Extraction now decodes exactly one object per candidate
+   start, fenced blocks first. The security analyst shared the same fragile extractor and now
+   uses this one.
+
+Chat tools `research_hypothesize`, `research_critique` and `research_design_experiment` are on
+`evidence_pipeline`, and routing words send hypothesis and experiment requests there. Tests:
+`test_research_hypotheses.py` (7) and routing tests.
+
+### 132 -- live-event history capped; tool chips work from the keyboard (UI-5, UI-7)
+
+Status: DONE 2026-09-25.
+
+- **UI-5:** the console's `liveEvents` array grew for the life of a long-running app. It now
+  keeps the latest 500, and the total count shown in the rail is tracked separately.
+- **UI-7:** the expandable tool-call chip was a clickable `div`. It is now focusable, has
+  `role="button"` and `aria-expanded`, and toggles on Enter and Space.

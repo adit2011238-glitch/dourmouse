@@ -65,14 +65,12 @@ def default_complete() -> Complete:
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
-    start, end = text.find("{"), text.rfind("}")
-    while start != -1 and end > start:
-        try:
-            value = json.loads(text[start:end + 1])
-            return value if isinstance(value, dict) else None
-        except ValueError:
-            start = text.find("{", start + 1)
-    return None
+    """Same extraction as the research stages (finding #131): one complete
+    object per candidate start, fenced blocks first, so prose with braces
+    after the answer cannot break it."""
+    from dourmouse.research_pipeline.hypotheses import _json
+
+    return _json(text)
 
 
 def evidence_block(findings: list[dict[str, Any]]) -> str:

@@ -2211,7 +2211,7 @@ function paintMast(){
   $("footBackend").textContent = b.model ? b.model.split("/").pop() : "-";
   $("footNode").textContent = s.online ? s.node + (s.latency_ms != null ? ` ${s.latency_ms}ms` : "") : "OFFLINE";
   const r = sys.roster ? (sys.roster.subagents||[]).length : 0;
-  $("railFoot").textContent = `${r} AGENTS / ${liveEvents.length} EVENTS`;
+  $("railFoot").textContent = `${r} AGENTS / ${liveEventTotal} EVENTS`;
 }
 function paintAgents(){
   const box = $("agents"); const rost = (sys.roster&&sys.roster.subagents)||[]; const c = sys.conns||{};
@@ -2576,9 +2576,14 @@ const WORK = {
   world_correlations:["Cross-checking world monitor signals",""],
   world_brief:["Building a world monitor brief",""],
 };
+// Finding #132 (UI-5): the backing array used to grow for the whole life of
+// a long-running app; it keeps the latest 500, and the total is counted.
 const liveEvents = [];
+let liveEventTotal = 0;
 function liveAdd(kind, title, sub){
   liveEvents.push({kind,title,sub,t:Date.now()});
+  liveEventTotal++;
+  if(liveEvents.length > 500) liveEvents.splice(0, liveEvents.length - 500);
   const box = $("liveBody");
   if(box.querySelector(".liveempty")) box.innerHTML = "";
   const el = document.createElement("div");
@@ -2591,7 +2596,7 @@ function liveAdd(kind, title, sub){
   while(box.children.length > 60) box.removeChild(box.firstChild);
   $("liveDot").className = "dot " + (kind==="err"?"no":kind==="done"?"ok":"");
 }
-function liveClear(){ liveEvents.length=0; $("liveBody").innerHTML='<div class="liveempty">Nothing running.</div>'; $("liveDot").className="dot"; }
+function liveClear(){ liveEvents.length=0; liveEventTotal=0; $("liveBody").innerHTML='<div class="liveempty">Nothing running.</div>'; $("liveDot").className="dot"; }
 function describeTool(name){
   const w = WORK[name];
   return w ? {t:w[0], s:w[1]} : {t:"Using "+name, s:""};
@@ -2758,7 +2763,12 @@ function act(acts,label,name,bad,spin,detail){
       ? trimmed.slice(0,8000)+`\n… truncated (${trimmed.length.toLocaleString()} chars total, COPY unavailable past this point)`
       : trimmed;
     wrap.appendChild(a); wrap.appendChild(pre);
-    a.onclick=()=>{ pre.hidden=!pre.hidden; car.textContent=pre.hidden?"▸":"▾"; };
+    // Finding #132 (UI-7): a real button for keyboards and screen readers,
+    // not a clickable div.
+    a.tabIndex = 0; a.setAttribute("role", "button"); a.setAttribute("aria-expanded", "false");
+    const toggle = () => { pre.hidden=!pre.hidden; car.textContent=pre.hidden?"▸":"▾"; a.setAttribute("aria-expanded", String(!pre.hidden)); };
+    a.onclick = toggle;
+    a.onkeydown = (ev) => { if(ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); toggle(); } };
   } else {
     wrap.appendChild(a);
   }

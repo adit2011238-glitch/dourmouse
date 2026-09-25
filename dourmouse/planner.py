@@ -199,6 +199,14 @@ _DOMAIN_ROUTE: dict[str, str] = {
     "quarantine": "security",
     "quarantined": "security",
     "privacy": "security",
+    # Findings #127/#131: hypotheses and experiments are the evidence
+    # pipeline's (research_info only searches; design_3d designs objects).
+    "hypothesis": "evidence_pipeline",
+    "hypotheses": "evidence_pipeline",
+    "experiment": "evidence_pipeline",
+    "experiments": "evidence_pipeline",
+    "replicate": "evidence_pipeline",
+    "replication": "evidence_pipeline",
 }
 
 # Stop words that are ALSO strong domain words must not be stripped — the

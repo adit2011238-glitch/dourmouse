@@ -359,6 +359,52 @@ def _research_experiment_status_tool(arguments: dict[str, Any]) -> str:
         return f"ERROR: {exc}"
 
 
+def _research_hypothesize_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.research_pipeline import hypotheses as hy
+
+    try:
+        r = hy.generate_hypotheses(str(arguments.get("question_id") or ""))
+    except KeyError as exc:
+        return f"ERROR: {exc}"
+    if not r["ok"]:
+        return "Not done: " + r["error"]
+    lines = [f"{h['id']}: {h['statement']} (rests on {', '.join(h['claims'])})" for h in r["hypotheses"]]
+    return "\n".join(lines + ([f"({r['dropped']} proposal(s) dropped: they cited no real claim.)"] if r["dropped"] else []))
+
+
+def _research_critique_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.research_pipeline import hypotheses as hy
+
+    try:
+        r = hy.criticize(str(arguments.get("hypothesis_id") or ""))
+    except KeyError as exc:
+        return f"ERROR: {exc}"
+    if not r["ok"]:
+        return "Not done: " + r["error"]
+    rv = r["review"]
+    return (f"Verdict: {r['verdict']}\nWeakest assumption: {rv['weakest_assumption']}\n"
+            f"Alternative: {rv.get('alternative', '')}\nRefuted if: {rv['refuted_if']}")
+
+
+def _research_design_experiment_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.research_pipeline import hypotheses as hy
+
+    try:
+        r = hy.design_and_run(str(arguments.get("hypothesis_id") or ""))
+    except KeyError as exc:
+        return f"ERROR: {exc}"
+    if not r["ok"]:
+        return "Not done: " + r["error"]
+    out = f"experiment {r['experiment_id']}, run {r['run_id']}: {r['state']}"
+    st = r.get("statistics") or {}
+    if st and "error" not in st:
+        out += (f"\nn={st['n']}, mean={st['mean']:.6g}, sd={st['sd']:.6g}, 95% CI [{st['ci95'][0]:.6g}, "
+                f"{st['ci95'][1]:.6g}], p={st['p_two_sided']:.4g} ({st['method']})")
+    elif st:
+        out += "\nstatistics: " + st["error"]
+    return out
+
+
 def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
     return Subagent(
         name="evidence_pipeline",
@@ -464,6 +510,30 @@ def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
                 description="Status, metrics, result and logs of one experiment run (brought up to date first).",
                 parameters={"type": "object", "properties": {"run_id": {"type": "string"}}, "required": ["run_id"]},
                 handler=_research_experiment_status_tool,
+            ),
+            # Finding #131 (R4): hypotheses, criticism, designed experiments.
+            ToolSpec(
+                name="research_hypothesize",
+                description=("Propose testable hypotheses from a research question's sourced claims; each "
+                             "must rest on real claims or it is not kept."),
+                parameters={"type": "object", "properties": {"question_id": {"type": "string"}},
+                            "required": ["question_id"]},
+                handler=_research_hypothesize_tool,
+            ),
+            ToolSpec(
+                name="research_critique",
+                description="Have a critic review a hypothesis: weakest assumption, an alternative, what would refute it.",
+                parameters={"type": "object", "properties": {"hypothesis_id": {"type": "string"}},
+                            "required": ["hypothesis_id"]},
+                handler=_research_critique_tool,
+            ),
+            ToolSpec(
+                name="research_design_experiment",
+                description=("Design an experiment for a hypothesis, run it on this Mac, and compute its "
+                             "statistics (mean, confidence interval, p-value) without a model."),
+                parameters={"type": "object", "properties": {"hypothesis_id": {"type": "string"}},
+                            "required": ["hypothesis_id"]},
+                handler=_research_design_experiment_tool,
             ),
         ),
     )

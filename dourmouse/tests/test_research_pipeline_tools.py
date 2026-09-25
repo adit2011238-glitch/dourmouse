@@ -252,6 +252,7 @@ class TestBuildResearchPipelineSubagent:
             "research_run_pipeline", "research_follow_up", "research_detect_contradictions",
             "research_synthesize", "research_status",
             "research_experiment", "research_replicate", "research_experiment_status",  # finding #127
+            "research_hypothesize", "research_critique", "research_design_experiment",  # finding #131
         }
 
 

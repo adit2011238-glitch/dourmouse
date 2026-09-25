@@ -587,6 +587,14 @@ class TestSecurityRouting:
     def test_security_queries_reach_security(self, query):
         assert find_agents_for_query(build_general_registry(), query, limit=1)[0]["name"] == "security"
 
+    @pytest.mark.parametrize("query", [
+        "come up with hypotheses for my caffeine research question", "critique that hypothesis",
+        "design an experiment for hypothesis hyp-1", "replicate experiment run run-abc",
+    ])
+    def test_research_stage_queries_reach_the_evidence_pipeline(self, query):
+        """Findings #127/#131."""
+        assert find_agents_for_query(build_general_registry(), query, limit=1)[0]["name"] == "evidence_pipeline"
+
     @pytest.mark.parametrize(("query", "agent"), [
         ("search the web for mac firewall tips", "research_info"),
         ("save it to a file named notes.txt in your workspace", "dev_coding"),
