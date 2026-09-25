@@ -64,7 +64,6 @@ _COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 # one of these and still pass.
 BASELINE_FOCUS_VISIBLE_COUNT = {
     "console": 5,
-    "os": 4,
     "login": 1,
     "setup": 2,
     # agent.html/all_hands.html/atlas_lab.html/map.html/mobile.html and
@@ -101,7 +100,6 @@ BASELINE_FOCUS_VISIBLE_COUNT = {
 
 _PATHS = {
     "console": uc.ui_console_path,
-    "os": uc.ui_os_path,
     "login": uc.ui_login_path,
     "setup": uc.ui_setup_path,
     "agent": uc.ui_agent_path,
@@ -177,34 +175,17 @@ def test_console_d3d_num_focus_indicator_actually_changes_the_border():
     )
 
 
-def test_os_global_focus_default_is_not_shadowed_by_a_later_duplicate():
-    """Two unscoped `:focus-visible{...}` rules at the same specificity
-    used to exist; the later one always wins for every element, so the
-    file's real global default must be the ONLY unscoped one left."""
-    source = _COMMENT.sub("", _source("os"))
-    unscoped = re.findall(r"""(?<![.\w#\[\]="'>:-])""" r":focus-visible\s*\{", source)
-    assert len(unscoped) == 1, (
-        f"expected exactly one unscoped `:focus-visible{{...}}` rule (the real global "
-        f"default), found {len(unscoped)} — a later duplicate silently wins the cascade "
-        "and the file's intended default never paints"
-    )
-
-
-def test_os_command_palette_input_has_a_working_focus_indicator():
-    """.palbox input sets outline:none inside a .palbox{overflow:hidden}
-    ancestor; it must carry its own non-outline (so it can't be clipped)
-    compensating focus-visible style."""
-    source = _source("os")
-    assert re.search(r"\.palbox\{[^}]*overflow:hidden", source), (
-        "expected .palbox to still clip overflow — this test's clipping "
-        "rationale depends on it"
-    )
+def test_console_launcher_input_has_a_working_focus_indicator():
+    """The launcher (finding #121, the command palette moved here from the
+    retired os.html): .palbox input sets outline:none inside a
+    .palbox{overflow:hidden} ancestor, so it must carry its own non-outline
+    (unclippable) :focus-visible style."""
+    source = _source("console")
+    assert re.search(r"\.palbox\{[^}]*overflow:hidden", source)
     assert re.search(r"\.palbox input\{[^}]*outline:none", source)
     assert re.search(r"\.palbox input:focus-visible\{[^}]*box-shadow:", source), (
-        ".palbox input removes the default outline but has no compensating "
-        ":focus-visible rule of its own"
+        ".palbox input removes the default outline but has no compensating :focus-visible rule"
     )
-
 
 def test_login_token_input_has_a_working_focus_indicator():
     """#tok (the access-token password field) sets outline:none. The only

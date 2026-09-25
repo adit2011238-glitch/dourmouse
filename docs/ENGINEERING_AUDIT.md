@@ -5078,3 +5078,60 @@ Two regressions caught by the suite run for #113-#115 and fixed at the root:
    tied with comms and mail on "send a quick message to my landlord". The planner now applies
    the other half of its existing compound rule: a message word with no agent/bus word
    lowers the inter-agent bus.
+
+### 120 -- every background switch settable from the console (OS-8.3)
+
+Status: DONE 2026-09-25. Verified in a real browser.
+
+The runtimes added for the Mac security plan and the OS work were switched only by environment
+variables:
+- continuous scans, the network watcher and the AI analyst;
+- the downloads watcher and the lockdown enforcer;
+- standing agents, the librarian, and the librarian's folders.
+
+`dourmouse/settings_registry.py` lists each with a plain-English description, reads its current
+value, and saves changes to the user's own 0600 config file through `/api/settings/features`.
+Folders are validated as absolute, existing directories, and unknown keys (an API key, `PATH`)
+and wrong types are refused. The console's SETTINGS screen has a new "Security and background
+agents" section. Runtimes start with the server, so each change says "restart to apply" rather
+than pretending to apply live.
+
+Two stale spots on the same screen were corrected:
+- the "Compute node" row (still shaped for the Dell);
+- the footer line telling people to edit `.env`.
+
+Tests: `test_settings_registry.py` (4) and a route round trip.
+
+### 121 -- one home instead of five: the launcher, and app.html/os.html retired (OS-8.2, OS-9)
+
+Status: DONE 2026-09-25. Verified in a real browser.
+
+- **Launcher (OS-8.2):** Cmd/Ctrl+K (or the ⌘K button in the masthead) opens a searchable list:
+  - every console screen;
+  - the panels: notifications, the browser;
+  - the common actions: security report, scan now, lockdown, find a file, background-agent
+    settings, the workspace view.
+
+  An http(s) address opens in the browser pane, and anything else is sent to Dourmouse as a
+  directive, so the launcher doubles as a command line. It keeps the accessible focus style of
+  the palette it replaces (an inset box-shadow, since the box clips an outline). The focus test
+  moved with it.
+- **Consolidation (OS-9):** `app.html` and `os.html` were two of five overlapping homes, and
+  their one unique piece was the command palette. Both files are deleted, `/app` and `/os`
+  redirect to the console, and their contrast and focus tests went with them.
+  - `index.html` stays only as the legacy HUD at `/index.html` and `/hud` (14 test files pin
+    its behaviour, and deeplinks target its hash router); it is no longer a home.
+  - `console.html` (the full surface) and `workspace.html` (the Electron window's first page)
+    remain co-primary, one launcher entry apart.
+
+Bugs found by driving it:
+1. **The service worker served the shell stale-while-revalidate,** so the first open after any
+   update showed the PREVIOUS console (the new launcher and bell were missing until a second
+   reload). The shell is now network-first, with the cache kept for offline, and the cache is
+   bumped to v4 so every stale v3 copy is dropped.
+2. **The standing runtime handed broadcasts to agents.** The live feeds post every poll to `*`,
+   and the librarian answered each as a search. The "Re: live:read_inbox" replies then flooded
+   the notification center. Only messages addressed to the agent are answered now; broadcasts
+   are marked read.
+
+Tests: redirects, launcher presence, the network-first shell, and broadcasts not answered.

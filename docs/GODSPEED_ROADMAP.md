@@ -1092,3 +1092,6 @@ and a real build sequence, not just a requirement statement:
   coding tools scoped, parallel branches included).
 - [x] OS-8.1 (finding #119) 2026-09-25 -- notification center: bell, history, per-source mute; the
   security, downloads, analyst and librarian events feed it.
+- [x] OS-8.3 (finding #120) 2026-09-25 -- every background switch settable from the console.
+- [x] OS-8.2 + OS-9 (finding #121) 2026-09-25 -- Cmd+K launcher; app.html and os.html retired into
+  the console; service worker made network-first (stale console after updates fixed).

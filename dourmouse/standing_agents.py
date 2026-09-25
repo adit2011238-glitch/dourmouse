@@ -109,6 +109,12 @@ class StandingRuntime:
         for msg in self._bus.inbox(name, limit=50):
             if msg.get("read") or msg.get("from") == name:
                 continue
+            if msg.get("to") != name:
+                # A broadcast (the live feeds post every poll to "*") is not a
+                # request: answering it flooded the bus and the notification
+                # center with "Re: live:..." replies (found live, finding #121).
+                self._bus.mark_read(msg["id"], name)
+                continue
             try:
                 reply = agent.handle_message(msg.get("subject", ""), msg.get("body", ""), msg.get("from", ""))
             except Exception as exc:  # noqa: BLE001 -- recorded, the loop goes on

@@ -85,3 +85,15 @@ def test_a_broken_tick_is_recorded_and_the_agent_keeps_going():
     st = rt.status()[0]
     assert st["errors"] == 1 and "disk vanished" in st["last_error"] and st["activity"][0]["kind"] == "error"
     assert rt.run_tick("broken") == "" and rt.status()[0]["ticks"] == 2
+
+
+def test_broadcasts_are_not_answered():
+    """Found live (finding #121): the live feeds broadcast every poll to "*",
+    and the librarian answered each one as if it were a search."""
+    bus = MessageBus()
+    rt = StandingRuntime(bus)
+    agent = Echo()
+    rt.register(agent)
+    bus.post("live", "*", "live:read_inbox", "3 new emails")
+    assert rt.drain_inbox("echo") == 0 and not agent.answered.is_set()
+    assert bus.outbox("echo") == []

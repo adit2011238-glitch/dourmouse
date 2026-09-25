@@ -2,9 +2,11 @@
  *
  * What it caches, and the honesty rules that govern it:
  *   - SHELL (/, /index.html, /login.html, /map, /map.html, /assets/*):
- *     stale-while-revalidate — the shell opens instantly offline and
- *     revalidates in the background. A stale shell is still honest: it is
- *     the UI, not data.
+ *     network-first, cached copy only when the server cannot be reached
+ *     (finding #121). It used to be stale-while-revalidate, which meant the
+ *     first open after every update showed the PREVIOUS console: found live
+ *     when a freshly shipped screen was missing until a second reload. The
+ *     server is local, so the network path is fast; offline still opens.
  *   - /api/state: network-first. On success the SHARED-scope snapshot is
  *     cached (see the X-Dourmouse-Scope rule); OFFLINE, the cached snapshot
  *     is served with an explicit `X-Dourmouse-Stale: 1` header that the UI
@@ -19,7 +21,7 @@
  * user) ever enter the cache. A signed-in user going offline sees the
  * shared bucket — honestly marked stale — never someone's personal data.
  */
-const CACHE = 'dourmouse-shell-v3';  // v5.31: ATLAS motion + compute-node card joined the shell
+const CACHE = 'dourmouse-shell-v4';  // finding #121: network-first shell; v4 drops every stale v3 copy
 // v5.22.3: the PWA manifest + icons join the shell so the INSTALLED app
 // opens instantly with its icon even offline.
 const SHELL = ['/', '/index.html', '/login.html', '/map', '/map.html',
@@ -101,14 +103,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Shell + static assets: stale-while-revalidate.
+  // Shell + static assets: network-first, the cached copy only offline.
   if (url.pathname === '/' || SHELL.includes(url.pathname) ||
       url.pathname.startsWith(ASSET_PREFIX)) {
     event.respondWith(
-      caches.match(req).then((cached) => {
-        const live = revalidate(req);
-        return cached || live;
-      })
+      revalidate(req).then((live) => live || caches.match(req).then((cached) => cached || Response.error()))
     );
     return;
   }

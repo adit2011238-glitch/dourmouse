@@ -215,20 +215,12 @@ def ui_console_path() -> Path:
     return Path(__file__).resolve().parent.parent / "ui" / "console.html"
 
 
-def ui_os_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "ui" / "os.html"
-
-
 def ui_login_path() -> Path:
     return Path(__file__).resolve().parent.parent / "ui" / "login.html"
 
 
 def ui_setup_path() -> Path:
     return Path(__file__).resolve().parent.parent / "ui" / "setup.html"
-
-
-def ui_app_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "ui" / "app.html"
 
 
 def ui_hud_path() -> Path:

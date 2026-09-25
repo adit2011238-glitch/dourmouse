@@ -222,8 +222,6 @@ def test_text_dim_stays_distinguishable_from_text(ui_source):
 CONSOLE_TEXT_TOKENS = {"--blue": uc.AA_NORMAL, "--blue-hi": uc.AA_NORMAL, "--blue-dim": uc.AA_NORMAL}
 CONSOLE_GROUND_TOKENS = ("--bg", "--panel", "--panel2")
 
-OS_TEXT_TOKENS = {"--t0": uc.AA_NORMAL, "--t1": uc.AA_NORMAL, "--t2": uc.AA_NORMAL}
-OS_GROUND_TOKENS = ("--v0", "--v1", "--v2", "--v3", "--v4")
 
 # login.html and setup.html -- the sign-in and onboarding screens, the two
 # still furthest from the rest of the app's polish. Neither uses index.html's
@@ -317,7 +315,6 @@ GRAVEYARD_GROUND_TOKENS = ("--ground", "--surface", "--surface2")
 
 _SCREENS = {
     "console": (uc.ui_console_path, CONSOLE_TEXT_TOKENS, CONSOLE_GROUND_TOKENS),
-    "os": (uc.ui_os_path, OS_TEXT_TOKENS, OS_GROUND_TOKENS),
     "login": (uc.ui_login_path, LOGIN_TEXT_TOKENS, LOGIN_GROUND_TOKENS),
     "setup": (uc.ui_setup_path, SETUP_TEXT_TOKENS, SETUP_GROUND_TOKENS),
     "workspace": (uc.ui_workspace_path, WORKSPACE_TEXT_TOKENS, WORKSPACE_GROUND_TOKENS),
@@ -333,7 +330,7 @@ _SCREENS = {
 }
 
 _PRIMARY_TOKEN = {
-    "console": "--blue-hi", "os": "--t0", "login": "--text", "setup": "--blue-hi",
+    "console": "--blue-hi", "login": "--text", "setup": "--blue-hi",
     "workspace": "--blue-hi", "voice": "--text",
     "agent": "--text", "all_hands": "--text", "atlas_lab": "--text", "map": "--text",
     "mobile": "--text", "product": "--text", "hub": "--text", "graveyard": "--text",
@@ -419,19 +416,6 @@ def test_extract_tokens_survives_a_colon_bearing_bullet_comment():
     assert tokens["--t0"] == "#fefefe"
 
 
-def test_os_default_root_block_excludes_light_theme_override():
-    """os.html's dark default is the real regression surface; its
-    prefers-color-scheme/[data-theme="light"] blocks re-declare --t2 with
-    a different, already-passing value that must not mask the dark one."""
-    source = uc.ui_os_path().read_text(encoding="utf-8", errors="replace")
-    root = uc.default_root_block(source)
-    tokens = uc.extract_tokens(root)
-    # The light override sets --t0 to a near-black value; the dark
-    # default's --t0 stays near-white. If the light block leaked in here,
-    # this would flip.
-    assert uc.relative_luminance(uc.parse_color(tokens["--t0"])[:3]) > 0.5
-
-
 # --------------------------------------------------------------------------- #
 # login.html and setup.html -- the sign-in and onboarding screens.
 #
@@ -485,98 +469,17 @@ def test_dim_token_stays_no_brighter_than_primary(screen, dim_token):
 
 
 # --------------------------------------------------------------------------- #
-# app.html and hud.html -- the desktop shell and the tactical HUD screen.
-#
-# app.html carries three live variants of the same --ink/--ink-2/--ink-3
-# trio on --bg/--surface/--surface-2: a light default `:root { ... }`, a
-# `prefers-color-scheme: dark` override (`:root:not([data-theme="light"])`),
-# and an explicit `:root[data-theme="dark"]`. default_root_block() only
-# ever matches the first *bare* `:root { ... }` -- neither qualified
-# selector fits its regex -- so here it captures the LIGHT default (the
-# opposite role it plays for os.html, whose bare default is dark and whose
-# override is qualified). The two dark variants are pulled with a small
-# local block extractor: same "no nested braces inside the body" assumption
-# default_root_block relies on, just keyed by literal selector text instead
-# of "the first bare :root".
+# hud.html -- the tactical HUD screen. (app.html, the old desktop shell, was
+# retired into the console in finding #121; its checks went with it.)
 #
 # hud.html has no theme variants at all -- a single unconditional `:root`
 # -- so default_root_block is the same no-op safety net there that it is
 # for login.html/setup.html.
 # --------------------------------------------------------------------------- #
 
-APP_TEXT_TOKENS = {"--ink": uc.AA_NORMAL, "--ink-2": uc.AA_NORMAL, "--ink-3": uc.AA_NORMAL}
-APP_GROUND_TOKENS = ("--bg", "--surface", "--surface-2")
 
 HUD_TEXT_TOKENS = {"--txt": uc.AA_NORMAL, "--red": uc.AA_NORMAL, "--dim": uc.AA_NORMAL, "--dim-2": uc.AA_NORMAL}
 HUD_GROUND_TOKENS = ("--bg", "--panel", "--raised")
-
-
-def _named_root_block(source: str, selector: str) -> str:
-    """Extract one `<selector> { ... }` block by literal selector text.
-
-    Only valid for a block with no nested braces in its body -- true of
-    every token block these two screens declare -- so this stays a
-    test-local helper next to default_root_block() rather than growing
-    that module's public API for a shape it hasn't needed before.
-    """
-    start = source.index(selector)
-    brace_open = source.index("{", start)
-    brace_close = source.index("}", brace_open)
-    return source[brace_open : brace_close + 1]
-
-
-def _app_variant(name: str) -> str:
-    path = uc.ui_app_path()
-    if not path.exists():
-        pytest.skip(f"UI not present at {path}")
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if name == "light":
-        return uc.default_root_block(text)
-    if name == "dark-system":
-        return _named_root_block(text, ':root:not([data-theme="light"])')
-    if name == "dark-explicit":
-        return _named_root_block(text, ':root[data-theme="dark"]')
-    raise ValueError(name)
-
-
-_APP_VARIANTS = ["light", "dark-system", "dark-explicit"]
-
-
-@pytest.mark.parametrize("variant", _APP_VARIANTS)
-def test_app_shipping_text_tokens_meet_AA(variant):
-    rows = uc.audit_tokens(_app_variant(variant), APP_TEXT_TOKENS, APP_GROUND_TOKENS)
-    assert rows, f"no text tokens found for app.html ({variant}) -- has the token block moved?"
-    failures = [r for r in rows if not r["passes"]]
-    assert not failures, f"app.html ({variant}) text tokens below WCAG AA: " + "; ".join(
-        f"{r['token']} on {r['ground']} = {r['ratio']}:1 (needs {r['threshold']})"
-        for r in failures
-    )
-
-
-@pytest.mark.parametrize("variant", _APP_VARIANTS)
-def test_app_ink3_was_the_known_failing_zinc_500_value(variant):
-    """Pins the regression: --ink-3 must no longer be #71717A, the value
-    that measured 3.81-4.63:1 (light) / 3.08-4.12:1 (dark) against
-    app.html's own grounds -- below the 4.5:1 its real caption/hint text
-    (.mode .sub, .who, .topbar .hint, .status, .chint) needs."""
-    tokens = uc.extract_tokens(_app_variant(variant))
-    assert tokens["--ink-3"].upper() != "#71717A"
-
-
-@pytest.mark.parametrize("variant", _APP_VARIANTS)
-def test_app_ink3_stays_no_more_prominent_than_ink2(variant):
-    """The fix ties --ink-3 to --ink-2 in every variant (same accepted
-    outcome as login.html's --text-dim tying --text-body) -- it must not
-    overshoot into reading as more prominent than the token above it.
-    Contrast-against-ground, not raw luminance, is the right ordering
-    here: app.html's light variant wants the darker of two inks to read as
-    more prominent, the opposite direction from every dark-themed screen
-    the luminance-based checks above assume."""
-    tokens = uc.extract_tokens(_app_variant(variant))
-    bg = uc.parse_color(tokens["--bg"])[:3]
-    ink2 = uc.contrast_ratio(uc.parse_color(tokens["--ink-2"]), bg)
-    ink3 = uc.contrast_ratio(uc.parse_color(tokens["--ink-3"]), bg)
-    assert ink3 <= ink2 + 1e-9
 
 
 @pytest.fixture(scope="module")

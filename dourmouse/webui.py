@@ -2092,17 +2092,15 @@ class _Handler(BaseHTTPRequestHandler):
             # (console.html has no hash routing), so deeplinks must not be
             # pointed at "/" now that "/" is the console.
             self._serve_static("index.html")
-        elif path in ("/os", "/os.html"):
-            # v8.5 — the OS interface: conversation-first with real system
-            # panels (compute, tools, memory, connections) bound to the
-            # existing endpoints. Additive: "/" and "/app" are untouched.
-            self._serve_static("os.html")
-        elif path in ("/app", "/app.html"):
-            # v8.3 — the consumer interface: chat-first, three modes
-            # (chat/research/code) mapped to real focus_agents. Served
-            # alongside the HUD rather than replacing it, so the operator
-            # surface stays available at "/".
-            self._serve_static("app.html")
+        elif path in ("/os", "/os.html", "/app", "/app.html"):
+            # OS-9 (finding #121): two of the five overlapping home screens
+            # are retired into the console (their one unique piece, the
+            # command palette, now lives there as the Cmd+K launcher). Old
+            # links and bookmarks land on the console instead of a 404.
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         elif path in ("/study", "/study.html"):
             # backlog #9: the Study tab — chat scoped to the "study"
             # subagent (real, read-only access to the user's study folder).
@@ -2308,6 +2306,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"enabled": grounded_mode_enabled()})
             except Exception as exc:  # noqa: BLE001 - a settings read must never 500
                 self._send_json({"enabled": False, "error": str(exc)[:200]})
+        elif path == "/api/settings/features":
+            # OS-8.3 (finding #120): every background switch, with its value.
+            from dourmouse.settings_registry import feature_settings
+
+            self._send_json({"features": feature_settings()})
         elif path == "/api/settings/auto-approve":
             # 2026-09-14: backend half of the "skip confirmations" toggle
             # — off by default, see config.auto_approve_enabled's own
@@ -3732,6 +3735,15 @@ class _Handler(BaseHTTPRequestHandler):
             # config.save_grounded_mode_setting). Same post-first-run
             # settings-change auth posture as the orchestrator-model POST.
             self._handle_grounded_mode_post()
+        elif parsed.path == "/api/settings/features":
+            # OS-8.3 (finding #120): save one background switch.
+            from dourmouse.settings_registry import save_feature
+
+            body = self._read_json_body()
+            try:
+                self._send_json(save_feature(str(body.get("key") or ""), body.get("value")))
+            except ValueError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
         elif parsed.path == "/api/settings/auto-approve":
             # 2026-09-14: persists the "skip confirmations" toggle (see
             # config.save_auto_approve_setting). Same post-first-run

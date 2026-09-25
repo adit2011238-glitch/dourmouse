@@ -1257,9 +1257,10 @@ class TestSpotifyWidgetInjection:
         # NOT "/" — that serves console.html (the default since v8.7),
         # which is correctly EXCLUDED (it ships its own inline Spotify
         # controls, per _serve_static's own exclusion-list comment).
-        # os.html has no inline controls of its own, so it's a real
-        # "should get the floating widget" page.
-        conn.request("GET", "/os.html")
+        # study.html has no inline controls of its own, so it's a real
+        # "should get the floating widget" page (os.html was, until it was
+        # retired into the console in finding #121).
+        conn.request("GET", "/study")
         resp = conn.getresponse()
         assert resp.status == 200
         body = resp.read()
@@ -4347,3 +4348,56 @@ class TestMediaAndAlertRoutes:
         srv.state.dismiss_alert(d["alerts"][0]["id"])
         assert json.loads(self._get(port, "/api/alerts")[2])["alerts"] == []
         assert json.loads(self._get(port, "/api/alerts?history=1")[2])["alerts"][0]["dismissed"] is True
+
+
+def test_settings_features_route_round_trip(server, monkeypatch):
+    """Finding #120 over real HTTP."""
+    monkeypatch.setenv("DOURMOUSE_DOWNLOADS_WATCH", "0")
+    _, port = server
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request("GET", "/api/settings/features")
+    feats = {f["key"]: f for f in json.loads(conn.getresponse().read())["features"]}
+    assert feats["DOURMOUSE_DOWNLOADS_WATCH"]["value"] is False
+    conn.request("POST", "/api/settings/features", body=json.dumps({"key": "DOURMOUSE_DOWNLOADS_WATCH", "value": True}),
+                 headers={"Content-Type": "application/json"})
+    assert json.loads(conn.getresponse().read())["value"] is True
+    conn.request("POST", "/api/settings/features", body=json.dumps({"key": "PATH", "value": "x"}),
+                 headers={"Content-Type": "application/json"})
+    resp = conn.getresponse()
+    assert resp.status == 400 and b"not a setting" in resp.read()
+    conn.close()
+
+
+def test_retired_home_screens_redirect_to_the_console(server):
+    """OS-9 (finding #121): /os and /app were folded into the console."""
+    _, port = server
+    for path in ("/os", "/os.html", "/app", "/app.html"):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert (resp.status, resp.getheader("Location")) == (302, "/"), path
+
+
+def test_console_carries_the_launcher():
+    """OS-8.2 (finding #121): Cmd/Ctrl+K opens a launcher that reaches every
+    screen and sends anything else to Dourmouse."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "ui" / "console.html").read_text(encoding="utf-8")
+    for needle in ('id="pal"', 'id="palq"', "function palActions()", 'e.key.toLowerCase() === "k"',
+                   "SCREENS.map(n =>", 'kind: "ASK"'):
+        assert needle in src, needle
+
+
+def test_the_service_worker_serves_the_shell_network_first():
+    """Finding #121: stale-while-revalidate showed the previous console on
+    the first open after an update. The shell is network-first now, with
+    the cache as the offline fallback, and the cache version moved on."""
+    from pathlib import Path
+
+    sw = (Path(__file__).resolve().parents[2] / "ui" / "sw.js").read_text(encoding="utf-8")
+    assert "revalidate(req).then((live) => live || caches.match(req)" in sw
+    assert "return cached || live;" not in sw
+    assert "dourmouse-shell-v3'" not in sw

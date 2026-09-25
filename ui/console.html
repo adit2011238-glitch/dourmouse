@@ -980,6 +980,20 @@ pre:hover .copybtn,.copybtn:focus-visible{opacity:1}
 .liveempty{font-size:9px;color:var(--blue-deep);padding:11px;text-align:center;letter-spacing:.1em}
 
 .note{font-size:9.5px;color:var(--blue-deep);line-height:1.65;letter-spacing:.04em}
+/* Finding #121: launcher. .palbox clips overflow, so the input's focus
+   ring is an inset box-shadow (an outline could be cut off). */
+.pal{position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:flex-start;padding-top:12vh}
+.pal[hidden]{display:none}
+.palbox{width:min(560px,92vw);background:var(--panel);border:1px solid var(--line-2);border-radius:6px;overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.palbox input{width:100%;border:none;background:none;outline:none;padding:15px 17px;font:inherit;font-size:14px;
+  color:var(--blue-hi);border-bottom:1px solid var(--line)}
+.palbox input:focus-visible{outline:none;box-shadow:inset 0 -2px 0 var(--amber)}
+.pallist{max-height:52vh;overflow:auto}
+.palitem{display:flex;justify-content:space-between;gap:12px;padding:9px 17px;cursor:pointer;font-size:11px;color:var(--blue-dim)}
+.palitem b{color:var(--blue-hi);font-weight:500}
+.palitem.sel,.palitem:hover{background:var(--amber-soft);color:var(--amber)}
+.palitem .k{font-size:8.5px;letter-spacing:.14em;opacity:.7}
 /* Finding #119: notification center */
 .bell{background:none;border:1px solid var(--line-2);color:var(--blue-dim);font:inherit;font-size:9px;
   letter-spacing:.14em;padding:2px 8px;border-radius:2px;cursor:pointer;margin-right:10px}
@@ -1265,6 +1279,14 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
      whole app (the "Global Panel Manager" from the user's own spec), not
      one per tab. Opened via openBrowserPane(url), triggered either by the
      model (open_browser_pane tool -> SSE) or the user's own address bar. -->
+<!-- Finding #121 (OS-8.2): the launcher. One place to reach every screen,
+     pane and quick action, or send anything else straight to Dourmouse. -->
+<div class="pal" id="pal" role="dialog" aria-modal="true" aria-label="Launcher" hidden>
+  <div class="palbox">
+    <input id="palq" placeholder="Go to a screen, run an action, or ask Dourmouse..." autocomplete="off" aria-label="Launcher search">
+    <div class="pallist" id="pallist" role="listbox"></div>
+  </div>
+</div>
 <!-- Finding #119: the notification center. -->
 <div id="bellPanel" class="bellpanel" hidden>
   <div class="bellhead"><span>NOTIFICATIONS</span>
@@ -1342,6 +1364,7 @@ body.bp-open.bp-pane-min .dock,body.bp-open.bp-pane-min .body{margin-right:44px}
     </span>
     <span id="mastScreen">HOME</span>
     <span class="right">
+      <button id="palBtn" class="bell" type="button" title="Launcher (Cmd+K)" aria-label="Open launcher">&#8984;K</button>
       <button id="bellBtn" class="bell" type="button" title="Notifications" aria-label="Notifications">ALERTS <b id="bellCount">0</b></button>
       <span>MEM_LOAD: <b id="mMem">-</b></span>
       <span>SESSION: <b id="mSess">-</b></span>
@@ -4896,8 +4919,8 @@ function paintSettings(){
     <div class="sec">INTELLIGENCE</div>
     <div class="row"><div class="g"><div class="n">${esc(b.model||"-")}</div>
       <div class="d">${esc(b.backend||"")} · ${esc(b.base_url||"")}</div></div></div>
-    <div class="row"><div class="g"><div class="n">Compute node</div>
-      <div class="d">${s.online?`${esc(s.node)} · ${esc(s.model)} · ${s.latency_ms}ms`:"offline"}</div></div></div>
+    <div class="row"><div class="g"><div class="n">Compute</div>
+      <div class="d">${s.online?`${esc(s.node)} · ${esc(s.detail||"")}`:"unavailable"}</div></div></div>
     <!-- v14 (user-directed, 2026-09-12): "commercial, for other people
          to use" — BYOK (bring your own key). Each install is a
          stranger's own machine now, not this developer's; sharing one
@@ -4939,6 +4962,9 @@ function paintSettings(){
       <div id="appDryRunRow" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
     <div class="note" id="appDryRunNote">Loading…</div>
+    <div class="sec">SECURITY AND BACKGROUND AGENTS</div>
+    <div class="note">What Dourmouse does on its own. Changes are saved on this Mac and take effect the next time Dourmouse starts.</div>
+    <div id="featureRows"></div>
     <div class="sec">MEMORY</div>
     <div class="row"><div class="g"><div class="n">${m.count!=null?`${m.count} facts stored`:"-"}</div>
       <div class="d">${m.active?"learning loop on":esc(m.gate||"")}</div></div></div>
@@ -4959,7 +4985,46 @@ function paintSettings(){
     <div class="row"><div class="g"><div class="n">${esc(t.host||"-")}</div>
       <div class="d">${t.cpu_pct!=null?`CPU ${t.cpu_pct}% · MEM ${t.mem_used_gb}/${t.mem_total_gb} GB`:"telemetry unavailable"}</div></div></div>
     <div class="sec">CONNECTIONS</div>${rows}
-    <div class="note" style="margin-top:12px">Secrets are never shown here. Configure them in <code>.env</code> on the host.</div>`;
+    <div class="note" style="margin-top:12px">Saved keys are never shown here, only whether one is set.</div>`;
+
+  /* Finding #120 (OS-8.3): every background switch, from the settings
+     registry, so none of them needs a terminal or a config file. */
+  (async () => {
+    const box = $("featureRows");
+    if(!box) return;
+    let data;
+    try{ data = await api("/api/settings/features"); }catch{ box.innerHTML = '<div class="note">Could not load these settings.</div>'; return; }
+    box.innerHTML = "";
+    data.features.forEach(f => {
+      const row = document.createElement("div");
+      row.className = "row";
+      if(f.kind === "bool"){
+        row.innerHTML = `<div class="g" style="flex:1"><div class="n">${esc(f.label)}</div><div class="d">${esc(f.help)}</div></div>`;
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "chip" + (f.value ? " on" : "");
+        b.textContent = f.value ? "ON" : "OFF"; b.setAttribute("aria-pressed", String(!!f.value));
+        b.onclick = async () => {
+          const r = await fetch("/api/settings/features", {method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({key: f.key, value: !f.value})}).then(x => x.json()).catch(() => ({ok:false, error:"network"}));
+          if(!r.ok){ alert(r.error || "Could not save"); return; }
+          f.value = r.value; b.className = "chip" + (f.value ? " on" : ""); b.textContent = f.value ? "ON" : "OFF";
+          b.setAttribute("aria-pressed", String(!!f.value));
+          row.querySelector(".d").textContent = f.help + " Saved: restart Dourmouse to apply.";
+        };
+        row.appendChild(b);
+      }else{
+        row.innerHTML = `<div class="g" style="flex:1"><div class="n">${esc(f.label)}</div><div class="d">${esc(f.help)}</div>
+          <textarea rows="3" style="width:100%;margin-top:6px;background:var(--panel2);border:1px solid var(--line-2);color:var(--blue-hi);font:inherit;font-size:11px;padding:6px">${esc((f.value||[]).join("\n"))}</textarea>
+          <button type="button" class="chip" style="margin-top:6px">SAVE FOLDERS</button></div>`;
+        row.querySelector("button").onclick = async () => {
+          const r = await fetch("/api/settings/features", {method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({key: f.key, value: row.querySelector("textarea").value})}).then(x => x.json()).catch(() => ({ok:false, error:"network"}));
+          row.querySelector(".d").textContent = r.ok ? f.help + " Saved: restart Dourmouse to apply." : (r.error || "Could not save");
+        };
+      }
+      box.appendChild(row);
+    });
+  })();
 
   /* v8.8: theme switcher. Applies instantly (no reload) and persists, so
      the first-run choice is a default rather than a decision you are
@@ -7552,6 +7617,58 @@ function secOnEvent(data){
   if(data.type === "security_analysis"){ _secAnalysis = data.analysis; if(screen === "SECURITY") paintSecAnalyst(); return; }
   if(data.type === "security_scan" || data.type === "security_network_change") loadSecurityDashboard();
 }
+// Finding #121 (OS-8.2): the launcher. Every screen, the panes and the
+// common actions in one searchable list; anything that matches nothing is
+// sent to Dourmouse as a directive, so the launcher is also a command line.
+const PAL_SCREEN_HELP = {
+  HOME:"overview", COMMS:"mail and messages", RESEARCH:"research with sources", CODE:"coding agents",
+  VISION:"camera and screen", MEDIA:"media player", PROJECTS:"project workspaces", SETTINGS:"settings",
+  ATLAS:"strategy lab", GLOBE:"3D world view", NEWS:"live news", DESIGN3D:"3D design", VOICE:"hands-free",
+  ORCHESTRATION:"agents at work", GOALS:"long-running goals", TIMETABLE:"scheduled routines",
+  AGENTSMITH:"self-extension drafts", WIKI:"device knowledge base", SECURITY:"this Mac's security", OFFICE:"agent office",
+};
+function palActions(){
+  const acts = SCREENS.map(n => ({label: n, help: PAL_SCREEN_HELP[n] || "", kind: "SCREEN", run: () => show(n)}));
+  acts.push(
+    {label: "Notifications", help: "alerts and history", kind: "PANEL", run: () => { $("bellPanel").hidden = false; loadBell(); }},
+    {label: "Security report", help: "full report of this Mac", kind: "ACTION", run: () => { show("SECURITY"); setTimeout(() => $("secReportBtn") && $("secReportBtn").click(), 300); }},
+    {label: "Scan now", help: "run a security scan", kind: "ACTION", run: () => { show("SECURITY"); setTimeout(() => $("secScanBtn") && $("secScanBtn").click(), 300); }},
+    {label: "Lockdown", help: "blocklist, start or end", kind: "ACTION", run: () => { show("SECURITY"); setTimeout(() => $("secLockState") && $("secLockState").scrollIntoView({block:"start"}), 300); }},
+    {label: "Find a file", help: "ask the librarian", kind: "ACTION", run: () => { ta.value = "Find the file: "; ta.focus(); }},
+    {label: "Browser", help: "open the browser pane", kind: "PANEL", run: () => openBrowserPane("https://www.google.com")},
+    {label: "Workspace view", help: "the workspace home", kind: "VIEW", run: () => { location.href = "/workspace"; }},
+    {label: "Settings: background agents", help: "switches for scans, librarian, analyst", kind: "ACTION", run: () => { show("SETTINGS"); setTimeout(() => $("featureRows") && $("featureRows").scrollIntoView({block:"start"}), 300); }},
+  );
+  return acts;
+}
+let _palSel = 0, _palItems = [];
+function palRender(){
+  const q = $("palq").value.trim().toLowerCase();
+  const all = palActions();
+  _palItems = q ? all.filter(a => (a.label + " " + a.help).toLowerCase().includes(q)) : all;
+  const typed = $("palq").value.trim();
+  if(typed && !/^https?:\/\//i.test(typed)) _palItems = _palItems.concat([{label: "Ask Dourmouse: " + typed, help: "", kind: "ASK", run: () => { ta.value = typed; submit(); }}]);
+  if(/^https?:\/\//i.test(typed)) _palItems.unshift({label: "Open " + typed, help: "in the browser pane", kind: "WEB", run: () => openBrowserPane(typed)});
+  _palSel = Math.min(_palSel, Math.max(0, _palItems.length - 1));
+  $("pallist").innerHTML = _palItems.map((a, i) => `<div class="palitem${i === _palSel ? " sel" : ""}" role="option" aria-selected="${i === _palSel}" data-i="${i}">
+    <span><b>${esc(a.label)}</b>${a.help ? " &middot; " + esc(a.help) : ""}</span><span class="k">${a.kind}</span></div>`).join("");
+}
+function palOpen(){ $("pal").hidden = false; $("palq").value = ""; _palSel = 0; palRender(); $("palq").focus(); }
+function palClose(){ $("pal").hidden = true; }
+function palRun(i){ const a = _palItems[i]; if(!a) return; palClose(); a.run(); }
+$("palBtn").addEventListener("click", palOpen);
+$("palq").addEventListener("input", () => { _palSel = 0; palRender(); });
+$("palq").addEventListener("keydown", (e) => {
+  if(e.key === "ArrowDown"){ e.preventDefault(); _palSel = Math.min(_palItems.length - 1, _palSel + 1); palRender(); }
+  else if(e.key === "ArrowUp"){ e.preventDefault(); _palSel = Math.max(0, _palSel - 1); palRender(); }
+  else if(e.key === "Enter"){ e.preventDefault(); palRun(_palSel); }
+  else if(e.key === "Escape"){ e.preventDefault(); palClose(); }
+});
+$("pallist").addEventListener("click", (e) => { const it = e.target.closest("[data-i]"); if(it) palRun(Number(it.dataset.i)); });
+$("pal").addEventListener("click", (e) => { if(e.target.id === "pal") palClose(); });
+document.addEventListener("keydown", (e) => {
+  if((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k"){ e.preventDefault(); $("pal").hidden ? palOpen() : palClose(); }
+});
 // Finding #119: the notification center. The bell shows unread alerts
 // (security findings, the analyst, risky downloads, goals, the librarian);
 // the panel lists them with dismiss, per-source mute, and history.
