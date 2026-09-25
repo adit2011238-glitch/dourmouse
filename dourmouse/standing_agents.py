@@ -75,7 +75,41 @@ class StandingRuntime:
         self._wake: dict[str, threading.Event] = {}
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._events: dict[str, list[dict[str, Any]]] = {}
+        self._events_lock = threading.Lock()
         bus.on_post(self._on_post)
+
+    def attach_event_log(self, log: Any) -> None:
+        """R6 (finding #128): an agent that declares ``wake_on`` (event-kind
+        prefixes such as "graph.put" or "security.") is woken by matching
+        events in the append-only log, and handed them via ``handle_event``."""
+        log.add_listener(self._on_event)
+
+    def _on_event(self, event: dict[str, Any]) -> None:
+        for name, agent in self._agents.items():
+            prefixes = getattr(agent, "wake_on", ()) or ()
+            if any(str(event.get("kind", "")).startswith(p) for p in prefixes):
+                with self._events_lock:
+                    self._events.setdefault(name, []).append(event)
+                self._wake[name].set()
+
+    def drain_events(self, name: str) -> int:
+        agent, st = self._agents[name], self._state[name]
+        with self._events_lock:
+            pending, self._events[name] = self._events.get(name, []), []
+        handler = getattr(agent, "handle_event", None)
+        for event in pending:
+            if handler is None:
+                continue
+            try:
+                note = handler(event)
+            except Exception as exc:  # noqa: BLE001 -- recorded, the loop goes on
+                st.errors += 1
+                st.last_error = f"{type(exc).__name__}: {exc}"
+                continue
+            if note:
+                self._record(st, "event", note)
+        return len(pending)
 
     def register(self, agent: StandingAgent) -> None:
         extra = set(agent.capabilities) - ALLOWED_CAPABILITIES
@@ -152,6 +186,7 @@ class StandingRuntime:
         next_tick = 0.0
         while not self._stop.is_set():
             self.drain_inbox(name)
+            self.drain_events(name)
             if time.monotonic() >= next_tick:
                 self.run_tick(name)
                 next_tick = time.monotonic() + st.interval_s

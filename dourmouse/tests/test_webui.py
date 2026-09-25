@@ -4401,3 +4401,33 @@ def test_the_service_worker_serves_the_shell_network_first():
     assert "revalidate(req).then((live) => live || caches.match(req)" in sw
     assert "return cached || live;" not in sw
     assert "dourmouse-shell-v3'" not in sw
+
+
+def test_research_graph_and_event_log_routes(server, monkeypatch, tmp_path):
+    """Findings #128/#129 over real HTTP: a graph change made while the
+    server runs is in the event log, and the research graph route serves the
+    overview and one question in full."""
+    import dourmouse.research_graph.store as gs
+
+    monkeypatch.setattr(gs, "default_db", lambda: tmp_path / "graph.db")
+    _, port = server
+    g = gs.GraphStore(gs.default_db())
+    g.put("project", "p1", {"name": "Q"}, created_by="t")
+    g.put("research_question", "q1", {"text": "Q"}, created_by="t")
+    g.link(("research_question", "q1"), "part_of", ("project", "p1"), created_by="t")
+
+    def get(path):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        body = json.loads(resp.read())
+        conn.close()
+        return resp.status, body
+
+    status, ev = get("/api/events/log?kind=graph.")
+    kinds = [(e["kind"], e["subject_id"]) for e in ev["events"]]
+    assert ("graph.put", "q1") in kinds and ("graph.link", "q1") in kinds and ev["next"] == ev["events"][-1]["seq"]
+    status, o = get("/api/research/graph")
+    assert o["counts"]["research_question"] == 1 and o["questions"][0]["text"] == "Q"
+    assert get("/api/research/graph?question=q1")[1]["text"] == "Q"
+    assert get("/api/research/graph?question=nope")[0] == 404

@@ -36,6 +36,8 @@ research_pipeline/store.py, sentry.py's SentryStore).
 
 from __future__ import annotations
 
+import contextlib
+import json
 import sqlite3
 import threading
 import time
@@ -92,6 +94,20 @@ CREATE TABLE IF NOT EXISTS agent_events (
 CREATE INDEX IF NOT EXISTS idx_agent_events_agent ON agent_events(agent);
 CREATE INDEX IF NOT EXISTS idx_agent_events_call ON agent_events(call_id);
 CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts);
+
+-- R6 (finding #128): the append-only event log. One row per state change
+-- anywhere that matters (the research graph, security scans), read by
+-- cursor (seq) so a consumer never misses or double-reads an event.
+CREATE TABLE IF NOT EXISTS events (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           REAL NOT NULL,
+    kind         TEXT NOT NULL,
+    subject_type TEXT NOT NULL DEFAULT '',
+    subject_id   TEXT NOT NULL DEFAULT '',
+    actor        TEXT NOT NULL DEFAULT '',
+    payload      TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
 """
 
 #: Finding #067: which dispatch.py event types carry real per-agent
@@ -257,6 +273,39 @@ class OfficeLogger:
             }
             for r in rows
         ]
+
+    # -- R6 (finding #128): the event log ------------------------------------ #
+
+    def add_listener(self, fn: Any) -> None:
+        """Called with each appended event (e.g. to wake a standing agent)."""
+        self._listeners = [*getattr(self, "_listeners", []), fn]
+
+    def append_event(self, kind: str, subject_type: str = "", subject_id: str = "", actor: str = "",
+                     payload: dict[str, Any] | None = None) -> int:
+        body = json.dumps(payload or {}, sort_keys=True, default=str)[:8000]
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO events (ts, kind, subject_type, subject_id, actor, payload) VALUES (?, ?, ?, ?, ?, ?)",
+                (time.time(), kind, subject_type, subject_id, actor, body),
+            )
+            conn.commit()
+            seq = int(cur.lastrowid or 0)
+        event = {"seq": seq, "kind": kind, "subject_type": subject_type, "subject_id": subject_id, "actor": actor}
+        for fn in list(getattr(self, "_listeners", [])):
+            with contextlib.suppress(Exception):  # a listener must never break the log
+                fn(event)
+        return seq
+
+    def events_since(self, seq: int = 0, kind_prefix: str = "", limit: int = 200) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 2000))
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT seq, ts, kind, subject_type, subject_id, actor, payload FROM events "
+                "WHERE seq > ? AND kind LIKE ? ORDER BY seq ASC LIMIT ?",
+                (int(seq), kind_prefix.replace("%", "") + "%", limit),
+            ).fetchall()
+        return [{"seq": r[0], "ts": r[1], "kind": r[2], "subject_type": r[3], "subject_id": r[4],
+                 "actor": r[5], "payload": json.loads(r[6] or "{}")} for r in rows]
 
     def recent_meetings(self, limit: int = 30) -> list[dict[str, Any]]:
         """Finding #123 (A1): recent multi-agent runs, newest first."""

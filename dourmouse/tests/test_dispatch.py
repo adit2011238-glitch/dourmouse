@@ -3843,7 +3843,10 @@ class TestBuildClientOrchestratorRouting:
             if expected == "claude":
                 assert isinstance(client, dispatch_module.ClaudeCliClient), agent
             elif expected == "gemini":
-                assert isinstance(client, dispatch_module.GeminiClient), agent
+                # Finding #130: the Gemini client cannot call tools, so a
+                # split "gemini" verdict runs on Ollama Cloud instead.
+                assert isinstance(client, dispatch_module.OllamaNativeClient), agent
+                assert client._root == "https://ollama.com", agent
             else:
                 # This test hand-builds a bare OllamaConfig() (never
                 # reads env), so a NON-privacy-pinned "local" verdict
@@ -4512,3 +4515,53 @@ class TestEmitEventTagsRealAgentAndCallId:
         call_id_a = next(e["call_id"] for e in events_a if e.get("call_id"))
         call_id_b = next(e["call_id"] for e in events_b if e.get("call_id"))
         assert call_id_a != call_id_b
+
+
+def test_split_mode_never_hands_a_tool_using_agent_to_the_toolless_gemini_client(monkeypatch):
+    """Finding #130: GeminiClient passes no tools, so every agent the split
+    classifies as "gemini" (public-web research and news) must run on a
+    tool-capable large cloud model instead."""
+    from dourmouse.config import OllamaConfig
+    from dourmouse.general_roster import build_general_registry
+
+    monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "split")
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
+    gemini_agents = [s.name for s in build_general_registry().all_subagents()
+                     if dispatch_module._agent_split_backend(s.name) == "gemini"]
+    assert gemini_agents, "the split no longer classifies any agent as gemini; revisit this test"
+    for agent in gemini_agents:
+        assert dispatch_module._split_backend(agent) == "ollama_cloud"
+        client = dispatch_module._build_client(OllamaConfig(), forced_agent=agent)
+        assert not isinstance(client, dispatch_module.GeminiClient), agent
+
+
+def test_cloud_routing_uses_the_configured_cloud_model(monkeypatch):
+    """Finding #130: split/ollama_cloud routing used the gpt-oss:20b
+    constant as both the label AND the requested model, ignoring the
+    owner's OLLAMA_CLOUD_MODEL."""
+    from dourmouse.dispatch import run_dispatch_messages
+    from dourmouse.general_roster import build_general_registry
+
+    monkeypatch.setenv(dispatch_module._CLAUDE_ORCHESTRATOR_ENV, "ollama_cloud")
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
+    monkeypatch.setenv("OLLAMA_CLOUD_MODEL", "gpt-oss:120b")
+    monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+    sent = []
+
+    class _Client:
+        def __init__(self):
+            self.chat = type("C", (), {})()
+            self.chat.completions = self
+
+        def create(self, **kw):
+            sent.append(kw.get("model"))
+            msg = type("M", (), {"content": "ok", "tool_calls": None})()
+            return type("R", (), {"choices": [type("Ch", (), {"message": msg})()]})()
+
+    monkeypatch.setattr(dispatch_module, "_build_client", lambda *a, **k: _Client())
+    events = []
+    registry = build_general_registry()
+    run_dispatch_messages([{"role": "user", "content": "hello"}], registry, event_sink=events.append)
+    brain = [e for e in events if e.get("type") == "brain"]
+    assert brain and brain[0]["model"] == "gpt-oss:120b"
+    assert sent and set(sent) == {"gpt-oss:120b"}

@@ -2363,7 +2363,7 @@ def _build_client(
     # confirmation_gate is already correctly honored.
     mode = "" if force_plain_dispatch else _orchestrator_backend_mode()
     if mode == "split":
-        mode = _agent_split_backend(forced_agent)
+        mode = _split_backend(forced_agent)
     if mode in ("claude", "claude_cli"):
         # session_stem (the calling ChatSession's own per-tab session-file
         # stem — see chat.py's own session_file/tab_id wiring) is the real
@@ -3003,6 +3003,20 @@ def _agent_split_backend(agent_name: str | None) -> str:
     from dourmouse.model_delegation import CLOUD, route_for
 
     return "gemini" if route_for(agent_name) == CLOUD else "local"
+
+
+def _split_backend(agent_name: str | None) -> str:
+    """The backend split mode actually uses for ``agent_name``: the
+    privacy/role verdict of _agent_split_backend, except that a "gemini"
+    verdict runs on Ollama Cloud. Finding #130: GeminiClient sends Gemini
+    only the last user message and the system prompt, with no tools and no
+    tool results, so an agent routed there could never call a tool (live:
+    the research agent's experiment call came back MALFORMED_FUNCTION_CALL,
+    Gemini trying to call tools it was never given). Ollama Cloud is a large
+    model with real tool calling. Choosing Gemini for everything on purpose
+    (the "gemini" orchestrator mode) is unchanged."""
+    verdict = _agent_split_backend(agent_name)
+    return "ollama_cloud" if verdict == "gemini" else verdict
 
 
 def _ollama_cloud_config() -> OllamaConfig:
@@ -3791,11 +3805,13 @@ def run_dispatch_messages(
         # Same effective-agent peek _build_client() used above to pick
         # the REAL client — must agree, or this event would report a
         # different backend than the one actually built.
-        _orch_mode = _agent_split_backend(_effective_split_agent(forced_agent, last_user, registry))
+        _orch_mode = _split_backend(_effective_split_agent(forced_agent, last_user, registry))
     if _orch_mode in ("claude", "claude_cli"):
         model, backend_name, backend_local = "claude-sonnet-5 (CLI)", "claude_cli", False
     elif _orch_mode in ("ollama_cloud", "cloud"):
-        model, backend_name, backend_local = _OLLAMA_CLOUD_DEFAULT_MODEL, "ollama_cloud", False
+        # The configured cloud model (OLLAMA_CLOUD_MODEL, the owner's gpt-oss:120b),
+        # never the fallback constant: this value is also the model requested (#130).
+        model, backend_name, backend_local = _ollama_cloud_config().model, "ollama_cloud", False
     elif _orch_mode == "gemini":
         from dourmouse.gemini_backend import GEMINI_DEFAULT_MODEL
 
@@ -4615,11 +4631,11 @@ def _run_dispatch_loop(
                     # CLIENT was actually built against in that case, so
                     # match it here rather than re-falling-back to "no
                     # agent" and reporting the wrong side of the split.
-                    _orch_mode2 = _agent_split_backend(ctx.forced_agent or next(iter(plan_agents)))
+                    _orch_mode2 = _split_backend(ctx.forced_agent or next(iter(plan_agents)))
                 if _orch_mode2 in ("claude", "claude_cli"):
                     model, _routed_backend, _routed_local = "claude-sonnet-5 (CLI)", "claude_cli", False
                 elif _orch_mode2 in ("ollama_cloud", "cloud"):
-                    model, _routed_backend, _routed_local = _OLLAMA_CLOUD_DEFAULT_MODEL, "ollama_cloud", False
+                    model, _routed_backend, _routed_local = _ollama_cloud_config().model, "ollama_cloud", False
                 elif _orch_mode2 == "gemini":
                     from dourmouse.gemini_backend import GEMINI_DEFAULT_MODEL
 

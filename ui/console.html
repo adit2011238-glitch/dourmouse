@@ -4239,11 +4239,61 @@ function bookOpen(it){
 function paintResearch(){
   $("researchBody").innerHTML = `<div class="note">Ask a question below and it routes to the research agent,
     searches the live web and cites sources. Results stay right here.</div>
-    <div class="sec">TRY</div><div class="cards" id="rc"></div>`;
+    <div class="sec">TRY</div><div class="cards" id="rc"></div>
+    <div class="sec">RESEARCH GRAPH</div><div id="rgraph"><p class="note">Loading…</p></div>
+    <div id="rdetail"></div>
+    <div class="sec">LATEST CHANGES</div><div id="revents"></div>`;
+  loadResearchGraph();
   [["Latest on open-weight models",""],["What happened in the news today",""],["Compare two frameworks",""]]
     .forEach(([q])=>{ const b=document.createElement("button"); b.className="card"; b.type="button";
       b.innerHTML=`<div class="h">${esc(q)}</div>`;
       b.onclick=()=>{ focusAgent="research_info"; ta.value=q; submit(); }; $("rc").appendChild(b); });
+}
+/* R8 (finding #129): the research graph made visible. Every question the
+   evidence pipeline has worked on, with its claims, sources and open
+   contradictions; every hypothesis with the experiments testing it and
+   their runs (and replications); and the latest changes from the event
+   log. Click a question for its claims with the passage and source behind
+   each. */
+async function loadResearchGraph(){
+  let g, ev;
+  try{ g = await api("/api/research/graph"); }catch{ $("rgraph").innerHTML = '<p class="note">Could not load the research graph.</p>'; return; }
+  try{ ev = await api("/api/events/log?kind=graph.&since=0"); }catch{ ev = {events: []}; }
+  const c = g.counts || {};
+  const nonzero = Object.entries(c).filter(([, n]) => n > 0);
+  let html = nonzero.length ? `<div class="note">${nonzero.map(([t, n]) => `${n} ${esc(t.replace(/_/g, " "))}`).join(" · ")}</div>`
+    : `<p class="note">Nothing yet. Ask the evidence pipeline to research something ("research ... with sources"), or run an experiment, and it appears here with every claim traceable to its source.</p>`;
+  html += (g.questions || []).map(q => `<div class="row" data-q="${esc(q.id)}" style="cursor:pointer"><div class="g">
+      <div class="n">${esc(q.text)}</div>
+      <div class="d">${q.sub_questions} sub-question(s) · ${q.claims} claim(s)${q.contradictions ? ` · ${q.open_contradictions} open of ${q.contradictions} contradiction(s)` : ""}</div></div></div>`).join("");
+  html += (g.hypotheses || []).map(h => `<div class="row"><div class="g">
+      <div class="n">Hypothesis: ${esc(h.statement)}</div>
+      ${(h.experiments || []).map(e => `<div class="d">Experiment (${esc(e.status)}): ${esc(e.protocol.slice(0, 200))}</div>
+        ${(e.runs || []).map(r => `<div class="d">&nbsp;&nbsp;run ${esc(r.id)}: ${esc(r.status)}${Object.keys(r.metrics).length ? " · " + Object.entries(r.metrics).map(([k, v]) => esc(k) + "=" + esc(JSON.stringify(v))).join(", ") : ""}${r.replicates.length ? " · replicates " + esc(r.replicates.join(", ")) : ""}</div>`).join("")}`).join("") || '<div class="d">no experiments yet</div>'}</div></div>`).join("");
+  const untested = (g.experiments || []).filter(e => !(g.hypotheses || []).some(h => (h.experiments || []).some(x => x.id === e.id)));
+  html += untested.map(e => `<div class="row"><div class="g">
+      <div class="n">Experiment (${esc(e.status)}): ${esc(e.protocol.slice(0, 200))}</div>
+      ${(e.runs || []).map(r => `<div class="d">run ${esc(r.id)}: ${esc(r.status)}${Object.keys(r.metrics).length ? " · " + Object.entries(r.metrics).map(([k, v]) => esc(k) + "=" + esc(JSON.stringify(v))).join(", ") : ""}${r.replicates.length ? " · replicates " + esc(r.replicates.join(", ")) : ""}</div>`).join("")}</div></div>`).join("");
+  $("rgraph").innerHTML = html;
+  $("rgraph").querySelectorAll("[data-q]").forEach(el => el.onclick = () => openResearchQuestion(el.dataset.q));
+  const recent = (ev.events || []).slice(-15).reverse();
+  $("revents").innerHTML = recent.length ? recent.map(e => `<div class="d">${new Date(e.ts * 1000).toLocaleTimeString()} · ${esc(e.kind.replace("graph.", ""))} ${esc(e.subject_type)} ${esc(e.subject_id.slice(0, 24))}${e.payload && e.payload.relation ? " " + esc(e.payload.relation) + " " + esc(e.payload.dst_type) : ""}</div>`).join("")
+    : '<p class="note">No changes recorded yet.</p>';
+}
+async function openResearchQuestion(id){
+  let q;
+  try{ q = await api("/api/research/graph?question=" + encodeURIComponent(id)); }catch{ return; }
+  $("rdetail").innerHTML = `<div class="sec">${esc(q.text)}</div>` +
+    (q.claims.length ? q.claims.map(c => `<div class="row"><div class="g">
+      <div class="n">${esc(c.text)}${c.contradicted_by.length ? ' <span style="color:var(--warn)">· disputed</span>' : ""}</div>
+      ${c.sub_question ? `<div class="d">for: ${esc(c.sub_question)}</div>` : ""}
+      ${c.passage ? `<div class="d" style="font-style:italic">"${esc(c.passage)}"</div>` : ""}
+      ${c.source ? `<div class="d"><a href="#" data-url="${esc(c.source)}" style="color:var(--amber)">${esc(c.source)}</a></div>` : ""}</div></div>`).join("")
+      : '<p class="note">No claims yet.</p>') +
+    (q.contradictions.length ? `<div class="sec">CONTRADICTIONS</div>` + q.contradictions.map(x => `<div class="row"><div class="g">
+      <div class="n">${esc(x.note)}</div><div class="d">${esc(x.status)}${x.spawned.length ? " · follow-up: " + esc(x.spawned.join("; ")) : ""}</div></div></div>`).join("") : "");
+  $("rdetail").querySelectorAll("[data-url]").forEach(a => a.onclick = (e) => { e.preventDefault(); openBrowserPane(a.dataset.url); });
+  $("rdetail").scrollIntoView({behavior: "smooth", block: "start"});
 }
 function paintMedia(){
   const c=(sys.conns||{}).spotify;

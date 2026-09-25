@@ -97,3 +97,31 @@ def test_broadcasts_are_not_answered():
     bus.post("live", "*", "live:read_inbox", "3 new emails")
     assert rt.drain_inbox("echo") == 0 and not agent.answered.is_set()
     assert bus.outbox("echo") == []
+
+
+def test_event_log_wakes_agents_that_asked_for_those_kinds(tmp_path):
+    """R6 (finding #128): an agent with wake_on prefixes is handed matching
+    events from the append-only log; others are not."""
+    from dourmouse.office_logger import OfficeLogger
+
+    class Watcher(Echo):
+        name = "watcher"
+        wake_on = ("graph.put",)
+
+        def __init__(self):
+            super().__init__()
+            self.seen = []
+
+        def handle_event(self, event):
+            self.seen.append(event["kind"])
+            return f"saw {event['subject_type']}"
+
+    log = OfficeLogger(tmp_path / "o.db")
+    rt = StandingRuntime(MessageBus())
+    w = Watcher()
+    rt.register(w)
+    rt.attach_event_log(log)
+    log.append_event("graph.put", "claim", "c1", "t")
+    log.append_event("security.scan", "scan", "x", "sentry")
+    assert rt.drain_events("watcher") == 1 and w.seen == ["graph.put"]
+    assert rt.status()[0]["activity"][0]["text"] == "saw claim"

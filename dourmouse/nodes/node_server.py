@@ -399,6 +399,13 @@ class JobRunner:
                 k32.CloseHandle(job_handle)
         metrics: dict[str, Any] = {}
         metrics_file = d / "out" / "metrics.json"
+        if not metrics_file.exists() and (d / "metrics.json").exists():
+            # Finding #130: code often writes metrics.json next to main.py
+            # instead of into out/ (seen live from the research agent); the
+            # numbers are real either way, so they are read from there and
+            # the fallback is noted on the job.
+            metrics_file = d / "metrics.json"
+            status["metrics_source"] = "metrics.json (job folder, not out/)"
         if metrics_file.exists():
             try:
                 metrics = json.loads(metrics_file.read_text(encoding="utf-8"))

@@ -326,6 +326,39 @@ def _research_status_tool(arguments: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _research_experiment_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.research_pipeline import experiments as ex
+
+    try:
+        r = ex.run_experiment(str(arguments.get("protocol") or ""), str(arguments.get("code") or ""),
+                              hypothesis_id=(arguments.get("hypothesis_id") or None),
+                              wait_s=float(arguments.get("wait_s") or 120))
+    except (ValueError, KeyError) as exc:
+        return f"ERROR: {exc}"
+    return f"experiment {r['experiment_id']}\n" + ex.describe_run(r["run_id"])
+
+
+def _research_replicate_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.research_pipeline import experiments as ex
+
+    try:
+        r = ex.replicate(str(arguments.get("run_id") or ""))
+    except (ValueError, KeyError) as exc:
+        return f"ERROR: {exc}"
+    return f"replication {r['run_id']}: {r['verdict']}"
+
+
+def _research_experiment_status_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.research_pipeline import experiments as ex
+
+    run_id = str(arguments.get("run_id") or "")
+    try:
+        ex.refresh_run(run_id)
+        return ex.describe_run(run_id)
+    except (ValueError, KeyError) as exc:
+        return f"ERROR: {exc}"
+
+
 def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
     return Subagent(
         name="evidence_pipeline",
@@ -399,6 +432,38 @@ def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
                     "required": ["question"],
                 },
                 handler=_research_status_tool,
+            ),
+            # Finding #127 (R5 + RES-18): experiments as research objects.
+            ToolSpec(
+                name="research_experiment",
+                description=(
+                    "Test a hypothesis with an experiment: its protocol and Python code are recorded in the "
+                    "research graph and executed as a sandboxed job on this Mac; the result, metrics "
+                    "(from out/metrics.json), logs and environment hash are recorded and linked."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "protocol": {"type": "string", "description": "what is tested, and how"},
+                        "code": {"type": "string", "description": "Python; write key numbers to out/metrics.json"},
+                        "hypothesis_id": {"type": "string", "description": "optional: the hypothesis it tests"},
+                        "wait_s": {"type": "number", "default": 120},
+                    },
+                    "required": ["protocol", "code"],
+                },
+                handler=_research_experiment_tool,
+            ),
+            ToolSpec(
+                name="research_replicate",
+                description="Replicate an experiment run and report whether every metric came out the same.",
+                parameters={"type": "object", "properties": {"run_id": {"type": "string"}}, "required": ["run_id"]},
+                handler=_research_replicate_tool,
+            ),
+            ToolSpec(
+                name="research_experiment_status",
+                description="Status, metrics, result and logs of one experiment run (brought up to date first).",
+                parameters={"type": "object", "properties": {"run_id": {"type": "string"}}, "required": ["run_id"]},
+                handler=_research_experiment_status_tool,
             ),
         ),
     )

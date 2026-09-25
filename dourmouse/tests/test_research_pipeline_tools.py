@@ -251,6 +251,7 @@ class TestBuildResearchPipelineSubagent:
             "research_plan", "research_discover_sources", "research_extract_evidence",
             "research_run_pipeline", "research_follow_up", "research_detect_contradictions",
             "research_synthesize", "research_status",
+            "research_experiment", "research_replicate", "research_experiment_status",  # finding #127
         }
 
 

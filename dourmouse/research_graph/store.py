@@ -12,6 +12,7 @@ touching or deleting the old table.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
@@ -27,6 +28,22 @@ from dourmouse.config import workspace_dir
 from .model import OBJECT_TYPES, GraphError, ImmutableObject, Mutability, validate_body, validate_relation
 
 SCHEMA_VERSION = 1
+
+# R6 (finding #128): every change to the graph is announced to observers
+# (the server records each in the append-only event log). Inside a
+# transaction the announcements wait for the commit and are dropped on a
+# rollback, so the log never shows a change that did not happen.
+_observers: list[Any] = []
+
+
+def add_observer(fn: Any) -> None:
+    if fn not in _observers:
+        _observers.append(fn)
+
+
+def remove_observer(fn: Any) -> None:
+    if fn in _observers:
+        _observers.remove(fn)
 
 
 def default_db() -> Path:
@@ -85,15 +102,33 @@ class GraphStore:
             conn = sqlite3.connect(self.path, timeout=30)
             conn.execute("PRAGMA synchronous=NORMAL")
             self._tx.conn = conn
+            self._tx.pending = []
             try:
                 yield
                 conn.commit()
             except BaseException:
                 conn.rollback()
+                self._tx.pending = []
                 raise
             finally:
                 self._tx.conn = None
                 conn.close()
+            pending, self._tx.pending = self._tx.pending, []
+            for event in pending:
+                self._announce(event)
+
+    def _emit(self, kind: str, obj_type: str, obj_id: str, by: str, **extra: Any) -> None:
+        event = {"kind": kind, "type": obj_type, "id": obj_id, "by": by, "db": str(self.path), **extra}
+        if getattr(self._tx, "conn", None) is not None:
+            self._tx.pending.append(event)
+        else:
+            self._announce(event)
+
+    @staticmethod
+    def _announce(event: dict[str, Any]) -> None:
+        for fn in list(_observers):
+            with contextlib.suppress(Exception):  # an observer must never break a write
+                fn(event)
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -184,7 +219,9 @@ class GraphStore:
                 "VALUES (?, 1, ?, ?, ?, ?)",
                 (obj_id, project_id, json.dumps(body, sort_keys=True), self._clock(), created_by),
             )
-            return self._get(conn, obj_type, obj_id, None)
+            created = self._get(conn, obj_type, obj_id, None)
+        self._emit("graph.put", obj_type, obj_id, created_by, version=1, project_id=project_id)
+        return created
 
     def revise(self, obj_type: str, obj_id: str, changes: dict[str, Any], *, created_by: str) -> GraphObject:
         """Version N+1 of a VERSIONED object; version N stays readable and is
@@ -209,7 +246,10 @@ class GraphStore:
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (obj_id, cur.version + 1, cur.project_id, json.dumps(body, sort_keys=True), now, created_by),
             )
-            return self._get(conn, obj_type, obj_id, None)
+            revised = self._get(conn, obj_type, obj_id, None)
+        self._emit("graph.revise", obj_type, obj_id, created_by, version=revised.version,
+                   changed=sorted(changes))
+        return revised
 
     def _get(self, conn: sqlite3.Connection, obj_type: str, obj_id: str, version: int | None) -> GraphObject:
         table = self._table(obj_type)
@@ -279,11 +319,14 @@ class GraphStore:
         with self._lock, self._conn() as conn:
             for t, i in (src, dst):
                 self._get(conn, t, i, None)  # raises KeyError for a dangling end
-            conn.execute(
+            cur = conn.execute(
                 "INSERT OR IGNORE INTO edges(src_type, src_id, relation, dst_type, dst_id, created_at, created_by) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (src[0], src[1], relation, dst[0], dst[1], self._clock(), created_by),
             )
+            added = cur.rowcount == 1
+        if added:
+            self._emit("graph.link", src[0], src[1], created_by, relation=relation, dst_type=dst[0], dst_id=dst[1])
 
     def edges(
         self, *, src: tuple[str, str] | None = None, dst: tuple[str, str] | None = None,

@@ -216,3 +216,40 @@ def test_delegate_parallel_branches_announce_the_id_their_run_uses(monkeypatch):
     cid = branch[0]["call_id"]
     nested = [e for e in events if e.get("call_id") == cid and e.get("type") != "delegate_parallel_branch"]
     assert nested, "the branch's own run did not carry the id it announced"
+
+
+class TestEventLog:
+    """R6 (finding #128): the research graph's changes land in the
+    append-only event log, only committed ones, and read back by cursor."""
+
+    def test_graph_changes_are_logged_and_a_rollback_logs_nothing(self, tmp_path):
+        from dourmouse.office_logger import OfficeLogger
+        from dourmouse.research_graph import store as gs
+
+        log = OfficeLogger(tmp_path / "office.db")
+
+        def obs(e):
+            log.append_event(e["kind"], e["type"], e["id"], e["by"], e)
+
+        gs.add_observer(obs)
+        try:
+            g = gs.GraphStore(tmp_path / "graph.db")
+            g.put("hypothesis", "h1", {"statement": "s"}, created_by="t")
+            g.put("hypothesis", "h1", {"statement": "s"}, created_by="t")  # idempotent: no second event
+            g.revise("hypothesis", "h1", {"status": "tested"}, created_by="t")
+            g.put("experiment", "e1", {"protocol": "p"}, created_by="t")
+            g.link(("hypothesis", "h1"), "tested_by", ("experiment", "e1"), created_by="t")
+            g.link(("hypothesis", "h1"), "tested_by", ("experiment", "e1"), created_by="t")  # no duplicate
+            try:
+                with g.transaction():
+                    g.put("hypothesis", "h2", {"statement": "never"}, created_by="t")
+                    raise RuntimeError("abort")
+            except RuntimeError:
+                pass
+        finally:
+            gs.remove_observer(obs)
+        events = log.events_since(0)
+        assert [(e["kind"], e["subject_id"]) for e in events] == [
+            ("graph.put", "h1"), ("graph.revise", "h1"), ("graph.put", "e1"), ("graph.link", "h1")]
+        assert events[1]["payload"]["version"] == 2 and events[3]["payload"]["relation"] == "tested_by"
+        assert log.events_since(events[1]["seq"], "graph.put") == [events[2]]

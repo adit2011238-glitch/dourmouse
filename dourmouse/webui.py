@@ -3191,6 +3191,30 @@ class _Handler(BaseHTTPRequestHandler):
 
             self._send_json({"alerts": store.alerts(owner, include_dismissed=history)[:200],
                              "muted": store.muted_sources(owner), "sources": sorted(ALERT_KINDS)})
+        elif path == "/api/research/graph":
+            # R8 (finding #129): the research graph for the RESEARCH screen;
+            # ?question=<id> returns one question in full.
+            from dourmouse.research_graph import view as _rview
+            from dourmouse.research_graph.store import GraphStore
+            from dourmouse.research_graph.store import default_db as _graph_db
+
+            qs = urllib.parse.parse_qs(parsed.query)
+            store = GraphStore(_graph_db())
+            qid = (qs.get("question") or [""])[0]
+            try:
+                self._send_json(_rview.question_detail(store, qid) if qid else _rview.overview(store))
+            except KeyError as exc:
+                self._send_json({"error": str(exc)}, status=404)
+        elif path == "/api/events/log":
+            # R6 (finding #128): the append-only event log, read by cursor.
+            qs = urllib.parse.parse_qs(parsed.query)
+            log = getattr(self.server, "office_log", None)
+            try:
+                since = int((qs.get("since") or ["0"])[0])
+            except ValueError:
+                since = 0
+            events = log.events_since(since, (qs.get("kind") or [""])[0], 500) if log is not None else []
+            self._send_json({"events": events, "next": events[-1]["seq"] if events else since})
         elif path == "/api/standing":
             # Finding #114: what the standing agents did without being asked.
             rt = getattr(self.server, "standing_agents", None)
@@ -7657,6 +7681,18 @@ def run_server(
         office_log = OfficeLogger()
     server.office_log = office_log
     server.bus.on_post(server.office_log.log_message)
+    # R6 (finding #128): every research-graph change lands in the append-only
+    # event log. The observer list is process-wide, so a newer server replaces
+    # an older one's observer instead of stacking beside it.
+    from dourmouse.research_graph import store as _graph_store
+
+    def _graph_event(event: dict[str, Any]) -> None:
+        office_log.append_event(event["kind"], event["type"], event["id"], event["by"], event)
+
+    setattr(_graph_event, "_dourmouse_server_observer", True)  # noqa: B010 -- marker read just below
+    _graph_store._observers[:] = [o for o in _graph_store._observers
+                                  if not getattr(o, "_dourmouse_server_observer", False)]
+    _graph_store.add_observer(_graph_event)
 
     def _notify_direct_message(msg: dict) -> None:
         """Finding #065 (notification gap): message_bus had no proactive
@@ -7910,6 +7946,11 @@ def run_server(
     sentry_rt: SentryRuntime | None = getattr(server, "security_sentry", None)
     if sentry_rt is not None:
         sentry_rt.add_listener(lambda result, why: events_hub.broadcast(_netwatch.scan_event(result, why)))
+        # R6 (finding #128): each scan is also a durable event.
+        def _log_scan(result: Any, why: str) -> None:
+            office_log.append_event("security.scan", "scan", why, "sentry", _netwatch.scan_event(result, why))
+
+        sentry_rt.add_listener(_log_scan)
         if _netwatch.analyst_enabled():
             from dourmouse.security.analyst import Analyst
             from dourmouse.security.lockdown import notify_user
@@ -7949,6 +7990,7 @@ def run_server(
 
         standing = StandingRuntime(getattr(server, "bus", None) or get_message_bus(),
                                    log=getattr(server, "office_log", None))
+        standing.attach_event_log(office_log)  # R6: agents can wake on event kinds
         if librarian_enabled():
             _lib = get_librarian()
             _lib.on_new_proposals = lambda props: _alert(

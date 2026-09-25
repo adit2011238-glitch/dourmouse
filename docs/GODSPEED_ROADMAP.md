@@ -1103,3 +1103,8 @@ and a real build sequence, not just a requirement statement:
   gate proven to stop an obedient model.
 - [x] Phase 5 A2 (finding #125) 2026-09-25 -- agent window streams thinking, tools, answer and approvals.
 - [x] Phase 5 A3 (finding #126) 2026-09-25 -- office desks show concurrent runs. Phase 5 A0-A4 complete.
+- [x] R5 + RES-18 (finding #127) 2026-09-25 -- experiments, runs, metrics and replication as linked graph objects.
+- [x] R6 (finding #128) 2026-09-25 -- append-only event log; graph changes (commit-only) and scans; agents wake on events.
+- [x] R8 (finding #129) 2026-09-25 -- the research view on the RESEARCH screen.
+- [x] Finding #130 2026-09-25 -- split mode sent research agents to a tool-less Gemini client; now Ollama
+  Cloud with the configured model.

@@ -5234,3 +5234,89 @@ office desk reads e.g. "COMPUTING x2" when an agent works on two runs at once (t
 meeting, or two chats).
 
 Tests for #125 and #126: `test_office_desk_and_agent_window.py` (3).
+
+### 127 -- experiments are first-class research objects (R5, and R4's replication stage RES-18)
+
+Status: DONE 2026-09-25. Verified live through chat with the real cloud model.
+
+`research_pipeline/experiments.py` records the spec's whole experiment record in the research
+graph:
+- the experiment (protocol and code, versioned status);
+- each run (status, environment hash, node, start and finish times, exit code, logs);
+- one metric object per `out/metrics.json` key;
+- a result.
+
+These are linked `hypothesis tested_by experiment`, `run run_of experiment` and `run produced
+metric/result`. Runs execute on this Mac's sandboxed job runner (#113).
+
+`replicate` reruns the code, links `replicates`, and says plainly whether every metric came out
+the same. In the test, a seeded computation replicates and a clock-based one reports "did NOT
+replicate: clock ...". `refresh_run` brings a long run up to date.
+
+The chat tools `research_experiment`, `research_replicate` and `research_experiment_status` are
+on `evidence_pipeline`. Live, the research agent ran the seeded-sample experiment (after its
+first call omitted `protocol` and was refused) and reported the run id and a mean of 0.032.
+Tests: `test_research_experiments.py` (5).
+
+### 128 -- event sourcing (R6)
+
+Status: DONE 2026-09-25.
+
+`office_logger` gains the append-only `events` table (seq, ts, kind, subject, actor, payload),
+read by cursor (`events_since`), with listeners.
+- **The research graph announces every real change** (`graph.put`, `graph.revise`, `graph.link`),
+  and only real ones: an idempotent re-put or a duplicate link emits nothing.
+- **Transactions:** inside a transaction the announcements wait for the commit, and are dropped
+  on rollback, so the log never shows a change that did not happen.
+- **Security scans** are logged as `security.scan`.
+- **Standing agents** can declare `wake_on` event-kind prefixes and receive matching events
+  through `handle_event`; this is INFRA-1's wake signal, as the plan intended.
+- **Server wiring:** the server registers one graph observer, and a newer server replaces an
+  older one's rather than stacking.
+- **API:** `/api/events/log?since=&kind=`.
+
+Honest scope: the graph stays the source of truth (it is itself versioned); the event log is the
+ordered record of how it changed, not a store the state is rebuilt from.
+
+Tests: the rollback case, the cursor read, an agent woken by an event, and the route.
+
+### 129 -- the research view (R8)
+
+Status: DONE 2026-09-25. Verified in a real browser.
+
+`research_graph/view.py` plus `/api/research/graph`. The RESEARCH screen now shows:
+- the object counts;
+- every question, with its sub-questions, claims and open contradictions;
+- every hypothesis with the experiments testing it, and every recent experiment with its runs,
+  metrics and replications;
+- the latest graph changes from the event log.
+
+Clicking a question lists each claim with the passage and the source URL behind it (opening in
+the browser pane), whether it is disputed, and each contradiction with the follow-up it
+spawned.
+
+Live, the experiment from #127 appeared, with its event trail (put experiment, put run, run_of,
+produced result, revise experiment). Tests: `test_research_view.py` (2) and a route test.
+
+### 130 -- research agents could never call a tool in split mode (found while verifying #127)
+
+Status: DONE 2026-09-25.
+
+With Claude front mode on, "split" routing sends public-web research and news agents to Gemini.
+But `GeminiClient` sends Gemini only the last user message and the system prompt; it passes no
+tools and no tool results. So every agent routed there could never call a tool. Live, the
+research agent's experiment request came back `MALFORMED_FUNCTION_CALL` (Gemini attempting
+tools it was never given) and was shown as the answer.
+
+Fixes:
+1. **Routing.** A split "gemini" verdict now runs on Ollama Cloud, a large tool-capable model,
+   through one helper `_split_backend` used by the client and both brain labels. Deliberately
+   choosing Gemini for everything is unchanged.
+2. **Model name.** The cloud route requested, and labeled, the `gpt-oss:20b` constant, ignoring
+   the owner's `OLLAMA_CLOUD_MODEL=gpt-oss:120b`. It now uses the configured model.
+3. **Metrics location.** Code that writes `metrics.json` beside `main.py` instead of into `out/`
+   (what the agent wrote live) now still has its metrics recorded, with the fallback noted on
+   the job.
+
+Tests: every split-"gemini" agent gets a non-Gemini client, the configured model is both label
+and request, and root-level metrics are recorded.
