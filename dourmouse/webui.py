@@ -586,7 +586,10 @@ class ActivityTracker:
             payload = {
                 "type": "agent_activity",
                 "agents": {
-                    name: {"status": self._status[name], "last": self._last[name]}
+                    # Finding #126 (A3): how many runs this agent has live
+                    # right now, so the office desk can say so.
+                    name: {"status": self._status[name], "last": self._last[name],
+                           "concurrent": len(self._prune_call_ids_locked(name))}
                     for name in changed
                 },
             }

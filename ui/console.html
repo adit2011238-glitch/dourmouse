@@ -6825,7 +6825,8 @@ function orchApplyDelta(agents){
     const feed = prev.feed.slice();
     if(patch.last) feed.push(patch.last);
     if(feed.length > 30) feed.shift();
-    _orchAgents[name] = {status: patch.status, last: patch.last, feed};
+    _orchAgents[name] = {status: patch.status, last: patch.last, feed,
+      concurrent: patch.concurrent ?? prev.concurrent ?? 0};
   }
   if(screen === "ORCHESTRATION") paintOrchestration();
   if(screen === "OFFICE") paintOffice();
@@ -7012,7 +7013,11 @@ function officeUpdateSprite(name, agent, meetingAssignments){
   const desk = el.querySelector(".office-desk");
   if(desk) desk.style.opacity = inMeeting ? "0" : "1";
   const statusText = el.querySelector(".office-status-text");
-  if(statusText) statusText.textContent = inMeeting ? "IN MEETING" : status.toUpperCase();
+  // Finding #126 (A3): one agent can be working on several runs at once
+  // (two branches of a meeting, or two chats); the desk says how many.
+  const live = agent.concurrent ?? (agent.concurrent_call_ids || []).length;
+  if(statusText) statusText.textContent = inMeeting ? "IN MEETING"
+    : status.toUpperCase() + (live > 1 && status !== "idle" ? ` x${live}` : "");
   if(agent.last && agent.last.tool){
     const speech = el.querySelector(".office-speech");
     const speechText = el.querySelector(".office-speech-text");

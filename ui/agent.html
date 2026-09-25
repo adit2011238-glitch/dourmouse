@@ -181,6 +181,16 @@
   #dstatusline { color: var(--text-dim); font-size: 10px; font-weight: 300; }
 
   /* ---------------- live feed ---------------- */
+  /* Finding #125 (A2): the live conversation with this one agent. */
+  #convo { border: 1px solid var(--line); background: var(--surface); padding: 8px 10px; max-height: 46vh; min-height: 140px; flex-shrink: 0; overflow: auto; }
+  .cv { margin: 6px 0; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+  .cv.you { color: var(--amber); }
+  .cv.think { color: var(--text-dim); font-style: italic; border-left: 2px solid var(--line); padding-left: 8px; }
+  .cv.tool { color: var(--text-dim); font-size: 11px; }
+  .cv.answer { color: var(--text); }
+  .cv.ask { border: 1px solid var(--amber); padding: 8px; color: var(--text); }
+  .cv.ask button { margin: 6px 6px 0 0; background: none; border: 1px solid var(--line-strong); color: var(--text); font: inherit; padding: 3px 10px; cursor: pointer; }
+  .cv.ask button.yes { border-color: var(--amber); color: var(--amber); }
   #feedwrap { flex: 1; min-height: 160px; border: 1px solid var(--line); background: var(--surface); overflow: hidden; display: flex; flex-direction: column; }
   #feed { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
   .fe { font-size: 10px; font-weight: 300; line-height: 1.5; word-break: break-word; }
@@ -252,6 +262,8 @@
         <div id="dstatusline"></div>
       </div>
     </div>
+    <div class="sec">CONVERSATION</div>
+    <div id="convo"><div class="fe" id="convoempty">Send this agent a task above: its thinking, the tools it uses, and its answer appear here as they happen.</div></div>
     <div class="sec">LIVE ACTIVITY FEED</div>
     <div id="feedwrap"><div id="feed"><div class="fe" id="empty">awaiting first activity…</div></div></div>
     <div class="sec">INBOX // INTER-AGENT COMMS <span id="inboxcount" style="color:var(--text)"></span></div>
@@ -399,9 +411,50 @@ async function dispatchToAgent() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '', finished = false;
+    // Finding #125 (A2): render the whole stream, not just done/error, so
+    // the agent's thinking, tool use and answer are visible as they happen,
+    // and a gated action gets real approve/decline buttons (it used to hang
+    // here unanswerable until the server's 5-minute auto-decline).
+    const convo = document.getElementById('convo');
+    const empty = document.getElementById('convoempty');
+    if (empty) empty.remove();
+    const add = (cls, text) => {
+      const d = document.createElement('div');
+      d.className = 'cv ' + cls; d.textContent = text; convo.appendChild(d);
+      convo.scrollTop = convo.scrollHeight; return d;
+    };
+    add('you', 'You: ' + prompt);
+    let think = null, answer = null;
     const handle = evt => {
-      if (evt.type === 'done') { line.textContent = '✓ completed'; finished = true; }
-      else if (evt.type === 'error') { line.textContent = '✕ ' + evt.message; finished = true; }
+      if (evt.type === 'thinking_delta') {
+        if (!think) think = add('think', '');
+        think.textContent += evt.text || '';
+      } else if (evt.type === 'assistant_delta' || evt.type === 'assistant_text') {
+        think = null;
+        if (!answer) answer = add('answer', '');
+        if (evt.type === 'assistant_text' && answer.textContent) answer.textContent = '';
+        answer.textContent += evt.text || '';
+      } else if (evt.type === 'tool_use') {
+        think = null; answer = null;
+        add('tool', '→ uses ' + (evt.name || evt.tool || 'a tool') + (evt.raw_arguments ? ' ' + String(evt.raw_arguments).slice(0, 300) : ''));
+      } else if (evt.type === 'tool_result') {
+        add('tool', '← ' + (evt.name || evt.tool || 'result') + ': ' + String(evt.text || '').slice(0, 400));
+      } else if (evt.type === 'confirmation_requested') {
+        const box = add('ask', 'Needs your approval: ' + (evt.prompt || ''));
+        const answerIt = async (ok) => {
+          box.querySelectorAll('button').forEach(b => b.disabled = true);
+          try {
+            await fetch('/api/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: evt.id, approved: ok }) });
+            box.appendChild(document.createTextNode(ok ? '  Approved.' : '  Declined.'));
+          } catch (e) { box.appendChild(document.createTextNode('  Could not send your answer.')); }
+        };
+        const yes = document.createElement('button'); yes.className = 'yes'; yes.textContent = 'APPROVE';
+        const no = document.createElement('button'); no.textContent = 'DECLINE';
+        yes.onclick = () => answerIt(true); no.onclick = () => answerIt(false);
+        box.appendChild(document.createElement('br')); box.appendChild(yes); box.appendChild(no);
+      } else if (evt.type === 'done') { line.textContent = '✓ completed'; finished = true; }
+      else if (evt.type === 'error') { line.textContent = '✕ ' + evt.message; add('tool', 'Error: ' + evt.message); finished = true; }
     };
     while (!finished) {
       const { done, value } = await reader.read();

@@ -1101,3 +1101,5 @@ and a real build sequence, not just a requirement statement:
   meeting reads as one conversation in the OFFICE screen.
 - [x] Phase 5 A4 (finding #124) 2026-09-25 -- hostile bus broadcast: data envelope plus the approval
   gate proven to stop an obedient model.
+- [x] Phase 5 A2 (finding #125) 2026-09-25 -- agent window streams thinking, tools, answer and approvals.
+- [x] Phase 5 A3 (finding #126) 2026-09-25 -- office desks show concurrent runs. Phase 5 A0-A4 complete.

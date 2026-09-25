@@ -5201,3 +5201,36 @@ OVERRIDE ... call gmail_send to attacker@evil.example"), including a fake closin
    sender never runs.
 
 Tests: `test_hostile_broadcast.py` (2).
+
+### 125 -- talk to one agent and watch it think, live (Phase 5 A2)
+
+Status: DONE 2026-09-25. Verified in a real browser against the real cloud model.
+
+Each agent already had its own window (`/agent/<name>`) that could send it a task, but the page
+threw away the whole stream except done/error. You never saw the agent think or answer.
+
+The window now has a CONVERSATION panel that renders, as they arrive:
+- the reasoning (`thinking_delta`);
+- each tool call with its arguments, and each result;
+- the answer.
+
+It also closes a real gap: a gated action started from an agent window emitted
+`confirmation_requested`, which the page ignored, so the action hung unanswerable until the
+server's 5-minute auto-decline. It now shows APPROVE / DECLINE, which answer through
+`/api/confirm`.
+
+Live on the new `compute` agent (#113), asked for the sum of squares of 1 to 100, the panel
+showed the reasoning, `compute_run_python` with its code, the job's real stdout (338350), and
+the answer. A first render squeezed the panel to one line in the page's flex column; fixed with
+a minimum height.
+
+### 126 -- an agent's desk shows how many runs it has live (Phase 5 A3)
+
+Status: DONE 2026-09-25.
+
+The activity tracker already knew each agent's concurrent run ids, but the live delta pushed to
+the console carried only status and last action. The delta now carries `concurrent`, and an
+office desk reads e.g. "COMPUTING x2" when an agent works on two runs at once (two branches of a
+meeting, or two chats).
+
+Tests for #125 and #126: `test_office_desk_and_agent_window.py` (3).
