@@ -1110,3 +1110,4 @@ and a real build sequence, not just a requirement statement:
   Cloud with the configured model.
 - [x] R4 (finding #131) 2026-09-25 -- hypothesis generation (claim-grounded), criticism, experiment design, deterministic statistics.
 - [x] UI-5 + UI-7 (finding #132) 2026-09-25 -- live-event array capped; tool chips keyboard-accessible.
+- [x] R7 (finding #133) 2026-09-25 -- run policy (loop breaker, approval budget) and an action ledger at the single tool choke point.

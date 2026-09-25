@@ -52,6 +52,7 @@ from openai import OpenAI
 
 from dourmouse import model_router
 from dourmouse.backend_fallback import load_llm_config_with_fallback, probe_ollama_fallback
+from dourmouse.execution_policy import RunPolicy
 from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
@@ -2640,6 +2641,39 @@ def _execute_tool(
     arguments: dict[str, Any],
     confirmation_gate: Callable[[str], bool] | None,
     ledger: list[dict[str, Any]] | None = None,
+    policy: Any = None,
+) -> str:
+    """R7 (finding #133): the model proposes, the runtime decides. Every
+    call is recorded in the action ledger (proposed, then denied / declined
+    / executed / failed), and ``policy`` (a RunPolicy, one per dispatch
+    run) can refuse a call before anything runs; see execution_policy.py."""
+    from dourmouse import execution_policy as _ep
+
+    actor = getattr(policy, "actor", "") if policy is not None else ""
+    _ep.record("proposed", spec.name, arguments, actor, permission=spec.permission.name)
+    if policy is not None and spec.permission is not Permission.PROHIBITED:
+        reason = policy.decide(spec.name, arguments,
+                               consequential=spec.permission is Permission.REQUIRES_CONFIRMATION)
+        if reason:
+            _ep.record("denied", spec.name, arguments, actor, reason=reason)
+            return f"REFUSED BY POLICY: {reason}"
+    result = _execute_tool_inner(spec, arguments, confirmation_gate, ledger)
+    if result.startswith("DECLINED BY USER") or result.startswith("CONFIRMATION REQUIRED"):
+        _ep.record("declined", spec.name, arguments, actor)
+    elif result.startswith(("REFUSED", "BLOCKED BY HOOK")):
+        _ep.record("denied", spec.name, arguments, actor, reason=result[:300])
+    elif result.startswith("ERROR"):
+        _ep.record("failed", spec.name, arguments, actor, error=result[:300])
+    else:
+        _ep.record("executed", spec.name, arguments, actor)
+    return result
+
+
+def _execute_tool_inner(
+    spec: ToolSpec,
+    arguments: dict[str, Any],
+    confirmation_gate: Callable[[str], bool] | None,
+    ledger: list[dict[str, Any]] | None = None,
 ) -> str:
     """Permission-enforced tool execution (deterministic, Rule 2.8).
 
@@ -3416,6 +3450,8 @@ class DispatchContext:
     # instance and gets its own fresh id, same reasoning as forced_agent's
     # own "NOT inherited" note just above.
     call_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    # R7 (finding #133): this run's bounds (loop breaker, approval budget).
+    policy: RunPolicy = field(default_factory=RunPolicy)
     # v13: Grounded Mode (config.grounded_mode_enabled()) for THIS run — a
     # user-controllable setting, not inferred from the prompt. See
     # _MAX_GROUNDED_NUDGES's own comment for the mechanism and the live bug
@@ -5226,8 +5262,10 @@ def _run_dispatch_loop(
                             )
                         else:
                             try:
+                                ctx.policy.actor = ctx.forced_agent or "orchestrator"
                                 result_text = _execute_tool(
-                                    spec, arguments, confirmation_gate, ledger=transcript
+                                    spec, arguments, confirmation_gate, ledger=transcript,
+                                    policy=ctx.policy,
                                 )
                             except Exception as exc:  # surface handler errors honestly
                                 result_text = f"ERROR: tool '{name}' failed: {exc}"

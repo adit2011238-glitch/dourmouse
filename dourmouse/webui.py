@@ -7693,6 +7693,11 @@ def run_server(
     _graph_store._observers[:] = [o for o in _graph_store._observers
                                   if not getattr(o, "_dourmouse_server_observer", False)]
     _graph_store.add_observer(_graph_event)
+    # R7 (finding #133): every proposed tool call and what the runtime did
+    # with it (denied / declined / executed / failed) goes to the same log.
+    from dourmouse import execution_policy as _execution_policy
+
+    _execution_policy.set_action_sink(office_log.append_event)
 
     def _notify_direct_message(msg: dict) -> None:
         """Finding #065 (notification gap): message_bus had no proactive

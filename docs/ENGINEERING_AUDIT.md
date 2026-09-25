@@ -5367,3 +5367,31 @@ Status: DONE 2026-09-25.
   keeps the latest 500, and the total count shown in the rail is tracked separately.
 - **UI-7:** the expandable tool-call chip was a clickable `div`. It is now focusable, has
   `role="button"` and `aria-expanded`, and toggles on Enter and Space.
+
+### 133 -- bounded lead authority: the model proposes, the runtime decides (R7)
+
+Status: DONE 2026-09-25.
+
+Checked first: every tool call already passes through one choke point, `dispatch._execute_tool`
+(permission, hooks, required arguments, the approval gate), so "dispatch calls tools directly"
+was out of date. What was missing was a policy over a whole run, and a record of what the model
+proposed versus what the runtime did.
+
+`dourmouse/execution_policy.py`:
+- **The run policy.** One `RunPolicy` per dispatch run (on `DispatchContext`) sets two hard
+  bounds the model cannot talk past:
+  - the same tool with the same arguments runs at most 3 times (a loop breaker);
+  - at most 8 approval-gated actions may be requested per run, so a runaway run cannot bury the
+    owner in prompts.
+
+  Both limits are overridable through `DOURMOUSE_MAX_IDENTICAL_CALLS` and
+  `DOURMOUSE_MAX_CONSEQUENTIAL_PER_RUN`. A refusal is a plain `REFUSED BY POLICY` sentence the
+  model can relay.
+- **The action ledger.** Each call is recorded as `action.proposed`, then `action.denied`,
+  `action.declined`, `action.executed` or `action.failed`, in the R6 event log with the acting
+  agent. Arguments are never logged raw (they can hold credentials): only their names and a
+  hash.
+
+`_execute_tool` is now the policy and ledger wrapper around the unchanged
+`_execute_tool_inner`. Tests: `test_execution_policy.py` (3, including a secret argument that
+never reaches the ledger).
