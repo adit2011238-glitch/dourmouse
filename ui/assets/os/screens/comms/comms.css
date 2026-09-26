@@ -1,0 +1,71 @@
+/* COMMS. Every selector is scoped to [data-screen="COMMS"]. Amber tints are
+   color-mix() on --dm-active. The thread rules mirror HOME's, because the
+   shared thread view draws the same markup. */
+
+[data-screen="COMMS"] { display: flex; flex-direction: column; gap: 10px; }
+[data-screen="COMMS"] .cm-note { padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="COMMS"] .cm-note[hidden] { display: none; }
+[data-screen="COMMS"] .cm-note[data-tone="ok"] { border-color: rgba(16,185,129,.4); }
+[data-screen="COMMS"] .cm-note[data-tone="error"] { border-color: rgba(239,68,68,.45); color: var(--dm-error); }
+[data-screen="COMMS"] .cm-confirm:empty { display: none; }
+
+[data-screen="COMMS"] .cm-bar { display: flex; align-items: center; gap: 8px; }
+[data-screen="COMMS"] .cm-age { margin-left: auto; font-size: var(--dm-text-xs); white-space: nowrap; }
+[data-screen="COMMS"] .cm-field { background: rgba(255,255,255,.05); border: 1px solid var(--os-edge-lo); border-radius: 8px; color: var(--dm-fg); font: inherit; font-size: var(--dm-text-sm); padding: 6px 10px; min-width: 0; box-sizing: border-box; }
+[data-screen="COMMS"] .cm-field:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+[data-screen="COMMS"] .cm-q { flex: 1; max-width: 520px; }
+[data-screen="COMMS"] .cm-body { width: 100%; min-height: 110px; resize: vertical; line-height: 1.5; }
+
+[data-screen="COMMS"] .cm-list { min-height: 40px; }
+[data-screen="COMMS"] .cm-row { position: relative; }
+[data-screen="COMMS"] .cm-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 0; margin: 0; font: inherit; text-align: left; color: inherit; cursor: pointer; }
+[data-screen="COMMS"] .cm-open:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; border-radius: 4px; }
+[data-screen="COMMS"] .cm-who { flex: none; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dm-fg); font-size: var(--dm-text-base); font-weight: 500; }
+[data-screen="COMMS"] .cm-row[data-unread="true"] .cm-who { font-weight: 700; }
+[data-screen="COMMS"] .cm-row[data-unread="true"] .cm-who::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--dm-active); margin-right: 7px; vertical-align: 1px; }
+[data-screen="COMMS"] .cm-subj { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-screen="COMMS"] .cm-when { flex: none; font-variant-numeric: tabular-nums; }
+[data-screen="COMMS"] .os-row-actions { display: inline-flex; gap: 6px; flex: none; opacity: 0; }
+[data-screen="COMMS"] .os-row:hover .os-row-actions,
+[data-screen="COMMS"] .os-row:focus-within .os-row-actions,
+[data-screen="COMMS"] .os-row[aria-selected="true"] .os-row-actions { opacity: 1; }
+@media (hover: none) { [data-screen="COMMS"] .os-row-actions { opacity: 1; } }
+[data-screen="COMMS"] .cm-foot { margin-top: 4px; }
+
+[data-screen="COMMS"] .cm-detail[hidden], [data-screen="COMMS"] .cm-compose[hidden] { display: none; }
+[data-screen="COMMS"] .cm-dsubj { font-size: var(--dm-text-base); color: var(--dm-fg); font-weight: 500; overflow-wrap: anywhere; }
+[data-screen="COMMS"] .cm-dfrom { font-size: var(--dm-text-xs); margin-top: 2px; overflow-wrap: anywhere; }
+[data-screen="COMMS"] .cm-dbody { margin: 10px 0; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.22); border: 1px solid var(--os-edge-lo); font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+[data-screen="COMMS"] .cm-dbody:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+[data-screen="COMMS"] .cm-dacts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+[data-screen="COMMS"] .cm-compose { border-radius: 12px; padding: 12px; background: rgba(255,255,255,.04); border: 1px solid var(--os-edge-lo); }
+[data-screen="COMMS"] .cm-lab { display: block; margin-bottom: 8px; }
+[data-screen="COMMS"] .cm-lab .cm-field { display: block; width: 100%; }
+[data-screen="COMMS"] .cm-cstatus { min-height: 1em; margin-bottom: 8px; font-size: var(--dm-text-sm); color: var(--dm-error); overflow-wrap: anywhere; }
+[data-screen="COMMS"] .cm-cstatus:empty { display: none; }
+
+[data-screen="COMMS"] .cm-thread-head { margin-top: 8px; }
+[data-screen="COMMS"] .cm-thread { min-height: 40px; }
+[data-screen="COMMS"] .turn { margin-bottom: 14px; }
+[data-screen="COMMS"] .turn-you { margin-bottom: 12px; }
+[data-screen="COMMS"] .turn .you { color: var(--dm-fg); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.55; }
+[data-screen="COMMS"] .turn-bot .who { min-height: 1em; }
+[data-screen="COMMS"] .chips { margin-top: 2px; }
+[data-screen="COMMS"] .chips .tag { font-family: var(--dm-font-mono); text-transform: none; letter-spacing: .02em; }
+[data-screen="COMMS"] .chipdetail { margin: 4px 0 8px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid var(--os-edge-lo); }
+[data-screen="COMMS"] .chipdetail[hidden] { display: none; }
+[data-screen="COMMS"] .chip-pre, [data-screen="COMMS"] .think-text {
+  margin: 0 0 8px; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body);
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto;
+}
+[data-screen="COMMS"] .think { margin: 6px 0; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
+[data-screen="COMMS"] .think[hidden] { display: none; }
+[data-screen="COMMS"] .think summary { cursor: pointer; letter-spacing: .1em; }
+[data-screen="COMMS"] .think summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+[data-screen="COMMS"] .reply { margin-top: 8px; font-size: var(--dm-text-sm); line-height: 1.6; overflow-wrap: anywhere; }
+[data-screen="COMMS"] .reply:empty { display: none; }
+[data-screen="COMMS"] .terr { margin-top: 8px; color: var(--dm-error); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+[data-screen="COMMS"] .terr:empty { display: none; }
+[data-screen="COMMS"] .turn-actions { margin-top: 8px; display: flex; gap: 8px; }
+[data-screen="COMMS"] .turn-actions[hidden] { display: none; }

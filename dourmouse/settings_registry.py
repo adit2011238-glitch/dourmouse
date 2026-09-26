@@ -91,6 +91,55 @@ def save_feature(key: str, value: Any) -> dict[str, Any]:
     return {"ok": True, "key": key, "value": _current(feature, {}), "restart_required": True}
 
 
+def reset_features() -> dict[str, Any]:
+    """Put the background switches back to their defaults (OS shell SETTINGS,
+    finding #150).
+
+    Scope is deliberate and narrow: only the keys in ``FEATURES`` are touched.
+    A saved API key, the orchestrator model, the auto-approve flag and every
+    other setting in the same file are left exactly as they are.
+
+    The saved line is removed rather than overwritten with the default, so a
+    future change to a default reaches this user too. A switch that is also set
+    by the real process environment (a variable exported before launch) cannot
+    be reset from here: it is listed under ``still_overridden`` so the screen
+    can say so instead of claiming a reset that did not happen."""
+    saved = config._read_user_config_file()
+    cleared: list[str] = []
+    still_overridden: list[str] = []
+    for feature in FEATURES:
+        key = feature["key"]
+        if key in saved:
+            cleared.append(key)
+        env_value = os.environ.get(key)
+        if env_value is None:
+            continue
+        if key in saved and env_value == saved[key]:
+            # save_feature() put it in this process's environment; take it out again
+            os.environ.pop(key, None)
+        else:
+            still_overridden.append(key)
+    if cleared:
+        _remove_user_settings(cleared)
+    return {"ok": True, "cleared": cleared, "still_overridden": still_overridden,
+            "restart_required": True}
+
+
+def _remove_user_settings(keys: list[str]) -> None:
+    """Drop these keys from the user's config file, keeping every other line
+    and the file private (0600)."""
+    path = config.user_env_path()
+    values = config._read_user_config_file()
+    for key in keys:
+        values.pop(key, None)
+    body = ["# Dourmouse configuration: written by first-run setup and Settings.",
+            "# This file holds credentials. Keep it to yourself; it is never",
+            "# bundled into a build or uploaded anywhere.", ""]
+    body += [f"{k}={v}" for k, v in sorted(values.items())]
+    path.write_text("\n".join(body) + "\n", encoding="utf-8")
+    path.chmod(0o600)
+
+
 def _write_user_setting(key: str, value: str) -> None:
     """Merge one key into the user's config file, keeping every other line
     and the file private (0600)."""

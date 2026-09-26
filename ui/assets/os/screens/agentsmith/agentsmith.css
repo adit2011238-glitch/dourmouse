@@ -1,0 +1,34 @@
+/* AGENTSMITH. Every selector is scoped to [data-screen="AGENTSMITH"]. */
+
+[data-screen="AGENTSMITH"] { display: flex; flex-direction: column; gap: 10px; }
+[data-screen="AGENTSMITH"] .as-note { padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="AGENTSMITH"] .as-note[hidden] { display: none; }
+[data-screen="AGENTSMITH"] .as-note[data-tone="ok"] { border-color: rgba(16,185,129,.4); }
+[data-screen="AGENTSMITH"] .as-restart { padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg); border: 1px solid color-mix(in srgb, var(--os-warn) 55%, transparent); background: color-mix(in srgb, var(--os-warn) 10%, transparent); overflow-wrap: anywhere; }
+[data-screen="AGENTSMITH"] .as-restart[hidden] { display: none; }
+[data-screen="AGENTSMITH"] .as-confirm:empty { display: none; }
+[data-screen="AGENTSMITH"] .as-lede { font-size: var(--dm-text-sm); color: var(--dm-fg-dim); letter-spacing: .04em; }
+[data-screen="AGENTSMITH"] .as-lede:empty { display: none; }
+[data-screen="AGENTSMITH"] .as-draft[hidden] { display: none; }
+[data-screen="AGENTSMITH"] .as-lab { display: block; margin-bottom: 8px; }
+[data-screen="AGENTSMITH"] .as-field { display: block; width: 100%; box-sizing: border-box; background: rgba(255,255,255,.05); border: 1px solid var(--os-edge-lo); border-radius: 8px; color: var(--dm-fg); font: inherit; font-size: var(--dm-text-sm); padding: 8px 10px; line-height: 1.5; resize: vertical; }
+[data-screen="AGENTSMITH"] .as-field:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+[data-screen="AGENTSMITH"] .as-cstatus { margin: 8px 0; font-size: var(--dm-text-sm); color: var(--dm-error); overflow-wrap: anywhere; }
+[data-screen="AGENTSMITH"] .as-cstatus:empty { display: none; }
+
+[data-screen="AGENTSMITH"] .as-list { min-height: 40px; display: flex; flex-direction: column; gap: 10px; }
+[data-screen="AGENTSMITH"] .as-group { margin: 6px 0 0; }
+[data-screen="AGENTSMITH"] .as-none { padding: 4px 0; }
+[data-screen="AGENTSMITH"] .as-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+[data-screen="AGENTSMITH"] .as-sig { font-family: var(--dm-font-mono); font-size: var(--dm-text-sm); color: var(--dm-fg-body); overflow-wrap: anywhere; }
+[data-screen="AGENTSMITH"] .as-gap { margin-top: 6px; overflow-wrap: anywhere; }
+[data-screen="AGENTSMITH"] .as-meta { margin-top: 4px; font-size: var(--dm-text-xs); }
+[data-screen="AGENTSMITH"] .as-btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+[data-screen="AGENTSMITH"] .as-detail { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--os-edge-lo); }
+[data-screen="AGENTSMITH"] .as-detail .who { margin-top: 10px; }
+[data-screen="AGENTSMITH"] .as-detail .who:first-child { margin-top: 0; }
+[data-screen="AGENTSMITH"] .as-body { overflow-wrap: anywhere; }
+[data-screen="AGENTSMITH"] .as-code { margin: 4px 0 0; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid var(--os-edge-lo); font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+[data-screen="AGENTSMITH"] .as-code:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+[data-screen="AGENTSMITH"] .as-warn { margin-top: 8px; color: var(--os-warn); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+[data-screen="AGENTSMITH"] .as-foot { margin-top: 4px; }

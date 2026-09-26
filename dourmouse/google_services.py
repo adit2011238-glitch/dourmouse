@@ -269,6 +269,65 @@ def _gmail_search_oauth(token: str, query: str, max_results: int) -> str:
     return "GMAIL SEARCH RESULTS (newest first):\n" + "\n".join(rows)
 
 
+def gmail_inbox_rows(query: str = "", max_results: int = 25) -> list[dict[str, Any]] | None:
+    """Structured mailbox rows for the COMMS screen, newest first, or None when
+    no signed-in Google user has a token (the caller then falls back to the
+    App-Password text search, which cannot say unread or starred).
+
+    An empty query lists the INBOX label only; a query is Gmail search syntax.
+    Each row carries the real label state (unread, starred), Gmail's own
+    timestamp in milliseconds and the snippet. Raises RuntimeError with the
+    real Google message on any failure.
+    """
+    token = _oauth_access_token()
+    if not token:
+        return None
+    n = max(1, min(int(max_results), 50))
+    params: dict[str, Any] = {"maxResults": n}
+    q = (query or "").strip()
+    if q:
+        params["q"] = q
+    else:
+        params["labelIds"] = "INBOX"
+    listing = _http_json("GET", f"{_GMAIL_API}/messages?{urllib.parse.urlencode(params)}", token)
+    ids = [str(m.get("id") or "") for m in (listing.get("messages") or [])[:n]]
+    ids = [i for i in ids if _MSG_ID_RE.match(i)]
+
+    def one(mid: str) -> dict[str, Any]:
+        meta = _http_json(
+            "GET",
+            f"{_GMAIL_API}/messages/{urllib.parse.quote(mid)}?format=metadata"
+            "&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date",
+            token,
+        )
+        headers = {
+            str(h.get("name", "")).lower(): str(h.get("value", ""))
+            for h in (meta.get("payload") or {}).get("headers", [])
+        }
+        labels = meta.get("labelIds") or []
+        try:
+            ts = int(meta.get("internalDate") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        return {
+            "id": mid,
+            "from": headers.get("from", "(unknown sender)")[:160],
+            "subject": headers.get("subject", "(no subject)")[:200],
+            "date": headers.get("date", "")[:40],
+            "ts": ts,
+            "unread": "UNREAD" in labels,
+            "flagged": "STARRED" in labels,
+            "snippet": str(meta.get("snippet") or "")[:200],
+        }
+
+    if not ids:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return list(pool.map(one, ids))
+
+
 def _message_text(payload: Any) -> str:
     """Walk a Gmail message payload tree for the text/plain body."""
     if not isinstance(payload, dict):
@@ -1563,6 +1622,37 @@ def gmail_bulk_trash(query: str = "", max_count: int = 50) -> str:
     if failed:
         lines.append(f"{len(failed)} failed: " + "; ".join(failed[:10]))
     return "\n".join(lines)
+
+
+def gmail_flag(message_id: str, flagged: bool = True) -> str:
+    """Star (flag) or un-star one message. Gmail's own "flag" is the STARRED
+    label, so this adds or removes exactly that one label: nothing moves,
+    nothing is deleted, and doing it twice changes nothing more.
+
+    Not registered as an agent tool. It is reached only from the owner's own
+    click on the COMMS screen (dourmouse/os_api/comms.py), which asks first.
+    """
+    mid = (message_id or "").strip()
+    if not _MSG_ID_RE.match(mid):
+        return f"ERROR: {message_id!r} is not a valid Gmail message id. Nothing was changed."
+    word = "FLAG" if flagged else "UNFLAG"
+    token = _oauth_access_token()
+    if not token:
+        reauth = _oauth_user_needs_reauth(word)
+        return reauth or (
+            "NOT CONFIGURED: flagging needs the signed-in Google user's OAuth "
+            "session with the gmail.modify scope. No user is signed in: sign in "
+            "at /login, then retry. Nothing was changed."
+        )
+    what = _describe(token, mid)
+    payload = {"addLabelIds": ["STARRED"]} if flagged else {"removeLabelIds": ["STARRED"]}
+    try:
+        _gmail_modify(token, mid, "modify", payload)
+    except RuntimeError as exc:
+        return f"GMAIL {word} (reported honestly): {exc}"
+    if flagged:
+        return f"GMAIL FLAGGED: {what} is starred (id {mid}). Nothing moved."
+    return f"GMAIL UNFLAGGED: {what} is no longer starred (id {mid}). Nothing moved."
 
 
 def gmail_untrash(message_id: str) -> str:

@@ -1,0 +1,47 @@
+/* MEDIA. Every selector starts with the screen id. */
+
+[data-screen="MEDIA"] { display: flex; flex-direction: column; gap: 12px; }
+[data-screen="MEDIA"] .med-open[hidden] { display: none; }
+[data-screen="MEDIA"] .med-pathrow { display: flex; gap: 8px; align-items: center; }
+[data-screen="MEDIA"] .med-pathrow .os-field { flex: 1; min-width: 0; }
+[data-screen="MEDIA"] .med-src { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+[data-screen="MEDIA"] .med-list { margin-top: 8px; max-height: 240px; overflow: auto; }
+[data-screen="MEDIA"] .med-file { width: 100%; text-align: left; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; }
+[data-screen="MEDIA"] .med-file:hover { background: rgba(255,255,255,.05); }
+[data-screen="MEDIA"] .med-file:focus-visible { outline: 2px solid var(--dm-active); outline-offset: -2px; }
+[data-screen="MEDIA"] .med-note { padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="MEDIA"] .med-note[hidden] { display: none; }
+[data-screen="MEDIA"] .med-player { padding: 0; overflow: hidden; }
+[data-screen="MEDIA"] .med-stage { min-height: 190px; display: grid; place-items: center; background: radial-gradient(ellipse at 50% 40%, rgba(255,255,255,.07), transparent 70%); }
+[data-screen="MEDIA"] .med-stage video { max-width: 100%; max-height: 46vh; background: #000; }
+[data-screen="MEDIA"] .med-stage img { max-width: 100%; max-height: 46vh; }
+[data-screen="MEDIA"] .med-msg { padding: 24px; text-align: center; color: var(--dm-fg-dim); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+[data-screen="MEDIA"] .med-msg.bad { color: var(--dm-error); }
+[data-screen="MEDIA"] .med-bar { padding: 12px; border-top: 1px solid var(--os-edge-lo); }
+[data-screen="MEDIA"] .med-info { color: var(--dm-fg-body); overflow-wrap: anywhere; }
+[data-screen="MEDIA"] .med-tx { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+[data-screen="MEDIA"] .med-tx input[type="range"] { flex: 1; min-width: 0; accent-color: var(--dm-fg); }
+[data-screen="MEDIA"] .med-tx input[type="range"]:focus-visible, [data-screen="MEDIA"] .med-play:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+[data-screen="MEDIA"] .med-play { width: 40px; height: 40px; border-radius: 999px; justify-content: center; padding: 0; flex: none; }
+[data-screen="MEDIA"] .med-tx .muted { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
+[data-screen="MEDIA"] .med-thread { min-height: 40px; }
+
+[data-screen="MEDIA"] .turn { margin-bottom: 14px; }
+[data-screen="MEDIA"] .turn-you { margin-bottom: 12px; }
+[data-screen="MEDIA"] .turn .you { color: var(--dm-fg); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.55; }
+[data-screen="MEDIA"] .turn-bot .who { min-height: 1em; }
+[data-screen="MEDIA"] .chips { margin-top: 2px; }
+[data-screen="MEDIA"] .chips .tag { font-family: var(--dm-font-mono); text-transform: none; letter-spacing: .02em; }
+[data-screen="MEDIA"] .chipdetail { margin: 4px 0 8px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid var(--os-edge-lo); }
+[data-screen="MEDIA"] .chipdetail[hidden] { display: none; }
+[data-screen="MEDIA"] .chip-pre, [data-screen="MEDIA"] .think-text { margin: 0 0 8px; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+[data-screen="MEDIA"] .think { margin: 6px 0; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
+[data-screen="MEDIA"] .think[hidden] { display: none; }
+[data-screen="MEDIA"] .think summary { cursor: pointer; letter-spacing: .1em; }
+[data-screen="MEDIA"] .think summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+[data-screen="MEDIA"] .reply { margin-top: 8px; font-size: var(--dm-text-sm); line-height: 1.6; overflow-wrap: anywhere; }
+[data-screen="MEDIA"] .reply:empty { display: none; }
+[data-screen="MEDIA"] .terr { margin-top: 8px; color: var(--dm-error); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+[data-screen="MEDIA"] .terr:empty { display: none; }
+[data-screen="MEDIA"] .turn-actions { margin-top: 8px; display: flex; gap: 8px; }
+[data-screen="MEDIA"] .turn-actions[hidden] { display: none; }

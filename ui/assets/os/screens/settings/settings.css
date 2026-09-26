@@ -1,0 +1,23 @@
+[data-screen="SETTINGS"] .set-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="SETTINGS"] .set-note[hidden] { display: none; }
+[data-screen="SETTINGS"] .set-note[data-tone="ok"] { border-color: rgba(16,185,129,.4); }
+[data-screen="SETTINGS"] .set-note[data-tone="error"] { border-color: rgba(239,68,68,.45); color: var(--dm-error); }
+[data-screen="SETTINGS"] #setConfirm:not(:empty) { margin-bottom: 12px; }
+[data-screen="SETTINGS"] .set-gap { margin-top: 12px; }
+[data-screen="SETTINGS"] .set-help { margin: 2px 0 6px; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); overflow-wrap: anywhere; }
+[data-screen="SETTINGS"] .set-err { margin: 4px 0; color: var(--dm-error); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+[data-screen="SETTINGS"] .set-block { display: block; font-size: var(--dm-text-xs); }
+[data-screen="SETTINGS"] .set-sec { margin-top: 12px; }
+[data-screen="SETTINGS"] .set-sec:first-of-type { margin-top: 8px; }
+[data-screen="SETTINGS"] .set-feat { border-bottom: 1px solid var(--os-edge-lo); }
+[data-screen="SETTINGS"] .set-feat:last-child { border-bottom: 0; }
+[data-screen="SETTINGS"] .set-tg { align-items: center; }
+[data-screen="SETTINGS"] .set-btns { display: flex; gap: 8px; margin-top: 8px; }
+[data-screen="SETTINGS"] .set-test { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--os-edge-lo); }
+[data-screen="SETTINGS"] .set-folders { margin-top: 12px; }
+[data-screen="SETTINGS"] .set-folders label { display: block; margin-bottom: 4px; color: var(--dm-fg-body); font-size: var(--dm-text-sm); }
+[data-screen="SETTINGS"] .set-folders b { color: var(--dm-fg); font-weight: 500; }
+[data-screen="SETTINGS"] .set-folders textarea { width: 100%; box-sizing: border-box; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg); background: rgba(0,0,0,.25); border: 1px solid var(--os-edge-lo); border-radius: 8px; padding: 7px 10px; resize: vertical; }
+[data-screen="SETTINGS"] .set-folders textarea:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+[data-screen="SETTINGS"] .os-seg button[disabled] { opacity: .38; cursor: not-allowed; }
+[data-screen="SETTINGS"] .os-switch[disabled] { opacity: .38; cursor: not-allowed; }

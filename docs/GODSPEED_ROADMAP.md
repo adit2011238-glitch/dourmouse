@@ -1126,3 +1126,7 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #146 2026-09-26 -- OS shell screens NEWS, ATLAS, WIKI on real data (wave A); ctx.keys.pushEsc.
 - [x] Finding #147 2026-09-26 -- OS shell screens GOALS, TIMETABLE, ORCHESTRATION, OFFICE (wave B); real goal pause and resume; kit confirmHere.
 - [x] Finding #148 2026-09-26 -- swap preparation: DOURMOUSE_DEFAULT_SHELL, DOURMOUSE_ELECTRON_START_PATH, native startup sign-in check in the shell.
+- [x] Finding #149 2026-09-26 -- OS shell screens COMMS (real Gmail rows, confirm-gated archive/trash/flag) and AGENTSMITH (hash-bound approval of drafted tools) (wave C).
+- [x] Finding #150 2026-09-26 -- OS shell screens PROJECTS and SETTINGS (scoped reset, honest summary, auto-approve behind a stronger confirm) (wave D).
+- [x] Finding #151 2026-09-26 -- OS shell screens CODE (read-only git) and RESEARCH (loop, graph, export) (wave E); git calls hardened against repo-configured programs.
+- [x] Finding #152 2026-09-26 -- OS shell screens MEDIA and VOICE (fixed-folder media, bounded probe; wake-word state, transcribe route) (wave F); Electron playback check still to do.
