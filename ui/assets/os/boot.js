@@ -36,6 +36,7 @@ import { createSpecOverlay } from './chrome/spec-overlay.js';
 import { createControlCentre } from './chrome/control-centre.js';
 import { createNotifCentre } from './chrome/notif-centre.js';
 import { createWallpaperPicker } from './chrome/wallpaper.js';
+import { createStartupCheck } from './chrome/startup-check.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -81,6 +82,9 @@ function boot() {
     notifications: panels.make('notifications', { el: $('notifcenter'), trigger: dock.alertsButton, exclusive: ['cc', 'wallpaper'], onOpen: () => notif.onOpen(), onClose: () => notif.onClose() }),
     wallpaper: panels.make('wallpaper', { el: $('wallpicker'), trigger: $('wallBtn'), exclusive: ['cc', 'notifications'], onOpen: () => picker.sync() }),
   };
+  const startup = createStartupCheck({ root: $('startup'), api, toasts });
+  defs.startup = panels.make('startup', { el: $('startup'), trigger: null, exclusive: ['cc', 'notifications', 'wallpaper'] });
+  startup.bind(defs.startup);
   $('ccBtn').addEventListener('click', () => defs.cc.toggle());
   $('wallBtn').addEventListener('click', () => defs.wallpaper.toggle());
   picker.sync();
@@ -206,7 +210,10 @@ function boot() {
   prefs.hydrate().then((changed) => {
     if (changed.length) picker.sync();
   }).catch((err) => console.warn('prefs hydrate', err && err.message));
-  return router.start();
+  /* after the first screen is up: a real sign-in check, a dialog only if something is missing */
+  const started = router.start();
+  startup.run().catch((err) => console.warn('startup check', err && err.message));
+  return started;
 }
 
 boot();

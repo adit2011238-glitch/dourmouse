@@ -162,3 +162,29 @@ class TestNoEmDashesOrSlashSeparators:
             assert "—" not in text, f"em dash in {path.relative_to(_ROOT)}"
             assert "–" not in text, f"en dash in {path.relative_to(_ROOT)}"
             assert not re.search(r"^\s*//\s*[-=/*]{3,}", text, re.M), f"decorative // separator in {path.relative_to(_ROOT)}"
+
+
+class TestRootRouteAndElectronStartPath:
+    """Finding #148: the shell can be the default page before the swap."""
+
+    def test_the_root_serves_the_console_unless_the_owner_asks_for_the_shell(self, server, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")  # a configured install (else "/" goes to /setup)
+        monkeypatch.delenv("DOURMOUSE_DEFAULT_SHELL", raising=False)
+        status, _, body = get(server, "/")
+        assert status == 200 and b'src="/assets/os/boot.js"' not in body and b"<title>DOURMOUSE</title>" in body
+        monkeypatch.setenv("DOURMOUSE_DEFAULT_SHELL", "os")
+        status, headers, body = get(server, "/")
+        assert status == 200 and b'src="/assets/os/boot.js"' in body
+        assert "script-src 'self'" in headers["content-security-policy"], "the shell keeps its CSP at /"
+
+    def test_console_stays_at_its_own_address_when_the_shell_is_the_default(self, server, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        monkeypatch.setenv("DOURMOUSE_DEFAULT_SHELL", "os")
+        for path in ("/console", "/console.html"):
+            status, _, body = get(server, path)
+            assert status == 200 and b'src="/assets/os/boot.js"' not in body, f"{path} must still be the console"
+
+    def test_electron_reads_a_safe_start_path_from_the_environment(self):
+        src = (_UI.parent / "electron" / "main.js").read_text(encoding="utf-8")
+        assert "DOURMOUSE_ELECTRON_START_PATH" in src and src.count("${BASE_URL}${START_PATH}") == 2
+        assert 'DEFAULT_START_PATH = "/workspace"' in src, "the default only changes in the swap commit"

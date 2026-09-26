@@ -1125,3 +1125,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #145 2026-09-26 -- `/api/office_log?meeting=` no longer sends a second response after the meeting.
 - [x] Finding #146 2026-09-26 -- OS shell screens NEWS, ATLAS, WIKI on real data (wave A); ctx.keys.pushEsc.
 - [x] Finding #147 2026-09-26 -- OS shell screens GOALS, TIMETABLE, ORCHESTRATION, OFFICE (wave B); real goal pause and resume; kit confirmHere.
+- [x] Finding #148 2026-09-26 -- swap preparation: DOURMOUSE_DEFAULT_SHELL, DOURMOUSE_ELECTRON_START_PATH, native startup sign-in check in the shell.

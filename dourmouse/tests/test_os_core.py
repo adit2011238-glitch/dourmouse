@@ -42,7 +42,7 @@ MODULES = [
     "core/api.js", "core/approvals.js", "core/chat.js", "core/ctx.js", "core/events.js", "core/host.js",
     "core/keymap.js", "core/prefs.js", "core/registry.js", "core/ring.js", "core/router.js", "core/scope.js",
     "kit/html.js", "kit/states.js", "kit/approval-card.js", "kit/md.js", "kit/flow-svg.js", "kit/icons.js", "kit/format.js",
-    "kit/thread-helpers.js", "kit/thread-view.js", "kit/confirm-card.js",
+    "kit/thread-helpers.js", "kit/thread-view.js", "kit/confirm-card.js", "chrome/startup-check.js",
 ]
 
 
@@ -563,3 +563,18 @@ class TestStates:
         # the error() renderer returns false for an abort before it touches the DOM
         out = run(tmp_path, "const e = new Error('a'); e.name = 'AbortError'; R.r = states.error({}, e);", "import { states } from 'kit/states.js';")
         assert out["r"] is False
+
+
+class TestStartupCheck:
+    IMPORTS = "import { missingSignins } from 'chrome/startup-check.js';"
+
+    def test_it_names_exactly_what_is_missing_and_the_command_to_paste(self, tmp_path):
+        out = run(tmp_path, """
+R.all = missingSignins({ claude: { ok: false }, codex: { ok: false } }, { configured: true, me: null }).map((i) => [i.id, i.command || i.href]);
+R.claudeOnly = missingSignins({ claude: { ok: false }, codex: { ok: true } }, { configured: true, me: { email: 'a@b' } }).map((i) => i.id);
+R.none = missingSignins({ claude: { ok: true }, codex: { ok: true } }, { configured: true, me: { email: 'a@b' } });
+R.unreadable = [missingSignins(null, null), missingSignins({}, {}), missingSignins({ claude: {} }, { configured: false })];
+""", self.IMPORTS)
+        assert out["all"] == [["claude", "claude"], ["codex", "npm i -g @openai/codex && codex login"], ["google", "/api/auth/google/start"]]
+        assert out["claudeOnly"] == ["claude"] and out["none"] == []
+        assert out["unreadable"] == [[], [], []], "silence means no problem was reported, never a guess"

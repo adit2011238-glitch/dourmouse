@@ -2181,7 +2181,13 @@ class _Handler(BaseHTTPRequestHandler):
             # a voice mode that surfaces live tool activity. The HUD is
             # unchanged and still served at /hud (and /index.html), so
             # nothing was removed — only the default landing changed.
-            self._serve_static("console.html")
+            # Finding #148: DOURMOUSE_DEFAULT_SHELL=os serves the OS shell at
+            # "/" so it can be lived in before the deliberate swap. /console
+            # and /console.html always serve the console.
+            if path == "/" and os.environ.get("DOURMOUSE_DEFAULT_SHELL", "console").strip().lower() == "os":
+                self._serve_static("shell.html")
+            else:
+                self._serve_static("console.html")
         elif path in ("/dispatch", "/index.html"):
             # v8.7: the HUD, unchanged. It keeps /index.html because the
             # deeplink redirect targets that path — the hash router that

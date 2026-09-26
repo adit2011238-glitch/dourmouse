@@ -110,6 +110,13 @@ button { font-family: inherit; }
 }
 @keyframes os-pop { from { opacity: 0; transform: translateY(-8px) scale(.98); } to { opacity: 1; transform: none; } }
 #controlcenter, #notifcenter { right: 14px; }
+#startup { left: 50%; transform: translateX(-50%); width: 380px; top: 64px; animation-name: none; }
+#startup .su-item { margin: 10px 0 12px; }
+#startup .su-label { font-size: var(--dm-text-sm); color: var(--dm-fg); margin-bottom: 6px; }
+#startup .su-cmd { display: block; width: 100%; text-align: left; font: inherit; font-family: var(--dm-font-mono); font-size: var(--dm-text-sm); color: var(--dm-fg); padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.06); border: 1px solid var(--os-edge-lo); cursor: pointer; }
+#startup .su-cmd:hover { background: rgba(255,255,255,.1); }
+#startup .su-cmd:focus-visible, #startup a.os-btn:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+#startup .su-foot { display: flex; justify-content: flex-end; margin-top: 4px; }
 .cc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .cc-tile {
   grid-column: span 1; border-radius: 12px; padding: 11px 12px; background: rgba(255,255,255,.05);

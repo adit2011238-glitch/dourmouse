@@ -63,6 +63,14 @@ const VENV_PYTHON = path.join(PROJECT_ROOT, ".venv", "bin", "python");
 // change was needed to make the port controllable from here.
 const PORT = parseInt(process.env.DOURMOUSE_UI_PORT || "8765", 10);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+// Where the main window opens. DOURMOUSE_ELECTRON_START_PATH lets the owner
+// (or a test) open the OS shell ("/shell" or "/") without a rebuild; anything
+// that is not a plain same-origin path falls back to the default.
+const DEFAULT_START_PATH = "/workspace";
+const START_PATH = (() => {
+  const raw = process.env.DOURMOUSE_ELECTRON_START_PATH || "";
+  return /^\/[A-Za-z0-9_.\/#?=&%-]{0,120}$/.test(raw) && !raw.startsWith("//") ? raw : DEFAULT_START_PATH;
+})();
 // When true, an already-running dev server on PORT is reused instead of
 // spawning a new one -- matches how the feasibility spike iterated, and
 // is genuinely useful for fast local development. The real packaged app
@@ -868,7 +876,7 @@ app.whenReady().then(async () => {
   });
   installPermissionPolicy(session.defaultSession);
   lockToAppOrigin(mainWindow);
-  mainWindow.loadURL(`${BASE_URL}/workspace`);
+  mainWindow.loadURL(`${BASE_URL}${START_PATH}`);
   if (geometry.maximized) mainWindow.maximize();
   mainWindow.on("close", persistMainWindowGeometry);
   mainWindow.on("resize", () => {
@@ -919,7 +927,7 @@ app.whenReady().then(async () => {
         webPreferences: { preload: PRELOAD, contextIsolation: true },
       });
       lockToAppOrigin(mainWindow);
-      mainWindow.loadURL(`${BASE_URL}/workspace`);
+      mainWindow.loadURL(`${BASE_URL}${START_PATH}`);
       mainWindow.on("close", persistMainWindowGeometry);
     }
   });
