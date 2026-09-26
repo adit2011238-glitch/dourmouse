@@ -1,0 +1,18 @@
+[data-screen="WIKI"] .wik-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="WIKI"] .wik-note[hidden] { display: none; }
+[data-screen="WIKI"] .wik-list { margin-top: 12px; }
+[data-screen="WIKI"] .wik-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+[data-screen="WIKI"] .wik-q { flex: 1; min-width: 160px; max-width: 320px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--os-edge-lo); background: rgba(0,0,0,.25); color: var(--dm-fg); font: inherit; font-size: var(--dm-text-sm); }
+[data-screen="WIKI"] .wik-q:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+[data-screen="WIKI"] .wik-f[aria-pressed="true"] { color: var(--dm-fg); border-color: var(--dm-active); }
+[data-screen="WIKI"] .wik-row { align-items: flex-start; }
+[data-screen="WIKI"] .wik-row .tag { flex: none; margin-top: 2px; }
+[data-screen="WIKI"] .wik-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+[data-screen="WIKI"] .wik-name b { color: var(--dm-fg); font-weight: 500; font-size: var(--dm-text-sm); }
+[data-screen="WIKI"] .wik-name .dir { display: block; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
+[data-screen="WIKI"] .wik-open { margin: 0 8px 8px 8px; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.22); border: 1px solid var(--os-edge-lo); font-size: var(--dm-text-sm); color: var(--dm-fg-body); }
+[data-screen="WIKI"] .wik-sum { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; margin-top: 6px; }
+[data-screen="WIKI"] .wik-meta { font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-dim); overflow-wrap: anywhere; }
+[data-screen="WIKI"] .tone-ok { color: var(--dm-ok); }
+[data-screen="WIKI"] .tone-active { color: var(--dm-active); }
+[data-screen="WIKI"] .tone-dim { color: var(--dm-fg-dim); }

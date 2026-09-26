@@ -524,7 +524,7 @@ const live = new Set();
 const timers = createTimers({ setInterval: (fn, ms) => { const id = Symbol(); live.add(id); return id; }, clearInterval: (id) => live.delete(id), doc: { hidden: false } });
 const events = createEvents({ EventSourceImpl: FakeES, setTimer: () => 0, clearTimer: () => {} });
 events.start(); FakeES.last.onopen();
-let keys = 0; const keymap = { bind: () => { keys += 1; return () => { keys -= 1; }; } };
+let keys = 0; let escs = 0; const keymap = { bind: () => { keys += 1; return () => { keys -= 1; }; }, pushEsc: () => { escs += 1; return () => { escs -= 1; }; } };
 let threadSubs = 0; const thread = { key: 'HOME', subscribe: () => { threadSubs += 1; return () => { threadSubs -= 1; }; } };
 let scopeSubs = 0; let overlaySubs = 0;
 const deps = { events, timers, keymap, api: { withSignal: (s) => ({ signal: s }) }, chat: { thread: () => thread },
@@ -533,13 +533,13 @@ const deps = { events, timers, keymap, api: { withSignal: (s) => ({ signal: s })
   renderApproval: (c, e) => ({ off: () => {} }) };
 const h = createScreenCtx({ id: 'NEWS', root: {}, deps });
 const c = h.ctx; const base = events.count();
-c.events.on('a', () => {}); c.events.onResync(() => {}); c.every(1000, () => {}); c.every(2000, () => {}); c.keys.bind('r', () => {}); c.chat.subscribe(() => {}); c.scope.onChange(() => {}); c.overlays.onChange(() => {});
-R.during = { events: events.count() - base, timers: timers.count(), keys, threadSubs, scopeSubs, overlaySubs, aborted: c.signal.aborted };
+c.events.on('a', () => {}); c.events.onResync(() => {}); c.every(1000, () => {}); c.every(2000, () => {}); c.keys.bind('r', () => {}); c.keys.pushEsc(() => {}); c.chat.subscribe(() => {}); c.scope.onChange(() => {}); c.overlays.onChange(() => {});
+R.during = { events: events.count() - base, timers: timers.count(), keys, escs, threadSubs, scopeSubs, overlaySubs, aborted: c.signal.aborted };
 h.dispose(); h.dispose();
-R.after = { events: events.count() - base, timers: timers.count(), keys, threadSubs, scopeSubs, overlaySubs, aborted: c.signal.aborted };
+R.after = { events: events.count() - base, timers: timers.count(), keys, escs, threadSubs, scopeSubs, overlaySubs, aborted: c.signal.aborted };
 """, self.IMPORTS)
-        assert out["during"] == {"events": 2, "timers": 2, "keys": 1, "threadSubs": 1, "scopeSubs": 1, "overlaySubs": 1, "aborted": False}
-        assert out["after"] == {"events": 0, "timers": 0, "keys": 0, "threadSubs": 0, "scopeSubs": 0, "overlaySubs": 0, "aborted": True}
+        assert out["during"] == {"events": 2, "timers": 2, "keys": 1, "escs": 1, "threadSubs": 1, "scopeSubs": 1, "overlaySubs": 1, "aborted": False}
+        assert out["after"] == {"events": 0, "timers": 0, "keys": 0, "escs": 0, "threadSubs": 0, "scopeSubs": 0, "overlaySubs": 0, "aborted": True}
 
     def test_a_timer_does_not_run_while_the_tab_is_hidden_and_survives_a_throw(self, tmp_path):
         out = run(tmp_path, """

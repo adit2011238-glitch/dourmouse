@@ -1123,3 +1123,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #143 2026-09-26 -- OS shell route (/shell, strict CSP) and the os_api plug-in router for screen backends; the shell and its 18 screens are next.
 - [x] Finding #144 2026-09-26 -- OS shell foundation (chrome, core, kit), the HOME and SECURITY screens, the shared thread view and the live-check tool; 16 more screens next.
 - [x] Finding #145 2026-09-26 -- `/api/office_log?meeting=` no longer sends a second response after the meeting.
+- [x] Finding #146 2026-09-26 -- OS shell screens NEWS, ATLAS, WIKI on real data (wave A); ctx.keys.pushEsc.

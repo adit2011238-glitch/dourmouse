@@ -1,0 +1,15 @@
+[data-screen="ATLAS"] .atl-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="ATLAS"] .atl-note[hidden] { display: none; }
+[data-screen="ATLAS"] .atl-note[data-tone="error"] { border-color: rgba(239,68,68,.45); color: var(--dm-error); }
+[data-screen="ATLAS"] .atl-row { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; font-size: var(--dm-text-sm); color: var(--dm-fg-body); }
+[data-screen="ATLAS"] .atl-row .n { flex: 1; min-width: 0; text-transform: capitalize; }
+[data-screen="ATLAS"] .atl-row b { font-weight: 500; color: var(--dm-fg); font-variant-numeric: tabular-nums; }
+[data-screen="ATLAS"] .atl-row.fail .n { color: var(--dm-fg-dim); }
+[data-screen="ATLAS"] .atl-err { flex-basis: 100%; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); overflow-wrap: anywhere; }
+[data-screen="ATLAS"] .atl-row.fail { flex-wrap: wrap; }
+[data-screen="ATLAS"] .tone-ok { color: var(--dm-ok); }
+[data-screen="ATLAS"] .tone-active { color: var(--dm-active); }
+[data-screen="ATLAS"] .tone-warn { color: var(--os-warn); }
+[data-screen="ATLAS"] .tone-bad { color: var(--dm-error); }
+[data-screen="ATLAS"] .tone-dim { color: var(--dm-fg-dim); }
+[data-screen="ATLAS"] .atl-pulse .muted { margin-top: 8px; }

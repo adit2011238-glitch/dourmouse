@@ -119,6 +119,14 @@ export function createScreenCtx({ id, root, deps }) {
         offs.push(off);
         return off;
       },
+      /* Escape closes the newest open thing first. Push a closer while
+         something of yours is open (a confirm card, a drawer) and call the
+         returned off() when it closes; it is removed on unmount either way. */
+      pushEsc(fn) {
+        const off = deps.keymap.pushEsc(fn);
+        offs.push(off);
+        return off;
+      },
     },
     host: deps.host,
     prefs: {
