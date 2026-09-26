@@ -1120,3 +1120,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #140 2026-09-26 -- one run policy per request; damaged history file recovery (S17, S27).
 - [x] Finding #141 2026-09-26 -- lockdown page paths via MV3 extension; R9 answer critic.
 - [x] Finding #142 2026-09-26 -- request bodies bounded (413/400); host guard accepts owner-listed proxy names and name:port.
+- [x] Finding #143 2026-09-26 -- OS shell route (/shell, strict CSP) and the os_api plug-in router for screen backends; the shell and its 18 screens are next.

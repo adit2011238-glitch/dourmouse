@@ -5537,7 +5537,7 @@ Severity: medium. Status: DONE 2026-09-26.
 - **Proxy and check (S33).** Both fetch a caller-supplied URL and used plain `urlopen`; they now use `net_guard.guarded_urlopen` (no private or metadata addresses at any hop). Proxied pages carry `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups`, so somebody else's page served from the app's origin can never act as the app even when opened top-level.
 - **Electron (S34, S35, S36).** A deny-by-default permission policy for every session (only the app's own microphone, camera, clipboard write and fullscreen), main and task windows refuse to leave the app's origin (external http(s) links open in the default browser), the DevTools address is pinned to `127.0.0.1`. The decisions are pure functions in `electron/policy.js`, tested under plain node.
 
-Tests: `TestPaneNeverFetchesPrivateAddresses`, `test_electron_hardening.py` (12). Honest limits: the Electron wiring (permission handlers, navigation locks, bridge check) is syntax-checked and its pure decisions are tested, but it was not exercised in a running Electron; the DevTools port remains unauthenticated to local processes because the app is driven through it.
+Tests: `TestPaneNeverFetchesPrivateAddresses`, `test_electron_hardening.py` (12). Live check (evidence 139): a second Electron 44 instance with its own ports and temp data, driven over CDP, showed the pane bridge refusing Origin, Sec-Fetch-Site and foreign-Host requests (403) and serving plain local clients (200); a remote page in the pane denied geolocation, notifications, microphone and clipboard read; the app origin keeps microphone and fullscreen; `window.open` and `location = file://...` were blocked. Honest limits: an external http(s) link click and the packaged app were not exercised; the DevTools port remains unauthenticated to local processes because the app is driven through it.
 
 ### 140 -- one run policy per request; a damaged history file no longer stops the app (security review S17, S27)
 
@@ -5566,3 +5566,12 @@ Severity: low to medium. Status: DONE 2026-09-26.
 - Stale expectations updated by their tests: `claude_code` and `codex_code` are approval-gated (#137), and the console's lockdown `kind` error names `'url'` (#141).
 
 Tests: `TestRequestBodiesAreBounded`, the extended `test_request_guard.py`, and the updated mobile, Google and claude/codex tests. Full suite: see the commit message.
+
+### 143 -- the OS shell route and a plug-in router for the screens' backends (redesign, first step)
+
+Severity: feature. Status: DONE 2026-09-26 (the shell itself is not built yet).
+
+- `/shell` serves `ui/shell.html` beside the console, with a strict CSP (`script-src 'self'`, no inline script, `frame-ancestors 'self'`, `object-src 'none'`) and `nosniff`, no Spotify widget injection, and the `.woff2`, `.jpg`, `.webp` types the asset server had been sending as `application/octet-stream`. The page can approve actions (`POST /api/confirm`), so an injected script would be a way to approve an attacker's request; the CSP is why the shell has no inline script.
+- `dourmouse/os_api/`: one module per feature registers routes with `@route`; `webui.py` has one hook per method after the auth gate and the request guard, so builders add backends without editing an eight-thousand-line file. Handlers return `(status, payload)`; `ApiError` is an expected refusal; anything else is an honest 500 with the message. `GET /api/os/ping` lists what is served.
+
+Tests: `test_os_api_router.py` (9, including that a web page cannot POST to a shell route and a foreign Host cannot read one). Full suite in an isolated worktree: 6,175 passed, 12 skipped, 0 failed. Also noted: the live Electron check of the #139 hardening (evidence 139).

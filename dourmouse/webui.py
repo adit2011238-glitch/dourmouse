@@ -1867,6 +1867,27 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- finding #135: requests driven by a web page, not by the app ------- #
 
+    def _os_api(self, method: str, parsed: urllib.parse.ParseResult) -> bool:
+        """Serve a route the OS shell's screens registered in dourmouse/os_api/.
+        Runs after the auth gate and the request guard. True when it answered."""
+        from dourmouse import os_api
+
+        handler = os_api.find(method, parsed.path)
+        if handler is None:
+            return False
+        request = os_api.Request(
+            server=self.server, query=urllib.parse.parse_qs(parsed.query),
+            body=self._read_json_body() if method == "POST" else {}, user=self._session_user(),
+        )
+        try:
+            status, payload = handler(request)
+        except os_api.ApiError as exc:
+            status, payload = exc.status, {"ok": False, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 -- an honest 500 with the reason, never a fake success
+            status, payload = 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        self._send_json(payload, status=status)
+        return True
+
     def _server_port(self) -> int:
         address = self.server.server_address
         return int(address[1]) if isinstance(address, tuple) else 0
@@ -2131,6 +2152,8 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_unauthorized()
             return
+        if self._os_api("GET", parsed):
+            return
         if path in ("/setup", "/setup.html"):
             # v8.9: first-run setup. Served without a session for the same
             # reason the setup POSTs are — a fresh install has no config to
@@ -2179,6 +2202,11 @@ class _Handler(BaseHTTPRequestHandler):
             # backlog #9: the Study tab — chat scoped to the "study"
             # subagent (real, read-only access to the user's study folder).
             self._serve_static("study.html")
+        elif path in ("/shell", "/shell.html"):
+            # Finding #143 (OS shell redesign): the real OS shell, reachable
+            # beside the console until the deliberate swap. Modules under
+            # /assets/os/ are served by the ordinary asset rule.
+            self._serve_static("shell.html")
         elif path in ("/os_mockup", "/os_mockup.html"):
             # 2026-09-23 (finding #080): the OS shell design mockup, served
             # for review before any of it is wired into a live surface.
@@ -3796,6 +3824,8 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_unauthorized()
             return
+        if self._os_api("POST", parsed):
+            return
         if parsed.path == "/api/deeplink":
             # v5.20: programmatic deep-link navigation (the desktop shell's
             # already-running path): allow-list parsed server-side, then a
@@ -4758,6 +4788,10 @@ class _Handler(BaseHTTPRequestHandler):
             ".svg": "image/svg+xml",
             ".ico": "image/x-icon",
             ".wav": "audio/wav",
+            ".woff2": "font/woff2",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
         }.get(Path(rel).suffix, "application/octet-stream")
         body = target.read_bytes()
         # Finding #135: the preview frame is sandboxed (its origin is opaque),
@@ -4801,6 +4835,7 @@ class _Handler(BaseHTTPRequestHandler):
             "index.html",
             "hud.html",
             "console.html",
+            "shell.html",
         ):
             widget_css = _UI_DIR / "spotify_widget.css"
             widget_js = _UI_DIR / "spotify_widget.js"
@@ -4829,6 +4864,20 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if rel == "shell.html":
+            # Finding #143: the shell has no inline script, so scripts may come
+            # only from this origin. The page can approve actions (POST
+            # /api/confirm), so a script injected through an email subject or a
+            # headline would be a way to approve the attacker's own request;
+            # frame-ancestors keeps it from being framed and clicked. Styles
+            # allow inline because the design uses style attributes.
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; "
+                "frame-ancestors 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
+                "connect-src 'self'; font-src 'self'; media-src 'self' blob:",
+            )
+            self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
