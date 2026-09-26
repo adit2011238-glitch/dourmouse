@@ -1635,6 +1635,28 @@ class TestGroundedMode:
         assert report["final_text"] == "just an answer"
         assert len(client.chat.completions.calls) == 1  # no nudge round-trip
 
+    def test_no_nudge_on_the_last_turn_so_the_run_is_not_marked_out_of_turns(self, monkeypatch):
+        """Finding #134: with one turn, the nudge cannot be acted on. The
+        answer stands, carries the caveat, and the run is not flagged as
+        having run out of turns."""
+        from dourmouse.dispatch import run_dispatch_messages, system_message
+
+        monkeypatch.setattr("dourmouse.config.grounded_mode_enabled", lambda: True)
+        registry = _test_registry()
+        client = FakeClient([_FakeResponse(_FakeMessage(content="the real answer"))])
+        messages = [
+            {"role": "system", "content": system_message(registry)},
+            {"role": "user", "content": "x"},
+        ]
+        report = run_dispatch_messages(
+            messages, registry, client=client, forced_agent="echo_agent", max_turns=1,
+        )
+        assert len(client.chat.completions.calls) == 1
+        assert "the real answer" in report["final_text"]
+        assert "Grounded Mode was on" in report["final_text"]
+        assert not any(e.get("type") == "budget_exhausted" for e in report["transcript"])
+        assert not any(e.get("type") == "grounded_reminder" for e in report["transcript"])
+
     def test_on_zero_tools_nudges_once_then_caveats(self, monkeypatch):
         from dourmouse.dispatch import run_dispatch_messages, system_message
 
@@ -3122,6 +3144,87 @@ class TestClientFactoryRotation:
             client_factory=boom,
         )
         assert response.choices[0].message.content == "survived"
+
+
+def _http_429(retry_after: str | None = None):
+    import email.message
+    import urllib.error
+
+    hdrs = email.message.Message()
+    if retry_after is not None:
+        hdrs["Retry-After"] = retry_after
+    return urllib.error.HTTPError("https://x", 429, "Too Many Requests", hdrs, None)
+
+
+def _http_500():
+    import email.message
+    import urllib.error
+
+    return urllib.error.HTTPError("https://x", 500, "Server Error", email.message.Message(), None)
+
+
+class TestRateLimitBackoff:
+    """Finding #134 (AGENT-3): an HTTP 429 gets more retries and a real
+    pause. A live 8-branch cloud fan-out used to fail branches after
+    about 1.5 seconds of backoff."""
+
+    @staticmethod
+    def _client(failures):
+        client = FakeClient([_FakeResponse(_FakeMessage(content="unused"))])
+        state = {"n": 0}
+
+        def create(**k):
+            state["n"] += 1
+            if state["n"] <= len(failures):
+                raise failures[state["n"] - 1]
+            return _FakeResponse(_FakeMessage(content="recovered"))
+
+        client.chat.completions.create = create
+        return client, state
+
+    def test_429_outlasts_the_configured_retries(self, monkeypatch):
+        from dourmouse.config import NvidiaConfig
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(dispatch_module.time, "sleep", sleeps.append)
+        client, state = self._client([_http_429(), _http_429(), _http_429()])
+        config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1, retry_backoff=0.5)
+        response = dispatch_module._call_with_retry(client, model="m", messages=[], tools=[], config=config)
+        assert response.choices[0].message.content == "recovered"
+        assert state["n"] == 4
+        assert sleeps == [2.0, 4.0, 8.0]
+
+    def test_retry_after_is_honoured_and_capped(self, monkeypatch):
+        from dourmouse.config import NvidiaConfig
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(dispatch_module.time, "sleep", sleeps.append)
+        client, _ = self._client([_http_429("7"), _http_429("9999")])
+        config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1, retry_backoff=0.5)
+        dispatch_module._call_with_retry(client, model="m", messages=[], tools=[], config=config)
+        assert sleeps == [7.0, 30.0]
+
+    def test_a_429_that_never_clears_still_gives_up(self, monkeypatch):
+        from dourmouse.config import NvidiaConfig
+
+        monkeypatch.setattr(dispatch_module.time, "sleep", lambda s: None)
+        client, state = self._client([_http_429()] * 50)
+        config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1, retry_backoff=0.5)
+        with pytest.raises(Exception, match="429"):
+            dispatch_module._call_with_retry(client, model="m", messages=[], tools=[], config=config)
+        assert state["n"] == 1 + dispatch_module._RATE_LIMIT_RETRIES
+
+    def test_other_transient_errors_keep_the_configured_retries(self, monkeypatch):
+        from dourmouse.config import NvidiaConfig
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(dispatch_module.time, "sleep", sleeps.append)
+        client, state = self._client([_http_500()] * 50)
+        config = NvidiaConfig(api_key="k", base_url="https://x", model="m", max_retries=1, retry_backoff=0.5)
+        with pytest.raises(Exception, match="500"):
+            dispatch_module._call_with_retry(client, model="m", messages=[], tools=[], config=config)
+        assert state["n"] == 2
+        assert sleeps == [0.5]
 
 
 class TestNvidiaAccountPoolWiring:

@@ -47,8 +47,11 @@ outcome is that it stays on the machine.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
+import contextvars
 import os
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -230,6 +233,20 @@ _DEFAULT_MAX_WORKERS = int(os.environ.get("DOURMOUSE_DELEGATE_WORKERS", "4"))
 
 _pool_lock = threading.Lock()
 
+# Finding #134 (AGENT-3): the dispatch run that called delegate_to_models,
+# handed to the worker threads through the context (they copy it), so the
+# delegated turns inherit its backend instead of rebuilding one.
+_caller_ctx: contextvars.ContextVar[Any] = contextvars.ContextVar("dourmouse_delegation_caller", default=None)
+
+
+@contextlib.contextmanager
+def inherit_caller(ctx: Any) -> Iterator[None]:
+    token = _caller_ctx.set(ctx)
+    try:
+        yield
+    finally:
+        _caller_ctx.reset(token)
+
 
 def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
     """One turn on the local model, through the real dispatch loop.
@@ -240,10 +257,16 @@ def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
     """
     import time
 
-    from dourmouse.dispatch import run_dispatch_messages
+    from dourmouse.dispatch import is_backend_failure_text, run_dispatch_messages
     from dourmouse.general_roster import build_general_registry
 
     started = time.monotonic()
+    caller = _caller_ctx.get()
+    job_id = None
+    if caller is not None and caller.jobs is not None:
+        job_id = caller.jobs.spawn(
+            task=task.prompt, subagent=task.agent, depth=caller.depth + 1, parent_id=caller.current_job_id
+        )
     try:
         registry = build_general_registry()
         # A delegated turn gets a short capability note of its own. It already
@@ -257,22 +280,44 @@ def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
         except Exception:  # noqa: BLE001 - context must never break a turn
             pass
         messages.append({"role": "user", "content": task.prompt})
-        # client is left None on purpose: run_dispatch_messages builds the
-        # right one itself, honouring the per-agent backend split. Handing it
-        # a pre-built client here would bypass that routing.
+        # With no calling run (the MCP bridge), client is left None on
+        # purpose: run_dispatch_messages builds the right one itself,
+        # honouring the per-agent backend split. Inside a run, the delegated
+        # turn inherits that run's backend and governance (finding #134).
+        inherit: dict[str, Any] = {}
+        if caller is not None:
+            inherit = {
+                "client": caller.client, "config": caller.config, "confirmation_gate": caller.confirmation_gate,
+                "event_sink": caller.event_sink, "job_tracker": caller.jobs, "depth": caller.depth + 1,
+                "max_depth": caller.max_depth, "budget": caller.budget, "max_delegates": caller.max_delegates,
+                "current_job_id": job_id, "cost_budget": caller.cost_budget, "dlp": caller.dlp,
+                "rbac": caller.rbac, "fanout_branch": True,
+            }
+            if task.agent and caller.config is not None and hasattr(caller.config, "model_for_agent"):
+                inherit["model"] = caller.config.model_for_agent(task.agent)
         report = run_dispatch_messages(
             messages,
             registry,
             forced_agent=task.agent or None,
+            **inherit,
         )
+        text = str(report.get("final_text") or "")
+        if is_backend_failure_text(text):
+            # A backend that could not answer says so as the reply; that is a
+            # failure to report, never a success.
+            raise RuntimeError(text.strip())
+        if caller is not None and caller.jobs is not None and job_id:
+            caller.jobs.finish(job_id, result=text)
         return DelegationResult(
             task=task,
             ok=True,
-            text=str(report.get("final_text") or ""),
+            text=text,
             model_used=LOCAL,
             seconds=time.monotonic() - started,
         )
     except Exception as exc:  # noqa: BLE001 - one failed branch must not kill the fan-out
+        if caller is not None and caller.jobs is not None and job_id:
+            caller.jobs.finish(job_id, error=str(exc))
         return DelegationResult(
             task=task,
             ok=False,
@@ -377,7 +422,7 @@ def delegate(
                 pass
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_one, i, t) for i, t in enumerate(tasks)]
+        futures = [pool.submit(contextvars.copy_context().run, _one, i, t) for i, t in enumerate(tasks)]
         concurrent.futures.wait(futures, timeout=timeout + 30)
 
     out: list[DelegationResult] = []

@@ -1168,6 +1168,194 @@ class TestDelegateParallelConcurrency:
         assert jobs.count() == n
 
 
+class TestFanoutBranchGuard:
+    """Finding #134 (AGENT-3): a delegate_parallel branch never fans out
+    again. Live-caught: each branch inherited the parent's "use
+    delegate_parallel with 8 branches" text and fanned out itself, so 8
+    branches became 64 model runs and the cloud answered HTTP 429."""
+
+    @staticmethod
+    def _tool_names(registry, fanout_branch):
+        from dourmouse.tests.test_dispatch import FakeClient as _FC
+
+        client = _FC([_FakeResponse(_FakeMessage(content="done"))])
+        run_dispatch_messages(
+            [{"role": "user", "content": "how much disk space is free on this Mac"}], registry,
+            client=client, fanout_branch=fanout_branch,
+        )
+        return [t["function"]["name"] for t in (client.chat.completions.calls[0].get("tools") or [])]
+
+    def test_a_branch_is_not_offered_delegate_parallel(self, registry):
+        top_level = self._tool_names(registry, False)
+        branch = self._tool_names(registry, True)
+        assert "delegate_parallel" in top_level and "delegate_to_models" in top_level
+        assert "delegate_parallel" not in branch
+        assert "delegate_to_models" not in branch  # the other fan-out tool, hidden too
+        assert "delegate_task" in branch  # single delegation is still fine
+
+    def test_the_tool_itself_refuses_inside_a_branch(self, registry, jobs):
+        tool_call = _delegate_parallel_call("c1", [{"agent_or_task": "echo_agent", "instructions": "again"}])
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[tool_call])),
+            _FakeResponse(_FakeMessage(content="ok")),
+        ])
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            fanout_branch=True,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "already one branch of a parallel fan-out" in result["text"]
+        assert jobs.count() == 0
+
+    def test_a_real_fan_out_runs_each_branch_with_the_flag(self, registry, jobs):
+        """Branches must not re-fan-out, but the fan-out itself still
+        works and every branch is reported."""
+        branches = [{"agent_or_task": "echo_agent", "instructions": f"branch {i}"} for i in range(3)]
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out",
+            lambda: _FakeResponse(_FakeMessage(content=None, tool_calls=[_delegate_parallel_call("c1", branches)])),
+        )
+        for i in range(3):
+            client.chat.completions.add(f"branch {i}", (lambda i=i: _FakeResponse(_FakeMessage(content=f"DONE {i}"))))
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=3,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "3 succeeded" in result["text"]
+        assert jobs.count() == 3
+
+
+class TestFanoutHonesty:
+    """Finding #134 (AGENT-3): what a fan-out reports must be true."""
+
+    def test_a_branch_is_told_it_is_one_part_of_a_fan_out(self, registry, jobs):
+        branches = [{"instructions": f"branch {i}"} for i in range(2)]
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out",
+            lambda: _FakeResponse(_FakeMessage(content=None, tool_calls=[_delegate_parallel_call("c1", branches)])),
+        )
+        for i in range(2):
+            client.chat.completions.add(f"branch {i}", (lambda i=i: _FakeResponse(_FakeMessage(content=f"DONE {i}"))))
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
+        run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
+        )
+        prompts = [
+            m["content"] for c in client.chat.completions.calls for m in c["messages"]
+            if m.get("role") == "user" and "[PARENT CONTEXT" in (m.get("content") or "")
+        ]
+        assert len(prompts) == 2
+        assert all("Do ONLY the TASK above" in p for p in prompts)
+
+    def test_a_backend_failure_reply_is_a_failed_branch(self, registry, jobs):
+        branches = [{"instructions": "branch ok"}, {"instructions": "branch bad"}]
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out",
+            lambda: _FakeResponse(_FakeMessage(content=None, tool_calls=[_delegate_parallel_call("c1", branches)])),
+        )
+        client.chat.completions.add("branch ok", lambda: _FakeResponse(_FakeMessage(content="DONE ok")))
+        client.chat.completions.add(
+            "branch bad",
+            lambda: _FakeResponse(_FakeMessage(content="CLAUDE ORCHESTRATOR (reported honestly): claude exited 1: boom")),
+        )
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "1 succeeded" in result["text"] and "1 failed" in result["text"]
+        assert "claude exited 1: boom" in result["text"]
+
+    def test_delegate_to_models_inherits_the_calling_run(self, registry, jobs):
+        """The delegated turn must run on the CALLER'S client (the fake here),
+        with a job record, instead of building a backend of its own."""
+        call = _FakeToolCall("c1", "delegate_to_models", json.dumps({"tasks": [{"prompt": "branch a"}]}))
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out", lambda: _FakeResponse(_FakeMessage(content=None, tool_calls=[call])),
+        )
+        client.chat.completions.add("branch a", lambda: _FakeResponse(_FakeMessage(content="DONE a")))
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=3,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "1 succeeded" in result["text"] and "DONE a" in result["text"]
+        assert jobs.count() == 1
+
+    def test_delegate_to_models_is_budgeted_like_delegate_parallel(self, registry, jobs):
+        tasks = [{"prompt": f"branch {i}"} for i in range(3)]
+        call = _FakeToolCall("c1", "delegate_to_models", json.dumps({"tasks": tasks}))
+        client = _KeyedClient()
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content=None, tool_calls=[call])))
+        for i in range(3):
+            client.chat.completions.add(f"branch {i}", (lambda i=i: _FakeResponse(_FakeMessage(content=f"DONE {i}"))))
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert "2 succeeded" in result["text"]
+        assert "1 task(s) REFUSED" in result["text"]
+        assert jobs.count() == 2
+
+
+class TestCloudBurst:
+    """Finding #134 (AGENT-3): a cloud backend may fan out wider than the
+    local cap; local, CLI and unknown backends keep it."""
+
+    def test_width_by_backend(self, monkeypatch):
+        from dourmouse.config import OllamaConfig
+        from dourmouse.general_roster import _MAX_CONCURRENT_DELEGATES, delegate_burst_width
+
+        monkeypatch.delenv("DOURMOUSE_CLOUD_BURST", raising=False)
+        assert delegate_burst_width(None) == (_MAX_CONCURRENT_DELEGATES, "unknown backend")
+        assert delegate_burst_width(OllamaConfig(is_cloud=False))[0] == _MAX_CONCURRENT_DELEGATES
+        assert delegate_burst_width(OllamaConfig(is_cloud=True)) == (16, "ollama cloud burst")
+        monkeypatch.setenv("DOURMOUSE_CLOUD_BURST", "24")
+        assert delegate_burst_width(OllamaConfig(is_cloud=True))[0] == 24
+        monkeypatch.setenv("DOURMOUSE_CLOUD_BURST", "lots")
+        assert delegate_burst_width(OllamaConfig(is_cloud=True))[0] == 16
+
+    def test_burst_really_runs_that_many_at_once(self, registry, jobs, monkeypatch):
+        """Ten branches with a burst width of ten: every branch waits on one
+        barrier of ten, which only opens if all ten are in flight together.
+        At the old cap of six the barrier would time out and the branches
+        would fail."""
+        import dourmouse.general_roster as gr
+
+        n = 10
+        monkeypatch.setattr(gr, "delegate_burst_width", lambda config: (n, "test burst"))
+        barrier = threading.Barrier(n, timeout=5)
+        branches = [{"agent_or_task": "echo_agent", "instructions": f"branch {i}"} for i in range(n)]
+        client = _KeyedClient()
+        client.chat.completions.add(
+            "fan out",
+            lambda: _FakeResponse(_FakeMessage(content=None, tool_calls=[_delegate_parallel_call("c1", branches)])),
+        )
+
+        def _wait(i: int) -> Any:
+            barrier.wait()
+            return _FakeResponse(_FakeMessage(content=f"DONE {i}"))
+
+        for i in range(n):
+            client.chat.completions.add(f"branch {i}", (lambda i=i: _wait(i)))
+        client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="parent wrap-up")))
+        events: list[dict[str, Any]] = []
+        report = run_dispatch_messages(
+            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            max_delegates=n, event_sink=events.append,
+        )
+        result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+        assert f"{n} succeeded" in result["text"], result["text"][:400]
+        burst = [e for e in events if e.get("type") == "delegate_parallel_burst"]
+        assert burst and burst[0]["concurrent"] == n and burst[0]["reason"] == "test burst"
+
+
 # --------------------------------------------------------------------------- #
 # /api/jobs — the HTTP audit surface the UI panel polls
 # --------------------------------------------------------------------------- #

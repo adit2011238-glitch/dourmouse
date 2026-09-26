@@ -1111,3 +1111,4 @@ and a real build sequence, not just a requirement statement:
 - [x] R4 (finding #131) 2026-09-25 -- hypothesis generation (claim-grounded), criticism, experiment design, deterministic statistics.
 - [x] UI-5 + UI-7 (finding #132) 2026-09-25 -- live-event array capped; tool chips keyboard-accessible.
 - [x] R7 (finding #133) 2026-09-25 -- run policy (loop breaker, approval budget) and an action ledger at the single tool choke point.
+- [x] AGENT-3 (finding #134) 2026-09-26 -- cloud burst (16 concurrent branches on cloud backends); branches never re-fan-out; branch prompts scoped to their own task; 429 backoff with Retry-After; delegate_to_models honest and inherits the caller's backend.

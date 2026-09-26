@@ -3163,6 +3163,10 @@ async function run(text){
               liveAdd(e.ok?"done":"err", "Branch finished: "+(e.agent||"any"), modelShown);
             }
             break; }
+          case "delegate_parallel_burst":
+            // Finding #134 (AGENT-3): how wide the fan-out actually ran.
+            act(node.acts,"FAN-OUT",`${e.total} branches, ${e.concurrent} at once (${e.reason||""})`,false,false,"");
+            node.noteStep(); break;
           case "confirmation_requested": node.st.textContent="WAITING"; addApproval(node,e,myDeclines,targetScreen); break;
           // v13.8 (real, live-reproduced gap): all_hands.py's own "ALL HANDS
           // STARTED" chat text unconditionally promises "Progress is
@@ -3336,6 +3340,8 @@ function restoreTranscriptEvent(node, e){
       if(e.phase==="start"){ act(node.acts,"USING",label,false,false,e.task||""); node.noteStep(); }
       else if(e.phase==="result"){ act(node.acts,"RESULT",label,!e.ok,false, e.ok ? (e.text||"") : ("ERROR: "+(e.error||""))); node.noteStep(); }
       break; }
+    case "delegate_parallel_burst":
+      act(node.acts,"FAN-OUT",`${e.total} branches, ${e.concurrent} at once (${e.reason||""})`,false,false,""); node.noteStep(); break;
     case "confirmation_requested":
       act(node.acts,"APPROVAL REQUESTED",e.tool||"",false,false,e.prompt||""); node.noteStep(); break;
     case "confirmation_resolved":

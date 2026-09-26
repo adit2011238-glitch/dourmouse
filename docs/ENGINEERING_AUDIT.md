@@ -5395,3 +5395,53 @@ proposed versus what the runtime did.
 `_execute_tool` is now the policy and ledger wrapper around the unchanged
 `_execute_tool_inner`. Tests: `test_execution_policy.py` (3, including a secret argument that
 never reaches the ledger).
+
+### 134 -- cloud burst for parallel agents, and four fan-out defects found by running it live (AGENT-3)
+
+Severity: medium (the fan-out multiplied work and reported success over failures). Status: DONE 2026-09-26.
+
+The ask: `delegate_parallel` was capped at 6 concurrent branches, a number sized for a laptop and
+a local model. Every model is a cloud model now, so a branch costs this machine only a waiting
+thread. Measured first: 32 simultaneous calls to Ollama Cloud (`gpt-oss:120b`) all succeeded, no
+HTTP 429.
+
+**Built.** `general_roster.delegate_burst_width(config)` (`general_roster.py:2769`): a known cloud
+backend fans out up to 16 branches at once (`DOURMOUSE_CLOUD_BURST` overrides), a local model, a
+CLI backend or an unknown backend keeps 6. The delegate budget (25 per request) still bounds the
+total. A `delegate_parallel_burst` event tells the console how wide the fan-out ran, shown as a
+`FAN-OUT` chip ("8 branches, 8 at once (ollama cloud burst)").
+
+**Four defects the live run exposed (each fixed at its root, each tested):**
+1. *A branch fanned out again.* Each branch received the parent conversation, including "use
+   delegate_parallel with 8 branches", obeyed it, and 8 branches became 64 model runs. Branch runs
+   now carry `DispatchContext.fanout_branch` (`dispatch.py:3504`), inherited through
+   `delegate_task`; the fan-out tools (`FANOUT_TOOLS`, `dispatch.py:158`) are removed from their
+   tool list (`dispatch.py:4673`) and both tools also refuse when called from a branch.
+2. *Every branch answered all eight questions.* The parent context held the whole request. A
+   branch prompt now ends "This run is one branch of a parallel fan-out ... Do ONLY the TASK
+   above". Live: each branch answers its own question in about 8 seconds.
+3. *A rate limit failed branches after 1.5 seconds.* HTTP 429 now gets 4 retries and a real
+   pause: the provider's `Retry-After` (capped at 30 s), else four times the configured backoff,
+   doubling (`dispatch.py:128-150`). Other transient errors keep the configured retries.
+4. *`delegate_to_models` reported "8 succeeded" over 8 failures, on the wrong backend.* Its
+   delegated turns rebuilt a backend from the deployment default, so every task failed on a model
+   name the Claude CLI did not know, and the tool still counted them as successes because the
+   failure came back as the reply text. Now a backend's own "(reported honestly)" reply is a
+   failure (`dispatch.is_backend_failure_text`, applied in `delegate_to_models` and
+   `delegate_parallel`), and inside a dispatch run the delegated turns inherit the caller's
+   backend, model, approval gate, budgets, job tracker and event stream, and are charged against
+   the delegate budget like `delegate_parallel` branches (`model_delegation.inherit_caller`). From
+   the MCP bridge there is no calling run, and the old behaviour stays.
+
+Also fixed: with `max_turns=1` the Grounded Mode nudge used the only turn, so a correct answer
+was flagged "incomplete (ran out of turns)". A nudge now fires only when a turn remains
+(`dispatch.py:4823`).
+
+Tests: `TestCloudBurst`, `TestFanoutBranchGuard`, `TestFanoutHonesty` (`test_self_dispatch.py`),
+`TestRateLimitBackoff` (`test_dispatch.py`), three in `test_model_delegation.py`, one grounded
+last-turn test. Live: preview server, real directive, real Ollama Cloud.
+
+Honest limits: 16 is measured only up to 32 simultaneous calls on this account and can change
+with the provider's limits (`DOURMOUSE_CLOUD_BURST`). A branch still shares the parent's cost
+budget. The `deepseek-r1:14b` default that broke `delegate_to_models` outside a run (the MCP bridge
+path) is a stale local model name in the deployment default and is not changed here.

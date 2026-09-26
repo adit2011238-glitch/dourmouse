@@ -57,6 +57,7 @@ from dourmouse.dispatch import (
     Subagent,
     ToolSpec,
     current_dispatch_context,
+    is_backend_failure_text,
     run_dispatch_messages,
     system_message,
 )
@@ -2680,6 +2681,7 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
                 # depth limit for an empty answer). None when no target was
                 # given — a free sub-orchestration still plans normally.
                 forced_agent=target or None,
+                fanout_branch=ctx.fanout_branch,  # finding #134
             )
         except Exception as exc:  # honest failure surface (Rule 2.2)
             if ctx.jobs is not None and job_id:
@@ -2748,6 +2750,38 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
 # run — ThreadPoolExecutor just queues them behind the first 6 rather than
 # starting literally all of them at once.
 _MAX_CONCURRENT_DELEGATES = 6
+
+# Finding #134 (AGENT-3): cloud burst capacity. The cap above was sized for
+# a laptop, a local model and one rate-limited key. Every model is a large
+# cloud model now: a branch's model call runs on the provider's hardware,
+# so this machine only holds a waiting thread per branch, and rate limits
+# (HTTP 429) already retry with backoff in dispatch._call_with_retry. A
+# fan-out on a known cloud backend may therefore run this many branches at
+# once. A genuinely local model, a CLI backend (a real subprocess per call)
+# and an unidentified backend keep the conservative cap. The delegate
+# budget (DispatchContext.max_delegates, 25 per request) still bounds the
+# total, so a wider burst never means more work, only less waiting.
+_CLOUD_BURST_ENV = "DOURMOUSE_CLOUD_BURST"
+_CLOUD_BURST_DEFAULT = 16
+_CLOUD_BACKENDS = frozenset({"ollama", "nvidia", "omniroute", "freellmapi"})
+
+
+def delegate_burst_width(config: Any) -> tuple[int, str]:
+    """How many delegate_parallel branches may run at once for ``config``,
+    and why: (width, reason)."""
+    from dourmouse.config import backend_identity
+
+    name, is_local = backend_identity(config)
+    if is_local:
+        return _MAX_CONCURRENT_DELEGATES, "local model"
+    if name not in _CLOUD_BACKENDS:
+        return _MAX_CONCURRENT_DELEGATES, f"{name} backend"
+    raw = os.environ.get(_CLOUD_BURST_ENV, "").strip()
+    try:
+        width = max(1, int(raw)) if raw else _CLOUD_BURST_DEFAULT
+    except ValueError:
+        width = _CLOUD_BURST_DEFAULT
+    return width, f"{name} cloud burst"
 
 
 def _safe_emit(sink: Callable[[dict[str, Any]], None] | None, entry: dict[str, Any]) -> None:
@@ -2872,6 +2906,11 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                 "ERROR: delegate_parallel requires an active dispatch "
                 "context (it can only be called from inside a dispatch run)."
             )
+        if ctx.fanout_branch:  # finding #134: backstop, the tool is also hidden
+            return (
+                "REFUSED: this run is already one branch of a parallel fan-out. "
+                "Do this branch's own task directly with your tools."
+            )
         branches_arg = arguments.get("branches")
         if not isinstance(branches_arg, list) or not branches_arg:
             return (
@@ -2971,9 +3010,14 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                 else instructions
             )
             if ctx.parent_context:
+                # Finding #134: this is ONE branch of a fan-out. Live, every
+                # branch got the whole parent request as context and answered
+                # all eight questions instead of its own one.
                 nested_prompt += (
                     "\n\n[PARENT CONTEXT — read this; it is what the parent "
                     "conversation already established]\n" + ctx.parent_context
+                    + "\n\n[This run is one branch of a parallel fan-out. Other branches are "
+                    "handling every other part of the parent request. Do ONLY the TASK above.]"
                 )
             # v3.1 per-agent models, same resolution delegate_task uses: a
             # targeted branch runs on THAT agent's configured model,
@@ -3041,7 +3085,11 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                     model=nested_model,
                     forced_agent=target or None,
                     call_id=branch_call_id,
+                    fanout_branch=True,
                 )
+                if is_backend_failure_text(report.get("final_text") or ""):
+                    # Finding #134: the backend's own failure report is not an answer.
+                    raise RuntimeError(str(report.get("final_text")).strip())
             except Exception as exc:  # honest failure surface (Rule 2.2)
                 if ctx.jobs is not None and job_id:
                     ctx.jobs.finish(job_id, error=f"nested dispatch failed: {exc}")
@@ -3091,7 +3139,12 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
             })
             return result
 
-        max_workers = min(len(granted), _MAX_CONCURRENT_DELEGATES)
+        width, _why = delegate_burst_width(ctx.config)
+        max_workers = min(len(granted), width)
+        _safe_emit(ctx.event_sink, {
+            "type": "delegate_parallel_burst", "run_id": run_id, "total": len(granted),
+            "concurrent": max_workers, "width": width, "reason": _why,
+        })
         results: list[dict[str, Any] | None] = [None] * len(granted)
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             # Each branch runs in a copy of this turn's context, so a
@@ -3115,8 +3168,9 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
             "names one subagent to route that branch at (like "
             "delegate_task's 'subagent'), or omit it for a free "
             "sub-orchestration; 'instructions' is that branch's task. Up "
-            f"to {_MAX_CONCURRENT_DELEGATES} branches run genuinely at "
-            "once (more queue behind that). Same depth/budget guards as "
+            f"to {_CLOUD_BURST_DEFAULT} branches run genuinely at once on a "
+            f"cloud model ({_MAX_CONCURRENT_DELEGATES} otherwise; more queue "
+            "behind that). Same depth/budget guards as "
             "delegate_task, spent one unit per branch. Use when several "
             "parts of a request are independent and can be answered in "
             "parallel (e.g. 'check my inbox AND look up the weather AND "
@@ -6387,6 +6441,7 @@ def build_general_registry() -> DispatchRegistry:
             DelegationTask,
             delegate,
             format_results,
+            inherit_caller,
         )
 
         raw = arguments.get("tasks")
@@ -6426,8 +6481,41 @@ def build_general_registry() -> DispatchRegistry:
                 )
             )
 
-        results = delegate(tasks)
-        return format_results(results)
+        # Finding #134 (AGENT-3): inside a dispatch run, the delegated turns
+        # inherit the caller's backend, model, gate, budgets and event stream,
+        # exactly as delegate_parallel's branches do. Live, they were built
+        # from the deployment default instead: every task failed on the wrong
+        # backend while the tool reported all of them as succeeded. From the
+        # MCP bridge there is no run to inherit from, and the old behaviour
+        # (the deployment default) is what that path is for.
+        ctx = current_dispatch_context(registry)
+        refused = 0
+        if ctx is not None:
+            if ctx.fanout_branch:
+                return (
+                    "REFUSED: this run is already one branch of a parallel fan-out. "
+                    "Do this branch's own task directly with your tools."
+                )
+            if ctx.depth >= ctx.max_depth:
+                return f"REFUSED: maximum delegate depth ({ctx.max_depth}) reached, no deeper nesting allowed."
+            granted: list[DelegationTask] = []
+            for task in tasks:
+                if not ctx.consume_delegate():
+                    break
+                granted.append(task)
+            refused = len(tasks) - len(granted)
+            if not granted:
+                return (
+                    f"REFUSED: delegate budget exhausted (max {ctx.max_delegates} nested runs per "
+                    f"top-level request), 0 of {len(tasks)} tasks ran."
+                )
+            tasks = granted
+        with inherit_caller(ctx):
+            results = delegate(tasks)
+        text = format_results(results)
+        if refused:
+            text += f"\n\n{refused} task(s) REFUSED (delegate budget exhausted)."
+        return text
 
     _delegate_models_spec = ToolSpec(
         name="delegate_to_models",

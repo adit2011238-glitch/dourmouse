@@ -118,6 +118,56 @@ def _is_transient_error(exc: Exception) -> bool:
     return False
 
 
+# Finding #134 (AGENT-3): an HTTP 429 is the provider asking for a pause,
+# not a fault. The generic transient backoff (0.5s then 1s) gave a burst of
+# parallel branches about 1.5 seconds before failing them outright, which is
+# what a live 8-branch cloud fan-out hit. A rate limit now gets more retries
+# and a real pause: the provider's own Retry-After when it sends one
+# (capped), else four times the configured backoff, doubling (2, 4, 8, 16
+# seconds at the default 0.5).
+_RATE_LIMIT_RETRIES = 4
+_RATE_LIMIT_MAX_WAIT = 30.0
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    import urllib.error
+
+    import openai as _openai
+
+    if isinstance(exc, _openai.RateLimitError):
+        return True
+    return isinstance(exc, urllib.error.HTTPError) and exc.code == 429
+
+
+def _rate_limit_delay(exc: Exception, attempt: int, backoff: float) -> float:
+    headers = getattr(exc, "headers", None) or getattr(getattr(exc, "response", None), "headers", None)
+    raw = headers.get("Retry-After") if headers is not None else None
+    ours = max(backoff, 0.0) * 4 * (2**attempt)
+    try:
+        wait = float(raw) if raw is not None else ours
+    except (TypeError, ValueError):
+        wait = ours
+    return max(0.0, min(wait, _RATE_LIMIT_MAX_WAIT))
+
+
+# Finding #134 (AGENT-3): the tools that start a parallel fan-out. A run that
+# is itself a branch of a fan-out never gets them (see DispatchContext.
+# fanout_branch): live, a branch that inherited "use delegate_parallel with 8
+# branches" from the parent conversation reached for delegate_to_models
+# instead, so 8 branches became 8 more fan-outs.
+FANOUT_TOOLS = frozenset({"delegate_parallel", "delegate_to_models"})
+
+# A backend that cannot answer returns its own failure as the reply, in the
+# house form "<BACKEND> (reported honestly): <reason>" (the Claude CLI and
+# Gemini paths both do). That is a failure, not an answer, and a fan-out that
+# counts it as a success reports "8 succeeded" over eight errors.
+_HONEST_FAILURE = re.compile(r"^[A-Z][A-Z0-9 _-]{1,40} \(reported honestly\):")
+
+
+def is_backend_failure_text(text: str) -> bool:
+    return bool(_HONEST_FAILURE.match((text or "").lstrip()))
+
+
 # Hard cap on a single LLM response (Ollama ``num_predict`` / OpenAI
 # ``max_tokens``).
 #
@@ -827,7 +877,8 @@ def _call_with_retry_inner_impl(
     extra_body = None
 
     last_exc: Exception | None = None
-    for attempt in range(retries + 1):
+    attempt = 0
+    while True:
         try:
             if call_log is not None:
                 call_log.append({"model": model, "attempt": attempt + 1})
@@ -847,15 +898,18 @@ def _call_with_retry_inner_impl(
             last_exc = exc
             if not _is_transient_error(exc):
                 raise
-            if attempt < retries:
-                if client_factory is not None and model_router.is_rate_limit_error(exc):
-                    try:
-                        switched = client_factory()
-                    except Exception:  # noqa: BLE001 - a bad factory must not break the retry itself
-                        switched = None
-                    if switched is not None:
-                        client, model = switched
-                time.sleep(backoff * (2**attempt))
+            limited = _is_rate_limited(exc)
+            if attempt >= (max(retries, _RATE_LIMIT_RETRIES) if limited else retries):
+                break
+            if client_factory is not None and model_router.is_rate_limit_error(exc):
+                try:
+                    switched = client_factory()
+                except Exception:  # noqa: BLE001 - a bad factory must not break the retry itself
+                    switched = None
+                if switched is not None:
+                    client, model = switched
+            time.sleep(_rate_limit_delay(exc, attempt, backoff) if limited else backoff * (2**attempt))
+            attempt += 1
     if fallback and fallback != model:
         if call_log is not None:
             call_log.append({"model": fallback, "attempt": "fallback"})
@@ -3439,6 +3493,15 @@ class DispatchContext:
     # owns whichever ONE agent it was forced to), so there is nothing to
     # propagate.
     forced_agent: str | None = None
+    # Finding #134 (AGENT-3): this run is one branch of a delegate_parallel
+    # fan-out. Live-caught: each branch received the parent conversation as
+    # context, including the user's own "use delegate_parallel with 8
+    # branches", obeyed it and fanned out again: 8 branches became 64
+    # model runs, the cloud answered HTTP 429 and the delegate budget ran
+    # out before any branch finished. A branch is already one parallel
+    # piece, so it never gets delegate_parallel. Inherited through
+    # delegate_task, so a grandchild cannot fan out either.
+    fanout_branch: bool = False
     # Finding #067 (agent-ecosystem "full chain of thought, any agent, any
     # meeting, on demand" gap): a fresh, real per-RUN identifier, distinct
     # for every DispatchContext instance (default_factory runs once per
@@ -3651,6 +3714,7 @@ def run_dispatch_messages(
     should_stop: Callable[[], bool] | None = None,
     force_plain_dispatch: bool = False,
     call_id: str | None = None,
+    fanout_branch: bool = False,
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -3893,6 +3957,7 @@ def run_dispatch_messages(
         # delegate_parallel branch) passes the id it announced, so the
         # branch's fan-out events and every event of its run share one id.
         call_id=call_id or uuid.uuid4().hex[:12],
+        fanout_branch=fanout_branch,
         # v8.30: pinned whenever anything more specific than the plain
         # generic default already claimed this model — an explicit caller
         # override, brain escalation, or the fast lane's own deliberate
@@ -4605,6 +4670,8 @@ def _run_dispatch_loop(
         if plan_agents
         else []
     )
+    if ctx.fanout_branch:  # finding #134: a branch never fans out again
+        scoped_tools = [t for t in scoped_tools if t.get("function", {}).get("name") not in FANOUT_TOOLS]
 
     # v8.30: per-agent model routing for the ONE case it was never wired
     # for. An explicit focus_agent route and a delegate_task nested run
@@ -4750,7 +4817,10 @@ def _run_dispatch_loop(
             except Exception:  # noqa: BLE001 - memory retrieval must never break a turn
                 memory_context = ""
 
-    for _ in range(max_turns):
+    for turn_index in range(max_turns):
+        # Finding #134: how many turns remain AFTER this one. A nudge asks the
+        # model to act on the next turn, so it only makes sense when one exists.
+        turns_left = max_turns - turn_index - 1
         # Deterministic cost cap BEFORE each LLM call (spec: prevent runaway
         # execution loop costs). A tripped budget ends the run honestly.
         if cost_budget is not None:
@@ -5038,7 +5108,12 @@ def _run_dispatch_loop(
             grounded_violation = (
                 ctx.grounded and tools_used == 0 and bool(scoped_tools) and not grounded_exempt
             )
-            if grounded_violation and grounded_nudges < _MAX_GROUNDED_NUDGES:
+            # Finding #134: no nudge on the last turn. Live, a fan-out branch
+            # with max_turns=1 answered correctly, then the nudge used up the
+            # only turn and the run was reported "incomplete (ran out of
+            # turns)". With no turn left the nudge cannot be acted on; the
+            # answer is final and the caveat below still applies.
+            if grounded_violation and grounded_nudges < _MAX_GROUNDED_NUDGES and turns_left > 0:
                 grounded_nudges += 1
                 reminder = (
                     "[GROUNDED MODE] You answered with zero tool calls, but "

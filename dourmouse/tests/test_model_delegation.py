@@ -150,6 +150,58 @@ class TestFanOut:
 
 
 class TestFormatting:
+    def test_a_backend_failure_reply_is_a_failure_not_a_success(self, monkeypatch):
+        """Finding #134: a backend that cannot answer returns its own failure
+        as the reply. The fan-out used to count that as a success."""
+        import dourmouse.dispatch as dispatch
+
+        monkeypatch.setattr(
+            dispatch, "run_dispatch_messages",
+            lambda *a, **k: {"final_text": "CLAUDE ORCHESTRATOR (reported honestly): claude exited 1: boom"},
+        )
+        result = md._run_local(DelegationTask(prompt="x"), timeout=5.0)
+        assert result.ok is False and "boom" in result.error
+        assert "0 succeeded, 1 failed" in md.format_results([result])
+
+    def test_delegated_turns_inherit_the_calling_run(self, monkeypatch):
+        import types
+
+        import dourmouse.dispatch as dispatch
+        from dourmouse.dispatch import JobTracker
+
+        seen: dict = {}
+
+        def fake_run(messages, registry, **kwargs):
+            seen.update(kwargs)
+            return {"final_text": "fine"}
+
+        monkeypatch.setattr(dispatch, "run_dispatch_messages", fake_run)
+        jobs = JobTracker()
+        budget = [1]
+        caller = types.SimpleNamespace(
+            client="C", config=None, confirmation_gate="G", event_sink="S", jobs=jobs, depth=1, max_depth=3,
+            budget=budget, max_delegates=9, current_job_id=None, cost_budget="B", dlp="D", rbac="R",
+        )
+        with md.inherit_caller(caller):
+            result = md._run_local(DelegationTask(prompt="x"), timeout=5.0)
+        assert result.ok and result.text == "fine"
+        assert (seen["client"], seen["confirmation_gate"], seen["dlp"], seen["rbac"]) == ("C", "G", "D", "R")
+        assert seen["depth"] == 2 and seen["budget"] is budget and seen["fanout_branch"] is True
+        assert jobs.count() == 1
+
+    def test_worker_threads_see_the_calling_run(self, monkeypatch):
+        seen = []
+
+        def peek(task, timeout):
+            seen.append(md._caller_ctx.get())
+            return md.DelegationResult(task=task, ok=True, text="x")
+
+        monkeypatch.setattr(md, "_run_local", peek)
+        with md.inherit_caller("the-caller"):
+            md.delegate([DelegationTask(prompt="a"), DelegationTask(prompt="b")])
+        assert seen == ["the-caller", "the-caller"]
+        assert md._caller_ctx.get() is None  # and it is released afterwards
+
     def test_failures_are_never_rendered_as_answers(self):
         out = format_results(
             [
