@@ -1122,3 +1122,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #142 2026-09-26 -- request bodies bounded (413/400); host guard accepts owner-listed proxy names and name:port.
 - [x] Finding #143 2026-09-26 -- OS shell route (/shell, strict CSP) and the os_api plug-in router for screen backends; the shell and its 18 screens are next.
 - [ ] Finding #144 2026-09-26 -- OS shell foundation (chrome, core, kit) first cut committed as WIP: boot.js, HOME, SECURITY, tests and live verification still to do; then 16 more screens.
+- [x] Finding #145 2026-09-26 -- `/api/office_log?meeting=` no longer sends a second response after the meeting.

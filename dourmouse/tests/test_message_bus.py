@@ -447,6 +447,36 @@ class TestOfficeLogWiring:
             srv.server_close()
             thread.join(timeout=2)
 
+    def test_meeting_query_sends_one_response_not_two(self, tmp_path):
+        """The ?meeting= branch used to send the meeting and then fall through to
+        the default branch and send a second document on the same connection,
+        which an HTTP client that reads one response never sees. Read the raw
+        bytes and count the responses."""
+        import socket
+
+        from dourmouse.office_logger import OfficeLogger
+
+        office_log = OfficeLogger(tmp_path / "office.db")
+        srv = run_server(_echo_registry(), port=0, client=None, config=None, office_log=office_log)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = srv.server_address[1]
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+                s.sendall(
+                    f"GET /api/office_log?meeting=run-1 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n".encode()
+                )
+                raw = b""
+                while chunk := s.recv(65536):
+                    raw += chunk
+            assert raw.count(b"HTTP/1.") == 1
+            assert raw.startswith(b"HTTP/1.") and b" 200 " in raw.split(b"\r\n", 1)[0]
+            assert b'"messages"' not in raw  # the default branch's document
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
 
 class TestMessagesApi:
     def test_messages_endpoint_returns_bus_traffic(self):

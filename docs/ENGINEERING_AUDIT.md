@@ -5585,3 +5585,13 @@ What exists (about 3,250 lines, written by a builder following `REDESIGN_SHELL_A
 What is missing: `ui/assets/os/boot.js` (so `/shell` loads the page but no script), the HOME and SECURITY screens, every test (`test_os_shell_route.py`, `test_os_core.py`, `test_os_screen_contract.py`, the two screen tests), any live check against the mockup, and the other 16 screens. The files are unlinked from the app (nothing navigates to `/shell`) and no existing test reads them; the full suite is green with them present. They have not been reviewed line by line: treat them as a first draft to finish and verify, not as done.
 
 Next: finish slice 1 (boot.js, HOME, SECURITY, tests, live comparison with `os_mockup.html`), then the screen waves in `~/Documents/DOURMOUSE/REDESIGN_PROGRESS.md`.
+
+### 145 -- `GET /api/office_log?meeting=` answered twice (found while planning the OFFICE screen)
+
+Severity: low. Status: DONE 2026-09-26.
+
+- **What was wrong.** In `webui.py` the `office_log` route chose its answer with an `if/elif` chain in which only the `meetings=1` branch ended with `return`. A `?meeting=<run>` request sent the meeting document and then fell through to the default branch, which sent a second JSON document (`{"messages": ...}`) on the same connection. A client that reads one response never sees the second one, so nothing visibly broke, but the server wrote a stray response into a keep-alive stream (the next request on that connection could read it). The `office_log is None` branch fell through the same way and would have raised on the `None`.
+- **Fix.** Each of the first three branches now returns after answering.
+- **Test.** `test_meeting_query_sends_one_response_not_two` in `test_message_bus.py` reads the raw bytes of a `Connection: close` request and counts the responses; it fails on the old code and passes on the fix.
+
+Honest limit: `run_server` always creates a default office log when none is passed, so the `None` branch is not reachable through the server as shipped; it is fixed for consistency, and only the `?meeting=` path has a test.
