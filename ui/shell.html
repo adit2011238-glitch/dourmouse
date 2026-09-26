@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DOURMOUSE</title>
+  <!-- The OS shell (finding #143). Thin on purpose: PWA head tags, the chrome
+       skeleton and ONE module script. There is no inline script, no inline
+       event handler and no importmap, because the server sends this page with
+       script-src 'self': the page can approve actions (POST /api/confirm), so
+       injected script would be a way to approve an attacker's request. -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#09090B">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="DourMouse">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="/assets/icon-192.png">
+<link rel="stylesheet" href="/assets/dourmouse-ui.css">
+<link rel="stylesheet" href="/assets/dourmouse-os.css">
+<link rel="stylesheet" href="/assets/os/shell.css">
+<link rel="stylesheet" href="/assets/os/kit/kit.css">
+<link rel="modulepreload" href="/assets/os/boot.js">
+<link rel="modulepreload" href="/assets/os/core/api.js">
+<link rel="modulepreload" href="/assets/os/core/events.js">
+<link rel="modulepreload" href="/assets/os/core/chat.js">
+<link rel="modulepreload" href="/assets/os/core/approvals.js">
+<link rel="modulepreload" href="/assets/os/core/scope.js">
+<link rel="modulepreload" href="/assets/os/core/prefs.js">
+<link rel="modulepreload" href="/assets/os/core/keymap.js">
+<link rel="modulepreload" href="/assets/os/core/ring.js">
+<link rel="modulepreload" href="/assets/os/core/host.js">
+<link rel="modulepreload" href="/assets/os/core/registry.js">
+<link rel="modulepreload" href="/assets/os/core/router.js">
+<link rel="modulepreload" href="/assets/os/core/ctx.js">
+<link rel="modulepreload" href="/assets/os/kit/html.js">
+<link rel="modulepreload" href="/assets/os/kit/states.js">
+</head>
+<body>
+<div class="os-wallpaper" id="wall" data-wall="aurora" data-animated="true"></div>
+<div id="walldim"></div>
+
+<header class="os-menubar" id="menubar" aria-label="Menu bar"></header>
+
+<div class="os-panel" id="controlcenter" role="dialog" aria-label="Control Centre" hidden></div>
+<div class="os-panel" id="notifcenter" role="dialog" aria-label="Notifications" hidden></div>
+
+<div id="shell">
+  <nav id="sidebar" aria-label="Screens"></nav>
+  <section id="stage" aria-label="Stage">
+    <div id="stagebar">
+      <span class="os-lights" id="lights"></span>
+      <h1 id="stagetitle" tabindex="-1">HOME</h1>
+      <span id="stagesub"></span>
+      <span class="grow"></span>
+      <div id="stageactions"></div>
+    </div>
+    <div id="body"></div>
+    <div class="composer" id="composer" hidden></div>
+  </section>
+</div>
+
+<div id="wallpicker" role="dialog" aria-label="Wallpaper" hidden></div>
+
+<div id="specbar">
+  <button type="button" class="os-btn" id="specBtn" data-spec="Toggles this overlay. Keyboard: Alt+A.">SPEC</button>
+  <span id="speclegend">Alt+A labels every control</span>
+</div>
+
+<div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+
+<nav class="os-dock" id="dock" aria-label="Dock"></nav>
+
+<script type="module" src="/assets/os/boot.js" data-sw="/sw.js"></script>
+</body>
+</html>

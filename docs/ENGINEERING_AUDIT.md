@@ -5575,3 +5575,13 @@ Severity: feature. Status: DONE 2026-09-26 (the shell itself is not built yet).
 - `dourmouse/os_api/`: one module per feature registers routes with `@route`; `webui.py` has one hook per method after the auth gate and the request guard, so builders add backends without editing an eight-thousand-line file. Handlers return `(status, payload)`; `ApiError` is an expected refusal; anything else is an honest 500 with the message. `GET /api/os/ping` lists what is served.
 
 Tests: `test_os_api_router.py` (9, including that a web page cannot POST to a shell route and a foreign Host cannot read one). Full suite in an isolated worktree: 6,175 passed, 12 skipped, 0 failed. Also noted: the live Electron check of the #139 hardening (evidence 139).
+
+### 144 -- OS shell foundation files, first cut (IN PROGRESS: a builder stopped at the usage limit)
+
+Severity: feature. Status: IN PROGRESS 2026-09-26. Committed so the work is not lost; the shell is not usable yet.
+
+What exists (about 3,250 lines, written by a builder following `REDESIGN_SHELL_ARCHITECTURE.md`): `ui/shell.html`; `ui/assets/os/shell.css`; `core/` (api, events, chat, approvals, scope, prefs, keymap, ring, host, registry, router, ctx); `kit/` (html, states, approval-card, icons, flow-svg, md, kit.css); `chrome/` (menubar, sidebar, stage, dock, composer, panels, status, spec-overlay, toasts).
+
+What is missing: `ui/assets/os/boot.js` (so `/shell` loads the page but no script), the HOME and SECURITY screens, every test (`test_os_shell_route.py`, `test_os_core.py`, `test_os_screen_contract.py`, the two screen tests), any live check against the mockup, and the other 16 screens. The files are unlinked from the app (nothing navigates to `/shell`) and no existing test reads them; the full suite is green with them present. They have not been reviewed line by line: treat them as a first draft to finish and verify, not as done.
+
+Next: finish slice 1 (boot.js, HOME, SECURITY, tests, live comparison with `os_mockup.html`), then the screen waves in `~/Documents/DOURMOUSE/REDESIGN_PROGRESS.md`.
