@@ -255,3 +255,92 @@ class TestListApprovedNames:
         )
         se.approve(entry["id"], store=store)
         assert se.list_approved_names() == ["self_ext_listed"]
+
+
+class TestInjectionAndIntegrity:
+    """S20 / S24: a crafted description must never run as code, the reviewer
+    sees the exact module text, edits after approval are refused, and the
+    approval subprocess never sees the server's keys."""
+
+    _EVIL = 'x\\" + str(1+1) #'
+
+    def _entry(self, description):
+        return {
+            "id": "ext-001", "tool_name": "self_ext_probe", "capability_gap": 'gap """ + 1 #',
+            "description": description, "parameters_schema": _PARAMS, "handler_source": _HANDLER_OK,
+        }
+
+    def test_reviewers_injection_description_stays_a_literal(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        entry = self._entry(self._EVIL)
+        path, sha = se._write_approved_module(entry)
+        mod = se.load_approved("self_ext_probe", expected_sha256=sha)
+        assert mod.TOOL_SPEC.confirm_prompt({}) == f"Run self-added tool self_ext_probe: {self._EVIL}?"
+
+    def test_add_draft_rejects_unsafe_descriptions(self, tmp_path):
+        import pytest
+
+        store = se.SelfExtensions(tmp_path / "d.jsonl")
+        for bad in (self._EVIL, 'say "hi"', "it's", "line\nbreak", "tab\there", "back`tick"):
+            with pytest.raises(ValueError):
+                store.add_draft(
+                    capability_gap="x", tool_name="one", description=bad,
+                    parameters_schema=_PARAMS, handler_source=_HANDLER_OK, test_source="t",
+                )
+        assert store.list() == []
+
+    def test_reviewer_sees_the_exact_module_text_that_is_written(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        store = se.SelfExtensions()
+        entry = store.add_draft(
+            capability_gap="gap", tool_name="self_ext_probe", description="Adds numbers.",
+            parameters_schema=_PARAMS, handler_source=_HANDLER_OK, test_source="t",
+        )
+        preview = store.get(entry["id"])["module_preview"]
+        path, _ = se._write_approved_module(store.get(entry["id"]))
+        assert path.read_text(encoding="utf-8") == preview
+
+    def test_module_edited_after_approval_is_refused(self, tmp_path, monkeypatch):
+        import pytest
+
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        store = se.SelfExtensions()
+        entry = store.add_draft(
+            capability_gap="x", tool_name="self_ext_add_numbers", description="Adds two numbers.",
+            parameters_schema=_PARAMS, handler_source=_HANDLER_OK, test_source=_test_ok("self_ext_add_numbers"),
+        )
+        assert se.approve(entry["id"], store=store)["ok"] is True
+        path = tmp_path / "self_extensions" / "approved" / "self_ext_add_numbers.py"
+        path.write_text(path.read_text(encoding="utf-8") + "\nimport os\n", encoding="utf-8")
+        with pytest.raises(PermissionError, match="changed after it was approved"):
+            se.load_approved("self_ext_add_numbers")
+
+    def test_module_with_no_recorded_hash_is_refused(self, tmp_path, monkeypatch):
+        import pytest
+
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        se._write_approved_module(self._entry("d"))
+        with pytest.raises(PermissionError, match="no recorded approval hash"):
+            se.load_approved("self_ext_probe")
+
+    def test_scrubbed_env_has_no_keys(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-value")
+        monkeypatch.setenv("SOME_TOKEN", "fake-token-value")
+        env = se.scrubbed_subprocess_env({"X": "1"})
+        assert "GEMINI_API_KEY" not in env and "SOME_TOKEN" not in env
+        assert env["X"] == "1" and "PATH" in env
+
+    def test_approval_test_subprocess_cannot_read_server_keys(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("FAKE_SERVER_API_KEY", "fake-key-value-12345")
+        store = se.SelfExtensions()
+        test_src = (
+            "import os\n\n\ndef test_no_keys():\n"
+            "    assert 'FAKE_SERVER_API_KEY' not in os.environ\n"
+        )
+        entry = store.add_draft(
+            capability_gap="x", tool_name="self_ext_envcheck", description="d",
+            parameters_schema=_PARAMS, handler_source=_HANDLER_OK, test_source=test_src,
+        )
+        result = se.approve(entry["id"], store=store)
+        assert result["ok"] is True, result.get("error")

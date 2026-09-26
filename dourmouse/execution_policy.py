@@ -27,6 +27,7 @@ import contextlib
 import hashlib
 import json
 import os
+import threading
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -68,18 +69,22 @@ class RunPolicy:
     actor: str = ""
     consequential: int = 0
     calls: Counter[str] = field(default_factory=Counter)
+    # Finding #140: one policy now covers a whole request, including every
+    # branch of a fan-out, which run on several threads at once.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def decide(self, name: str, arguments: dict[str, Any], *, consequential: bool) -> str | None:
         """None to allow, or the refusal reason."""
         _, digest = _args_fingerprint(arguments)
         key = f"{name}:{digest}"
-        if self.calls[key] >= self.max_identical:
-            return (f"'{name}' was already called {self.calls[key]} times with exactly these arguments in this "
-                    "run; the runtime will not repeat it again. Use the earlier result, or change the approach.")
-        if consequential and self.consequential >= self.max_consequential:
-            return (f"this run has already asked for {self.consequential} actions that need approval, the most "
-                    "one run may ask for. Finish with what is done, or have the user start a new request.")
-        self.calls[key] += 1
-        if consequential:
-            self.consequential += 1
-        return None
+        with self._lock:
+            if self.calls[key] >= self.max_identical:
+                return (f"'{name}' was already called {self.calls[key]} times with exactly these arguments in this "
+                        "run; the runtime will not repeat it again. Use the earlier result, or change the approach.")
+            if consequential and self.consequential >= self.max_consequential:
+                return (f"this run has already asked for {self.consequential} actions that need approval, the most "
+                        "one run may ask for. Finish with what is done, or have the user start a new request.")
+            self.calls[key] += 1
+            if consequential:
+                self.consequential += 1
+            return None

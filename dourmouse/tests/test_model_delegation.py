@@ -181,12 +181,14 @@ class TestFormatting:
         caller = types.SimpleNamespace(
             client="C", config=None, confirmation_gate="G", event_sink="S", jobs=jobs, depth=1, max_depth=3,
             budget=budget, max_delegates=9, current_job_id=None, cost_budget="B", dlp="D", rbac="R",
+            policy="P",
         )
         with md.inherit_caller(caller):
             result = md._run_local(DelegationTask(prompt="x"), timeout=5.0)
         assert result.ok and result.text == "fine"
         assert (seen["client"], seen["confirmation_gate"], seen["dlp"], seen["rbac"]) == ("C", "G", "D", "R")
         assert seen["depth"] == 2 and seen["budget"] is budget and seen["fanout_branch"] is True
+        assert seen["policy"] == "P"  # finding #140: the parent's run policy, shared
         assert jobs.count() == 1
 
     def test_worker_threads_see_the_calling_run(self, monkeypatch):

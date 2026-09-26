@@ -5,8 +5,11 @@ everything") and set a large-cloud-only model policy. The ``compute``
 agent used to offload inference to a LAN Dell running Qwen3 1.7B, which
 broke both rules; it now runs Python work (simulations, experiments,
 number crunching) on this Mac through the same job runner the node server
-uses (finding #098): each job in its own folder under the workspace, a
-scrubbed environment, a timeout, a resident-memory limit, captured
+uses (finding #098): each job in its own folder under the workspace, inside
+a macOS Seatbelt sandbox (reads allowlisted, writes only in that folder, no
+network; a job is refused, never run unsandboxed, when sandbox-exec is
+missing), an allowlist environment, CPU, file, process and disk limits, a
+timeout that kills the whole process group, a resident-memory limit, captured
 stdout/stderr, ``out/metrics.json`` and artifacts hashed, and the
 interpreter's environment hash recorded so a result can be reproduced.
 """

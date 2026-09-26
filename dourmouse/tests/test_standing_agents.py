@@ -125,3 +125,100 @@ def test_event_log_wakes_agents_that_asked_for_those_kinds(tmp_path):
     log.append_event("security.scan", "scan", "x", "sentry")
     assert rt.drain_events("watcher") == 1 and w.seen == ["graph.put"]
     assert rt.status()[0]["activity"][0]["text"] == "saw claim"
+
+
+def _wait_for(cond, timeout=5.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if cond():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_event_queue_is_bounded_and_drops_are_counted(monkeypatch, caplog):
+    from dourmouse import standing_agents as sa
+
+    class Watcher(Echo):
+        name = "watcher"
+        wake_on = ("graph.",)
+
+    monkeypatch.setattr(sa, "MAX_PENDING_EVENTS", 5)
+    rt = StandingRuntime(MessageBus())
+    rt.register(Watcher())
+    with caplog.at_level("WARNING"):
+        for i in range(12):
+            rt._on_event({"kind": "graph.put", "n": i})
+    assert len(rt._events["watcher"]) == 5
+    assert [e["n"] for e in rt._events["watcher"]] == [7, 8, 9, 10, 11]  # oldest dropped
+    assert rt.status()[0]["dropped_events"] == 7
+    assert "dropped oldest" in caplog.text
+
+
+def test_loop_survives_a_failure_outside_the_guarded_calls():
+    """S29: an exception from inside the loop's own bookkeeping (here the
+    inbox drain) used to end the thread silently."""
+    rt = StandingRuntime(MessageBus())
+    agent = Echo()
+    rt.register(agent)
+    calls = {"n": 0}
+    real = rt.drain_inbox
+
+    def flaky(name):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise RuntimeError("bus exploded")
+        return real(name)
+
+    rt.drain_inbox = flaky
+    rt.start()
+    try:
+        assert _wait_for(lambda: agent.ticks >= 1)
+        st = rt.status()[0]
+        assert st["errors"] >= 2
+        assert any("bus exploded" in a["text"] for a in st["activity"] if a["kind"] == "error")
+        assert st["health"] == "ok"
+    finally:
+        rt.stop()
+
+
+def test_a_dead_loop_is_restarted_and_reported():
+    class Fatal(Echo):
+        name = "fatal"
+
+        def __init__(self):
+            super().__init__()
+            self.boom = True
+
+        def tick(self):
+            if self.boom:
+                self.boom = False
+                raise SystemExit("agent tried to exit the thread")
+            return super().tick()
+
+    rt = StandingRuntime(MessageBus())
+    agent = Fatal()
+    rt.register(agent)
+    assert rt.status()[0]["health"] == "not_started"
+    rt.start()
+    try:
+        assert _wait_for(lambda: agent.ticks >= 1)
+        st = rt.status()[0]
+        assert st["restarts"] == 1
+        assert any("SystemExit" in a["text"] for a in st["activity"] if a["kind"] == "error")
+        assert st["health"] == "ok"
+        assert rt.health() == {"fatal": "ok"}
+    finally:
+        rt.stop()
+
+
+def test_stalled_loop_is_reported(monkeypatch):
+    rt = StandingRuntime(MessageBus())
+    rt.register(Echo())
+    rt.start()
+    try:
+        assert _wait_for(lambda: rt.status()[0]["last_alive_at"] is not None)
+        rt._state["echo"].last_alive_at = time.time() - 100000
+        assert rt.status()[0]["health"] == "stalled"
+    finally:
+        rt.stop()

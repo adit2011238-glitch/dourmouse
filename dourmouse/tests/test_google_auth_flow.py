@@ -719,10 +719,12 @@ def test_google_callback_denied_redirects_to_login(server):
         assert state not in srv.oauth_pending
 
 
-def test_google_start_honors_host_port(server):
+def test_google_start_honors_host_port(server, monkeypatch):
     """The redirect_uri sent to Google carries the Host header's port, not
     the internal server_port (reviewer-caught: proxy deployments otherwise
-    hit redirect_uri_mismatch)."""
+    hit redirect_uri_mismatch). Behind a local proxy the owner lists the
+    proxy's address in DOURMOUSE_ALLOWED_HOSTS (finding #135)."""
+    monkeypatch.setenv("DOURMOUSE_ALLOWED_HOSTS", "127.0.0.1:9999")
     base, _ = server
     request = urllib.request.Request(base + "/api/auth/google/start")
     request.add_header("Host", "127.0.0.1:9999")

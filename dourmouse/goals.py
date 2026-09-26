@@ -301,7 +301,13 @@ class GoalStore:
             return False
         goal_id = task["goal_id"]
         if approved:
-            self.update_task_status(task_id, "READY", result={"approved_for_next_run": True})
+            # Finding #137: the ticket approves the exact actions the human was
+            # shown (recorded when the task was parked), not whatever the model
+            # decides to do on the next run.
+            pending = list((task.get("result") or {}).get("pending_prompts") or [])
+            self.update_task_status(
+                task_id, "READY", result={"approved_for_next_run": True, "approved_prompts": pending},
+            )
             self.update_goal_status(goal_id, "EXECUTING")
         else:
             self.update_task_status(task_id, "FAILED", error=reason or "declined by human reviewer")

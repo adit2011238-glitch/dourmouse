@@ -239,4 +239,7 @@ class TestProxyEndpoint:
         # The whole point: this response must carry no framing-blocking
         # header of its own, however the real upstream site was blocking it.
         assert "X-Frame-Options" not in headers
-        assert "Content-Security-Policy" not in headers
+        # Finding #139: a CSP sandbox (opaque origin for the framed page), and
+        # nothing that blocks framing.
+        csp = headers["Content-Security-Policy"]
+        assert csp.startswith("sandbox ") and "frame-ancestors" not in csp and "allow-same-origin" not in csp

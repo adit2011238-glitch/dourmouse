@@ -99,3 +99,52 @@ def test_the_ledger_records_decisions_but_never_raw_arguments():
     assert all(actor == "worker" for _, _, actor, _ in events)
     assert "SECRET-TOKEN-123" not in json.dumps([p for *_, p in events])
     assert events[0][3]["argument_names"] == ["x"] and len(events[0][3]["arguments_sha"]) == 16
+
+
+class TestOnePolicyPerRequest:
+    """Finding #140: a nested run used to start a fresh policy, so the limit on
+    approval-gated actions restarted at zero in every delegate and every branch."""
+
+    def test_the_limit_holds_across_threads(self):
+        import threading
+
+        policy = ep.RunPolicy(max_identical=1000, max_consequential=50)
+        allowed = []
+
+        def worker(i: int) -> None:
+            for j in range(20):
+                if policy.decide("send", {"n": i * 100 + j}, consequential=True) is None:
+                    allowed.append(1)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        assert len(allowed) == 50 and policy.consequential == 50
+
+    def test_a_delegated_run_gets_the_parents_policy_not_a_new_one(self):
+        from dourmouse.dispatch import (
+            DispatchRegistry,
+            Subagent,
+            ToolSpec,
+            current_dispatch_context,
+            run_dispatch_messages,
+        )
+        from dourmouse.tests.test_dispatch import FakeClient, _FakeMessage, _FakeResponse
+
+        seen = []
+        probe = ToolSpec(
+            name="probe", description="records the policy of the run it is called from",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda a: seen.append(current_dispatch_context(registry).policy) or "ok",
+        )
+        registry = DispatchRegistry()
+        registry.register_subagent(Subagent(name="p", domain="T", description="probe", tools=(probe,)))
+        shared = ep.RunPolicy(max_consequential=3)
+        from dourmouse.tests.test_dispatch import _FakeToolCall
+
+        client = FakeClient([
+            _FakeResponse(_FakeMessage(content=None, tool_calls=[_FakeToolCall("c1", "probe", "{}")])),
+            _FakeResponse(_FakeMessage(content="done")),
+        ])
+        run_dispatch_messages([{"role": "user", "content": "use the probe"}], registry, client=client, policy=shared, forced_agent="p")
+        assert seen == [shared]

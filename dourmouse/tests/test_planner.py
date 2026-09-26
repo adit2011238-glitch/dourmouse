@@ -595,6 +595,28 @@ class TestSecurityRouting:
         """Findings #127/#131."""
         assert find_agents_for_query(build_general_registry(), query, limit=1)[0]["name"] == "evidence_pipeline"
 
+    @pytest.mark.parametrize("query", [
+        "check my research answer for unsupported claims", "which sentences in my report lack citations",
+    ])
+    def test_answer_critic_queries_reach_the_evidence_pipeline(self, query):
+        """R9: the critic's routing words route to it with a clear margin."""
+        found = find_agents_for_query(build_general_registry(), query, limit=2)
+        assert found[0]["name"] == "evidence_pipeline"
+        assert found[0]["score"] >= found[1]["score"] + 1
+
+    @pytest.mark.parametrize(("query", "agent"), [
+        ("what is the weather", "research_info"),
+        ("search the web for python news", "news"),
+        ("check my inbox", "mail"),
+    ])
+    def test_answer_critic_words_did_not_move_other_routes(self, query, agent):
+        assert find_agents_for_query(build_general_registry(), query, limit=1)[0]["name"] == agent
+
+    @pytest.mark.parametrize("query", ["save this to my documents", "delete my old notes"])
+    def test_answer_critic_did_not_capture_generic_queries(self, query):
+        top = find_agents_for_query(build_general_registry(), query, limit=3)
+        assert "evidence_pipeline" not in [a["name"] for a in top]
+
     @pytest.mark.parametrize(("query", "agent"), [
         ("search the web for mac firewall tips", "research_info"),
         ("save it to a file named notes.txt in your workspace", "dev_coding"),

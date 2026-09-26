@@ -33,7 +33,7 @@ class TestKill:
         proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
         try:
             assert proc.stdout.readline().strip() == "ready"
-            r = rs.kill_process(proc.pid, grace=0.5)
+            r = rs.kill_process(proc.pid, expect_create_time=rs.process_identity(proc.pid)["create_time"], grace=0.5)
             assert r["ok"] and r["result"].startswith("force-killed")
         finally:
             if proc.poll() is None:
@@ -81,7 +81,7 @@ class TestQuarantine:
         f.chmod(0o755)
         q = rs.quarantine_file(f, reason="test")
         assert not f.exists() and q["sha256"] and q["mode"] == 0o755
-        moved = rs.quarantine_dir() / q["id"] / "evil.command"
+        moved = rs.quarantine_dir() / q["id"] / "item" / "evil.command"
         assert moved.stat().st_mode & 0o777 == 0o400
         assert [m["id"] for m in rs.list_quarantine()][0] == q["id"]
         r = rs.restore(q["id"])
@@ -147,3 +147,81 @@ class TestStartupItems:
         monkeypatch.setattr(mt, "persistence_dirs", lambda: [tmp_path / "LaunchAgents"])
         with pytest.raises(rs.ResponseRefused, match="not a launch agent"):
             rs.disable_startup_item(f)
+
+
+class TestKillIdentity:
+    """Security review S12: the pid alone is never enough."""
+
+    def test_no_identity_kills_nothing(self):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            with pytest.raises(rs.ResponseRefused, match="no identity"):
+                rs.kill_process(proc.pid)
+            assert proc.poll() is None
+        finally:
+            proc.kill()
+
+    def test_a_different_start_time_or_exe_means_a_reused_pid(self):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            who = rs.process_identity(proc.pid)
+            with pytest.raises(rs.ResponseRefused, match="reused"):
+                rs.kill_process(proc.pid, expect_create_time=who["create_time"] - 500)
+            with pytest.raises(rs.ResponseRefused, match="reused"):
+                rs.kill_process(proc.pid, expect_exe="/tmp/not-this-program")
+            assert proc.poll() is None
+            r = rs.kill_process(proc.pid, expect_create_time=who["create_time"], expect_exe=who["exe"])
+            assert r["ok"] and proc.wait(timeout=5) is not None
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+
+class TestQuarantineLayout:
+    """Security review S08, S10."""
+
+    def test_a_file_named_manifest_json_is_quarantined_and_restored(self, tmp_path):
+        f = tmp_path / "manifest.json"
+        f.write_text('{"name": "my extension", "version": "1"}', encoding="utf-8")
+        q = rs.quarantine_file(f, reason="suspicious extension")
+        assert not f.exists()
+        assert [m["id"] for m in rs.list_quarantine() if m["id"] == q["id"]] == [q["id"]]
+        assert rs.restore(q["id"])["ok"]
+        assert f.read_text(encoding="utf-8") == '{"name": "my extension", "version": "1"}'
+
+    def test_an_app_bundle_cannot_run_inside_quarantine_and_comes_back_exactly(self, tmp_path):
+        app = tmp_path / "Evil.app"
+        binary = app / "Contents" / "MacOS" / "Evil"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+        binary.chmod(0o755)
+        (app / "Contents" / "Info.plist").write_text("<plist/>", encoding="utf-8")
+        helper_bin = app / "Contents" / "Resources" / "helper.sh"
+        helper_bin.parent.mkdir()
+        helper_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+        helper_bin.chmod(0o4755)
+        q = rs.quarantine_file(app, reason="test")
+        stored = rs.quarantine_dir() / q["id"] / "item"
+        assert [p.name for p in stored.iterdir()] == ["Evil.app.quarantined"]  # not an app any more
+        for f in stored.rglob("*"):
+            if f.is_file():
+                assert f.stat().st_mode & 0o7111 == 0 and not os.access(f, os.X_OK)
+        rs.restore(q["id"])
+        assert binary.stat().st_mode & 0o7777 == 0o755
+        assert helper_bin.stat().st_mode & 0o7777 == 0o4755
+        assert not (tmp_path / "Evil.app.quarantined").exists()
+
+    def test_a_damaged_manifest_is_refused_and_not_listed(self, tmp_path):
+        f = tmp_path / "a.bin"
+        f.write_bytes(b"1")
+        q = rs.quarantine_file(f)
+        mpath = rs.quarantine_dir() / q["id"] / "manifest.json"
+        import json
+
+        m = json.loads(mpath.read_text(encoding="utf-8"))
+        m["name"] = "other"  # no longer the last part of original_path
+        mpath.write_text(json.dumps(m), encoding="utf-8")
+        assert all(x["id"] != q["id"] for x in rs.list_quarantine())
+        with pytest.raises(rs.ResponseRefused, match="damaged"):
+            rs.restore(q["id"])
+        assert not f.exists()  # nothing was moved anywhere else

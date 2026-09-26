@@ -88,8 +88,15 @@
   nameEl.textContent = displayName;
   document.title = displayName;
 
+  // Finding #135: this page runs in a sandboxed frame, so its reads are
+  // cross-origin and the server wants the per-launch token it put here.
+  var PT = "__DM_PREVIEW_TOKEN__";
+  function tok(u){
+    return PT ? u + (u.indexOf("?") === -1 ? "?" : "&") + "pt=" + encodeURIComponent(PT) : u;
+  }
+  function plain(u){ return u.replace(/([?&])pt=[^&]*&?/, "$1").replace(/[?&]$/, ""); }
   function fetchJson(url){
-    return fetch(url).then(function(r){ return r.json(); });
+    return fetch(tok(url)).then(function(r){ return r.json(); });
   }
 
   if (!path) {
@@ -99,8 +106,8 @@
     function loadPage(){
       var img = document.createElement("img");
       img.alt = "page " + (state.page + 1);
-      img.src = prefix + "/pdf-page.png?" + pathParam + "=" + encodeURIComponent(path) +
-        "&page=" + state.page + "&t=" + Date.now();
+      img.src = tok(prefix + "/pdf-page.png?" + pathParam + "=" + encodeURIComponent(path) +
+        "&page=" + state.page + "&t=" + Date.now());
       stage.innerHTML = "";
       stage.appendChild(img);
       pageLabel.hidden = false;
@@ -138,11 +145,11 @@
     var media = document.createElement(isVideo ? "video" : "audio");
     media.controls = true;
     media.preload = "metadata";
-    media.src = prefix + "/media?" + pathParam + "=" + encodeURIComponent(path);
+    media.src = tok(prefix + "/media?" + pathParam + "=" + encodeURIComponent(path));
     // Sidecar subtitles (movie.srt / movie.en.srt next to the file).
     ((info && info.subtitles) || []).forEach(function(s, i){
       var t = document.createElement("track");
-      t.kind = "subtitles"; t.label = s.label; t.src = s.url; if (i === 0) t.default = true;
+      t.kind = "subtitles"; t.label = s.label; t.src = tok(s.url); if (i === 0) t.default = true;
       media.appendChild(t);
     });
     // Remember where playback stopped, per file.
@@ -188,7 +195,7 @@
       stage.innerHTML = '<div class="msg err">Could not play ' + displayName +
         ": " + why + '.</div><div class="hint">' + hint +
         '<br><br><code style="opacity:.8;word-break:break-all">' +
-        media.src.replace(/</g, "&lt;") + '</code></div>';
+        plain(media.src).replace(/</g, "&lt;") + '</code></div>';
     };
     stage.innerHTML = "";
     stage.appendChild(media);
@@ -218,7 +225,7 @@
     img.onerror = function(){
       stage.innerHTML = '<div class="msg err">Could not load this image.</div>';
     };
-    img.src = prefix + "/image?" + pathParam + "=" + encodeURIComponent(path) + "&t=" + Date.now();
+    img.src = tok(prefix + "/image?" + pathParam + "=" + encodeURIComponent(path) + "&t=" + Date.now());
     stage.innerHTML = "";
     stage.appendChild(img);
   } else {

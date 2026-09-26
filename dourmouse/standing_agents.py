@@ -27,6 +27,7 @@ Design rules (docs: REMAINING_WORK INFRA-1), each enforced here:
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import time
 import traceback
@@ -34,7 +35,18 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+_LOG = logging.getLogger(__name__)
+
 ALLOWED_CAPABILITIES = frozenset({"read", "propose"})
+
+#: Per-agent pending-event cap. When a tick stalls, the oldest events are
+#: dropped (and counted) instead of growing memory without bound.
+MAX_PENDING_EVENTS = 500
+_BACKOFF_START_S = 0.5
+_BACKOFF_MAX_S = 30.0
+#: A loop that has not come round for this many seconds (or three
+#: intervals, if longer) is reported as stalled.
+_STALL_FLOOR_S = 120.0
 
 
 class StandingAgent(Protocol):
@@ -63,6 +75,9 @@ class AgentState:
     last_summary: str = ""
     last_error: str = ""
     errors: int = 0
+    dropped_events: int = 0
+    restarts: int = 0
+    last_alive_at: float | None = None
     activity: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
 
 
@@ -74,8 +89,8 @@ class StandingRuntime:
         self._state: dict[str, AgentState] = {}
         self._wake: dict[str, threading.Event] = {}
         self._stop = threading.Event()
-        self._threads: list[threading.Thread] = []
-        self._events: dict[str, list[dict[str, Any]]] = {}
+        self._threads: dict[str, threading.Thread] = {}
+        self._events: dict[str, deque[dict[str, Any]]] = {}
         self._events_lock = threading.Lock()
         bus.on_post(self._on_post)
 
@@ -89,14 +104,24 @@ class StandingRuntime:
         for name, agent in self._agents.items():
             prefixes = getattr(agent, "wake_on", ()) or ()
             if any(str(event.get("kind", "")).startswith(p) for p in prefixes):
+                st = self._state[name]
                 with self._events_lock:
-                    self._events.setdefault(name, []).append(event)
+                    pending = self._events.setdefault(name, deque(maxlen=MAX_PENDING_EVENTS))
+                    if len(pending) == pending.maxlen:
+                        st.dropped_events += 1
+                        if st.dropped_events == 1 or st.dropped_events % 100 == 0:
+                            _LOG.warning("standing agent %s: event queue full (%d), dropped oldest; %d dropped so far",
+                                         name, MAX_PENDING_EVENTS, st.dropped_events)
+                    pending.append(event)
                 self._wake[name].set()
 
     def drain_events(self, name: str) -> int:
         agent, st = self._agents[name], self._state[name]
         with self._events_lock:
-            pending, self._events[name] = self._events.get(name, []), []
+            queue = self._events.get(name)
+            pending = list(queue) if queue else []
+            if queue:
+                queue.clear()
         handler = getattr(agent, "handle_event", None)
         for event in pending:
             if handler is None:
@@ -182,33 +207,82 @@ class StandingRuntime:
         return summary
 
     def _loop(self, name: str) -> None:
+        """One agent's loop. A failure in any step is recorded and backed
+        off (0.5s doubling to 30s), never allowed to end the thread."""
         st, wake = self._state[name], self._wake[name]
         next_tick = 0.0
+        backoff = _BACKOFF_START_S
         while not self._stop.is_set():
-            self.drain_inbox(name)
-            self.drain_events(name)
-            if time.monotonic() >= next_tick:
-                self.run_tick(name)
-                next_tick = time.monotonic() + st.interval_s
-            wake.wait(max(0.05, next_tick - time.monotonic()))
-            wake.clear()
+            st.last_alive_at = time.time()
+            try:
+                self.drain_inbox(name)
+                self.drain_events(name)
+                if time.monotonic() >= next_tick:
+                    self.run_tick(name)
+                    next_tick = time.monotonic() + st.interval_s
+                backoff = _BACKOFF_START_S
+                wake.wait(max(0.05, next_tick - time.monotonic()))
+                wake.clear()
+            except Exception as exc:  # noqa: BLE001 -- recorded, the loop goes on
+                st.errors += 1
+                st.last_error = f"loop: {type(exc).__name__}: {exc}"
+                _LOG.exception("standing agent %s: loop step failed, retrying in %.1fs", name, backoff)
+                self._record(st, "error", st.last_error)
+                self._stop.wait(backoff)
+                backoff = min(backoff * 2, _BACKOFF_MAX_S)
+
+    def _supervise(self, name: str) -> None:
+        """Runs ``_loop`` and restarts it, with backoff, if it ever exits
+        for any reason other than stop() (for example a BaseException an
+        agent raised)."""
+        st = self._state[name]
+        backoff = _BACKOFF_START_S
+        while not self._stop.is_set():
+            try:
+                self._loop(name)
+            except BaseException as exc:  # noqa: BLE001 -- the supervisor must outlive whatever killed the loop
+                st.errors += 1
+                st.restarts += 1
+                st.last_error = f"loop died: {type(exc).__name__}: {exc}"
+                _LOG.exception("standing agent %s: loop died, restarting in %.1fs", name, backoff)
+                self._record(st, "error", st.last_error)
+                self._stop.wait(backoff)
+                backoff = min(backoff * 2, _BACKOFF_MAX_S)
 
     def start(self) -> None:
         for name in self._agents:
-            t = threading.Thread(target=self._loop, args=(name,), daemon=True, name=f"standing-{name}")
+            t = threading.Thread(target=self._supervise, args=(name,), daemon=True, name=f"standing-{name}")
             t.start()
-            self._threads.append(t)
+            self._threads[name] = t
 
     def stop(self) -> None:
         self._stop.set()
         for ev in self._wake.values():
             ev.set()
 
+    def _health(self, st: AgentState) -> str:
+        """ok, stalled (loop has not come round recently), dead (thread
+        gone before stop) or not_started."""
+        thread = self._threads.get(st.name)
+        if thread is None:
+            return "not_started"
+        if not thread.is_alive():
+            return "stopped" if self._stop.is_set() else "dead"
+        limit = max(_STALL_FLOOR_S, 3 * st.interval_s)
+        if st.last_alive_at is not None and time.time() - st.last_alive_at > limit:
+            return "stalled"
+        return "ok"
+
+    def health(self) -> dict[str, str]:
+        return {st.name: self._health(st) for st in self._state.values()}
+
     def status(self) -> list[dict[str, Any]]:
         return [{
             "name": st.name, "interval_s": st.interval_s, "capabilities": st.capabilities, "ticks": st.ticks,
             "answered": st.answered, "last_tick_at": st.last_tick_at, "last_summary": st.last_summary,
             "last_error": st.last_error, "errors": st.errors, "activity": list(st.activity)[:30],
+            "health": self._health(st), "restarts": st.restarts, "dropped_events": st.dropped_events,
+            "last_alive_at": st.last_alive_at,
         } for st in self._state.values()]
 
 

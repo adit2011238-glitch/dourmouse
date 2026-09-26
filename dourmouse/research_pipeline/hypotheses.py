@@ -69,23 +69,32 @@ def default_complete() -> Complete:
     return complete
 
 
+#: Each failed candidate start can scan to the end of the text, so the work
+#: is bounded by capping both the input and the number of starts tried (S30).
+_JSON_MAX_CHARS = 200_000
+_JSON_MAX_ATTEMPTS = 200
+
+
 def _json(text: str) -> dict[str, Any] | None:
     """The first complete JSON object in a reply. Models wrap JSON in prose
     and code fences, and prose AFTER the object can contain braces too
     (found live), so each candidate start is decoded to exactly one object
     rather than sliced to the last brace; fenced blocks are tried first."""
     decoder = json.JSONDecoder()
-    fenced = [m.group(1) for m in re.finditer(r"```(?:json)?\s*(.*?)```", text, re.S)]
+    text = text[:_JSON_MAX_CHARS]
+    fenced = [m.group(1) for m in re.finditer(r"```(?:json)?\s*(.*?)```", text, re.S)][:_JSON_MAX_ATTEMPTS]
+    attempts = 0
     for chunk in fenced + [text]:
-        i = chunk.find("{")
-        while i != -1:
+        for start in re.finditer(r"\{", chunk):
+            if attempts >= _JSON_MAX_ATTEMPTS:
+                return None
+            attempts += 1
             try:
-                value, _ = decoder.raw_decode(chunk, i)
-                if isinstance(value, dict):
-                    return value
+                value, _ = decoder.raw_decode(chunk, start.start())
             except ValueError:
-                pass
-            i = chunk.find("{", i + 1)
+                continue
+            if isinstance(value, dict):
+                return value
     return None
 
 

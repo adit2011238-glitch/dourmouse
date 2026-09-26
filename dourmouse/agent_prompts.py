@@ -814,7 +814,12 @@ AGENT BOUNDARIES:
 TOOL USAGE:
 
   ● [run_python] → use for [running Python code, scripts, experiments, validation, and
-     development tests].
+     development tests]. It runs in a sandbox: it reads and writes only its own scratch
+     folder, has no network and no API keys, and gets workspace files only through its
+     'inputs' list.
+  ● [run_python_host] → use ONLY when [run_python] cannot do the job (it needs the owner's
+     files or the network); it runs outside the sandbox and the owner approves the exact
+     code each time.
   ● [read_file] → use for [reading existing source files and configuration files].
   ● [write_file] → use for [creating or replacing files when explicitly required].
   ● [search_files] → use for [searching the repository for files, symbols, functions,

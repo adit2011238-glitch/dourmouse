@@ -16,6 +16,7 @@ anything") will need REQUIRES_CONFIRMATION when they exist.
 from __future__ import annotations
 
 import dataclasses
+import re
 import time
 from typing import Any
 
@@ -254,9 +255,13 @@ def _format_lockdown(st: dict[str, Any]) -> str:
         mark = ""
         if "blocked_now" in s:
             mark = " (blocked now)" if s["blocked_now"] else " (NOT blocked right now)"
-        note = f" [path {s['path_ignored']} cannot be blocked, whole site is]" if s.get("path_ignored") else ""
-        sites.append(s["domain"] + mark + note)
+        note = f" [the path {s['path_ignored']} is ignored: only the names are blocked]" if s.get("path_ignored") else ""
+        names = " and ".join(s.get("blocks") or [s["domain"]])
+        sites.append(f"{s['domain']}{mark} (blocks exactly {names})" + note)
     lines.append("Websites: " + (", ".join(sites) or "none"))
+    if st.get("urls"):
+        lines.append("URLs (browser extension only): " + ", ".join(u["url"] for u in st["urls"]))
+    lines.extend("WARNING: " + w for w in st.get("warnings", []))
     lines.extend("Note: " + x for x in st["limits"])
     return "\n".join(lines)
 
@@ -267,37 +272,116 @@ def _lockdown_status(_arguments: dict[str, Any]) -> str:
     return _format_lockdown(lockdown.status())
 
 
+def _str_list(value: Any) -> list[str]:
+    """A tool argument that should be a list of names, as one."""
+    if isinstance(value, str):
+        return [value]
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def _shown(value: str, limit: int = 60) -> str:
+    """Model-supplied text quoted for an approval prompt: one line, capped."""
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", value).strip()
+    return '"' + (text if len(text) <= limit else text[:limit] + "...") + '"'
+
+
+def _lockdown_edit_prompt(arguments: dict[str, Any]) -> str:
+    from . import lockdown
+
+    lines = ["Change the lockdown blocklist?"]
+    sites = []
+    for entry in _str_list(arguments.get("add_sites")):
+        try:
+            names = lockdown.hosts_names(lockdown.normalize_site(entry)["domain"])
+            sites.append(" and ".join(names))
+        except ValueError as exc:
+            sites.append(f"{_shown(entry)} (will be refused: {exc})")
+    urls = []
+    for entry in _str_list(arguments.get("add_urls")):
+        try:
+            urls.append(lockdown.normalize_url(entry)["url"])
+        except ValueError as exc:
+            urls.append(f"{_shown(entry)} (will be refused: {exc})")
+    apps = []
+    for entry in _str_list(arguments.get("add_apps")):
+        row = lockdown.resolve_app(entry)
+        refused = lockdown.protected_app_reason(row)
+        apps.append(f"{row['name']}" + (f" ({row['bundle_id']})" if row.get("bundle_id") else "")
+                    + (f" (will be refused: {refused})" if refused else ""))
+    removes = [_shown(e) for e in _str_list(arguments.get("remove"))]
+    if sites:
+        lines.append("Add websites (exactly these names, not other subdomains): " + ", ".join(sites))
+    if urls:
+        lines.append("Add URLs (any address starting with these, blocked only in browsers with the Dourmouse "
+                     "lockdown extension): " + ", ".join(urls))
+    if apps:
+        lines.append("Add apps (closed whenever lockdown is on): " + ", ".join(apps))
+    if removes:
+        lines.append("Remove: " + ", ".join(removes))
+    if not (sites or urls or apps or removes):
+        lines.append("No entries were listed, so nothing will change.")
+    lines.append("Lockdown is ON: the change takes effect at once." if lockdown.Blocklist.load().active
+                 else "Lockdown is off: nothing is blocked until you start it.")
+    return "\n".join(lines)
+
+
 def _lockdown_edit(arguments: dict[str, Any]) -> str:
     from . import lockdown
 
-    bl = lockdown.Blocklist.load()
     added, removed, errors = [], [], []
-    for entry in arguments.get("add_sites") or []:
-        try:
-            added.append(bl.add_site(entry)["domain"])
-        except ValueError as exc:
-            errors.append(str(exc))
-    for entry in arguments.get("add_apps") or []:
-        added.append(bl.add_app(entry)["name"])
-    for entry in arguments.get("remove") or []:
-        if bl.remove(entry):
-            removed.append(entry)
-    bl.save()
-    if bl.active:
-        lockdown.write_hosts_request(bl)  # a running lockdown picks up the change
+    with lockdown.locked_blocklist() as bl:
+        for entry in _str_list(arguments.get("add_sites")):
+            try:
+                added.append(bl.add_site(entry)["domain"])
+            except ValueError as exc:
+                errors.append(str(exc))
+        for entry in _str_list(arguments.get("add_urls")):
+            try:
+                added.append(bl.add_url(entry)["url"])
+            except ValueError as exc:
+                errors.append(str(exc))
+        for entry in _str_list(arguments.get("add_apps")):
+            try:
+                added.append(bl.add_app(entry)["name"])
+            except ValueError as exc:
+                errors.append(str(exc))
+        for entry in _str_list(arguments.get("remove")):
+            if bl.remove(entry):
+                removed.append(entry)
+        bl.save()
+        if bl.active:
+            lockdown.write_hosts_request(bl)  # a running lockdown picks up the change
+        st = lockdown.status(bl)
     out = []
     if added:
         out.append("Added: " + ", ".join(added))
     if removed:
         out.append("Removed: " + ", ".join(removed))
     out.extend("ERROR: " + e for e in errors)
-    return "\n".join(out + ["", _format_lockdown(lockdown.status(bl))])
+    return "\n".join(out + ["", _format_lockdown(st)])
 
 
 def _lockdown_start(_arguments: dict[str, Any]) -> str:
     from . import lockdown
 
     return _format_lockdown(lockdown.start())
+
+
+def _lockdown_start_prompt(_arguments: dict[str, Any]) -> str:
+    from . import lockdown
+
+    bl = lockdown.Blocklist.load()
+    apps = ", ".join(a["name"] for a in bl.apps) or "none"
+    names = ", ".join(n for s in bl.sites for n in lockdown.hosts_names(s["domain"])) or "none"
+    lines = ["Start lockdown now? Until you end it:", f"Apps closed on sight: {apps}",
+             f"Website names blocked (exactly these, not other subdomains): {names}"]
+    if bl.urls:
+        lines.append("URLs blocked in browsers with the lockdown extension: " + ", ".join(u["url"] for u in bl.urls))
+    if bl.always:
+        lines.append("Also blocked for good: " + ", ".join(s["domain"] for s in bl.always))
+    if bl.load_warning:
+        lines.append("WARNING: " + bl.load_warning)
+    return "\n".join(lines)
 
 
 def _lockdown_stop(_arguments: dict[str, Any]) -> str:
@@ -356,10 +440,39 @@ def _respond(fn: Any) -> str:
         "name", "pid", "result", "original_path", "now_at", "id", "restored_to", "path", "quarantine_id"))
 
 
+#: The identity of each process shown to the owner in an approval prompt,
+#: so the kill checks the very process that was approved, not whatever the
+#: pid names by then.
+_PROMPTED_PROCESSES: dict[int, dict[str, Any]] = {}
+
+
+def _kill_prompt(a: dict[str, Any]) -> str:
+    from .response import ResponseRefused, process_identity
+
+    pid = int(a.get("pid") or 0)
+    expected = a.get("expect_name") or None
+    try:
+        who = process_identity(pid)
+    except ResponseRefused as exc:
+        return f"Stop process {pid}? Not possible: {exc}"
+    _PROMPTED_PROCESSES[pid] = who
+    started = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(who["create_time"])) if who["create_time"] else "unknown"
+    text = (f"Stop process {pid}: {who['name']} ({who['exe'] or 'path unknown'}), user {who['user'] or 'unknown'}, "
+            f"started {started}?")
+    if expected and expected != who["name"]:
+        text += f" WARNING: the request said {_shown(str(expected))}, which is not this process."
+    return text
+
+
 def _security_kill_process(a: dict[str, Any]) -> str:
     from .response import kill_process
 
-    return _respond(lambda: kill_process(int(a["pid"]), expect_name=a.get("expect_name") or None))
+    pid = int(a["pid"])
+    approved = _PROMPTED_PROCESSES.pop(pid, None)
+    identity: dict[str, Any] = {"expect_name": a.get("expect_name") or None}
+    if approved:
+        identity.update(expect_create_time=approved["create_time"], expect_exe=approved["exe"])
+    return _respond(lambda: kill_process(pid, **identity))
 
 
 def _security_quarantine_file(a: dict[str, Any]) -> str:
@@ -448,11 +561,44 @@ def _security_privacy_mode(a: dict[str, Any]) -> str:
 
     on = bool(a.get("on"))
     set_privacy_mode(on)
-    return ("Privacy mode ON: the analyst will not send findings to the cloud model, and browser history "
-            "stays on this Mac." if on else "Privacy mode OFF.")
+    return ("Privacy mode ON: the analyst will not send findings to the cloud model, and the security tools "
+            "will not show the chat findings, download sources, hostnames, process lists, file names or "
+            "browser history; those stay on this Mac (the console still shows them)." if on
+            else "Privacy mode OFF.")
+
+
+#: Tools whose output is evidence about this Mac. The chat model is in the
+#: cloud, so in privacy mode these answer with a note instead (browser history
+#: has its own, finer-grained handling, and the analyst its own guard).
+EVIDENCE_TOOLS = frozenset({
+    "security_status", "list_exposed_services", "security_sentry_scan", "security_external_peers",
+    "security_known_devices", "security_downloads", "security_monitoring_check", "security_diagnose_connection",
+    "security_report", "security_quarantine_list",
+})
+
+
+def _withhold_in_privacy_mode(spec: ToolSpec) -> ToolSpec:
+    inner = spec.handler
+
+    def handler(arguments: dict[str, Any]) -> str:
+        from .privacy import privacy_mode
+
+        if privacy_mode():
+            return (f"Withheld in privacy mode: {spec.name} would return security evidence from this Mac (file names, "
+                    "addresses, download sources, processes), and that stays on this Mac. Turn privacy mode off "
+                    "(security_privacy_mode) or open the Security console to see it.")
+        return inner(arguments)
+
+    return dataclasses.replace(spec, handler=handler)
 
 
 def build_security_subagent() -> Subagent:
+    sub = _build_security_subagent()
+    return dataclasses.replace(
+        sub, tools=tuple(_withhold_in_privacy_mode(t) if t.name in EVIDENCE_TOOLS else t for t in sub.tools))
+
+
+def _build_security_subagent() -> Subagent:
     return Subagent(
         name="security",
         domain="Both",
@@ -597,15 +743,23 @@ def build_security_subagent() -> Subagent:
             ToolSpec(
                 name="lockdown_edit",
                 description=(
-                    "Add or remove entries on the lockdown blocklist. Websites can be URLs or domains (the whole "
-                    "domain is blocked); apps by name (e.g. 'Discord'), bundle id or path. Does not start lockdown."
+                    "Add or remove entries on the lockdown blocklist. Websites can be URLs or domains: exactly that "
+                    "name and its www. form are blocked, not other subdomains such as m. or old., and never the path. "
+                    "add_urls takes addresses with a path (reddit.com/r/all) and blocks any address starting with "
+                    "that path, but only in browsers that have the Dourmouse lockdown extension installed. "
+                    "Apps by name (e.g. 'Discord'), bundle id or path; macOS's own apps and terminals are refused. "
+                    "Does not start lockdown, but takes effect at once if lockdown is already on, so the owner "
+                    "approves the exact entries first."
                 ),
                 parameters={"type": "object", "properties": {
                     "add_sites": {"type": "array", "items": {"type": "string"}},
+                    "add_urls": {"type": "array", "items": {"type": "string"}},
                     "add_apps": {"type": "array", "items": {"type": "string"}},
                     "remove": {"type": "array", "items": {"type": "string"}},
                 }},
                 handler=_lockdown_edit,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=_lockdown_edit_prompt,
             ),
             ToolSpec(
                 name="lockdown_start",
@@ -613,7 +767,7 @@ def build_security_subagent() -> Subagent:
                 parameters={"type": "object", "properties": {}},
                 handler=_lockdown_start,
                 permission=Permission.REQUIRES_CONFIRMATION,
-                confirm_prompt=lambda a: "Start lockdown now? Everything on the blocklist will be closed and blocked until you end it.",
+                confirm_prompt=_lockdown_start_prompt,
             ),
             ToolSpec(
                 name="lockdown_stop",
@@ -673,7 +827,7 @@ def build_security_subagent() -> Subagent:
                 }, "required": ["pid"]},
                 handler=_security_kill_process,
                 permission=Permission.REQUIRES_CONFIRMATION,
-                confirm_prompt=lambda a: f"Stop process {a.get('pid')} ({a.get('expect_name') or 'name not given'})?",
+                confirm_prompt=_kill_prompt,
             ),
             ToolSpec(
                 name="security_quarantine_file",

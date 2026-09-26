@@ -37,10 +37,12 @@ Binds to 127.0.0.1 only. Secrets stay in .env; nothing is logged in full.
 
 from __future__ import annotations
 
+import hmac
 import json
 import mimetypes
 import os
 import re
+import secrets
 import sys
 import threading
 import time
@@ -51,6 +53,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
+from dourmouse import request_guard
 from dourmouse.http_server import DourmouseHTTPServer
 
 
@@ -1781,6 +1784,12 @@ def _vision_dependency_status(key: str, deadline: float) -> bool | None:
     return _VISION_DEPENDENCY_CACHE.get(key)
 
 
+# Finding #142: the biggest request body the server will read: larger than the
+# 50 MB upload cap so uploads are unaffected, small enough that one request
+# cannot hold a thread and memory for a gigabyte.
+_MAX_BODY_BYTES = 64 * 1024 * 1024
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "AtlasDourmouseWebUI/0.1"
 
@@ -1856,6 +1865,53 @@ class _Handler(BaseHTTPRequestHandler):
                 return store.session_email(value.strip())
         return None
 
+    # -- finding #135: requests driven by a web page, not by the app ------- #
+
+    def _server_port(self) -> int:
+        address = self.server.server_address
+        return int(address[1]) if isinstance(address, tuple) else 0
+
+    def _guard(self) -> bool:
+        """False, after answering 403, when the request is a web page's doing.
+
+        A loopback client skips the access token, and a page open in the
+        owner's browser reaches 127.0.0.1 like any local program. The Host
+        header (DNS rebinding) and, for writes, Origin and Sec-Fetch-Site
+        (cross-site forgery) are what tell the two apart. See request_guard.
+        """
+        ip = (self.client_address[0] if self.client_address else "") or ""
+        reason = request_guard.check(
+            self.command, self.headers, ip, self._server_port(), request_guard.extra_allowed_hosts()
+        )
+        if reason is None:
+            # Finding #142: a request body is bounded before anything reads it. A
+            # client that announces gigabytes used to make the server wait for
+            # them, one thread per request; a garbage length raised a 500.
+            try:
+                announced = int(self.headers.get("Content-Length", "0") or 0)
+            except ValueError:
+                self._send_json({"error": "bad Content-Length"}, status=400)
+                self.close_connection = True
+                return False
+            if announced < 0 or announced > _MAX_BODY_BYTES:
+                self._send_json({"error": "request body too large", "limit": _MAX_BODY_BYTES}, status=413)
+                self.close_connection = True
+                return False
+            return True
+        self._send_json({"error": "forbidden", "detail": reason}, status=403)
+        return False
+
+    def _cors_allowed(self) -> bool:
+        """The preview routes answer with a wildcard CORS header so the
+        sandboxed preview frame can read them. A cross-origin caller therefore
+        needs the per-launch token the app put in that frame's page; any other
+        page cannot read a file off this disk."""
+        if not request_guard.is_cross_origin(self.headers, self._server_port(), request_guard.extra_allowed_hosts()):
+            return True
+        token = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("pt", [""])[0]
+        expected = getattr(self.server, "preview_token", "") or ""
+        return bool(expected) and hmac.compare_digest(token, expected)
+
     def _send_unauthorized(self) -> None:
         """401 for APIs, a redirect to /login for page navigations."""
         if self.path.startswith("/api/"):
@@ -1903,9 +1959,15 @@ class _Handler(BaseHTTPRequestHandler):
     # CORS explicitly rather than changing the iframe's own security
     # sandbox to fix a symptom instead of the cause.
     def _send_json_cors(self, payload: dict[str, Any], status: int = 200) -> None:
+        if not self._cors_allowed():
+            self._send_json({"error": "forbidden"}, status=403)
+            return
         self._send_json(payload, status=status, headers={"Access-Control-Allow-Origin": "*"})
 
     def _send_bytes_cors(self, body: bytes, content_type: str, status: int = 200) -> None:
+        if not self._cors_allowed():
+            self._send_json({"error": "forbidden"}, status=403)
+            return
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -1925,6 +1987,9 @@ class _Handler(BaseHTTPRequestHandler):
     # an Accept-Ranges header a <video> element cannot seek at all, and Safari
     # refuses to begin playback of a ranged-media URL that answers 200.
     def _send_media_file(self, target: Path, content_type: str) -> None:
+        if not self._cors_allowed():
+            self._send_json({"error": "forbidden"}, status=403)
+            return
         try:
             size = target.stat().st_size
         except OSError as exc:
@@ -1995,7 +2060,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
     def _read_json_body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        length = max(0, min(length, _MAX_BODY_BYTES))  # _guard already refused anything larger
         raw = self.rfile.read(length) if length else b"{}"
         try:
             return json.loads(raw or b"{}")
@@ -2005,6 +2074,8 @@ class _Handler(BaseHTTPRequestHandler):
     # -- routes ----------------------------------------------------------- #
 
     def do_GET(self):  # noqa: N802
+        if not self._guard():
+            return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         if path == "/login":
@@ -3191,6 +3262,16 @@ class _Handler(BaseHTTPRequestHandler):
 
             self._send_json({"alerts": store.alerts(owner, include_dismissed=history)[:200],
                              "muted": store.muted_sources(owner), "sources": sorted(ALERT_KINDS)})
+        elif path == "/api/security/lockdown/rules":
+            # Finding #141: what the browser extension enforces (URL-path
+            # blocks). Read-only and rebuilt from the blocklist on every call,
+            # so the extension always applies the current lockdown state. The
+            # extension sends no token: like every route here, a loopback
+            # caller is trusted and the Host guard keeps web pages out.
+            from dourmouse.security.extension_rules import rules_payload
+            from dourmouse.security.lockdown import Blocklist
+
+            self._send_json(rules_payload(Blocklist.load()))
         elif path == "/api/research/graph":
             # R8 (finding #129): the research graph for the RESEARCH screen;
             # ?question=<id> returns one question in full.
@@ -3692,6 +3773,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404, "not found")
 
     def do_POST(self):  # noqa: N802
+        if not self._guard():
+            return
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/login":
             # v4.0: token exchange — sets the dourmouse_session cookie.
@@ -4677,6 +4760,17 @@ class _Handler(BaseHTTPRequestHandler):
             ".wav": "audio/wav",
         }.get(Path(rel).suffix, "application/octet-stream")
         body = target.read_bytes()
+        # Finding #135: the preview frame is sandboxed (its origin is opaque),
+        # so its reads are cross-origin and need the per-launch token. Only a
+        # same-origin load of this page (the app's own frame or window) is
+        # given the token; a page on another site that frames this one gets an
+        # empty string and can read nothing.
+        if rel == "file_preview.html":
+            same_origin = not request_guard.is_cross_origin(
+                self.headers, self._server_port(), request_guard.extra_allowed_hosts()
+            )
+            token = (getattr(self.server, "preview_token", "") or "") if same_origin else ""
+            body = body.replace(b"__DM_PREVIEW_TOKEN__", token.encode("ascii"))
         # v8.2 — the [ATLAS TERMINAL] button opens the streamlit terminal;
         # its port is configurable via DOURMOUSE_ATLAS_TERMINAL_PORT (default
         # 8511, the start_atlas_ui.sh default). Injected at serve time so the
@@ -4768,13 +4862,18 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        # The whole point of this endpoint: no X-Frame-Options/CSP header
-        # of ours goes out here at all. Absence is the correct way to
-        # allow framing (there is no valid "allow everyone" value for
-        # X-Frame-Options -- ALLOW-FROM is deprecated/unsupported and an
-        # unrecognized value risks the opposite of what's intended), and
-        # this handler never adds either header, unlike _serve_static's
-        # static-file responses elsewhere in this class.
+        # The whole point of this endpoint: no framing-blocking header of
+        # ours goes out here (no X-Frame-Options, no frame-ancestors).
+        # Absence is the correct way to allow framing (there is no valid
+        # "allow everyone" value for X-Frame-Options -- ALLOW-FROM is
+        # deprecated/unsupported and an unrecognized value risks the
+        # opposite of what's intended).
+        #
+        # Finding #139: what it serves is somebody else's page, from OUR
+        # origin. A CSP sandbox gives that page an opaque origin even when it
+        # is opened as a top-level page rather than inside the console's
+        # sandboxed frame, so its scripts can never act as the app.
+        self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups")
         self.end_headers()
         self.wfile.write(body)
 
@@ -7629,6 +7728,7 @@ def run_server(
     # measured against (see _handle_role elevation gate).
     server.app_role = rbac.role
     server.access_token = access  # v4.0: auth gate (empty = loopback-only)
+    server.preview_token = secrets.token_urlsafe(24)  # finding #135: see _cors_allowed
     server.registry = registry
     server.client = client
     server.config = config
@@ -7676,9 +7776,12 @@ def run_server(
     # default_db() like every other real store here; tests pass an isolated
     # instance the same way they already do for bus/state.
     if office_log is None:
+        from dourmouse.db_recovery import open_with_recovery
         from dourmouse.office_logger import OfficeLogger
+        from dourmouse.office_logger import default_db as _office_db
 
-        office_log = OfficeLogger()
+        # Finding #140: history must never stop the app from starting.
+        office_log = open_with_recovery(OfficeLogger, _office_db(), "office log")
     server.office_log = office_log
     server.bus.on_post(server.office_log.log_message)
     # R6 (finding #128): every research-graph change lands in the append-only
@@ -7969,7 +8072,7 @@ def run_server(
                         events_hub.broadcast({"type": "security_analysis", "analysis": out})
                         if out.get("ok"):
                             _alert("security", "Security analyst: " + out["summary"],
-                                   "Worry: " + str(out.get("worry")), "high" if out.get("worry") == "high" else "med")
+                                   "Worry: " + str(out.get("worry")), str(out.get("alert_severity") or "med"))
                 threading.Thread(target=run, daemon=True, name="dourmouse-security-analyst").start()
 
             sentry_rt.add_listener(_analyze)

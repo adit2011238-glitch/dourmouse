@@ -81,10 +81,13 @@ class TestToolRegistration:
         names = [t.name for t in sub.tools]
         assert "codex_code" in names
 
-    def test_codex_code_is_regular_tier(self, registry):
+    def test_codex_code_needs_the_owners_approval(self, registry):
+        """Finding #137: this hands a task to a CLI that edits files and runs
+        commands, so the owner approves it, and the prompt shows the task."""
         sub = registry.get_subagent("dev_coding")
         tool = next(t for t in sub.tools if t.name == "codex_code")
-        assert tool.permission.value == "regular"
+        assert tool.permission.value == "requires_confirmation"
+        assert "fix the parser" in tool.confirm_prompt({"task": "fix the parser"})
 
     def test_codex_code_in_roster_payload(self, registry):
         from dourmouse.webui import build_roster_payload

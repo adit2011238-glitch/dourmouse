@@ -44,7 +44,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import contextlib
 import contextvars
+import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1239,34 +1241,105 @@ def _list_calendar_events_tool(arguments: dict[str, Any]) -> str:
 # Dev/Coding — real code execution in a sandboxed workspace
 # --------------------------------------------------------------------------- #
 
+# Finding #137: where Dourmouse keeps its own state and secrets inside the
+# workspace. The file tools never write here (a model that had read a hostile
+# page could otherwise plant code the server loads at its next start, or edit
+# the auth database), and run_python never copies from here.
+_PROTECTED_WORKSPACE_TOP = frozenset({
+    "self_extensions", "auth", "state", "security", "memory", "sessions", "librarian", "office",
+    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro",
+})
+_PROTECTED_FILE_RE = re.compile(
+    r"(^\.env($|\.)|\.(db|sqlite|sqlite3|pem|key|p12)$|\.db-(wal|shm)$|^(schedules|world_history)\.jsonl$)", re.IGNORECASE
+)
+
+
+def _refuse_protected(base: Path, target: Path, action: str) -> None:
+    """Raise ValueError when ``target`` is one of Dourmouse's own state or secret files."""
+    parts = target.relative_to(base.resolve()).parts
+    if (parts and parts[0] in _PROTECTED_WORKSPACE_TOP) or (parts and _PROTECTED_FILE_RE.search(parts[-1])):
+        raise ValueError(
+            f"{action} of {'/'.join(parts)!r} is refused: it is where Dourmouse keeps its own state or "
+            "secrets. Use another path in the workspace."
+        )
+
+
+_RUN_INPUT_LIMITS = (20, 20 * 1024 * 1024)  # files, total bytes copied into a run's scratch folder
+
+
+def _stage_run_inputs(raw: Any, scratch: Path) -> None:
+    """Copy the workspace files a run_python snippet asked for into its scratch
+    folder, the only place the sandboxed code can read."""
+    if not raw:
+        return
+    if not isinstance(raw, list) or not all(isinstance(p, str) for p in raw):
+        raise ValueError("'inputs' must be a list of workspace-relative file paths")
+    if len(raw) > _RUN_INPUT_LIMITS[0]:
+        raise ValueError(f"'inputs' lists more than {_RUN_INPUT_LIMITS[0]} files")
+    root = _workspace_root()
+    total = 0
+    for rel in raw:
+        src = _safe_resolve(root, rel)
+        _refuse_protected(root, src, "reading")
+        if not src.is_file():
+            raise ValueError(f"no such file in the workspace: {rel!r}")
+        total += src.stat().st_size
+        if total > _RUN_INPUT_LIMITS[1]:
+            raise ValueError("'inputs' are larger than 20 MB in total")
+        scratch.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, scratch / src.name)
+
+
 def _run_python_tool(arguments: dict[str, Any]) -> str:
+    """Finding #137: model-written code runs in the compute sandbox (default-deny
+    reads, writes only its scratch folder, no network, no keys in the
+    environment), not as the owner with the server's whole environment."""
+    from dourmouse import sandbox
+
     code = arguments.get("code", "")
     if not code.strip():
         return "ERROR: run_python requires a non-empty 'code' string."
     try:
-        timeout = int(arguments.get("timeout_seconds", 30))
+        timeout = max(1, min(int(arguments.get("timeout_seconds", 30)), 300))
+    except (TypeError, ValueError):
+        return "ERROR: timeout_seconds must be an integer."
+    scratch = _workspace_root() / "scratch"
+    try:
+        _stage_run_inputs(arguments.get("inputs"), scratch)
+    except ValueError as exc:
+        return f"REFUSED: {exc}"
+    return sandbox.run_python_sandboxed(code, scratch, timeout=timeout)
+
+
+def _run_python_host_tool(arguments: dict[str, Any]) -> str:
+    """The approved way to run Python OUTSIDE the sandbox (the code can read the
+    owner's files and use the network); only reached after the owner approves
+    the exact code."""
+    from dourmouse import sandbox
+
+    code = arguments.get("code", "")
+    if not code.strip():
+        return "ERROR: run_python_host requires a non-empty 'code' string."
+    try:
+        timeout = max(1, min(int(arguments.get("timeout_seconds", 30)), 300))
     except (TypeError, ValueError):
         return "ERROR: timeout_seconds must be an integer."
     try:
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            cwd=str(_workspace_root()),
-            capture_output=True,
-            text=True, encoding="utf-8", errors="replace",
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return f"ERROR: code timed out after {timeout}s: {exc}"
+        with subprocess.Popen(  # noqa: S603 -- the owner approved this exact code
+            [sys.executable, "-I", "-c", code], cwd=str(_workspace_root()), env=sandbox.host_environment(),
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", start_new_session=True,
+        ) as proc:
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                proc.communicate()
+                return f"ERROR: code timed out after {timeout}s"
     except OSError as exc:
         return f"ERROR: could not run python: {exc}"
-    out = (proc.stdout or "").strip()
-    err = (proc.stderr or "").strip()
-    parts = [f"EXIT CODE: {proc.returncode}"]
-    if out:
-        parts.append(f"STDOUT:\n{out}")
-    if err:
-        parts.append(f"STDERR:\n{err}")
-    return "\n".join(parts)
+    return sandbox.format_run(proc.returncode, stdout, stderr)
 
 
 def _read_file_tool(arguments: dict[str, Any]) -> str:
@@ -1371,6 +1444,7 @@ def _auto_commit_note(target: Path, action: str) -> str:
 def _write_file_tool(arguments: dict[str, Any]) -> str:
     try:
         target = _safe_resolve(_workspace_root(), arguments.get("path", ""))
+        _refuse_protected(_workspace_root(), target, "writing")
     except ValueError as exc:
         return f"REFUSED: {exc}"
     existed = target.exists()
@@ -1400,6 +1474,7 @@ def _edit_file_tool(arguments: dict[str, Any]) -> str:
     """
     try:
         target = _safe_resolve(_workspace_root(), arguments.get("path", ""))
+        _refuse_protected(_workspace_root(), target, "editing")
     except ValueError as exc:
         return f"REFUSED: {exc}"
     old_str = arguments.get("old_str", "")
@@ -2503,14 +2578,17 @@ def _draft_tool_tool(arguments: dict[str, Any]) -> str:
     if test_syntax_error:
         return f"ERROR: test_source does not parse: {test_syntax_error}"
     store = se.SelfExtensions()
-    entry = store.add_draft(
-        capability_gap=capability_gap,
-        tool_name=tool_name,
-        description=description,
-        parameters_schema=parameters_schema,
-        handler_source=handler_source,
-        test_source=test_source,
-    )
+    try:
+        entry = store.add_draft(
+            capability_gap=capability_gap,
+            tool_name=tool_name,
+            description=description,
+            parameters_schema=parameters_schema,
+            handler_source=handler_source,
+            test_source=test_source,
+        )
+    except ValueError as exc:  # finding #136: an unsafe description is refused, not a crash
+        return f"ERROR: {exc}"
     return (
         f"DRAFTED {entry['id']}: {tool_name}. This is NOT live and NOT registered -- "
         "a human must review the real source and approve it (the AGENT SMITH screen in "
@@ -2682,6 +2760,7 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
                 # given — a free sub-orchestration still plans normally.
                 forced_agent=target or None,
                 fanout_branch=ctx.fanout_branch,  # finding #134
+                policy=ctx.policy,  # finding #140
             )
         except Exception as exc:  # honest failure surface (Rule 2.2)
             if ctx.jobs is not None and job_id:
@@ -3086,6 +3165,7 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                     forced_agent=target or None,
                     call_id=branch_call_id,
                     fanout_branch=True,
+                    policy=ctx.policy,  # finding #140
                 )
                 if is_backend_failure_text(report.get("final_text") or ""):
                     # Finding #134: the backend's own failure report is not an answer.
@@ -4178,8 +4258,31 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="run_python",
                     description=(
-                        "Execute a Python snippet in a sandboxed workspace "
-                        "subprocess and return the REAL stdout/stderr/exit code."
+                        "Execute a Python snippet in a kernel-enforced sandbox and "
+                        "return the REAL stdout/stderr/exit code. The code reads and "
+                        "writes only its own scratch folder (workspace/scratch), has "
+                        "no network and no API keys. To give it workspace files, list "
+                        "them in 'inputs' (workspace-relative paths); they are copied "
+                        "into the scratch folder."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "string"},
+                            "timeout_seconds": {"type": "integer", "default": 30},
+                            "inputs": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["code"],
+                    },
+                    handler=_run_python_tool,
+                ),
+                ToolSpec(
+                    name="run_python_host",
+                    description=(
+                        "Execute a Python snippet on this Mac OUTSIDE the sandbox: it "
+                        "can read the owner's files and use the network. Only for what "
+                        "run_python cannot do. REQUIRES the owner's approval of the "
+                        "exact code every time."
                     ),
                     parameters={
                         "type": "object",
@@ -4189,7 +4292,9 @@ def build_general_registry() -> DispatchRegistry:
                         },
                         "required": ["code"],
                     },
-                    handler=_run_python_tool,
+                    handler=_run_python_host_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: "Run this Python on your Mac WITHOUT the sandbox (it can read your files and use the network)?\n\n" + str(a.get("code", ""))[:2000],
                 ),
                 ToolSpec(
                     name="read_file",
@@ -4294,6 +4399,8 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["task"],
                     },
                     handler=_claude_code_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: f"Hand this task to Claude Code (it can edit files and run commands in {a.get('cwd') or _PROJECT_ROOT})?\n\n" + str(a.get("task", ""))[:1500],
                 ),
                 ToolSpec(
                     name="codex_code",
@@ -4320,6 +4427,8 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["task"],
                     },
                     handler=_codex_code_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: f"Hand this task to Codex (it can edit files and run commands in {a.get('cwd') or _PROJECT_ROOT})?\n\n" + str(a.get("task", ""))[:1500],
                 ),
                 ToolSpec(
                     name="deploy",
@@ -6186,6 +6295,11 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["tool", "arguments", "schedule_text"],
                     },
                     handler=_schedule_recurring_tool,
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda a: (
+                        f"Run {a.get('tool')} again and again ({a.get('schedule_text')}), with no one asking each time?\n\n"
+                        f"Arguments: {json.dumps(a.get('arguments'), default=str)[:1200]}"
+                    ),
                 ),
                 ToolSpec(
                     name="list_schedules",

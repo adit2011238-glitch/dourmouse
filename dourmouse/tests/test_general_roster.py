@@ -519,6 +519,9 @@ class TestRosterShape:
             # websites; switching it off lifts that. Both need the owner.
             "lockdown_start",
             "lockdown_stop",
+            # security review S02: editing the blocklist takes effect at once
+            # while a lockdown is on, so it is approved with the exact entries.
+            "lockdown_edit",
             # finding #106: response actions change the machine (each is
             # restorable, but the owner still decides).
             "security_kill_process",
@@ -535,6 +538,14 @@ class TestRosterShape:
             "librarian_undo",
             # finding #122: appending to a user's existing Google Sheet.
             "sheets_append",
+            # finding #137: code that runs outside the sandbox, and the two
+            # coding CLIs (they edit files and run commands), need the owner.
+            "run_python_host",
+            "claude_code",
+            "codex_code",
+            # finding #137: a standing instruction that fires with no one
+            # asking each time is approved once, with its exact arguments.
+            "schedule_recurring",
         }
 
     def test_internet_tools_registered(self):

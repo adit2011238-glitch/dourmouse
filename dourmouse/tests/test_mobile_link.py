@@ -266,6 +266,8 @@ class TestMobileRoute:
     def test_mobile_page_self_url_from_host_header(self, monkeypatch):
         """A phone reaching /mobile via a host detection cannot see (e.g. a
         Tailscale DNS name) must get a QR pointing back at that same URL."""
+        # Finding #135: a loopback caller may only use a Host name the owner allowed.
+        monkeypatch.setenv("DOURMOUSE_ALLOWED_HOSTS", "my-mac.tailnet.ts.net")
         server = self._serve(monkeypatch, token="s3cret")
         try:
             import http.client
@@ -295,7 +297,10 @@ class TestMobileRoute:
             resp = conn.getresponse()
             body = resp.read().decode("utf-8", "replace")
             conn.close()
-            assert resp.status == 200
+            # Finding #135: from this machine a Host that is not the server's own
+            # is refused before any page is built. The page's own filter below
+            # still guards a phone reaching it over the network.
+            assert resp.status == 403
             # The hostile host never reaches the rendered page (the page's own
             # legitimate <script> tag is fine — the injected payload is not).
             assert "alert(1)" not in body

@@ -25,10 +25,12 @@ stays dependency-light.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
@@ -167,19 +169,130 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
 
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"nvapi-[A-Za-z0-9._-]{8,}"), "NVIDIA_API_KEY"),
-    (re.compile(r"sk-[A-Za-z0-9]{16,}"), "OPENAI_API_KEY"),
+    (re.compile(r"sk-ant-[A-Za-z0-9_-]{16,}"), "ANTHROPIC_API_KEY"),
+    (re.compile(r"sk-[A-Za-z0-9_-]{16,}"), "OPENAI_API_KEY"),
+    (re.compile(r"AIza[0-9A-Za-z_-]{20,}"), "GOOGLE_API_KEY"),
+    (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"), "SLACK_TOKEN"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "GITHUB_TOKEN"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS_ACCESS_KEY_ID"),
     (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----"), "PRIVATE_KEY_BLOCK"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), "JWT"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), "GITHUB_TOKEN"),
-    (
-        re.compile(
-            r"(?i)\b(api[_-]?key|access[_-]?token|secret|password|passwd|auth[_-]?token)"
-            r"\b\s*[=:]\s*['\"]?[A-Za-z0-9._\-]{12,}"
-        ),
-        "SECRET_ASSIGNMENT",
-    ),
+    # Ollama Cloud key shape: 32 hex characters, a dot, then a token.
+    (re.compile(r"\b[0-9a-f]{32}\.[A-Za-z0-9_-]{16,}"), "OLLAMA_API_KEY"),
+    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}"), "BEARER_TOKEN"),
 )
+
+# A secret assigned to a name: GEMINI_API_KEY=..., "db_password": "...",
+# clientSecret: .... Found by locating the assignment first (a bounded name, an
+# = or :, a value) and judging name and value in code. A single pattern with a
+# variable-length name in front of the marker backtracks on any long run of
+# letters and digits (a base64 blob in a tool result froze the process for
+# minutes; finding #136), and matching the marker anywhere in a word redacted
+# "monkey" and "keyboard_layout".
+_ASSIGNMENT = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?P<name>[A-Za-z][A-Za-z0-9_.-]{0,79})(?P<q1>['\"]?)(?P<sep>[ \t]*[=:][ \t]*)(?P<q2>['\"]?)"
+    r"(?P<value>[A-Za-z0-9._~+/=\-]{8,})"
+)
+_STRONG_NAME_WORDS = frozenset({"secret", "secrets", "password", "passwd", "credential", "credentials", "apikey"})
+_WEAK_NAME_WORDS = frozenset({"key", "keys", "token", "tokens"})
+_STRONG_NAME_RE = re.compile(r"api[_-]?key|access[_-]?token|auth[_-]?token")
+
+
+def _name_words(name: str) -> list[str]:
+    return [w for w in re.split(r"[_.\-]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()) if w]
+
+
+def _is_secret_assignment(name: str, value: str) -> bool:
+    words = _name_words(name)
+    if _STRONG_NAME_RE.search("_".join(words)) or _STRONG_NAME_WORDS.intersection(words):
+        return True  # a name that says "secret": any value of this length
+    if _WEAK_NAME_WORDS.intersection(words):
+        # key and token also name harmless things (token_count, max_tokens,
+        # key_binding), so those need a value that looks random: letters and
+        # digits together, and long enough.
+        return len(value) >= 12 and any(c.isdigit() for c in value) and any(c.isalpha() for c in value)
+    return False
+
+
+def _redact_assignments(text: str) -> tuple[str, bool]:
+    if "=" not in text and ":" not in text:
+        return text, False
+    hit = False
+
+    def sub(m: re.Match[str]) -> str:
+        nonlocal hit
+        if not _is_secret_assignment(m.group("name"), m.group("value")):
+            return m.group(0)
+        hit = True
+        return f"{m.group('name')}{m.group('q1')}{m.group('sep')}{m.group('q2')}[REDACTED:SECRET_ASSIGNMENT]"
+
+    return _ASSIGNMENT.sub(sub, text), hit
+
+_ENV_NAME_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
+_ENV_MIN_VALUE_LEN = 8
+
+
+def _value_forms(value: str) -> set[str]:
+    """The raw value plus its URL-encoded and base64 spellings."""
+    raw = value.encode("utf-8")
+    forms = {
+        value,
+        urllib.parse.quote(value, safe=""),
+        urllib.parse.quote_plus(value),
+    }
+    for encoder in (base64.b64encode, base64.urlsafe_b64encode):
+        b64 = encoder(raw).decode("ascii")
+        forms.add(b64)
+        forms.add(b64.rstrip("="))
+    return {f for f in forms if len(f) >= _ENV_MIN_VALUE_LEN}
+
+
+class _ExactValues:
+    """Exact secret strings taken from the user's own .env.
+
+    Loaded on first use and reloaded whenever the file changes (mtime or
+    size) or ``refresh()`` is called, so a key the owner adds in Settings is
+    covered without a restart. The values are never logged or returned.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._stamp: tuple[str, int, int] | None = None
+        self._forms: tuple[str, ...] = ()
+
+    def _load(self, path: Any) -> tuple[str, ...]:
+        from dotenv import dotenv_values
+
+        forms: set[str] = set()
+        for name, value in dotenv_values(path).items():
+            if value and len(value) >= _ENV_MIN_VALUE_LEN and any(m in name.upper() for m in _ENV_NAME_MARKERS):
+                forms |= _value_forms(value)
+        # Longest first so a form containing another is replaced whole.
+        return tuple(sorted(forms, key=len, reverse=True))
+
+    def get(self, force: bool = False) -> tuple[str, ...]:
+        from .config import user_env_path
+
+        path = user_env_path()
+        try:
+            st = path.stat()
+            stamp = (str(path), st.st_mtime_ns, st.st_size)
+        except FileNotFoundError:
+            stamp = (str(path), -1, -1)
+        with self._lock:
+            if force or stamp != self._stamp:
+                self._forms = self._load(path) if stamp[1] != -1 else ()
+                self._stamp = stamp
+            return self._forms
+
+
+_EXACT_VALUES = _ExactValues()
+
+
+def refresh_exact_values() -> None:
+    """Re-read the user's .env now (normally it is re-read when it changes)."""
+    _EXACT_VALUES.get(force=True)
 
 
 class DlpFilter:
@@ -190,15 +303,26 @@ class DlpFilter:
     and BEFORE they are written to the transcript/ledger. A matched secret is
     replaced with ``[REDACTED:<LABEL>]``; the caller is told which labels
     fired so it can note the event honestly.
+
+    Besides the shape patterns, every secret-named value in the user's own
+    .env is redacted by exact match (raw, URL-encoded and base64 forms).
     """
 
     def redact(self, text: str) -> tuple[str, list[str]]:
         matched: list[str] = []
         result = text
+        for form in _EXACT_VALUES.get():
+            if form in result:
+                if "ENV_SECRET" not in matched:
+                    matched.append("ENV_SECRET")
+                result = result.replace(form, "[REDACTED:ENV_SECRET]")
         for pattern, label in _SECRET_PATTERNS:
             if pattern.search(result):
                 matched.append(label)
                 result = pattern.sub(f"[REDACTED:{label}]", result)
+        result, assigned = _redact_assignments(result)
+        if assigned:
+            matched.append("SECRET_ASSIGNMENT")
         return result, matched
 
 

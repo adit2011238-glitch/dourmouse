@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Dourmouse Lockdown",
+  "version": "1.0.0",
+  "description": "Blocks the web addresses on your Dourmouse lockdown list while a lockdown is on. Talks only to Dourmouse on this Mac.",
+  "minimum_chrome_version": "111",
+  "permissions": ["declarativeNetRequest", "alarms", "storage"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Dourmouse Lockdown"
+  }
+}

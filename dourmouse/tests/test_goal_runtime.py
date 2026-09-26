@@ -66,6 +66,13 @@ class _FakeSession:
         if event_sink is not None:
             for event in scripted.get("events", []):
                 event_sink(event)
+        # A task that reaches for gated actions: each prompt goes to the real
+        # gate the runtime built, and a refusal shows up the way dispatch
+        # reports it (a DECLINED BY USER tool result).
+        for gated_prompt in scripted.get("gate_calls", []):
+            approved = self.confirmation_gate(gated_prompt) if self.confirmation_gate else False
+            if not approved and event_sink is not None:
+                event_sink({"type": "tool_result", "name": "risky_tool", "text": f"DECLINED BY USER: {gated_prompt}"})
         if scripted.get("raises"):
             raise RuntimeError(scripted["raises"])
         return {"final_text": scripted.get("final_text", ""), "transcript": [], "messages": []}
@@ -465,26 +472,72 @@ class TestConfirmationGateFor:
     probe full dispatch path -- _FakeSession replaces ChatSession
     entirely, so it never actually calls a real confirmation_gate."""
 
-    def test_a_fresh_approval_ticket_approves_regardless_of_global_auto_approve(self, monkeypatch):
+    def test_a_ticket_approves_exactly_the_action_the_human_saw_and_only_once(self, monkeypatch):
         import dourmouse.goal_runtime as gr
 
         monkeypatch.setattr(gr, "auto_approve_enabled", lambda: False)
-        gate = gr._confirmation_gate_for(approved_this_run=True)
+        declined: list[str] = []
+        gate = gr._confirmation_gate_for(["do the risky thing"], declined)
         assert gate("do the risky thing") is True
+        assert gate("do the risky thing") is False  # single use
+        assert gate("something else entirely") is False  # never seen by the human
+        assert declined == ["do the risky thing", "something else entirely"]
 
-    def test_no_ticket_and_no_global_auto_approve_declines(self, monkeypatch):
+    def test_no_ticket_and_no_global_auto_approve_declines_and_records_what_it_declined(self, monkeypatch):
         import dourmouse.goal_runtime as gr
 
         monkeypatch.setattr(gr, "auto_approve_enabled", lambda: False)
-        gate = gr._confirmation_gate_for(approved_this_run=False)
+        declined: list[str] = []
+        gate = gr._confirmation_gate_for((), declined)
         assert gate("do the risky thing") is False
+        assert declined == ["do the risky thing"]
 
     def test_global_auto_approve_still_works_without_a_per_task_ticket(self, monkeypatch):
         import dourmouse.goal_runtime as gr
 
         monkeypatch.setattr(gr, "auto_approve_enabled", lambda: True)
-        gate = gr._confirmation_gate_for(approved_this_run=False)
+        gate = gr._confirmation_gate_for()
         assert gate("do the risky thing") is True
+
+
+class TestApprovalIsPerAction:
+    """Finding #137: approving a parked task approves the actions the human
+    was shown, not a blanket for the whole re-run."""
+
+    @staticmethod
+    def _parked(monkeypatch, first_prompts):
+        import dourmouse.goal_runtime as gr
+
+        monkeypatch.setattr(gr, "auto_approve_enabled", lambda: False)
+        _install_fake(monkeypatch, {"clean up": {"final_text": "cleaned", "gate_calls": first_prompts}})
+        store = GoalStore(None)
+        goal = store.create_goal("Tidy")
+        task = store.create_task(goal["id"], "clean up")
+        store.update_goal_status(goal["id"], "EXECUTING")
+        _runtime(store).tick()
+        return store, goal, task
+
+    def test_a_parked_task_records_the_exact_prompt_it_needs_approved(self, monkeypatch):
+        store, _, task = self._parked(monkeypatch, ["Delete old.txt?"])
+        parked = store.get_task(task["id"])
+        assert parked["status"] == "WAITING_FOR_APPROVAL"
+        assert parked["result"] == {"pending_prompts": ["Delete old.txt?"]}
+
+    def test_the_approved_action_runs_on_the_rerun(self, monkeypatch):
+        store, goal, task = self._parked(monkeypatch, ["Delete old.txt?"])
+        store.resolve_task_approval(task["id"], True)
+        assert store.get_task(task["id"])["result"]["approved_prompts"] == ["Delete old.txt?"]
+        _runtime(store).tick()
+        assert store.get_task(task["id"])["status"] == "COMPLETED"
+
+    def test_a_different_gated_action_on_the_rerun_is_parked_again_with_its_own_prompt(self, monkeypatch):
+        store, goal, task = self._parked(monkeypatch, ["Delete old.txt?"])
+        store.resolve_task_approval(task["id"], True)
+        _FakeSession.responses["clean up"] = {"final_text": "cleaned", "gate_calls": ["Delete EVERYTHING?"]}
+        _runtime(store).tick()
+        again = store.get_task(task["id"])
+        assert again["status"] == "WAITING_FOR_APPROVAL"
+        assert again["result"] == {"pending_prompts": ["Delete EVERYTHING?"]}
 
 
 class TestResumableApprovalTicket:

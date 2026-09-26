@@ -39,6 +39,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -51,12 +52,26 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from dourmouse import sandbox as _sandbox
+
 VERSION = "2"
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 _JOB_RE = re.compile(r"^[0-9a-f]{32}$")
 MAX_BLOB_BYTES = 512 * 1024 * 1024
 MAX_JOB_SECONDS = 6 * 3600
 _OUTPUT_TAIL = 64 * 1024
+# Job resource caps (S22). Each stdout and stderr file, and the whole job
+# folder, are bounded; a job over either is killed and marked failed.
+MAX_JOB_OUTPUT_BYTES = 32 * 1024 * 1024
+MAX_JOB_DIR_BYTES = 2 * 1024 * 1024 * 1024
+_MAX_FILE_BYTES = 1024 * 1024 * 1024  # RLIMIT_FSIZE: one file a job writes
+_MAX_OPEN_FILES = 1024
+_NPROC_HEADROOM = 256  # forks a job may add beyond the user's current process count
+# Every job runs inside the Seatbelt sandbox in dourmouse/sandbox.py (S19).
+# Setting DOURMOUSE_UNSANDBOXED_JOBS=1 in the node's environment is the ONE
+# explicit override that lets jobs run without it (for a host that has no
+# sandbox-exec); without it a job is refused rather than run unsandboxed.
+_UNSANDBOXED_ENV = "DOURMOUSE_UNSANDBOXED_JOBS"
 
 
 class _Server(ThreadingHTTPServer):
@@ -135,17 +150,24 @@ class BlobStore:
 # compute role
 # --------------------------------------------------------------------------- #
 
-def _job_environment() -> dict[str, str]:
-    """Only what Python needs to start; never the node's own environment,
-    which may hold tokens and keys."""
+def _job_environment(home: str | Path | None = None, tmpdir: str | Path | None = None) -> dict[str, str]:
+    """ALLOWLIST only: what Python needs to start, never the node's own
+    environment, which may hold tokens and keys. HOME is the job's own
+    directory when given (S19)."""
     # PROCESSOR_ARCHITECTURE / NUMBER_OF_PROCESSORS: Windows' platform.machine()
     # and numerical libraries read them (live, machine() came back empty
     # without it); they hold no secrets.
-    keep = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "PATH", "LANG", "LC_ALL", "HOME", "USERPROFILE",
-            "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS")
-    env = {k: v for k, v in os.environ.items() if k.upper() in keep}
+    keep = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "LANG", "LC_ALL")
+    env = {k: v for k, v in os.environ.items() if k.upper() in keep or k.startswith("LC_")}
+    env["PATH"] = os.environ.get("PATH", "") if sys.platform == "win32" else "/usr/bin:/bin:/usr/sbin:/sbin"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONNOUSERSITE"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    if home is not None:
+        env["HOME"] = str(home)
+        env["USERPROFILE"] = str(home)
+    if tmpdir is not None:
+        env["TMPDIR"] = env["TEMP"] = env["TMP"] = str(tmpdir)
     return env
 
 
@@ -297,6 +319,11 @@ class JobRunner:
             for k, v in inputs.items()
         ):
             raise ValueError("inputs must map safe file names to sha256 hashes")
+        if not _sandbox_ready():
+            raise RuntimeError(
+                "refusing to run a job: sandbox-exec (macOS Seatbelt) is unavailable, and jobs never run "
+                f"unsandboxed. Set {_UNSANDBOXED_ENV}=1 in the node's environment only if you accept that."
+            )
         job_id = uuid.uuid4().hex
         d = self._dir(job_id)
         (d / "in").mkdir(parents=True)
@@ -341,62 +368,102 @@ class JobRunner:
         status.update(state="running", started_at=time.time())
         self._write_status(job_id, status)
         stdout_path, stderr_path = d / "stdout.txt", d / "stderr.txt"
+        if not os.path.isfile(self.python):
+            raise FileNotFoundError(f"job interpreter not found: {self.python}")
+        (d / "tmp").mkdir(exist_ok=True)
         kwargs: dict[str, Any] = {}
         if sys.platform == "win32":
             kwargs["creationflags"] = 0x00000004  # CREATE_SUSPENDED: capped before it runs a line
             status["memory_limit"] = "enforced (Windows Job Object)"
-        elif sys.platform.startswith("linux"):
+        else:
             import resource
 
-            limit = status["memory_mb"] * 1024 * 1024
+            # Own session and process group, so a timeout or a memory breach
+            # can kill the job's children too (S21).
+            kwargs["start_new_session"] = True
+            as_limit = status["memory_mb"] * 1024 * 1024 if sys.platform.startswith("linux") else None
+            cpu_seconds = min(status["timeout_s"] * (os.cpu_count() or 1), MAX_JOB_SECONDS * 4)
+            nproc = _nproc_limit()
 
             def _limits() -> None:
-                resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+                # CPU seconds, one file's size, forks, open files, no core dumps (S22).
+                if as_limit is not None:
+                    resource.setrlimit(resource.RLIMIT_AS, (as_limit, as_limit))
+                resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+                resource.setrlimit(resource.RLIMIT_FSIZE, (_MAX_FILE_BYTES, _MAX_FILE_BYTES))
+                resource.setrlimit(resource.RLIMIT_NPROC, (nproc, nproc))
+                resource.setrlimit(resource.RLIMIT_NOFILE, (_MAX_OPEN_FILES, _MAX_OPEN_FILES))
+                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
             kwargs["preexec_fn"] = _limits
-            status["memory_limit"] = "enforced (RLIMIT_AS)"
+            if sys.platform.startswith("linux"):
+                status["memory_limit"] = "enforced (RLIMIT_AS)"
+            else:
+                # macOS does not enforce RLIMIT_AS (setrlimit refuses it). Dourmouse
+                # runs on the Mac alone (owner, 2026-09-24), so the limit is
+                # enforced here by a resident-memory watchdog instead (finding
+                # #098); without psutil the job says so rather than pretend.
+                status["memory_limit"] = (
+                    "enforced (RSS watchdog, 250 ms)" if _psutil() is not None else f"NOT enforced on {sys.platform}"
+                )
+        argv = [self.python, "-I", "-B", "main.py"]
+        profile_path = None
+        if _sandbox_exe() is not None:
+            profile_path = _sandbox.write_profile(_sandbox.build_job_profile(d, self.python))
+            argv = [str(_sandbox_exe()), "-f", profile_path, *argv]
+            status["sandbox"] = "seatbelt (reads allowlisted, writes job folder only, no network)"
         else:
-            # macOS does not enforce RLIMIT_AS (setrlimit refuses it). Dourmouse
-            # runs on the Mac alone (owner, 2026-09-24), so the limit is
-            # enforced here by a resident-memory watchdog instead (finding
-            # #098); without psutil the job says so rather than pretend.
-            status["memory_limit"] = (
-                "enforced (RSS watchdog, 250 ms)" if _psutil() is not None else f"NOT enforced on {sys.platform}"
-            )
+            status["sandbox"] = f"NONE ({_UNSANDBOXED_ENV}=1)"
         self._write_status(job_id, status)
-        with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:
-            proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter, job's own file
-                [self.python, "-I", "main.py"], cwd=d, env=_job_environment(),
-                stdin=subprocess.DEVNULL, stdout=out, stderr=err, **kwargs,
-            )
-            job_handle = None
-            if sys.platform == "win32":
+        over_limit = threading.Event()
+        exceeded: list[str] = []
+        try:
+            with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:
+                proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter, job's own file
+                    argv, cwd=d, env=_job_environment(d, d / "tmp"),
+                    stdin=subprocess.DEVNULL, stdout=out, stderr=err, **kwargs,
+                )
+                job_handle = None
+                if sys.platform == "win32":
+                    try:
+                        job_handle = _limit_memory_windows(proc.pid, status["memory_mb"])
+                    finally:
+                        _resume_windows(proc.pid)
+                if status["memory_limit"].startswith("enforced (RSS"):
+                    threading.Thread(
+                        target=_rss_watchdog, args=(proc, status["memory_mb"], over_limit), daemon=True,
+                    ).start()
+                threading.Thread(target=_disk_guard, args=(proc, d, exceeded), daemon=True).start()
                 try:
-                    job_handle = _limit_memory_windows(proc.pid, status["memory_mb"])
-                finally:
-                    _resume_windows(proc.pid)
-            over_limit = threading.Event()
-            if status["memory_limit"].startswith("enforced (RSS"):
-                threading.Thread(
-                    target=_rss_watchdog, args=(proc, status["memory_mb"], over_limit), daemon=True,
-                ).start()
-            try:
-                code = proc.wait(timeout=status["timeout_s"])
-                state = "succeeded" if code == 0 else "failed"
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                code = proc.wait()
-                state = "timed_out"
-            if over_limit.is_set():
-                state = "failed"
-                status["error"] = f"memory limit exceeded ({status['memory_mb']} MB)"
-            if sys.platform == "win32" and job_handle is not None:
-                import ctypes
-                from ctypes import wintypes
+                    code = proc.wait(timeout=status["timeout_s"])
+                    state = "succeeded" if code == 0 else "failed"
+                except subprocess.TimeoutExpired:
+                    _kill_tree(proc)
+                    code = proc.wait()
+                    state = "timed_out"
+                # Whatever the job left running in its group dies with it.
+                _kill_tree(proc)
+                if over_limit.is_set():
+                    state = "failed"
+                    status["error"] = f"memory limit exceeded ({status['memory_mb']} MB)"
+                if exceeded:
+                    state = "failed"
+                    status["error"] = exceeded[0]
+                if sys.platform == "win32" and job_handle is not None:
+                    import ctypes
+                    from ctypes import wintypes
 
-                k32 = ctypes.WinDLL("kernel32")
-                k32.CloseHandle.argtypes = (wintypes.HANDLE,)
-                k32.CloseHandle(job_handle)
+                    k32 = ctypes.WinDLL("kernel32")
+                    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+                    k32.CloseHandle(job_handle)
+        finally:
+            if profile_path is not None:
+                with contextlib.suppress(OSError):
+                    os.unlink(profile_path)
+        used = _dir_bytes(d)
+        if used > MAX_JOB_DIR_BYTES and not exceeded:
+            state = "failed"
+            status["error"] = f"job folder grew to {used} bytes, over the {MAX_JOB_DIR_BYTES} byte limit"
         metrics: dict[str, Any] = {}
         metrics_file = d / "out" / "metrics.json"
         if not metrics_file.exists() and (d / "metrics.json").exists():
@@ -406,15 +473,17 @@ class JobRunner:
             # the fallback is noted on the job.
             metrics_file = d / "metrics.json"
             status["metrics_source"] = "metrics.json (job folder, not out/)"
-        if metrics_file.exists():
+        if metrics_file.is_symlink():
+            metrics = {"_error": "metrics.json is a symlink; refused"}
+        elif metrics_file.exists():
             try:
                 metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
             except ValueError:
                 metrics = {"_error": "out/metrics.json is not valid JSON"}
         artifacts = {}
         for f in sorted((d / "out").rglob("*")):
-            if f.is_file():
-                artifacts[str(f.relative_to(d / "out")).replace("\\", "/")] = hashlib.sha256(f.read_bytes()).hexdigest()
+            if f.is_file() and not f.is_symlink():  # a link could point at a file the job may not read itself
+                artifacts[str(f.relative_to(d / "out")).replace("\\", "/")] = _sha256_file(f)
         status.update(
             state=state, exit_code=code, finished_at=time.time(), metrics=metrics, artifacts=artifacts,
             stdout_tail=_tail(stdout_path), stderr_tail=_tail(stderr_path),
@@ -454,6 +523,7 @@ def _rss_watchdog(proc: subprocess.Popen[bytes], memory_mb: int, over: threading
                     rss += p.memory_info().rss
             if rss > limit:
                 over.set()
+                _kill_tree(proc)
                 for p in reversed(procs):
                     with contextlib.suppress(psutil.Error):
                         p.kill()
@@ -464,8 +534,82 @@ def _rss_watchdog(proc: subprocess.Popen[bytes], memory_mb: int, over: threading
 
 
 def _tail(path: Path) -> str:
-    data = path.read_bytes()
-    return data[-_OUTPUT_TAIL:].decode("utf-8", errors="replace")
+    """The last _OUTPUT_TAIL bytes, read by seeking (a job may have written
+    gigabytes) and never through a symlink the job swapped in."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as fh:
+        size = os.fstat(fh.fileno()).st_size
+        fh.seek(max(0, size - _OUTPUT_TAIL))
+        return fh.read(_OUTPUT_TAIL).decode("utf-8", errors="replace")
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _dir_bytes(root: Path) -> int:
+    """Bytes under root, without following symlinks."""
+    total = 0
+    for dirpath, _dirs, files in os.walk(root, followlinks=False):
+        for name in files:
+            with contextlib.suppress(OSError):  # a file the job deleted mid-walk
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+    return total
+
+
+def _kill_tree(proc: subprocess.Popen[bytes]) -> None:
+    """Kill the job's whole process group plus any descendant that left it
+    with its own session (S21). Safe to call on a job that already exited:
+    it then only sweeps stragglers left in the group."""
+    psutil = _psutil()
+    descendants: list[Any] = []
+    if psutil is not None:
+        with contextlib.suppress(psutil.Error):
+            descendants = psutil.Process(proc.pid).children(recursive=True)
+    if sys.platform != "win32":
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+    if proc.poll() is None:
+        proc.kill()
+    for p in descendants:
+        with contextlib.suppress(psutil.Error):
+            p.kill()
+
+
+def _disk_guard(proc: subprocess.Popen[bytes], job_dir: Path, exceeded: list[str]) -> None:
+    """Kill the job as soon as its output files or its folder pass the caps,
+    so a runaway print loop or write loop cannot fill the disk (S22)."""
+    while proc.poll() is None:
+        for name in ("stdout.txt", "stderr.txt"):
+            with contextlib.suppress(OSError):
+                if os.lstat(job_dir / name).st_size > MAX_JOB_OUTPUT_BYTES:
+                    exceeded.append(f"{name} passed {MAX_JOB_OUTPUT_BYTES} bytes of output; job killed")
+        if not exceeded and _dir_bytes(job_dir) > MAX_JOB_DIR_BYTES:
+            exceeded.append(f"job folder passed {MAX_JOB_DIR_BYTES} bytes; job killed")
+        if exceeded:
+            _kill_tree(proc)
+            return
+        time.sleep(0.25)
+
+
+def _nproc_limit() -> int:
+    """RLIMIT_NPROC counts the whole user's processes on macOS, so the cap is
+    the current count plus headroom rather than a fixed small number."""
+    psutil = _psutil()
+    current = len(psutil.pids()) if psutil is not None else 1024
+    return current + _NPROC_HEADROOM
+
+
+def _sandbox_exe() -> str | None:
+    return _sandbox.sandbox_exe()
+
+
+def _sandbox_ready() -> bool:
+    return _sandbox_exe() is not None or os.environ.get(_UNSANDBOXED_ENV) == "1"
 
 
 # --------------------------------------------------------------------------- #

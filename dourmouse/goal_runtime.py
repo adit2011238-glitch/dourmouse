@@ -81,7 +81,7 @@ def goal_runtime_enabled() -> bool:
     return os.environ.get("DOURMOUSE_GOAL_RUNTIME", "1").strip() != "0"
 
 
-def _confirmation_gate_for(approved_this_run: bool):
+def _confirmation_gate_for(approved_prompts: Any = (), declined: list[str] | None = None):
     """Autonomous tasks have no live human to ask synchronously. Built
     fresh per task-run (not a single module-level function) since
     2026-09-18 (finding #029, acceptance test 7): a task carrying a
@@ -92,10 +92,24 @@ def _confirmation_gate_for(approved_this_run: bool):
     proceeds exactly like an interactive session after a yes; off,
     decline honestly (never hang, never silently approve) so the caller
     classifies this as needing approval rather than pretending the
-    action happened."""
+    action happened.
 
-    def gate(_prompt_text: str) -> bool:
-        return approved_this_run or auto_approve_enabled()
+    Finding #137: the ticket is per action, not per run. It carries the exact
+    prompts the human was shown, and each is honoured once. A gated call the
+    human never saw (the model chose differently on the re-run) is declined
+    and parked again with its own prompt. ``declined`` collects those
+    prompts so the task can be parked with exactly what needs approval."""
+    remaining = list(approved_prompts or ())
+
+    def gate(prompt_text: str) -> bool:
+        if auto_approve_enabled():
+            return True
+        if prompt_text in remaining:
+            remaining.remove(prompt_text)
+            return True
+        if declined is not None:
+            declined.append(prompt_text)
+        return False
 
     return gate
 
@@ -236,14 +250,16 @@ class GoalRuntime:
         # a second, different gated action hit during this run all leave
         # the ticket already consumed, requiring fresh human approval
         # again rather than inheriting a stale blanket grant).
-        approved_this_run = bool((task.get("result") or {}).get("approved_for_next_run"))
+        ticket = task.get("result") or {}
+        approved_this_run = bool(ticket.get("approved_for_next_run"))
+        approved_prompts = list(ticket.get("approved_prompts") or []) if approved_this_run else []
         self._store.update_task_status(
             task_id, "RUNNING", increment_attempt=True,
             result={} if approved_this_run else None,
         )
         self._store.set_current_task(goal_id, task_id)
         try:
-            report = self._execute_via_dispatch(goal, task, approved_this_run)
+            report = self._execute_via_dispatch(goal, task, approved_prompts)
         except Exception as exc:
             self._handle_task_failure(goal, task, f"{type(exc).__name__}: {exc}")
             return
@@ -258,7 +274,10 @@ class GoalRuntime:
             return
         if report.get("blocked_reason"):
             reason = report["blocked_reason"]
-            self._store.update_task_status(task_id, "WAITING_FOR_APPROVAL", error=reason)
+            self._store.update_task_status(
+                task_id, "WAITING_FOR_APPROVAL", error=reason,
+                result={"pending_prompts": list(report.get("pending_prompts") or [])},
+            )
             self._store.update_goal_status(goal_id, "WAITING_FOR_APPROVAL", blocked_reason=reason)
             self._notify(goal_id, f"Needs your approval: {goal['objective']}", reason)
             return
@@ -303,14 +322,15 @@ class GoalRuntime:
         )
 
     def _execute_via_dispatch(
-        self, goal: dict[str, Any], task: dict[str, Any], approved_this_run: bool = False,
+        self, goal: dict[str, Any], task: dict[str, Any], approved_prompts: Any = (),
     ) -> dict[str, Any]:
         from dourmouse.chat import ChatSession  # lazy: keep this module importable without pulling in every backend
 
         session_file = workspace_dir() / "sessions" / f"goal_{goal['id']}_task_{task['id']}.jsonl"
+        pending_prompts: list[str] = []
         session = ChatSession(
             self._registry, session_file=session_file,
-            confirmation_gate=_confirmation_gate_for(approved_this_run),
+            confirmation_gate=_confirmation_gate_for(approved_prompts, pending_prompts),
         )
         blocked_reason: list[str] = []
         #: Real evidence of what actually happened, handed to the
@@ -347,6 +367,7 @@ class GoalRuntime:
             force_plain_dispatch=True,
         )
         report["blocked_reason"] = blocked_reason[0] if blocked_reason else None
+        report["pending_prompts"] = pending_prompts
         report["tool_trace"] = tool_trace
         return report
 

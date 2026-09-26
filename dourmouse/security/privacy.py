@@ -1,17 +1,22 @@
 """Privacy mode (MS-12, spec item 42; finding #112).
 
-When it is on, security data about this Mac does not leave it: the AI
-analyst does not send findings to the cloud model, and the browser-history
-tool gives counts and sources only, never URLs or search terms, to the chat
-(whose model is in the cloud). Everything local keeps working: detection,
-the report, lockdown, response actions. Stored in the user config dir,
-read fresh on every use, so switching it needs no restart.
+When it is on, security evidence about this Mac does not leave it: the AI
+analyst does not send findings to the cloud model, the browser-history tool
+gives counts and sources only, and every chat tool that returns evidence
+(findings, download sources, hostnames, process and connection lists, file
+names, the report) answers with a plain "withheld" note instead, because the
+chat model is in the cloud. The console and everything local keep working:
+detection, the report, lockdown, response actions. Stored in the user config
+dir, read fresh on every use, so switching it needs no restart.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import stat
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -37,11 +42,27 @@ def privacy_mode() -> bool:
 def set_privacy_mode(on: bool) -> dict[str, Any]:
     data = _read()
     data["privacy_mode"] = bool(on)
-    p = settings_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    p.chmod(0o600)
+    atomic_write_text(settings_path(), json.dumps(data, indent=2))
     return {"privacy_mode": bool(on)}
+
+
+def atomic_write_text(path: Path, text: str, mode: int = 0o600) -> None:
+    """Write a file so a reader sees the old content or the new content,
+    never a truncated half: a temp file in the same folder, flushed to disk,
+    then renamed over the target."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
 
 
 class PrivacyModeOn(Exception):

@@ -291,7 +291,7 @@ def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
                 "event_sink": caller.event_sink, "job_tracker": caller.jobs, "depth": caller.depth + 1,
                 "max_depth": caller.max_depth, "budget": caller.budget, "max_delegates": caller.max_delegates,
                 "current_job_id": job_id, "cost_budget": caller.cost_budget, "dlp": caller.dlp,
-                "rbac": caller.rbac, "fanout_branch": True,
+                "rbac": caller.rbac, "fanout_branch": True, "policy": caller.policy,
             }
             if task.agent and caller.config is not None and hasattr(caller.config, "model_for_agent"):
                 inherit["model"] = caller.config.model_for_agent(task.agent)

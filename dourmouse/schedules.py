@@ -433,7 +433,16 @@ class SchedulerRunner:
                     "schedule; NOT executed. Disable this schedule or point it "
                     "at a regular-tier tool."
                 )
-            return str(spec.handler(args))
+            # Finding #137: through the one choke point every other tool call
+            # uses, so the pre-tool hooks, required-argument checks, the run
+            # policy and the action ledger apply to an unattended run too, and
+            # the result is scrubbed of credentials like any other tool result.
+            from dourmouse.dispatch import _execute_tool
+            from dourmouse.execution_policy import RunPolicy
+            from dourmouse.governance import DlpFilter
+
+            text = _execute_tool(spec, args, lambda _prompt: False, ledger=None, policy=RunPolicy(actor="scheduler"))
+            return DlpFilter().redact(str(text))[0]
         except Exception as exc:  # honest failure, never a fabricated result
             return f"SCHEDULE RUN FAILED (reported honestly): {exc}"
 

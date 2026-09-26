@@ -2696,6 +2696,7 @@ def _execute_tool(
     confirmation_gate: Callable[[str], bool] | None,
     ledger: list[dict[str, Any]] | None = None,
     policy: Any = None,
+    actor: str = "",
 ) -> str:
     """R7 (finding #133): the model proposes, the runtime decides. Every
     call is recorded in the action ledger (proposed, then denied / declined
@@ -2703,7 +2704,7 @@ def _execute_tool(
     run) can refuse a call before anything runs; see execution_policy.py."""
     from dourmouse import execution_policy as _ep
 
-    actor = getattr(policy, "actor", "") if policy is not None else ""
+    actor = actor or (getattr(policy, "actor", "") if policy is not None else "")
     _ep.record("proposed", spec.name, arguments, actor, permission=spec.permission.name)
     if policy is not None and spec.permission is not Permission.PROHIBITED:
         reason = policy.decide(spec.name, arguments,
@@ -3715,6 +3716,7 @@ def run_dispatch_messages(
     force_plain_dispatch: bool = False,
     call_id: str | None = None,
     fanout_branch: bool = False,
+    policy: RunPolicy | None = None,
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -3958,6 +3960,10 @@ def run_dispatch_messages(
         # branch's fan-out events and every event of its run share one id.
         call_id=call_id or uuid.uuid4().hex[:12],
         fanout_branch=fanout_branch,
+        # Finding #140: a nested run shares its parent's policy, so the limit on
+        # approval-gated actions and on repeated calls covers the whole request
+        # instead of restarting at zero in every delegate and every branch.
+        policy=policy if policy is not None else RunPolicy(),
         # v8.30: pinned whenever anything more specific than the plain
         # generic default already claimed this model — an explicit caller
         # override, brain escalation, or the fast lane's own deliberate
@@ -5337,10 +5343,9 @@ def _run_dispatch_loop(
                             )
                         else:
                             try:
-                                ctx.policy.actor = ctx.forced_agent or "orchestrator"
                                 result_text = _execute_tool(
                                     spec, arguments, confirmation_gate, ledger=transcript,
-                                    policy=ctx.policy,
+                                    policy=ctx.policy, actor=ctx.forced_agent or "orchestrator",
                                 )
                             except Exception as exc:  # surface handler errors honestly
                                 result_text = f"ERROR: tool '{name}' failed: {exc}"
@@ -5350,11 +5355,10 @@ def _run_dispatch_loop(
 
             # DLP at the API boundary: redact credential-shaped text from tool
             # results before they reach the model or the audit transcript.
-            if (
-                dlp is not None
-                and result_text
-                and not result_text.startswith(("REFUSED", "ERROR"))
-            ):
+            # Finding #136: error and refusal text too. It often echoes the
+            # command, the environment or the file that failed, which is
+            # exactly where a key turns up.
+            if dlp is not None and result_text:
                 result_text, hits = dlp.redact(result_text)
                 if hits:
                     result_text += f"\n[DLP: {len(hits)} secret pattern(s) redacted from tool result]"

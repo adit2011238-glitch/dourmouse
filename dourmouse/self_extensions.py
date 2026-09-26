@@ -51,7 +51,7 @@ real passing test -- not an automated content scanner.
 from __future__ import annotations
 
 import ast
-import importlib.util
+import hashlib
 import json
 import os
 import re
@@ -111,6 +111,41 @@ def _approved_dir() -> Path:
     if override:
         return Path(override)
     return workspace_dir() / _APPROVED_DIR
+
+
+#: Carries "<tool_name>=<sha256>" into the approval subprocess so the drafted
+#: test's own load_approved() can verify the module it just asked for. The
+#: subprocess re-runs conftest.py, which moves DOURMOUSE_WORKSPACE, so the
+#: drafts store cannot be found there (same collision as the override above).
+_EXPECTED_SHA_ENV = "DOURMOUSE_SELF_EXT_EXPECTED_SHA256"
+
+#: The approval subprocess runs AI-authored test code. It gets only what
+#: pytest and the interpreter need, never the server's API keys (S24).
+_SUBPROCESS_ENV_ALLOWLIST = (
+    "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "VIRTUAL_ENV", "SYSTEMROOT",
+)
+
+_BAD_DESCRIPTION_CHARS = re.compile(r"[\\\"'`\x00-\x1f\x7f]")
+
+
+def scrubbed_subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """An allowlist environment: no API keys, tokens or other server secrets."""
+    env = {k: os.environ[k] for k in _SUBPROCESS_ENV_ALLOWLIST if k in os.environ}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.update(extra or {})
+    return env
+
+
+def validate_description(description: str) -> str | None:
+    """Returns an error string if ``description`` holds a backslash, a quote,
+    a backtick, a control character or a newline, else None. The description
+    is shown to the human in the per-call confirm prompt, so it must be
+    plain prose (S20)."""
+    if not isinstance(description, str) or not description.strip():
+        return "description must be a non-empty string."
+    if _BAD_DESCRIPTION_CHARS.search(description):
+        return "description must be plain prose: no backslashes, quotes, backticks, control characters or newlines."
+    return None
 
 
 def check_syntax(source: str) -> str | None:
@@ -179,6 +214,9 @@ class SelfExtensions:
         test_source: str,
         goal_id: str | None = None,
     ) -> dict[str, Any]:
+        description_error = validate_description(description)
+        if description_error:
+            raise ValueError(description_error)
         entries = self._load()
         entry_id = f"ext-{len(entries) + 1:03d}"
         entry = {
@@ -202,6 +240,9 @@ class SelfExtensions:
     def get(self, entry_id: str) -> dict[str, Any] | None:
         for e in self._load():
             if e.get("id") == entry_id:
+                # The exact text that would be written and later executed,
+                # for the human reviewer (S20). Computed, never stored.
+                e["module_preview"] = render_module_source(e)
                 return e
         return None
 
@@ -210,6 +251,22 @@ class SelfExtensions:
         if status:
             entries = [e for e in entries if e.get("status") == status]
         return entries
+
+    def _set_module_hash(self, entry_id: str, sha256: str) -> None:
+        entries = self._load()
+        for e in entries:
+            if e.get("id") == entry_id:
+                e["module_sha256"] = sha256
+                self._save(entries)
+                return
+
+    def approved_hash(self, tool_name: str) -> str | None:
+        """sha256 recorded when the latest APPROVED draft of this tool was approved."""
+        found = None
+        for e in self._load():
+            if e.get("tool_name") == tool_name and e.get("status") == "APPROVED" and e.get("module_sha256"):
+                found = e["module_sha256"]
+        return found
 
     def _set_decision(self, entry_id: str, status: str, reason: str) -> dict[str, Any] | None:
         entries = self._load()
@@ -238,21 +295,43 @@ LOAD_APPROVED_CONTRACT = (
 )
 
 
-def load_approved(tool_name: str) -> types.ModuleType:
+def _expected_module_hash(tool_name: str, store: SelfExtensions | None) -> str | None:
+    pinned = os.environ.get(_EXPECTED_SHA_ENV, "")
+    name, _, sha = pinned.partition("=")
+    if sha and name == tool_name:
+        return sha
+    return (store or SelfExtensions()).approved_hash(tool_name)
+
+
+def load_approved(
+    tool_name: str, *, expected_sha256: str | None = None, store: SelfExtensions | None = None
+) -> types.ModuleType:
     """Dynamically imports an approved self-extension's real module file
     from the workspace (NOT the git-tracked package -- see the module
     docstring). This is the one real dynamic-import path in this whole
     codebase; used by: a drafted test file reaching its own handler
     (the contract above), the approval flow's own post-write sanity
-    import, and general_roster.py's startup loader."""
+    import, and general_roster.py's startup loader.
+
+    The file's sha256 must equal the one recorded when a human approved it;
+    a module edited (or planted) afterwards is refused, and the bytes that
+    were hashed are the bytes that are executed (S20)."""
     path = _approved_dir() / f"{tool_name}.py"
     if not path.is_file():
         raise FileNotFoundError(f"no approved self-extension named {tool_name!r} at {path}")
-    spec = importlib.util.spec_from_file_location(f"dourmouse_self_ext_{tool_name}", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"could not load self-extension {tool_name!r} from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    source_bytes = path.read_bytes()
+    expected = expected_sha256 or _expected_module_hash(tool_name, store)
+    if not expected:
+        raise PermissionError(
+            f"self-extension {tool_name!r} has no recorded approval hash; approve it again to load it."
+        )
+    if hashlib.sha256(source_bytes).hexdigest() != expected:
+        raise PermissionError(
+            f"self-extension {tool_name!r} changed after it was approved (sha256 mismatch); refusing to load it."
+        )
+    module = types.ModuleType(f"dourmouse_self_ext_{tool_name}")
+    module.__file__ = str(path)
+    exec(compile(source_bytes, str(path), "exec"), module.__dict__)  # noqa: S102 -- hash-verified approved source
     return module
 
 
@@ -263,19 +342,23 @@ def list_approved_names() -> list[str]:
     return sorted(p.stem for p in d.glob("*.py"))
 
 
-def _write_approved_module(entry: dict[str, Any]) -> Path:
-    """Writes the real, complete Python module for an approved tool.
-    ALWAYS forces Permission.REQUIRES_CONFIRMATION (Domain D acceptance
-    test 3: a self-added tool can never grant itself elevated access),
-    regardless of anything the draft's own source claims."""
-    approved_dir = _approved_dir()
-    approved_dir.mkdir(parents=True, exist_ok=True)
+def render_module_source(entry: dict[str, Any]) -> str:
+    """The exact, complete Python module written for an approved tool.
+    Deterministic in the draft (no timestamp), so the human sees the same
+    text that is written, hashed and later executed. Every draft field that
+    is not code is emitted as a repr() literal, never interpolated into
+    source; ALWAYS forces Permission.REQUIRES_CONFIRMATION (Domain D
+    acceptance test 3: a self-added tool can never grant itself elevated
+    access), regardless of anything the draft's own source claims."""
     name = entry["tool_name"]
-    confirm_prompt_body = entry["description"].replace('"', '\\"')
-    module_source = (
-        f'"""Self-extension {entry["id"]}: {entry["tool_name"]}.\n\n'
-        f'Drafted by agent_smith for this capability gap:\n{entry["capability_gap"]}\n\n'
-        f'Approved {_now()}. Full history: workspace/self_extensions/CHANGELOG.md.\n"""\n\n'
+    doc = (
+        f"Self-extension {entry['id']}: {name}.\n\n"
+        f"Drafted by agent_smith for this capability gap:\n{entry['capability_gap']}\n\n"
+        "Full history: workspace/self_extensions/CHANGELOG.md."
+    )
+    prompt = f"Run self-added tool {name}: {entry['description']}?"
+    return (
+        f"__doc__ = {doc!r}\n\n"
         "from dourmouse.dispatch import Permission, ToolSpec\n\n\n"
         f"{entry['handler_source']}\n\n\n"
         "TOOL_SPEC = ToolSpec(\n"
@@ -284,15 +367,23 @@ def _write_approved_module(entry: dict[str, Any]) -> Path:
         f"    parameters={entry['parameters_schema']!r},\n"
         "    handler=handle,\n"
         "    permission=Permission.REQUIRES_CONFIRMATION,\n"
-        f'    confirm_prompt=lambda a: "Run self-added tool {name}: {confirm_prompt_body}?",\n'
+        f"    confirm_prompt=lambda a: {prompt!r},\n"
         ")\n"
     )
-    module_path = approved_dir / f"{name}.py"
-    module_path.write_text(module_source, encoding="utf-8")
-    return module_path
 
 
-def _write_and_run_test(entry: dict[str, Any]) -> tuple[bool, str]:
+def _write_approved_module(entry: dict[str, Any]) -> tuple[Path, str]:
+    """Writes the module text from ``render_module_source``; returns its
+    path and the sha256 of the bytes written."""
+    approved_dir = _approved_dir()
+    approved_dir.mkdir(parents=True, exist_ok=True)
+    data = render_module_source(entry).encode("utf-8")
+    module_path = approved_dir / f"{entry['tool_name']}.py"
+    module_path.write_bytes(data)
+    return module_path, hashlib.sha256(data).hexdigest()
+
+
+def _write_and_run_test(entry: dict[str, Any], module_sha256: str) -> tuple[bool, str]:
     """Writes the draft's own test file to the real dourmouse/tests/
     directory (pytest's own discovery root -- a loose file elsewhere
     would never actually run) and runs it, alone, in a real subprocess.
@@ -307,7 +398,12 @@ def _write_and_run_test(entry: dict[str, Any]) -> tuple[bool, str]:
     tests_dir = Path(dourmouse.__file__).resolve().parent / "tests"
     test_path = tests_dir / f"test_self_ext_{entry['tool_name']}.py"
     test_path.write_text(entry["test_source"], encoding="utf-8")
-    subprocess_env = {**os.environ, _APPROVED_DIR_OVERRIDE_ENV: str(_approved_dir())}
+    subprocess_env = scrubbed_subprocess_env(
+        {
+            _APPROVED_DIR_OVERRIDE_ENV: str(_approved_dir()),
+            _EXPECTED_SHA_ENV: f"{entry['tool_name']}={module_sha256}",
+        }
+    )
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pytest", str(test_path), "-q"],
@@ -376,13 +472,14 @@ def approve(entry_id: str, *, store: SelfExtensions | None = None, changelog_pat
         store._set_decision(entry_id, "APPROVAL_FAILED", name_error)
         return {"ok": False, "error": name_error}
     try:
-        _write_approved_module(entry)
-        load_approved(entry["tool_name"])  # sanity import of code a human just approved
+        _, module_sha256 = _write_approved_module(entry)
+        store._set_module_hash(entry_id, module_sha256)
+        load_approved(entry["tool_name"], expected_sha256=module_sha256)  # sanity import of code a human just approved
     except Exception as exc:  # noqa: BLE001 -- a broken draft must report honestly, never crash the approval route
         reason = f"{type(exc).__name__}: {exc}"
         store._set_decision(entry_id, "APPROVAL_FAILED", reason)
         return {"ok": False, "error": reason}
-    passed, output = _write_and_run_test(entry)
+    passed, output = _write_and_run_test(entry, module_sha256)
     if not passed:
         reason = f"the draft's own test failed:\n{output}"
         store._set_decision(entry_id, "APPROVAL_FAILED", reason)

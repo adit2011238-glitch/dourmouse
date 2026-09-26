@@ -178,3 +178,92 @@ class TestHonestFallback:
         # Consistency with the real lookup, without reimplementing the logic:
         exe = shutil.which("sandbox-exec")
         assert flag == (exe is not None and os.access(exe, os.X_OK))
+
+
+@_NEEDS_SANDBOX
+class TestRunSandboxedS23:
+    """S23: run_sandboxed passes an allowlist environment, reads default-deny,
+    and writes only inside the cwd."""
+
+    def test_api_keys_are_not_in_the_shell_environment(self, sandbox_env, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-leak")
+        monkeypatch.setenv("OLLAMA_API_KEY", "ol-should-not-leak")
+        result = run_sandboxed("env", cwd=str(sandbox_env["ws"]), timeout=15)
+        assert "EXIT CODE: 0" in result
+        assert "should-not-leak" not in result and "API_KEY" not in result
+
+    def test_personal_data_outside_the_allowlist_is_unreadable(self, sandbox_env):
+        home = sandbox_env["home"]
+        for rel in ("Library/Application Support/x.db", "Library/Cookies/c.binarycookies", ".zsh_history", "notes.txt"):
+            f = home / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("PERSONAL-DATA")
+        cmds = " ; ".join(f'cat "{home / rel}"' for rel in (
+            "Library/Application Support/x.db", "Library/Cookies/c.binarycookies", ".zsh_history", "notes.txt"))
+        result = run_sandboxed(cmds, cwd=str(sandbox_env["ws"]), timeout=15)
+        assert "PERSONAL-DATA" not in result
+
+    def test_writes_are_limited_to_the_cwd_not_the_whole_workspace(self, sandbox_env):
+        ws = sandbox_env["ws"]
+        job = ws / "job"
+        job.mkdir()
+        (ws / "self_extensions" / "approved").mkdir(parents=True)
+        result = run_sandboxed(
+            f'echo x > "{ws}/self_extensions/approved/evil.py"; echo y > "{ws}/sibling.txt"; echo z > mine.txt',
+            cwd=str(job), timeout=15,
+        )
+        assert not (ws / "self_extensions" / "approved" / "evil.py").exists()
+        assert not (ws / "sibling.txt").exists()
+        assert (job / "mine.txt").read_text().strip() == "z"
+        assert "operation not permitted" in result.lower()
+
+    def test_a_timed_out_command_kills_its_background_children(self, sandbox_env):
+        import time
+
+        pidfile = sandbox_env["ws"] / "bg.pid"
+        result = run_sandboxed(f"sleep 90 & echo $! > {pidfile}; sleep 90", cwd=str(sandbox_env["ws"]), timeout=2)
+        assert "timed out" in result
+        pid = int(pidfile.read_text())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.1)
+        pytest.fail(f"background child {pid} survived the timeout")
+
+
+class TestProfiles:
+    def test_job_profile_is_default_deny_with_an_explicit_read_allowlist(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        from dourmouse.sandbox import build_job_profile
+
+        job = tmp_path / "job"
+        job.mkdir()
+        profile = build_job_profile(job)
+        assert "(deny default)" in profile
+        assert "\n(allow file-read*)" not in profile
+        assert f'(allow file-write* (subpath "{job.resolve()}"))' in profile
+        assert "(deny network*)" in profile and "(allow network*)" not in profile
+        for needle in (".ssh", "Library/Keychains", "Library/Application Support", "Library/Cookies",
+                       "Library/Messages", ".zsh_history"):
+            assert needle in profile
+        assert f'(allow file-read* (subpath "{os.path.realpath(__import__("sys").prefix)}"))' in profile
+
+    def test_network_is_opt_in_only_through_the_parameter(self, tmp_path):
+        from dourmouse.sandbox import build_job_profile
+
+        assert "(allow network*)" in build_job_profile(tmp_path, allow_network=True)
+        assert "(allow network*)" not in build_job_profile(tmp_path)
+
+    def test_job_environment_is_an_allowlist(self, monkeypatch, tmp_path):
+        from dourmouse.sandbox import job_environment
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "k")
+        monkeypatch.setenv("LC_CTYPE", "en_US.UTF-8")
+        env = job_environment(tmp_path)
+        assert set(env) <= {"PATH", "HOME", "LC_CTYPE", "LANG", "LC_ALL", "PYTHONIOENCODING", "PYTHONNOUSERSITE",
+                            "PYTHONDONTWRITEBYTECODE", "TMPDIR"} | {k for k in env if k.startswith("LC_")}
+        assert env["HOME"] == str(tmp_path)

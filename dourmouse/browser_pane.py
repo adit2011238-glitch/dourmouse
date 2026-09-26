@@ -29,6 +29,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable
 
+from dourmouse.net_guard import guarded_urlopen
+
 _CHECK_TIMEOUT = 5.0
 
 # Real, live-found reason this is a normal browser UA string rather than
@@ -67,7 +69,7 @@ def check_frameable(url: str) -> dict[str, Any]:
     """
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _FETCH_USER_AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=_CHECK_TIMEOUT) as resp:
+        with guarded_urlopen(req, timeout=_CHECK_TIMEOUT) as resp:
             headers = resp.headers
     except urllib.error.HTTPError as exc:
         # A real response with headers, just a non-2xx status (some sites
@@ -340,7 +342,7 @@ def fetch_and_rewrite_for_proxy(url: str) -> dict[str, Any]:
     for why failures are still a real document, not a bare error code."""
     req = urllib.request.Request(url, headers={"User-Agent": _FETCH_USER_AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=PROXY_TIMEOUT) as resp:
+        with guarded_urlopen(req, timeout=PROXY_TIMEOUT) as resp:
             content_type = (resp.headers.get("Content-Type") or "").lower()
             if "text/html" not in content_type:
                 return {

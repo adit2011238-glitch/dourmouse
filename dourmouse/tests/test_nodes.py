@@ -181,3 +181,166 @@ def test_every_job_records_the_environment_it_ran_on(node):
     assert len(env["sha256"]) == 64
     health_env = client.health()["environment"]
     assert health_env["sha256"] == env["sha256"] and isinstance(health_env["packages"], list)
+
+
+# --------------------------------------------------------------------------- #
+# S19, S21, S22: every job runs inside the Seatbelt sandbox, with limits
+# --------------------------------------------------------------------------- #
+
+import os  # noqa: E402
+import time  # noqa: E402
+
+from dourmouse import sandbox as sb  # noqa: E402
+
+_needs_sandbox = pytest.mark.skipif(not sb.sandbox_available(), reason="sandbox-exec unavailable")
+
+
+def _run(node, code, **kw):
+    client, _ = node
+    return client.wait_job(client.submit_job(code, **kw)["id"], poll_s=0.1, max_wait_s=60)
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@_needs_sandbox
+class TestJobSandbox:
+    def test_a_job_cannot_read_a_dotenv_or_ssh_in_home_or_reach_the_network(self, node, tmp_path, monkeypatch):
+        home = tmp_path / "fakehome"
+        (home / ".ssh").mkdir(parents=True)
+        (home / ".ssh" / "id_rsa").write_text("KEYMATERIAL")
+        (home / ".env").write_text("TOKEN=abc")
+        monkeypatch.setenv("HOME", str(home))
+        outside = tmp_path / "outside.txt"
+        code = f"""
+import json, socket, os
+r = {{}}
+def attempt(name, fn):
+    try:
+        fn(); r[name] = 'allowed'
+    except OSError:
+        r[name] = 'denied'
+attempt('ssh_key', lambda: open({str(home / '.ssh' / 'id_rsa')!r}).read())
+attempt('ssh_list', lambda: os.listdir({str(home / '.ssh')!r}))
+attempt('dotenv', lambda: open({str(home / '.env')!r}).read())
+attempt('write_outside', lambda: open({str(outside)!r}, 'w').write('x'))
+def net():
+    s = socket.socket(); s.settimeout(3); s.connect(('1.1.1.1', 53))
+attempt('network', net)
+open('own.txt', 'w').write('fine')
+r['own_write'] = 'ok'
+json.dump(r, open('out/metrics.json', 'w'))
+"""
+        st = _run(node, code)
+        assert st["state"] == "succeeded", st
+        assert st["metrics"] == {"ssh_key": "denied", "ssh_list": "denied", "dotenv": "denied",
+                                 "write_outside": "denied", "network": "denied", "own_write": "ok"}
+        assert not outside.exists()
+        assert st["sandbox"].startswith("seatbelt")
+
+    def test_the_job_environment_is_an_allowlist_with_home_in_the_job_folder(self, node, monkeypatch):
+        for key in ("ANTHROPIC_API_KEY", "OLLAMA_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN"):
+            monkeypatch.setenv(key, "should-not-leak")
+        st = _run(node, "import os, json; json.dump({'env': sorted(os.environ), 'home': os.environ['HOME'], "
+                        "'cwd': os.getcwd()}, open('out/metrics.json', 'w'))")
+        assert st["state"] == "succeeded", st
+        leaked = [k for k in st["metrics"]["env"] if "KEY" in k or "TOKEN" in k or "SECRET" in k]
+        assert leaked == []
+        assert os.path.realpath(st["metrics"]["home"]) == os.path.realpath(st["metrics"]["cwd"])
+
+    def test_normal_numeric_work_still_runs(self, node):
+        st = _run(node, "import math, statistics, json\n"
+                        "json.dump({'m': statistics.mean([1, 2, 3]), 's': math.sqrt(16)}, open('out/metrics.json', 'w'))")
+        assert st["state"] == "succeeded", st
+        assert st["metrics"] == {"m": 2, "s": 4.0}
+
+    def test_a_child_process_dies_when_the_job_times_out(self, node):
+        code = (
+            "import subprocess, time, os\n"
+            "p = subprocess.Popen(['/bin/sleep', '120'])\n"
+            "q = subprocess.Popen(['/bin/sleep', '120'], start_new_session=True)\n"
+            "open('out/pids.txt', 'w').write(f'{p.pid} {q.pid}')\n"
+            "time.sleep(120)\n"
+        )
+        client, _ = node
+        st = _run(node, code, timeout_s=3)
+        assert st["state"] == "timed_out"
+        pids = [int(x) for x in client.artifact(st["id"], "pids.txt").decode().split()]
+        deadline = time.monotonic() + 5
+        while any(_pid_alive(p) for p in pids) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not any(_pid_alive(p) for p in pids), pids
+
+    def test_runaway_output_is_stopped_and_the_job_failed(self, node, monkeypatch):
+        monkeypatch.setattr(node_server, "MAX_JOB_OUTPUT_BYTES", 200_000)
+        st = _run(node, "import sys\nwhile True:\n    sys.stdout.write('x' * 10000)\n    sys.stdout.flush()\n", timeout_s=60)
+        assert st["state"] == "failed"
+        assert "output" in st["error"]
+        assert len(st["stdout_tail"].encode()) <= node_server._OUTPUT_TAIL
+
+    def test_a_job_folder_over_the_cap_is_failed(self, node, monkeypatch):
+        monkeypatch.setattr(node_server, "MAX_JOB_DIR_BYTES", 100_000)
+        st = _run(node, "open('out/big.bin', 'wb').write(b'x' * 500_000)")
+        assert st["state"] == "failed" and "job folder" in st["error"]
+
+    def test_a_symlink_in_out_is_not_followed_for_metrics_or_hashing(self, node, tmp_path):
+        secret = tmp_path / "secret.json"
+        secret.write_text('{"leak": 1}')
+        # The job's own sandbox cannot read the target, but it can create the link.
+        st = _run(node, f"import os; os.symlink({str(secret)!r}, 'out/metrics.json'); os.symlink({str(secret)!r}, 'out/l.txt')")
+        assert st["state"] == "succeeded", st
+        assert "leak" not in st["metrics"]
+        assert "l.txt" not in st["artifacts"]
+
+    def test_a_job_hits_its_cpu_and_process_rlimits_are_applied(self, node):
+        st = _run(node, "import resource, json\n"
+                        "json.dump({'fsize': resource.getrlimit(resource.RLIMIT_FSIZE)[0], "
+                        "'core': resource.getrlimit(resource.RLIMIT_CORE)[0], "
+                        "'nofile': resource.getrlimit(resource.RLIMIT_NOFILE)[0], "
+                        "'cpu': resource.getrlimit(resource.RLIMIT_CPU)[0], "
+                        "'nproc': resource.getrlimit(resource.RLIMIT_NPROC)[0]}, open('out/metrics.json', 'w'))", timeout_s=30)
+        m = st["metrics"]
+        assert m["fsize"] == node_server._MAX_FILE_BYTES and m["core"] == 0
+        assert m["nofile"] == node_server._MAX_OPEN_FILES
+        assert 0 < m["cpu"] < resource_unlimited() and 0 < m["nproc"] < resource_unlimited()
+
+
+def resource_unlimited() -> int:
+    import resource
+
+    return resource.RLIM_INFINITY
+
+
+class TestJobsRefuseWithoutASandbox:
+    def test_no_sandbox_exec_means_the_job_is_refused_not_run(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(node_server, "_sandbox_exe", lambda: None)
+        monkeypatch.delenv("DOURMOUSE_UNSANDBOXED_JOBS", raising=False)
+        runner = node_server.JobRunner(tmp_path / "jobs", sys.executable, lambda sha: b"")
+        with pytest.raises(RuntimeError, match="sandbox-exec"):
+            runner.submit({"code": "open('ran.txt', 'w').write('x')"})
+        assert not list((tmp_path / "jobs").glob("*/main.py"))
+
+    def test_the_explicit_override_is_the_only_way_to_run_unsandboxed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(node_server, "_sandbox_exe", lambda: None)
+        monkeypatch.setenv("DOURMOUSE_UNSANDBOXED_JOBS", "1")
+        runner = node_server.JobRunner(tmp_path / "jobs", sys.executable, lambda sha: b"")
+        job_id = runner.submit({"code": "print(1)"})["id"]
+        deadline = time.monotonic() + 60
+        while runner.status(job_id)["state"] in ("queued", "running") and time.monotonic() < deadline:
+            time.sleep(0.05)
+        st = runner.status(job_id)
+        assert st["state"] == "succeeded" and st["sandbox"].startswith("NONE")
+
+    def test_the_job_environment_holds_no_secrets(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        monkeypatch.setenv("SOME_TOKEN", "t")
+        monkeypatch.setenv("LC_CTYPE", "UTF-8")
+        env = node_server._job_environment(tmp_path)
+        assert "ANTHROPIC_API_KEY" not in env and "SOME_TOKEN" not in env
+        assert env["HOME"] == str(tmp_path) and env["LC_CTYPE"] == "UTF-8"
+        assert env["PATH"] in ("/usr/bin:/bin:/usr/sbin:/sbin", os.environ.get("PATH", ""))

@@ -129,7 +129,18 @@ class TestResolveTaskApproval:
     def test_approving_writes_a_one_time_ticket_into_the_task_result(self, store):
         _, task = self._waiting_task(store)
         store.resolve_task_approval(task["id"], True)
-        assert store.get_task(task["id"])["result"] == {"approved_for_next_run": True}
+        assert store.get_task(task["id"])["result"] == {"approved_for_next_run": True, "approved_prompts": []}
+
+    def test_the_ticket_names_the_exact_actions_the_human_was_shown(self, store):
+        """Finding #137: not a blanket approval for whatever the model does next."""
+        _, task = self._waiting_task(store)
+        store.update_task_status(
+            task["id"], "WAITING_FOR_APPROVAL", result={"pending_prompts": ["Delete a.txt?", "Send the summary?"]},
+        )
+        store.resolve_task_approval(task["id"], True)
+        assert store.get_task(task["id"])["result"] == {
+            "approved_for_next_run": True, "approved_prompts": ["Delete a.txt?", "Send the summary?"],
+        }
 
     def test_declining_fails_the_task_and_blocks_the_goal_with_the_real_reason(self, store):
         goal, task = self._waiting_task(store)

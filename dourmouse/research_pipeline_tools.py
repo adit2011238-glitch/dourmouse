@@ -40,7 +40,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from dourmouse.dispatch import DispatchRegistry, Subagent, ToolSpec
+from dourmouse.dispatch import DispatchRegistry, Permission, Subagent, ToolSpec
 from dourmouse.research_pipeline.core import ResearchRecord
 from dourmouse.research_pipeline.stages import (
     detect_contradictions,
@@ -386,6 +386,50 @@ def _research_critique_tool(arguments: dict[str, Any]) -> str:
             f"Alternative: {rv.get('alternative', '')}\nRefuted if: {rv['refuted_if']}")
 
 
+def _research_critique_answer_tool(arguments: dict[str, Any]) -> str:
+    """R9: read-only. The critic's own model call (if any) only decides partly
+    matching sentences and every quote it gives is verified by the platform."""
+    from dourmouse.research_graph.store import GraphStore
+    from dourmouse.research_graph.store import default_db as graph_db
+    from dourmouse.research_pipeline.answer_critic import critique_answer
+    from dourmouse.research_pipeline.hypotheses import default_complete
+
+    question_id = str(arguments.get("question_id") or "").strip()
+    if not question_id:
+        return "ERROR: research_critique_answer requires a non-empty 'question_id'."
+    answer = str(arguments.get("answer") or "").strip()
+    graph = GraphStore(graph_db())
+    target: Any = question_id
+    try:
+        graph.get("research_question", question_id)
+    except KeyError:
+        # Not a graph id: the pipeline's other tools are keyed by the question text.
+        record = _store().load(question_id)
+        if record is None:
+            return f"ERROR: no research question or record {question_id!r}."
+        target = record
+        answer = answer or record.synthesis.strip()
+    else:
+        if not answer:
+            results = [e for e in graph.edges(dst=("research_question", question_id), relation="answers")
+                       if e.src_type == "result"]
+            if results:
+                answer = str(graph.get("result", results[-1].src_id).body.get("summary") or "").strip()
+    if not answer:
+        return "Not done: this question has no synthesized answer yet, and none was given to check."
+    supplied = bool(str(arguments.get("answer") or "").strip())
+    result = critique_answer(answer, target, default_complete(), store=graph,
+                             # The pipeline's own synthesis is written to cite each claim by URL.
+                             require_citations=None if supplied else True)
+    lines = [result.summary]
+    for s in result.sentences:
+        if s.verdict in ("SUPPORTED", "NOT_A_CLAIM"):
+            continue
+        ids = f" [{', '.join(s.evidence_ids)}]" if s.evidence_ids else ""
+        lines.append(f"- {s.verdict}{ids}: {s.text} ({s.reason})")
+    return "\n".join(lines)
+
+
 def _research_design_experiment_tool(arguments: dict[str, Any]) -> str:
     from dourmouse.research_pipeline import hypotheses as hy
 
@@ -534,6 +578,20 @@ def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
                 parameters={"type": "object", "properties": {"hypothesis_id": {"type": "string"}},
                             "required": ["hypothesis_id"]},
                 handler=_research_design_experiment_tool,
+            ),
+            ToolSpec(
+                name="research_critique_answer",
+                description=("Critic pass over a synthesized research answer: flags each sentence that no stored "
+                             "claim or source passage backs and each backed sentence lacking a citation, "
+                             "verifying support deterministically. Reports only, changes nothing."),
+                parameters={"type": "object",
+                            "properties": {"question_id": {"type": "string"},
+                                           "answer": {"type": "string",
+                                                      "description": "optional: the answer text to check; "
+                                                                     "default is the question's synthesized answer"}},
+                            "required": ["question_id"]},
+                handler=_research_critique_answer_tool,
+                permission=Permission.REGULAR,
             ),
         ),
     )

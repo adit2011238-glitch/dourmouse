@@ -7437,9 +7437,10 @@ function secBuild(){
     <div class="sec">LOCKDOWN</div>
     <div id="secLockState"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
-      <input id="secLockEntry" placeholder="website or URL, or app name" autocomplete="off"
+      <input id="secLockEntry" placeholder="a website, a page like reddit.com/r/all, or an app name" autocomplete="off"
         style="flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line-2);color:var(--blue-hi);padding:7px 9px;border-radius:2px;font:inherit;font-size:11px">
       <button class="btn" id="secAddSite">+ WEBSITE</button>
+      <button class="btn" id="secAddUrl" title="One page or section of a site. Needs the Dourmouse browser extension.">+ PAGE</button>
       <button class="btn" id="secAddApp">+ APP</button>
     </div>
     <div id="secLockLists"></div>
@@ -7495,11 +7496,20 @@ function secBuild(){
     if(j && j.ok){ $("secLockEntry").value = ""; _secLockdown = j.lockdown; paintSecLockdown(); }
   };
   $("secAddSite").onclick = () => addEntry("site");
+  $("secAddUrl").onclick = () => addEntry("url");
   $("secAddApp").onclick = () => addEntry("app");
   $("secKillBtn").onclick = async () => {
     const pid = parseInt($("secKillPid").value, 10);
     if(!pid) return;
-    const j = await secAction({action: "kill_process", pid}, `Stop process ${pid}? Unsaved work in it is lost.`);
+    // Finding #136: look the process up first, show the owner WHO it is, and
+    // send that identity back so a pid that has since been reused by another
+    // program is refused instead of stopped.
+    const who = await secAction({action: "process_identity", pid});
+    if(!who || who.ok === false) return;
+    const when = who.create_time ? new Date(who.create_time * 1000).toLocaleTimeString() : "unknown time";
+    const j = await secAction(
+      {action: "kill_process", pid, expect_name: who.name, expect_create_time: who.create_time, expect_exe: who.exe},
+      `Stop ${who.name} (process ${pid}, started ${when})?\n${who.exe || ""}\nUnsaved work in it is lost.`);
     if(j && j.ok){ $("secKillPid").value = ""; alert(`${j.name} (${j.pid}): ${j.result}`); }
   };
   $("secQBtn").onclick = async () => {
@@ -7655,6 +7665,8 @@ function paintSecLockdown(){
     <div style="display:flex;gap:6px;flex-wrap:wrap">${l.apps.map(a => chip(a.name, "remove", a.bundle_id || a.name)).join("") || '<span class="note">none</span>'}</div>
     <div class="d" style="margin:8px 0 4px">WEBSITES</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">${l.sites.map(s => chip(s.domain, "remove", s.domain, siteMark(s))).join("") || '<span class="note">none</span>'}</div>
+    <div class="d" style="margin:8px 0 4px">PAGES (enforced by the browser extension)</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${(l.urls||[]).map(u => chip(u.url, "remove", u.url)).join("") || '<span class="note">none</span>'}</div>
     <div class="d" style="margin:8px 0 4px">BLOCKED FOR GOOD (security)</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">${(l.always_blocked||[]).map(s => chip(s.domain, "unblock", s.domain)).join("") || '<span class="note">none</span>'}</div>
     <div class="d" style="margin-top:8px">${(l.limits||[]).filter(x => !x.includes("sudo ")).map(esc).join("<br>")}</div>`;

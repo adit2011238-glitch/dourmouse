@@ -246,6 +246,45 @@ class TestSchedulerRunner:
         assert tracker.events
         assert "CONFIRMATION REQUIRED" not in tracker.events[0]["text"]
 
+    def _registry_with(self, handler):
+        tool = ToolSpec(
+            name="probe", description="a regular probe", parameters={"type": "object", "properties": {}},
+            handler=handler,
+        )
+        registry = DispatchRegistry()
+        registry.register_subagent(Subagent(name="p", domain="Test", description="x", tools=(tool,)))
+        return registry
+
+    def test_a_scheduled_result_is_scrubbed_of_credentials(self, tmp_path):
+        """Finding #137: a scheduled run's output is redacted like any tool result."""
+        registry = self._registry_with(lambda a: "GEMINI_API_KEY=AIzaSyFAKEFAKEFAKEFAKEFAKEFAKE12345")
+        store = schedules.Schedules(tmp_path / "schedules.jsonl")
+        store.add("probe", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+        tracker = _FakeTracker()
+        runner = schedules.SchedulerRunner(
+            registry, tracker, store=store, now_fn=lambda: datetime(2026, 8, 12, 9, 0), tick=1.0,
+        )
+        runner._tick_once()
+        assert "AIzaSyFAKE" not in tracker.events[0]["text"]
+
+    def test_a_scheduled_run_lands_in_the_action_ledger_under_its_own_name(self, tmp_path):
+        from dourmouse import execution_policy
+
+        seen = []
+        execution_policy.set_action_sink(lambda kind, source, subject, actor, data: seen.append((kind, subject, actor)))
+        try:
+            registry = self._registry_with(lambda a: "ok")
+            store = schedules.Schedules(tmp_path / "schedules.jsonl")
+            store.add("probe", {}, {"kind": "interval", "interval_seconds": 60}, "every 60 minutes")
+            runner = schedules.SchedulerRunner(
+                registry, _FakeTracker(), store=store, now_fn=lambda: datetime(2026, 8, 12, 9, 0), tick=1.0,
+            )
+            runner._tick_once()
+        finally:
+            execution_policy.set_action_sink(None)
+        assert ("action.proposed", "probe", "scheduler") in seen
+        assert ("action.executed", "probe", "scheduler") in seen
+
 
 class TestStore:
     def test_crud(self, tmp_path):

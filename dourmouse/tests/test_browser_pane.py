@@ -52,7 +52,7 @@ class TestCheckFrameable:
 
     def test_no_blocking_header_is_frameable(self, monkeypatch):
         monkeypatch.setattr(
-            browser_pane.urllib.request, "urlopen", lambda *a, **k: _FakeResponse({})
+            browser_pane, "guarded_urlopen", lambda *a, **k: _FakeResponse({})
         )
         result = check_frameable("https://example.com")
         assert result["frameable"] is True
@@ -61,8 +61,8 @@ class TestCheckFrameable:
     @pytest.mark.parametrize("value", ["DENY", "SAMEORIGIN", "deny", "sameorigin"])
     def test_x_frame_options_blocks_it(self, monkeypatch, value):
         monkeypatch.setattr(
-            browser_pane.urllib.request,
-            "urlopen",
+            browser_pane,
+            "guarded_urlopen",
             lambda *a, **k: _FakeResponse({"X-Frame-Options": value}),
         )
         result = check_frameable("https://www.google.com")
@@ -71,8 +71,8 @@ class TestCheckFrameable:
 
     def test_csp_frame_ancestors_none_blocks_it(self, monkeypatch):
         monkeypatch.setattr(
-            browser_pane.urllib.request,
-            "urlopen",
+            browser_pane,
+            "guarded_urlopen",
             lambda *a, **k: _FakeResponse(
                 {"Content-Security-Policy": "frame-ancestors 'none'"}
             ),
@@ -83,8 +83,8 @@ class TestCheckFrameable:
 
     def test_csp_frame_ancestors_specific_origin_blocks_us(self, monkeypatch):
         monkeypatch.setattr(
-            browser_pane.urllib.request,
-            "urlopen",
+            browser_pane,
+            "guarded_urlopen",
             lambda *a, **k: _FakeResponse(
                 {"Content-Security-Policy": "frame-ancestors https://example.com"}
             ),
@@ -94,8 +94,8 @@ class TestCheckFrameable:
 
     def test_csp_frame_ancestors_wildcard_allows_it(self, monkeypatch):
         monkeypatch.setattr(
-            browser_pane.urllib.request,
-            "urlopen",
+            browser_pane,
+            "guarded_urlopen",
             lambda *a, **k: _FakeResponse({"Content-Security-Policy": "frame-ancestors *"}),
         )
         result = check_frameable("https://example.com")
@@ -107,7 +107,7 @@ class TestCheckFrameable:
                 "https://x", 405, "Method Not Allowed", _FakeHeaders({"X-Frame-Options": "DENY"}), None
             )
 
-        monkeypatch.setattr(browser_pane.urllib.request, "urlopen", raise_http_error)
+        monkeypatch.setattr(browser_pane, "guarded_urlopen", raise_http_error)
         result = check_frameable("https://x")
         assert result["frameable"] is False
 
@@ -115,7 +115,7 @@ class TestCheckFrameable:
         def raise_url_error(*a, **k):
             raise urllib.error.URLError("no route to host")
 
-        monkeypatch.setattr(browser_pane.urllib.request, "urlopen", raise_url_error)
+        monkeypatch.setattr(browser_pane, "guarded_urlopen", raise_url_error)
         result = check_frameable("https://unreachable.example")
         assert result["frameable"] is True
         assert result["checked"] is False
@@ -316,8 +316,8 @@ class TestNeutralizeFrameBusting:
 
     def test_applied_by_the_real_proxy_fetch(self, monkeypatch):
         monkeypatch.setattr(
-            browser_pane.urllib.request,
-            "urlopen",
+            browser_pane,
+            "guarded_urlopen",
             lambda *a, **k: _FakeResponse(
                 {"Content-Type": "text/html"},
                 body=b"<html><head></head><body><script>if(top!==self){top.location='x';}</script></body></html>",
@@ -332,8 +332,8 @@ class TestNeutralizeFrameBusting:
 class TestFetchAndRewriteForProxy:
     def test_real_html_page_gets_base_tag_injected(self, monkeypatch):
         monkeypatch.setattr(
-            browser_pane.urllib.request,
-            "urlopen",
+            browser_pane,
+            "guarded_urlopen",
             lambda *a, **k: _FakeResponse(
                 {"Content-Type": "text/html; charset=utf-8"},
                 body=b"<html><head></head><body>hi</body></html>",
@@ -345,8 +345,8 @@ class TestFetchAndRewriteForProxy:
 
     def test_non_html_content_type_is_an_honest_failure(self, monkeypatch):
         monkeypatch.setattr(
-            browser_pane.urllib.request,
-            "urlopen",
+            browser_pane,
+            "guarded_urlopen",
             lambda *a, **k: _FakeResponse({"Content-Type": "application/pdf"}, body=b"%PDF-1.4"),
         )
         result = browser_pane.fetch_and_rewrite_for_proxy("https://example.com/file.pdf")
@@ -357,8 +357,8 @@ class TestFetchAndRewriteForProxy:
     def test_oversized_page_is_an_honest_failure(self, monkeypatch):
         monkeypatch.setattr(browser_pane, "PROXY_MAX_BYTES", 10)
         monkeypatch.setattr(
-            browser_pane.urllib.request,
-            "urlopen",
+            browser_pane,
+            "guarded_urlopen",
             lambda *a, **k: _FakeResponse(
                 {"Content-Type": "text/html"}, body=b"x" * 1000
             ),
@@ -371,9 +371,53 @@ class TestFetchAndRewriteForProxy:
         def raise_url_error(*a, **k):
             raise urllib.error.URLError("no route to host")
 
-        monkeypatch.setattr(browser_pane.urllib.request, "urlopen", raise_url_error)
+        monkeypatch.setattr(browser_pane, "guarded_urlopen", raise_url_error)
         result = browser_pane.fetch_and_rewrite_for_proxy("https://unreachable.example/")
         assert result["ok"] is False
         assert b"<html>" in result["body"]
         assert b"no route to host" in result["body"]
         assert b"unreachable.example" in result["body"]  # the real "open it directly" link
+
+
+class TestPaneNeverFetchesPrivateAddresses:
+    """Finding #139: the pane's check and proxy fetch a URL on the server's
+    behalf, and the proxy serves the answer from the app's own origin. Both now
+    refuse addresses that are not on the public internet, at every redirect hop."""
+
+    @staticmethod
+    def _listener():
+        import socket
+
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        srv.settimeout(0.5)
+        return srv
+
+    def test_the_proxy_does_not_connect_to_a_loopback_service(self):
+        srv = self._listener()
+        try:
+            result = browser_pane.fetch_and_rewrite_for_proxy(f"http://127.0.0.1:{srv.getsockname()[1]}/admin")
+            assert result["ok"] is False
+            assert b"private/internal address" in result["body"]
+            with pytest.raises(OSError):  # nothing ever connected
+                srv.accept()
+        finally:
+            srv.close()
+
+    def test_the_frameable_check_does_not_connect_either(self):
+        srv = self._listener()
+        try:
+            result = check_frameable(f"http://127.0.0.1:{srv.getsockname()[1]}/")
+            assert result["checked"] is False
+            with pytest.raises(OSError):
+                srv.accept()
+        finally:
+            srv.close()
+
+    @pytest.mark.parametrize("url", [
+        "http://169.254.169.254/latest/meta-data/", "http://10.0.0.1/", "http://192.168.1.1/", "http://[::1]/",
+        "http://localhost/",
+    ])
+    def test_private_ranges_and_metadata_addresses_are_refused(self, url):
+        assert browser_pane.fetch_and_rewrite_for_proxy(url)["ok"] is False

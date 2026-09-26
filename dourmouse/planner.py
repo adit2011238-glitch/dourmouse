@@ -207,6 +207,12 @@ _DOMAIN_ROUTE: dict[str, str] = {
     "experiments": "evidence_pipeline",
     "replicate": "evidence_pipeline",
     "replication": "evidence_pipeline",
+    # R9: checking a research answer for unsupported claims and missing
+    # citations. Only words that mean this; "claims" and "sources" stay out
+    # (insurance claims, "sources" of news) so no other query is touched.
+    "unsupported": "evidence_pipeline",
+    "citation": "evidence_pipeline",
+    "citations": "evidence_pipeline",
 }
 
 # Stop words that are ALSO strong domain words must not be stripped — the

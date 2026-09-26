@@ -57,7 +57,7 @@ class TestBuildSecuritySubagent:
         subagent = sec_tools.build_security_subagent()
         gated = {t.name for t in subagent.tools if t.permission == Permission.REQUIRES_CONFIRMATION}
         # Everything that changes the machine needs the owner (findings #103, #106).
-        assert gated == {"lockdown_start", "lockdown_stop", "security_kill_process", "security_quarantine_file",
+        assert gated == {"lockdown_start", "lockdown_stop", "lockdown_edit", "security_kill_process", "security_quarantine_file",
                          "security_disable_startup_item", "security_restore", "security_block_domain",
                          "security_unblock_domain", "security_privacy_mode"}
         assert all(t.confirm_prompt is not None for t in subagent.tools if t.name in gated)
@@ -250,3 +250,118 @@ class TestSecurityKnownDevices:
         result = _tool("security_known_devices").handler({})
         assert "1 real known device(s)" in result
         assert "router" in result and "e8:9f" in result and "192.168.1.1" in result
+
+
+class TestLockdownApprovalPrompts:
+    """Security review S02, S05."""
+
+    def test_editing_the_blocklist_is_gated_and_the_prompt_lists_every_entry(self):
+        from dourmouse.dispatch import Permission
+
+        tool = _tool("lockdown_edit")
+        assert tool.permission == Permission.REQUIRES_CONFIRMATION
+        prompt = tool.confirm_prompt({"add_sites": ["https://m.youtube.com/watch", "127.0.0.1"], "add_apps": ["Finder", "com.example.Game"],
+                                      "remove": ["reddit.com"]})
+        assert "m.youtube.com and www.m.youtube.com" in prompt
+        assert "127.0.0.1" in prompt and "will be refused" in prompt
+        assert "Finder" in prompt and "will be refused" in prompt and "Game" in prompt
+        assert '"reddit.com"' in prompt and "Lockdown is off" in prompt
+
+    def test_the_start_prompt_shows_what_will_be_blocked(self, tmp_path, monkeypatch):
+        from dourmouse.security import lockdown
+
+        monkeypatch.setattr(lockdown, "config_path", lambda: tmp_path / "l.json")
+        bl = lockdown.Blocklist()
+        bl.add_site("youtube.com")
+        bl.add_app("com.example.Game")
+        bl.save()
+        prompt = _tool("lockdown_start").confirm_prompt({})
+        assert "youtube.com, www.youtube.com" in prompt and "Game" in prompt
+
+    def test_the_edit_reports_a_refused_app_and_saves_the_rest(self, tmp_path, monkeypatch):
+        from dourmouse.security import lockdown
+
+        monkeypatch.setattr(lockdown, "config_path", lambda: tmp_path / "l.json")
+        monkeypatch.setattr(lockdown, "hosts_request_path", lambda: tmp_path / "req.json")
+        out = _tool("lockdown_edit").handler({"add_sites": ["reddit.com"], "add_apps": ["Terminal"]})
+        assert "ERROR" in out and "Terminal" in out and "Added: reddit.com" in out
+        assert "blocks exactly reddit.com and www.reddit.com" in out
+        assert "whole site" not in out and "whole domain" not in _tool("lockdown_edit").description
+
+
+class TestPrivacyModeWithholdsEvidence:
+    """Security review S09."""
+
+    def test_evidence_tools_return_a_note_not_the_evidence(self):
+        from dourmouse.security.privacy import set_privacy_mode
+
+        set_privacy_mode(True)
+        try:
+            for name in sec_tools.EVIDENCE_TOOLS:
+                assert _tool(name).handler({}).startswith("Withheld in privacy mode"), name
+        finally:
+            set_privacy_mode(False)
+
+    def test_downloads_show_their_source_only_when_privacy_is_off(self, monkeypatch):
+        from dourmouse.security.privacy import set_privacy_mode
+
+        monkeypatch.setattr(SentryStore, "recent_downloads", lambda self, n: [
+            {"risk": "med", "name": "a.dmg", "kind": "dmg", "size": 1, "reasons": [], "where_from": ["https://s.example/a?sig=abc"]}])
+        monkeypatch.setattr(sec_tools, "_sentry_db", lambda: ":memory:")
+        set_privacy_mode(False)
+        assert "sig=abc" in _tool("security_downloads").handler({})
+        set_privacy_mode(True)
+        assert "sig=abc" not in _tool("security_downloads").handler({})
+        set_privacy_mode(False)
+
+
+class TestKillPromptShowsWhatIsKilled:
+    def test_the_approved_process_is_the_one_checked(self):
+        import subprocess
+        import sys
+
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            tool = _tool("security_kill_process")
+            prompt = tool.confirm_prompt({"pid": proc.pid})
+            assert f"process {proc.pid}" in prompt and "started" in prompt
+            assert "Done" in tool.handler({"pid": proc.pid}) and proc.wait(timeout=5) is not None
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+    def test_a_pid_with_no_identity_is_refused(self):
+        import subprocess
+        import sys
+
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            assert "no identity" in _tool("security_kill_process").handler({"pid": proc.pid})
+            assert proc.poll() is None
+        finally:
+            proc.kill()
+
+
+class TestLockdownUrls:
+    def test_the_edit_prompt_and_handler_take_urls(self, tmp_path, monkeypatch):
+        from dourmouse.security import lockdown
+
+        monkeypatch.setattr(lockdown, "config_path", lambda: tmp_path / "l.json")
+        monkeypatch.setattr(lockdown, "hosts_request_path", lambda: tmp_path / "req.json")
+        tool = _tool("lockdown_edit")
+        assert "add_urls" in tool.parameters["properties"]
+        prompt = tool.confirm_prompt({"add_urls": ["https://reddit.com/r/all", "example.com"]})
+        assert "reddit.com/r/all" in prompt and "extension" in prompt and "will be refused" in prompt
+        out = tool.handler({"add_urls": ["https://www.reddit.com/r/all?x=1", "apple.com/x"]})
+        assert "Added: reddit.com/r/all" in out and "ERROR" in out
+        assert "URLs (browser extension only): reddit.com/r/all" in out
+        assert [u["url"] for u in lockdown.Blocklist.load().urls] == ["reddit.com/r/all"]
+
+    def test_the_start_prompt_lists_urls(self, tmp_path, monkeypatch):
+        from dourmouse.security import lockdown
+
+        monkeypatch.setattr(lockdown, "config_path", lambda: tmp_path / "l.json")
+        bl = lockdown.Blocklist()
+        bl.add_url("reddit.com/r/all")
+        bl.save()
+        assert "reddit.com/r/all" in _tool("lockdown_start").confirm_prompt({})

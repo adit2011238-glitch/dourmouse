@@ -17,6 +17,10 @@ from http.server import ThreadingHTTPServer
 
 
 class DourmouseHTTPServer(ThreadingHTTPServer):
+    # Finding #135: the per-launch token the file-preview routes require of a
+    # cross-origin caller (set by webui.run_server).
+    preview_token: str = ""
+
     if sys.platform == "win32":
         allow_reuse_address = False
 

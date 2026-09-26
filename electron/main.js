@@ -21,11 +21,12 @@
 // default because node_modules is gitignored, so a fresh clone genuinely has
 // no Electron and must still start -- run `npm install` here to enable it.
 
-const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification } = require("electron");
+const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification, session } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const policy = require("./policy");
 
 // Stage D: real CDP access to this process's own Chromium, the load-
 // bearing fact proven live in the migration spike (chromium.connect_over_cdp
@@ -35,6 +36,14 @@ const path = require("path");
 // (dev + a packaged build running side by side) never collides.
 const CDP_PORT = parseInt(process.env.DOURMOUSE_ELECTRON_CDP_PORT || "9333", 10);
 app.commandLine.appendSwitch("remote-debugging-port", String(CDP_PORT));
+// Finding S36, assessed: the DevTools port is kept because the app is driven
+// through it (dourmouse/browser_agent.py). Chromium binds it to loopback only;
+// the address is pinned explicitly here rather than left to the default. It
+// has no authentication, so any local process running as any user can drive
+// the app's pages: that is the same trust boundary as the loopback server, and
+// is a known, accepted residual risk of using CDP. Browsers cannot reach it
+// (Chromium rejects a non-local Host header and cross-origin websockets).
+app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 
 // Stage E: when packaged, electron-builder's extraResources (see
 // package.json's "build" config) lay dourmouse/, ui/, and .venv/ out as
@@ -71,6 +80,46 @@ let atlasWindow = null;
 const taskWindows = new Map();
 
 const PRELOAD = path.join(__dirname, "preload.js");
+
+// Finding S34: deny every web permission by default, for every session (the
+// pane's BrowserView shares the default session with the console windows, so
+// one policy covers both). policy.permissionAllowed grants the few things the
+// app's own pages use, and only to the app's own origin. The pane's page is
+// refused outright even if its origin were ever the app's.
+const permissionPolicyInstalled = new WeakSet();
+function installPermissionPolicy(ses) {
+  if (permissionPolicyInstalled.has(ses)) return;
+  permissionPolicyInstalled.add(ses);
+  const fromPane = (wc) => !!(paneView && wc && !paneView.webContents.isDestroyed() && wc === paneView.webContents);
+  ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+    const origin = (details && details.requestingUrl) || (wc && wc.getURL()) || "";
+    callback(!fromPane(wc) && policy.permissionAllowed(permission, origin, PORT));
+  });
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
+    return !fromPane(wc) && policy.permissionAllowed(permission, requestingOrigin, PORT);
+  });
+}
+
+// Finding S35: the console windows carry the privileged preload, so they may
+// only ever show the app itself. A link, redirect or window.open to anywhere
+// else is stopped here and, for plain http(s), handed to the OS browser.
+function lockToAppOrigin(win) {
+  const wc = win.webContents;
+  const sendOut = (url) => {
+    if (policy.externalUrlAllowed(url)) shell.openExternal(url);
+  };
+  const guard = (evt, url) => {
+    if (policy.navigationAllowed(url, PORT)) return;
+    evt.preventDefault();
+    sendOut(url);
+  };
+  wc.on("will-navigate", guard);
+  wc.on("will-redirect", guard);
+  wc.setWindowOpenHandler(({ url }) => {
+    if (!policy.navigationAllowed(url, PORT)) sendOut(url);
+    return { action: "deny" };
+  });
+}
 
 function log(...args) {
   console.log("[dourmouse-electron]", ...args);
@@ -401,6 +450,7 @@ function ensurePaneView() {
   // Real, disclosed limitation: this is a one-time-at-discovery match,
   // not an ongoing identity check -- see browser_agent.py's own comment
   // on _ensure_browser_via_electron_pane for the full reasoning.
+  installPermissionPolicy(paneView.webContents.session);
   paneView.webContents.loadURL("about:blank");
   const wc = paneView.webContents;
   for (const ev of ["did-navigate", "did-navigate-in-page", "page-title-updated", "did-start-loading",
@@ -497,6 +547,19 @@ function startPaneBridge() {
     // Localhost-only by construction (bound to 127.0.0.1 below, matching
     // this whole app's existing 127.0.0.1-only posture) -- no auth needed
     // for the same reason webui.py's own loopback-only endpoints don't.
+    //
+    // Finding #135: "localhost only" does not keep out a web page, because a
+    // browser will connect to 127.0.0.1 on any page's behalf. The callers
+    // here are local programs (browser_agent.py, the Python tools), which
+    // send neither Origin nor Sec-Fetch-Site; a browser always sends at least
+    // one of them on a cross-site request, and names the attacker's own host
+    // in Host under DNS rebinding. Refuse both.
+    const hostHeader = String(req.headers.host || "").toLowerCase();
+    const ownHost = hostHeader === `127.0.0.1:${PANE_BRIDGE_PORT}` || hostHeader === `localhost:${PANE_BRIDGE_PORT}`;
+    if (!ownHost || req.headers.origin !== undefined || req.headers["sec-fetch-site"] !== undefined) {
+      respond(403, { ok: false, error: "browser-originated requests are not accepted here" });
+      return;
+    }
     if (req.method === "GET" && req.url === "/status") {
       respond(200, { active: paneVisible, cdpEndpoint: `http://127.0.0.1:${CDP_PORT}` });
     } else if (req.method === "POST" && req.url === "/show") {
@@ -731,6 +794,7 @@ function openTaskWindow(taskId, routePath, { title, width = 980, height = 760 } 
     title: (title || taskId.toUpperCase()).slice(0, 80),
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
+  lockToAppOrigin(win);
   win.loadURL(`${BASE_URL}${routePath}`);
   taskWindows.set(taskId, win);
   win.on("closed", () => taskWindows.delete(taskId));
@@ -802,6 +866,8 @@ app.whenReady().then(async () => {
     title: "DOURMOUSE // CENTRAL AGENT DISPATCH",
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
+  installPermissionPolicy(session.defaultSession);
+  lockToAppOrigin(mainWindow);
   mainWindow.loadURL(`${BASE_URL}/workspace`);
   if (geometry.maximized) mainWindow.maximize();
   mainWindow.on("close", persistMainWindowGeometry);
@@ -820,6 +886,7 @@ app.whenReady().then(async () => {
     title: "AGENT ORCHESTRATION MAP",
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
+  lockToAppOrigin(mapWindow);
   mapWindow.loadURL(`${BASE_URL}/map`);
 
   const openAtlasAtLaunch = process.env.DOURMOUSE_OPEN_ATLAS_LAB === "1";
@@ -830,6 +897,7 @@ app.whenReady().then(async () => {
     title: "ATLAS // STRATEGY LAB",
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
+  lockToAppOrigin(atlasWindow);
   atlasWindow.loadURL(`${BASE_URL}/atlas-lab`);
 
   // Stage A/B end here; Stage C native integrations start here.
@@ -850,6 +918,7 @@ app.whenReady().then(async () => {
         minHeight: 680,
         webPreferences: { preload: PRELOAD, contextIsolation: true },
       });
+      lockToAppOrigin(mainWindow);
       mainWindow.loadURL(`${BASE_URL}/workspace`);
       mainWindow.on("close", persistMainWindowGeometry);
     }

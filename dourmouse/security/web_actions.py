@@ -26,24 +26,27 @@ def handle_action(body: dict[str, Any]) -> dict[str, Any]:
     action = body.get("action")
     try:
         if action == "lockdown_add":
-            bl = ld.Blocklist.load()
             kind = body.get("kind")
             entry = _str(body, "entry")
-            row = bl.add_site(entry) if kind == "site" else bl.add_app(entry) if kind == "app" else None
-            if row is None:
-                raise ValueError("kind must be 'site' or 'app'")
-            bl.save()
-            if bl.active:
-                ld.write_hosts_request(bl)
-            return {"ok": True, "added": row, "lockdown": ld.status(bl, check_sites=False)}
+            # Finding #136: one change at a time under the lockdown lock, so a
+            # concurrent start, stop or edit is never overwritten by a stale copy.
+            with ld.locked_blocklist() as bl:
+                adders = {"site": bl.add_site, "url": bl.add_url, "app": bl.add_app}
+                if kind not in adders:
+                    raise ValueError("kind must be 'site', 'url' or 'app'")
+                row = adders[kind](entry)
+                bl.save()
+                if bl.active:
+                    ld.write_hosts_request(bl)
+                return {"ok": True, "added": row, "lockdown": ld.status(bl, check_sites=False)}
         if action == "lockdown_remove":
-            bl = ld.Blocklist.load()
-            removed = bl.remove(_str(body, "entry"))
-            bl.save()
-            if bl.active:
-                ld.write_hosts_request(bl)
-            return {"ok": removed, "lockdown": ld.status(bl, check_sites=False),
-                    **({} if removed else {"error": "not on the blocklist"})}
+            with ld.locked_blocklist() as bl:
+                removed = bl.remove(_str(body, "entry"))
+                bl.save()
+                if bl.active:
+                    ld.write_hosts_request(bl)
+                return {"ok": removed, "lockdown": ld.status(bl, check_sites=False),
+                        **({} if removed else {"error": "not on the blocklist"})}
         if action == "lockdown_start":
             return {"ok": True, "lockdown": ld.start()}
         if action == "lockdown_stop":
@@ -52,11 +55,25 @@ def handle_action(body: dict[str, Any]) -> dict[str, Any]:
             return {"ok": True, "lockdown": ld.block_domain_always(_str(body, "domain"), str(body.get("reason") or ""))}
         if action == "unblock_domain":
             return {"ok": True, "lockdown": ld.unblock_domain_always(_str(body, "domain"))}
+        if action == "process_identity":
+            pid = body.get("pid")
+            if not isinstance(pid, int) or isinstance(pid, bool):
+                raise ValueError("pid must be a number")
+            return {"ok": True, **rs.process_identity(pid)}
         if action == "kill_process":
             pid = body.get("pid")
             if not isinstance(pid, int) or isinstance(pid, bool):
                 raise ValueError("pid must be a number")
-            return rs.kill_process(pid, expect_name=body.get("expect_name") or None)
+            created = body.get("expect_create_time")
+            if created is not None and (not isinstance(created, (int, float)) or isinstance(created, bool)):
+                raise ValueError("expect_create_time must be a number")
+            # Finding #136: a pid alone can be reused by another process between
+            # the moment the owner saw it and the moment it is stopped, so the
+            # caller must say who it believes the pid is (see process_identity).
+            return rs.kill_process(
+                pid, expect_name=body.get("expect_name") or None, expect_create_time=created,
+                expect_exe=body.get("expect_exe") or None,
+            )
         if action == "quarantine":
             return rs.quarantine_file(_str(body, "path"), reason=str(body.get("reason") or ""))
         if action == "restore":

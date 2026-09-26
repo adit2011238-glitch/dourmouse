@@ -4224,7 +4224,7 @@ class TestSecurityConsoleEndpoints:
         r = self._post(port, {"action": "lockdown_add", "kind": "site", "entry": "https://www.reddit.com/r/x"})
         assert r["ok"] and r["added"]["domain"] == "reddit.com"
         assert self._post(port, {"action": "lockdown_add", "kind": "nope", "entry": "x"}) == {
-            "ok": False, "error": "kind must be 'site' or 'app'"}
+            "ok": False, "error": "kind must be 'site', 'url' or 'app'"}
         r = self._post(port, {"action": "block_domain", "domain": "phish.example", "reason": "phishing"})
         assert [s["domain"] for s in r["lockdown"]["always_blocked"]] == ["phish.example"]
         assert json.loads((tmp_path / "hosts-req.json").read_text())["domains"] == ["phish.example"]

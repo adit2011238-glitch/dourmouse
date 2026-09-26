@@ -5445,3 +5445,124 @@ Honest limits: 16 is measured only up to 32 simultaneous calls on this account a
 with the provider's limits (`DOURMOUSE_CLOUD_BURST`). A branch still shares the parent's cost
 budget. The `deepseek-r1:14b` default that broke `delegate_to_models` outside a run (the MCP bridge
 path) is a stale local model name in the deployment default and is not changed here.
+
+### 135 -- the local server refused nothing a web page sent it (security review S01, S07, S31, S32)
+
+Severity: high (any website the owner opens could drive the app). Status: DONE 2026-09-26.
+
+Found by the security review (`SECURITY_REVIEW_2026-09-26.md`, two independent reviewers plus a
+verifier). The server trusts every connection from this machine: `_authorized` lets a loopback
+client skip the access token (`webui.py:1813`), and nothing looked at `Host` or `Origin`. A page
+in the owner's browser reaches `127.0.0.1` like any local program, so it could:
+- send a simple cross-site POST to any state-changing route, for example `/api/security/action`
+  (start lockdown, edit the blocklist, and per the reviewers kill processes, quarantine files,
+  switch privacy mode off) or `/api/chat`;
+- via DNS rebinding, address the server under its own name and read any answer;
+- read any image, PDF, audio or video file off the disk through `/api/files/*`, which answers with
+  `Access-Control-Allow-Origin: *` and accepts any absolute path (`_sandboxed_preview_path`).
+
+Reproduced live first, with a real cross-origin page in real Chrome: with the guard off, the page
+added an entry to the lockdown blocklist and read a file (evidence 135).
+
+Fix, at the root, in one place (`dourmouse/request_guard.py`, `webui._Handler._guard`):
+- `Host` must be the server's own loopback name and port for any loopback client (stops
+  rebinding); extra names, for a proxy, come from `DOURMOUSE_ALLOWED_HOSTS`.
+- A state-changing request must carry no foreign `Origin` (including `null`) and no cross-site
+  `Sec-Fetch-Site`. Scripts and tests send neither header and are unchanged. A client that is not
+  on loopback is still judged by the access token, not here.
+- The wildcard-CORS preview routes now answer a cross-origin caller only with a per-launch random
+  token (`server.preview_token`, `pt=` in the URL). The app puts the token into `file_preview.html`
+  when it serves that page to a same-origin load, so its sandboxed preview frame works; a page on
+  another site that frames it gets an empty token and reads nothing.
+- The Electron pane bridge (port 9334) refuses any request with an `Origin` or `Sec-Fetch-Site`
+  header, or a `Host` that is not its own (`electron/main.js`).
+
+Tests: `test_request_guard.py` (24, the pure function) and `test_webui_request_guard.py` (17, a
+real server: cross-site POST, sandboxed-frame POST, rebinding for reads and writes, the
+`/api/security/action` route, the token on the image route, the page token). Live: the same
+hostile page against a guarded server changed nothing and read nothing; the sandboxed preview
+frame still renders an image (evidence 135).
+
+Honest limits: any process running as the owner can still call the server, as before (it can read
+the owner's files anyway). Chrome DevTools port 9333 stays unauthenticated to local processes (it
+is how the app is driven); it does not accept web pages' requests any more than the bridge does
+but is not guarded by this change. The Electron bridge check is syntax-checked but not exercised
+live. Someone reaching the app through a local proxy under another name (for example Tailscale
+serve) must list that name in `DOURMOUSE_ALLOWED_HOSTS`.
+
+### 136 -- lockdown, quarantine and the security analyst hardened (security review S02-S06, S08-S12, S25, S26, S28)
+
+Severity: high (a stuck lockdown, a stranded quarantine, evidence leaking in privacy mode). Status: DONE 2026-09-26. Built by a parallel builder, verified against the code by the main thread; each item has a test that fails without it.
+
+- **Lockdown could not be ended after a corrupt file (S25).** `lockdown.json` was read strictly, so a truncated file made `stop()` raise and silently disabled app enforcement. Files are now written atomically (`privacy.atomic_write_text`, `privacy.py:49`) and read tolerantly: a damaged file is set aside as `.corrupt`, loads as empty and inactive with a warning, so END LOCKDOWN always works. Every load-change-save runs under one lock (`lockdown.locked_blocklist`, `lockdown.py:276`; the console's add and remove now use it, S06).
+- **The app enforcer killed by bare name (S03).** It now matches by path, bundle id or exact executable name, and never touches Finder, Dock, loginwindow, WindowServer, launchd, Terminal, iTerm, Electron, the server's own pid and ancestors, or the server's interpreter (`lockdown.py:313-340`). `add_app` refuses these at entry.
+- **The root helper (S04, S28)** refuses names macOS depends on, opens its request file without following links and judges the open descriptor (regular, small, owned by the owner, not group or world writable), caps entries, and treats a corrupt request as empty so the block is always removable (`lockdown_helper.py:68-170`). The install records the owner's uid. An existing install must re-run the install command once.
+- **Honest wording (S05).** A site entry blocks the name and its `www` form only; status and tool text now say exactly that.
+- **`lockdown_edit` is approval-gated (S02)** with a prompt listing the exact entries, and the start prompt lists what will be blocked.
+- **Quarantine (S08, S10).** A file named `manifest.json` stranded itself (the move succeeded, the manifest write failed). Each item now lives in its own subfolder with the manifest beside it, written first and rolled back on failure. A quarantined app bundle or folder has execute and setuid bits cleared and a `.quarantined` suffix, and restore reverses both exactly.
+- **Privacy mode (S09):** the chat tools that return security evidence return a plain "withheld" note while privacy mode is on.
+- **The analyst (S11, S26).** Findings reach the model as fenced, escaped, length-capped data; the alert severity is computed from the deterministic findings and the model can never lower it. A finding set is marked analysed only after the analysis was stored, so one 429 or timeout no longer loses it.
+- **`kill_process` identity (S12).** It needs the process's start time or executable (or name) and re-checks them at kill time; the console now looks the pid up first, shows the owner who it is and when it started, and sends that identity back (`web_actions.py`, `console.html`).
+
+Tests: `test_security_lockdown.py`, `test_security_response.py`, `test_security_analyst.py`, `test_security_tools.py`, `test_security_web_actions.py`. Honest limits: a corrupt `always-blocked` list is lost with the damaged file; a `.app` nested deep inside a quarantined folder keeps its name but cannot launch; the analyst's assessment is advisory text and can still be wrong.
+
+### 137 -- model-written code runs in a sandbox, code tools and standing instructions need the owner (security review S13, S14, S15, S19, S21, S22, S23)
+
+Severity: critical. Status: DONE 2026-09-26.
+
+The review's worst class: outsider text (a page, an email) could steer the model into running code as the owner with the server's whole environment, with no prompt, because `run_python` and the coding CLIs were ungated (`general_roster.py` default `Permission.REGULAR`), compute jobs ran unsandboxed (probe: network reachable, `~/.ssh` listed, home writable), and the scheduler and goal runtime could run them unattended.
+
+- **One sandbox for all model code** (`sandbox.py`: `build_job_profile`, `job_environment`, `run_python_sandboxed`; `nodes/node_server.py`). Default-deny reads with an explicit allowlist (system libraries, the exact interpreter, the job's own folder), writes only that folder, no network, an allowlist environment with no keys and HOME set to the job folder, CPU and file-size limits, the whole process group killed on a timeout plus a sweep of descendants that left it, output and disk caps. Refuses to run without `sandbox-exec` (override `DOURMOUSE_UNSANDBOXED_JOBS=1`). Independently probed on this Mac: a job cannot list `~/.ssh` or home, read a home file, connect out, write outside its folder, or see a key; `math`, `statistics` and `json` still run.
+- **`run_python`** now uses it (scratch folder `workspace/scratch`; workspace files come in through an `inputs` list that refuses Dourmouse's own state). **`run_python_host`** is the approved way to run outside the sandbox: the owner sees the exact code. **`claude_code` and `codex_code`** need approval showing the task.
+- **The file tools** refuse Dourmouse's own state and secret locations (`self_extensions`, `auth`, `state`, `security`, `memory`, databases, `.env`, keys), so a model can no longer plant code the server loads at its next start (`general_roster._refuse_protected`, `:1257`).
+- **Standing instructions (S14, S15).** `schedule_recurring` needs approval showing tool, arguments and cadence. A scheduled run goes through `dispatch._execute_tool` (hooks, required arguments, run policy, action ledger under the actor "scheduler") and its output is scrubbed of credentials (`schedules.py`). A goal task's approval is now per action: the ticket carries the exact prompts the owner was shown, each honoured once, and a different gated action on the re-run parks the task again with its own prompt (`goal_runtime._confirmation_gate_for`, `goals.resolve_task_approval`).
+
+Tests: `test_code_execution_policy.py` (29, real sandbox probes: no read outside, no write outside, no network, no keys, timeout kills children), `test_nodes.py` and `test_sandbox.py` additions, `TestApprovalIsPerAction`, scheduler tests. Honest limits: a descendant that calls `setsid` and whose parent already exited can outlive a kill; memory is limited by a resident-size watchdog, not the kernel (macOS refuses `RLIMIT_AS`); approved self-extension tools still run inside the server process; the Autonomous mode toggle remains the owner's own switch for skipping approvals, including for goals.
+
+### 138 -- secrets scrubbing, self-extension injection, standing agents (security review S16, S20, S24, S29, S30)
+
+Severity: high. Status: DONE 2026-09-26. A builder wrote it; the main thread found and fixed two defects in it.
+
+- **DLP (S16).** The scrubber missed `GEMINI_API_KEY=`, Anthropic, Google and Ollama keys. It now also recognises those shapes, bearer tokens, and assignments to secret-named variables, and matches every secret in the owner's own `.env` exactly (raw, URL-encoded, base64; reloaded when the file changes) (`governance.py:169-300`). It is applied to error and refusal results too (`dispatch.py`).
+- **The first version of the assignment pattern hung the process.** A 20,000-character run of letters and digits (any base64 blob in a tool result) did not finish in three minutes, and the pattern also redacted `monkey`, `hotkey` and `max_tokens: 4096000000`. Replaced by locating an assignment first (bounded name, `=` or `:`, value) and judging name and value in code (`_redact_assignments`, `governance.py:218`); a 200 KB run now takes well under a second. Tests cover the hang shapes and the harmless names.
+- **Self-extension (S20, S24).** A crafted description escaped the generated source's string and ran at import, and at every server start. Modules are now generated from data with `repr` literals only (`render_module_source`), descriptions with backslashes, quotes or control characters are refused, the reviewer sees the exact module text, and its sha256 is checked at every load; an extension approved before this change must be approved again. The approval subprocess gets a scrubbed environment (`scrubbed_subprocess_env`).
+- **Standing agents (S29)** keep a bounded queue (drop oldest, counted), log per-event failures, restart their thread with backoff and expose health. **`_json` (S30)** is linear.
+
+Honest limits: exact-value redaction covers the `.env` only (there is no keychain reader); a secret paraphrased or split across lines is not recognised; approved tools still run in-process.
+
+### 139 -- the pane proxy and the Electron shell hardened (security review S33, S34, S35, S36)
+
+Severity: medium. Status: DONE 2026-09-26.
+
+- **Proxy and check (S33).** Both fetch a caller-supplied URL and used plain `urlopen`; they now use `net_guard.guarded_urlopen` (no private or metadata addresses at any hop). Proxied pages carry `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups`, so somebody else's page served from the app's origin can never act as the app even when opened top-level.
+- **Electron (S34, S35, S36).** A deny-by-default permission policy for every session (only the app's own microphone, camera, clipboard write and fullscreen), main and task windows refuse to leave the app's origin (external http(s) links open in the default browser), the DevTools address is pinned to `127.0.0.1`. The decisions are pure functions in `electron/policy.js`, tested under plain node.
+
+Tests: `TestPaneNeverFetchesPrivateAddresses`, `test_electron_hardening.py` (12). Honest limits: the Electron wiring (permission handlers, navigation locks, bridge check) is syntax-checked and its pure decisions are tested, but it was not exercised in a running Electron; the DevTools port remains unauthenticated to local processes because the app is driven through it.
+
+### 140 -- one run policy per request; a damaged history file no longer stops the app (security review S17, S27)
+
+Severity: medium. Status: DONE 2026-09-26.
+
+- A delegate, a branch or a `delegate_to_models` task used to start a fresh `RunPolicy`, so the limit of 8 approval-gated actions restarted at zero in each of up to 25 nested runs. Nested runs now share the parent's policy (`run_dispatch_messages(policy=...)`), the policy is thread-safe (parallel branches), and the actor is passed per call instead of stored on the shared object.
+- `OfficeLogger()` raised on a damaged file and the server refused to start. `dourmouse/db_recovery.py` sets a damaged file aside under a dated name and starts a fresh one; a merely locked database is never moved.
+
+Tests: `TestOnePolicyPerRequest`, `test_db_recovery.py` (6, including a real server start on a damaged file).
+
+### 141 -- lockdown can block page paths through a browser extension, and the answer critic (R9) (owner spec, spec item 58)
+
+Severity: feature. Status: DONE 2026-09-26. Built by parallel builders, integrated and route-wired by the main thread.
+
+- **URL paths.** Lockdown only blocked whole names through `/etc/hosts`. The blocklist now holds page entries (`reddit.com/r/all`), validated like sites (http(s) only, no credentials, ports or IP literals, at most 200), and `extension/lockdown/` is a Manifest V3 extension that polls `GET /api/security/lockdown/rules` and blocks them with `declarativeNetRequest` while lockdown is on. It keeps its last rules if the app is closed. The console has a `+ PAGE` button. `dourmouse/security/extension_rules.py` builds the rules (a pure function).
+- **R9 answer critic.** `research_pipeline/answer_critic.py` classifies each sentence of a research answer as supported (a stored claim or passage backs it, checked by token overlap, with the passage id), missing citation, cited but unverified, unsupported, or not a claim. A model may decide only ambiguous sentences and must quote the passage, and the platform verifies the quote is in a stored passage of that question; a quote that does not verify demotes the sentence. Exposed as `research_critique_answer`.
+
+Tests: `test_extension_rules.py`, `test_extension_manifest.py` (node harness), `TestExtensionRulesRoute`, `test_research_answer_critic.py` (22), routing tests in `test_planner.py`. Honest limits: the extension was never loaded into a real Chrome (branded Chrome blocks scripted loading, and nothing may be downloaded), so matching rests on Chrome's documented behaviour and stubbed APIs: the owner loads it once (README) and checks the badge; it covers only browsers that have it. The critic's support test is lexical: it cannot detect negation, and its thresholds are judgement calls, not tuned on real answers; no live model run.
+
+### 142 -- request bodies are bounded; the host guard learns proxies and ports (found running the suite on #135-#141)
+
+Severity: low to medium. Status: DONE 2026-09-26.
+
+- **Unbounded request bodies.** `_read_json_body` read whatever `Content-Length` announced (`webui.py`, review "not checked" list): a client that announced gigabytes held a thread and memory until it stopped sending, and a garbage length raised a 500. `_guard` now refuses a body over 64 MB with 413 and a non-numeric length with 400 before anything reads it (the 50 MB upload cap is unchanged), and `_read_json_body` clamps as a second line.
+- **Host guard and proxies.** Running the full suite after #135 showed three tests that send a custom `Host` header from a loopback client (the Google sign-in redirect, and the phone-pairing page building its own URL). That is exactly what a local proxy in front of the app does, so the guard now accepts an owner-listed entry as a bare name (any port) or `name:port` (that port only) in `DOURMOUSE_ALLOWED_HOSTS`, for both `Host` and `Origin`. A loopback name on a wrong port is still refused. The hostile-Host pairing test now expects 403 from this machine; the page's own filter still guards a phone reaching it over the network.
+- Stale expectations updated by their tests: `claude_code` and `codex_code` are approval-gated (#137), and the console's lockdown `kind` error names `'url'` (#141).
+
+Tests: `TestRequestBodiesAreBounded`, the extended `test_request_guard.py`, and the updated mobile, Google and claude/codex tests. Full suite: see the commit message.

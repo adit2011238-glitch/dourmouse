@@ -109,3 +109,18 @@ def test_json_is_found_inside_prose_and_fences():
     assert hy._json(reply) == {"protocol": "p", "code": "d = {1: 2}\nprint(d)"}
     assert hy._json('prefix {"a": 1} suffix {bad}') == {"a": 1}
     assert hy._json("no object") is None
+
+
+def test_json_scan_is_bounded_on_unclosed_braces():
+    """S30: 100000 unclosed braces took about 4.8s (one full scan per brace)."""
+    import time
+
+    t0 = time.perf_counter()
+    assert hy._json("{" * 100000) is None
+    assert time.perf_counter() - t0 < 1.0
+    # a real object after a modest run of bad starts is still found
+    assert hy._json("{" * 50 + ' {"a": 1}') == {"a": 1}
+    # beyond the attempt cap the scan gives up rather than grinding on
+    assert hy._json("{" * (hy._JSON_MAX_ATTEMPTS + 10) + ' {"a": 1}') is None
+    # input beyond the length cap is not scanned
+    assert hy._json(" " * (hy._JSON_MAX_CHARS + 10) + '{"a": 1}') is None

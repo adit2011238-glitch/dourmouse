@@ -221,6 +221,90 @@ class TestDlpFilter:
         assert f"[REDACTED:{label}]" in redacted
         assert text not in redacted  # nothing of the secret survives
 
+    @pytest.mark.parametrize(
+        "text,secret",
+        [
+            ("GEMINI_API_KEY=AIzaSyFAKEFAKEFAKEFAKEFAKEFAKE12345", "AIzaSyFAKEFAKEFAKEFAKEFAKEFAKE12345"),
+            ("ANTHROPIC_API_KEY=sk-ant-api03-FAKEFAKEFAKEFAKE-xyz", "sk-ant-api03-FAKEFAKEFAKEFAKE-xyz"),
+            ("OLLAMA_API_KEY=0123456789abcdef0123456789abcdef.FAKETOKENFAKETOKEN12", "0123456789abcdef0123456789abcdef.FAKETOKENFAKETOKEN12"),
+            ("my_service_token: fakevalue12345", "fakevalue12345"),
+            ('{"DB_PASSWORD": "fakepass12345"}', "fakepass12345"),
+            ("Authorization: Bearer FAKEBEARERFAKEBEARER1234", "FAKEBEARERFAKEBEARER1234"),
+            ("xoxb-1234567890-FAKEFAKE", "xoxb-1234567890-FAKEFAKE"),
+            ("github_pat_FAKEFAKEFAKEFAKEFAKE12", "github_pat_FAKEFAKEFAKEFAKEFAKE12"),
+        ],
+    )
+    def test_redacts_dotenv_lines_and_provider_shapes(self, text, secret):
+        redacted, matched = DlpFilter().redact(text)
+        assert matched
+        assert secret not in redacted
+
+    def test_exact_env_values_redacted_in_all_forms(self, tmp_path, monkeypatch):
+        import base64
+        import urllib.parse
+
+        from dourmouse import governance
+
+        monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path))
+        value = "zz plain/secret+value=12345"
+        (tmp_path / ".env").write_text(f'SOME_TOKEN="{value}"\nOTHER=notasecretvalue99\nSHORT_KEY=abc\n')
+        governance.refresh_exact_values()
+        b64 = base64.b64encode(value.encode()).decode()
+        text = f"a {value} b {urllib.parse.quote(value, safe='')} c {b64} d notasecretvalue99 e abc"
+        redacted, matched = DlpFilter().redact(text)
+        assert "ENV_SECRET" in matched
+        assert value not in redacted
+        assert urllib.parse.quote(value, safe="") not in redacted
+        assert b64 not in redacted
+        assert "notasecretvalue99" in redacted  # name has no secret marker
+        assert " abc" in redacted  # too short to register
+
+    def test_exact_values_refresh_when_env_changes(self, tmp_path, monkeypatch):
+        from dourmouse import governance
+
+        monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path))
+        env = tmp_path / ".env"
+        env.write_text("A_SECRET=firstvalue1234\n")
+        governance.refresh_exact_values()
+        assert "firstvalue1234" not in DlpFilter().redact("x firstvalue1234")[0]
+        env.write_text("A_SECRET=firstvalue1234\nB_KEY=secondvalue5678\n")
+        assert "secondvalue5678" not in DlpFilter().redact("y secondvalue5678")[0]
+        env.unlink()
+        assert DlpFilter().redact("z firstvalue1234")[0] == "z firstvalue1234"
+
+    @pytest.mark.parametrize("text", [
+        "monkey: bananas_are_great", 'hotkey = "ctrl+shift+something_long"', "token_count = 1234567890",
+        "max_tokens: 4096000000", "keyboard_layout: en_us_qwerty_variant", "The turkey: roasted_for_hours",
+        "key_binding: cmd_shift_p_long_name", "secretary: meeting_notes_today", "num_tokens=999999999999",
+    ])
+    def test_harmless_names_that_contain_key_or_token_are_left_alone(self, text):
+        """Finding #136: matching the marker anywhere in a word redacted these."""
+        assert DlpFilter().redact(text) == (text, [])
+
+    @pytest.mark.parametrize("text,secret", [
+        ("apikey=abcdEFGH12345678", "abcdEFGH12345678"),
+        ("clientSecret: correcthorsebatterystaple", "correcthorsebatterystaple"),
+        ("accessToken = Zx9Qk2Lm4Np6Rs8T", "Zx9Qk2Lm4Np6Rs8T"),
+        ("session_key=q1w2e3r4t5y6u7i8", "q1w2e3r4t5y6u7i8"),
+    ])
+    def test_camel_case_and_bare_names_are_still_caught(self, text, secret):
+        redacted, matched = DlpFilter().redact(text)
+        assert secret not in redacted and "SECRET_ASSIGNMENT" in matched
+
+    def test_the_name_stays_visible_so_the_model_can_see_what_was_removed(self):
+        assert DlpFilter().redact("db_password: hunter2hunter2")[0] == "db_password: [REDACTED:SECRET_ASSIGNMENT]"
+
+    @pytest.mark.parametrize("blob", ["A1b2" * 50_000, "a" * 200_000, "key" * 60_000, ("token=" + "x" * 30) * 3000])
+    def test_a_long_run_of_letters_and_digits_does_not_hang(self, blob):
+        """Finding #136: the first version of the assignment pattern backtracked
+        on this input and did not finish in minutes. Base64 in a tool result is
+        exactly this shape."""
+        import time
+
+        started = time.perf_counter()
+        DlpFilter().redact(blob)
+        assert time.perf_counter() - started < 2.0
+
     def test_leaves_normal_text_alone(self):
         text = "The research summary is ready and the meeting is at 3pm."
         redacted, matched = DlpFilter().redact(text)

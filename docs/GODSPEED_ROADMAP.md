@@ -1112,3 +1112,11 @@ and a real build sequence, not just a requirement statement:
 - [x] UI-5 + UI-7 (finding #132) 2026-09-25 -- live-event array capped; tool chips keyboard-accessible.
 - [x] R7 (finding #133) 2026-09-25 -- run policy (loop breaker, approval budget) and an action ledger at the single tool choke point.
 - [x] AGENT-3 (finding #134) 2026-09-26 -- cloud burst (16 concurrent branches on cloud backends); branches never re-fan-out; branch prompts scoped to their own task; 429 backoff with Retry-After; delegate_to_models honest and inherits the caller's backend.
+- [x] Finding #135 2026-09-26 -- request guard: Host/Origin/Sec-Fetch-Site checks on the local server, launch token on the wildcard-CORS file preview routes, pane bridge check (security review S01, S07, S31, S32).
+- [x] Finding #136 2026-09-26 -- lockdown, quarantine and analyst hardening (review S02-S06, S08-S12, S25, S26, S28).
+- [x] Finding #137 2026-09-26 -- model-written code sandboxed; code tools, schedules and goal approvals need the owner (S13-S15, S19, S21-S23).
+- [x] Finding #138 2026-09-26 -- DLP (and its hang), self-extension injection, standing agents (S16, S20, S24, S29, S30).
+- [x] Finding #139 2026-09-26 -- pane proxy SSRF and CSP sandbox; Electron permissions and navigation (S33-S36).
+- [x] Finding #140 2026-09-26 -- one run policy per request; damaged history file recovery (S17, S27).
+- [x] Finding #141 2026-09-26 -- lockdown page paths via MV3 extension; R9 answer critic.
+- [x] Finding #142 2026-09-26 -- request bodies bounded (413/400); host guard accepts owner-listed proxy names and name:port.
