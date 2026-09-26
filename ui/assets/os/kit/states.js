@@ -5,7 +5,7 @@
    Each call sets data-state on the region so tests and the verification run
    can read which state is showing without guessing from text. */
 
-import { html, setHtml } from './html.js';
+import { html, setHtml, SafeHtml } from './html.js';
 import { isAbort } from '../core/api.js';
 
 function put(root, state, safe) {
@@ -22,7 +22,7 @@ export const states = {
   /* Content is a SafeHtml, a Node, or an array of Nodes. */
   populated(root, content) {
     root.dataset.state = 'populated';
-    if (content && typeof content === 'object' && 'text' in content && typeof content.text === 'string') {
+    if (content instanceof SafeHtml) {
       setHtml(root, content);
     } else if (Array.isArray(content)) {
       root.replaceChildren(...content);

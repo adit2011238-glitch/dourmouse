@@ -7,9 +7,11 @@ import { esc, raw } from './html.js';
 
 function inline(escaped) {
   let out = escaped;
-  out = out.replace(/`([^`\n]+)`/g, (_m, code) => '<code>' + code + '</code>');
-  out = out.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
-  out = out.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, url) => {
+  /* Every quantifier is bounded: an unbounded [^\]\n]+ rescans to the end of
+     the line from each '[' and is quadratic on a long line of brackets. */
+  out = out.replace(/`([^`\n]{1,500})`/g, (_m, code) => '<code>' + code + '</code>');
+  out = out.replace(/\*\*([^*\n]{1,500})\*\*/g, '<b>$1</b>');
+  out = out.replace(/\[([^\]\n]{1,200})\]\((https?:\/\/[^\s)]{1,2000})\)/g, (_m, label, url) => {
     return '<a href="' + url + '" data-ext="1" rel="noopener noreferrer">' + label + '</a>';
   });
   return out;

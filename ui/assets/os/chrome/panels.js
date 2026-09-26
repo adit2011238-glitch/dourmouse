@@ -72,5 +72,6 @@ export function createPanels({ keymap, doc = document }) {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
+    listenerCount: () => listeners.size,
   };
 }

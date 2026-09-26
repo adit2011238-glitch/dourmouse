@@ -19,7 +19,12 @@ export const AFFIRM = new Set([
 
 /* A curated whole-message set, never a substring test (mirrors webui.py). */
 export function isImperativeAffirm(text) {
-  const t = String(text || '').trim().toLowerCase().replace(/[!.\s]+$/, '').trim().replace(/\s+/g, ' ');
+  const raw = String(text || '').trim();
+  /* The longest phrase is 24 characters. A long message is never a bare
+     affirmation, and cutting it here also keeps the trailing-punctuation strip
+     below from running a quadratic regex over a huge string. */
+  if (raw.length > 80) return false;
+  const t = raw.toLowerCase().replace(/[!.\s]+$/, '').trim().replace(/\s+/g, ' ');
   return AFFIRM.has(t);
 }
 

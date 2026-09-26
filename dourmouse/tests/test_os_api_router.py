@@ -104,3 +104,36 @@ class TestSameGuardsAsEverythingElse:
     def test_a_foreign_host_cannot_read_one_either(self, server):
         port = server.server_address[1]
         assert call(server, "GET", "/api/os/ping", None, {"Host": f"evil.example:{port}"})[0] == 403
+
+
+class TestABrokenBackendModuleDoesNotTakeTheOthersDown:
+    def test_a_module_that_fails_to_import_is_reported_and_skipped(self, monkeypatch):
+        import importlib
+        import pkgutil
+        from types import SimpleNamespace
+
+        real_iter = pkgutil.iter_modules
+        real_import = importlib.import_module
+
+        def fake_iter(path=None, prefix=""):
+            return list(real_iter(path, prefix)) + [SimpleNamespace(name="zz_broken")]
+
+        def fake_import(name, package=None):
+            if name.endswith(".zz_broken"):
+                raise SyntaxError("invalid syntax (a half-written screen backend)")
+            # re-run the @route decorators into the emptied table (the module may be cached already)
+            return importlib.reload(real_import(name, package))
+
+        monkeypatch.setattr(os_api, "_loaded", False)
+        monkeypatch.setattr(os_api, "_FAILED", {})
+        monkeypatch.setattr(os_api, "_ROUTES", {})
+        monkeypatch.setattr(pkgutil, "iter_modules", fake_iter)
+        monkeypatch.setattr(importlib, "import_module", fake_import)
+        assert os_api.find("GET", "/api/os/ping") is not None, "the healthy modules still load"
+        failures = os_api.failed()
+        assert list(failures) == ["zz_broken"] and "SyntaxError" in failures["zz_broken"]
+
+    def test_the_handshake_names_the_failed_modules(self, server, monkeypatch):
+        monkeypatch.setattr(os_api, "_FAILED", {"news": "SyntaxError: x"})
+        status, data = call(server, "GET", "/api/os/ping")
+        assert status == 200 and data["failed_modules"] == {"news": "SyntaxError: x"}

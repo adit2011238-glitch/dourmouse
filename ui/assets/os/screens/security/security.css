@@ -1,0 +1,25 @@
+[data-screen="SECURITY"] .sec-top { grid-template-columns: 1.35fr 1fr; }
+@media (max-width: 1100px) { [data-screen="SECURITY"] .sec-top { grid-template-columns: 1fr; } }
+[data-screen="SECURITY"] .sec-bottom { margin-top: 12px; }
+[data-screen="SECURITY"] .sec-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="SECURITY"] .sec-note[hidden] { display: none; }
+[data-screen="SECURITY"] .sec-note[data-tone="ok"] { border-color: rgba(16,185,129,.4); }
+[data-screen="SECURITY"] .sec-note[data-tone="error"] { border-color: rgba(239,68,68,.45); color: var(--dm-error); }
+[data-screen="SECURITY"] #secConfirm:not(:empty) { margin-bottom: 12px; }
+[data-screen="SECURITY"] .mach { border-radius: 12px; padding: 12px; background: rgba(255,255,255,.04); border: 1px solid var(--os-edge-lo); }
+[data-screen="SECURITY"] .mach .mh { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+[data-screen="SECURITY"] .mach .mh svg { width: 16px; height: 16px; color: var(--dm-fg-dim); }
+[data-screen="SECURITY"] .mach .mh b { font-size: var(--dm-text-base); color: var(--dm-fg); flex: 1; }
+[data-screen="SECURITY"] .tone-bad { color: var(--dm-error); }
+[data-screen="SECURITY"] .tone-warn { color: var(--os-warn); }
+[data-screen="SECURITY"] .tone-ok { color: var(--dm-ok); }
+[data-screen="SECURITY"] .sec-sub { margin-top: 12px; }
+[data-screen="SECURITY"] .sec-lock { margin-top: 12px; }
+[data-screen="SECURITY"] .sec-btns { display: flex; gap: 8px; margin-top: 8px; }
+[data-screen="SECURITY"] .sec-err { color: var(--dm-error); margin-top: 6px; }
+[data-screen="SECURITY"] .sec-find { align-items: flex-start; }
+[data-screen="SECURITY"] .sec-find .tag { margin-top: 2px; }
+[data-screen="SECURITY"] .sec-fix { margin: 0 8px 8px 8px; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.22); border: 1px solid var(--os-edge-lo); }
+[data-screen="SECURITY"] .sec-fix .who { margin-top: 6px; }
+[data-screen="SECURITY"] .sec-fix .who:first-child { margin-top: 0; }
+[data-screen="SECURITY"] .sec-log { font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body); line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }

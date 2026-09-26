@@ -12,7 +12,10 @@ export function createDock({ root, registry, go, notif }) {
     </button>`)}<div class="os-dock-sep"></div>
     <button type="button" class="os-dock-item" id="dockAlerts" data-panel-trigger="alerts" aria-label="Alerts" aria-expanded="false" aria-controls="notifcenter" data-spec="Notification centre. Every alert the server raised, plus this session's notices. Dismissing here dismisses it on the server.">
       ${icon('BELL')}<span class="os-badge" id="dockBadge" hidden></span><span class="os-dock-label">Alerts</span>
-    </button>`);
+    </button><div class="os-dock-sep"></div>${(registry.CONSOLE_LINKS || []).map(([id, label]) => html`
+    <a class="os-dock-item" href="/console" data-console="${id}" aria-label="${label}, in the classic console" data-spec="${label} stays in the classic console. This link opens the console at its home screen; choose ${label} from its sidebar.">
+      ${icon(id)}<span class="os-dock-label">${label} (classic)</span>
+    </a>`)}`);
   root.addEventListener('click', (e) => {
     const b = e.target.closest('[data-go]');
     if (b) go(b.dataset.go);

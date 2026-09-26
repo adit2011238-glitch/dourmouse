@@ -5,6 +5,10 @@
 
 :root {
   --dm-active-ink: #09090B;
+  /* Warning and medium severity, and the AI stage of a flow, keep one fixed
+     colour. --dm-active is the user's accent: if a warning followed it, an
+     Emerald accent would paint a warning the same green as a good state. */
+  --os-warn: #F59E0B;
 }
 
 html, body {
@@ -58,7 +62,6 @@ button { font-family: inherit; }
   margin: 0; font-weight: 400; font-size: var(--dm-text-xs); letter-spacing: .1em; text-transform: uppercase; color: var(--dm-fg);
 }
 #stagetitle:focus { outline: none; }
-#stagetitle:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 3px; border-radius: 3px; }
 #stagesub { font-size: var(--dm-text-2xs); color: var(--dm-fg-dim); letter-spacing: .04em; }
 #stagebar .grow { flex: 1; }
 #stageactions { display: flex; gap: 8px; }
@@ -79,7 +82,7 @@ button { font-family: inherit; }
   display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px; border-top: 1px solid var(--os-edge-lo);
   background: rgba(0,0,0,.2); flex: 0 0 auto;
 }
-.composer textarea.os-field { resize: none; min-height: 32px; max-height: 130px; line-height: 1.4; }
+.composer textarea.os-field { resize: none; height: 32px; min-height: 32px; max-height: 130px; line-height: 1.4; box-sizing: border-box; padding-top: 6px; padding-bottom: 6px; }
 .composer .cq { font-size: var(--dm-text-2xs); color: var(--dm-fg-dim); align-self: center; white-space: nowrap; }
 
 /* ---- menu bar (the base bar is in dourmouse-os.css) ---- */
@@ -123,7 +126,7 @@ button.cc-tile:hover { background: rgba(255,255,255,.09); }
 .cc-tile .s { font-size: var(--dm-text-2xs); color: var(--dm-fg-dim); margin-top: 3px; line-height: 1.4; }
 .cc-tile .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--dm-fg-dim); flex: 0 0 auto; }
 .cc-tile .dot.ok { background: var(--dm-ok); }
-.cc-tile .dot.warn { background: var(--dm-active); }
+.cc-tile .dot.warn { background: var(--os-warn); }
 .cc-tile .dot.bad { background: var(--dm-error); }
 .cc-head {
   font-size: var(--dm-text-xs); color: var(--dm-fg-dim); text-transform: uppercase; letter-spacing: .08em; margin: 10px 2px 8px;
@@ -195,7 +198,7 @@ button.cc-tile:hover { background: rgba(255,255,255,.09); }
   border: 1px solid var(--os-edge-hi); box-shadow: var(--os-elev-float); border-left: 3px solid var(--dm-fg-dim);
   animation: os-pop var(--os-dur) var(--os-spring) both; display: flex; gap: 8px; align-items: flex-start;
 }
-.toast[data-level="warn"] { border-left-color: var(--dm-active); }
+.toast[data-level="warn"] { border-left-color: var(--os-warn); }
 .toast[data-level="error"] { border-left-color: var(--dm-error); }
 .toast[data-level="ok"] { border-left-color: var(--dm-ok); }
 .toast .bd { flex: 1; min-width: 0; }
@@ -224,3 +227,12 @@ button.cc-tile:hover { background: rgba(255,255,255,.09); }
 }
 
 .sr-only { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* dock links to the classic console are anchors, not buttons */
+a.os-dock-item { text-decoration: none; }
+
+/* Alt+A overlay outline follows the accent (dourmouse-os.css hardcodes amber) */
+body[data-annotate="true"] [data-spec] { outline-color: color-mix(in srgb, var(--dm-active) 55%, transparent); }
+.os-btn.is-on, .os-btn[aria-pressed="true"] { border-color: var(--dm-active); color: var(--dm-active); }
+.os-btn--primary { border-color: transparent; }
+.os-btn--primary.is-on, .os-btn--primary[aria-pressed="true"] { color: var(--dm-active-ink); }

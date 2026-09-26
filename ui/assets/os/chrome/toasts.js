@@ -14,6 +14,7 @@ export function createToasts({ mount, prefs, timers }) {
   const localItems = ring(LOCAL_CAP);
   const visible = [];
   const listeners = new Set();
+  const visibleListeners = new Set();
   let seq = 0;
 
   const emit = () => listeners.forEach((fn) => {
@@ -24,7 +25,17 @@ export function createToasts({ mount, prefs, timers }) {
     }
   });
 
+  /* fires whenever the on-screen stack changes (shown, dismissed, expired) */
+  const emitVisible = () => visibleListeners.forEach((fn) => {
+    try {
+      fn(visible.length);
+    } catch (err) {
+      console.error(err);
+    }
+  });
+
   function paint() {
+    emitVisible();
     mount.replaceChildren(
       ...visible.map((t) => {
         const el = toFragment(html`<div class="toast" data-level="${t.level}" data-toast="${t.id}"><div class="bd"><div class="tt">${t.title}</div>${t.detail ? html`<div class="td">${t.detail}</div>` : ''}</div><button type="button" class="nx" aria-label="Dismiss notification">&times;</button></div>`).firstElementChild;
@@ -67,6 +78,11 @@ export function createToasts({ mount, prefs, timers }) {
       return () => listeners.delete(fn);
     },
     visibleCount: () => visible.length,
+    onVisible(fn) {
+      visibleListeners.add(fn);
+      return () => visibleListeners.delete(fn);
+    },
+    visibleListenerCount: () => visibleListeners.size,
     count: () => listeners.size,
     sweep() {
       const now = Date.now();

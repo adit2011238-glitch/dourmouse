@@ -5,7 +5,7 @@
 import { html, setHtml } from '../kit/html.js';
 import { icon } from '../kit/icons.js';
 
-const TONE = { ok: 'var(--dm-ok)', warn: 'var(--dm-active)', bad: 'var(--dm-error)', dim: 'var(--dm-fg-dim)' };
+const TONE = { ok: 'var(--dm-ok)', warn: 'var(--os-warn)', bad: 'var(--dm-error)', dim: 'var(--dm-fg-dim)' };
 
 export function securityTone(s) {
   if (!s.known) return 'dim';

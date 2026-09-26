@@ -35,7 +35,7 @@ export function resolveRoute(hash, current = 'HOME') {
 
 const IMPORT_FAIL = /dynamically imported module|Importing a module script failed|Failed to fetch|error loading/i;
 
-export function createRouter({ registry, win = globalThis.window, stage, nav, ctxFactory, states, toasts, panels, events, kit }) {
+export function createRouter({ registry, win = globalThis.window, stage, nav, ctxFactory, states, toasts, panels, events, kit, getBuilt }) {
   let seq = 0;
   let current = null; /* { id, entry, screen, handle, css } */
   let started = false;
@@ -82,6 +82,26 @@ export function createRouter({ registry, win = globalThis.window, stage, nav, ct
     stage.setSub(entry.sub || '');
     const root = stage.newRoot(entry.id);
     states.loading(root, 'Loading ' + entry.id);
+
+    /* Ask which screen folders exist BEFORE importing: importing a module
+       that is not there makes the browser log a 404 as a console error. If the
+       question cannot be answered, import anyway and classify a failure. */
+    if (getBuilt) {
+      let built = null;
+      try {
+        built = await getBuilt();
+      } catch (_err) {
+        built = null;
+      }
+      if (my !== seq) return;
+      if (built && !built.has(entry.slug)) {
+        states.unavailable(root, entry.id + ' is not built yet.', {
+          detail: 'There is no screen folder for ' + entry.id + ' in this build.',
+        });
+        stage.focusTitle();
+        return;
+      }
+    }
 
     let mod;
     try {

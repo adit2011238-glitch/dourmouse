@@ -1,0 +1,31 @@
+/* HOME. Everything is scoped to [data-screen="HOME"] so it cannot restyle the
+   chrome or another screen. Amber tints are color-mix() on --dm-active. */
+
+[data-screen="HOME"] { display: flex; flex-direction: column; gap: 12px; }
+[data-screen="HOME"] .home-scope { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--dm-active) 35%, transparent); background: color-mix(in srgb, var(--dm-active) 8%, transparent); font-size: var(--dm-text-sm); color: var(--dm-fg-body); }
+[data-screen="HOME"] .home-scope[hidden] { display: none; }
+[data-screen="HOME"] .home-attn[hidden] { display: none; }
+[data-screen="HOME"] .home-thread { min-height: 40px; }
+
+[data-screen="HOME"] .turn { margin-bottom: 14px; }
+[data-screen="HOME"] .turn-you { margin-bottom: 12px; }
+[data-screen="HOME"] .turn .you { color: var(--dm-fg); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.55; }
+[data-screen="HOME"] .turn-bot .who { min-height: 1em; }
+[data-screen="HOME"] .chips { margin-top: 2px; }
+[data-screen="HOME"] .chips .tag { font-family: var(--dm-font-mono); text-transform: none; letter-spacing: .02em; }
+[data-screen="HOME"] .chipdetail { margin: 4px 0 8px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid var(--os-edge-lo); }
+[data-screen="HOME"] .chipdetail[hidden] { display: none; }
+[data-screen="HOME"] .chip-pre, [data-screen="HOME"] .think-text {
+  margin: 0 0 8px; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body);
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto;
+}
+[data-screen="HOME"] .think { margin: 6px 0; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
+[data-screen="HOME"] .think[hidden] { display: none; }
+[data-screen="HOME"] .think summary { cursor: pointer; letter-spacing: .1em; }
+[data-screen="HOME"] .think summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+[data-screen="HOME"] .reply { margin-top: 8px; font-size: var(--dm-text-sm); line-height: 1.6; overflow-wrap: anywhere; }
+[data-screen="HOME"] .reply:empty { display: none; }
+[data-screen="HOME"] .terr { margin-top: 8px; color: var(--dm-error); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+[data-screen="HOME"] .terr:empty { display: none; }
+[data-screen="HOME"] .turn-actions { margin-top: 8px; display: flex; gap: 8px; }
+[data-screen="HOME"] .turn-actions[hidden] { display: none; }

@@ -138,12 +138,13 @@ export function createPrefs({ storage, api, root } = {}) {
       const d = document.getElementById('walldim');
       if (d) d.style.opacity = String(clampDim(n) / 100);
     },
-    applyWall(name) {
+    applyWall(name, photoUrl) {
       const w = document.getElementById('wall');
       if (!w) return;
       if (name === 'photo') {
-        const photo = read(LS.wallPhoto);
-        if (!photo) return;
+        const photo = photoUrl || read(LS.wallPhoto);
+        /* only a data:image URL with no quote in it may reach a CSS url("...") */
+        if (!photo || !/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+\/=]+$/i.test(photo)) return;
         w.style.backgroundImage = 'url("' + photo + '")';
         w.style.backgroundSize = 'cover';
         w.style.backgroundPosition = 'center';

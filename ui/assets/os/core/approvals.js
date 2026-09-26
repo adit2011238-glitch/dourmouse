@@ -9,6 +9,10 @@
 
 import { ApiError } from './api.js';
 
+/* Decided entries older than this many are forgotten, so a long-running app
+   does not keep every approval it ever showed. Pending ones are never dropped. */
+const MAX_ENTRIES = 300;
+
 const EMAIL_PREFIXES = ['Send Gmail to ', 'Send mail FROM the Dourmouse identity'];
 
 export function isEmailSendPrompt(prompt) {
@@ -43,12 +47,20 @@ export function createApprovals({ api, scope }) {
     }
   }
 
+  function prune() {
+    for (const [id, e] of byId) {
+      if (byId.size < MAX_ENTRIES) break;
+      if (e.state !== 'pending') byId.delete(id);
+    }
+  }
+
   const approvals = {
     /* Records a confirmation_requested event for a screen's thread. */
     add(key, evt) {
       if (!evt || !evt.id) return null;
       const existing = byId.get(evt.id);
       if (existing) return existing;
+      prune();
       const entry = {
         id: evt.id,
         key,
@@ -106,6 +118,7 @@ export function createApprovals({ api, scope }) {
       return () => listeners.delete(fn);
     },
     count: () => listeners.size,
+    size: () => byId.size,
     openCount() {
       let n = 0;
       byId.forEach((e) => {

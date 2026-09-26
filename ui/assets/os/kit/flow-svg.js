@@ -12,7 +12,7 @@ import { html, raw } from './html.js';
 
 const TONES = {
   det: ['rgba(52,211,153,.10)', 'var(--dm-ok)'],
-  ai: ['color-mix(in srgb, var(--dm-active) 13%, transparent)', 'var(--dm-active)'],
+  ai: ['color-mix(in srgb, var(--os-warn) 13%, transparent)', 'var(--os-warn)'],
   ui: ['rgba(255,255,255,.05)', 'var(--os-edge-hi)'],
   act: ['rgba(251,113,133,.12)', '#fb7185'],
   built: ['rgba(52,211,153,.10)', 'var(--dm-ok)'],
@@ -40,7 +40,7 @@ function column({ boxes, bracket, legend, idPrefix, label }) {
   boxes.forEach((b, i) => {
     const y = y0 + i * sy;
     const [fill, stroke] = TONES[b.tone] || TONES.ui;
-    shapes += html`<g data-box="${b.key || i}"><rect x="${bx}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="${raw(fill)}" stroke="${raw(stroke)}" stroke-width="1.3"/><text x="${bx + 14}" y="${y + 17}" fill="var(--dm-fg)" font-size="11" ${raw(FONT)}>${b.title}</text><text x="${bx + 14}" y="${y + 31}" fill="var(--dm-fg-dim)" font-size="8.5" ${raw(FONT)}>${b.sub || ''}</text></g>`.text;
+    shapes += html`<g data-box="${b.key || i}"><rect x="${bx}" y="${y}" width="${bw}" height="${bh}" rx="9" fill="${raw(fill)}" stroke="${raw(stroke)}" stroke-width="1.3"/><text x="${bx + 14}" y="${y + 17}" fill="var(--dm-fg)" font-size="11" ${raw(FONT)}>${b.title}</text><text x="${bx + 14}" y="${y + 31}" fill="var(--dm-fg-body)" font-size="9" ${raw(FONT)}>${b.sub || ''}</text></g>`.text;
     if (i > 0) {
       shapes += '<path d="M' + (bx + bw / 2) + ' ' + (y - sy + bh) + ' L' + (bx + bw / 2) + ' ' + y + '" stroke="var(--os-edge-hi)" stroke-width="1.3" marker-end="url(#' + arrow + ')"/>';
     }

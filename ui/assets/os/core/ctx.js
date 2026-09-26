@@ -39,7 +39,7 @@ export function createTimers({ setInterval: setI = globalThis.setInterval, clear
 }
 
 /* deps: { api, events, chat, approvals, scope, host, prefs, keymap, timers,
-           toasts, chrome, kit, renderApproval }
+           toasts, chrome, overlays, kit, renderApproval }
    chrome is the shell's stage/nav control surface, already bound to `screen`. */
 export function createScreenCtx({ id, root, deps }) {
   const owner = { id };
@@ -55,7 +55,14 @@ export function createScreenCtx({ id, root, deps }) {
     root,
     signal: ac.signal,
     api: deps.api.withSignal(ac.signal),
-    chat: thread,
+    /* subscribe() is tracked so leaving the screen removes the listener */
+    chat: Object.assign(Object.create(thread), {
+      subscribe(fn) {
+        const off = thread.subscribe(fn);
+        offs.push(off);
+        return off;
+      },
+    }),
     events: {
       on: (spec, fn) => events.on(spec, fn),
       onResync(fn) {
@@ -69,7 +76,12 @@ export function createScreenCtx({ id, root, deps }) {
     approvals: {
       /* Renders (or re-renders) the approval card for a confirmation_requested
          event into `container` and POSTs /api/confirm on a click. */
-      render: (container, evt) => deps.renderApproval(container, evt, id),
+      render(container, evt) {
+        const card = deps.renderApproval(container, evt, id);
+        if (card && typeof card.off === 'function') offs.push(card.off);
+        return card;
+      },
+      get: (approvalId) => deps.approvals.get(approvalId),
       pending: () => deps.approvals.pending(thread.key),
       declineAll: () => deps.approvals.declineAll(thread.key),
     },
@@ -83,7 +95,24 @@ export function createScreenCtx({ id, root, deps }) {
         return off;
       },
     },
+    /* Per-tab, per-request flag sent with every /api/chat body. It raises how
+       many steps a run may take. It is NOT auto-approve. */
+    autonomous: {
+      get: () => deps.chat.autonomous(),
+      set: (on) => deps.chat.setAutonomous(on),
+    },
     chrome: deps.chrome,
+    /* True while a panel or a toast is drawn over the stage. The Electron
+       BrowserView is composited above the page's own DOM, so a screen that
+       shows it (BROWSER) must hide it while this is true (pitfall 4). */
+    overlays: {
+      open: () => deps.overlays.open(),
+      onChange(fn) {
+        const off = deps.overlays.onChange(fn);
+        offs.push(off);
+        return off;
+      },
+    },
     keys: {
       bind(combo, fn) {
         const off = deps.keymap.bind(combo, fn);

@@ -16,6 +16,7 @@ honest 500 with the exception's message, never a fabricated success.
 from __future__ import annotations
 
 import importlib
+import logging
 import pkgutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ class Request:
 Handler = Callable[[Request], tuple[int, dict[str, Any]]]
 
 _ROUTES: dict[tuple[str, str], Handler] = {}
+_FAILED: dict[str, str] = {}
 _loaded = False
 
 
@@ -63,12 +65,25 @@ def route(method: str, path: str) -> Callable[[Handler], Handler]:
 
 
 def _load() -> None:
+    """Import every backend module once. One module that fails to import is
+    recorded and reported (``failed()``, ``GET /api/os/ping``) and skipped: it
+    must not take down the other screens' routes or every request behind them."""
     global _loaded
     if _loaded:
         return
     _loaded = True
     for info in sorted(pkgutil.iter_modules(__path__), key=lambda i: i.name):
-        importlib.import_module(f"{__name__}.{info.name}")
+        try:
+            importlib.import_module(f"{__name__}.{info.name}")
+        except Exception as exc:  # noqa: BLE001 -- recorded and surfaced below, never hidden
+            _FAILED[info.name] = f"{type(exc).__name__}: {exc}"
+            logging.getLogger(__name__).error("os_api module %s failed to import: %s", info.name, exc)
+
+
+def failed() -> dict[str, str]:
+    """Backend modules that could not be imported, with the reason."""
+    _load()
+    return dict(_FAILED)
 
 
 def find(method: str, path: str) -> Handler | None:

@@ -42,6 +42,15 @@ export const DOCK = [
   ['SETTINGS', 'Settings'],
 ];
 
+/* Owner decision: these three stay in the classic console. The console has no
+   hash router (checked: no location.hash use in ui/console.html), so a link
+   can only land on its HOME; the user picks the screen from its own sidebar. */
+export const CONSOLE_LINKS = [
+  ['VISION', 'Vision'],
+  ['GLOBE', 'Globe'],
+  ['DESIGN3D', 'Design 3D'],
+];
+
 export function byId(id) {
   return SCREENS.find((s) => s.id === id) || null;
 }
