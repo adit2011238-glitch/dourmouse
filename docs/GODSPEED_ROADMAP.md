@@ -1130,3 +1130,5 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #150 2026-09-26 -- OS shell screens PROJECTS and SETTINGS (scoped reset, honest summary, auto-approve behind a stronger confirm) (wave D).
 - [x] Finding #151 2026-09-26 -- OS shell screens CODE (read-only git) and RESEARCH (loop, graph, export) (wave E); git calls hardened against repo-configured programs.
 - [x] Finding #152 2026-09-26 -- OS shell screens MEDIA and VOICE (fixed-folder media, bounded probe; wake-word state, transcribe route) (wave F); Electron playback check still to do.
+- [x] Finding #153 2026-09-26 -- OS shell screen BROWSER (the last of 18): Electron pane driven and verified in a second instance, sandboxed proxy fallback, a page-waiting inbox for browser_pane_open.
+- [x] Finding #154 2026-09-27 -- the swap: the OS shell is the default page (DOURMOUSE_DEFAULT_SHELL=console undoes it), service worker v5 precaches it.

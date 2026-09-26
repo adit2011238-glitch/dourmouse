@@ -21,12 +21,52 @@
  * user) ever enter the cache. A signed-in user going offline sees the
  * shared bucket — honestly marked stale — never someone's personal data.
  */
-const CACHE = 'dourmouse-shell-v4';  // finding #121: network-first shell; v4 drops every stale v3 copy
+const CACHE = 'dourmouse-shell-v5';  // finding #154: '/' is now the OS shell; v5 drops every cached copy of the old console at '/'
 // v5.22.3: the PWA manifest + icons join the shell so the INSTALLED app
 // opens instantly with its icon even offline.
-const SHELL = ['/', '/index.html', '/login.html', '/map', '/map.html',
+// finding #154: the OS shell is the default page. Its page, its two design
+// stylesheets and the modules boot.js imports statically are precached so it
+// opens offline; a screen module is cached the first time it is visited (the
+// network-first /assets/ rule below), and /console keeps the classic screens.
+const SHELL = ['/', '/shell', '/console', '/index.html', '/login.html', '/map', '/map.html',
   '/manifest.json', '/assets/icon-192.png', '/assets/icon-512.png',
-  '/assets/apple-touch-icon.png'];
+  '/assets/apple-touch-icon.png',
+  '/assets/dourmouse-ui.css', '/assets/dourmouse-os.css', '/assets/os/shell.css', '/assets/os/kit/kit.css',
+  '/assets/os/boot.js',
+  '/assets/os/chrome/composer.js',
+  '/assets/os/chrome/control-centre.js',
+  '/assets/os/chrome/dock.js',
+  '/assets/os/chrome/menubar.js',
+  '/assets/os/chrome/notif-centre.js',
+  '/assets/os/chrome/panels.js',
+  '/assets/os/chrome/sidebar.js',
+  '/assets/os/chrome/spec-overlay.js',
+  '/assets/os/chrome/stage.js',
+  '/assets/os/chrome/startup-check.js',
+  '/assets/os/chrome/status.js',
+  '/assets/os/chrome/toasts.js',
+  '/assets/os/chrome/wallpaper.js',
+  '/assets/os/core/api.js',
+  '/assets/os/core/approvals.js',
+  '/assets/os/core/chat.js',
+  '/assets/os/core/ctx.js',
+  '/assets/os/core/events.js',
+  '/assets/os/core/host.js',
+  '/assets/os/core/keymap.js',
+  '/assets/os/core/pane-inbox.js',
+  '/assets/os/core/prefs.js',
+  '/assets/os/core/registry.js',
+  '/assets/os/core/ring.js',
+  '/assets/os/core/router.js',
+  '/assets/os/core/scope.js',
+  '/assets/os/kit/approval-card.js',
+  '/assets/os/kit/confirm-card.js',
+  '/assets/os/kit/flow-svg.js',
+  '/assets/os/kit/format.js',
+  '/assets/os/kit/html.js',
+  '/assets/os/kit/icons.js',
+  '/assets/os/kit/md.js',
+  '/assets/os/kit/states.js'];
 const ASSET_PREFIX = '/assets/';
 const STALE_HEADER = 'X-Dourmouse-Stale';
 const SCOPE_HEADER = 'X-Dourmouse-Scope';

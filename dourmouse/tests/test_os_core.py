@@ -42,7 +42,7 @@ MODULES = [
     "core/api.js", "core/approvals.js", "core/chat.js", "core/ctx.js", "core/events.js", "core/host.js",
     "core/keymap.js", "core/prefs.js", "core/registry.js", "core/ring.js", "core/router.js", "core/scope.js",
     "kit/html.js", "kit/states.js", "kit/approval-card.js", "kit/md.js", "kit/flow-svg.js", "kit/icons.js", "kit/format.js",
-    "kit/thread-helpers.js", "kit/thread-view.js", "kit/confirm-card.js", "chrome/startup-check.js",
+    "kit/thread-helpers.js", "kit/thread-view.js", "kit/confirm-card.js", "chrome/startup-check.js", "core/pane-inbox.js",
 ]
 
 
@@ -578,3 +578,16 @@ R.unreadable = [missingSignins(null, null), missingSignins({}, {}), missingSigni
         assert out["all"] == [["claude", "claude"], ["codex", "npm i -g @openai/codex && codex login"], ["google", "/api/auth/google/start"]]
         assert out["claudeOnly"] == ["claude"] and out["none"] == []
         assert out["unreadable"] == [[], [], []], "silence means no problem was reported, never a guess"
+
+
+class TestPaneInbox:
+    def test_the_newest_request_wins_and_is_taken_once(self, tmp_path):
+        out = run(tmp_path, """
+R.empty = hasPaneRequest();
+putPaneRequest('https://a.example/'); putPaneRequest('  https://b.example/x  ');
+R.has = hasPaneRequest(); R.first = takePaneRequest(); R.second = takePaneRequest(); R.after = hasPaneRequest();
+putPaneRequest(''); putPaneRequest(42); putPaneRequest(null);
+R.junk = takePaneRequest();
+putPaneRequest('https://x.example/' + 'a'.repeat(5000)); R.capped = takePaneRequest().length;
+""", "import { putPaneRequest, takePaneRequest, hasPaneRequest } from 'core/pane-inbox.js';")
+        assert out == {"empty": False, "has": True, "first": "https://b.example/x", "second": None, "after": False, "junk": None, "capped": 2000}

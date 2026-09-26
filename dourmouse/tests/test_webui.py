@@ -1312,7 +1312,21 @@ class TestStartupCheckInjection:
 
     _STARTUP_TAG = b'<script defer src="/assets/startup_check.js"></script>'
 
-    def test_injected_on_the_default_landing_page(self, server, monkeypatch):
+    def test_injected_on_the_classic_console(self, server, monkeypatch):
+        """Finding #154: "/" is the OS shell now, which has its own sign-in check
+        (chrome/startup-check.js). The classic console, still served at
+        /console, keeps the injected script."""
+        monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
+        srv, port = server
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/console")
+        resp = conn.getresponse()
+        assert resp.status == 200
+        body = resp.read()
+        conn.close()
+        assert self._STARTUP_TAG in body
+
+    def test_the_shell_at_root_has_its_own_check_and_not_the_light_overlay(self, server, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
         srv, port = server
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
@@ -1321,7 +1335,7 @@ class TestStartupCheckInjection:
         assert resp.status == 200
         body = resp.read()
         conn.close()
-        assert self._STARTUP_TAG in body
+        assert b'src="/assets/os/boot.js"' in body and self._STARTUP_TAG not in body
 
     def test_absent_from_login_and_setup_pages(self, server):
         srv, port = server
@@ -1346,7 +1360,7 @@ class TestStartupCheckInjection:
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
         srv, port = server
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        conn.request("GET", "/")
+        conn.request("GET", "/console")
         resp = conn.getresponse()
         assert resp.status == 200
         body = resp.read()

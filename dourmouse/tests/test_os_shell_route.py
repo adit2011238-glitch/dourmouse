@@ -8,6 +8,7 @@ exist and be served with a module-safe content type.
 from __future__ import annotations
 
 import http.client
+import os
 import re
 import threading
 from pathlib import Path
@@ -167,15 +168,15 @@ class TestNoEmDashesOrSlashSeparators:
 class TestRootRouteAndElectronStartPath:
     """Finding #148: the shell can be the default page before the swap."""
 
-    def test_the_root_serves_the_console_unless_the_owner_asks_for_the_shell(self, server, monkeypatch):
+    def test_the_root_serves_the_shell_by_default_and_the_console_on_request(self, server, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")  # a configured install (else "/" goes to /setup)
         monkeypatch.delenv("DOURMOUSE_DEFAULT_SHELL", raising=False)
+        status, headers, body = get(server, "/")
+        assert status == 200 and b'src="/assets/os/boot.js"' in body and b"<title>DOURMOUSE</title>" in body
+        assert "script-src 'self'" in headers["content-security-policy"], "the shell keeps its CSP at /"
+        monkeypatch.setenv("DOURMOUSE_DEFAULT_SHELL", "console")
         status, _, body = get(server, "/")
         assert status == 200 and b'src="/assets/os/boot.js"' not in body and b"<title>DOURMOUSE</title>" in body
-        monkeypatch.setenv("DOURMOUSE_DEFAULT_SHELL", "os")
-        status, headers, body = get(server, "/")
-        assert status == 200 and b'src="/assets/os/boot.js"' in body
-        assert "script-src 'self'" in headers["content-security-policy"], "the shell keeps its CSP at /"
 
     def test_console_stays_at_its_own_address_when_the_shell_is_the_default(self, server, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
@@ -187,4 +188,44 @@ class TestRootRouteAndElectronStartPath:
     def test_electron_reads_a_safe_start_path_from_the_environment(self):
         src = (_UI.parent / "electron" / "main.js").read_text(encoding="utf-8")
         assert "DOURMOUSE_ELECTRON_START_PATH" in src and src.count("${BASE_URL}${START_PATH}") == 2
-        assert 'DEFAULT_START_PATH = "/workspace"' in src, "the default only changes in the swap commit"
+        assert 'DEFAULT_START_PATH = "/"' in src, "the swap makes the shell the window's first page"
+
+
+class TestServiceWorkerServesTheShellOffline:
+    """Finding #154: the swap makes "/" the shell, so the service worker precaches it."""
+
+    @staticmethod
+    def _shell_list() -> set[str]:
+        src = (_UI / "sw.js").read_text(encoding="utf-8")
+        block = re.search(r"const SHELL = \[(.*?)\];", src, re.S)
+        assert block, "sw.js no longer declares SHELL"
+        return set(re.findall(r"'(/[^']*)'", block.group(1)))
+
+    def test_the_cache_name_moved_so_every_client_drops_the_old_console_at_root(self):
+        src = (_UI / "sw.js").read_text(encoding="utf-8")
+        assert "dourmouse-shell-v5" in src and "dourmouse-shell-v4" not in src
+
+    def test_the_shell_and_the_classic_console_are_precached_and_every_asset_named_exists(self):
+        listed = self._shell_list()
+        assert {"/", "/shell", "/console"} <= listed
+        for path in listed:
+            if path.startswith("/assets/"):
+                assert (_UI / path.lstrip("/")).is_file(), f"sw.js precaches {path} but it is not on disk"
+
+    def test_everything_boot_js_imports_statically_is_precached(self):
+        pattern = re.compile(
+            r"""(?:^|\n)\s*(?:import|export)\s[^;'"]*?from\s+['"](\.{1,2}/[^'"]+)['"]|(?:^|\n)\s*import\s+['"](\.{1,2}/[^'"]+)['"]"""
+        )
+        seen: set[str] = set()
+
+        def walk(rel: str) -> None:
+            path = os.path.normpath(rel)
+            if path in seen or "/screens/" in "/" + path:
+                return
+            seen.add(path)
+            for m in pattern.finditer((_UI / path).read_text(encoding="utf-8")):
+                walk(os.path.join(os.path.dirname(path), m.group(1) or m.group(2)))
+
+        walk("assets/os/boot.js")
+        missing = sorted("/" + p for p in seen if "/" + p not in self._shell_list())
+        assert not missing, f"boot.js imports these but sw.js does not precache them: {missing}"

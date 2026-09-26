@@ -37,6 +37,7 @@ import { createControlCentre } from './chrome/control-centre.js';
 import { createNotifCentre } from './chrome/notif-centre.js';
 import { createWallpaperPicker } from './chrome/wallpaper.js';
 import { createStartupCheck } from './chrome/startup-check.js';
+import { putPaneRequest } from './core/pane-inbox.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -166,6 +167,13 @@ function boot() {
         root,
         deps: { api, events, chat, approvals, scope, host, prefs, keymap, timers, toasts, chrome: makeChrome(id), overlays, kit, renderApproval },
       }),
+  });
+
+  /* a page the server wants in the browser pane while BROWSER is not showing: keep it for BROWSER and say so */
+  events.on('browser_pane_open', (evt) => {
+    if (router.current() === 'BROWSER' || !evt || typeof evt.url !== 'string') return;
+    putPaneRequest(evt.url);
+    toasts.show({ level: 'info', title: 'A page is waiting in BROWSER', detail: 'Open BROWSER to see it: ' + evt.url.slice(0, 120), ttl: 9000 });
   });
 
   /* the durable copy of accent, wallpaper and dim follows other windows */

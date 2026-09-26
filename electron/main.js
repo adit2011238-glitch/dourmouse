@@ -66,7 +66,8 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 // Where the main window opens. DOURMOUSE_ELECTRON_START_PATH lets the owner
 // (or a test) open the OS shell ("/shell" or "/") without a rebuild; anything
 // that is not a plain same-origin path falls back to the default.
-const DEFAULT_START_PATH = "/workspace";
+// Finding #154: the OS shell at "/" is the default; /workspace and /console are still served.
+const DEFAULT_START_PATH = "/";
 const START_PATH = (() => {
   const raw = process.env.DOURMOUSE_ELECTRON_START_PATH || "";
   return /^\/[A-Za-z0-9_.\/#?=&%-]{0,120}$/.test(raw) && !raw.startsWith("//") ? raw : DEFAULT_START_PATH;
@@ -428,6 +429,7 @@ const PANE_WIDTH_FRACTION = 0.45; // right ~45% of the main window, adjustable l
 
 let paneView = null;
 let paneVisible = false;
+let paneFail = null; // last main-frame load failure of the pane (finding #153), null while loading or after success
 // Finding #116 (OS-3): the console tells us exactly where its pane's page
 // area is, so the BrowserView sits inside the pane's own chrome (address
 // bar, back/forward, resize handle) instead of a fixed 45% of the window.
@@ -461,6 +463,15 @@ function ensurePaneView() {
   installPermissionPolicy(paneView.webContents.session);
   paneView.webContents.loadURL("about:blank");
   const wc = paneView.webContents;
+  // Finding #153: the BROWSER screen shows why a page did not load. A new load
+  // clears the last failure; a failed main frame records the engine's own
+  // words. ERR_ABORTED (-3) is a navigation replaced by another, not a failure.
+  wc.on("did-start-loading", () => { paneFail = null; });
+  wc.on("did-fail-load", (_evt, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (isMainFrame && errorCode !== -3) {
+      paneFail = { code: errorCode, description: String(errorDescription || "").slice(0, 200), url: String(validatedURL || "").slice(0, 2000) };
+    }
+  });
   for (const ev of ["did-navigate", "did-navigate-in-page", "page-title-updated", "did-start-loading",
                     "did-stop-loading", "did-fail-load"]) {
     wc.on(ev, pushPaneState);
@@ -486,6 +497,7 @@ function paneState() {
     loading: wc ? wc.isLoading() : false,
     canGoBack: wc ? can("canGoBack", "canGoBack") : false,
     canGoForward: wc ? can("canGoForward", "canGoForward") : false,
+    error: paneFail,
   };
 }
 

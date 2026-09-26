@@ -924,7 +924,9 @@ def launch(
     # own "← CONSOLE" link) — nothing about it is removed or broken, this
     # only changes which screen a freshly-launched app's one window shows
     # first. A real deep link still wins, exactly as before.
-    initial_href = "/workspace"
+    # Finding #154: the OS shell at "/" is the primary UI now; /workspace and
+    # /console are still served, one address away.
+    initial_href = "/"
     if deep_link:
         from dourmouse.deeplink import parse_deeplink
 

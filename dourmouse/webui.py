@@ -2181,10 +2181,10 @@ class _Handler(BaseHTTPRequestHandler):
             # a voice mode that surfaces live tool activity. The HUD is
             # unchanged and still served at /hud (and /index.html), so
             # nothing was removed — only the default landing changed.
-            # Finding #148: DOURMOUSE_DEFAULT_SHELL=os serves the OS shell at
-            # "/" so it can be lived in before the deliberate swap. /console
-            # and /console.html always serve the console.
-            if path == "/" and os.environ.get("DOURMOUSE_DEFAULT_SHELL", "console").strip().lower() == "os":
+            # Findings #148 and #154: "/" serves the OS shell (the swap). Set
+            # DOURMOUSE_DEFAULT_SHELL=console to get the classic console at "/"
+            # again; /console and /console.html always serve the console.
+            if path == "/" and os.environ.get("DOURMOUSE_DEFAULT_SHELL", "os").strip().lower() != "console":
                 self._serve_static("shell.html")
             else:
                 self._serve_static("console.html")
