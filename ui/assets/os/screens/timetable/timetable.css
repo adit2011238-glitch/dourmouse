@@ -1,0 +1,17 @@
+[data-screen="TIMETABLE"] .tt-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="TIMETABLE"] .tt-note[hidden], [data-screen="TIMETABLE"] .card[hidden] { display: none; }
+[data-screen="TIMETABLE"] .tt-note[data-tone="ok"] { border-color: rgba(16,185,129,.4); }
+[data-screen="TIMETABLE"] .tt-note[data-tone="error"] { border-color: rgba(239,68,68,.45); color: var(--dm-error); }
+[data-screen="TIMETABLE"] #ttConfirm:not(:empty) { margin-bottom: 12px; }
+[data-screen="TIMETABLE"] .tt-hand { margin-bottom: 12px; }
+[data-screen="TIMETABLE"] .tt-foot { margin-top: 10px; }
+[data-screen="TIMETABLE"] .tt-item + .tt-item { border-top: 1px solid var(--os-edge-lo); }
+[data-screen="TIMETABLE"] .os-row .rt b { color: var(--dm-fg); font-weight: 500; }
+[data-screen="TIMETABLE"] .os-row-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+[data-screen="TIMETABLE"] .tt-edit { margin: 0 8px 10px; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.22); border: 1px solid var(--os-edge-lo); }
+[data-screen="TIMETABLE"] .tt-editrow { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+[data-screen="TIMETABLE"] .tt-l { display: block; margin: 0 0 4px; font-size: var(--dm-text-2xs); letter-spacing: .06em; color: var(--dm-fg-label); }
+[data-screen="TIMETABLE"] .tt-in { flex: 1; width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--os-edge-lo); background: rgba(0,0,0,.25); color: var(--dm-fg); font: inherit; font-size: var(--dm-text-sm); }
+[data-screen="TIMETABLE"] .tt-in:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+[data-screen="TIMETABLE"] .tt-err { color: var(--dm-error); font-size: var(--dm-text-sm); margin-top: 6px; overflow-wrap: anywhere; }
+[data-screen="TIMETABLE"] .tt-warn { margin-top: 8px; }

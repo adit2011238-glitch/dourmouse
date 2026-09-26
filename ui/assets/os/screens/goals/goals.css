@@ -1,0 +1,24 @@
+[data-screen="GOALS"] .gl-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="GOALS"] .gl-note[hidden], [data-screen="GOALS"] .card[hidden] { display: none; }
+[data-screen="GOALS"] .gl-note[data-tone="ok"] { border-color: rgba(16,185,129,.4); }
+[data-screen="GOALS"] .gl-note[data-tone="warn"] { border-color: color-mix(in srgb, var(--os-warn) 45%, transparent); }
+[data-screen="GOALS"] .gl-note[data-tone="error"] { border-color: rgba(239,68,68,.45); color: var(--dm-error); }
+[data-screen="GOALS"] #glConfirm:not(:empty) { margin-bottom: 12px; }
+[data-screen="GOALS"] .gl-gap { margin-top: 12px; }
+[data-screen="GOALS"] .gl-form { margin-bottom: 12px; }
+[data-screen="GOALS"] .gl-foot { margin-top: 10px; }
+[data-screen="GOALS"] .gl-obj { color: var(--dm-fg); font-size: var(--dm-text-md); overflow-wrap: anywhere; }
+[data-screen="GOALS"] .gl-block { margin-top: 6px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); overflow-wrap: anywhere; }
+[data-screen="GOALS"] .gl-pct { margin-top: 6px; }
+[data-screen="GOALS"] .gl-btns { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+[data-screen="GOALS"] .gl-sub { margin-top: 14px; }
+[data-screen="GOALS"] .os-row-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+[data-screen="GOALS"] .gl-err { color: var(--dm-error); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+[data-screen="GOALS"] .gl-task .tag { min-width: 84px; text-align: center; }
+[data-screen="GOALS"] .gl-audit { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.22); border: 1px solid var(--os-edge-lo); }
+[data-screen="GOALS"] .gl-ev { font-size: var(--dm-text-xs); line-height: 1.8; color: var(--dm-fg-body); overflow-wrap: anywhere; }
+[data-screen="GOALS"] .gl-l { display: block; margin: 10px 0 4px; font-size: var(--dm-text-2xs); letter-spacing: .08em; text-transform: uppercase; color: var(--dm-fg-label); }
+[data-screen="GOALS"] .gl-in { width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--os-edge-lo); background: rgba(0,0,0,.25); color: var(--dm-fg); font: inherit; font-size: var(--dm-text-sm); }
+[data-screen="GOALS"] .gl-in:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+[data-screen="GOALS"] .gl-warn { margin-top: 10px; }
+[data-screen="GOALS"] .gl-task .os-row-actions { opacity: 1; }

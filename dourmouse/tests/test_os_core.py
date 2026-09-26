@@ -42,7 +42,7 @@ MODULES = [
     "core/api.js", "core/approvals.js", "core/chat.js", "core/ctx.js", "core/events.js", "core/host.js",
     "core/keymap.js", "core/prefs.js", "core/registry.js", "core/ring.js", "core/router.js", "core/scope.js",
     "kit/html.js", "kit/states.js", "kit/approval-card.js", "kit/md.js", "kit/flow-svg.js", "kit/icons.js", "kit/format.js",
-    "kit/thread-helpers.js", "kit/thread-view.js",
+    "kit/thread-helpers.js", "kit/thread-view.js", "kit/confirm-card.js",
 ]
 
 

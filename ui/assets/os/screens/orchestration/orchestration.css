@@ -1,0 +1,17 @@
+[data-screen="ORCHESTRATION"] .or-gap { margin-top: 12px; }
+[data-screen="ORCHESTRATION"] .or-foot { margin-top: 10px; }
+[data-screen="ORCHESTRATION"] .or-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); }
+[data-screen="ORCHESTRATION"] .or-note[hidden], [data-screen="ORCHESTRATION"] .card[hidden] { display: none; }
+[data-screen="ORCHESTRATION"] .or-run + .or-run { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--os-edge-lo); }
+[data-screen="ORCHESTRATION"] .or-runh { display: flex; gap: 10px; align-items: baseline; margin-bottom: 4px; color: var(--dm-fg); font-size: var(--dm-text-sm); }
+[data-screen="ORCHESTRATION"] .os-row .rt b { color: var(--dm-fg); font-weight: 500; }
+[data-screen="ORCHESTRATION"] .os-row-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+[data-screen="ORCHESTRATION"] .or-txh { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; color: var(--dm-fg); font-size: var(--dm-text-sm); }
+[data-screen="ORCHESTRATION"] .or-txtabs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+[data-screen="ORCHESTRATION"] .mt-lines { max-height: 340px; overflow: auto; font-size: var(--dm-text-xs); line-height: 1.7; }
+[data-screen="ORCHESTRATION"] .mt-line { display: grid; grid-template-columns: 62px 110px 54px 1fr; gap: 8px; padding: 2px 0; align-items: baseline; }
+[data-screen="ORCHESTRATION"] .mt-t { color: var(--dm-fg-dim); font-family: var(--dm-font-mono); }
+[data-screen="ORCHESTRATION"] .mt-a { color: var(--dm-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-screen="ORCHESTRATION"] .mt-k { color: var(--dm-fg-dim); text-transform: uppercase; letter-spacing: .06em; font-size: var(--dm-text-2xs); }
+[data-screen="ORCHESTRATION"] .mt-x { color: var(--dm-fg-body); white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-screen="ORCHESTRATION"] .mt-line[data-kind="done"] .mt-x { color: var(--dm-ok); }

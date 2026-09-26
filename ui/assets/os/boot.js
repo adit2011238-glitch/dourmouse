@@ -18,6 +18,7 @@ import * as registry from './core/registry.js';
 import { html, esc, raw } from './kit/html.js';
 import { states } from './kit/states.js';
 import { approvalCard } from './kit/approval-card.js';
+import { confirmHere } from './kit/confirm-card.js';
 import { ring } from './core/ring.js';
 import { icon, ICON } from './kit/icons.js';
 import { flowSvg } from './kit/flow-svg.js';
@@ -143,7 +144,7 @@ function boot() {
     },
   };
 
-  const kit = { html, esc, raw, states, ring, icons: { icon, ICON }, flowSvg, md, format, approvalCard };
+  const kit = { html, esc, raw, states, ring, icons: { icon, ICON }, flowSvg, md, format, approvalCard, confirmHere };
 
   const router = createRouter({
     registry,

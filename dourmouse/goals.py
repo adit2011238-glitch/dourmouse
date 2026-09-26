@@ -139,6 +139,11 @@ class GoalStore:
                     connection.execute(ddl)
             for stmt in _INDEXES:
                 connection.execute(stmt)
+            # 2026-09-26: PAUSE keeps the status the goal had in its own column
+            # instead of overwriting it, so RESUME can restore it exactly.
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(goals)").fetchall()}
+            if "paused_from" not in columns:
+                connection.execute("ALTER TABLE goals ADD COLUMN paused_from TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -230,16 +235,83 @@ class GoalStore:
         status = (status or "").strip().upper()
         if status not in GOAL_STATES:
             raise ValueError(f"goals: unknown status {status!r} (allowed: {sorted(GOAL_STATES)})")
+        held = False
         with self._lock, self._connect() as connection:
-            cursor = connection.execute(
-                "UPDATE goals SET status=?, blocked_reason=?, result=COALESCE(?, result),"
-                " updated_at=? WHERE id=?",
-                (status, blocked_reason, json.dumps(result) if result is not None else None, _now(), goal_id),
-            )
+            row = connection.execute("SELECT status FROM goals WHERE id=?", (goal_id,)).fetchone()
+            if row is not None and row["status"] == "PAUSED" and status not in GOAL_TERMINAL_STATES and status != "PAUSED":
+                # The worker (or an approval) wrote a status while the owner has
+                # the goal paused. Keep the goal paused and remember the write,
+                # so RESUME restores what the worker meant and PAUSE is never
+                # silently undone by a task that was already in flight.
+                held = True
+                cursor = connection.execute(
+                    "UPDATE goals SET paused_from=?, blocked_reason=?, result=COALESCE(?, result),"
+                    " updated_at=? WHERE id=?",
+                    (status, blocked_reason, json.dumps(result) if result is not None else None, _now(), goal_id),
+                )
+            else:
+                cursor = connection.execute(
+                    "UPDATE goals SET status=?, blocked_reason=?, result=COALESCE(?, result),"
+                    " paused_from=NULL, updated_at=? WHERE id=?",
+                    (status, blocked_reason, json.dumps(result) if result is not None else None, _now(), goal_id),
+                )
             changed = cursor.rowcount > 0
         if changed:
-            self._log_event(goal_id, None, "goal_status_changed", {"status": status, "blocked_reason": blocked_reason})
+            detail: dict[str, Any] = {"status": status, "blocked_reason": blocked_reason}
+            if held:
+                detail["held_while_paused"] = True
+            self._log_event(goal_id, None, "goal_status_changed", detail)
         return changed
+
+    def pause_goal(self, goal_id: str) -> bool:
+        """Pause a goal without losing the status it had. The worker only
+        advances EXECUTING/READY goals and re-checks the status before each
+        task, so a paused goal finishes the task already in flight and then
+        stops. Returns False for an unknown, terminal or already paused goal."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute("SELECT status FROM goals WHERE id=?", (goal_id,)).fetchone()
+            if row is None or row["status"] == "PAUSED" or row["status"] in GOAL_TERMINAL_STATES:
+                return False
+            previous = row["status"]
+            connection.execute(
+                "UPDATE goals SET paused_from=?, status='PAUSED', updated_at=? WHERE id=?",
+                (previous, _now(), goal_id),
+            )
+        self._log_event(goal_id, None, "goal_status_changed", {"status": "PAUSED", "paused_from": previous})
+        return True
+
+    def resume_goal(self, goal_id: str) -> bool:
+        """Undo :meth:`pause_goal`: the goal returns to the status it had (or
+        the last status the worker wrote while it was paused)."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute("SELECT status, paused_from FROM goals WHERE id=?", (goal_id,)).fetchone()
+            if row is None or row["status"] != "PAUSED":
+                return False
+            restored = row["paused_from"] if row["paused_from"] in GOAL_STATES else "READY"
+            connection.execute(
+                "UPDATE goals SET status=?, paused_from=NULL, updated_at=? WHERE id=?",
+                (restored, _now(), goal_id),
+            )
+        self._log_event(goal_id, None, "goal_status_changed", {"status": restored, "resumed": True})
+        return True
+
+    def create_goal_with_steps(
+        self, objective: str, steps: list[str] | None = None, priority: str = "normal",
+        success_criteria: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """A goal a person typed in, not one the model planned. Each step
+        becomes a task that depends on the one before it, so they run in the
+        order written. With no steps the objective itself is the single task
+        (there is no planner: nothing invents steps the owner did not write).
+        The goal starts EXECUTING, as the ``create_goal`` chat tool does."""
+        clean = [str(x).strip() for x in (steps or []) if str(x).strip()]
+        goal = self.create_goal(objective, priority=priority, success_criteria=success_criteria or None)
+        previous: str | None = None
+        for description in (clean or [goal["objective"]]):
+            task = self.create_task(goal["id"], description, depends_on=[previous] if previous else None)
+            previous = task["id"]
+        self.update_goal_status(goal["id"], "EXECUTING")
+        return self.get_goal(goal["id"])  # type: ignore[return-value]
 
     def set_current_task(self, goal_id: str, task_id: str | None) -> None:
         with self._lock, self._connect() as connection:
@@ -257,7 +329,7 @@ class GoalStore:
             # Both "NOT IN (...)" placeholder strings below are only "?" marks,
             # one per entry in a fixed, hardcoded state frozenset, never a value.
             cursor = connection.execute(
-                "UPDATE goals SET status='CANCELLED', updated_at=? WHERE id=? AND status NOT IN ({})".format(  # noqa: S608
+                "UPDATE goals SET status='CANCELLED', paused_from=NULL, updated_at=? WHERE id=? AND status NOT IN ({})".format(  # noqa: S608
                     ",".join("?" for _ in GOAL_TERMINAL_STATES)
                 ),
                 (_now(), goal_id, *GOAL_TERMINAL_STATES),
@@ -331,6 +403,7 @@ class GoalStore:
             "blocked_reason": row["blocked_reason"],
             "result": json.loads(row["result"]) if row["result"] else None,
             "session_id": row["session_id"],
+            "paused_from": row["paused_from"],
             "created_at": row["created_at"], "updated_at": row["updated_at"],
         }
 
@@ -518,7 +591,7 @@ class GoalStore:
         events = self.goal_events(goal_id, limit=limit) if goal_id else self.all_events(since=since, limit=limit)
         if goal_id and since:
             events = [e for e in events if e["at"] >= since]
-        title = f"# Dourmouse Audit Trail\n\n"
+        title = "# Dourmouse Audit Trail\n\n"
         scope = f"Goal `{goal_id}`" if goal_id else "All goals"
         lines = [title, f"Scope: {scope}", f"Entries: {len(events)}", ""]
         # goal_events() returns oldest-first; all_events() returns
