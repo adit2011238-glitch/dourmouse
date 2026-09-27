@@ -29,6 +29,7 @@ import importlib
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -589,6 +590,21 @@ class AuthStore:
                 if self._conn is None:
                     conn.close()
         return [str(r["email"]) for r in rows]
+
+    def login_allowed(self, email: str) -> bool:
+        """May this verified Google account sign in here? (finding #157, A3)
+
+        A Google sign-in proves who someone is, not that they own this Mac. When
+        DOURMOUSE_ALLOWED_EMAILS is set (comma or space separated) it is the whole
+        answer. When it is not, the account that signed in first owns the install
+        and any account that has signed in before still may; a stranger's Google
+        account is refused instead of being handed the owner's access."""
+        email = (email or "").strip().lower()
+        allowed = {e for e in re.split(r"[,;\s]+", os.environ.get("DOURMOUSE_ALLOWED_EMAILS", "").lower()) if "@" in e}
+        if allowed:
+            return email in allowed
+        existing = self.all_user_emails()
+        return not existing or email in existing
 
     def user_tokens(self, email: str) -> dict[str, Any]:
         email = (email or "").strip().lower()

@@ -34,7 +34,7 @@ export function planFor(text, answer, screens = []) {
        carried out; everything else says so and points at HOME. */
     const target = screenFromPhrase(raw, screens);
     if (target) return { kind: 'navigate', slug: target.slug, say: 'Opening ' + target.label + '.' };
-    return { kind: 'unknown', say: 'Not a command I understand: "' + raw.slice(0, 80) + '". Nothing was sent. Say one of the commands listed above, or ask the companion on HOME.' };
+    return { kind: 'unknown', say: 'Not a command I understand: "' + raw.slice(0, 80) + '". Nothing was sent. Say one of the commands listed above, or press SEND TO HOME to ask the companion.' };
   }
   const c = answer.command;
   const a = c.args || {};

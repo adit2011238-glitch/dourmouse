@@ -41,7 +41,7 @@ export default {
         <div class="voi-note" id="voiNote" role="status" hidden></div></div>
       <div class="card" style="margin-top:12px"><div class="lbl">Voice commands</div>
         <div id="voiCmds" data-region></div>
-        <div class="voi-row"><input class="os-field" id="voiText" type="text" autocomplete="off" spellcheck="false" placeholder="type a command" aria-label="Type a command" data-spec="Same parser as speech, typed. Useful for testing a phrase without speaking. Press Enter or RUN."><button class="os-btn" id="voiRun" type="button" data-spec="Sends the text to the server's command parser and carries out its answer. Text that is not a command is refused with a message and is not sent to the model.">RUN</button></div>
+        <div class="voi-row"><input class="os-field" id="voiText" type="text" autocomplete="off" spellcheck="false" placeholder="type a command" aria-label="Type a command" data-spec="Same parser as speech, typed. Useful for testing a phrase without speaking. Press Enter or RUN."><button class="os-btn" id="voiRun" type="button" data-spec="Sends the text to the server's command parser and carries out its answer. Text that is not a command is refused with a message and is not sent to the model; its row then offers SEND TO HOME if you do want the companion to answer.">RUN</button></div>
         <div id="voiLog" class="voi-log" data-region></div></div>
       <div class="card" style="margin-top:12px"><div class="lbl">Wakeword</div><div id="voiWake" data-region></div></div>`);
     const $ = (id) => root.querySelector('#' + id);
@@ -124,7 +124,7 @@ export default {
         li.append(el('code', '', c.pattern), document.createTextNode('  e.g. ' + c.example));
         ul.append(li);
       });
-      const foot = el('div', 'muted', 'This list is the server\'s own parser. This window also opens any screen by name ("open goals"). Anything else is not sent anywhere: to talk to the companion, use HOME.');
+      const foot = el('div', 'muted', 'This list is the server\'s own parser. This window also opens any screen by name ("open goals"). Anything else is not sent anywhere unless you press SEND TO HOME on its row.');
       states.populated(cmdsEl, [ul, foot]);
     }
 
@@ -160,9 +160,25 @@ export default {
         const t = el('span', 'rt');
         t.append(el('b', '', '"' + r.heard + '"'), document.createTextNode('  ' + r.say));
         row.append(t, el('span', 'muted', clock(r.at)));
+        if (r.sendText && !r.sent) {
+          const b = el('button', 'os-btn', 'SEND TO HOME');
+          b.type = 'button';
+          b.dataset.spec = 'Sends this phrase to the companion on HOME as an ordinary chat message. That uses the model, so it only happens when you press this.';
+          b.addEventListener('click', () => sendToHome(r));
+          row.append(b);
+        }
         wrap.append(row);
       });
       states.populated(logEl, wrap);
+    }
+
+    /* a phrase the parser did not know goes to the model only when the owner presses this */
+    async function sendToHome(r) {
+      r.sent = true;
+      paintLog();
+      ctx.chat.send(r.sendText).catch((err) => ctx.notify({ level: 'error', title: 'Could not send to the companion', detail: err && err.message }));
+      await Promise.resolve();
+      location.hash = '#/home';
     }
 
     /* ---------------- one utterance ---------------- */
@@ -184,7 +200,7 @@ export default {
       }
       if (ctx.signal.aborted) return;
       const plan = planFor(heard, answer, SCREENS);
-      log.push({ at: Date.now(), source, heard, say: plan.say, tone: plan.kind === 'refuse' || plan.kind === 'unknown' ? 'warn' : 'ok' });
+      log.push({ at: Date.now(), source, heard, say: plan.say, tone: plan.kind === 'refuse' || plan.kind === 'unknown' ? 'warn' : 'ok', sendText: plan.kind === 'unknown' ? heard : '' });
       paintLog();
       if (plan.kind === 'chat') {
         ctx.chat.send(plan.text).catch((err) => ctx.notify({ level: 'error', title: 'Could not send to the companion', detail: err && err.message }));

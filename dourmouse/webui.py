@@ -1795,6 +1795,13 @@ _MAX_BODY_BYTES = 64 * 1024 * 1024
 class _Handler(BaseHTTPRequestHandler):
     server_version = "AtlasDourmouseWebUI/0.1"
 
+    # finding #157 N2: a client that connects and then says nothing (or stops
+    # reading mid-response) held a handler thread for ever. Every blocking
+    # socket read or write now gives up after this many idle seconds. It is not
+    # a limit on how long a request may take: a handler that is busy computing
+    # touches no socket, so a long model turn or scan is not cut short.
+    timeout = 60
+
     def log_message(self, fmt, *args):  # quieter logs
         pass
 
@@ -5992,6 +5999,17 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             email = identity["email"]
             store = self.server.auth
+            if not store.login_allowed(email):
+                # finding #157 A3: no session and no stored tokens for a stranger's account
+                logging.getLogger(__name__).warning(
+                    "google sign-in refused for %s: not this install's account and not on DOURMOUSE_ALLOWED_EMAILS", email
+                )
+                self.send_response(302)
+                self.send_header("Location", "/login?reason=not_allowed")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             store.upsert_user(
                 email,
                 tokens,

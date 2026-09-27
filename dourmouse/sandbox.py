@@ -239,6 +239,25 @@ def _protected_write_rules(ws: Path) -> list[str]:
     return rules
 
 
+def _protected_read_rules(ws: Path) -> list[str]:
+    """Seatbelt deny rules for what a run_command shell must never READ even
+    though the workspace is readable: the Google login database, the token and
+    server-config files, the browser credential vault and the app's .env
+    (finding #157 R2B-06; a shell could `sqlite3` the refresh token out)."""
+    root = _project_root().resolve()
+    subpaths = [ws / "auth"]
+    literals = [ws / "spotify_tokens.json", ws / "mcp_servers.json", root / ".env"]
+    try:
+        from dourmouse.browser_agent import _VAULT_PATH
+
+        literals.append(Path(_VAULT_PATH).resolve())
+    except Exception as exc:  # noqa: BLE001 -- no vault path: the rest still applies
+        logging.getLogger(__name__).debug("credential vault not added to the read denies: %s", exc)
+    rules = [f"(deny file-read* (subpath {_quote(str(p))}))" for p in subpaths]
+    rules += [f"(deny file-read* (literal {_quote(str(p))}))" for p in literals]
+    return rules
+
+
 def build_sandbox_profile(cwd: str, allow_network: bool = False) -> str:
     """Render the Seatbelt profile for a run_command shell in ``cwd``.
 
@@ -258,6 +277,7 @@ def build_sandbox_profile(cwd: str, allow_network: bool = False) -> str:
     read_dirs = [ws, cwd_path, *python_read_paths()]
     lines = _profile_lines(read_dirs, [cwd_path], allow_network, _SYSTEM_READ_SUBPATHS + _TOOLCHAIN_READ_SUBPATHS)
     lines.extend(_protected_write_rules(ws))
+    lines.extend(_protected_read_rules(ws))
     return "\n".join(lines)
 
 

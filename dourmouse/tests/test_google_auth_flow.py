@@ -635,6 +635,63 @@ def test_google_callback_creates_session(server, monkeypatch):
         == "alice@example.com"
 
 
+def _plant_state(srv):
+    import secrets
+
+    state = secrets.token_urlsafe(24)
+    verifier, _challenge = google_auth.new_pkce()
+    with srv.oauth_lock:
+        srv.oauth_pending[state] = {
+            "verifier": verifier,
+            "redirect_uri": "http://127.0.0.1:0/api/auth/google/callback",
+            "redirect_to": "/",
+            "created": datetime.now().isoformat(),
+        }
+    return state
+
+
+def _callback(base, state):
+    request = urllib.request.Request(base + f"/api/auth/google/callback?code=code-1&state={state}")
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        _opener().open(request)
+    return exc_info.value
+
+
+def test_a_stranger_google_account_is_refused_when_the_install_already_has_an_owner(server, monkeypatch):
+    """finding #157 A3: any Google account used to become the owner."""
+    base, srv = server
+    monkeypatch.delenv("DOURMOUSE_ALLOWED_EMAILS", raising=False)
+    monkeypatch.setattr(google_auth, "urlopen", _FakeGoogleTransport())
+    srv.auth.upsert_user("owner@example.com", {"access_token": "t"}, name="Owner")
+    err = _callback(base, _plant_state(srv))
+    assert err.code == 302 and err.headers.get("Location") == "/login?reason=not_allowed"
+    assert "dourmouse_user_session" not in (err.headers.get("Set-Cookie") or "")
+    assert srv.auth.all_user_emails() == ["owner@example.com"], "the stranger's tokens must not be stored"
+
+
+def test_the_allow_list_decides_when_it_is_set(server, monkeypatch):
+    base, srv = server
+    monkeypatch.setattr(google_auth, "urlopen", _FakeGoogleTransport())
+    srv.auth.upsert_user("owner@example.com", {"access_token": "t"}, name="Owner")
+    monkeypatch.setenv("DOURMOUSE_ALLOWED_EMAILS", "Alice@Example.com; bob@example.com")
+    ok = _callback(base, _plant_state(srv))
+    assert "dourmouse_user_session=" in (ok.headers.get("Set-Cookie") or "")
+    monkeypatch.setenv("DOURMOUSE_ALLOWED_EMAILS", "bob@example.com")
+    no = _callback(base, _plant_state(srv))
+    assert no.headers.get("Location") == "/login?reason=not_allowed"
+    assert google_auth.AuthStore().login_allowed("anyone@example.com") is False
+
+
+def test_login_allowed_lets_the_first_account_and_returning_accounts_in(monkeypatch):
+    monkeypatch.delenv("DOURMOUSE_ALLOWED_EMAILS", raising=False)
+    store = google_auth.AuthStore()
+    assert store.login_allowed("first@example.com") is True
+    store.upsert_user("first@example.com", {})
+    assert store.login_allowed("FIRST@example.com") is True
+    assert store.login_allowed("other@example.com") is False
+    assert store.login_allowed("") is False
+
+
 def test_google_callback_rejects_unknown_state(server):
     base, _ = server
     request = urllib.request.Request(

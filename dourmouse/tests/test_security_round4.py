@@ -292,6 +292,115 @@ class TestSandboxProtectsTheAppFromItsOwnShell:
         assert (fake_project / "scratch.txt").read_text().strip() == "ok", "ordinary work in the working folder is unchanged"
 
 
+class TestSecretStoresAreNotReadable:
+    """finding #157 R2B-06: the model's read tools and its shell cannot read the login database or token files."""
+
+    def test_read_path_refuses_more_credential_files(self, tmp_path):
+        from dourmouse.system_access import _is_sensitive
+
+        for name in (".git-credentials", ".pypirc", ".zsh_history", ".bash_history", "browser_creds.json",
+                     "spotify_tokens.json", "mcp_servers.json", "dourmouse_auth.db", "Login Data", "Cookies"):
+            assert _is_sensitive(tmp_path / name), name
+        assert _is_sensitive(Path.home() / ".config" / "gh" / "hosts.yml")
+        assert not _is_sensitive(tmp_path / "notes.txt") and not _is_sensitive(tmp_path / "history.md")
+
+    def test_read_file_and_search_files_skip_the_secret_stores(self, tmp_path, monkeypatch):
+        from dourmouse.general_roster import _read_file_tool, _search_files_tool, _workspace_root
+
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(tmp_path))
+        assert _workspace_root().resolve() == tmp_path.resolve()
+        (tmp_path / "auth").mkdir()
+        (tmp_path / "auth" / "dourmouse_auth.db").write_text("refresh-token-needle")
+        (tmp_path / "spotify_tokens.json").write_text('{"t": "needle"}')
+        (tmp_path / "notes.txt").write_text("a needle in a note")
+        assert _read_file_tool({"path": "auth/dourmouse_auth.db"}).startswith("REFUSED")
+        assert _read_file_tool({"path": "spotify_tokens.json"}).startswith("REFUSED")
+        assert _read_file_tool({"path": "notes.txt"}) == "a needle in a note"
+        found = _search_files_tool({"query": "needle"})
+        assert "notes.txt" in found and "auth" not in found and "spotify" not in found
+
+    @pytest.mark.skipif(shutil.which("sandbox-exec") is None, reason="macOS sandbox-exec not available")
+    def test_a_shell_cannot_read_them_either_but_reads_ordinary_workspace_files(self, tmp_path, monkeypatch):
+        from dourmouse.sandbox import run_sandboxed
+
+        ws = tmp_path / "ws"
+        (ws / "auth").mkdir(parents=True)
+        (ws / "auth" / "dourmouse_auth.db").write_text("TOPSECRET-REFRESH")
+        (ws / "spotify_tokens.json").write_text("TOPSECRET-SPOTIFY")
+        (ws / "notes.txt").write_text("ordinary-note")
+        monkeypatch.setenv("DOURMOUSE_WORKSPACE", str(ws))
+        work = tmp_path / "work"
+        work.mkdir()
+        out = run_sandboxed(f"cat {ws}/auth/dourmouse_auth.db; cat {ws}/spotify_tokens.json; cat {ws}/notes.txt", str(work), 15)
+        assert "TOPSECRET" not in out and "ordinary-note" in out
+
+
+class TestOpenPathDoesNotRunCode:
+    """finding #157 R2B-09: open_path is ungated, so it must not hand a program to `open`."""
+
+    def test_apps_scripts_installers_and_executables_are_refused_and_documents_are_opened(self, tmp_path, monkeypatch):
+        import stat
+        import subprocess
+
+        from dourmouse import system_access as sa
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(list(cmd)))
+        for name in ("run.command", "Setup.pkg", "x.terminal", "thing.sh", "link.webloc"):
+            (tmp_path / name).write_text("x")
+            assert sa._open_path_tool({"path": str(tmp_path / name)}).startswith("REFUSED"), name
+        (tmp_path / "Some.app").mkdir()
+        assert sa._open_path_tool({"path": str(tmp_path / "Some.app")}).startswith("REFUSED")
+        prog = tmp_path / "program"
+        prog.write_text("#!/bin/sh\necho hi\n")
+        prog.chmod(prog.stat().st_mode | stat.S_IXUSR)
+        assert sa._open_path_tool({"path": str(prog)}).startswith("REFUSED")
+        assert calls == [], "nothing may reach the OS open command for these"
+        doc = tmp_path / "notes.txt"
+        doc.write_text("hello")
+        assert sa._open_path_tool({"path": str(doc)}).startswith("OPENED") and len(calls) == 1
+
+
+class TestFfmpegProtocols:
+    """finding #157 N3 (defence in depth): ffmpeg is told to open local files and pipes only.
+
+    The live test below cannot prove the option matters: recent ffmpeg builds already refuse a network
+    address named by a local playlist. The source pin is the real guard against the option being dropped."""
+
+    def test_probe_and_convert_pass_a_protocol_whitelist_before_the_input(self):
+        src = (ROOT / "dourmouse" / "media_convert.py").read_text(encoding="utf-8")
+        assert src.count('"-protocol_whitelist", _FFMPEG_PROTOCOLS, "-i"') == 2
+        from dourmouse.media_convert import _FFMPEG_PROTOCOLS
+
+        assert set(_FFMPEG_PROTOCOLS.split(",")) == {"file", "pipe", "crypto", "data"}
+
+    def test_the_real_ffmpeg_never_contacts_a_network_address_named_by_a_playlist(self, tmp_path):
+        import socket
+
+        from dourmouse.media_convert import ffmpeg_exe, probe
+
+        if ffmpeg_exe() is None:
+            pytest.skip("ffmpeg not installed here")
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(1.0)
+        try:
+            port = listener.getsockname()[1]
+            playlist = tmp_path / "evil.m3u8"
+            playlist.write_text(f"#EXTM3U\n#EXTINF:1,\nhttp://127.0.0.1:{port}/x.ts\n#EXT-X-ENDLIST\n")
+            out = probe(playlist)
+            try:
+                listener.accept()[0].close()
+                contacted = True
+            except OSError:
+                contacted = False
+        finally:
+            listener.close()
+        assert out["ok"] is False
+        assert contacted is False, "the playlist made ffmpeg open a network connection"
+
+
 class TestExternalToolsAndBackends:
     def test_drive_download_saves_only_inside_the_uploads_sandbox(self, monkeypatch, tmp_path):
         from dourmouse import google_services as gs
@@ -331,3 +440,113 @@ class TestExternalToolsAndBackends:
         from dourmouse.app_control import _check_not_blocked
 
         _check_not_blocked("Notes")
+
+
+class TestSocketTimeout:
+    """finding #157 N2: a silent client no longer holds a handler thread for ever."""
+
+    def test_the_handler_has_a_bounded_socket_timeout(self):
+        from dourmouse import webui
+
+        assert 0 < webui._Handler.timeout <= 120
+
+    def test_a_client_that_sends_nothing_is_dropped(self, monkeypatch):
+        import socket
+        import time
+        from http.server import ThreadingHTTPServer
+
+        from dourmouse import webui
+
+        monkeypatch.setattr(webui._Handler, "timeout", 1)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), webui._Handler)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            sock = socket.create_connection(srv.server_address, timeout=8)
+            start = time.monotonic()
+            data = sock.recv(16)  # blocks until the server hangs up
+            assert data == b"" and time.monotonic() - start < 6
+            sock.close()
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+
+class TestUnshownArguments:
+    """finding #157 R2B-07: an approval prompt that shows only an excerpt says so."""
+
+    @staticmethod
+    def _spec(prompt):
+        from dourmouse.dispatch import Permission, ToolSpec
+
+        return ToolSpec(
+            name="t",
+            description="d",
+            parameters={"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
+            handler=lambda a: "ran",
+            permission=Permission.REQUIRES_CONFIRMATION,
+            confirm_prompt=prompt,
+        )
+
+    def test_a_cut_off_argument_is_named_with_its_length_and_hash(self):
+        import hashlib
+
+        from dourmouse import dispatch
+
+        seen: list[str] = []
+        code = "print(1)\n" * 100
+        out = dispatch._execute_tool_inner(self._spec(lambda a: "Run: " + a["code"][:40]), {"code": code}, lambda t: seen.append(t) or True)
+        assert out == "ran"
+        assert "Not shown in full above: code (900 characters, sha256 " in seen[0]
+        assert hashlib.sha256(code.encode()).hexdigest()[:8] in seen[0]
+
+    def test_two_different_tails_never_look_the_same(self):
+        from dourmouse import dispatch
+
+        head = "x" * 200
+        a = dispatch._with_unshown_note("Run: " + head[:40], {"code": head + "AAA"})
+        b = dispatch._with_unshown_note("Run: " + head[:40], {"code": head + "BBB"})
+        assert a != b
+
+    def test_nothing_is_added_when_the_prompt_shows_it_all(self):
+        from dourmouse import dispatch
+
+        code = "y" * 300
+        assert dispatch._with_unshown_note("Run: " + code, {"code": code}) == "Run: " + code
+
+    def test_short_and_non_text_arguments_are_ignored_and_a_long_list_is_named(self):
+        from dourmouse import dispatch
+
+        assert dispatch._with_unshown_note("p", {"a": "short", "n": 5, "flag": True, "none": None}) == "p"
+        note = dispatch._with_unshown_note("Append rows", {"rows": [["cell " * 20] for _ in range(20)]})
+        assert "rows (" in note and "characters, sha256" in note
+
+    def test_the_default_prompt_that_prints_every_argument_gets_no_note(self):
+        from dourmouse import dispatch
+
+        args = {"code": "z" * 300}
+        assert "Not shown" not in dispatch._with_unshown_note(f"Execute t with {__import__('json').dumps(args)}?", args)
+
+
+class TestBrowserPrompts:
+    """finding #157 R2B-07: the four browser prompts say what the tool really does."""
+
+    def _prompt(self, name, args):
+        from dourmouse.general_roster import build_general_registry
+
+        spec = build_general_registry().lookup(name)
+        assert spec is not None and spec.confirm_prompt is not None
+        return spec.confirm_prompt(args)
+
+    def test_storing_using_and_forgetting_a_login_are_named_as_such(self):
+        store = self._prompt("browser_creds_store", {"site": "bank.example", "username": "me", "password": "hunter2hunter2"})
+        assert "Save a login for bank.example" in store and "hunter2" not in store
+        assert "Sign in to bank.example" in self._prompt("browser_signin", {"site": "bank.example"})
+        assert "Forget the saved login for bank.example" in self._prompt("browser_creds_forget", {"site": "bank.example"})
+
+    def test_a_submit_prompt_quotes_the_models_note_as_unchecked(self):
+        text = self._prompt("browser_submit", {"note": "Just a harmless search"})
+        assert text.startswith("Submit the form on the page the agent's browser has open")
+        assert "its own words, not checked" in text and "Just a harmless search" in text
+        assert "not checked" not in self._prompt("browser_submit", {})
+

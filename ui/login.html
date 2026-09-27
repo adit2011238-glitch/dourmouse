@@ -420,6 +420,8 @@
         gmsg.textContent = scopes;
         if (reason === 'denied') {
           gmsg.innerHTML = '<span class="warn">Sign-in was cancelled, no problem, nothing changed.</span>';
+        } else if (reason === 'not_allowed') {
+          gmsg.innerHTML = '<span class="warn">That Google account is not allowed on this Mac.</span> Sign in with the account you used here before, or list more accounts in <b>DOURMOUSE_ALLOWED_EMAILS</b>.';
         }
       } else {
         gmsg.innerHTML = '<span class="warn">GOOGLE LOGIN NOT CONFIGURED.</span> To link your ' +

@@ -92,6 +92,13 @@ _SENSITIVE_FILENAME_PATTERNS = (
     re.compile(r"^\.netrc$"),
     re.compile(r"^\.npmrc$"),
     re.compile(r"^\.pgpass$"),
+    # finding #157 R2B-06: more places a credential or a private history sits
+    re.compile(r"^\.git-credentials$"),
+    re.compile(r"^\.pypirc$"),
+    re.compile(r"^\.(zsh|bash|python|psql|mysql|sqlite)_history$"),
+    re.compile(r"^(browser_creds|spotify_tokens|mcp_servers)\.json$"),
+    re.compile(r"^dourmouse_auth\.db(-wal|-shm)?$"),
+    re.compile(r"^(Login Data|Login Data For Account|Cookies|Web Data|Cookies\.binarycookies)$"),
 )
 
 
@@ -185,7 +192,7 @@ def _is_sensitive(path: Path) -> bool:
         return True
     # gcloud credentials live under .config/gcloud — match the slash-delimited
     # tail so a legit path like ~/.config/gcloud-sandbox/ doesn't false-positive.
-    if "/.config/gcloud/" in str(resolved) + "/":
+    if "/.config/gcloud/" in str(resolved) + "/" or "/.config/gh/" in str(resolved) + "/":
         return True
     for root in _SYSTEM_ROOT_PARTS:
         try:
@@ -686,6 +693,26 @@ def _system_info_tool(arguments: dict[str, Any]) -> str:
     return "\n".join(info)
 
 
+#: finding #157 R2B-09: open_path is not gated, and the macOS `open` command RUNS
+#: an application bundle, an installer, a .command or .terminal file, and any
+#: file with its execute bit set. So the tool refuses to hand those to `open`.
+_OPEN_RUNS_CODE_EXTS = frozenset({
+    ".app", ".command", ".tool", ".sh", ".zsh", ".bash", ".pkg", ".mpkg", ".dmg", ".workflow",
+    ".scpt", ".scptd", ".applescript", ".action", ".terminal", ".jar", ".webloc", ".inetloc", ".fileloc",
+})
+
+
+def _opens_code_reason(target: Path) -> str | None:
+    if target.suffix.lower() in _OPEN_RUNS_CODE_EXTS:
+        return f"{target.name} is an application, installer or script, and opening it would run it."
+    try:
+        if target.is_file() and os.access(target, os.X_OK):
+            return f"{target.name} is an executable file, and opening it would run it."
+    except OSError:
+        return None
+    return None
+
+
 def _open_path_tool(arguments: dict[str, Any]) -> str:
     raw = arguments.get("path", "")
     target = _resolve_abs(raw)
@@ -693,6 +720,9 @@ def _open_path_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: open_path requires an ABSOLUTE path."
     if not target.exists():
         return f"ERROR: no such file or directory: {target}"
+    why = _opens_code_reason(target)
+    if why:
+        return f"REFUSED: {why} Nothing was opened. If you mean to run it, open it yourself in Finder."
     try:
         if sys.platform == "darwin":
             subprocess.run(["open", str(target)], check=True, timeout=15)

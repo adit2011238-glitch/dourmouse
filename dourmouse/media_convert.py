@@ -58,6 +58,14 @@ def ffmpeg_exe() -> str | None:
         return None
 
 
+#: finding #157 N3, defence in depth: a media file's own playlist (.m3u8, .sdp,
+#: a concat list) can name other inputs. Recent ffmpeg builds already refuse a
+#: network address from a local playlist, but an older or different build might
+#: not, and local files, pipes and the crypto and data wrappers are all this
+#: feature needs, so the list is stated explicitly.
+_FFMPEG_PROTOCOLS = "file,pipe,crypto,data"
+
+
 def cache_dir() -> Path:
     d = workspace_dir() / "media_cache"
     d.mkdir(parents=True, exist_ok=True)
@@ -74,7 +82,7 @@ def probe(src: Path) -> dict[str, Any]:
     exe = ffmpeg_exe()
     if exe is None:
         return {"ok": False, "error": "ffmpeg is not available (pip install imageio-ffmpeg)"}
-    proc = subprocess.run([exe, "-hide_banner", "-i", str(src)], capture_output=True, text=True, encoding="utf-8",
+    proc = subprocess.run([exe, "-hide_banner", "-protocol_whitelist", _FFMPEG_PROTOCOLS, "-i", str(src)], capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=60, check=False)
     text = proc.stderr
     video = re.findall(r"Stream #\d+:\d+(?:\[\w+\])?(?:\(\w+\))?: Video: (\w+)", text)
@@ -113,7 +121,7 @@ def plan(info: dict[str, Any]) -> dict[str, Any]:
 def _run(key: str, src: Path, out: Path, p: dict[str, Any], duration: float | None) -> None:
     job = _jobs[key]
     tmp = out.with_suffix(out.suffix + ".part")
-    cmd = [ffmpeg_exe() or "ffmpeg", "-hide_banner", "-nostdin", "-y", "-i", str(src), *p["args"],
+    cmd = [ffmpeg_exe() or "ffmpeg", "-hide_banner", "-nostdin", "-y", "-protocol_whitelist", _FFMPEG_PROTOCOLS, "-i", str(src), *p["args"],
            "-progress", "pipe:1", "-nostats", str(tmp)]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import difflib
+import hashlib
 import json
 import os
 import tempfile
@@ -2690,6 +2691,41 @@ def _emit_event(
         pass  # a raising sink must never break dispatch
 
 
+#: An argument shorter than this is always visible in any confirmation text.
+_PROMPT_ARG_MIN = 120
+
+
+def _with_unshown_note(prompt_text: str, arguments: dict[str, Any]) -> str:
+    """Say so when the confirmation text shows only an excerpt of an argument.
+
+    Several tools build their approval prompt from the first few hundred
+    characters of a long argument (the code a tool will run, the body of an
+    email, the text typed into an app). The reader of such a prompt could not
+    tell that more was coming (finding #157, R2B-07). This names, without any
+    per-tool code, every long argument whose full value is not in the prompt,
+    with its length and the start of its SHA-256 so two different tails never
+    look the same. Nothing is added when the prompt already shows the value."""
+    notes: list[str] = []
+    for key, value in arguments.items():
+        if isinstance(value, str):
+            text = value
+        elif isinstance(value, (list, dict)):
+            try:
+                text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                text = str(value)
+            if len(text) <= _PROMPT_ARG_MIN * 3:
+                continue
+        else:
+            continue
+        if len(text) > _PROMPT_ARG_MIN and text not in prompt_text:
+            digest = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:8]
+            notes.append(f"{key} ({len(text):,} characters, sha256 {digest})")
+    if not notes:
+        return prompt_text
+    return prompt_text + " [Not shown in full above: " + "; ".join(notes[:6]) + ". What you see is only an excerpt.]"
+
+
 def _execute_tool(
     spec: ToolSpec,
     arguments: dict[str, Any],
@@ -2769,10 +2805,13 @@ def _execute_tool_inner(
             f"argument(s) {', '.join(missing)}."
         )
     if spec.permission is Permission.REQUIRES_CONFIRMATION:
-        prompt_text = (
-            spec.confirm_prompt(arguments)
-            if spec.confirm_prompt
-            else f"Execute {spec.name} with {json.dumps(arguments)}?"
+        prompt_text = _with_unshown_note(
+            (
+                spec.confirm_prompt(arguments)
+                if spec.confirm_prompt
+                else f"Execute {spec.name} with {json.dumps(arguments)}?"
+            ),
+            arguments,
         )
         if ledger is not None:
             ledger.append(

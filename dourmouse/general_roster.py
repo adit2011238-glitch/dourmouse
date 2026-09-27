@@ -1342,11 +1342,27 @@ def _run_python_host_tool(arguments: dict[str, Any]) -> str:
     return sandbox.format_run(proc.returncode, stdout, stderr)
 
 
+def _is_secret_workspace_path(base: Path, target: Path) -> bool:
+    """True for the workspace's secret stores: the login database folder and the
+    token, key, database and env files (finding #157 R2B-06). The file tools may
+    still read ordinary workspace files, notes and the like."""
+    try:
+        parts = target.resolve().relative_to(base.resolve()).parts
+    except ValueError:
+        return False
+    return bool(parts) and (parts[0] == "auth" or bool(_PROTECTED_FILE_RE.search(parts[-1])))
+
+
 def _read_file_tool(arguments: dict[str, Any]) -> str:
     try:
         target = _safe_resolve(_workspace_root(), arguments.get("path", ""))
     except ValueError as exc:
         return f"REFUSED: {exc}"
+    if _is_secret_workspace_path(_workspace_root(), target):
+        return (
+            f"REFUSED: {arguments.get('path')!r} is where Dourmouse keeps its own logins, tokens or databases; "
+            "the file tools never read there."
+        )
     if not target.is_file():
         return f"ERROR: no such file in workspace: {arguments.get('path')!r}"
     return target.read_text(encoding="utf-8", errors="replace")
@@ -1399,7 +1415,13 @@ def _search_files_tool(arguments: dict[str, Any]) -> str:
             if raw.count("\n") >= max_results:
                 break
 
-    lines = [ln for ln in raw.splitlines() if ln.strip()][:max_results]
+    base = _workspace_root()
+
+    def _from_a_secret_store(line: str) -> bool:
+        where = Path(line.split(":", 1)[0])
+        return _is_secret_workspace_path(base, where if where.is_absolute() else base / where)
+
+    lines = [ln for ln in raw.splitlines() if ln.strip() and not _from_a_secret_store(ln)][:max_results]
     if not lines:
         return f"SEARCH: no matches for {query!r} in workspace."
     return "SEARCH RESULTS (workspace):\n" + "\n".join(lines)
@@ -5522,10 +5544,28 @@ def build_general_registry() -> DispatchRegistry:
 
         return _handler
 
-    _b_confirm = lambda a: (  # noqa: E731 - shared confirm prompt builder
-        f"{a.get('note', 'Submit the active form')} — site: "
-        f"{a.get('site', 'current page')}? (browser agent)"
-    )
+    # finding #157 R2B-07: one shared prompt said "Submit the active form" for
+    # storing, using and forgetting passwords, and took its wording from the
+    # model's own `note`. Each tool now states what it really does; the model's
+    # note is quoted as its own unchecked words.
+    def _b_confirm_submit(a):
+        note = " ".join(str(a.get("note") or "").split())[:200]
+        said = f' The agent describes it as: "{note}" (its own words, not checked).' if note else ""
+        return f"Submit the form on the page the agent's browser has open (logging in, signing up or sending data).{said} (browser agent)"
+
+    def _b_confirm_store(a):
+        return (
+            f"Save a login for {a.get('site')} (username {a.get('username')}) in the local credential vault. "
+            "The password is stored and is not shown here. (browser agent)"
+        )
+
+    def _b_confirm_forget(a):
+        return f"Forget the saved login for {a.get('site')}? (browser agent)"
+
+    def _b_confirm_signin(a):
+        return (
+            f"Sign in to {a.get('site')} using its saved login: the agent's browser will type the stored password. (browser agent)"
+        )
 
     registry.register_subagent(
         _subagent(
@@ -5671,7 +5711,7 @@ def build_general_registry() -> DispatchRegistry:
                     },
                     handler=_browser_h("submit"),
                     permission=Permission.REQUIRES_CONFIRMATION,
-                    confirm_prompt=_b_confirm,
+                    confirm_prompt=_b_confirm_submit,
                 ),
                 ToolSpec(
                     name="browser_wait",
@@ -5736,7 +5776,7 @@ def build_general_registry() -> DispatchRegistry:
                     },
                     handler=_browser_h("creds_store"),
                     permission=Permission.REQUIRES_CONFIRMATION,
-                    confirm_prompt=_b_confirm,
+                    confirm_prompt=_b_confirm_store,
                 ),
                 ToolSpec(
                     name="browser_creds_list",
@@ -5760,7 +5800,7 @@ def build_general_registry() -> DispatchRegistry:
                     },
                     handler=_browser_h("creds_forget"),
                     permission=Permission.REQUIRES_CONFIRMATION,
-                    confirm_prompt=_b_confirm,
+                    confirm_prompt=_b_confirm_forget,
                 ),
                 ToolSpec(
                     name="browser_signin",
@@ -5777,7 +5817,7 @@ def build_general_registry() -> DispatchRegistry:
                     },
                     handler=_browser_h("signin"),
                     permission=Permission.REQUIRES_CONFIRMATION,
-                    confirm_prompt=_b_confirm,
+                    confirm_prompt=_b_confirm_signin,
                 ),
                 ToolSpec(
                     name="browser_pane_show",

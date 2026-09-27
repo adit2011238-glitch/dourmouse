@@ -108,6 +108,13 @@ class TestSource:
         assert "not configured" not in text, "the wakeword tag must come from the server read"
         assert "open mail" not in text and "running late" not in text
 
+    def test_a_phrase_the_parser_does_not_know_goes_to_the_model_only_when_the_owner_presses_the_chip(self):
+        src = self._src()["index.js"]
+        assert "SEND TO HOME" in src and "sendText: plan.kind === 'unknown' ? heard : ''" in src
+        assert "async function sendToHome(r)" in src
+        # the only chat.send calls: the parser's own search or email plans, and the chip
+        assert src.count("ctx.chat.send(") == 2
+
     def test_every_utterance_goes_through_the_servers_parser(self):
         text = self._src()["index.js"]
         assert "/api/voice/command" in text and "/api/os/voice/info" in text and "/api/voice'" in text
