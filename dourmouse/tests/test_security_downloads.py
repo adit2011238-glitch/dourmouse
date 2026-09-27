@@ -122,6 +122,34 @@ class TestWatcher:
         assert [p.name for p in w.poll_once()] == ["new.pdf"]
         assert w.poll_once() == []
 
+    def test_start_never_lists_the_folder_on_the_callers_thread(self, tmp_path):
+        """finding #159: listing ~/Downloads can wait on a macOS permission prompt (a new app
+        identity has no grant yet); start() runs on the server's start-up path, so it must return
+        at once and take the baseline in its own thread."""
+        import threading
+
+        release = threading.Event()
+        w = dl.DownloadsWatcher(tmp_path, interval=0.05)
+        real_entries = w._entries
+
+        def blocked_until_the_prompt_is_answered():
+            release.wait(10)
+            return real_entries()
+
+        w._entries = blocked_until_the_prompt_is_answered
+        started = time.monotonic()
+        w.start()
+        try:
+            assert time.monotonic() - started < 1.0, "start() waited for the folder listing"
+            assert w._primed is False
+        finally:
+            release.set()
+            w.stop()
+        deadline = time.monotonic() + 5
+        while not w._primed and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert w._primed is True
+
 
 @on_mac
 def test_a_high_risk_download_becomes_a_finding(tmp_path):

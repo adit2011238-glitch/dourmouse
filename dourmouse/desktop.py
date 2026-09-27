@@ -819,7 +819,7 @@ def _brand_native_app() -> None:
             # the user's own ~/Applications (see that script's own
             # baked-in-project-root fix, and NATIVE_REWRITE_ROADMAP.md's
             # "dourmouse2" packaging pass) -- try that instead.
-            icon_path = str(Path.home() / "Applications" / "dourmouse2.app" / "Contents" / "Resources" / "DourMouse.icns")
+            icon_path = str(Path.home() / "Applications" / "Dourmouse.app" / "Contents" / "Resources" / "DourMouse.icns")
         if Path(icon_path).is_file():
             img = NSImage.alloc().initWithContentsOfFile_(icon_path)
             if img:

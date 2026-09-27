@@ -278,6 +278,12 @@ class DownloadsWatcher:
             return
 
         def loop() -> None:
+            # The first poll only records what is already there. It runs HERE, not
+            # in start(): listing ~/Downloads can wait on a macOS permission prompt
+            # (a new app identity has not been granted the folder yet), and start()
+            # runs on the server's start-up path, so a pending prompt held the whole
+            # server back until the app gave up (finding #159).
+            self.poll_once()
             while not self._stop.wait(self.interval):
                 for p in self.poll_once():
                     if self.on_file is not None:
@@ -285,7 +291,6 @@ class DownloadsWatcher:
                         with contextlib.suppress(Exception):
                             self.on_file(p)
 
-        self.poll_once()
         self._thread = threading.Thread(target=loop, daemon=True, name="dourmouse-downloads-watch")
         self._thread.start()
 

@@ -21,7 +21,7 @@
 // default because node_modules is gitignored, so a fresh clone genuinely has
 // no Electron and must still start -- run `npm install` here to enable it.
 
-const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification, session } = require("electron");
+const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification, session, dialog } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
 const fs = require("fs");
@@ -152,7 +152,7 @@ function pingServer(url) {
   });
 }
 
-async function waitForServer(url, timeoutMs = 30000, intervalMs = 300) {
+async function waitForServer(url, timeoutMs = 60000, intervalMs = 300) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await pingServer(url)) return true;
@@ -867,10 +867,22 @@ ipcMain.handle("bridge:open_map", () => {
 // --------------------------------------------------------------------- //
 
 app.whenReady().then(async () => {
+  // The Dock tile of a running shell shows the Dourmouse icon, the same one the
+  // pinned Dourmouse.app carries (finding #159). Best effort: a missing icon
+  // must never stop the app from starting.
+  if (process.platform === "darwin" && app.dock) {
+    try {
+      app.dock.setIcon(path.join(__dirname, "resources", "icon.png"));
+    } catch (exc) {
+      log("dock icon not set (non-fatal):", exc.message || exc);
+    }
+  }
   try {
     await ensureServer();
   } catch (exc) {
     log("FATAL: could not bring up the server:", exc.message || exc);
+    // A pinned app that just bounces and vanishes tells the owner nothing.
+    dialog.showErrorBox("Dourmouse could not start", String((exc && exc.message) || exc));
     app.quit();
     return;
   }
