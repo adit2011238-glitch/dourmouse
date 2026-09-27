@@ -30,6 +30,7 @@ execution. A silent fallback would be worse than not having the feature.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import shutil
 import signal
@@ -201,6 +202,43 @@ def _profile_lines(
     return lines
 
 
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+#: The workspace's own state and secret folders (the same list the confined
+#: file tools refuse: general_roster._PROTECTED_WORKSPACE_TOP).
+_PROTECTED_WORKSPACE_DIRS = (
+    "self_extensions", "auth", "state", "security", "memory", "sessions", "librarian", "office",
+    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro",
+)
+
+
+def _protected_write_rules(ws: Path) -> list[str]:
+    """Seatbelt deny rules for what a run_command shell must never write, even
+    when its working folder (or a parent of it) is writable: Dourmouse's own
+    source and interpreter, the config folder, and the workspace's state and
+    secret files. Finding #157: the working folder used to be writable as a
+    whole, so a shell started in the project root could rewrite the app's code
+    or its .env (one call was enough to switch off every approval)."""
+    root = _project_root().resolve()
+    rules: list[str] = []
+    subpaths = [ws / d for d in _PROTECTED_WORKSPACE_DIRS]
+    subpaths += [root / d for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv", ".git")]
+    literals = [ws / "mcp_servers.json", ws / "spotify_tokens.json", root / ".env"]
+    try:
+        from dourmouse.config import user_config_dir
+
+        subpaths.append(Path(user_config_dir()).expanduser().resolve())
+    except Exception as exc:  # noqa: BLE001 -- no config folder resolvable: the rest still applies
+        logging.getLogger(__name__).debug("config folder not added to the write denies: %s", exc)
+    for p in subpaths:
+        rules.append(f"(deny file-write* (subpath {_quote(str(p))}))")
+    for p in literals:
+        rules.append(f"(deny file-write* (literal {_quote(str(p))}))")
+    return rules
+
+
 def build_sandbox_profile(cwd: str, allow_network: bool = False) -> str:
     """Render the Seatbelt profile for a run_command shell in ``cwd``.
 
@@ -219,7 +257,7 @@ def build_sandbox_profile(cwd: str, allow_network: bool = False) -> str:
     cwd_path = Path(cwd).expanduser().resolve()
     read_dirs = [ws, cwd_path, *python_read_paths()]
     lines = _profile_lines(read_dirs, [cwd_path], allow_network, _SYSTEM_READ_SUBPATHS + _TOOLCHAIN_READ_SUBPATHS)
-    lines.append(f"(deny file-write* (subpath {_quote(str(ws / 'self_extensions'))}))")
+    lines.extend(_protected_write_rules(ws))
     return "\n".join(lines)
 
 

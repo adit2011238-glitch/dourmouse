@@ -27,6 +27,7 @@ import re
 import threading
 import urllib.error
 import urllib.request
+from html import escape as _escape_html
 from typing import Any, Callable
 
 from dourmouse.net_guard import guarded_urlopen
@@ -309,7 +310,7 @@ def _inject_base_tag(html_bytes: bytes, url: str) -> bytes:
     FIRST <base> in document order takes effect, and this must win —
     same reasoning for the shim running before any of the page's own
     scripts get a chance to act on a click."""
-    injected = (f'<base href="{url}">'.encode("utf-8")) + _NAV_INTERCEPT_SCRIPT_TEMPLATE.encode(
+    injected = (f'<base href="{_escape_html(url, quote=True)}">'.encode("utf-8")) + _NAV_INTERCEPT_SCRIPT_TEMPLATE.encode(
         "utf-8"
     )
     m = _BASE_TAG_RE.search(html_bytes)

@@ -1134,3 +1134,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #154 2026-09-27 -- the swap: the OS shell is the default page (DOURMOUSE_DEFAULT_SHELL=console undoes it), service worker v5 precaches it.
 - [x] Finding #155 2026-09-27 -- QA and polish pass over HOME, SECURITY, NEWS, ATLAS, WIKI, OFFICE, ORCHESTRATION (all-hands visibility, analyst panel, WIKI scan hand-off, many dead ends fixed).
 - [x] Finding #156 2026-09-27 -- Command K launcher restored in the shell (ranked search, quick actions, ask and open-URL fall-through).
+- [~] Finding #157 2026-09-27 -- security round 4: run_command sandbox and cwd, ungated absolute-path writers gated, .env newline injection, setup routes need login, drive_download/mcp/claude_cli/app_control hardened (A3, A5, R2B-06..09, R2B-11, A9, N2, N3 still open).

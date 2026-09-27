@@ -35,7 +35,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from dourmouse.config import user_config_dir, user_env_path
+from dourmouse.config import env_lines, user_config_dir, user_env_path
 
 _OLLAMA_URL = "http://127.0.0.1:11434/api/tags"
 # Validation MUST hit an endpoint that actually checks the key. Measured:
@@ -217,14 +217,14 @@ def save_config(values: dict[str, str]) -> dict[str, Any]:
             "# bundled into a build or uploaded anywhere.",
             "",
         ]
-        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        body += env_lines(existing)
         path.write_text("\n".join(body) + "\n", encoding="utf-8")
         # Best-effort: make it user-only. Windows inherits profile ACLs.
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
 
     # Update the live environment too, but do NOT pretend this is sufficient.

@@ -31,11 +31,14 @@ untouched.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import difflib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -44,15 +47,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-import contextlib
-import contextvars
-import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
 from dourmouse import config, git_safety, net_errors
+from dourmouse.device_wiki_tools import build_device_wiki_subagent
 from dourmouse.dispatch import (
     DispatchRegistry,
     Permission,
@@ -64,12 +65,11 @@ from dourmouse.dispatch import (
     system_message,
 )
 from dourmouse.goal_tools import build_goals_subagent
-from dourmouse.research_mesh_tools import build_research_mesh_subagent
-from dourmouse.device_wiki_tools import build_device_wiki_subagent
-from dourmouse.research_pipeline_tools import build_research_pipeline_subagent
-from dourmouse.message_bus import BROADCAST, get_message_bus
-from dourmouse.security.tools import build_security_subagent
 from dourmouse.librarian import librarian_tools
+from dourmouse.message_bus import BROADCAST, get_message_bus
+from dourmouse.research_mesh_tools import build_research_mesh_subagent
+from dourmouse.research_pipeline_tools import build_research_pipeline_subagent
+from dourmouse.security.tools import build_security_subagent
 from dourmouse.system_access import build_system_subagent
 
 _DELEGATE_RESULT_CAP = 6_000
@@ -1250,7 +1250,7 @@ _PROTECTED_WORKSPACE_TOP = frozenset({
     "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro",
 })
 _PROTECTED_FILE_RE = re.compile(
-    r"(^\.env($|\.)|\.(db|sqlite|sqlite3|pem|key|p12)$|\.db-(wal|shm)$|^(schedules|world_history)\.jsonl$)", re.IGNORECASE
+    r"(^\.env($|\.)|\.(db|sqlite|sqlite3|pem|key|p12)$|\.db-(wal|shm)$|^(schedules|world_history)\.jsonl$|^mcp_servers\.json$|^spotify_tokens\.json$)", re.IGNORECASE
 )
 
 

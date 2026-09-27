@@ -166,6 +166,11 @@ _CLAUDE_MCP_CONNECTION_FAILED_RE = re.compile(
 # own, which authenticates through the credentials in local_secrets.py
 # rather than through a claude.ai connector the user would have to
 # re-authorise separately.
+# Finding #157: --permission-mode bypassPermissions means Claude Code's OWN Bash,
+# Write and Edit would run with no approval and no secret scrubbing; --allowedTools
+# only adds to what is allowed. This turns them off for the chat backend, so every
+# action goes through Dourmouse's gated tools.
+_DISALLOWED_NATIVE_TOOLS = "Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch"
 _MCP_ALLOWED_TOOLS = "mcp__dourmouse__*"
 
 # Real, live-caught bug (2026-09-14): this machine has the "caveman"
@@ -497,6 +502,7 @@ def _run_claude_once(
             "--mcp-config", _ensure_mcp_config_path(),
             "--strict-mcp-config",
             "--allowedTools", _MCP_ALLOWED_TOOLS,
+            "--disallowedTools", _DISALLOWED_NATIVE_TOOLS,
             *_SETTINGS_OVERRIDE_ARGS,
         ]
     except Exception:  # noqa: BLE001 - best-effort: a broken MCP config must
@@ -868,6 +874,7 @@ def stream_claude(
             "--mcp-config", _ensure_mcp_config_path(),
             "--strict-mcp-config",
             "--allowedTools", _MCP_ALLOWED_TOOLS,
+            "--disallowedTools", _DISALLOWED_NATIVE_TOOLS,
             *_SETTINGS_OVERRIDE_ARGS,
         ]
     except Exception:  # noqa: BLE001 - best-effort, see _run_claude_once's own comment

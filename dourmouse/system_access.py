@@ -42,6 +42,7 @@ run_privileged_command stays UNSANDBOXED by design: its entire purpose is
 
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import re
@@ -287,6 +288,9 @@ def _apply_search_replace_tool(arguments: dict[str, Any]) -> str:
             f"REFUSED: {target} is inside a credential/system directory "
             "(Rule 2.6) — the agent never writes there."
         )
+    refused = _refused_target("apply_search_replace", target)
+    if refused:
+        return refused
     from dourmouse import patch_apply
 
     result = patch_apply.apply_search_replace(target, arguments.get("patch", ""))
@@ -312,6 +316,9 @@ def _apply_patch_tool(arguments: dict[str, Any]) -> str:
             f"REFUSED: {target} is inside a credential/system directory "
             "(Rule 2.6) — the agent never writes there."
         )
+    refused = _refused_target("apply_patch", target)
+    if refused:
+        return refused
     from dourmouse import patch_apply
 
     result = patch_apply.apply_unified_diff(target, arguments.get("diff", ""))
@@ -338,6 +345,71 @@ def _auto_commit_suffix(target: Path, action: str) -> str:
     return f" [auto-committed as {rev} — undo_last_change to revert]"
 
 
+#: Shell and tool start-up files in the home folder: anything written there runs
+#: the next time a terminal, git or a package manager starts.
+_STARTUP_FILES = frozenset({
+    ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".bashrc", ".bash_profile", ".bash_login",
+    ".profile", ".inputrc", ".gitconfig", ".gitattributes", ".npmrc", ".yarnrc", ".pypirc", ".netrc",
+})
+#: Folders whose contents run or are found on PATH without the owner starting them.
+_STARTUP_DIRS = (
+    "Library/LaunchAgents", "Library/LaunchDaemons", "Library/StartupItems", "Applications", "bin", ".local/bin", ".config/fish",
+)
+_SYSTEM_DIRS = ("/Library", "/Applications", "/System", "/usr", "/opt/homebrew", "/bin", "/sbin", "/private/etc", "/etc")
+
+
+def _under_dir(path: Path, base: Path) -> bool:
+    return path == base or base in path.parents
+
+
+def _protected_target_reason(target: Path) -> str | None:
+    """Why an UNGATED absolute-path write to ``target`` must be refused, or None.
+
+    The owner decided (v13.2) that write_path, apply_patch and apply_search_replace
+    stay ungated for coding, on the strength of the git safety net. That net does
+    not cover a change that RUNS: finding #157 (review B) showed a model could
+    plant a shell start-up file, a LaunchAgent, a git hook, Dourmouse's own code
+    or its .env or the self-extension approval record and have it take effect
+    later with no approval. Those places are refused here; a change to any of
+    them needs the owner (or the approved self-extension flow)."""
+    try:
+        path = target.resolve()
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        return "cannot be resolved"
+    root = _PROJECT_ROOT.resolve()
+    if any(_under_dir(path, root / d) for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv")) or path == root / ".env":
+        return "is part of Dourmouse's own code or its secrets"
+    if ".git" in path.parts:
+        return "is inside a .git folder (hooks and config run when git runs)"
+    if path.parent == home and path.name in _STARTUP_FILES:
+        return "is a shell or tool start-up file (it runs whenever a terminal or git starts)"
+    if any(_under_dir(path, home / d) for d in _STARTUP_DIRS) or any(_under_dir(path, Path(d)) for d in _SYSTEM_DIRS):
+        return "is a start-up, application or system location"
+    try:
+        from dourmouse.config import user_config_dir, workspace_dir
+        from dourmouse.sandbox import _PROTECTED_WORKSPACE_DIRS
+
+        if _under_dir(path, Path(user_config_dir()).expanduser().resolve()):
+            return "is Dourmouse's settings folder"
+        ws = Path(workspace_dir()).resolve()
+        if any(_under_dir(path, ws / d) for d in _PROTECTED_WORKSPACE_DIRS) or path in (ws / "mcp_servers.json", ws / "spotify_tokens.json"):
+            return "is Dourmouse's own state, approvals or secrets"
+    except Exception as exc:  # noqa: BLE001 -- the rest of the list still applies
+        logging.getLogger(__name__).debug("workspace protections not evaluated: %s", exc)
+    return None
+
+
+def _refused_target(tool: str, target: Path) -> str | None:
+    reason = _protected_target_reason(target)
+    if reason is None:
+        return None
+    return (
+        f"REFUSED: {target} {reason}. {tool} does not change that without the owner: "
+        "ask them to make the change, or use the approved self-extension flow for a new tool."
+    )
+
+
 def _write_path_tool(arguments: dict[str, Any]) -> str:
     raw = arguments.get("path", "")
     target = _resolve_abs(raw)
@@ -348,6 +420,9 @@ def _write_path_tool(arguments: dict[str, Any]) -> str:
             f"REFUSED: {target} is inside a credential/system directory "
             "(Rule 2.6) — the agent never writes there."
         )
+    refused = _refused_target("write_path", target)
+    if refused:
+        return refused
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         content = arguments.get("content", "")
@@ -424,6 +499,48 @@ def _run_shell(command: str, cwd: str, timeout: int) -> str:
     return "\n".join(parts)
 
 
+def _allowed_cwd_roots() -> list[Path]:
+    """Where a model-chosen working folder may be: the workspace, Dourmouse's own
+    folder (readable, its code is write-protected by the sandbox), and the
+    projects on the owner's bookshelf."""
+    roots = [_PROJECT_ROOT.resolve()]
+    try:
+        from dourmouse.config import workspace_dir
+
+        roots.append(Path(workspace_dir()).resolve())
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).debug("workspace not added to the run_command roots: %s", exc)
+    try:
+        from dourmouse.project_bookkeeper import _load_store, _public_view, _store_path
+
+        for rec in _public_view(_load_store(_store_path())).get("projects") or []:
+            if rec.get("path"):
+                roots.append(Path(str(rec["path"])).expanduser().resolve())
+    except Exception as exc:  # noqa: BLE001 -- an unreadable bookshelf means no extra roots
+        logging.getLogger(__name__).debug("bookshelf not read for the run_command roots: %s", exc)
+    return roots
+
+
+def _validated_cwd(raw: str) -> tuple[str | None, str]:
+    """(cwd, "") when a model-chosen working folder is acceptable, else (None,
+    reason). Finding #157: the sandbox lets the shell write in its working
+    folder, so a model that could pick "~" or "/" picked where it may write."""
+    try:
+        target = Path(raw).expanduser()
+        if not target.is_absolute():
+            return None, "cwd must be an absolute path"
+        target = target.resolve()
+    except (OSError, RuntimeError):
+        return None, "cwd could not be resolved"
+    if not target.is_dir():
+        return None, f"{target} is not a folder"
+    if _is_sensitive(target):
+        return None, f"{target} is a credential or system folder"
+    if not any(target == root or root in target.parents for root in _allowed_cwd_roots()):
+        return None, "run_command works inside the workspace, the Dourmouse folder or a project on the bookshelf"
+    return str(target), ""
+
+
 def _run_command_tool(arguments: dict[str, Any]) -> str:
     command = (arguments.get("command") or "").strip()
     if not command:
@@ -440,6 +557,11 @@ def _run_command_tool(arguments: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         return "ERROR: timeout_seconds must be an integer."
     cwd = (arguments.get("cwd") or _DEFAULT_CWD).strip()
+    if arguments.get("cwd"):
+        checked, why = _validated_cwd(cwd)
+        if checked is None:
+            return f"REFUSED: {why}. Nothing was run."
+        cwd = checked
     # Phase 1: the REAL safety boundary is the kernel-enforced sandbox (see
     # sandbox.py). The classifier above is now only a fast-path pre-filter.
     # run_sandboxed NEVER silently falls back to unsandboxed execution — on

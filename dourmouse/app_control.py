@@ -89,8 +89,19 @@ def _require_macos() -> None:
         )
 
 
+#: Finding #157: a terminal, a script runner and the password apps are as
+#: dangerous to type into as the apps already listed.
+_BLOCKED_APPS = frozenset(_BLOCKED_APPS | {"terminal", "iterm", "iterm2", "script editor", "passwords", "system events", "keychain access"})
+
+
+def _normalise_app_name(app_name: str) -> str:
+    """'Finder.app', '/System/Library/CoreServices/Finder.app' and 'finder' are one app."""
+    name = app_name.strip().lower().rstrip("/").rsplit("/", 1)[-1]
+    return name.removesuffix(".app").strip()
+
+
 def _check_not_blocked(app_name: str) -> None:
-    if app_name.strip().lower() in _BLOCKED_APPS:
+    if _normalise_app_name(app_name) in _BLOCKED_APPS or app_name.strip().lower() in _BLOCKED_APPS:
         raise AppControlError(
             f"REFUSED: {app_name!r} is on the app-control blocklist "
             "(security-surface apps aren't UI-scriptable through this tool, "

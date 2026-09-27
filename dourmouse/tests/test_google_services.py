@@ -12,6 +12,7 @@ import pytest
 from dourmouse import google_services as gs
 from dourmouse.dispatch import Permission
 from dourmouse.general_roster import build_general_registry
+from dourmouse.system_access import _uploads_root  # drive_download saves only inside the uploads sandbox (finding #157)
 
 
 class TestDriveCreateDoc:
@@ -799,38 +800,40 @@ class TestSheetsRead:
         assert "Anyone with the link" in out
 
 
+
+
 class TestDriveDownload:
     def test_rejects_bad_ids(self, tmp_path):
         for bad in ("", "../../evil", "a/b"):
-            out = gs.drive_download(bad, str(tmp_path / "f"))
+            out = gs.drive_download(bad, str(_uploads_root() / "f"))
             assert "ERROR" in out and "file ID" in out, bad
 
     def test_downloads_link_shared_file(self, monkeypatch, tmp_path):
         _stub(monkeypatch, "hello file bytes", "text/plain; charset=utf-8")
-        dest = tmp_path / "out.txt"
+        dest = _uploads_root() / "out.txt"
         out = gs.drive_download("1abcDEF", str(dest))
         assert "DRIVE DOWNLOAD OK" in out
         assert dest.read_text() == "hello file bytes"
 
     def test_sign_in_page_honest(self, monkeypatch, tmp_path):
         _stub(monkeypatch, "<html>Sign in to continue</html>", "text/html")
-        out = gs.drive_download("1abc", str(tmp_path / "f"))
+        out = gs.drive_download("1abc", str(_uploads_root() / "f"))
         assert "not link-shared" in out
         assert "Nothing was downloaded" in out
-        assert not (tmp_path / "f").exists()
+        assert not (_uploads_root() / "f").exists()
 
     def test_virus_scan_page_honest(self, monkeypatch, tmp_path):
         _stub(monkeypatch, '<html>confirm=tokenshere virus scan</html>', "text/html")
-        out = gs.drive_download("1abc", str(tmp_path / "f"))
+        out = gs.drive_download("1abc", str(_uploads_root() / "f"))
         assert "confirm" in out.lower() or "virus" in out.lower()
-        assert not (tmp_path / "f").exists()
+        assert not (_uploads_root() / "f").exists()
 
     def test_network_error_raises_honestly(self, monkeypatch, tmp_path):
         def _boom(req, timeout=10):
             raise OSError("connection refused")
         monkeypatch.setattr(gs.urllib.request, "urlopen", _boom)
         with pytest.raises(RuntimeError, match="NETWORK ERROR"):
-            gs.drive_download("1abc", str(tmp_path / "f"))
+            gs.drive_download("1abc", str(_uploads_root() / "f"))
 
 
 class TestStatusAndRoster:

@@ -50,6 +50,7 @@ model unless a user hand-set an env var):
 from __future__ import annotations
 
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -91,6 +92,29 @@ def user_config_dir() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "Dourmouse"
     return Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "dourmouse"
+
+
+_ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def env_lines(values: dict[str, str]) -> list[str]:
+    """KEY=VALUE lines for the user's config file, one per setting.
+
+    Finding #157: every writer of that file used to build its lines with a bare
+    f-string, so a value containing a line break wrote EXTRA lines: an owner-
+    level setting the allow-list never saw (a planted DOURMOUSE_AUTO_APPROVE=1
+    or DOURMOUSE_ACCESS_TOKEN=... took effect at once and survived restarts).
+    A key that is not a plain name, or a value with a line break or a NUL, is
+    refused here, in the one place all writers now go through."""
+    lines: list[str] = []
+    for key, value in sorted(values.items()):
+        if not _ENV_KEY.match(str(key)):
+            raise ValueError(f"{str(key)[:40]!r} is not a valid setting name")
+        text = str(value)
+        if any(ch in text for ch in ("\n", "\r", "\x00")):
+            raise ValueError(f"the value for {key} contains a line break or control character")
+        lines.append(f"{key}={text}")
+    return lines
 
 
 def user_env_path() -> Path:
@@ -1101,13 +1125,13 @@ def save_orchestrator_model_setting(model: str, backend: str = "") -> dict[str, 
             "# bundled into a build or uploaded anywhere.",
             "",
         ]
-        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        body += env_lines(existing)
         path.write_text("\n".join(body) + "\n", encoding="utf-8")
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "model": model, "backend": backend or None, "path": str(path)}
 
@@ -1159,13 +1183,13 @@ def save_claude_front_mode_setting(enabled: bool) -> dict[str, Any]:
             "# bundled into a build or uploaded anywhere.",
             "",
         ]
-        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        body += env_lines(existing)
         path.write_text("\n".join(body) + "\n", encoding="utf-8")
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
 
@@ -1216,13 +1240,13 @@ def save_google_oauth_full_scopes_setting(enabled: bool) -> dict[str, Any]:
             "# bundled into a build or uploaded anywhere.",
             "",
         ]
-        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        body += env_lines(existing)
         path.write_text("\n".join(body) + "\n", encoding="utf-8")
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
 
@@ -1288,13 +1312,13 @@ def save_grounded_mode_setting(enabled: bool) -> dict[str, Any]:
             "# bundled into a build or uploaded anywhere.",
             "",
         ]
-        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        body += env_lines(existing)
         path.write_text("\n".join(body) + "\n", encoding="utf-8")
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
 
@@ -1336,13 +1360,13 @@ def save_auto_approve_setting(enabled: bool) -> dict[str, Any]:
             "# bundled into a build or uploaded anywhere.",
             "",
         ]
-        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        body += env_lines(existing)
         path.write_text("\n".join(body) + "\n", encoding="utf-8")
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
 
@@ -1391,13 +1415,13 @@ def save_app_control_dry_run_setting(enabled: bool) -> dict[str, Any]:
             "# bundled into a build or uploaded anywhere.",
             "",
         ]
-        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        body += env_lines(existing)
         path.write_text("\n".join(body) + "\n", encoding="utf-8")
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
 
@@ -1453,13 +1477,13 @@ def save_api_key_setting(env_name: str, value: str) -> dict[str, Any]:
             "# bundled into a build or uploaded anywhere.",
             "",
         ]
-        body += [f"{k}={v}" for k, v in sorted(existing.items())]
+        body += env_lines(existing)
         path.write_text("\n".join(body) + "\n", encoding="utf-8")
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved" if value else "cleared", "configured": bool(value), "path": str(path)}
 

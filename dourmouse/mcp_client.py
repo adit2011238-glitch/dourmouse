@@ -74,6 +74,10 @@ _CLIENT_NAME = "dourmouse"
 _CLIENT_VERSION = "13.0"
 
 
+#: The only variables an external MCP server inherits from this process.
+_SERVER_ENV_ALLOW = frozenset({"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL", "TERM"})
+
+
 class McpClientError(Exception):
     """A real, named failure connecting to or calling an external MCP
     server -- never silently swallowed at the point it happens, only at
@@ -123,7 +127,10 @@ class McpClient:
         else:
             import os
 
-            full_env = dict(os.environ)
+            # Finding #157: an external server gets a small allow-list of the
+            # environment plus what its own config entry names, never every
+            # key and token of this process.
+            full_env = {k: v for k, v in os.environ.items() if k in _SERVER_ENV_ALLOW}
             if self._env:
                 full_env.update(self._env)
             try:

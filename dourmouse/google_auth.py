@@ -27,6 +27,7 @@ import base64
 import hashlib
 import importlib
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -494,6 +495,22 @@ class AuthStore:
         self._lock = threading.Lock()
         self._closed = False
         self._init_db()
+        self._harden_permissions()
+
+    def _harden_permissions(self) -> None:
+        """Finding #157: the database holds Google refresh tokens as plain JSON
+        and was created with the default umask (world-readable). Owner only,
+        and the folder too when it is the store's own ``auth`` folder. SQLite
+        gives the -wal and -shm files the database's permissions."""
+        if self.path is None:
+            return
+        try:
+            if self.path.parent.name == "auth":
+                self.path.parent.chmod(0o700)
+            if self.path.exists():
+                self.path.chmod(0o600)
+        except OSError as exc:  # a filesystem that has no modes: nothing to tighten
+            logging.getLogger(__name__).debug("auth store permissions not tightened: %s", exc)
 
     def _connect(self) -> sqlite3.Connection:
         if self._closed:

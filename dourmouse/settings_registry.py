@@ -135,7 +135,7 @@ def _remove_user_settings(keys: list[str]) -> None:
     body = ["# Dourmouse configuration: written by first-run setup and Settings.",
             "# This file holds credentials. Keep it to yourself; it is never",
             "# bundled into a build or uploaded anywhere.", ""]
-    body += [f"{k}={v}" for k, v in sorted(values.items())]
+    body += config.env_lines(values)
     path.write_text("\n".join(body) + "\n", encoding="utf-8")
     path.chmod(0o600)
 
@@ -150,6 +150,6 @@ def _write_user_setting(key: str, value: str) -> None:
     body = ["# Dourmouse configuration: written by first-run setup and Settings.",
             "# This file holds credentials. Keep it to yourself; it is never",
             "# bundled into a build or uploaded anywhere.", ""]
-    body += [f"{k}={v}" for k, v in sorted(values.items())]
+    body += config.env_lines(values)
     path.write_text("\n".join(body) + "\n", encoding="utf-8")
     path.chmod(0o600)

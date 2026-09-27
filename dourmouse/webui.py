@@ -37,8 +37,10 @@ Binds to 127.0.0.1 only. Secrets stay in .env; nothing is logged in full.
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -1994,8 +1996,18 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self._harden_file_response(content_type)
         self.end_headers()
         self.wfile.write(body)
+
+    def _harden_file_response(self, content_type: str) -> None:
+        """Finding #157: a file the owner or a model put on disk is served with
+        its own type. Opened as a page, an SVG (or HTML) would run its script as
+        the app's origin with full API access. nosniff always; a CSP sandbox for
+        the types that can carry script. Images shown in <img> are unaffected."""
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if content_type.split(";")[0].strip().lower() in ("image/svg+xml", "text/html", "application/xhtml+xml", "text/xml", "application/xml"):
+            self.send_header("Content-Security-Policy", "sandbox")
 
     def _send_error_cors(self, status: int, message: str) -> None:
         self._send_bytes_cors(message.encode("utf-8"), "text/plain; charset=utf-8", status=status)
@@ -2044,6 +2056,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
         self.send_header("Accept-Ranges", "bytes")
+        self._harden_file_response(content_type)
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         # Media is a real file on disk, not a computed view, so unlike every
@@ -2088,13 +2101,35 @@ class _Handler(BaseHTTPRequestHandler):
         length = max(0, min(length, _MAX_BODY_BYTES))  # _guard already refused anything larger
         raw = self.rfile.read(length) if length else b"{}"
         try:
-            return json.loads(raw or b"{}")
-        except json.JSONDecodeError:
+            data = json.loads(raw or b"{}")
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
             return {}
+        # a JSON list or string broke about 26 routes that call .get() on it
+        return data if isinstance(data, dict) else {}
 
     # -- routes ----------------------------------------------------------- #
 
+    def _safely(self, handler) -> None:
+        """Finding #157: an unexpected error in a handler answers a plain 500
+        with no path or exception text (it used to drop the connection with a
+        stack trace on stderr, and some os_api answers carried the exception
+        message). Errors that mean the client went away are left alone."""
+        try:
+            handler()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            raise
+        except Exception:  # noqa: BLE001 -- logged with its traceback, answered without detail
+            logging.getLogger(__name__).exception("unhandled error in %s %s", self.command, self.path.split("?")[0])
+            with contextlib.suppress(OSError):
+                self._send_json({"ok": False, "error": "internal error"}, status=500)
+
     def do_GET(self):  # noqa: N802
+        self._safely(self._do_GET)
+
+    def do_POST(self):  # noqa: N802
+        self._safely(self._do_POST)
+
+    def _do_GET(self):  # noqa: N802
         if not self._guard():
             return
         parsed = urllib.parse.urlparse(self.path)
@@ -3808,7 +3843,7 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self.send_error(404, "not found")
 
-    def do_POST(self):  # noqa: N802
+    def _do_POST(self):  # noqa: N802
         if not self._guard():
             return
         parsed = urllib.parse.urlparse(self.path)
@@ -3827,6 +3862,14 @@ class _Handler(BaseHTTPRequestHandler):
             # lock the user out of the screen that exists to configure them.
             # Bounded by design — the handler writes only an ALLOWLISTED set
             # of config keys, and the server binds loopback only.
+            # Finding #157: "only loopback" stopped being true (a network bind
+            # with an access token is a supported mode), and these routes
+            # rewrite the config file. The login applies here too: the desktop
+            # app is a loopback client and stays open, a network client needs
+            # the token.
+            if not self._authorized():
+                self._send_unauthorized()
+                return
             self._handle_setup(parsed.path)
             return
         if not self._authorized():

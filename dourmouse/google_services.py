@@ -2016,9 +2016,16 @@ def drive_download(file_id: str, dest: str = "") -> str:
 
         dest = str(_uploads_root() / f"{fid}.bin")
     try:
-        path = Path(dest).expanduser()
+        path = Path(dest).expanduser().resolve()
+        from dourmouse.system_access import _uploads_root
+
+        root = _uploads_root().resolve()
     except Exception:  # noqa: BLE001
         return "ERROR: drive_download needs a writable destination path."
+    # Finding #157: the bytes come from a file anyone can share, so where they
+    # land must not be the model's choice: only the uploads sandbox.
+    if path != root and root not in path.parents:
+        return f"REFUSED: drive_download saves only inside {root}; {path} is outside it. Nothing was downloaded."
     url = f"https://drive.google.com/uc?export=download&id={fid}"
     status, body, ctype = _http_get(url)
     if status != 200:
@@ -2027,6 +2034,8 @@ def drive_download(file_id: str, dest: str = "") -> str:
             "'Anyone with the link' (Share -> General access -> Anyone with "
             "the link). Nothing was downloaded."
         )
+    if len(body) > 50 * 1024 * 1024:
+        return "DRIVE DOWNLOAD REFUSED: the file is larger than 50 MB. Nothing was saved."
     text = body.decode("utf-8", errors="replace")
     if ctype.startswith("text/html") and "googleusercontent.com" not in text:
         if "signin" in text.lower() or "Sign in" in text:
