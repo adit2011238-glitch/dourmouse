@@ -550,3 +550,18 @@ class TestBrowserPrompts:
         assert "its own words, not checked" in text and "Just a harmless search" in text
         assert "not checked" not in self._prompt("browser_submit", {})
 
+
+class TestBrowserAgentDoesNotAttemptGoogleSignin:
+    """finding #160: the model tried to sign the owner into Google through the
+    automated browser (Google refuses it with 'content blocked'), instead of
+    directing the owner to SETTINGS' real system-browser flow."""
+
+    def test_the_browser_subagents_own_description_carries_the_refusal(self):
+        from dourmouse.general_roster import build_general_registry
+
+        b = next(s for s in build_general_registry().all_subagents() if s.name == "browser")
+        assert "NEVER attempt to sign the owner into Google" in b.description
+        assert "content blocked" in b.description
+        assert "SETTINGS" in b.description
+        assert "ordinary browsing and unaffected" in b.description, "plain Google browsing must stay allowed"
+

@@ -5573,7 +5573,18 @@ def build_general_registry() -> DispatchRegistry:
             "General",
             "Drives a real headless Chrome (Playwright + system Google Chrome) "
             "to open pages, fill forms, sign up and log in. Submitting forms, "
-            "logging in, and storing credentials always require confirmation.",
+            "logging in, and storing credentials always require confirmation. "
+            "NEVER attempt to sign the owner into Google (or another OAuth "
+            "identity provider: Microsoft, Apple, GitHub SSO, etc.) with this "
+            "browser: Google refuses sign-in from an automated Chrome and shows "
+            "the owner a 'content blocked' / 'this browser may not be secure' "
+            "page, not a login form to fill (finding #160, live-reported). If "
+            "the owner asks to sign in to Google, tell them plainly to use "
+            "SETTINGS -> Connect Google (or the setup page's Google step) — "
+            "that flow opens the owner's OWN real browser and adopts the "
+            "session automatically. This applies only to signing THE OWNER "
+            "in; visiting a public Google page (search, a shared doc link) is "
+            "ordinary browsing and unaffected.",
             [
                 ToolSpec(
                     name="open_browser_pane",
