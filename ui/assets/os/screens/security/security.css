@@ -23,3 +23,15 @@
 [data-screen="SECURITY"] .sec-fix .who { margin-top: 6px; }
 [data-screen="SECURITY"] .sec-fix .who:first-child { margin-top: 0; }
 [data-screen="SECURITY"] .sec-log { font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body); line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+[data-screen="SECURITY"] .sec-sum { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); }
+[data-screen="SECURITY"] .sec-sum[hidden] { display: none; }
+[data-screen="SECURITY"] .sec-sum[data-tone="bad"] { border-color: rgba(239,68,68,.45); }
+[data-screen="SECURITY"] .kv b .tag { white-space: nowrap; }
+[data-screen="SECURITY"] .kv > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color so it reads at 4.5:1 or better */
+[data-screen="SECURITY"] .muted, [data-screen="SECURITY"] .st .st-d { color: var(--dm-fg-body); }
+[data-screen="SECURITY"] .lbl, [data-screen="SECURITY"] .st { color: var(--dm-fg-body); }
+[data-screen="SECURITY"] .tone-bad, [data-screen="SECURITY"] .tag.bad, [data-screen="SECURITY"] .os-btn--danger, [data-screen="SECURITY"] .terr, [data-screen="SECURITY"] .or-err { color: color-mix(in srgb, var(--dm-error) 65%, #fff); }
+[data-screen="SECURITY"] .sec-gap { margin-top: 12px; }
+[data-screen="SECURITY"] .sec-ana-sum { color: var(--dm-fg); font-size: var(--dm-text-sm); line-height: 1.6; overflow-wrap: anywhere; margin-bottom: 4px; }
+[data-screen="SECURITY"] .sec-first { margin-top: 2px; color: var(--dm-active); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }

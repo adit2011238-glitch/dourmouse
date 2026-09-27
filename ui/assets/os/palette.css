@@ -1,0 +1,34 @@
+/* The launcher (Command K). Design tokens only; the card is the same material
+   as the other floating panels. */
+#palette {
+  position: fixed; inset: 0; z-index: 990; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 12vh; background: rgba(3, 9, 7, .5); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px);
+}
+#palette[hidden] { display: none; }
+.pal-card {
+  width: min(640px, 92vw); max-height: 68vh; display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 18px; background: var(--os-mat-thick); border: 1px solid var(--os-edge-hi);
+  -webkit-backdrop-filter: var(--os-blur-thick); backdrop-filter: var(--os-blur-thick);
+  box-shadow: var(--os-elev-float); animation: os-pop var(--os-dur) var(--os-spring) both;
+}
+.pal-field { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--os-edge-lo); color: var(--dm-fg-dim); }
+.pal-field svg { width: 18px; height: 18px; flex: none; }
+.pal-field input {
+  flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--dm-fg);
+  font: inherit; font-size: var(--dm-text-md, 15px);
+}
+.pal-field input::placeholder { color: var(--dm-fg-dim); }
+#pallist { overflow: auto; padding: 6px; }
+.pal-group { padding: 10px 10px 4px; font-size: var(--dm-text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--dm-fg-dim); }
+.pal-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer; min-width: 0; }
+.pal-item[aria-selected="true"] { background: color-mix(in srgb, var(--dm-active) 16%, transparent); outline: 1px solid color-mix(in srgb, var(--dm-active) 38%, transparent); }
+.pal-item .gl { width: 18px; height: 18px; flex: none; color: var(--dm-fg-dim); display: inline-flex; }
+.pal-item .gl svg { width: 18px; height: 18px; }
+.pal-item .lb { font-weight: 600; color: var(--dm-fg); white-space: nowrap; }
+.pal-item .hp { color: var(--dm-fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pal-item .kd { margin-left: auto; padding-left: 12px; flex: none; font-size: var(--dm-text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--dm-fg-dim); }
+.pal-empty { padding: 18px 12px; color: var(--dm-fg-dim); text-align: center; }
+.pal-foot { display: flex; gap: 18px; padding: 8px 14px; border-top: 1px solid var(--os-edge-lo); font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
+.pal-foot kbd { display: inline-block; min-width: 18px; padding: 1px 5px; margin-right: 4px; text-align: center; border-radius: 5px; border: 1px solid var(--os-edge-lo); background: rgba(255, 255, 255, .05); font: inherit; }
+#palBtn { letter-spacing: .04em; }
+@media (prefers-reduced-motion: reduce) { .pal-card { animation-duration: 1ms; } }

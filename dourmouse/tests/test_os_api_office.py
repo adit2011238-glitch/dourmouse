@@ -65,3 +65,10 @@ def test_mail_sits_in_the_lounge():
     out = build_floors([{"name": "mail", "tools": []}])
     lounge = next(f for f in out["floors"] if f["id"] == "lounge")
     assert [a["name"] for a in lounge["agents"]] == ["mail"]
+
+
+def test_the_grouping_rule_is_plain_words_with_no_file_path():
+    from dourmouse.os_api import office
+
+    assert ".py" not in office.RULE and "dourmouse/" not in office.RULE
+    assert "Unassigned" in office.RULE

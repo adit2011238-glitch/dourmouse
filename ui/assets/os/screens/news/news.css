@@ -32,3 +32,12 @@
 [data-screen="NEWS"] .terr:empty { display: none; }
 [data-screen="NEWS"] .turn-actions { margin-top: 8px; display: flex; gap: 8px; }
 [data-screen="NEWS"] .turn-actions[hidden] { display: none; }
+[data-screen="NEWS"] .news-list { max-height: min(46vh, 440px); overflow-y: auto; padding-right: 4px; }
+[data-screen="NEWS"] .news-when { color: var(--dm-fg-body); }
+/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color so it reads at 4.5:1 or better */
+[data-screen="NEWS"] .muted, [data-screen="NEWS"] .st .st-d { color: var(--dm-fg-body); }
+[data-screen="NEWS"] .lbl, [data-screen="NEWS"] .st { color: var(--dm-fg-body); }
+[data-screen="NEWS"] .tone-bad, [data-screen="NEWS"] .tag.bad, [data-screen="NEWS"] .os-btn--danger, [data-screen="NEWS"] .terr, [data-screen="NEWS"] .or-err { color: color-mix(in srgb, var(--dm-error) 65%, #fff); }
+[data-screen="NEWS"] .news-main { flex: 1; min-width: 0; }
+[data-screen="NEWS"] .news-main .news-title { display: block; width: 100%; }
+[data-screen="NEWS"] .news-sum { margin-top: 2px; font-size: var(--dm-text-xs); overflow-wrap: anywhere; }

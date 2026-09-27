@@ -5,7 +5,8 @@
 
    One deliberate exception: Escape reaches the stack even from an editable
    target, because a panel that has focus in its own text field must still
-   close on Esc. Nothing else does. */
+   close on Esc. A combo can opt in with bind(combo, fn, { editable: true }): only
+   the launcher (Command K) does. */
 
 const EDITABLE = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
@@ -55,8 +56,10 @@ export function createKeymap() {
       }
       return false;
     }
-    if (isEditableTarget(e.target)) return false;
+    const typing = isEditableTarget(e.target);
     for (const b of Array.from(bindings)) {
+      /* a combo bound with { editable: true } (Command K) also works while typing */
+      if (typing && !b.editable) continue;
       if (comboMatches(b.combo, e)) {
         try {
           b.fn(e);
@@ -73,8 +76,8 @@ export function createKeymap() {
   const onKey = (e) => handle(e);
   const map = {
     handle,
-    bind(combo, fn) {
-      const b = { combo: parseCombo(combo), fn };
+    bind(combo, fn, opts = {}) {
+      const b = { combo: parseCombo(combo), fn, editable: Boolean(opts && opts.editable) };
       bindings.add(b);
       return () => bindings.delete(b);
     },

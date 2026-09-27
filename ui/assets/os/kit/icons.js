@@ -35,6 +35,7 @@ export const ICON = {
   CLOCK: 'M12 8v5l3 2M12 3a9 9 0 100 18 9 9 0 000-18',
   CHAT: 'M4 4h16v12H5.2L4 17.5z',
   X: 'M6 6l12 12M18 6L6 18',
+  SEARCH: 'M11 4a7 7 0 100 14 7 7 0 000-14M20 20l-4-4',
 };
 
 /* An inline SVG from a path table entry (or a raw path string). The path

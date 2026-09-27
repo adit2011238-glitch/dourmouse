@@ -195,3 +195,19 @@ class TestSessionRoutes:
             assert "tab-d" in server.sessions_by_tab, "a refused rotation must not drop the session"
         finally:
             lock.release()
+
+
+class TestAllHandsStrip:
+    def test_home_shows_the_run_and_links_to_orchestration_without_a_new_route(self):
+        src = (_ROOT / "ui" / "assets" / "os" / "screens" / "home" / "index.js").read_text(encoding="utf-8")
+        assert "ctx.events.on('allhands'" in src and "'#/orchestration'" in src and "/api/allhands" in src
+        assert "innerHTML" not in src
+
+    def test_the_composer_takes_focus_again_after_the_shell_moves_it(self):
+        src = (_ROOT / "ui" / "assets" / "os" / "screens" / "home" / "index.js").read_text(encoding="utf-8")
+        assert src.count("focusComposer()") >= 2 and "ctx.signal.aborted" in src
+
+    def test_the_attention_list_can_show_every_item_and_keeps_keyboard_focus_after_a_dismiss(self):
+        src = (_ROOT / "ui" / "assets" / "os" / "screens" / "home" / "index.js").read_text(encoding="utf-8")
+        assert "SHOW ALL" in src and "SHOW FEWER" in src
+        assert "next.focus()" in src and "focusComposer()" in src

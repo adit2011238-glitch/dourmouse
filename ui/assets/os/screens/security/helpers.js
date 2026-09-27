@@ -69,7 +69,7 @@ export function macFacts(d) {
     firewall: fwOff ? { word: 'off', tone: 'bad' } : tele.firewall ? { word: 'no problem found', tone: 'ok' } : { word: 'not checked', tone: '' },
     exposure: tele.listening_ports ? { word: plural(exposed, 'exposed port') + ' found', tone: exposed ? 'warn' : 'ok' } : { word: 'not checked', tone: '' },
     risk: Number.isFinite(Number(d.risk_score)) ? String(Math.round(Number(d.risk_score))) : '',
-    newDevices: fs.filter((f) => f.is_new).length,
+    newDevices: fs.filter((f) => f.is_new && f.kind === 'new_device').length,
     devices: d.known_device_count || 0,
   };
 }

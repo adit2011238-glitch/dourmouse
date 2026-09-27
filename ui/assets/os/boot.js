@@ -38,6 +38,7 @@ import { createNotifCentre } from './chrome/notif-centre.js';
 import { createWallpaperPicker } from './chrome/wallpaper.js';
 import { createStartupCheck } from './chrome/startup-check.js';
 import { putPaneRequest } from './core/pane-inbox.js';
+import { createPalette } from './chrome/palette.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -86,6 +87,16 @@ function boot() {
   const startup = createStartupCheck({ root: $('startup'), api, toasts });
   defs.startup = panels.make('startup', { el: $('startup'), trigger: null, exclusive: ['cc', 'notifications', 'wallpaper'] });
   startup.bind(defs.startup);
+  const palette = createPalette({
+    root: $('palette'), go: (slug) => router.go(slug), refresh: () => router.refresh('manual'),
+    openPanel: (name) => defs[name] && defs[name].open(), api, chat, prefs, toasts,
+  });
+  defs.palette = panels.make('palette', { el: $('palette'), trigger: $('palBtn'), exclusive: ['cc', 'notifications', 'wallpaper', 'startup'], onOpen: () => palette.onOpen(), onClose: () => palette.onClose() });
+  palette.bind(defs.palette);
+  $('palBtn').addEventListener('click', () => defs.palette.toggle());
+  /* Command K and Ctrl K open the launcher from anywhere, even while typing */
+  keymap.bind('Meta+k', () => defs.palette.toggle(), { editable: true });
+  keymap.bind('Ctrl+k', () => defs.palette.toggle(), { editable: true });
   $('ccBtn').addEventListener('click', () => defs.cc.toggle());
   $('wallBtn').addEventListener('click', () => defs.wallpaper.toggle());
   picker.sync();

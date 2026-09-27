@@ -75,7 +75,7 @@ export default {
         {
           id: 'transcripts', label: 'TRANSCRIPTS', disabled: !target,
           title: target ? '' : 'No meeting has been recorded yet',
-          spec: 'Opens the merged conversation for the selected meeting: the fan-out running now, else the latest recorded one. It reads the office log and changes nothing.',
+          spec: 'Opens the merged conversation for the selected meeting: the parallel run happening now, else the latest recorded one. It reads the office log and changes nothing.',
           onClick: () => openTranscript(selectedMeeting()),
         },
       ]);
@@ -97,7 +97,10 @@ export default {
 
     /* ---------------- painting ---------------- */
     function paintMain() {
-      if (st.floorsError) {
+      root.dataset.state = st.floorsError && !st.floors ? 'error' : st.floors && !st.total ? 'empty' : 'populated';
+      if (st.floorsError && st.floors) states.stale(root, 'Could not refresh the roster: ' + st.floorsError.message + ' The floors below are from the last read.');
+      else if (!st.floorsError) states.clearStale(root);
+      if (st.floorsError && !st.floors) {
         states.error(mainEl, st.floorsError, { title: 'Could not read the roster', retry: () => loadAll() });
         return;
       }
@@ -130,9 +133,9 @@ export default {
               return html`<button type="button" class="desk ${s}" data-agent="${a.name}" aria-pressed="${String(st.agent === a.name)}" data-spec="${a.name}. ${DESK_WORD[s]}. Opens what this agent last did and which model it uses.">
                 <span class="av"></span><span class="who">${a.name}</span><span class="st">${DESK_WORD[s]}</span>${cur && cur.concurrent > 1 ? html`<span class="badge">x ${String(cur.concurrent)}</span>` : ''}</button>`;
             })}</div>
-            <div class="meetroom" data-spec="Meeting room. An agent sits here while one of its branches of a real delegate_parallel run is still running, and leaves when the branch reports. It is driven by events only, so an empty room means nothing is fanned out.">
+            <div class="meetroom" data-spec="Meeting room. An agent sits here while it is working on one part of a job the orchestrator split across several agents, and leaves when it reports back. It follows live events only, so an empty room means nothing is split up right now.">
               <div class="meetroom-l">MEETING ROOM</div>
-              <div class="meetroom-seats">${seated.length ? seated.map((n) => html`<div class="seat"><div class="av"></div><div class="nm">${n}</div></div>`) : html`<div class="of-empty">no fan-out running</div>`}</div>
+              <div class="meetroom-seats">${seated.length ? seated.map((n) => html`<div class="seat"><div class="av"></div><div class="nm">${n}</div></div>`) : html`<div class="of-empty">nobody in a meeting</div>`}</div>
             </div>
           </div>
           ${picked ? agentCard(picked) : ''}
@@ -158,10 +161,10 @@ export default {
     function setFoot() {
       const bits = [];
       bits.push(st.total + ' agents on the roster, ' + (st.floors.length) + ' floors.');
-      if (st.unassigned.length) bits.push(st.unassigned.length + ' not named by any floor and shown on Unassigned: ' + st.unassigned.join(', ') + '.');
-      if (st.unknown.length) bits.push('The floor table names ' + st.unknown.length + ' agent(s) the roster does not have: ' + st.unknown.join(', ') + '.');
+      if (st.unassigned.length) bits.push(st.unassigned.length + ' not placed on a floor and shown on Unassigned: ' + st.unassigned.join(', ') + '.');
+      if (st.unknown.length) bits.push('The floor list names ' + st.unknown.length + (st.unknown.length === 1 ? ' agent' : ' agents') + ' the roster does not have: ' + st.unknown.join(', ') + '.');
       if (st.snapError) bits.push('Activity could not be read (' + st.snapError.message + '), so every desk shows idle.');
-      footEl.textContent = bits.join(' ') + ' ' + st.rule + ' Status is idle, working, needs sign-in or in meeting; no always-on status is reported by any source, so none is drawn.';
+      footEl.textContent = bits.join(' ') + ' ' + st.rule + ' A desk shows idle, working, needs sign-in or in meeting.';
       ctx.chrome.setSub(st.floors.length + ' floors · ' + st.total + ' agents');
     }
 

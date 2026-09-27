@@ -49,3 +49,9 @@ def test_the_grouping_rule_and_unassigned_floor_are_stated_on_screen():
 
 def test_concurrent_count_is_kept_on_the_desk():
     assert "x ${String(cur.concurrent)}" in source("office")
+
+
+def test_a_failed_first_read_sets_the_screen_state_and_a_later_failure_keeps_the_floors():
+    src = (SCREENS / "office" / "index.js").read_text(encoding="utf-8")
+    assert "root.dataset.state = st.floorsError && !st.floors ? 'error'" in src
+    assert "The floors below are from the last read." in src

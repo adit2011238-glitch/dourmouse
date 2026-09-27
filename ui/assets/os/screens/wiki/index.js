@@ -11,6 +11,7 @@ import { html, setHtml } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
 import { agoLabel, plural } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
+import { confirmHere } from '../../kit/confirm-card.js';
 import { ROW_CAP, POLL_MS, STATUS_TAG, STATUS_WORD, counts, baseName, dirName, fmtSize, visibleRows, lastScan } from './helpers.js';
 
 function el(tag, cls, text) {
@@ -32,20 +33,43 @@ export default {
     root.dataset.state = 'loading';
     setHtml(root, html`
       <div class="wik-note" id="wikNote" role="status" hidden></div>
+      <div id="wikConfirm"></div>
       <div class="grid3" id="wikCounts" data-region></div>
       <div class="card wik-list"><div class="lbl">Files the wiki has seen</div><div id="wikList" data-region></div></div>`);
     const noteEl = root.querySelector('#wikNote');
+    const confirmEl = root.querySelector('#wikConfirm');
     const countsEl = root.querySelector('#wikCounts');
     const listEl = root.querySelector('#wikList');
 
-    ctx.chrome.setActions([
-      {
-        id: 'scan', label: 'SCAN', kind: 'primary', disabled: true,
-        title: 'Not available from here',
-        spec: 'Not available from this window: no route runs a wiki scan, and a scan sends file contents to a cloud model. Ask the device wiki agent in HOME to scan; the model calls are visible there.',
-        onClick: () => {},
-      },
-    ]);
+    /* SCAN hands the job to HOME after asking. No route runs a scan from here:
+       a scan sends file contents to a cloud model, so it stays a conversation
+       where every model call is visible and every gated step still asks. */
+    function paintActions() {
+      const roots = st.data ? st.data.configured_roots || [] : [];
+      ctx.chrome.setActions([
+        {
+          id: 'scan', label: 'SCAN', kind: 'primary', disabled: !st.data || !roots.length,
+          title: st.data && !roots.length ? 'No folders are configured for the wiki' : '',
+          spec: 'Asks first, then hands a scan request to the device wiki agent in HOME. The agent reads only the configured folders and a cloud model summarizes changed files, which uses credits. Every model call shows in the HOME conversation.',
+          onClick: () => askScan(),
+        },
+      ]);
+    }
+
+    function askScan() {
+      const roots = (st.data && st.data.configured_roots) || [];
+      let off = null;
+      const gone = () => { if (off) { off(); off = null; } confirmEl.replaceChildren(); };
+      confirmHere(confirmEl,
+        'Ask the device wiki agent in HOME to scan ' + plural(roots.length, 'folder', 'folders') + ' now? It reads files inside ' + roots.join(', ') + ' and a cloud model summarizes the new or changed ones, which uses credits. You can follow every step in HOME.',
+        async () => {
+          await ctx.chat.send('Scan the device wiki now with your device wiki tools. Stay inside the configured folders. Then tell me how many files were added, changed, missing and summarized.');
+          noteEl.hidden = false;
+          noteEl.textContent = 'Scan request sent to HOME. Follow it there; this list refreshes by itself every 15 seconds.';
+        },
+        { onDone: () => setTimeout(() => { if (!ctx.signal.aborted) gone(); }, 2500) });
+      off = ctx.keys.pushEsc(gone);
+    }
 
     function countCard(label, n, tone) {
       const c = el('div', 'card');
@@ -102,14 +126,14 @@ export default {
       if (!roots.length && !entries.length) {
         root.dataset.state = 'unavailable';
         states.unavailable(listEl, 'No folders are configured for the wiki, so it has nothing to hold.', {
-          detail: 'It only ever walks the folders named in DOURMOUSE_WIKI_ROOTS, never the whole disk. Set that variable and restart the server.',
+          detail: 'The wiki only ever reads the folders named in DOURMOUSE_WIKI_ROOTS, never the whole disk. Set that variable to one or more folder paths and restart the server.',
         });
         return;
       }
       if (!entries.length) {
         root.dataset.state = 'empty';
         states.empty(listEl, 'Nothing has been scanned yet.', {
-          hint: 'Watching ' + plural(roots.length, 'folder', 'folders') + ': ' + roots.join(', ') + '. Scanning is not available from this window.',
+          hint: 'Watching ' + plural(roots.length, 'folder', 'folders') + ': ' + roots.join(', ') + '. Press SCAN to ask the device wiki agent to scan them.',
         });
         return;
       }
@@ -164,7 +188,7 @@ export default {
         (v.hidden ? v.hidden + ' more not shown; narrow the filter. ' : '') +
         'A deleted file is marked MISSING, never dropped, and comes back from its kept summary if it reappears. A content change reverts a file to UNSUMMARIZED instead of keeping a stale summary. ' +
         (last ? 'A scan last touched a file ' + (agoLabel(last) || 'at an unknown time') + '. ' : '') +
-        'Scanning is not available from this window.';
+        'SCAN asks the device wiki agent in HOME to scan again.';
     }
 
     function paint() {
@@ -188,6 +212,7 @@ export default {
         const same = json === lastJson && !st.error;
         lastJson = json;
         st.data = d;
+        paintActions();
         if (same) return; /* nothing changed: do not rebuild the list under the reader's focus */
         st.error = null;
         states.clearStale(root);
@@ -215,6 +240,7 @@ export default {
     });
     ctx.events.onResync(() => load('resync'));
     ctx.every(POLL_MS, () => load('poll'));
+    paintActions();
     states.loading(listEl, 'Reading the device wiki');
     await load('show');
   },

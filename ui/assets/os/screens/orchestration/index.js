@@ -12,30 +12,36 @@ import { states } from '../../kit/states.js';
 import { agoLabel, plural } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
 import {
-  seedRuns, applyFanout, liveRuns, branchRows, runCounts, STATE_TAG, runLabel, branchLines, callIdFor,
+  RUN_CAP, seedRuns, applyFanout, liveRuns, branchRows, runCounts, STATE_TAG, runLabel, branchLines, callIdFor,
 } from './helpers.js';
 import { meetingHtml } from './meeting.js';
+import {
+  seedAllHands, applyAllHands, counts as ahCounts, newestRuns, activeCount, runWord, runTone, brainTag, preview, goalLine,
+} from './allhands.js';
 
 const RECENT_CAP = 30;
+const RUN_DRAWN = RUN_CAP;
 
 export default {
   id: 'ORCHESTRATION',
-  sub: 'parallel fan-out',
+  sub: 'parallel runs',
   css: true,
   thread: false,
 
   async mount(root, ctx) {
-    const st = { runs: {}, recent: null, recentError: null, snapError: null, tx: null, txBranch: '', txBusy: false, txError: '' };
+    const st = { evicted: 0, all: {}, allErr: null, allLoaded: false, allOpen: new Set(), runs: {}, recent: null, recentError: null, snapError: null, tx: null, txBranch: '', txBusy: false, txError: '' };
 
     root.dataset.state = 'populated';
     setHtml(root, html`
       <div class="or-note" id="orNote" role="status" hidden></div>
-      <div class="card"><div class="lbl" id="orLiveLbl">Active runs</div><div id="orLive" data-region></div></div>
+      <div class="card"><div class="lbl" id="orLiveLbl">Running in parallel now</div><div id="orLive" data-region></div></div>
+      <div class="card or-gap"><div class="lbl">All hands (started with /all in HOME)</div><div id="orAll" data-region></div></div>
       <div class="card or-gap" id="orTxCard" hidden><div class="lbl">Transcript</div><div id="orTx" data-region></div></div>
       <div class="card or-gap"><div class="lbl">Recent runs</div><div id="orRecent" data-region></div></div>
-      <div class="muted or-foot">Branches of one delegate_parallel call start together, each in its own thread. The events carry no per-branch tool count and no queue, so this screen shows none. Recent runs and transcripts are read from the persisted office log, so they survive a restart; the live board does not.</div>`);
+      <div class="muted or-foot">When the orchestrator gives one job to several agents at once, each agent works in its own thread and reports back on its own. The server does not report how many tools a branch has used or what is waiting in a queue, so this screen shows neither. Finished runs and their transcripts are read from the saved office log, so they survive a restart. The live board and the all hands list start empty after a restart.</div>`);
     const $ = (id) => root.querySelector('#' + id);
     const liveEl = $('orLive');
+    const allEl = $('orAll');
     const recentEl = $('orRecent');
     const txEl = $('orTx');
     const txCard = $('orTxCard');
@@ -49,6 +55,7 @@ export default {
 
     /* ---------------- live board ---------------- */
     function paintLive() {
+      root.dataset.state = st.snapError && st.recentError ? 'error' : 'populated';
       const runs = liveRuns(st.runs);
       ctx.chrome.setLive(runs.length > 0);
       if (st.snapError && !runs.length) {
@@ -56,11 +63,11 @@ export default {
         return;
       }
       if (!runs.length) {
-        states.empty(liveEl, 'Nothing is fanned out right now.', { hint: 'A run appears here the moment a delegate_parallel call starts, and moves to Recent runs when every branch has reported.' });
+        states.empty(liveEl, 'Nothing is running in parallel right now.', { hint: 'When the orchestrator hands one job to several agents at once, each agent appears here as it starts. Finished runs move to Recent runs. To put every model on one goal, type /all and the goal in HOME.' });
         return;
       }
       liveEl.dataset.state = 'populated';
-      setHtml(liveEl, html`${runs.map((run) => {
+      setHtml(liveEl, html`${st.evicted ? html`<div class="muted or-more">The board draws the newest ${String(RUN_DRAWN)} runs. ${String(st.evicted)} older running ${st.evicted === 1 ? 'run is' : 'runs are'} not drawn.</div>` : ''}${runs.map((run) => {
         const c = runCounts(run);
         return html`<div class="or-run" data-run="${run.id}">
           <div class="or-runh"><b>Run ${runLabel(run.id)}</b><span class="muted">${plural(c.total, 'branch', 'branches')}, ${c.done} done${c.failed ? ', ' + c.failed + ' failed' : ''}, ${c.running} running</span></div>
@@ -74,8 +81,52 @@ export default {
       })}`);
     }
 
+    /* ---------------- all hands (/all) ---------------- */
+    function paintAll() {
+      const runs = newestRuns(st.all);
+      ctx.chrome.setLive(liveRuns(st.runs).length > 0 || activeCount(st.all) > 0);
+      if (!st.allLoaded && !st.allErr) {
+        states.loading(allEl, 'Reading all hands runs');
+        return;
+      }
+      if (st.allErr && !runs.length) {
+        states.error(allEl, st.allErr, { title: 'Could not read the all hands runs', retry: () => loadAllHands() });
+        return;
+      }
+      if (!runs.length) {
+        states.empty(allEl, 'No all hands run since the server started.', { hint: 'In HOME, type /all and a goal. Every model this Mac can reach works on it at once and the answers are merged. The run shows up here while it works.' });
+        return;
+      }
+      allEl.dataset.state = 'populated';
+      setHtml(allEl, html`${runs.map((run) => {
+        const c = ahCounts(run);
+        const keySyn = run.id + '|synthesis';
+        return html`<div class="or-run" data-ah-run="${run.id}">
+          <div class="or-runh"><span class="tag ${runTone(run)}">${runWord(run)}</span><b>${goalLine(run)}</b>
+            <span class="muted">${c.total ? c.done + ' of ' + plural(c.total, 'model') + ' answered' + (c.failed ? ', ' + c.failed + ' failed' : '') : 'starting'}${run.started ? ' · ' + agoLabel(run.started) : ''}</span>
+            <span class="os-row-actions"><button type="button" class="os-btn" data-ah-window="${run.id}" data-spec="Opens this run in its own page, the same all hands page the classic console opened.">OPEN PAGE</button></span></div>
+          ${Object.entries(run.brains || {}).map(([key, b]) => {
+            const k = run.id + '|' + key;
+            const open = st.allOpen.has(k);
+            const body = b.status === 'error' ? b.error : b.result;
+            return html`<div class="os-row or-branch">
+              <span class="tag ${brainTag(b.status)}">${b.status}</span>
+              <span class="rt"><b>${b.label || key}</b> ${body ? html`<span class="muted">${open ? '' : preview(body)}</span>` : ''}
+                ${open && body ? html`<div class="or-full">${body}</div>` : ''}</span>
+              ${typeof b.elapsed === 'number' ? html`<span class="muted mono">${b.elapsed.toFixed(1)}s</span>` : ''}
+              ${body && String(body).length > 120 ? html`<span class="os-row-actions"><button type="button" class="os-btn" data-ah-toggle="${k}" aria-expanded="${String(open)}" data-spec="Shows or hides the full text this model returned.">${open ? 'HIDE' : 'SHOW'}</button></span>` : ''}
+            </div>`;
+          })}
+          ${run.synthesis ? html`<div class="or-syn"><div class="who">Merged answer</div><div class="or-full">${st.allOpen.has(keySyn) || run.synthesis.length <= 600 ? run.synthesis : preview(run.synthesis, 600)}</div>
+            ${run.synthesis.length > 600 ? html`<button type="button" class="os-btn" data-ah-toggle="${keySyn}" aria-expanded="${String(st.allOpen.has(keySyn))}" data-spec="Shows or hides the whole merged answer.">${st.allOpen.has(keySyn) ? 'HIDE' : 'SHOW ALL'}</button>` : ''}</div>` : ''}
+          ${run.error ? html`<div class="muted or-err">${preview(run.error, 400)}</div>` : ''}
+        </div>`;
+      })}`);
+    }
+
     /* ---------------- recent runs ---------------- */
     function paintRecent() {
+      root.dataset.state = st.snapError && st.recentError ? 'error' : 'populated';
       if (st.recentError) {
         states.error(recentEl, st.recentError, { title: 'Could not read recent runs', retry: () => loadRecent() });
         return;
@@ -85,7 +136,7 @@ export default {
         return;
       }
       if (!st.recent.length) {
-        states.empty(recentEl, 'No multi-agent runs recorded yet.', { hint: 'Runs are recorded when a delegate_parallel call finishes its first branch.' });
+        states.empty(recentEl, 'No parallel runs recorded yet.', { hint: 'A run is saved here once its first agent reports back.' });
         return;
       }
       recentEl.dataset.state = 'populated';
@@ -101,8 +152,19 @@ export default {
     }
 
     /* ---------------- transcript ---------------- */
+    let offEsc = null;
     function paintTx() {
       txCard.hidden = st.tx === null && !st.txBusy && !st.txError;
+      /* Esc closes the transcript, but only while one is open, so it never swallows the shell's own Esc */
+      if (txCard.hidden && offEsc) { offEsc(); offEsc = null; }
+      if (!txCard.hidden && !offEsc) {
+        offEsc = ctx.keys.pushEsc(() => {
+          st.tx = null;
+          st.txError = '';
+          st.txBusy = false;
+          paintTx();
+        });
+      }
       if (txCard.hidden) return;
       if (st.txBusy) {
         states.loading(txEl, 'Reading the transcript');
@@ -179,16 +241,41 @@ export default {
       paintRecent();
     }
 
+    async function loadAllHands() {
+      try {
+        const r = await ctx.api.get('/api/allhands');
+        if (ctx.signal.aborted) return;
+        st.all = seedAllHands(r && r.runs);
+        st.allErr = null;
+      } catch (err) {
+        if (isAbort(err)) return;
+        st.allErr = err;
+      }
+      st.allLoaded = true;
+      paintAll();
+    }
+
     async function loadAll() {
       states.loading(liveEl, 'Reading the activity snapshot');
-      await Promise.all([loadSnapshot(), loadRecent()]);
+      await Promise.all([loadSnapshot(), loadRecent(), loadAllHands()]);
     }
 
     /* ---------------- events ---------------- */
     ctx.events.on('delegate_fanout', (evt) => {
+      const before = Object.keys(st.runs).filter((id) => !st.runs[id].finished);
       applyFanout(st.runs, evt);
+      const gone = before.filter((id) => !(id in st.runs)).length;
+      if (gone) st.evicted += gone;
+      if (!liveRuns(st.runs).length) st.evicted = 0;
       paintLive();
       if (evt.finished) loadRecent();
+    });
+    ctx.events.on('allhands', (evt) => {
+      const run = applyAllHands(st.all, evt);
+      if (!run) return;
+      paintAll();
+      /* the start event has no goal or roster, and the final one has the elapsed times: read the list again */
+      if (run.partial || (!evt.brain && evt.status === 'done')) loadAllHands();
     });
     ctx.events.onResync(() => loadAll());
     ctx.events.onStatus((s) => {
@@ -197,6 +284,21 @@ export default {
     });
 
     root.addEventListener('click', (e) => {
+      const win = e.target.closest('[data-ah-window]');
+      if (win) {
+        if (!ctx.host.openExternal('/all-hands?run=' + encodeURIComponent(win.dataset.ahWindow))) ctx.notify({ level: 'warn', title: 'ORCHESTRATION', detail: 'This window could not open a separate page.' });
+        return;
+      }
+      const tg = e.target.closest('[data-ah-toggle]');
+      if (tg) {
+        const k = tg.dataset.ahToggle;
+        if (st.allOpen.has(k)) st.allOpen.delete(k);
+        else st.allOpen.add(k);
+        paintAll();
+        const again = root.querySelector('[data-ah-toggle="' + CSS.escape(k) + '"]');
+        if (again) again.focus();
+        return;
+      }
       const tx = e.target.closest('[data-tx-run]');
       if (tx) {
         openTranscript(tx.dataset.txRun, tx.dataset.txIndex !== undefined ? Number(tx.dataset.txIndex) : undefined);

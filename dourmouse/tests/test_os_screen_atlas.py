@@ -67,3 +67,38 @@ class TestSourceRules:
     def test_source_errors_reach_the_dom_only_as_text(self):
         src = (_DIR / "index.js").read_text(encoding="utf-8")
         assert "e.textContent = r.error" in src and "innerHTML" not in src
+
+
+class TestSignalsAndWording:
+    def test_signals_are_strongest_first_and_only_real_links_are_kept(self, tmp_path):
+        out = node(
+            tmp_path,
+            """const snap = { items: {
+  quakes: [{title:'A', severity:'low', link:'javascript:alert(1)', lat:1, lon:2}, {title:'B', severity:'high', link:'https://example.org/b'}],
+  storms: [{title:'C', severity:'critical'}, {title:'D'}, null, 'x'] } };
+R.all = h.signals(snap);
+R.q = h.signals(snap, 'quakes');
+R.capped = h.signals({ items: { q: Array.from({length: 40}, (_, i) => ({ title: 't' + i })) } });
+R.none = h.signals({});""",
+        )
+        assert [r["title"] for r in out["all"]["rows"]] == ["C", "B", "A", "D"]
+        assert out["all"]["total"] == 4
+        row_a = next(r for r in out["all"]["rows"] if r["title"] == "A")
+        assert row_a["link"] == "" and row_a["loc"] == "1.0, 2.0"
+        assert next(r for r in out["all"]["rows"] if r["title"] == "B")["link"] == "https://example.org/b"
+        assert [r["title"] for r in out["q"]["rows"]] == ["B", "A"]
+        assert len(out["capped"]["rows"]) == 12 and out["capped"]["total"] == 40
+        assert out["none"] == {"rows": [], "total": 0}
+
+    def test_a_feed_error_loses_its_query_string(self, tmp_path):
+        out = node(tmp_path, "R.r = h.channelRows({sources:{a:{ok:false,error:'HTTP 429 from https://x.org/api?lamin=-90&lomin=-180 blocked'}}});")
+        assert "lamin" not in out["r"][0]["error"] and out["r"][0]["error"].startswith("HTTP 429 from https://x.org/api")
+
+    def test_item_text_only_reaches_the_dom_as_text_and_a_throttle_is_not_an_error(self):
+        src = _src()
+        assert "innerHTML" not in src and "textContent = s.title" in src
+        assert "err.body.throttled" in src
+
+    def test_a_channel_can_be_picked_from_the_keyboard(self):
+        src = _src()
+        assert "'button' : 'span'" in src and "aria-pressed" in src

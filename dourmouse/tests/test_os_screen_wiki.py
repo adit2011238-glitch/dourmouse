@@ -67,10 +67,18 @@ class TestSourceRules:
         for sample in ("REMAINING_WORK", "old_notes", ">128<", ">14<"):
             assert sample not in src, sample
 
-    def test_scan_is_disabled_and_says_why_and_nothing_posts(self):
+    def test_scan_asks_first_then_hands_the_job_to_home_and_never_calls_a_route(self):
         src = (_DIR / "index.js").read_text(encoding="utf-8")
-        assert "disabled: true" in src and "Not available from this window" in src
+        assert "confirmHere(" in src and "kit/confirm-card.js" in src
+        # the only thing that can start a scan is the confirmed hand-off, and it is a chat message
+        body = src[src.index("function askScan()"):]
+        assert "ctx.chat.send(" in body and "credits" in body
         assert "ctx.api.post" not in src
+        assert src.count("ctx.chat.send(") == 1
+
+    def test_scan_is_off_until_a_folder_is_configured_and_says_why(self):
+        src = (_DIR / "index.js").read_text(encoding="utf-8")
+        assert "!roots.length" in src and "No folders are configured for the wiki" in src
 
     def test_summaries_and_paths_reach_the_dom_only_as_text(self):
         src = (_DIR / "index.js").read_text(encoding="utf-8")

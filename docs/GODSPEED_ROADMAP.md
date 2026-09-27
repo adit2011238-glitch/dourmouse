@@ -1132,3 +1132,5 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #152 2026-09-26 -- OS shell screens MEDIA and VOICE (fixed-folder media, bounded probe; wake-word state, transcribe route) (wave F); Electron playback check still to do.
 - [x] Finding #153 2026-09-26 -- OS shell screen BROWSER (the last of 18): Electron pane driven and verified in a second instance, sandboxed proxy fallback, a page-waiting inbox for browser_pane_open.
 - [x] Finding #154 2026-09-27 -- the swap: the OS shell is the default page (DOURMOUSE_DEFAULT_SHELL=console undoes it), service worker v5 precaches it.
+- [x] Finding #155 2026-09-27 -- QA and polish pass over HOME, SECURITY, NEWS, ATLAS, WIKI, OFFICE, ORCHESTRATION (all-hands visibility, analyst panel, WIKI scan hand-off, many dead ends fixed).
+- [x] Finding #156 2026-09-27 -- Command K launcher restored in the shell (ranked search, quick actions, ask and open-URL fall-through).

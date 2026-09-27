@@ -29,3 +29,13 @@
 [data-screen="HOME"] .terr:empty { display: none; }
 [data-screen="HOME"] .turn-actions { margin-top: 8px; display: flex; gap: 8px; }
 [data-screen="HOME"] .turn-actions[hidden] { display: none; }
+[data-screen="HOME"] .home-ah { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); font-size: var(--dm-text-sm); }
+[data-screen="HOME"] .home-ah[hidden] { display: none; }
+[data-screen="HOME"] .home-ah-t { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+[data-screen="HOME"] .home-ah-goal { color: var(--dm-fg); overflow-wrap: anywhere; }
+[data-screen="HOME"] a.os-btn { text-decoration: none; flex: none; }
+/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color so it reads at 4.5:1 or better */
+[data-screen="HOME"] .muted, [data-screen="HOME"] .st .st-d { color: var(--dm-fg-body); }
+[data-screen="HOME"] .lbl, [data-screen="HOME"] .st { color: var(--dm-fg-body); }
+[data-screen="HOME"] .home-attn .card { max-height: 42vh; overflow-y: auto; }
+[data-screen="HOME"] .home-more { margin-top: 8px; }

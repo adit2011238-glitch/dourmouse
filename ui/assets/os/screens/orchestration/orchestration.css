@@ -15,3 +15,16 @@
 [data-screen="ORCHESTRATION"] .mt-k { color: var(--dm-fg-dim); text-transform: uppercase; letter-spacing: .06em; font-size: var(--dm-text-2xs); }
 [data-screen="ORCHESTRATION"] .mt-x { color: var(--dm-fg-body); white-space: pre-wrap; overflow-wrap: anywhere; }
 [data-screen="ORCHESTRATION"] .mt-line[data-kind="done"] .mt-x { color: var(--dm-ok); }
+[data-screen="ORCHESTRATION"] .or-runh { flex-wrap: wrap; }
+[data-screen="ORCHESTRATION"] .or-runh b { min-width: 0; overflow-wrap: anywhere; }
+[data-screen="ORCHESTRATION"] .or-runh .os-row-actions { margin-left: auto; }
+[data-screen="ORCHESTRATION"] .or-full { margin-top: 4px; font-size: var(--dm-text-xs); color: var(--dm-fg-body); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
+[data-screen="ORCHESTRATION"] .or-syn { margin: 6px 8px 0; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.22); border: 1px solid var(--os-edge-lo); }
+[data-screen="ORCHESTRATION"] .or-err { margin-top: 6px; color: var(--dm-error); overflow-wrap: anywhere; }
+[data-screen="ORCHESTRATION"] .or-more { margin-bottom: 8px; }
+/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color so it reads at 4.5:1 or better */
+[data-screen="ORCHESTRATION"] .muted, [data-screen="ORCHESTRATION"] .st .st-d { color: var(--dm-fg-body); }
+[data-screen="ORCHESTRATION"] .lbl, [data-screen="ORCHESTRATION"] .st { color: var(--dm-fg-body); }
+[data-screen="ORCHESTRATION"] .tone-bad, [data-screen="ORCHESTRATION"] .tag.bad, [data-screen="ORCHESTRATION"] .os-btn--danger, [data-screen="ORCHESTRATION"] .terr, [data-screen="ORCHESTRATION"] .or-err { color: color-mix(in srgb, var(--dm-error) 65%, #fff); }
+[data-screen="ORCHESTRATION"] .or-branch { align-items: flex-start; }
+[data-screen="ORCHESTRATION"] .or-branch .tag { margin-top: 2px; }

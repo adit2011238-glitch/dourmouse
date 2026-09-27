@@ -102,3 +102,62 @@ def test_source_has_no_mockup_samples_and_makes_no_fake_claims():
     for sample in ("research_info", "4 tool calls", "3.2s", "Up to 6 branches", ">queued<"):
         assert sample not in src
     assert "\u2014" not in src
+
+
+ALLHANDS = SCREENS / "orchestration" / "allhands.js"
+
+
+class TestAllHands:
+    def test_a_run_first_seen_from_an_event_is_a_partial_skeleton_then_fills_in(self, tmp_path):
+        out = run_node(tmp_path, ALLHANDS, """
+const runs = {};
+h.applyAllHands(runs, { run_id: 'r1', status: 'started' }, 100);
+R.partial = runs.r1.partial === true && runs.r1.goal === '' && runs.r1.status === 'running';
+h.applyAllHands(runs, { run_id: 'r1', brain: 'claude', status: 'running' });
+h.applyAllHands(runs, { run_id: 'r1', brain: 'claude', status: 'done', summary: 'fast answer' });
+h.applyAllHands(runs, { run_id: 'r1', brain: 'codex', status: 'error', error: 'limit hit' });
+R.counts = h.counts(runs.r1);
+R.claude = runs.r1.brains.claude;
+h.applyAllHands(runs, { run_id: 'r1', status: 'done', synthesis: 'merged' }, 200);
+R.final = { status: runs.r1.status, syn: runs.r1.synthesis, word: h.runWord(runs.r1), tone: h.runTone(runs.r1), fin: runs.r1.finished };
+R.noid = h.applyAllHands(runs, { status: 'done' });
+""")
+        assert out["partial"] is True
+        assert out["counts"] == {"total": 2, "done": 1, "failed": 1, "working": 0}
+        assert out["claude"]["status"] == "done" and out["claude"]["result"] == "fast answer"
+        assert out["final"] == {"status": "done", "syn": "merged", "word": "partly failed", "tone": "bad", "fin": 200}
+        assert out["noid"] is None
+
+    def test_words_never_call_a_failed_run_done_and_a_merge_failure_is_named(self, tmp_path):
+        out = run_node(tmp_path, ALLHANDS, """
+const mk = (statuses, extra = {}) => ({ id: 'x', status: 'done', brains: Object.fromEntries(statuses.map((s, i) => ['b' + i, { status: s }])), ...extra });
+R.w = [h.runWord(mk(['done', 'done'])), h.runWord(mk(['error', 'error'])), h.runWord(mk(['done', 'error'])), h.runWord(mk(['done'], { error: 'merge died' })), h.runWord({ id: 'y', status: 'running', brains: {} })];
+R.p = h.preview('a  b\\n c'.repeat(200), 50).length;
+R.newest = h.newestRuns({ a: { id: 'a', started: 1 }, b: { id: 'b', started: 3 }, c: { id: 'c', started: 2 } }, 2).map((r) => r.id);
+""")
+        assert out["w"] == ["done", "all failed", "partly failed", "merge failed", "running"]
+        assert out["p"] <= 50 and out["newest"] == ["b", "c"]
+
+    def test_the_screen_reads_the_list_follows_events_and_escapes_every_model_text(self):
+        src = (SCREENS / "orchestration" / "index.js").read_text(encoding="utf-8")
+        assert "/api/allhands" in src and "ctx.events.on('allhands'" in src
+        assert "innerHTML" not in src and ".innerHTML" not in src
+        assert "openExternal('/all-hands?run='" in src
+
+    def test_esc_closes_the_transcript_only_while_one_is_open(self):
+        src = (SCREENS / "orchestration" / "index.js").read_text(encoding="utf-8")
+        assert "offEsc" in src and "ctx.keys.pushEsc(" in src
+
+    def test_a_crowded_board_says_how_many_runs_it_left_out(self):
+        src = (SCREENS / "orchestration" / "index.js").read_text(encoding="utf-8")
+        assert "st.evicted" in src and "not drawn" in src
+
+    def test_the_owner_sees_no_internal_tool_names_in_the_empty_states(self):
+        src = (SCREENS / "orchestration" / "index.js").read_text(encoding="utf-8")
+        for word in ("delegate_parallel call", "fanned out"):
+            assert word not in src
+
+    def test_regex_free_helpers_are_fast_on_a_big_run(self, tmp_path):
+        t0 = time.time()
+        run_node(tmp_path, ALLHANDS, "const runs = {}; for (let i = 0; i < 20000; i++) h.applyAllHands(runs, { run_id: 'r' + (i % 50), brain: 'b' + (i % 7), status: 'done', summary: 'x'.repeat(200000) }); R.n = Object.keys(runs).length;")
+        assert time.time() - t0 < 10

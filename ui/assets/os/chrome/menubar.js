@@ -25,6 +25,7 @@ export function createMenubar({ root, status, timers, panels }) {
   setHtml(root, html`
     <b class="mb-brand">DOURMOUSE</b>
     <button type="button" class="os-btn" id="wallBtn" aria-expanded="false" aria-controls="wallpicker" data-spec="Opens the wallpaper picker: four built-in gradients plus your own photo.">WALLPAPER</button>
+    <button type="button" class="os-btn" id="palBtn" aria-haspopup="dialog" aria-controls="palette" aria-label="Open the launcher (Command K)" data-spec="Opens the launcher: jump to any screen, run a quick action, or ask Dourmouse. Keyboard: Command K (Ctrl K)."><span aria-hidden="true">&#8984;K</span></button>
     <span class="os-menubar-spacer"></span>
     <button type="button" class="os-mb-cluster" id="ccBtn" aria-expanded="false" aria-controls="controlcenter" aria-label="Control Centre" data-panel-trigger="cc" data-spec="Control Centre. Live agents, security, network and brain, plus brightness and accent.">
       <span class="os-mb-ico" id="mbAgents" title="Agents">${icon('AGENTS')}<span id="mbAgentsN">-</span></span>

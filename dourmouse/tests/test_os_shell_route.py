@@ -115,7 +115,7 @@ class TestShellPage:
         boot = (_OS / "boot.js").read_text(encoding="utf-8")
         ids = set(re.findall(r"\$\('([A-Za-z]+)'\)", boot))
         # ids created by the chrome itself, not by the page skeleton
-        made_by_chrome = {"ccBtn", "wallBtn"}
+        made_by_chrome = {"ccBtn", "wallBtn", "palBtn"}
         assert ids, "boot.js looks nothing up?"
         for i in ids - made_by_chrome:
             assert f'id="{i}"' in html, f"boot.js needs #{i} but shell.html has none"

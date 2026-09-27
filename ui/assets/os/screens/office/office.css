@@ -53,3 +53,8 @@
 [data-screen="OFFICE"] .mt-x { color: var(--dm-fg-body); white-space: pre-wrap; overflow-wrap: anywhere; }
 [data-screen="OFFICE"] .mt-line[data-kind="done"] .mt-x { color: var(--dm-ok); }
 @media (max-width: 900px) { [data-screen="OFFICE"] .of-body { flex-direction: column; } [data-screen="OFFICE"] .meetroom { width: 100%; } }
+/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color so it reads at 4.5:1 or better */
+[data-screen="OFFICE"] .muted, [data-screen="OFFICE"] .st .st-d { color: var(--dm-fg-body); }
+[data-screen="OFFICE"] .desk .st, [data-screen="OFFICE"] .fno, [data-screen="OFFICE"] .of-empty { color: var(--dm-fg-body); }
+[data-screen="OFFICE"] .lbl, [data-screen="OFFICE"] .st { color: var(--dm-fg-body); }
+[data-screen="OFFICE"] .floor .fno { color: var(--dm-fg-body); }

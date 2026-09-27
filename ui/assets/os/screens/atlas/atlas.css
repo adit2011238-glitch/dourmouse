@@ -13,3 +13,16 @@
 [data-screen="ATLAS"] .tone-bad { color: var(--dm-error); }
 [data-screen="ATLAS"] .tone-dim { color: var(--dm-fg-dim); }
 [data-screen="ATLAS"] .atl-pulse .muted { margin-top: 8px; }
+[data-screen="ATLAS"] .atl-gap { margin-top: 12px; }
+[data-screen="ATLAS"] .atl-pick { text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; text-transform: capitalize; cursor: pointer; }
+[data-screen="ATLAS"] .atl-pick:hover { color: var(--dm-fg); text-decoration: underline; }
+[data-screen="ATLAS"] .atl-pick[aria-pressed="true"] { color: var(--dm-active); }
+[data-screen="ATLAS"] .atl-pick:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; border-radius: 4px; }
+[data-screen="ATLAS"] .atl-item { align-items: flex-start; }
+[data-screen="ATLAS"] .atl-item .tag { flex: none; margin-top: 2px; white-space: nowrap; }
+[data-screen="ATLAS"] .atl-item .rt b { color: var(--dm-fg); font-weight: 500; overflow-wrap: anywhere; }
+[data-screen="ATLAS"] .atl-meta { overflow-wrap: anywhere; }
+/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color so it reads at 4.5:1 or better */
+[data-screen="ATLAS"] .muted, [data-screen="ATLAS"] .st .st-d { color: var(--dm-fg-body); }
+[data-screen="ATLAS"] .lbl, [data-screen="ATLAS"] .st { color: var(--dm-fg-body); }
+[data-screen="ATLAS"] .tone-bad, [data-screen="ATLAS"] .tag.bad, [data-screen="ATLAS"] .os-btn--danger, [data-screen="ATLAS"] .terr, [data-screen="ATLAS"] .or-err { color: color-mix(in srgb, var(--dm-error) 65%, #fff); }

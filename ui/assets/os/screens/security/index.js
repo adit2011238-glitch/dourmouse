@@ -11,6 +11,7 @@
 import { html, setHtml } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
 import { flowSvg } from '../../kit/flow-svg.js';
+import { confirmHere as kitConfirm } from '../../kit/confirm-card.js';
 import { ring } from '../../core/ring.js';
 import { agoLabel } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
@@ -29,7 +30,7 @@ export default {
 
   async mount(root, ctx) {
     const st = {
-      dash: null, lock: null, lockError: '', analyst: null, staleMsg: '',
+      explaining: false, dash: null, lock: null, lockError: '', analyst: null, staleMsg: '',
       open: null, scanning: false, reporting: false,
     };
     const activity = ring(ACTIVITY_CAP);
@@ -41,20 +42,25 @@ export default {
     setHtml(root, html`
       <div class="sec-note" id="secNote" role="status" hidden></div>
       <div id="secConfirm"></div>
+      <div class="sec-sum" id="secSum" hidden></div>
       <div class="grid2 sec-top">
         <div class="card"><div class="lbl">How a finding is made</div><div id="secFlow" data-region></div></div>
         <div class="card"><div class="lbl">This Mac</div><div id="secMac" data-region></div></div>
       </div>
       <div class="grid2 sec-bottom">
-        <div class="card"><div class="lbl">Findings on this Mac</div><div id="secFindings" data-region></div></div>
+        <div class="card"><div class="lbl" id="secFindLbl">Findings on this Mac</div><div id="secFindings" data-region></div></div>
         <div class="card"><div class="lbl">Live activity</div><div id="secActivity" data-region></div></div>
-      </div>`);
+      </div>
+      <div class="card sec-gap"><div class="lbl">AI analyst</div><div id="secAnalyst" data-region></div></div>`);
     const $ = (id) => root.querySelector('#' + id);
     const noteEl = $('secNote');
     const confirmEl = $('secConfirm');
     const flowEl = $('secFlow');
     const macEl = $('secMac');
     const findEl = $('secFindings');
+    const sumEl = $('secSum');
+    const anaEl = $('secAnalyst');
+    const findLbl = $('secFindLbl');
     const actEl = $('secActivity');
 
     const note = (text, tone) => {
@@ -125,11 +131,47 @@ export default {
         root.querySelectorAll(':scope > .st-stale').forEach((n) => n.remove());
         root.dataset.state = st.dash.scanned ? 'populated' : 'empty';
       }
+      paintSummary();
       paintFlow();
       paintMac();
       paintFindings();
       paintActivity();
+      paintAnalyst();
       ctx.chrome.setLive(Boolean(st.dash.scanned));
+    }
+
+    /* The findings sit below the diagram, so say up front how many there are
+       and offer a jump: an owner with a finding should not have to scroll. */
+    function paintSummary() {
+      const d = st.dash;
+      const fs = findings(d);
+      findLbl.textContent = d.scanned ? 'Findings on this Mac (' + fs.length + ')' : 'Findings on this Mac';
+      if (!d.scanned || !fs.length) {
+        sumEl.hidden = true;
+        sumEl.replaceChildren();
+        return;
+      }
+      const c = { high: 0, med: 0, low: 0 };
+      fs.forEach((f) => { if (f.severity in c) c[f.severity] += 1; });
+      const parts = [];
+      if (c.high) parts.push(c.high + ' high');
+      if (c.med) parts.push(c.med + ' medium');
+      if (c.low) parts.push(c.low + ' low');
+      const text = document.createElement('span');
+      text.textContent = fs.length + (fs.length === 1 ? ' finding' : ' findings') + ' on the last scan' + (parts.length ? ': ' + parts.join(', ') : '') + '.';
+      const jump = document.createElement('button');
+      jump.type = 'button';
+      jump.className = 'os-btn';
+      jump.textContent = 'SHOW FINDINGS';
+      jump.dataset.spec = 'Scrolls down to the list of findings. It changes nothing.';
+      jump.addEventListener('click', () => {
+        findEl.scrollIntoView({ block: 'start' });
+        const first = findEl.querySelector('button');
+        if (first) first.focus({ preventScroll: true });
+      });
+      sumEl.hidden = false;
+      sumEl.dataset.tone = c.high ? 'bad' : '';
+      sumEl.replaceChildren(text, jump);
     }
 
     function paintFlow() {
@@ -161,7 +203,7 @@ export default {
       const posture = Array.isArray(d.posture) ? d.posture : [];
       const post = posture.length ? html`<div class="lbl sec-sub">Posture by area</div>${posture.map((p) => {
         const r = RATING[p.rating] || RATING.unknown;
-        return html`<div class="kv"><span>${p.label}${p.not_checked && p.not_checked.length ? html` <span class="muted">(not checked: ${p.not_checked.join(', ')})</span>` : ''}</span><b><span class="tag ${r.tag}">${r.word}</span></b></div>`;
+        return html`<div class="kv"><span>${p.label}${p.not_checked && p.not_checked.length ? html` <span class="muted">(not checked: ${p.not_checked.map((x) => String(x).replace(/_/g, ' ')).join(', ')})</span>` : ''}</span><b><span class="tag ${r.tag}">${r.word}</span></b></div>`;
       })}` : '';
       const lockErr = st.lockError ? html`<div class="muted sec-err">Lockdown state unavailable: ${st.lockError}</div>` : '';
       macEl.dataset.state = 'populated';
@@ -201,6 +243,32 @@ export default {
         </div>` : ''}`)}`);
     }
 
+    /* The analyst's last written explanation (a cloud model reading the sentry's
+       findings). It is model text, so it only goes in through the template. */
+    function paintAnalyst() {
+      const a = st.analyst && st.analyst.analysis;
+      const busy = st.explaining;
+      const btn = html`<div class="sec-btns"><button type="button" class="os-btn" id="explainBtn" ${busy ? 'disabled' : ''} data-spec="Asks first, then runs a fresh scan and sends the finding titles and details to a cloud model, which writes a plain explanation. It uses credits and changes nothing on this Mac.">${busy ? 'THINKING' : 'EXPLAIN MY FINDINGS'}</button></div>`;
+      if (!a) {
+        anaEl.dataset.state = 'empty';
+        setHtml(anaEl, html`<div class="muted">The analyst has not explained anything since it was last cleared. It writes on its own when a medium or high finding appears and the cloud analyst is switched on, or you can ask for one now.</div>${btn}`);
+        return;
+      }
+      if (!a.ok) {
+        anaEl.dataset.state = 'unavailable';
+        setHtml(anaEl, html`<div class="muted">The analyst could not answer: ${String(a.error || 'no reason was given')}</div>${btn}`);
+        return;
+      }
+      anaEl.dataset.state = 'populated';
+      const pts = Array.isArray(a.points) ? a.points : [];
+      setHtml(anaEl, html`
+        <div class="sec-ana-sum">${a.summary}</div>
+        <div class="muted">Worry level: ${a.worry}${a.at ? ' · ' + agoLabel(a.at) : ''}. Written by a cloud model from the findings; it is an explanation, not a verdict.</div>
+        ${pts.map((p) => html`<div class="os-row sec-find"><span class="rt"><b>${(p.titles || []).join(' + ')}</b><div class="muted">${p.meaning}</div>${p.first_step ? html`<div class="sec-first">First step: ${p.first_step}</div>` : ''}</span></div>`)}
+        ${a.dropped ? html`<div class="muted">${String(a.dropped)} point(s) were dropped because they did not name a real finding.</div>` : ''}
+        ${btn}`);
+    }
+
     function paintActivity() {
       const items = activity.newestFirst();
       if (!items.length) {
@@ -218,6 +286,7 @@ export default {
     }
 
     async function scan() {
+      if (st.scanning) return; /* a second click before the bar repaints must not start a second scan */
       st.scanning = true;
       paintActions();
       note('Scanning. This reads the machine and takes a few seconds.', 'info');
@@ -234,6 +303,7 @@ export default {
     }
 
     async function fullReport() {
+      if (st.reporting) return;
       st.reporting = true;
       paintActions();
       note('Building the report from a fresh scan.', 'info');
@@ -251,30 +321,36 @@ export default {
     }
 
     /* A page confirmation, as in the console: the server has no gate on this
-       route, so the card is the ask. Nothing runs until APPROVE is pressed. */
+       route, so the card is the ask. Nothing runs until APPROVE is pressed.
+       Esc declines it (never approves); a finished card clears itself. */
+    let offEsc = null;
+    function clearConfirm() {
+      if (offEsc) { offEsc(); offEsc = null; }
+      confirmEl.replaceChildren();
+    }
     function confirmHere(prompt, run) {
-      const entry = { id: 'local-' + Date.now(), prompt, email: false, autonomous: false, state: 'pending', busy: false, error: '' };
-      const card = ctx.kit.approvalCard(entry, async (ok) => {
-        if (!ok) {
-          entry.state = 'declined';
-          card.paint();
-          return true;
-        }
-        entry.busy = true;
-        entry.error = '';
-        card.paint();
-        try {
-          await run();
-          entry.state = 'approved';
-        } catch (err) {
-          entry.error = err && err.message ? err.message : String(err);
-        }
-        entry.busy = false;
-        card.paint();
-        return true;
+      if (offEsc) { offEsc(); offEsc = null; }
+      kitConfirm(confirmEl, prompt, run, {
+        onDone: (approved) => setTimeout(() => { if (!ctx.signal.aborted && confirmEl.querySelector('.approve.done')) clearConfirm(); }, approved ? 4000 : 1800),
       });
-      confirmEl.replaceChildren(card.el);
-      card.focus();
+      offEsc = ctx.keys.pushEsc(() => {
+        clearConfirm();
+      });
+    }
+
+    function explain() {
+      if (st.explaining) return;
+      confirmHere('Ask the cloud analyst to explain the findings? This runs a fresh scan and sends the finding titles and details to a cloud model, which uses credits. It changes nothing on this Mac.', async () => {
+        st.explaining = true;
+        paintAnalyst();
+        try {
+          const r = await ctx.api.post('/api/security/action', { action: 'analyze' });
+          if (r && r.analysis) st.analyst = { analysis: r.analysis };
+        } finally {
+          st.explaining = false;
+          if (!ctx.signal.aborted) paintAnalyst();
+        }
+      });
     }
 
     function lockToggle() {
@@ -310,6 +386,7 @@ export default {
         return;
       }
       if (e.target.closest('#lockBtn')) lockToggle();
+      if (e.target.closest('#explainBtn')) explain();
     });
 
     /* ---------------- live ---------------- */

@@ -8,6 +8,7 @@ import { states } from '../../kit/states.js';
 import { ago } from '../../kit/format.js';
 import { mountThreadView } from '../../kit/thread-view.js';
 import { isAbort } from '../../core/api.js';
+import { seedAllHands, applyAllHands, counts as ahCounts, newestRuns, runWord, goalLine } from '../orchestration/allhands.js';
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -26,8 +27,10 @@ export default {
     const attnEl = el('div', 'home-attn');
     attnEl.dataset.region = '';
     const scopeEl = el('div', 'home-scope');
+    const ahEl = el('div', 'home-ah');
+    ahEl.hidden = true;
     const threadEl = el('div', 'home-thread');
-    root.replaceChildren(scopeEl, attnEl, threadEl);
+    root.replaceChildren(scopeEl, ahEl, attnEl, threadEl);
     root.dataset.state = 'populated';
 
     /* ---------------- scope (project) ---------------- */
@@ -50,6 +53,7 @@ export default {
 
     /* ---------------- attention ---------------- */
     let attnItems = null;
+    let showAll = false;
     async function refreshAttention() {
       try {
         const d = await ctx.api.get('/api/attention');
@@ -74,7 +78,7 @@ export default {
       attnEl.dataset.state = 'populated';
       const card = el('div', 'card');
       card.append(el('div', 'lbl', 'Needs attention (' + items.length + ')'));
-      items.slice(0, 6).forEach((it) => {
+      (showAll ? items : items.slice(0, 6)).forEach((it) => {
         const row = el('div', 'os-row');
         row.append(el('span', 'tag warn', String(it.kind || 'note').replace(/_/g, ' ')));
         const t = el('span', 'rt', it.summary || '');
@@ -88,6 +92,10 @@ export default {
           try {
             await ctx.api.post('/api/attention/dismiss', { id: it.id });
             await refreshAttention();
+            /* keep keyboard focus in the list instead of dropping it to the page */
+            const next = attnEl.querySelector('.os-btn');
+            if (next) next.focus();
+            else ctx.chrome.focusComposer();
           } catch (err) {
             b.disabled = false;
             ctx.notify({ level: 'error', title: 'Could not dismiss', detail: err && err.message });
@@ -96,13 +104,68 @@ export default {
         row.append(b);
         card.append(row);
       });
-      if (items.length > 6) card.append(el('div', 'muted', items.length - 6 + ' more not shown.'));
+      if (items.length > 6) {
+        const more = el('button', 'os-btn home-more', showAll ? 'SHOW FEWER' : 'SHOW ALL ' + items.length);
+        more.type = 'button';
+        more.dataset.spec = 'Shows every item that needs attention, or only the newest six. It changes nothing.';
+        more.addEventListener('click', () => { showAll = !showAll; paintAttention(); const again = attnEl.querySelector('.home-more'); if (again) again.focus(); });
+        card.append(more);
+      }
       attnEl.replaceChildren(card);
     }
+
+    /* ---------------- all hands (/all) ----------------
+       /all <goal> starts a run that works in the background. The server's
+       reply says it streams in a window the shell does not have, so HOME
+       shows the run itself and links to where it is drawn. */
+    let runs = {};
+    let ahReload = null;
+    async function readRuns() {
+      try {
+        const r = await ctx.api.get('/api/allhands');
+        if (ctx.signal.aborted) return;
+        runs = seedAllHands(r && r.runs);
+      } catch (err) {
+        if (isAbort(err)) return;
+      }
+      paintAllHands();
+    }
+    function paintAllHands() {
+      const now = Date.now() / 1000;
+      /* the newest run, only while it works or for ten minutes after it finished */
+      const run = newestRuns(runs, 1).find((r) => r.status === 'running' || (r.finished && now - Number(r.finished) < 600));
+      if (!run) {
+        ahEl.hidden = true;
+        ahEl.replaceChildren();
+        return;
+      }
+      const c = ahCounts(run);
+      const line = el('span', 'home-ah-t');
+      const tag = el('span', 'tag ' + (run.status === 'running' ? 'warn' : runWord(run) === 'done' ? 'ok' : 'bad'), 'ALL HANDS ' + runWord(run));
+      const what = el('span', 'home-ah-goal', goalLine(run));
+      const prog = el('span', 'muted', c.total ? c.done + ' of ' + c.total + ' models answered' + (c.failed ? ', ' + c.failed + ' failed' : '') : 'starting');
+      line.append(tag, what, prog);
+      const go = el('a', 'os-btn', run.status === 'running' ? 'WATCH IN ORCHESTRATION' : 'SEE THE ANSWER');
+      go.href = '#/orchestration';
+      go.dataset.spec = 'Opens ORCHESTRATION, where each model of this all hands run and the merged answer are shown. It changes nothing.';
+      ahEl.hidden = false;
+      ahEl.replaceChildren(line, go);
+    }
+    ctx.events.on('allhands', (evt) => {
+      const run = applyAllHands(runs, evt);
+      if (!run) return;
+      paintAllHands();
+      if (run.partial && !ahReload) {
+        /* the start event has no goal: read the list once, coalescing a burst */
+        ahReload = true;
+        readRuns().finally(() => { ahReload = null; });
+      }
+    });
 
     /* ---------------- the thread ---------------- */
     const view = mountThreadView(threadEl, ctx, {
       scroller: root.parentElement,
+      emptyHint: 'Type a directive below. Enter sends, Shift+Enter starts a new line. Start with /all and a goal to put every model on it at once; the run appears above the conversation and in ORCHESTRATION.',
       onSent: () => refreshAttention(),
       onScope: paintScope,
     });
@@ -110,12 +173,15 @@ export default {
       if (s === 'error') states.stale(attnEl, 'Live updates paused. Reconnecting.');
       else states.clearStale(attnEl);
     });
-    ctx.events.onResync(() => refreshAttention());
+    ctx.events.onResync(() => { refreshAttention(); readRuns(); });
 
     paintScope();
     await view.start();
     await refreshAttention();
+    readRuns();
+    /* the shell moves focus to the stage title once a screen has mounted; ask again after that so typing starts at once */
     ctx.chrome.focusComposer();
+    setTimeout(() => { if (!ctx.signal.aborted) ctx.chrome.focusComposer(); }, 120);
   },
 
   async refresh(ctx, reason) {

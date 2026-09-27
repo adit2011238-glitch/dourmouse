@@ -69,6 +69,7 @@ class TestNumbersComeFromTheRead:
     def test_the_mac_card_never_turns_a_missing_collector_into_fine(self, tmp_path):
         out = node(tmp_path, DASH + """
 R.full = h.macFacts(dash);
+R.newdev = h.macFacts({ ...dash, findings: [...dash.findings, { fingerprint: 'zz99', kind: 'new_device', severity: 'low', title: 'n', detail: 'd', recommended_action: '', is_new: true }] });
 const blind = { ...dash, telemetry_available: {}, findings: [] };
 R.blind = h.macFacts(blind);
 R.clean = h.macFacts({ ...dash, findings: [], findings_by_severity: { high: 0, med: 0, low: 0 } });
@@ -76,7 +77,9 @@ R.tags = [h.macTag(dash), h.macTag({ ...dash, findings_by_severity: { high: 0, m
 """)
         assert out["full"]["firewall"] == {"word": "off", "tone": "bad"}
         assert out["full"]["exposure"] == {"word": "1 exposed port found", "tone": "warn"}
-        assert out["full"]["risk"] == "34" and out["full"]["newDevices"] == 1 and out["full"]["devices"] == 17
+        assert out["full"]["risk"] == "34" and out["full"]["devices"] == 17
+        # a new FIREWALL finding is not a new device: only a new_device finding counts next to "Known devices"
+        assert out["full"]["newDevices"] == 0 and out["newdev"]["newDevices"] == 1
         assert out["blind"]["firewall"]["word"] == "not checked" and out["blind"]["exposure"]["word"] == "not checked"
         assert out["clean"]["firewall"] == {"word": "no problem found", "tone": "ok"}, "no 'on' claim: the collector only saw no finding"
         assert [t["word"] for t in out["tags"]] == ["attention", "watch", "last scan clean"]
@@ -135,7 +138,7 @@ class TestActionsTheScreenMayCall:
         src = (_SEC / "index.js").read_text(encoding="utf-8")
         posted = set(re.findall(r"action:\s*(?:'([a-z_]+)'|start \? '([a-z_]+)' : '([a-z_]+)')", src))
         names = {n for tup in posted for n in tup if n}
-        assert names == {"scan", "report", "lockdown_start", "lockdown_stop"}
+        assert names == {"scan", "report", "analyze", "lockdown_start", "lockdown_stop"}
         for forbidden in ("kill_process", "quarantine", "disable_startup_item", "block_domain", "lockdown_add", "privacy_mode"):
             assert forbidden not in src
 
@@ -201,3 +204,32 @@ class TestEndpointsTheScreenReads:
     def test_network_read_shape_the_control_centre_relies_on(self, server):
         status, n = get(server, "/api/security/network")
         assert status == 200 and {"watching", "identity", "changes"} <= set(n)
+
+
+class TestOwnerFacingBehaviour:
+    def test_the_lock_card_is_the_shared_kit_card_and_esc_backs_out(self):
+        src = (_SEC / "index.js").read_text(encoding="utf-8")
+        assert "kit/confirm-card.js" in src and "ctx.keys.pushEsc(" in src
+
+    def test_a_status_tag_never_wraps_inside_a_row(self):
+        css = (_SEC / "security.css").read_text(encoding="utf-8")
+        assert "white-space: nowrap" in css and ".kv b .tag" in css
+
+    def test_findings_are_counted_up_front_with_a_jump(self):
+        src = (_SEC / "index.js").read_text(encoding="utf-8")
+        assert "SHOW FINDINGS" in src and "secFindLbl" in src
+
+    def test_a_second_click_on_scan_or_report_before_the_bar_repaints_starts_nothing(self):
+        src = (_SEC / "index.js").read_text(encoding="utf-8")
+        assert "if (st.scanning) return;" in src and "if (st.reporting) return;" in src
+
+    def test_the_analyst_call_spends_credits_so_it_only_runs_after_the_confirmation_card(self):
+        src = (_SEC / "index.js").read_text(encoding="utf-8")
+        body = src[src.index("function explain()"):src.index("function lockToggle()")]
+        assert "confirmHere(" in body and "credits" in body and "action: 'analyze'" in body
+        outside = src.replace(body, "")
+        assert "action: 'analyze'" not in outside
+
+    def test_the_analyst_text_reaches_the_dom_only_through_the_template(self):
+        src = (_SEC / "index.js").read_text(encoding="utf-8")
+        assert "innerHTML" not in src and "${a.summary}" in src and "${p.meaning}" in src

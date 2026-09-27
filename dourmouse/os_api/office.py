@@ -42,9 +42,9 @@ FLOORS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 )
 
 RULE = (
-    "Floors are a fixed table in dourmouse/os_api/office.py, chosen by what an agent is for "
-    "(operations, research, security, engineering, finance and media). The registry carries no "
-    "team field. An agent the table does not name goes to an Unassigned floor and is counted."
+    "Floors group agents by what they are for: operations, research, security, engineering, "
+    "finance and media. The agent registry has no team field, so the grouping is chosen by hand. "
+    "An agent that no floor names goes to an Unassigned floor and is counted."
 )
 
 

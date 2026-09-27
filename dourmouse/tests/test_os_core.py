@@ -42,7 +42,7 @@ MODULES = [
     "core/api.js", "core/approvals.js", "core/chat.js", "core/ctx.js", "core/events.js", "core/host.js",
     "core/keymap.js", "core/prefs.js", "core/registry.js", "core/ring.js", "core/router.js", "core/scope.js",
     "kit/html.js", "kit/states.js", "kit/approval-card.js", "kit/md.js", "kit/flow-svg.js", "kit/icons.js", "kit/format.js",
-    "kit/thread-helpers.js", "kit/thread-view.js", "kit/confirm-card.js", "chrome/startup-check.js", "core/pane-inbox.js",
+    "kit/thread-helpers.js", "kit/thread-view.js", "kit/confirm-card.js", "chrome/startup-check.js", "core/pane-inbox.js", "chrome/palette.js", "chrome/palette-search.js",
 ]
 
 
@@ -591,3 +591,64 @@ R.junk = takePaneRequest();
 putPaneRequest('https://x.example/' + 'a'.repeat(5000)); R.capped = takePaneRequest().length;
 """, "import { putPaneRequest, takePaneRequest, hasPaneRequest } from 'core/pane-inbox.js';")
         assert out == {"empty": False, "has": True, "first": "https://b.example/x", "second": None, "after": False, "junk": None, "capped": 2000}
+
+
+class TestLauncherSearch:
+    IMPORTS = "import { rank, score, tokens, withRecentFirst } from 'chrome/palette-search.js';"
+
+    def test_where_a_word_matches_decides_the_order(self, tmp_path):
+        out = run(tmp_path, """
+const items = [
+  { id: 'a', label: 'SECURITY', help: "this Mac's posture" },
+  { id: 'b', label: 'Scan this Mac now', help: 'a read-only security scan' },
+  { id: 'c', label: 'SETTINGS', help: 'preferences' },
+  { id: 'd', label: 'NEWS', help: 'live headlines' },
+];
+R.sec = rank(items, 'sec').map((i) => i.id);
+R.mac = rank(items, 'mac').map((i) => i.id);
+R.two = rank(items, 'scan mac').map((i) => i.id);
+R.none = rank(items, 'zzzz').map((i) => i.id);
+R.loose = rank(items, 'ngs').map((i) => i.id);
+R.empty = rank(items, '   ').map((i) => i.id);
+""", self.IMPORTS)
+        assert out["sec"] == ["a", "b"], "the label that starts with the word beats a help-text match"
+        assert out["mac"] == ["b", "a"], "a word at the start of a label word beats a help-text match"
+        assert out["two"] == ["b"], "every word must match"
+        assert out["none"] == [] and out["empty"] == ["a", "b", "c", "d"]
+        assert out["loose"] == ["c"], "a loose letter-by-letter match is the last resort"
+
+    def test_recent_items_get_a_lift_and_lead_the_empty_view(self, tmp_path):
+        out = run(tmp_path, """
+const items = [{ id: 'a', label: 'Alpha' }, { id: 'b', label: 'Alpine' }, { id: 'c', label: 'Also' }];
+R.plain = rank(items, 'al').map((i) => i.id);
+R.lifted = rank(items, 'al', ['b']).map((i) => i.id);
+const v = withRecentFirst(items, ['c', 'zzz', 'a']);
+R.recent = v.recent.map((i) => i.id); R.rest = v.rest.map((i) => i.id);
+""", self.IMPORTS)
+        assert out["plain"] == ["a", "b", "c"] and out["lifted"][0] == "b"
+        assert out["recent"] == ["c", "a"] and out["rest"] == ["b"], "an unknown recent id is ignored"
+
+    def test_a_hostile_query_is_bounded_and_fast(self, tmp_path):
+        out = run(tmp_path, """
+const items = Array.from({ length: 400 }, (_, i) => ({ id: 'i' + i, label: 'Item number ' + i, help: 'help text for item ' + i }));
+const t0 = Date.now();
+rank(items, 'a'.repeat(200000)); rank(items, '(((' .repeat(50000)); rank(items, ('x ').repeat(100000));
+R.ms = Date.now() - t0; R.tokens = tokens('a b c d e f g h i j').length; R.cap = tokens('q'.repeat(9999))[0].length;
+""", self.IMPORTS)
+        assert out["ms"] < 3000 and out["tokens"] == 6 and out["cap"] == 120
+
+
+class TestKeymapEditableOptIn:
+    def test_only_a_combo_that_opts_in_fires_while_typing(self, tmp_path):
+        out = run(tmp_path, """
+const km = createKeymap(); const fired = [];
+km.bind('r', () => fired.push('plain'));
+km.bind('Meta+k', () => fired.push('launcher'), { editable: true });
+km.bind('Ctrl+j', () => fired.push('other'));
+const field = { tagName: 'TEXTAREA' }; const body = { tagName: 'DIV' };
+km.handle({ key: 'r', target: field }); km.handle({ key: 'k', metaKey: true, target: field });
+km.handle({ key: 'j', ctrlKey: true, target: field });
+km.handle({ key: 'r', target: body }); km.handle({ key: 'k', metaKey: true, target: body });
+R.fired = fired;
+""", "import { createKeymap } from 'core/keymap.js';")
+        assert out["fired"] == ["launcher", "plain", "launcher"]

@@ -16,3 +16,8 @@
 [data-screen="WIKI"] .tone-ok { color: var(--dm-ok); }
 [data-screen="WIKI"] .tone-active { color: var(--dm-active); }
 [data-screen="WIKI"] .tone-dim { color: var(--dm-fg-dim); }
+[data-screen="WIKI"] #wikConfirm:not(:empty) { margin-bottom: 12px; }
+/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color so it reads at 4.5:1 or better */
+[data-screen="WIKI"] .muted, [data-screen="WIKI"] .st .st-d { color: var(--dm-fg-body); }
+[data-screen="WIKI"] .lbl, [data-screen="WIKI"] .st { color: var(--dm-fg-body); }
+[data-screen="WIKI"] .tone-dim { color: var(--dm-fg-body); }

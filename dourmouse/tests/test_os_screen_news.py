@@ -74,3 +74,22 @@ class TestSourceRules:
         src = (_DIR / "index.js").read_text(encoding="utf-8")
         assert "approvalCard" in src and "/api/os/news/research" in src
         assert "'Escape'" in src
+
+
+class TestOwnerFacingBehaviour:
+    def test_the_list_scrolls_inside_its_card_so_the_conversation_is_reachable(self):
+        css = (_DIR / "news.css").read_text(encoding="utf-8")
+        assert ".news-list" in css and "overflow-y: auto" in css
+
+    def test_important_alerts_are_rate_limited_and_counted(self):
+        src = (_DIR / "index.js").read_text(encoding="utf-8")
+        assert "lastToast" in src and "held" in src
+
+    def test_a_dropped_event_stream_is_said_out_loud(self):
+        src = (_DIR / "index.js").read_text(encoding="utf-8")
+        assert "ctx.events.onStatus(" in src
+
+    def test_the_summary_line_and_the_top_headlines_button_the_console_had_are_here(self):
+        src = (_DIR / "index.js").read_text(encoding="utf-8")
+        assert "news-sum" in src and "TOP HEADLINES" in src
+        assert "innerHTML" not in src

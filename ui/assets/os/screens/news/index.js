@@ -32,6 +32,8 @@ export default {
     const seen = new Set();
     let resp = null; /* the last GET /api/news answer */
     let loadError = null;
+    let lastToast = 0;
+    let held = 0;
     let live = 0; /* headlines that arrived as events since this screen opened */
 
     root.dataset.state = 'loading';
@@ -133,7 +135,11 @@ export default {
         : 'This headline carries no web link, so there is nothing to open.';
       if (!url) title.disabled = true;
       else title.addEventListener('click', () => open(item));
-      row.append(title);
+      const main = el('div', 'news-main');
+      main.append(title);
+      const sum = String(item.summary || '').replace(/\s+/g, ' ').trim();
+      if (sum) main.append(el('div', 'muted news-sum', sum.length > 220 ? sum.slice(0, 219) + '\u2026' : sum));
+      row.append(main);
       const when = ago(itemAt(item));
       if (when) row.append(el('span', 'news-when', when));
       if (url) {
@@ -168,7 +174,13 @@ export default {
       root.dataset.state = 'populated';
       const foot = el('div', 'muted news-foot');
       foot.textContent = 'Newest ' + items.length + ' headlines' + (feed.size >= FEED_CAP ? ' (older ones drop off at ' + FEED_CAP + ')' : '') + '. ' + (live ? live + ' arrived live since you opened this screen.' : 'New ones appear here as they arrive.');
-      states.populated(feedEl, [...items.map(rowFor), foot]);
+      /* the list scrolls inside its card so the conversation below stays in reach */
+      const list = el('div', 'news-list');
+      list.append(...items.map(rowFor));
+      const keepTop = feedEl.querySelector('.news-list');
+      const prevScroll = keepTop ? keepTop.scrollTop : 0;
+      states.populated(feedEl, [list, foot]);
+      list.scrollTop = prevScroll; /* a new headline must not yank the reader back to the top */
     }
 
     /* ---------------- reads ---------------- */
@@ -197,17 +209,35 @@ export default {
       if (!item || typeof item !== 'object') return;
       if (!remember(item)) return;
       live += 1;
-      if (isImportant(item)) ctx.notify({ level: 'warn', title: 'Important headline', detail: String(item.title || '').slice(0, 160), ttl: 5000 });
+      if (isImportant(item)) {
+        /* at most one toast every 4 seconds; the rest are counted into the next one */
+        const t = Date.now();
+        if (t - lastToast >= 4000) {
+          lastToast = t;
+          const more = held ? ' (and ' + held + ' more important since the last alert)' : '';
+          held = 0;
+          ctx.notify({ level: 'warn', title: 'Important headline', detail: String(item.title || '').slice(0, 160) + more, ttl: 5000 });
+        } else held += 1;
+      }
       paintFeed();
     });
     ctx.events.onResync(() => load('resync'));
+    ctx.events.onStatus((st) => {
+      if (st === 'error') states.stale(root, 'Live updates paused. Reconnecting. Headlines that arrive meanwhile show up when it is back.');
+      else if (!loadError) states.clearStale(root);
+    });
 
     /* ---------------- the conversation ---------------- */
     const view = mountThreadView(threadEl, ctx, {
       scroller: root.parentElement,
       placeholder: 'Ask the news agent about a headline or a topic',
       emptyMessage: 'No conversation about the news yet.',
-      emptyHint: 'Ask below. The headlines above update on their own.',
+      emptyHint: 'Ask below, or press TOP HEADLINES. The headlines above update on their own.',
+      actions: [{
+        id: 'top', label: 'TOP HEADLINES',
+        spec: 'Asks the news agent for the top headlines now, in the conversation below. It is a normal message, so it uses the model like anything you type.',
+        onClick: () => ctx.chat.send('Top headlines now').catch((err) => ctx.notify({ level: 'error', title: 'Could not send', detail: err && err.message })),
+      }],
     });
 
     states.loading(feedEl, 'Reading the headlines the watcher has collected');
