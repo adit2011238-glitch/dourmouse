@@ -9,6 +9,15 @@
      colour. --dm-active is the user's accent: if a warning followed it, an
      Emerald accent would paint a warning the same green as a good state. */
   --os-warn: #F59E0B;
+
+  /* S2: the shell's type scale. Almost nothing is under 11px and body text is 12
+     to 13px. Overridden here, not in dourmouse-ui.css, because the classic console
+     (/console) also reads those tokens and was tuned around the smaller scale. */
+  --dm-text-2xs: 11px;
+  --dm-text-xs:  11.5px;
+  --dm-text-sm:  12px;
+  --dm-text-base: 13px;
+  --dm-text-md:  14px;
 }
 
 html, body {
@@ -36,6 +45,8 @@ button { font-family: inherit; }
   font-family: var(--dm-font-sans); font-size: var(--dm-text-xs); letter-spacing: .06em; color: var(--dm-fg-dim);
   transition: background var(--os-dur-fast) linear, color var(--os-dur-fast) linear;
 }
+.navgroup { padding: 10px 9px 3px; font-size: var(--dm-text-2xs); letter-spacing: .1em; text-transform: uppercase; color: var(--dm-fg-label); }
+.navgroup:first-child { padding-top: 2px; }
 .navitem:hover { background: rgba(255,255,255,.07); color: var(--dm-fg); }
 .navitem[aria-current="page"] { background: color-mix(in srgb, var(--dm-active) 15%, transparent); color: var(--dm-active); }
 .navitem:focus-visible { outline: 2px solid var(--dm-active); outline-offset: -2px; }
@@ -110,6 +121,11 @@ button { font-family: inherit; }
 }
 @keyframes os-pop { from { opacity: 0; transform: translateY(-8px) scale(.98); } to { opacity: 1; transform: none; } }
 #controlcenter, #notifcenter { right: 14px; }
+#shortcuts { left: 50%; transform: translateX(-50%); width: 400px; top: 64px; animation-name: none; }
+.sc-group { margin: 0 0 10px; }
+.sc-name { font-size: var(--dm-text-xs); letter-spacing: .08em; text-transform: uppercase; color: var(--dm-fg-label); margin: 6px 2px; }
+.sc-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 2px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); }
+.sc-keys { flex: none; min-width: 26px; padding: 1px 7px; text-align: center; border-radius: 6px; border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.06); font: inherit; font-family: var(--dm-font-mono); color: var(--dm-fg); }
 #startup { left: 50%; transform: translateX(-50%); width: 380px; top: 64px; animation-name: none; }
 #startup .su-item { margin: 10px 0 12px; }
 #startup .su-label { font-size: var(--dm-text-sm); color: var(--dm-fg); margin-bottom: 6px; }
@@ -219,14 +235,31 @@ button.cc-tile:hover { background: rgba(255,255,255,.09); }
 .os-dock-item[data-running="true"]::after { background: var(--dm-active); }
 .os-dock-item .os-badge {
   position: absolute; top: -4px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px;
-  background: var(--dm-active); color: var(--dm-active-ink); font-size: 9px; font-family: var(--dm-font-mono);
+  background: var(--dm-active); color: var(--dm-active-ink); font-size: var(--dm-text-2xs); font-family: var(--dm-font-mono);
   display: grid; place-items: center; box-sizing: border-box;
 }
 .os-dock-item[aria-current="page"] { background: rgba(255,255,255,.14); color: var(--dm-fg); }
 
-@media (max-width: 900px) {
-  #sidebar { display: none; }
-  #shell { inset: 28px 0 92px 0; padding: 8px; }
+/* Short windows: the type scale grew, so the sidebar tightens to keep all 18 rows in view. */
+@media (max-height: 820px) {
+  #sidebar { gap: 1px; }
+  .navitem { padding: 4px 9px; }
+  .navgroup { padding: 6px 9px 1px; }
+  .navgroup:first-child { padding-top: 0; }
+}
+
+/* Narrow windows (S10, F20): the sidebar becomes an icon rail with tooltips
+   (each row carries a title). It never disappears, so all 18 screens stay
+   one click away. */
+@media (max-width: 1000px) {
+  #sidebar { width: 44px; padding: 6px 4px; align-items: stretch; }
+  #sidebar { gap: 1px; }
+  #sidebar .navitem { justify-content: center; padding: 5px 0; position: relative; }
+  #sidebar .navitem .nl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #sidebar .navitem .ni { width: 17px; height: 17px; }
+  #sidebar .navitem .nd { position: absolute; top: 5px; right: 6px; }
+  #sidebar .navgroup { height: 1px; margin: 4px 6px; padding: 0; background: var(--os-edge-lo); font-size: 0; overflow: hidden; }
+  #shell { padding: 8px; gap: 8px; }
   #wallpicker { left: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {

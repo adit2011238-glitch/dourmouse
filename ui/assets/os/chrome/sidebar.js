@@ -6,8 +6,9 @@ import { html, setHtml } from '../kit/html.js';
 import { icon } from '../kit/icons.js';
 
 export function createSidebar({ root, registry, go }) {
-  setHtml(root, html`${registry.SCREENS.map((s) => html`
-    <button type="button" class="navitem" data-go="${s.slug}" data-live="0" aria-current="false" data-spec="Switches the stage to ${s.id}. ${s.thread ? 'Has its own independent thread.' : "Directives typed here fall back to HOME's thread."}">
+  const groupAt = new Map((registry.SIDEBAR_GROUPS || []).map(([label, firstId]) => [firstId, label]));
+  setHtml(root, html`${registry.SCREENS.map((s, i) => html`${groupAt.has(s.id) ? html`<div class="navgroup" role="presentation">${groupAt.get(s.id)}</div>` : ''}
+    <button type="button" class="navitem" data-go="${s.slug}" data-live="0" aria-current="false" title="${s.label}${i < 9 ? ' (Command ' + (i + 1) + ')' : ''}" data-spec="Switches the stage to ${s.id}. ${s.thread ? 'Has its own independent thread.' : "Directives typed here fall back to HOME's thread."}">
       ${icon(s.icon, 'ni')}<span class="nl">${s.label}</span><i class="nd" aria-hidden="true"></i>
     </button>`)}`);
   root.addEventListener('click', (e) => {

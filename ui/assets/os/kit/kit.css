@@ -46,6 +46,7 @@ button.tag:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 
 .st .st-t { color: var(--dm-fg); font-size: var(--dm-text-base); letter-spacing: .04em; }
 .st .st-m { color: var(--dm-fg-body); max-width: 56ch; overflow-wrap: anywhere; }
 .st .st-d { color: var(--dm-fg-dim); font-size: var(--dm-text-xs); max-width: 60ch; overflow-wrap: anywhere; }
+.st-suggest { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .st-error .st-t { color: var(--dm-error); }
 .st-unavailable .st-t { color: var(--os-warn); }
 .st-spin { width: 12px; height: 12px; border-radius: 999px; border: 2px solid currentColor; border-top-color: transparent; animation: os-spin .7s linear infinite; }
@@ -76,9 +77,25 @@ button.tag:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 
 .md ul, .md ol { margin: 0 0 8px; padding-left: 20px; }
 .md .md-h { color: var(--dm-fg); margin: 6px 0; letter-spacing: .04em; }
 .md code { font-family: var(--dm-font-mono); background: rgba(255,255,255,.08); padding: 1px 4px; border-radius: 4px; font-size: .95em; }
-.md pre.md-code { position: relative; margin: 6px 0; padding: 10px; border-radius: 8px; background: rgba(0,0,0,.35); overflow: auto; }
+.md .md-codeblock { margin: 8px 0; border-radius: 8px; background: rgba(0,0,0,.35); border: 1px solid var(--os-edge-lo); overflow: hidden; }
+.md .md-codebar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 4px 10px; background: rgba(255,255,255,.05); border-bottom: 1px solid var(--os-edge-lo); }
+.md .md-copy { border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.06); color: var(--dm-fg-body); font: inherit; font-size: var(--dm-text-2xs); letter-spacing: .06em; padding: 2px 8px; border-radius: 6px; cursor: pointer; }
+.md .md-copy:hover { color: var(--dm-fg); background: rgba(255,255,255,.12); }
+.md .md-copy:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+.md pre.md-code { position: relative; margin: 0; padding: 10px; overflow: auto; font-size: .95em; line-height: 1.5; }
 .md pre.md-code code { background: none; padding: 0; }
-.md .md-lang { display: block; font-size: var(--dm-text-2xs); color: var(--dm-fg-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .08em; }
+.md .md-lang { font-size: var(--dm-text-2xs); color: var(--dm-fg-label); text-transform: uppercase; letter-spacing: .08em; }
+.md .md-h1 { font-size: 1.25em; margin: 12px 0 6px; }
+.md .md-h2 { font-size: 1.12em; margin: 10px 0 6px; }
+.md .md-h3 { font-size: 1em; margin: 8px 0 4px; }
+.md blockquote { margin: 6px 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--os-edge-hi); color: var(--dm-fg-body); }
+.md hr { border: 0; border-top: 1px solid var(--os-edge-lo); margin: 10px 0; }
+.md .md-tablewrap { overflow-x: auto; margin: 8px 0; max-width: 100%; }
+.md table.md-table { border-collapse: collapse; font-size: .95em; min-width: 40%; }
+.md .md-table th, .md .md-table td { border: 1px solid var(--os-edge-lo); padding: 4px 10px; text-align: left; vertical-align: top; }
+.md .md-table th { background: rgba(255,255,255,.06); color: var(--dm-fg); font-weight: 600; }
+.md .md-al-center { text-align: center !important; }
+.md .md-al-right { text-align: right !important; }
 .md a { color: var(--dm-active); }
 .md a:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
 

@@ -51,9 +51,31 @@ R.unknown = h.planFor('x', cmd('teleport', {}));
         assert out["search"] == {"kind": "chat", "text": "search for nvidia earnings", "say": 'Sending "search for nvidia earnings" to the companion on HOME.'}
         assert out["email"]["text"] == "email sam: running late" and "until you approve" in out["email"]["say"]
         assert out["close"]["kind"] == "refuse"
-        assert out["free"]["kind"] == "chat" and out["free"]["text"] == "what is the time"
-        assert out["nul"]["kind"] == "chat"
+        # F7: a phrase the parser does not know is never sent to the model as chat
+        assert out["free"]["kind"] == "unknown" and "Nothing was sent" in out["free"]["say"]
+        assert "text" not in out["free"]
+        assert out["nul"]["kind"] == "unknown"
         assert out["unknown"]["kind"] == "refuse" and "teleport" in out["unknown"]["say"]
+
+
+class TestScreenNames:
+    def test_open_a_screen_by_its_registry_name_and_nothing_else(self, tmp_path):
+        out = node(tmp_path, """
+const screens = [{ id: 'GOALS', slug: 'goals' }, { id: 'TIMETABLE', slug: 'timetable' }];
+R.goals = h.planFor('open goals', { recognized: false }, screens);
+R.go = h.planFor('Go to the timetable', { recognized: false }, screens);
+R.nope = h.planFor('open teleport', { recognized: false }, screens);
+R.chatty = h.planFor('open goals and delete everything', { recognized: false }, screens);
+R.none = h.planFor('open goals', { recognized: false });
+const N = 200000; const t = Date.now();
+for (const v of ['open ' + ' '.repeat(N), 'open ' + 'a'.repeat(N), 'go to ' + 'a b '.repeat(N / 4)]) h.screenFromPhrase(v, screens);
+R.ms = Date.now() - t;
+""")
+        assert out["goals"] == {"kind": "navigate", "slug": "goals", "say": "Opening GOALS."}
+        assert out["go"]["slug"] == "timetable"
+        for k in ("nope", "chatty", "none"):
+            assert out[k]["kind"] == "unknown"
+        assert out["ms"] < 1500
 
 
 class TestEngine:

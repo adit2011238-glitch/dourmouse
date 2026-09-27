@@ -23,21 +23,21 @@
 [data-screen="OFFICE"] .desk:hover { transform: translateY(-2px); background: rgba(255,255,255,.08); }
 [data-screen="OFFICE"] .desk[aria-pressed="true"] { border-color: var(--dm-active); }
 [data-screen="OFFICE"] .desk .who { display: block; font-size: var(--dm-text-2xs); color: var(--dm-fg-body); letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-[data-screen="OFFICE"] .desk .st { display: block; font-size: 8px; letter-spacing: .09em; text-transform: uppercase; margin-top: 3px; color: var(--dm-fg-dim); }
+[data-screen="OFFICE"] .desk .st { display: block; font-size: var(--dm-text-2xs); letter-spacing: .09em; text-transform: uppercase; margin-top: 3px; color: var(--dm-fg-dim); }
 [data-screen="OFFICE"] .desk.work .st { color: var(--dm-active); }
 [data-screen="OFFICE"] .desk.auth .st { color: var(--dm-error); }
 [data-screen="OFFICE"] .desk.meet { opacity: .35; }
 [data-screen="OFFICE"] .desk .av { display: block; width: 16px; height: 16px; border-radius: 5px; margin-bottom: 5px; background: linear-gradient(160deg, rgba(255,255,255,.28), rgba(255,255,255,.08)); border: 1px solid var(--os-edge-hi); }
 [data-screen="OFFICE"] .desk.work .av { background: linear-gradient(160deg, var(--dm-active), color-mix(in srgb, var(--dm-active) 55%, black)); }
 [data-screen="OFFICE"] .desk.auth .av { background: linear-gradient(160deg, #ef4444, #991b1b); }
-[data-screen="OFFICE"] .desk .badge { position: absolute; top: 5px; right: 5px; font-size: 8px; font-family: var(--dm-font-mono); color: var(--dm-active); }
+[data-screen="OFFICE"] .desk .badge { position: absolute; top: 5px; right: 5px; font-size: var(--dm-text-2xs); font-family: var(--dm-font-mono); color: var(--dm-active); }
 [data-screen="OFFICE"] .meetroom { width: 196px; flex: 0 0 auto; padding: 10px; display: flex; flex-direction: column; min-height: 120px; border-radius: var(--os-radius-widget); border: 1px solid rgba(139,92,246,.42); background: rgba(139,92,246,.11); box-shadow: var(--os-elev-rest); }
-[data-screen="OFFICE"] .meetroom-l { font-size: 8px; letter-spacing: .14em; color: #c4b5fd; margin-bottom: 7px; }
+[data-screen="OFFICE"] .meetroom-l { font-size: var(--dm-text-2xs); letter-spacing: .14em; color: #c4b5fd; margin-bottom: 7px; }
 [data-screen="OFFICE"] .meetroom-seats { display: flex; gap: 8px; flex-wrap: wrap; align-content: flex-start; flex: 1; }
 [data-screen="OFFICE"] .seat { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 52px; }
 [data-screen="OFFICE"] .seat .av { width: 16px; height: 16px; border-radius: 5px; background: linear-gradient(160deg, #a78bfa, #6d28d9); border: 1px solid rgba(255,255,255,.22); animation: of-seat-in var(--os-dur-slow) var(--os-spring) both; }
-[data-screen="OFFICE"] .seat .nm { font-size: 8px; color: #ddd6fe; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 52px; }
-[data-screen="OFFICE"] .of-empty { font-size: 9px; color: #a78bfa; opacity: .7; align-self: center; }
+[data-screen="OFFICE"] .seat .nm { font-size: var(--dm-text-2xs); color: #ddd6fe; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 52px; }
+[data-screen="OFFICE"] .of-empty { font-size: var(--dm-text-2xs); color: #a78bfa; opacity: .7; align-self: center; }
 @keyframes of-seat-in { from { opacity: 0; transform: translate(-26px, 16px) scale(.6); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { [data-screen="OFFICE"] .seat .av { animation-duration: 1ms; } }
 [data-screen="OFFICE"] .of-agent { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,.22); border: 1px solid var(--os-edge-lo); }

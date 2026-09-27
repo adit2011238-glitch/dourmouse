@@ -14,12 +14,27 @@ const CONSOLE_ONLY = {
   design3d: 'The 3D editor stays in the classic console; the OS shell has no screen for it.',
 };
 
+/* "open goals", "go to timetable", "show security": a screen name from the shell's own
+   registry (screens = [{ id, slug }]), matched whole, never a guess. */
+export function screenFromPhrase(text, screens) {
+  const m = /^\s{0,8}(?:open|go to|show|switch to)\s{1,4}(?:the\s{1,4})?([a-z0-9 ]{1,40}?)\s{0,8}$/i.exec(String(text || '').slice(0, 200));
+  if (!m) return null;
+  const word = m[1].trim().toLowerCase();
+  const hit = (screens || []).find((s) => s.slug === word);
+  return hit ? { slug: hit.slug, label: hit.id } : null;
+}
+
 /* What to do with the parser's answer. `answer` is the body of
    POST /api/voice/command. Returns { kind, ... } and never performs anything. */
-export function planFor(text, answer) {
+export function planFor(text, answer, screens = []) {
   const raw = String(text || '').trim();
   if (!answer || !answer.recognized || !answer.command) {
-    return { kind: 'chat', text: raw, say: 'Not a command. Sent to the companion on HOME as an ordinary message.' };
+    /* F7: a phrase the parser does not know is NOT sent to the model as chat (that spent
+       credits on a typo). Only a plain "open <screen name>" the shell itself can do is
+       carried out; everything else says so and points at HOME. */
+    const target = screenFromPhrase(raw, screens);
+    if (target) return { kind: 'navigate', slug: target.slug, say: 'Opening ' + target.label + '.' };
+    return { kind: 'unknown', say: 'Not a command I understand: "' + raw.slice(0, 80) + '". Nothing was sent. Say one of the commands listed above, or ask the companion on HOME.' };
   }
   const c = answer.command;
   const a = c.args || {};

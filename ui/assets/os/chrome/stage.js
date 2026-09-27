@@ -8,10 +8,11 @@
      green  hide or show the sidebar */
 
 import { html, setHtml } from '../kit/html.js';
+import { actionKey, assertUniqueActions, dedupeActions } from '../kit/actions.js';
 
-export function createStage({ shell, stage, bar, titleEl, subEl, actionsEl, body, lights, go }) {
+export function createStage({ shell, stage, bar, titleEl, subEl, actionsEl, body, lights, go, host = null }) {
   setHtml(lights, html`
-    <button type="button" class="os-tl r" id="tlClose" aria-label="Return to HOME" data-spec="Red: return to HOME. This shell keeps its native window frame, so the lights act on the stage."></button>
+    <button type="button" class="os-tl r" id="tlClose" aria-label="Return to HOME" title="Return to HOME (these three only act on this stage, not on the window)" data-spec="Red: return to HOME. In a browser these lights act on the stage, not on the window."></button>
     <button type="button" class="os-tl y" id="tlMin" aria-label="Collapse the stage" aria-pressed="false" data-spec="Yellow: collapse the stage to its title bar, or restore it."></button>
     <button type="button" class="os-tl g" id="tlZoom" aria-label="Hide the sidebar" aria-pressed="false" data-spec="Green: hide or show the sidebar to give the stage the whole width."></button>`);
   const redEl = lights.querySelector('#tlClose');
@@ -24,16 +25,25 @@ export function createStage({ shell, stage, bar, titleEl, subEl, actionsEl, body
     yellowEl.setAttribute('aria-pressed', String(on));
     yellowEl.setAttribute('aria-label', on ? 'Restore the stage' : 'Collapse the stage');
   });
-  greenEl.addEventListener('click', () => {
+  function toggleSidebar() {
     const hidden = shell.dataset.sidebar !== 'hidden';
     shell.dataset.sidebar = hidden ? 'hidden' : 'shown';
     greenEl.setAttribute('aria-pressed', String(hidden));
     greenEl.setAttribute('aria-label', hidden ? 'Show the sidebar' : 'Hide the sidebar');
-  });
+  }
+  greenEl.addEventListener('click', toggleSidebar);
+  /* S6: inside the Electron app the native window frame already has the real
+     traffic lights, so these stage-only look-alikes would be a second set that
+     does not close, minimise or zoom anything. They stay in a plain browser
+     (and pywebview), where there is no such frame of ours to confuse them
+     with. The sidebar toggle they carried is also on Command backslash. */
+  if (host && host.kind === 'electron') lights.hidden = true;
 
   const buttons = new Map(); /* key -> button element */
 
   return {
+    toggleSidebar,
+    lightsHidden: () => lights.hidden,
     setTitle(text) {
       titleEl.textContent = text;
     },
@@ -43,10 +53,18 @@ export function createStage({ shell, stage, bar, titleEl, subEl, actionsEl, body
     /* actions: [{ id?, label, spec?, onClick, kind?: 'primary'|'danger', disabled?, pressed?, title? }]
        Buttons are reused by key so a state change never drops keyboard focus. */
     setActions(actions) {
+      /* a repeated id is a bug in the screen: name it in the console, then draw every
+         button anyway so one slip never takes the whole screen down */
+      try {
+        assertUniqueActions(actions);
+      } catch (err) {
+        console.error('[stage] ' + err.message);
+        actions = dedupeActions(actions);
+      }
       const seen = new Set();
       const order = [];
       (actions || []).forEach((a) => {
-        const key = a.id || a.label;
+        const key = actionKey(a);
         seen.add(key);
         let b = buttons.get(key);
         if (!b) {

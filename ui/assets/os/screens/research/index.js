@@ -64,7 +64,7 @@ export default {
     /* ---------------- stage bar ---------------- */
     const actions = () => [
       {
-        id: 'new', label: 'NEW QUESTION', kind: 'primary', disabled: ctx.chat.busy(),
+        id: 'new-question', label: 'NEW QUESTION', kind: 'primary', disabled: ctx.chat.busy(),
         title: ctx.chat.busy() ? 'Stop the run first' : '',
         spec: 'Asks the research agent to plan a new question. It opens a small form, asks you to confirm, then sends ONE message to the model in this thread: the agent decomposes the question and may fetch web pages.',
         onClick: () => newQuestion(),

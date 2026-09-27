@@ -10,6 +10,7 @@ import { SCREENS, CONSOLE_LINKS } from '../core/registry.js';
 import { ACCENTS } from '../core/prefs.js';
 import { putPaneRequest } from '../core/pane-inbox.js';
 import { rank, withRecentFirst } from './palette-search.js';
+import { keysFor } from '../core/shortcuts.js';
 
 const RECENT_KEY = 'dm.os.palRecent';
 const RECENT_MAX = 6;
@@ -17,7 +18,7 @@ const RESULT_MAX = 40;
 const KIND = { SCREEN: 'Screen', ACTION: 'Action', PANEL: 'Panel', CONSOLE: 'Classic console', ASK: 'Ask', WEB: 'Web' };
 const GROUP = { SCREEN: 'Screens', ACTION: 'Actions', PANEL: 'Panels', CONSOLE: 'Classic console' };
 
-export function createPalette({ root, go, refresh, openPanel, api, chat, prefs, toasts }) {
+export function createPalette({ scope, shortcuts = [], root, go, refresh, openPanel, api, chat, prefs, toasts }) {
   let def = null;
   let shown = [];
   let sel = 0;
@@ -74,7 +75,7 @@ export function createPalette({ root, go, refresh, openPanel, api, chat, prefs, 
       return;
     }
     try {
-      await api.post('/api/os/session/new', { tab_id: chat.tabId ? chat.tabId() : undefined });
+      await api.post('/api/os/session/new', { tab_id: scope.tabId() });
       thread.clear();
     } catch (err) {
       toasts.show({ level: 'error', title: 'Could not start a new conversation', detail: err && err.message });
@@ -83,10 +84,11 @@ export function createPalette({ root, go, refresh, openPanel, api, chat, prefs, 
 
   function buildItems() {
     const items = [];
-    SCREENS.forEach((s) => items.push({ id: 'screen:' + s.id, label: s.id, help: s.sub, kind: 'SCREEN', glyph: s.icon, run: () => go(s.slug) }));
+    SCREENS.forEach((s) => items.push({ id: 'screen:' + s.id, label: s.id, help: s.sub, kind: 'SCREEN', glyph: s.icon, keys: keysFor(shortcuts, s.id), run: () => go(s.slug) }));
     items.push(
       { id: 'act:scan', label: 'Scan this Mac now', help: 'a read-only security scan', kind: 'ACTION', run: scanNow },
-      { id: 'act:new', label: 'New conversation', help: 'start a fresh thread on HOME', kind: 'ACTION', run: newConversation },
+      { id: 'act:new', label: 'New conversation', help: 'start a fresh thread on HOME', kind: 'ACTION', keys: keysFor(shortcuts, 'new'), run: newConversation },
+      { id: 'act:shortcuts', label: 'Keyboard shortcuts', help: 'every shortcut in one list', kind: 'ACTION', keys: keysFor(shortcuts, 'help'), run: () => openPanel('shortcuts') },
       { id: 'act:refresh', label: 'Refresh this screen', help: 'read it again', kind: 'ACTION', run: () => refresh() },
       {
         id: 'act:auto', label: chat.autonomous() ? 'Turn autonomous mode off' : 'Turn autonomous mode on', help: 'more steps per run; every gated action still asks', kind: 'ACTION',
@@ -142,7 +144,7 @@ export function createPalette({ root, go, refresh, openPanel, api, chat, prefs, 
       last = g || last;
       parts.push(html`<div class="pal-item" id="palopt${i}" role="option" aria-selected="${String(i === sel)}" data-i="${i}">
         <span class="gl" aria-hidden="true">${it.glyph ? icon(it.glyph, '', { width: 1.5 }) : ''}</span>
-        <span class="lb">${it.label}</span><span class="hp">${it.help || ''}</span><span class="kd">${KIND[it.kind] || ''}</span></div>`);
+        <span class="lb">${it.label}</span><span class="hp">${it.help || ''}</span>${it.keys ? html`<kbd class="ks">${it.keys}</kbd>` : ''}<span class="kd">${KIND[it.kind] || ''}</span></div>`);
     });
     if (!rows.length) parts.push(html`<div class="pal-empty">Nothing matches. Press Enter to ask Dourmouse instead.</div>`);
     setHtml(list, html`${parts}`);
@@ -224,6 +226,7 @@ export function createPalette({ root, go, refresh, openPanel, api, chat, prefs, 
     onClose() {
       opener = null;
     },
+    newConversation,
     /* test hook */
     _items: buildItems,
     get opener() {

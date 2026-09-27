@@ -39,6 +39,8 @@ import { createWallpaperPicker } from './chrome/wallpaper.js';
 import { createStartupCheck } from './chrome/startup-check.js';
 import { putPaneRequest } from './core/pane-inbox.js';
 import { createPalette } from './chrome/palette.js';
+import { createShortcutsPanel } from './chrome/shortcuts-panel.js';
+import { shortcutList, bindable } from './core/shortcuts.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -69,7 +71,7 @@ function boot() {
   const sidebar = createSidebar({ root: $('sidebar'), registry, go: (slug) => router.go(slug) });
   const stage = createStage({
     shell: $('shell'), stage: $('stage'), bar: $('stagebar'), titleEl: $('stagetitle'), subEl: $('stagesub'),
-    actionsEl: $('stageactions'), body: $('body'), lights: $('lights'), go: (slug) => router.go(slug),
+    actionsEl: $('stageactions'), body: $('body'), lights: $('lights'), go: (slug) => router.go(slug), host,
   });
   const composer = createComposer({ root: $('composer') });
   composer.reset();
@@ -87,16 +89,31 @@ function boot() {
   const startup = createStartupCheck({ root: $('startup'), api, toasts });
   defs.startup = panels.make('startup', { el: $('startup'), trigger: null, exclusive: ['cc', 'notifications', 'wallpaper'] });
   startup.bind(defs.startup);
+  const shortcuts = shortcutList(registry.SCREENS);
+  createShortcutsPanel({ root: $('shortcuts'), list: shortcuts });
+  defs.shortcuts = panels.make('shortcuts', { el: $('shortcuts'), trigger: null, exclusive: ['cc', 'notifications', 'wallpaper', 'startup', 'palette'] });
   const palette = createPalette({
+    scope, shortcuts,
     root: $('palette'), go: (slug) => router.go(slug), refresh: () => router.refresh('manual'),
     openPanel: (name) => defs[name] && defs[name].open(), api, chat, prefs, toasts,
   });
-  defs.palette = panels.make('palette', { el: $('palette'), trigger: $('palBtn'), exclusive: ['cc', 'notifications', 'wallpaper', 'startup'], onOpen: () => palette.onOpen(), onClose: () => palette.onClose() });
+  defs.palette = panels.make('palette', { el: $('palette'), trigger: $('palBtn'), exclusive: ['cc', 'notifications', 'wallpaper', 'startup', 'shortcuts'], onOpen: () => palette.onOpen(), onClose: () => palette.onClose() });
   palette.bind(defs.palette);
   $('palBtn').addEventListener('click', () => defs.palette.toggle());
   /* Command K and Ctrl K open the launcher from anywhere, even while typing */
   keymap.bind('Meta+k', () => defs.palette.toggle(), { editable: true });
   keymap.bind('Ctrl+k', () => defs.palette.toggle(), { editable: true });
+  /* S4: the Mac shortcuts, all listed in core/shortcuts.js and all working while typing */
+  const actions = {
+    settings: () => router.go('settings'),
+    new: () => palette.newConversation(),
+    help: () => defs.shortcuts.toggle(),
+    sidebar: () => stage.toggleSidebar(),
+  };
+  bindable(shortcuts).forEach((s) => {
+    const fn = s.screen && s.id !== 'settings' ? () => router.go(s.screen.toLowerCase()) : actions[s.id];
+    if (fn) keymap.bind(s.combo, fn, { editable: true });
+  });
   $('ccBtn').addEventListener('click', () => defs.cc.toggle());
   $('wallBtn').addEventListener('click', () => defs.wallpaper.toggle());
   picker.sync();

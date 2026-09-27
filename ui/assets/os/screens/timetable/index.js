@@ -15,7 +15,7 @@ import { html, setHtml } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
 import { agoLabel, plural } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
-import { isOverdue, argsPreview, toolTiers, cannotRunUnattended, sortEntries, handoffText } from './helpers.js';
+import { isOverdue, argsPreview, toolTiers, cannotRunUnattended, sortEntries, handoffText, lastAttemptText } from './helpers.js';
 
 const POLL_MS = 10000;
 
@@ -139,7 +139,7 @@ export default {
         <div class="os-row">
           <span class="tag ${e.enabled ? 'ok' : ''}">${e.schedule_description || 'unknown schedule'}</span>
           <span class="rt"><b>${e.tool}</b> <span class="muted mono">${argsPreview(e.arguments)}</span>
-            <div class="muted">${e.enabled ? 'next run ' + (e.next_run || 'unknown') : 'paused'} · ${e.last_run ? 'last run ' + agoLabel(e.last_run) : 'never run'}</div></span>
+            <div class="muted">${e.enabled ? 'next run ' + (e.next_run || 'unknown') : 'paused'} · ${lastAttemptText(e, blocked, e.last_run ? agoLabel(e.last_run) : '')}</div></span>
           ${!e.enabled ? html`<span class="tag">paused</span>` : ''}
           <span data-overdue="${e.id}">${overdue ? html`<span class="tag warn" title="The runner fires this once on its next check">overdue</span>` : ''}</span>
           ${blocked ? html`<span class="tag bad" title="This tool needs confirmation, so the unattended runner stops it">needs confirmation, will not run</span>` : ''}

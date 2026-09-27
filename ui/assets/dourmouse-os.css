@@ -594,7 +594,7 @@ body[data-annotate="true"] [data-spec]::after {
   padding: 5px 8px; border-radius: 6px;
   background: #1b1205; border: 1px solid var(--dm-active, #F59E0B);
   color: #ffd98a; font-family: var(--dm-font-sans, ui-monospace, monospace);
-  font-size: 9px; line-height: 1.45; letter-spacing: .02em;
+  font-size: var(--dm-text-xs, 11px); line-height: 1.45; letter-spacing: .02em;
   text-transform: none; white-space: normal; text-align: left;
   pointer-events: none; box-shadow: var(--os-elev-float);
 }

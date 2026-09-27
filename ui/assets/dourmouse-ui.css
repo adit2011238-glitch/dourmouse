@@ -151,16 +151,16 @@
 
   /* Text. */
   --dm-fg:          #FAFAFA;  /* headers, active titles, the user's own text */
-  --dm-fg-body:     #A1A1AA;  /* body copy, logs, commentary, inactive     */
-  --dm-fg-label:    #71717A;  /* small uppercase metadata labels           */
-  --dm-fg-dim:      #52525B;  /* timestamps, line numbers, paths, hints    */
+  --dm-fg-body:     #C4C4CC;  /* body copy, logs, commentary, inactive     */
+  --dm-fg-label:    #A9A9B3;  /* small uppercase metadata labels           */
+  --dm-fg-dim:      #9C9CA6;  /* timestamps, line numbers, paths, hints    */
   --dm-fg-prose:    #D4D4D8;  /* assistant prose in the terminal feed      */
 
   /* Functional accents. Solid, never blurred, never given a drop shadow.
      Budget: all accent colour combined stays under ~10% of the screen. */
   --dm-active:      #F59E0B;  /* selection, active state                   */
   --dm-ok:          #10B981;  /* online, passing, settled                  */
-  --dm-error:       #EF4444;  /* breaking log, failed run                  */
+  --dm-error:       #F87171;  /* breaking log, failed run (4.5:1 on cards) */
 
   /* Type. Two faces, one job each, both self-hosted so they work offline.
      2026-09-23 (finding #082): --dm-font-sans was 'Departure Mono', a PIXEL

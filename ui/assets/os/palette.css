@@ -27,6 +27,8 @@
 .pal-item .lb { font-weight: 600; color: var(--dm-fg); white-space: nowrap; }
 .pal-item .hp { color: var(--dm-fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .pal-item .kd { margin-left: auto; padding-left: 12px; flex: none; font-size: var(--dm-text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--dm-fg-dim); }
+.pal-item .ks { margin-left: auto; flex: none; font: inherit; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.05); color: var(--dm-fg-body); }
+.pal-item .ks + .kd { margin-left: 0; }
 .pal-empty { padding: 18px 12px; color: var(--dm-fg-dim); text-align: center; }
 .pal-foot { display: flex; gap: 18px; padding: 8px 14px; border-top: 1px solid var(--os-edge-lo); font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
 .pal-foot kbd { display: inline-block; min-width: 18px; padding: 1px 5px; margin-right: 4px; text-align: center; border-radius: 5px; border: 1px solid var(--os-edge-lo); background: rgba(255, 255, 255, .05); font: inherit; }

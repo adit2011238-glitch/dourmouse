@@ -26,20 +26,32 @@ export const SCREENS = [
   S('OFFICE', false, 'agents at work', () => import('../screens/office/index.js')),
 ];
 
+/* S8: the sidebar's section labels. Each group is a CONTIGUOUS run of SCREENS, so the
+   sidebar order, the launcher order and Command 1 to 9 all stay the registry order.
+   [label, id of the first screen in the group]. Ids are not renamed. */
+export const SIDEBAR_GROUPS = [
+  ['Work', 'HOME'],
+  ['Plan', 'WIKI'],
+  ['Agents', 'ORCHESTRATION'],
+  ['Watch', 'ATLAS'],
+  ['System', 'SETTINGS'],
+];
+
 export const IDS = SCREENS.map((s) => s.id);
 export const THREAD_SCREENS = SCREENS.filter((s) => s.thread).map((s) => s.id);
 
-/* The dock: icon-only surfaces worth one click from anywhere. */
+/* The dock: icon-only surfaces worth one click from anywhere. Names are the
+   sidebar's own names (S9), so one thing has one name. */
 export const DOCK = [
-  ['HOME', 'Console'],
-  ['OFFICE', 'Agents'],
-  ['RESEARCH', 'Research'],
-  ['SECURITY', 'Security'],
-  ['BROWSER', 'Browser'],
-  ['MEDIA', 'Media'],
-  ['WIKI', 'Wiki'],
-  ['GOALS', 'Goals'],
-  ['SETTINGS', 'Settings'],
+  ['HOME', 'HOME'],
+  ['OFFICE', 'OFFICE'],
+  ['RESEARCH', 'RESEARCH'],
+  ['SECURITY', 'SECURITY'],
+  ['BROWSER', 'BROWSER'],
+  ['MEDIA', 'MEDIA'],
+  ['WIKI', 'WIKI'],
+  ['GOALS', 'GOALS'],
+  ['SETTINGS', 'SETTINGS'],
 ];
 
 /* Owner decision: these three stay in the classic console. The console has no

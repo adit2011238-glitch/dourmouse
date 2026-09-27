@@ -70,3 +70,19 @@ def test_source_makes_no_claims_the_code_contradicts():
         assert sample not in src
     assert "catch-up" in src
     assert "\u2014" not in src
+
+
+def test_a_refused_or_failed_attempt_is_never_called_a_run(tmp_path):
+    out = run_node(tmp_path, H, """
+R.refused = h.lastAttemptText({ last_run: 'x' }, true, '19s ago');
+R.attempt = h.lastAttemptText({ last_run: 'x' }, false, '19s ago');
+R.never = h.lastAttemptText({ last_run: null }, false, '');
+R.neverGated = h.lastAttemptText({ last_run: null }, true, '');
+R.badTs = h.lastAttemptText({ last_run: 'garbage' }, false, '');
+""")
+    assert out["refused"] == "refused by the gate 19s ago, did not run"
+    assert out["attempt"] == "last attempt 19s ago, result not recorded"
+    assert out["never"] == "never run" and "gate refuses" in out["neverGated"]
+    for text in out.values():
+        assert "last run" not in text
+    assert "last run ' + agoLabel" not in source("timetable")

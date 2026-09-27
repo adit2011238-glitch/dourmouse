@@ -15,6 +15,7 @@ import { states } from '../../kit/states.js';
 import { ring } from '../../core/ring.js';
 import { clock } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
+import { SCREENS } from '../../core/registry.js';
 import { planFor, chooseEngine, wakewordTag, stripDataUrl, MAX_RECORD_S, LOG_CAP } from './helpers.js';
 
 function el(tag, cls, text) {
@@ -40,7 +41,7 @@ export default {
         <div class="voi-note" id="voiNote" role="status" hidden></div></div>
       <div class="card" style="margin-top:12px"><div class="lbl">Voice commands</div>
         <div id="voiCmds" data-region></div>
-        <div class="voi-row"><input class="os-field" id="voiText" type="text" autocomplete="off" spellcheck="false" placeholder="type a command" aria-label="Type a command" data-spec="Same parser as speech, typed. Useful for testing a phrase without speaking. Press Enter or RUN."><button class="os-btn" id="voiRun" type="button" data-spec="Sends the text to the server's command parser and carries out its answer. Text that is not a command goes to the companion on HOME as an ordinary message, which uses the model.">RUN</button></div>
+        <div class="voi-row"><input class="os-field" id="voiText" type="text" autocomplete="off" spellcheck="false" placeholder="type a command" aria-label="Type a command" data-spec="Same parser as speech, typed. Useful for testing a phrase without speaking. Press Enter or RUN."><button class="os-btn" id="voiRun" type="button" data-spec="Sends the text to the server's command parser and carries out its answer. Text that is not a command is refused with a message and is not sent to the model.">RUN</button></div>
         <div id="voiLog" class="voi-log" data-region></div></div>
       <div class="card" style="margin-top:12px"><div class="lbl">Wakeword</div><div id="voiWake" data-region></div></div>`);
     const $ = (id) => root.querySelector('#' + id);
@@ -123,7 +124,7 @@ export default {
         li.append(el('code', '', c.pattern), document.createTextNode('  e.g. ' + c.example));
         ul.append(li);
       });
-      const foot = el('div', 'muted', 'Anything the parser does not recognise is sent to the companion as a normal chat message rather than dropped.');
+      const foot = el('div', 'muted', 'This list is the server\'s own parser. This window also opens any screen by name ("open goals"). Anything else is not sent anywhere: to talk to the companion, use HOME.');
       states.populated(cmdsEl, [ul, foot]);
     }
 
@@ -182,8 +183,8 @@ export default {
         return;
       }
       if (ctx.signal.aborted) return;
-      const plan = planFor(heard, answer);
-      log.push({ at: Date.now(), source, heard, say: plan.say, tone: plan.kind === 'refuse' ? 'warn' : 'ok' });
+      const plan = planFor(heard, answer, SCREENS);
+      log.push({ at: Date.now(), source, heard, say: plan.say, tone: plan.kind === 'refuse' || plan.kind === 'unknown' ? 'warn' : 'ok' });
       paintLog();
       if (plan.kind === 'chat') {
         ctx.chat.send(plan.text).catch((err) => ctx.notify({ level: 'error', title: 'Could not send to the companion', detail: err && err.message }));

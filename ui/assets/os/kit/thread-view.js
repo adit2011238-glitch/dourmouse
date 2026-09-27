@@ -16,7 +16,7 @@
 
 import { setHtml } from './html.js';
 import { states } from './states.js';
-import { md } from './md.js';
+import { md, wireCodeCopy } from './md.js';
 import { isAbort } from '../core/api.js';
 import { headerText, toolSteps, chipTone, copyText, shouldFollow, recordsFor, isLive } from './thread-helpers.js';
 
@@ -60,7 +60,7 @@ export function mountThreadView(region, ctx, opts = {}) {
     const actions = [...(own || [])];
     if (o.newThread) {
       actions.push({
-        id: 'new', label: 'NEW THREAD', disabled: busy,
+        id: 'thread-new', label: 'NEW THREAD', disabled: busy,
         title: busy ? 'Stop the run first' : '',
         spec: 'Starts a fresh conversation on the server for this tab. The old session file stays on disk. Refused while a run is in flight.',
         onClick: () => newThread(),
@@ -68,7 +68,7 @@ export function mountThreadView(region, ctx, opts = {}) {
     }
     if (o.autonomous) {
       actions.push({
-        id: 'auto', label: 'AUTONOMOUS', pressed: auto,
+        id: 'thread-auto', label: 'AUTONOMOUS', pressed: auto,
         spec: 'Opt-in: raises how many steps a run may take from 8 to 24 for this tab. Still bounded by the governance budget. It is not auto-approve: every gated action still asks.',
         onClick: () => {
           ctx.autonomous.set(!ctx.autonomous.get());
@@ -193,6 +193,11 @@ export function mountThreadView(region, ctx, opts = {}) {
       acts.hidden = !finished || (!turn.reply && turn.status !== 'stopped' && turn.status !== 'error');
       copy.disabled = !turn.reply;
       regen.disabled = thread.busy();
+      const failed = turn.status === 'error';
+      regen.textContent = failed ? 'RETRY' : 'REGENERATE';
+      regen.dataset.spec = failed
+        ? 'Sends the same directive again after the error above. The failed attempt stays in the transcript.'
+        : 'Re-runs the same directive as a fresh turn. The previous answer stays in the transcript.';
     }
     copy.addEventListener('click', () => {
       const write = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(copyText(turn)) : Promise.reject(new Error('This browser does not allow clipboard access here.'));
@@ -201,6 +206,7 @@ export function mountThreadView(region, ctx, opts = {}) {
     regen.addEventListener('click', () => {
       thread.send(turn.text).catch((err) => ctx.notify({ level: 'error', title: 'Send failed', detail: err && err.message }));
     });
+    wireCodeCopy(reply, (level, title, detail) => ctx.notify({ level, title, detail, ttl: 2500 }));
     reply.addEventListener('click', (e) => {
       const a = e.target.closest('a[data-ext]');
       if (!a) return;
@@ -241,12 +247,39 @@ export function mountThreadView(region, ctx, opts = {}) {
     else run();
   }
 
+  /* S7: real first steps in the empty state. Each is { label, spec, send } (sends that
+     directive to this thread) or { label, spec, go } (opens that screen). Text is fixed
+     copy from the screen, never data, and nothing is sent until the owner clicks. */
+  function paintSuggestions() {
+    const list = Array.isArray(o.emptyActions) ? o.emptyActions : [];
+    const box = region.querySelector('.st-empty');
+    if (!list.length || !box) return;
+    const row = el('div', 'st-suggest');
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', 'Suggested first steps');
+    list.forEach((a) => {
+      const b = el('button', 'os-btn st-sugg', a.label);
+      b.type = 'button';
+      if (a.spec) b.dataset.spec = a.spec;
+      b.addEventListener('click', () => {
+        if (a.send) {
+          thread.send(a.send).catch((err) => ctx.notify({ level: 'error', title: 'Send failed', detail: err && err.message }));
+        } else if (a.go) {
+          window.location.hash = '#/' + a.go;
+        }
+      });
+      row.append(b);
+    });
+    box.append(row);
+  }
+
   function paintAll() {
     views.clear();
     cards.clear();
     const turns = thread.turns();
     if (!turns.length) {
       states.empty(region, o.emptyMessage, { hint: o.emptyHint });
+      paintSuggestions();
       return;
     }
     region.replaceChildren();

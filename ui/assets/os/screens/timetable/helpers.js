@@ -43,6 +43,18 @@ export function cannotRunUnattended(entry, tiers) {
   return tier !== undefined && tier !== 'regular';
 }
 
+/* F4: the store stamps last_run for EVERY attempt, including one the confirmation
+   gate refused and one that errored, and it records no result. So the row says
+   what is actually known: a gated routine never ran, and anything else was
+   attempted at that time with its result not recorded. It never says "last run"
+   about an attempt it cannot show succeeded. `ago` is the formatted age or ''. */
+export function lastAttemptText(entry, blocked, ago) {
+  if (!entry || !entry.last_run) return blocked ? 'has never run: the gate refuses this tool' : 'never run';
+  if (!ago) return blocked ? 'refused by the gate, did not run' : 'attempted, result not recorded';
+  if (blocked) return 'refused by the gate ' + ago + ', did not run';
+  return 'last attempt ' + ago + ', result not recorded';
+}
+
 export function sortEntries(list) {
   return (Array.isArray(list) ? list : []).slice().sort((a, b) => Number(Boolean(b.enabled)) - Number(Boolean(a.enabled)) || String(a.id).localeCompare(String(b.id)));
 }

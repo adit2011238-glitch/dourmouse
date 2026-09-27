@@ -74,7 +74,12 @@ export default {
     const footEl = el('div', 'muted cm-foot', 'Sending, deleting and flagging always ask first. Reading does not. Trash is Gmail\'s Trash, recoverable for 30 days.');
     const threadHead = el('div', 'lbl cm-thread-head', 'Mail agent conversation');
     const threadEl = el('div', 'cm-thread');
-    root.replaceChildren(noteEl, confirmEl, barEl, listEl, footEl, detailEl, composeEl, threadHead, threadEl);
+    /* F3: the list and the opened message sit side by side on a wide window and
+       stack with the message FIRST on a narrow one, so opening a row can never
+       put the message below the fold. */
+    const splitEl = el('div', 'cm-split');
+    splitEl.append(listEl, detailEl);
+    root.replaceChildren(noteEl, confirmEl, barEl, splitEl, footEl, composeEl, threadHead, threadEl);
     root.dataset.state = 'populated';
 
     const note = (text, tone) => {
@@ -206,6 +211,7 @@ export default {
       st.detail = null;
       st.detailSeq += 1;
       detailEl.hidden = true;
+      delete splitEl.dataset.detail;
       detailEl.replaceChildren();
       if (offDetailEsc) offDetailEsc();
       offDetailEsc = null;
@@ -223,8 +229,10 @@ export default {
       listEl.querySelectorAll('.cm-row').forEach((r) => r.setAttribute('aria-selected', String(r.dataset.id === id)));
       const seq = (st.detailSeq += 1);
       detailEl.hidden = false;
+      splitEl.dataset.detail = '1';
       detailEl.dataset.region = '';
       states.loading(detailEl, 'Opening the message');
+      if (detailEl.scrollIntoView) detailEl.scrollIntoView({ block: 'nearest' });
       if (!offDetailEsc) offDetailEsc = ctx.keys.pushEsc(() => closeDetail());
       try {
         const m = await ctx.api.get('/api/os/comms/message?id=' + encodeURIComponent(id));
