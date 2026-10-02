@@ -353,7 +353,8 @@ class TestMobileRoute:
             conn.close()
             assert resp.status == 200
             assert json.loads(body)["ok"] is True
-            assert "dourmouse_session=s3cret" in resp.getheader("Set-Cookie", "")
+            cookie = resp.getheader("Set-Cookie", "")
+            assert "dourmouse_session=v1." in cookie and "s3cret" not in cookie
         finally:
             server.shutdown()
             server.server_close()

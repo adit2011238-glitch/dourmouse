@@ -301,3 +301,157 @@ export function makeHistory(cap = 50) {
     },
   };
 }
+
+/* ---------------- Phase B1: tabs, find, zoom, downloads, history ---------------- */
+
+const FAVICON = /^data:image\/(png|jpeg|gif|webp|x-icon|vnd\.microsoft\.icon);base64,[A-Za-z0-9+/=]{1,40000}$/;
+
+/* A favicon the shell sent as a data address, or '' when it is anything else. The page
+   area never sets an image source from a string that did not pass this. */
+export function safeFavicon(v) {
+  return typeof v === 'string' && FAVICON.test(v) ? v : '';
+}
+
+export function tabLabel(tab) {
+  if (!tab || !tab.url) return 'New tab';
+  if (tab.title && tab.title !== tab.url) return tab.title;
+  return hostOf(tab.url) || tab.url;
+}
+
+/* The tab list and per-tab extras in the pane's state, with anything odd made safe.
+   paneModel above reads the active tab only and stays as it was. */
+export function tabsModel(raw) {
+  const s = raw && typeof raw === 'object' ? raw : {};
+  const list = Array.isArray(s.tabs) ? s.tabs : [];
+  const tabs = list
+    .filter((t) => t && typeof t === 'object' && Number.isInteger(t.id))
+    .slice(0, 60)
+    .map((t) => ({
+      id: t.id,
+      url: typeof t.url === 'string' ? t.url.slice(0, MAX_ADDRESS) : '',
+      title: typeof t.title === 'string' ? t.title.slice(0, 300) : '',
+      favicon: safeFavicon(t.favicon),
+      loading: t.loading === true,
+      active: t.active === true,
+      audible: t.audible === true,
+    }));
+  const f = s.find && typeof s.find === 'object' ? s.find : null;
+  const zoom = typeof s.zoom === 'number' && Number.isFinite(s.zoom) && s.zoom >= 0.25 && s.zoom <= 5 ? s.zoom : 1;
+  return {
+    tabs,
+    activeId: Number.isInteger(s.activeTab) ? s.activeTab : 0,
+    zoom,
+    find: f ? { text: typeof f.text === 'string' ? f.text.slice(0, 200) : '', active: Number.isInteger(f.active) ? f.active : 0, matches: Number.isInteger(f.matches) ? f.matches : 0 } : null,
+    closed: Number.isInteger(s.closedTabs) && s.closedTabs > 0 ? s.closedTabs : 0,
+    blocked: Number.isInteger(s.blockedPopups) && s.blockedPopups > 0 ? s.blockedPopups : 0,
+  };
+}
+
+/* One string that changes when anything the strip draws changes, so it is rebuilt only then. */
+export function tabsKey(model, agentUrl) {
+  return model.tabs.map((t) => [t.id, t.active ? 1 : 0, t.loading ? 1 : 0, t.audible ? 1 : 0, t.title, t.url, t.favicon.length, agentUrl && sameAddress(t.url, agentUrl) ? 1 : 0].join('|')).join('~');
+}
+
+export function zoomLabel(z) {
+  return Math.round((Number.isFinite(z) ? z : 1) * 100) + '%';
+}
+
+export function findLabel(find, typed) {
+  if (!typed) return '';
+  if (!find || find.text !== typed) return '';
+  if (find.matches === 0) return 'No matches';
+  return find.active + ' of ' + find.matches;
+}
+
+export function formatBytes(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 0) return '';
+  if (v < 1024) return v + ' B';
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let x = v / 1024;
+  let i = 0;
+  while (x >= 1024 && i < units.length - 1) {
+    x /= 1024;
+    i += 1;
+  }
+  return (x >= 100 ? x.toFixed(0) : x.toFixed(1)) + ' ' + units[i];
+}
+
+const DL_STATES = new Set(['progressing', 'completed', 'cancelled', 'interrupted']);
+
+/* The downloads list as the shell sends it. */
+export function downloadsModel(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  return list
+    .filter((d) => d && typeof d === 'object' && typeof d.id === 'string' && typeof d.filename === 'string')
+    .slice(0, 100)
+    .map((d) => ({
+      id: d.id,
+      filename: d.filename.slice(0, 200),
+      url: typeof d.url === 'string' ? d.url.slice(0, 500) : '',
+      state: DL_STATES.has(d.state) ? d.state : 'interrupted',
+      paused: d.paused === true,
+      received: Number.isFinite(d.received) ? d.received : 0,
+      total: Number.isFinite(d.total) && d.total > 0 ? d.total : 0,
+      percent: Number.isFinite(d.percent) ? d.percent : null,
+      error: typeof d.error === 'string' ? d.error.slice(0, 200) : '',
+      openable: d.openable === true,
+      quarantined: d.quarantined === true ? true : d.quarantined === false ? false : null,
+    }));
+}
+
+export function activeDownloads(list) {
+  return list.filter((d) => d.state === 'progressing').length;
+}
+
+/* The one line under a download's name. */
+export function downloadLine(d) {
+  if (d.state === 'progressing') {
+    const have = formatBytes(d.received);
+    const of = d.total ? ' of ' + formatBytes(d.total) : '';
+    const pct = d.percent !== null ? ', ' + d.percent + '%' : '';
+    return (d.paused ? 'Paused, ' : '') + have + of + pct;
+  }
+  if (d.state === 'completed') {
+    const size = d.total || d.received ? formatBytes(d.total || d.received) : '';
+    const flag = d.quarantined === true ? 'flagged for Gatekeeper' : d.quarantined === false ? 'not flagged for Gatekeeper' : '';
+    return ['Done', size, flag].filter(Boolean).join(', ');
+  }
+  if (d.state === 'cancelled') return 'Cancelled';
+  return 'Did not finish' + (d.error ? ': ' + d.error : '');
+}
+
+/* History grouped by day, newest first: "Today", "Yesterday", then the date. */
+export function groupHistory(list, now = Date.now()) {
+  const day = (ms) => {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+  const today = day(now);
+  const groups = [];
+  const byKey = new Map();
+  for (const e of Array.isArray(list) ? list : []) {
+    if (!e || typeof e.url !== 'string' || !Number.isFinite(e.at)) continue;
+    const k = day(e.at);
+    let g = byKey.get(k);
+    if (!g) {
+      const diff = Math.round((today - k) / 86400000);
+      g = { label: diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : new Date(k).toDateString(), items: [] };
+      byKey.set(k, g);
+      groups.push(g);
+    }
+    g.items.push({ id: String(e.id || ''), url: e.url.slice(0, MAX_ADDRESS), title: typeof e.title === 'string' ? e.title.slice(0, 300) : '', at: e.at });
+  }
+  return groups;
+}
+
+export function bookmarksModel(raw) {
+  return (Array.isArray(raw) ? raw : [])
+    .filter((b) => b && typeof b.id === 'string' && typeof b.url === 'string' && isWebUrl(b.url))
+    .slice(0, 1000)
+    .map((b) => ({ id: b.id, url: b.url.slice(0, MAX_ADDRESS), title: typeof b.title === 'string' && b.title ? b.title.slice(0, 300) : hostOf(b.url) || b.url }));
+}
+
+export function bookmarkFor(list, url) {
+  return list.find((b) => b.url === url) || null;
+}

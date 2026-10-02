@@ -396,6 +396,44 @@ def _record_player_open(pane_url: str) -> None:
 # Time a human has to approve/decline a gated action before it auto-declines.
 _CONFIRM_TIMEOUT_SECONDS = 300.0
 
+# Phase H, R2B-07: the full arguments of each confirmation that is waiting,
+# under a random id that the confirmation_requested event carries.
+_CONFIRM_DETAILS: dict[str, dict[str, Any]] = {}
+_CONFIRM_DETAILS_LOCK = threading.Lock()
+_CONFIRM_DETAILS_MAX_CHARS = 1_000_000
+
+
+def _store_confirmation_details(details: dict[str, Any] | None) -> str:
+    if not details:
+        return ""
+    try:
+        arguments = json.dumps(details.get("arguments"), ensure_ascii=False, indent=2, default=str)
+    except (TypeError, ValueError):
+        arguments = str(details.get("arguments"))
+    truncated = len(arguments) > _CONFIRM_DETAILS_MAX_CHARS
+    details_id = secrets.token_hex(12)
+    with _CONFIRM_DETAILS_LOCK:
+        _CONFIRM_DETAILS[details_id] = {
+            "tool": str(details.get("tool") or ""),
+            "arguments": arguments[:_CONFIRM_DETAILS_MAX_CHARS],
+            "characters": len(arguments),
+            "truncated": truncated,
+        }
+    return details_id
+
+
+def _drop_confirmation_details(details_id: str) -> None:
+    if details_id:
+        with _CONFIRM_DETAILS_LOCK:
+            _CONFIRM_DETAILS.pop(details_id, None)
+
+
+def confirmation_details(details_id: str) -> dict[str, Any] | None:
+    """The full arguments of a confirmation that is still waiting, or None."""
+    with _CONFIRM_DETAILS_LOCK:
+        found = _CONFIRM_DETAILS.get(details_id)
+        return dict(found) if found else None
+
 # Phase 5 (bounded autonomous multi-step execution): the real ceiling for an
 # opt-in "Autonomous Project" turn (body.autonomous=true), vs. the ordinary
 # max_turns=8 every other chat turn is still capped at. Deliberately layered
@@ -473,15 +511,25 @@ class WebConfirmationGate:
             confirm_id = f"confirm-{self._next_id}"
             pending = _PendingConfirmation(confirm_id, prompt_text)
             self._pending[confirm_id] = pending
-        self._emit(
-            {
-                "type": "confirmation_requested",
-                "id": confirm_id,
-                "prompt": prompt_text,
-                "autonomous": self.autonomous,
-            }
-        )
-        approved = pending.wait()
+        # Phase H, R2B-07: keep the full arguments behind this prompt, which
+        # may show only an excerpt of a long one, so the approval card can
+        # offer every character (GET /api/confirm/details?details_id=...).
+        from dourmouse.dispatch import current_confirmation_details
+
+        details_id = _store_confirmation_details(current_confirmation_details())
+        event = {
+            "type": "confirmation_requested",
+            "id": confirm_id,
+            "prompt": prompt_text,
+            "autonomous": self.autonomous,
+        }
+        if details_id:
+            event["details_id"] = details_id
+        try:
+            self._emit(event)
+            approved = pending.wait()
+        finally:
+            _drop_confirmation_details(details_id)
         with self._lock:
             self._pending.pop(confirm_id, None)
         return approved
@@ -1900,6 +1948,137 @@ def _vision_dependency_status(key: str, deadline: float) -> bool | None:
 _MAX_BODY_BYTES = 64 * 1024 * 1024
 
 
+# -- phase H, A9: the login cookie and the login throttle --------------------- #
+
+_LOGIN_COOKIE_TTL_S = 30 * 24 * 3600
+_LOGIN_FAILURE_WINDOW_S = 300.0
+_LOGIN_FAILURE_LIMIT = 5
+_LOGIN_FAILURE_DELAY_S = 0.25
+_LOGIN_FAILURES_LOCK = threading.Lock()
+
+
+def _login_cookie_mac(token: str, payload: str) -> str:
+    import hashlib
+
+    return hmac.new(token.encode("utf-8"), f"dourmouse-login:{payload}".encode(), hashlib.sha256).hexdigest()
+
+
+def _login_cookie_value(token: str, now: float | None = None) -> str:
+    """A signed, expiring session value for the dourmouse_session cookie:
+    ``v1.<expiry>.<nonce>.<hmac>``. It proves the holder logged in with the
+    token without containing the token, and it stops working when the token
+    changes or the expiry passes."""
+    expiry = int((time.time() if now is None else now) + _LOGIN_COOKIE_TTL_S)
+    payload = f"v1.{expiry}.{secrets.token_hex(12)}"
+    return f"{payload}.{_login_cookie_mac(token, payload)}"
+
+
+def _login_cookie_ok(token: str, value: str, now: float | None = None) -> bool:
+    parts = (value or "").strip().split(".")
+    if not token or len(parts) != 4 or parts[0] != "v1" or not parts[1].isascii() and parts[1].isdigit():
+        return False
+    if int(parts[1]) < (time.time() if now is None else now):
+        return False
+    expected = _login_cookie_mac(token, ".".join(parts[:3]))
+    return hmac.compare_digest(parts[3].encode("utf-8", "replace"), expected.encode("ascii"))
+
+
+def _login_failures(server: Any) -> dict[str, list[float]]:
+    failures = getattr(server, "login_failures", None)
+    if failures is None:
+        failures = {}
+        server.login_failures = failures
+    return failures
+
+
+def _login_lockout_remaining(server: Any, ip: str) -> float:
+    """Seconds this address must wait before it may try the token again."""
+    now = time.monotonic()
+    with _LOGIN_FAILURES_LOCK:
+        failures = _login_failures(server)
+        recent = [t for t in failures.get(ip, []) if now - t < _LOGIN_FAILURE_WINDOW_S]
+        failures[ip] = recent
+        if len(recent) < _LOGIN_FAILURE_LIMIT:
+            return 0.0
+        return max(0.0, _LOGIN_FAILURE_WINDOW_S - (now - recent[0]))
+
+
+def _record_login_failure(server: Any, ip: str) -> None:
+    with _LOGIN_FAILURES_LOCK:
+        _login_failures(server).setdefault(ip, []).append(time.monotonic())
+
+
+# -- phase H, A5: the per-launch owner secret --------------------------------- #
+
+def _read_owner_secret_from_stdin(timeout: float = 5.0) -> str | None:
+    """One line from standard input, written by the app's launcher (Electron
+    main.js) when it starts this server. Never from the environment or a file:
+    the environment is inherited by every command the model runs and a file is
+    something the model's tools might read. Standard input is then pointed at
+    /dev/null so no child process inherits the pipe."""
+    import select
+
+    try:
+        fd = sys.stdin.fileno() if sys.stdin is not None else -1
+    except (AttributeError, OSError, ValueError):
+        return None
+    if fd < 0:
+        return None
+    data = b""
+    deadline = time.monotonic() + timeout
+    try:
+        while b"\n" not in data and len(data) < 1024:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            ready, _, _ = select.select([fd], [], [], remaining)
+            if not ready:
+                break
+            chunk = os.read(fd, 1024 - len(data))
+            if not chunk:
+                break
+            data += chunk
+    except (OSError, ValueError):
+        return None
+    finally:
+        with contextlib.suppress(OSError):
+            devnull = os.open(os.devnull, os.O_RDONLY)
+            os.dup2(devnull, fd)
+            os.close(devnull)
+    line = data.decode("ascii", "replace").split("\n", 1)[0].strip()
+    return line or None
+
+
+def _configure_owner_gate(server: Any, owner_secret: str | None) -> None:
+    """Decide whether owner-only routes need the per-launch secret.
+
+    Enforced when a valid secret is passed in (tests, an in-process launcher)
+    or when ``DOURMOUSE_OWNER_GATE=stdin`` (or 1) and the launcher writes one
+    line to this process's standard input. Anything else leaves the gate off,
+    which is the behaviour before phase H: a launcher that cannot hand the
+    secret to the app window must not lock the owner out of approvals."""
+    mode = os.environ.get(request_guard.OWNER_GATE_ENV, "").strip().lower()
+    secret = owner_secret
+    problem = ""
+    if secret is None and mode in ("1", "stdin", "on", "true", "yes"):
+        secret = _read_owner_secret_from_stdin()
+        if secret is None:
+            problem = (f"{request_guard.OWNER_GATE_ENV} is set but no owner secret arrived on standard input")
+    if secret is not None and not request_guard.valid_owner_secret(secret):
+        problem = "the owner secret is not 32 to 256 URL-safe characters"
+        secret = None
+    server.owner_secret = secret or ""
+    server.owner_gate_enforced = secret is not None
+    if secret is not None:
+        server.owner_gate_state = "enforced: owner-only routes need the app window's per-launch secret"
+    elif problem:
+        server.owner_gate_state = f"off ({problem}); owner-only routes accept any local request"
+        print(f"WARNING: owner gate {server.owner_gate_state}", file=sys.stderr)
+    else:
+        server.owner_gate_state = (f"off ({request_guard.OWNER_GATE_ENV} is not set); "
+                                   "owner-only routes accept any local request")
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "AtlasDourmouseWebUI/0.1"
 
@@ -1959,15 +2138,59 @@ class _Handler(BaseHTTPRequestHandler):
         if host in ("127.0.0.1", "::1", "localhost"):
             return True
         auth = self.headers.get("Authorization", "")
-        if auth.startswith("Bearer ") and hmac.compare_digest(auth[7:].strip(), token):
+        if auth.startswith("Bearer ") and hmac.compare_digest(auth[7:].strip().encode("utf-8", "replace"), token.encode("utf-8")):
             return True
         cookie = self.headers.get("Cookie", "")
         for part in cookie.split(";"):
             name, _, value = part.strip().partition("=")
-            if name == "dourmouse_session" and hmac.compare_digest(value, token):
+            if name == "dourmouse_session" and (
+                # Phase H, A9: /api/login now issues a signed session value
+                # instead of the token itself. A cookie that still holds the
+                # raw token (set before this change) keeps working.
+                hmac.compare_digest(value.encode("utf-8", "replace"), token.encode("utf-8"))
+                or _login_cookie_ok(token, value)
+            ):
                 return True
             if name == "dourmouse_user_session" and self._session_user() is not None:
                 return True
+        return False
+
+    # -- phase H, A5: owner-only routes ------------------------------------ #
+
+    def _is_owner(self) -> bool:
+        """True when this request may use an owner-only route
+        (request_guard.OWNER_ONLY_POST and its prefixes).
+
+        A client on another device has already shown the access token (or a
+        Google session) to get past ``_authorized``: that is the owner on
+        another device. On this machine the login is skipped, so when the
+        owner gate is enforced the request must carry the per-launch owner
+        secret (cookie or header) that only the app window holds. When the
+        gate is not enforced (no secret was handed over at launch) every
+        loopback request counts, which is the behaviour before phase H."""
+        ip = (self.client_address[0] if self.client_address else "") or ""
+        if not request_guard.is_loopback(ip):
+            return self._authorized()
+        if not getattr(self.server, "owner_gate_enforced", False):
+            return True
+        return request_guard.owner_proof_matches(self.headers, getattr(self.server, "owner_secret", "") or "")
+
+    def _owner_gate(self, path: str) -> bool:
+        """False, after answering 403, when an owner-only route is called by
+        something that cannot prove it is the owner's app window."""
+        if not request_guard.is_owner_route(self.command, path) or _Handler._is_owner(self):
+            return True
+        self._send_json(
+            {
+                "ok": False,
+                "error": "owner only",
+                "detail": (
+                    "this action can only be taken from the Dourmouse app window; a page in "
+                    "the browser pane, a script or another program cannot take it"
+                ),
+            },
+            status=403,
+        )
         return False
 
     def _session_user(self) -> str | None:
@@ -2303,6 +2526,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_unauthorized()
             return
         if self._os_api("GET", parsed):
+            return
+        if path == "/api/confirm/details":
+            # Phase H, R2B-07: everything behind an approval prompt, for a
+            # "show all" view. Only while that confirmation is waiting.
+            found = confirmation_details((urllib.parse.parse_qs(parsed.query).get("details_id") or [""])[0])
+            if found is None:
+                self._send_json({"ok": False, "error": "no such confirmation is waiting"}, status=404)
+            else:
+                self._send_json({"ok": True, **found})
+            return
+        if path == "/api/security/owner-gate":
+            # Phase H, A5: is the owner gate on, and does THIS request hold the
+            # owner secret? Never returns the secret.
+            self._send_json({
+                "ok": True,
+                "enforced": bool(getattr(self.server, "owner_gate_enforced", False)),
+                "state": getattr(self.server, "owner_gate_state", ""),
+                "owner": self._is_owner(),
+            })
             return
         if path in ("/setup", "/setup.html"):
             # v8.9: first-run setup. Served without a session for the same
@@ -3997,10 +4239,19 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._authorized():
                 self._send_unauthorized()
                 return
+            if not _Handler._owner_gate(self, parsed.path):
+                return
             self._handle_setup(parsed.path)
             return
         if not self._authorized():
             self._send_unauthorized()
+            return
+        # Phase H, A5: approvals, settings, the app-driving allow list and the
+        # security switches need the app window's per-launch secret when the
+        # owner gate is enforced. Checked before any handler, os_api included.
+        # (Called through the class so a stand-in handler that borrows
+        # _do_POST, as some tests use, needs nothing more.)
+        if not _Handler._owner_gate(self, parsed.path):
             return
         if self._os_api("POST", parsed):
             return
@@ -5491,7 +5742,10 @@ class _Handler(BaseHTTPRequestHandler):
         # confirmation is blocked holding session_lock for the duration of
         # its session.ask() call, so taking the lock here would deadlock
         # against the very confirmation we're trying to resolve.
-        if _is_imperative_affirm(raw_prompt):
+        # Phase H, A5: resolving an approval is owner-only (like /api/confirm),
+        # so a request that cannot prove it is the owner's window sends its
+        # "yes" as an ordinary message instead of approving anything.
+        if _is_imperative_affirm(raw_prompt) and self._is_owner():
             pending = gate.pending_items()
             if len(pending) == 1:
                 confirm_id, prompt_text = pending[0]
@@ -5934,22 +6188,38 @@ class _Handler(BaseHTTPRequestHandler):
         When no token is configured (loopback posture) returns ok:False with
         enabled:False so a stray login page can't confuse anyone.
         """
-        import hmac
-
         token = getattr(self.server, "access_token", "") or ""
         body = self._read_json_body()
-        provided = (body.get("token") or "").strip()
+        provided = body.get("token")
+        provided = provided.strip() if isinstance(provided, str) else ""
         if not token:
             self._send_json({"ok": False, "enabled": False})
             return
-        if not provided or not hmac.compare_digest(provided, token):
+        # Phase H, A9: a client that keeps guessing is slowed and then refused
+        # for a while (per address), instead of being allowed unlimited tries.
+        ip = (self.client_address[0] if self.client_address else "") or ""
+        wait = _login_lockout_remaining(self.server, ip)
+        if wait > 0:
+            self._send_json(
+                {"ok": False, "error": "too many failed attempts", "retry_after": int(wait) + 1},
+                status=429,
+                headers={"Retry-After": str(int(wait) + 1)},
+            )
+            return
+        if not provided or not hmac.compare_digest(provided.encode("utf-8", "replace"), token.encode("utf-8")):
+            _record_login_failure(self.server, ip)
+            time.sleep(_LOGIN_FAILURE_DELAY_S)
             self._send_json({"ok": False, "error": "invalid token"}, status=401)
             return
+        # Phase H, A9: the cookie holds a signed, expiring session value, not
+        # the access token itself, so whoever reads a cookie jar does not get
+        # the permanent token. Changing the token signs every session out.
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header(
             "Set-Cookie",
-            f"dourmouse_session={token}; Path=/; HttpOnly; SameSite=Strict",
+            f"dourmouse_session={_login_cookie_value(token)}; Path=/; HttpOnly; SameSite=Strict; "
+            f"Max-Age={_LOGIN_COOKIE_TTL_S}",
         )
         self.send_header("Content-Length", str(len(b'{"ok": true}')))
         self.end_headers()
@@ -6319,6 +6589,15 @@ class _Handler(BaseHTTPRequestHandler):
         from dourmouse import mobile_link
 
         token = getattr(self.server, "access_token", "") or ""
+        # Phase H, A9: the page lists this Mac's LAN and Tailscale addresses.
+        # The Mac itself (loopback) and a signed-in client may see them; a
+        # client on the network that has not shown the token is sent to the
+        # login page instead. The QR codes are meant to be read off the Mac's
+        # own screen, so pairing a fresh phone is unchanged.
+        ip = (self.client_address[0] if self.client_address else "") or ""
+        if token and not request_guard.is_loopback(ip) and not self._authorized():
+            self._send_unauthorized()
+            return
         addrs = mobile_link.detect_addresses()
         # The port the phone is actually hitting comes from the Host header
         # (or the default). QR encodes the LOGIN page — the token entry the
@@ -7768,8 +8047,15 @@ def run_server(
     session_file: Path | str | None = None,
     browser_pane_requests: Any | None = None,
     office_log: Any | None = None,
+    owner_secret: str | None = None,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns the running ThreadingHTTPServer.
+
+    ``owner_secret`` (phase H, A5): when given (32 to 256 URL-safe
+    characters), owner-only routes need it as the ``dourmouse_owner`` cookie
+    or the ``X-Dourmouse-Owner`` header. When None, the launcher may hand one
+    over on standard input (``DOURMOUSE_OWNER_GATE=stdin``); otherwise the
+    gate stays off. See ``_configure_owner_gate``.
 
     ``session_file`` (v8.31): which on-disk session ledger the server's
     live ``ChatSession`` writes to and resumes from. None (default,
@@ -8009,6 +8295,7 @@ def run_server(
     server.app_role = rbac.role
     server.access_token = access  # v4.0: auth gate (empty = loopback-only)
     server.preview_token = secrets.token_urlsafe(24)  # finding #135: see _cors_allowed
+    _configure_owner_gate(server, owner_secret)  # phase H, A5
     server.registry = registry
     server.client = client
     server.config = config

@@ -65,6 +65,11 @@ def _is_loopback(ip: str) -> bool:
     return (mapped or addr).is_loopback
 
 
+def is_loopback(ip: str) -> bool:
+    """True for 127.0.0.0/8, ::1 (also IPv4-mapped) and the name localhost."""
+    return _is_loopback(ip)
+
+
 def _split_host(value: str) -> tuple[str, int | None]:
     """``localhost:8765`` -> ("localhost", 8765); ``[::1]:8765`` -> ("::1", 8765)."""
     value = value.strip().lower()
@@ -107,6 +112,111 @@ def is_cross_origin(headers: Headers, port: int, allowed_hosts: Iterable[str] = 
     if origin is None:
         return False
     return _foreign_origin(origin, {h.lower() for h in allowed_hosts}, port)
+
+
+# --------------------------------------------------------------------------- #
+# Owner-only routes (security review A5, phase H)
+# --------------------------------------------------------------------------- #
+#
+# The Host and Origin checks above cannot tell the owner's app window from a
+# page the model is driving: both are same-origin to this server once a
+# browser tab is pointed at it. The routes below change what the model is
+# allowed to do (approvals, auto-approve, the app-driving allow list, the
+# security switches, the config file), so they need proof that the request
+# comes from the owner's own window: a per-launch secret the server holds in
+# memory only, delivered to the app window as an HttpOnly cookie (or sent by a
+# trusted client as a header). A page in the browser pane lives in its own
+# cookie partition and never receives it; the model's sandboxed shell has no
+# network and no copy of it.
+
+OWNER_COOKIE = "dourmouse_owner"
+OWNER_HEADER = "X-Dourmouse-Owner"
+OWNER_GATE_ENV = "DOURMOUSE_OWNER_GATE"
+
+#: Exact POST paths that only the owner may call.
+OWNER_ONLY_POST: frozenset[str] = frozenset({
+    # Approving a gated tool call, or a goal's task, or a self-extension.
+    "/api/confirm",
+    "/api/goals/tasks/approve",
+    "/api/self_extensions/approve",
+    "/api/os/agentsmith/approve",
+    # App driving (phase F1): the allow list, acting as the owner, and
+    # releasing the kill switch. Engaging the kill switch stays open to all.
+    "/api/os/apps/allow",
+    "/api/os/apps/deny",
+    "/api/os/apps/act",
+    "/api/os/apps/resume",
+    # The vision kill switch can be released through this route.
+    "/api/vision/kill-switch",
+    # Raising the conversation's role, switching the model backend.
+    "/api/role",
+    "/api/backend",
+    # Standing jobs run tools unattended.
+    "/api/schedules",
+    "/api/schedules/update",
+    "/api/schedules/toggle",
+    "/api/schedules/remove",
+    "/api/os/goals/create",
+    "/api/os/browser/history/clear",
+    "/api/os/browser/bookmarks/remove",
+    # Destructive housekeeping.
+    "/api/projects/delete",
+    "/api/artifacts/clear",
+})
+
+#: POST path prefixes that only the owner may call.
+OWNER_ONLY_POST_PREFIXES: tuple[str, ...] = (
+    "/api/settings/",     # auto-approve, API keys, scopes, model, features
+    "/api/os/settings/",  # the shell's toggles, features, reset
+    "/api/os/comms/",     # trash, archive and flag act on the owner's mailbox
+    "/api/security/",     # dismissals, lockdown on and off, quarantine
+    "/api/setup/",        # writes the config file and restarts the server
+)
+
+_OWNER_SECRET_MIN = 32
+_OWNER_SECRET_MAX = 256
+
+
+def is_owner_route(method: str, path: str) -> bool:
+    """True when ``method path`` is one of the owner-only actions above."""
+    if method.upper() not in ("POST", "PUT", "PATCH", "DELETE"):
+        return False
+    if path in OWNER_ONLY_POST:
+        return True
+    if path.startswith("/api/atlas-lab/proposals/") and path.endswith("/approve"):
+        return True  # approving runs model-written code in the sandbox
+    return any(path.startswith(prefix) for prefix in OWNER_ONLY_POST_PREFIXES)
+
+
+def valid_owner_secret(value: str | None) -> bool:
+    """A usable secret: 32 to 256 URL-safe characters (what ``secrets.token_urlsafe``
+    and Node's ``randomBytes(32).toString("base64url")`` produce)."""
+    if not value or not (_OWNER_SECRET_MIN <= len(value) <= _OWNER_SECRET_MAX):
+        return False
+    return all(c.isascii() and (c.isalnum() or c in "-_") for c in value)
+
+
+def _cookie_value(headers: Headers, name: str) -> str | None:
+    for part in (headers.get("Cookie") or "").split(";"):
+        key, sep, value = part.strip().partition("=")
+        if sep and key == name:
+            return value.strip()
+    return None
+
+
+def owner_proof_matches(headers: Headers, secret: str) -> bool:
+    """True when the request carries the per-launch owner secret, as the
+    ``dourmouse_owner`` cookie or the ``X-Dourmouse-Owner`` header. Compared in
+    constant time, as bytes (a non-ASCII value cannot raise)."""
+    import hmac
+
+    if not secret:
+        return False
+    expected = secret.encode("utf-8")
+    for candidate in (headers.get(OWNER_HEADER), _cookie_value(headers, OWNER_COOKIE)):
+        if candidate and hmac.compare_digest(candidate.strip().encode("utf-8", "replace"), expected):
+            return True
+    return False
 
 
 def check(

@@ -2731,6 +2731,18 @@ def _emit_event(
 #: An argument shorter than this is always visible in any confirmation text.
 _PROMPT_ARG_MIN = 120
 
+#: Phase H, R2B-07: the tool and full arguments of the confirmation this
+#: thread is waiting on (set only while the gate is being asked).
+_CONFIRM_DETAILS = threading.local()
+
+
+def current_confirmation_details() -> dict[str, Any] | None:
+    """``{"tool", "arguments"}`` for the approval the calling thread is asking
+    for right now, or None. A confirmation gate calls this to keep the full
+    arguments next to the prompt, which shows only an excerpt of long ones."""
+    value = getattr(_CONFIRM_DETAILS, "value", None)
+    return dict(value) if value else None
+
 
 def _with_unshown_note(prompt_text: str, arguments: dict[str, Any]) -> str:
     """Say so when the confirmation text shows only an excerpt of an argument.
@@ -2763,6 +2775,145 @@ def _with_unshown_note(prompt_text: str, arguments: dict[str, Any]) -> str:
     return prompt_text + " [Not shown in full above: " + "; ".join(notes[:6]) + ". What you see is only an excerpt.]"
 
 
+# --------------------------------------------------------------------------- #
+# Phase H: decisions that depend on a call's arguments, not only on the tool
+# --------------------------------------------------------------------------- #
+#
+# A ToolSpec's permission is fixed per tool. Some calls of an otherwise
+# harmless tool are not harmless: opening the app's own server in the browser
+# the model drives (A5), sending a secret in a URL or a search (R2B-08),
+# silencing a security alert (R2B-09), or a pinned chat that reads untrusted
+# mail and pages putting data into a link (the shared desk, finding #161).
+# ``_argument_gate`` looks at the arguments and answers refuse, ask, or
+# nothing; ``_execute_tool`` applies it before the policy and the gate.
+
+#: Tools whose arguments leave this machine: a URL that is opened or fetched,
+#: a search query, text typed into a page or another app, an outgoing message.
+OUTBOUND_TOOLS: frozenset[str] = frozenset({
+    "browser_open", "open_browser_pane", "open_url", "fetch_url", "web_search",
+    "research_fetch_url", "research_web_search", "news_search", "spotify_search",
+    "browser_fill", "browser_fill_form", "browser_select", "browser_press", "browser_click",
+    "gmail_send", "email_own_send", "send_draft", "send_app_keystrokes", "freebuff_dispatch",
+})
+
+#: Tools that open a URL in a browser.
+_URL_OPEN_TOOLS: frozenset[str] = frozenset({"browser_open", "open_browser_pane", "open_url"})
+
+#: The agent that owns each shared-desk URL tool. Any other pinned agent got
+#: the tool through SHARED_DESK_TOOLS (finding #161).
+_DESK_TOOL_HOME: dict[str, str] = {"browser_open": "browser", "open_browser_pane": "browser"}
+
+#: Characters after ``?`` and ``#`` a pinned chat may put in a link unasked.
+DESK_LINK_DATA_LIMIT = 64
+
+#: Security statuses that close or silence an incident.
+_INCIDENT_OPEN_STATUSES = frozenset({"", "OPEN", "INVESTIGATING"})
+
+
+def _own_ports() -> set[int]:
+    """The app's own server, Electron's remote-debugging port and the pane
+    bridge. Opening these in a browser the model drives hands it the app."""
+    ports: set[int] = set()
+    for name, default in (("DOURMOUSE_UI_PORT", 8765), ("DOURMOUSE_ELECTRON_CDP_PORT", 9333),
+                          ("DOURMOUSE_ELECTRON_PANE_PORT", 9334)):
+        raw = os.environ.get(name, "").strip()
+        ports.add(int(raw) if raw.isdigit() else default)
+        ports.add(default)
+    return ports
+
+
+def _host_is_internal(host: str, port: int) -> bool:
+    """True when ``host`` is this machine or a private network address.
+    Literal addresses in every spelling a browser accepts (``127.1``,
+    ``2130706433``, ``0x7f000001``, ``[::1]``) are judged without DNS; a
+    name is resolved and refused if any answer is internal. A name that does
+    not resolve is not judged here (the browser will fail to open it too)."""
+    import ipaddress
+    import socket
+
+    from dourmouse import net_guard
+
+    name = host.strip().strip("[]").rstrip(".").lower()
+    if not name:
+        return False
+    if name == "localhost" or name.endswith(".localhost"):
+        return True
+    try:
+        return not net_guard.is_public_address(ipaddress.ip_address(name.split("%", 1)[0]))
+    except ValueError:
+        pass
+    try:
+        packed = socket.inet_aton(name)  # accepts 127.1, 2130706433, 0x7f.1, 0177.0.0.1
+    except OSError:
+        packed = None
+    if packed is not None and re.fullmatch(r"[0-9a-fx.]+", name):
+        return not net_guard.is_public_address(ipaddress.IPv4Address(packed))
+    try:
+        net_guard.vet_host(name, port)
+    except net_guard.FetchRefused:
+        return True
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return False
+
+
+def _url_gate(spec_name: str, url: str, actor: str) -> tuple[str, str] | None:
+    import urllib.parse as _up
+
+    try:
+        parts = _up.urlsplit(url.strip())
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return None  # the tool itself refuses a malformed address
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    # Chromium reads these spellings differently from urlsplit (a backslash ends the host, a
+    # percent-encoded host is decoded), so a loopback address could slip past the check below.
+    if "\\" in url or "%" in (parts.netloc or "") or "@" in (parts.netloc or ""):
+        return ("refuse", f"{url} is spelled in a way browsers and this check read differently "
+                "(a backslash, a percent-encoded host or a user name before the host). Give a plain address.")
+    if _host_is_internal(parts.hostname, port):
+        if port in _own_ports():
+            return ("refuse", f"{url} is Dourmouse's own server or browser-control port on this machine; "
+                    "a browser the model drives never opens it (it could press the owner's buttons).")
+        return ("confirm", f"Open {url}? This address is on this Mac or the local network, not the public "
+                "internet, so the page can reach local services.")
+    home = _DESK_TOOL_HOME.get(spec_name)
+    pinned = actor not in ("", "orchestrator", "mcp_bridge") and home is not None and actor != home
+    data = len(parts.query) + len(parts.fragment)
+    if pinned and data > DESK_LINK_DATA_LIMIT:
+        return ("confirm", f"Open {url} ? It was asked for from the {actor} chat, which reads mail and web "
+                f"pages written by others, and the address carries {data} characters after '?' or '#'. "
+                "Whatever is in them is sent to that site.")
+    return None
+
+
+def _argument_gate(spec: ToolSpec, arguments: dict[str, Any], actor: str) -> tuple[str, str] | None:
+    """``("refuse", reason)``, ``("confirm", prompt)`` or None for this call."""
+    name = spec.name
+    if name in OUTBOUND_TOOLS or name.startswith("mcp__"):
+        labels = DlpFilter().secrets_in_arguments(arguments)
+        if labels:
+            return ("refuse", f"the arguments of {name} contain what looks like a secret ({', '.join(labels)}). "
+                    "A secret is never sent out of this machine by a tool call; if the owner means to share it, "
+                    "they do that themselves.")
+    if name in _URL_OPEN_TOOLS:
+        url = arguments.get("url")
+        if isinstance(url, str) and url.strip():
+            decision = _url_gate(name, url, actor)
+            if decision is not None:
+                return decision
+    if name == "security_sentry_dismiss":
+        return ("confirm", f"Dismiss security finding {arguments.get('fingerprint')!s} as a false positive? "
+                "Its alert stops showing and the same finding is not raised again.")
+    if name == "security_incident_update":
+        status = str(arguments.get("status") or "").strip().upper()
+        if status not in _INCIDENT_OPEN_STATUSES:
+            return ("confirm", f"Set security incident {arguments.get('fingerprint')!s} to {status}? "
+                    f"That closes or silences it. Note given: {arguments.get('note')!s}")
+    return None
+
+
 def _execute_tool(
     spec: ToolSpec,
     arguments: dict[str, Any],
@@ -2779,6 +2930,31 @@ def _execute_tool(
 
     actor = actor or (getattr(policy, "actor", "") if policy is not None else "")
     _ep.record("proposed", spec.name, arguments, actor, permission=spec.permission.name)
+    decision = (
+        _argument_gate(spec, arguments, actor)
+        if spec.permission is not Permission.PROHIBITED and isinstance(arguments, dict)
+        else None
+    )
+    if decision is not None and decision[0] == "refuse":
+        _ep.record("denied", spec.name, arguments, actor, reason=decision[1][:300])
+        return f"REFUSED: {decision[1]}"
+    if decision is not None:
+        # Ask the human, through the same gate and the same ledger entries as
+        # a tool that always asks. A call that was already gated keeps its own
+        # prompt, with this reason in front of it.
+        reason = decision[1]
+        was_gated = spec.permission is Permission.REQUIRES_CONFIRMATION
+        original = spec.confirm_prompt if was_gated else None
+        tool_name = spec.name
+
+        def _prompt(args: dict[str, Any]) -> str:
+            if original is not None:
+                return f"{reason} {original(args)}"
+            if was_gated:
+                return f"{reason} Execute {tool_name} with {json.dumps(args, default=str)}?"
+            return reason
+
+        spec = _dataclass_replace(spec, permission=Permission.REQUIRES_CONFIRMATION, confirm_prompt=_prompt)
     if policy is not None and spec.permission is not Permission.PROHIBITED:
         reason = policy.decide(spec.name, arguments,
                                consequential=spec.permission is Permission.REQUIRES_CONFIRMATION)
@@ -2885,7 +3061,14 @@ def _execute_tool_inner(
                 "CLAUDE DIRECT CLI) — that mode shows a real, clickable "
                 "approval prompt this one cannot."
             )
-        approved = bool(confirmation_gate(prompt_text))
+        # Phase H, R2B-07: the gate runs on this thread, so it can read the
+        # full arguments behind the prompt (current_confirmation_details) and
+        # offer a "show everything" view of what the excerpt left out.
+        _CONFIRM_DETAILS.value = {"tool": spec.name, "arguments": arguments}
+        try:
+            approved = bool(confirmation_gate(prompt_text))
+        finally:
+            _CONFIRM_DETAILS.value = None
         if ledger is not None:
             ledger.append(
                 {

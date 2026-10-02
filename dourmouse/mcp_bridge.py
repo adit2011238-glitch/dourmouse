@@ -185,6 +185,15 @@ class McpBridgeServer:
 
             self._tools = exposed_tools(registry or build_general_registry())
         self._by_name = {t.name: t for t in self._tools}
+        # Phase H, R2B-11: one run policy per connection (the bridge process
+        # lives as long as the CLI session that launched it), so the caps on
+        # repeated calls and on approval requests apply here as they do in a
+        # normal chat run, and every result passes the secret scrubber.
+        from dourmouse.execution_policy import RunPolicy
+        from dourmouse.governance import DlpFilter
+
+        self._policy = RunPolicy(actor="mcp_bridge")
+        self._dlp = DlpFilter()
         self._stdin = stdin if stdin is not None else sys.stdin
         self._stdout = stdout if stdout is not None else sys.stdout
         self._stderr = stderr if stderr is not None else sys.stderr
@@ -295,16 +304,29 @@ class McpBridgeServer:
             from dourmouse.config import auto_approve_enabled
 
             gate = (lambda _prompt: True) if auto_approve_enabled() else None
-            result_text = _execute_tool(tool, arguments, confirmation_gate=gate)
+            if not isinstance(arguments, dict):
+                raise TypeError("arguments must be a JSON object")
+            result_text = _execute_tool(tool, arguments, confirmation_gate=gate,
+                                        policy=self._policy, actor="mcp_bridge")
         except Exception as exc:  # noqa: BLE001 - Rule 2.2: a real failure is reported, never fabricated
-            result_text = f"ERROR: tool '{name}' failed: {exc}"
+            result_text = self._scrub(f"ERROR: tool '{name}' failed: {exc}")
             self._log_toolcall(name, arguments, result_text)
             return {
                 "content": [{"type": "text", "text": result_text}],
                 "isError": True,
             }
+        result_text = self._scrub(str(result_text))
         self._log_toolcall(name, arguments, result_text)
         return {"content": [{"type": "text", "text": str(result_text)}], "isError": False}
+
+    def _scrub(self, text: str) -> str:
+        """Phase H, R2B-11: the same scrubbing a normal chat run applies to a
+        tool result before the model sees it (dispatch.py, "DLP at the API
+        boundary"). Before this the bridge returned results to the CLI raw."""
+        redacted, hits = self._dlp.redact(text)
+        if hits:
+            redacted += f"\n[DLP: {len(hits)} secret pattern(s) redacted from tool result]"
+        return redacted
 
     def _log_toolcall(self, name: str, arguments: dict[str, Any], result_text: str) -> None:
         """Best-effort real-tool-call record, read back by ClaudeCliClient

@@ -33,5 +33,32 @@ contextBridge.exposeInMainWorld("dourmouseShell", {
     hide: () => ipcRenderer.invoke("pane:hide"),
     state: () => ipcRenderer.invoke("pane:state"),
     onState: (cb) => ipcRenderer.on("pane:state", (_evt, s) => cb(s)),
+    // Phase B1: tabs, find, zoom, print, downloads. Every one is a plain request to
+    // main.js, which validates it; the page never gets a handle to the pane. The two
+    // subscriptions below return the function that removes them, so a screen can
+    // clean up on unmount (onState above cannot, which is why host.js fans it out).
+    screen: (active) => ipcRenderer.invoke("pane:screen", active === true),
+    newTab: (url) => ipcRenderer.invoke("pane:tab-new", url),
+    closeTab: (id) => ipcRenderer.invoke("pane:tab-close", id),
+    selectTab: (id) => ipcRenderer.invoke("pane:tab-select", id),
+    reopenTab: () => ipcRenderer.invoke("pane:tab-reopen"),
+    find: (text, opts) => ipcRenderer.invoke("pane:find", text, opts),
+    findStop: () => ipcRenderer.invoke("pane:find-stop"),
+    focusPage: () => ipcRenderer.invoke("pane:focus-page"),
+    zoom: (action) => ipcRenderer.invoke("pane:zoom", action),
+    print: (opts) => ipcRenderer.invoke("pane:print", opts),
+    downloads: () => ipcRenderer.invoke("pane:downloads"),
+    downloadAction: (id, action) => ipcRenderer.invoke("pane:download-action", id, action),
+    clearDownloads: () => ipcRenderer.invoke("pane:downloads-clear"),
+    onDownloads: (cb) => {
+      const h = (_evt, list) => cb(list);
+      ipcRenderer.on("pane:downloads", h);
+      return () => ipcRenderer.removeListener("pane:downloads", h);
+    },
+    onCommand: (cb) => {
+      const h = (_evt, cmd) => cb(cmd);
+      ipcRenderer.on("pane:command", h);
+      return () => ipcRenderer.removeListener("pane:command", h);
+    },
   },
 });

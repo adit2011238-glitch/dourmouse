@@ -10,7 +10,17 @@
 
    Outside Electron the fallback is a sandboxed iframe fed by
    /api/browser-pane/proxy, with the limits that path really has (said on the
-   screen). One pane, no tabs: there is no tab list behind it in main.js.
+   screen). That fallback has one page and none of the tab, find, zoom, download,
+   history or bookmark features, because those live in the Electron shell.
+
+   Inside Electron the pane holds a list of tabs (Phase B1). The strip, the find
+   bar, zoom, print, the downloads shelf and the history list all show what the
+   shell reports; bookmarks and history are read and written through ctx.api (the
+   server forwards them to the shell, which stores them in its userData folder).
+   The downloads shelf and the history list are drawn IN the page area, in place
+   of the page, because the native view is composited above this page's DOM: a
+   panel laid over it would be invisible. While one is open the native view is
+   hidden, exactly as for any other panel.
 
    Nothing here is a sample: the address, title, loading, back and forward all
    come from the pane's own state, or from the addresses opened in this window
@@ -19,12 +29,14 @@
 import { takePaneRequest } from '../../core/pane-inbox.js';
 import { html, setHtml, raw } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
-import { ago } from '../../kit/format.js';
+import { confirmHere } from '../../kit/confirm-card.js';
+import { ago, clock } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
 import {
-  PRESETS, normalizeAddress, eventTarget, lockInfo, hostOf, isWebUrl, paneModel, failLine, tabTitle,
+  PRESETS, normalizeAddress, eventTarget, lockInfo, hostOf, isWebUrl, paneModel, failLine,
   viewBounds, sameBounds, clampWidth, clampHeight, presetForWidth, parseStoredWidth, parseStoredHeight,
-  watchLine, footnotes, makeHistory,
+  watchLine, footnotes, makeHistory, sameAddress, tabsModel, tabsKey, tabLabel, zoomLabel, findLabel,
+  downloadsModel, activeDownloads, downloadLine, formatBytes, groupHistory, bookmarksModel, bookmarkFor,
 } from './helpers.js';
 
 const SVG = (body, extra = '') => raw('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ' + extra + '>' + body + '</svg>');
@@ -40,6 +52,16 @@ const ICON = {
   tablet: SVG('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M11 18h2"/>'),
   desktop: SVG('<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/>'),
   fill: SVG('<path d="M4 9V4h5M20 15v5h-5M4 15v5h5M20 9V4h-5"/>'),
+  plus: SVG('<path d="M12 5v14M5 12h14"/>'),
+  minus: SVG('<path d="M5 12h14"/>'),
+  star: SVG('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.7l5.9-.8z"/>'),
+  find: SVG('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>'),
+  up: SVG('<path d="M6 15l6-6 6 6"/>'),
+  down: SVG('<path d="M6 9l6 6 6-6"/>'),
+  print: SVG('<path d="M7 9V4h10v5M7 17H5a1 1 0 01-1-1v-5a2 2 0 012-2h12a2 2 0 012 2v5a1 1 0 01-1 1h-2M7 14h10v6H7z"/>'),
+  pdf: SVG('<path d="M7 3h7l5 5v13H7zM14 3v5h5M9.5 15h5M9.5 18h3"/>'),
+  download: SVG('<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>'),
+  clock: SVG('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
 };
 
 const PRESET_SPEC = {
@@ -69,6 +91,7 @@ export default {
     const pane = ctx.host.pane || null; /* the Electron pane bridge, or null */
     const electron = ctx.host.kind === 'electron';
     const fallbackKind = electron ? 'electron' : ctx.host.kind;
+    const hasB1 = Boolean(pane) && typeof pane.newTab === 'function' && typeof pane.onDownloads === 'function'; /* an older shell has the pane but not tabs */
 
     /* ---------------- state ---------------- */
     let disposed = false;
@@ -96,6 +119,29 @@ export default {
     let reloadMode = '';
     let offPane = null;
     const hist = makeHistory(50);
+    /* Phase B1 */
+    let tm = tabsModel(null); /* the tab list and the active tab's zoom and find state */
+    let tabsSig = '';
+    let lastActiveId = 0;
+    let panel = ''; /* '' | 'history' | 'downloads': drawn in the page area in place of the page */
+    let dl = []; /* the downloads shelf */
+    let dlStruct = '';
+    let dlLive = new Map();
+    let offDl = null;
+    let offCmd = null;
+    let bms = [];
+    let bmsError = '';
+    let findOpen = false;
+    let offFindEsc = null;
+    let offPanelEsc = null;
+    let histQuery = '';
+    let histSeq = 0;
+    let histTimer = 0;
+    let histBody = null;
+    let histConfirm = null;
+    let dlBody = null;
+    const panelRoot = el('div', 'bw-panel');
+    const MOD = /Mac/i.test(String(globalThis.navigator && globalThis.navigator.platform)) ? 'Meta' : 'Ctrl';
 
     /* ---------------- skeleton: built once, regions repaint ---------------- */
     root.dataset.state = 'populated';
@@ -104,8 +150,9 @@ export default {
       <div class="cb-wrap" id="bwWrap">
         <div class="cb-frame">
           <div class="cb-tabs">
-            <div class="cb-tab on" id="bwTab"><span class="fav">${ICON.globe}</span><span class="tt" id="bwTabTitle"></span></div>
-            <span class="cb-one" id="bwOne"></span>
+            <div class="cb-tablist" id="bwTabs" role="tablist" aria-label="Open tabs"></div>
+            <button type="button" class="cb-ico cb-new" id="bwNewTab" aria-label="New tab" title="New tab (Cmd+T)" data-spec="Opens a new empty tab next to the others. Cmd+T does the same. At most 30 tabs: a page that opens tabs in a loop is cut off after five in ten seconds.">${ICON.plus}</button>
+            <button type="button" class="cb-reopen" id="bwReopen" hidden title="Reopen the last closed tab (Cmd+Shift+T)" data-spec="Reopens the tab you closed last, in the place it was. Cmd+Shift+T does the same. Only web pages are remembered, and only until the app closes.">REOPEN CLOSED TAB</button>
           </div>
           <div class="cb-bar" id="bwBar">
             <div class="cb-nav">
@@ -115,11 +162,30 @@ export default {
             </div>
             <form class="cb-addr" id="bwAddrForm" data-lock="none" novalidate>
               <span id="bwLock" role="img" aria-label="No page loaded">${ICON.lock}</span>
-              <input id="bwAddr" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="Address" placeholder="Type an address and press Enter" data-spec="The real current address of the page. Typing an address and pressing Enter opens it. Only http and https addresses open; file, javascript, data and the rest are refused. Alt+L focuses it.">
+              <input id="bwAddr" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="Address" placeholder="Type an address and press Enter" data-spec="The real current address of the page. Typing an address and pressing Enter opens it. Only http and https addresses open; file, javascript, data and the rest are refused. Alt+L or Cmd+L focuses it.">
+              <button type="button" class="cb-star" id="bwStar" aria-label="Bookmark this page" aria-pressed="false" title="Bookmark this page" data-spec="Adds this page to the bookmarks bar, or removes it when it is already there. Bookmarks are kept by the Electron app on this Mac and are shared by every tab.">${ICON.star}</button>
             </form>
+            <div class="cb-tools" id="bwTools" role="group" aria-label="Page tools">
+              <button type="button" class="cb-ico" id="bwFindBtn" aria-label="Find in page" title="Find in page (Cmd+F)" data-spec="Opens the find bar for the page in this tab: it highlights every match and shows which one you are on. Cmd+F does the same.">${ICON.find}</button>
+              <button type="button" class="cb-ico" id="bwZoomOut" aria-label="Zoom out" title="Zoom out (Cmd+-)" data-spec="Makes this site smaller. The level is remembered for this site only, the way Chrome does it.">${ICON.minus}</button>
+              <button type="button" class="cb-zoom" id="bwZoom" aria-label="Reset zoom" title="Reset zoom (Cmd+0)" data-spec="The zoom level of this site. Press it to go back to 100 percent.">100%</button>
+              <button type="button" class="cb-ico" id="bwZoomIn" aria-label="Zoom in" title="Zoom in (Cmd+=)" data-spec="Makes this site larger. The level is remembered for this site only.">${ICON.plus}</button>
+              <button type="button" class="cb-ico" id="bwPrint" aria-label="Print" title="Print (Cmd+P)" data-spec="Opens the system print dialog for this page. It has Save as PDF in its own menu. Nothing prints until you confirm there.">${ICON.print}</button>
+              <button type="button" class="cb-ico" id="bwPdf" aria-label="Save page as PDF" title="Save page as PDF" data-spec="Saves this page as a PDF in your Downloads folder and lists it on the downloads shelf. Nothing is opened.">${ICON.pdf}</button>
+              <button type="button" class="cb-ico cb-badged" id="bwDl" aria-label="Downloads" aria-pressed="false" title="Downloads" data-spec="Shows what this browser has downloaded and what is downloading now. Files go to your Downloads folder, where the downloads watcher checks them. Nothing is ever opened by itself.">${ICON.download}<span class="cb-count" id="bwDlCount" hidden></span></button>
+              <button type="button" class="cb-ico" id="bwHist" aria-label="History" aria-pressed="false" title="History" data-spec="Lists the pages this browser has visited, newest first, with a search box. Click one to open it, remove one, or clear all of it.">${ICON.clock}</button>
+            </div>
             <span class="cb-size" id="bwSize" title="Size of the page area in pixels"></span>
             <div class="cb-vp" id="bwPresets" role="group" aria-label="Page area size" data-spec="Sets the width of the page area. Layout only: the page reflows because the view really is that wide, but there is no device emulation."></div>
           </div>
+          <div class="cb-find" id="bwFind" role="search" hidden>
+            <input id="bwFindInput" type="text" autocomplete="off" spellcheck="false" aria-label="Find in page" placeholder="Find in page" data-spec="Type to highlight every match on the page. Enter goes to the next match, Shift+Enter to the one before, Escape closes the bar.">
+            <span class="cb-findcount" id="bwFindCount" role="status" aria-live="polite"></span>
+            <button type="button" class="cb-ico" id="bwFindPrev" aria-label="Previous match" title="Previous match (Shift+Enter)" data-spec="Goes to the match before this one.">${ICON.up}</button>
+            <button type="button" class="cb-ico" id="bwFindNext" aria-label="Next match" title="Next match (Enter)" data-spec="Goes to the next match.">${ICON.down}</button>
+            <button type="button" class="cb-ico" id="bwFindClose" aria-label="Close find bar" title="Close (Escape)" data-spec="Closes the find bar and clears the highlights.">${ICON.stop}</button>
+          </div>
+          <div class="cb-bm" id="bwBm" role="toolbar" aria-label="Bookmarks" hidden></div>
           <div class="bw-proxy" id="bwProxy" hidden></div>
           <div class="cb-page" id="bwPage" data-region></div>
           <div class="cb-watch" id="bwWatch" data-region></div>
@@ -132,8 +198,27 @@ export default {
     const $ = (id) => root.querySelector('#' + id);
     const noteEl = $('bwNote');
     const wrap = $('bwWrap');
-    const tabTitleEl = $('bwTabTitle');
-    const oneEl = $('bwOne');
+    const tabsEl = $('bwTabs');
+    const newTabBtn = $('bwNewTab');
+    const reopenBtn = $('bwReopen');
+    const starBtn = $('bwStar');
+    const toolsEl = $('bwTools');
+    const findBtn = $('bwFindBtn');
+    const zoomOutBtn = $('bwZoomOut');
+    const zoomBtn = $('bwZoom');
+    const zoomInBtn = $('bwZoomIn');
+    const printBtn = $('bwPrint');
+    const pdfBtn = $('bwPdf');
+    const dlBtn = $('bwDl');
+    const dlCount = $('bwDlCount');
+    const histBtn = $('bwHist');
+    const findBar = $('bwFind');
+    const findInput = $('bwFindInput');
+    const findCount = $('bwFindCount');
+    const findPrev = $('bwFindPrev');
+    const findNext = $('bwFindNext');
+    const findClose = $('bwFindClose');
+    const bmEl = $('bwBm');
     const barEl = $('bwBar');
     const backBtn = $('bwBack');
     const fwdBtn = $('bwFwd');
@@ -163,9 +248,6 @@ export default {
     });
 
     setHtml($('bwFoot'), html`${footnotes(fallbackKind).map((f) => html`<span data-spec="${f.spec}"><b>${f.head}</b> &middot; ${f.text}</span>`)}`);
-    oneEl.textContent = 'one shared pane';
-    oneEl.dataset.spec = 'There is one pane, shared with the browser agent. Tabs are not built: they need a tab list in the Electron main process.';
-
     ctx.chrome.setSub(pane ? 'real browser, shared with the AI' : 'proxied view, not shared with the AI');
     ctx.chrome.setLive(Boolean(pane));
 
@@ -211,7 +293,7 @@ export default {
         safe(pane.bounds(b)); /* sent even while hidden, so a show lands in place */
       }
       const v = cur();
-      const want = surface === 'pane' && !paneProblem && Boolean(v.url) && !v.error && !ctx.overlays.open() && !dragging && Boolean(b);
+      const want = surface === 'pane' && !paneProblem && !panel && Boolean(v.url) && !v.error && !ctx.overlays.open() && !dragging && Boolean(b);
       if (want && !viewShown) {
         viewShown = true;
         safe(pane.show());
@@ -251,6 +333,7 @@ export default {
       if (electron && !pane) key = 'unavailable:nopane';
       else if (paneProblem) key = 'unavailable:' + paneProblem;
       else if (surface === 'pane' && !paneKnown) key = 'loading';
+      else if (panel && surface === 'pane') key = 'panel:' + panel;
       else if (v.error) key = 'error:' + v.error.code + ':' + v.error.url;
       else if (!v.url) key = 'empty:' + surface;
       else key = 'populated:' + surface;
@@ -271,6 +354,9 @@ export default {
         states.unavailable(pageEl, 'The browser view did not answer.', { detail: paneProblem, retry: () => connectPane() });
       } else if (key === 'loading') {
         states.loading(pageEl, 'Asking the browser view for its state');
+      } else if (key.startsWith('panel:')) {
+        states.populated(pageEl, panelRoot);
+        buildPanel();
       } else if (key.startsWith('error:')) {
         states.error(pageEl, { message: failLine(v.error), path: v.error.url }, {
           title: 'This page did not load',
@@ -291,7 +377,6 @@ export default {
       if (disposed) return;
       const v = cur();
       const lock = lockInfo(v.url);
-      tabTitleEl.textContent = surface === 'pane' ? tabTitle({ title: v.title, url: v.url }) : (hostOf(v.url) || (v.url ? v.url : 'No page'));
       form.dataset.lock = lock.kind;
       lockEl.setAttribute('aria-label', lock.label);
       lockEl.title = lock.label;
@@ -299,7 +384,7 @@ export default {
       const usable = !(electron && !pane) && !paneProblem;
       backBtn.disabled = !usable || !v.back;
       fwdBtn.disabled = !usable || !v.fwd;
-      reloadBtn.disabled = !usable || !v.url;
+      reloadBtn.disabled = !usable || (!v.url && !v.error); /* a crashed tab has no address but can still be reloaded */
       addr.disabled = !usable;
       barEl.dataset.loading = v.loading ? '1' : '0';
       const mode = surface === 'pane' && v.loading ? 'stop' : 'reload';
@@ -315,6 +400,8 @@ export default {
         proxyEl.textContent = 'Proxied view: this server fetched the page for you and shows it in a sandbox. No cookies or logins reach it, only this exact address is fetched, and links clicked inside it do not open here. Type an address in the bar, or use OPEN EXTERNALLY.';
       }
       paintRegion(v);
+      renderTabs(v);
+      paintTools(v);
       const web = isWebUrl(v.url);
       const key = String(web);
       if (key !== actionKey) {
@@ -386,6 +473,7 @@ export default {
 
     async function openWeb(url) {
       note('', '');
+      closePanel();
       if (pane && !paneProblem) {
         if (surface === 'frame') teardownFrame();
         surface = 'pane';
@@ -417,6 +505,7 @@ export default {
 
     function openApp(path) {
       note('', '');
+      closePanel();
       surface = 'frame';
       pendingUrl = '';
       if (viewShown && pane) {
@@ -476,6 +565,534 @@ export default {
       if (!ctx.host.openExternal(v.url)) {
         ctx.notify({ level: 'warn', title: 'Could not open it', detail: 'This window has no way to open the system browser.' });
       }
+    }
+
+    /* ---------------- tabs (Phase B1) ---------------- */
+    function virtualTab(v) {
+      return { id: 0, url: v.url, title: v.title, favicon: '', loading: v.loading, active: true, audible: false };
+    }
+
+    function tabNode(t, agentUrl) {
+      const holder = el('div', 'cb-tab' + (t.active ? ' on' : ''));
+      holder.dataset.tab = String(t.id);
+      const pick = el('button', 'cb-pick');
+      pick.type = 'button';
+      pick.setAttribute('role', 'tab');
+      pick.setAttribute('aria-selected', String(t.active));
+      pick.dataset.role = 'pick';
+      const label = tabLabel(t);
+      pick.title = label + (t.url ? '\n' + t.url : '');
+      const fav = el('span', 'fav');
+      if (t.loading) {
+        fav.classList.add('spin');
+      } else if (t.favicon) {
+        const img = el('img');
+        img.alt = '';
+        img.src = t.favicon;
+        fav.append(img);
+      } else {
+        setHtml(fav, html`${ICON.globe}`);
+      }
+      const tt = el('span', 'tt', label);
+      pick.append(fav, tt);
+      if (t.audible) pick.append(el('span', 'snd', 'sound'));
+      if (agentUrl && t.url && sameAddress(t.url, agentUrl)) {
+        const eye = el('span', 'eye');
+        setHtml(eye, html`${ICON.eye}`);
+        eye.title = 'The browser agent is attached to this tab';
+        pick.append(eye);
+      }
+      pick.addEventListener('click', () => selectTab(t.id));
+      holder.append(pick);
+      if (pane && t.id > 0) {
+        const x = el('button', 'cb-x');
+        x.type = 'button';
+        x.dataset.role = 'close';
+        x.setAttribute('aria-label', 'Close tab ' + label);
+        x.title = 'Close tab';
+        setHtml(x, html`${ICON.stop}`);
+        x.addEventListener('click', (e) => {
+          e.stopPropagation();
+          closeTab(t.id);
+        });
+        holder.append(x);
+        holder.addEventListener('auxclick', (e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            closeTab(t.id);
+          }
+        });
+      }
+      return holder;
+    }
+
+    function renderTabs(v) {
+      const list = pane && tm.tabs.length ? tm.tabs : [virtualTab(v)];
+      const agentUrl = electron && att && att.attached ? att.page_url : '';
+      const sig = tabsKey({ tabs: list }, agentUrl) + (pane ? 'p' : 'f') + (surface === 'frame' ? hostOf(v.url) : '');
+      if (sig === tabsSig) return;
+      tabsSig = sig;
+      const focused = tabsEl.contains(document.activeElement) ? document.activeElement : null;
+      const keep = focused ? { id: focused.closest('[data-tab]').dataset.tab, role: focused.dataset.role } : null;
+      const shown = surface === 'frame' && !pane ? [{ ...list[0], url: v.url, title: hostOf(v.url) }] : list;
+      tabsEl.replaceChildren(...shown.map((t) => tabNode(t, agentUrl)));
+      if (keep) {
+        const again = tabsEl.querySelector('[data-tab="' + keep.id + '"] [data-role="' + keep.role + '"]');
+        if (again) again.focus();
+      }
+    }
+
+    function selectTab(id) {
+      if (!pane || id === 0 || id === tm.activeId) {
+        closePanel();
+        return;
+      }
+      closePanel();
+      closeFindUi();
+      safe(pane.selectTab(id));
+    }
+
+    async function newTab() {
+      if (!pane || paneProblem) return;
+      closePanel();
+      try {
+        const r = await pane.newTab();
+        if (r && r.ok === false) {
+          note('A new tab did not open: ' + (r.error || 'no reason given'), 'error');
+          return;
+        }
+        dirty = true;
+        addr.value = '';
+        addr.focus();
+      } catch (err) {
+        paneFailed(err);
+      }
+    }
+
+    function closeTab(id) {
+      if (!pane) return;
+      safe(pane.closeTab(id));
+    }
+
+    async function reopenTab() {
+      if (!pane) return;
+      try {
+        const r = await pane.reopenTab();
+        if (r && r.ok === false) note(r.error || 'No closed tab to reopen.', 'error');
+        else closePanel();
+      } catch (err) {
+        paneFailed(err);
+      }
+    }
+
+    /* ---------------- tools: find, zoom, print, star (Phase B1) ---------------- */
+    function paintTools(v) {
+      const usable = hasB1 && !paneProblem;
+      const page = usable && Boolean(v.url);
+      toolsEl.hidden = !hasB1;
+      newTabBtn.hidden = !hasB1;
+      starBtn.hidden = !hasB1;
+      newTabBtn.disabled = !usable;
+      reopenBtn.hidden = !(usable && tm.closed > 0);
+      findBtn.disabled = !page;
+      zoomOutBtn.disabled = !page;
+      zoomInBtn.disabled = !page;
+      zoomBtn.disabled = !page;
+      printBtn.disabled = !page;
+      pdfBtn.disabled = !page;
+      dlBtn.disabled = !usable;
+      histBtn.disabled = !usable;
+      zoomBtn.textContent = zoomLabel(tm.zoom);
+      zoomBtn.dataset.changed = Math.abs(tm.zoom - 1) > 0.001 ? '1' : '0';
+      dlBtn.setAttribute('aria-pressed', String(panel === 'downloads'));
+      histBtn.setAttribute('aria-pressed', String(panel === 'history'));
+      const busy = activeDownloads(dl);
+      dlCount.hidden = busy === 0;
+      dlCount.textContent = String(busy);
+      const marked = Boolean(bookmarkFor(bms, v.url));
+      starBtn.disabled = !usable || !isWebUrl(v.url);
+      starBtn.setAttribute('aria-pressed', String(marked));
+      starBtn.setAttribute('aria-label', marked ? 'Remove this bookmark' : 'Bookmark this page');
+      starBtn.title = marked ? 'Remove this bookmark' : 'Bookmark this page (Cmd+D)';
+      findBar.hidden = !findOpen;
+      findCount.textContent = findLabel(tm.find, findInput.value);
+      findCount.dataset.none = tm.find && tm.find.text === findInput.value && tm.find.matches === 0 && findInput.value ? '1' : '0';
+    }
+
+    function openFind() {
+      if (!pane || paneProblem || !cur().url) return;
+      closePanel();
+      findOpen = true;
+      if (!offFindEsc) offFindEsc = ctx.keys.pushEsc(() => closeFind());
+      paint();
+      findInput.focus();
+      findInput.select();
+    }
+
+    function closeFindUi() {
+      findOpen = false;
+      findBar.hidden = true;
+      if (offFindEsc) {
+        offFindEsc();
+        offFindEsc = null;
+      }
+    }
+
+    function closeFind() {
+      if (!findOpen) return;
+      closeFindUi();
+      if (pane) {
+        safe(pane.findStop());
+        safe(pane.focusPage());
+      }
+      schedule();
+    }
+
+    function runFind(forward, next) {
+      if (!pane) return;
+      const q = findInput.value;
+      if (!q) {
+        safe(pane.findStop());
+        paintTools(cur());
+        return;
+      }
+      safe(pane.find(q, { forward, findNext: next }));
+    }
+
+    function zoom(action) {
+      if (pane && cur().url) safe(pane.zoom(action));
+    }
+
+    async function printPage(asPdf) {
+      if (!pane || !cur().url) return;
+      try {
+        const r = await pane.print(asPdf ? { pdf: true } : undefined);
+        if (r && r.ok === false) note('Printing did not start: ' + (r.error || 'no reason given'), 'error');
+        else if (asPdf && r && r.path) ctx.notify({ level: 'ok', title: 'Saved as PDF', detail: r.path });
+      } catch (err) {
+        paneFailed(err);
+      }
+    }
+
+    /* ---------------- bookmarks (Phase B1) ---------------- */
+    async function loadBookmarks() {
+      if (!hasB1) return;
+      try {
+        const d = await ctx.api.get('/api/os/browser/bookmarks');
+        if (disposed || ctx.signal.aborted) return;
+        bms = bookmarksModel(d.bookmarks);
+        bmsError = '';
+      } catch (err) {
+        if (isAbort(err) || disposed) return;
+        bmsError = err && err.message ? err.message : String(err);
+      }
+      paintBookmarks();
+      paintTools(cur());
+    }
+
+    function paintBookmarks() {
+      bmEl.hidden = !hasB1;
+      if (!hasB1) return;
+      if (bmsError) {
+        bmEl.replaceChildren(el('span', 'cb-bmnote', 'Bookmarks are not available: ' + bmsError));
+        return;
+      }
+      if (!bms.length) {
+        bmEl.replaceChildren(el('span', 'cb-bmnote', 'Bookmarks you add with the star in the address bar appear here.'));
+        return;
+      }
+      bmEl.replaceChildren(
+        ...bms.map((b) => {
+          const holder = el('span', 'cb-bmk');
+          const open = el('button', 'cb-bmopen', b.title);
+          open.type = 'button';
+          open.title = b.url;
+          open.addEventListener('click', () => openWeb(b.url));
+          const x = el('button', 'cb-bmx');
+          x.type = 'button';
+          x.setAttribute('aria-label', 'Remove bookmark ' + b.title);
+          x.title = 'Remove bookmark';
+          setHtml(x, html`${ICON.stop}`);
+          x.addEventListener('click', () => removeBookmark(b));
+          holder.append(open, x);
+          return holder;
+        }),
+      );
+    }
+
+    async function toggleBookmark() {
+      const v = cur();
+      if (!pane || !isWebUrl(v.url)) return;
+      const have = bookmarkFor(bms, v.url);
+      try {
+        if (have) await ctx.api.post('/api/os/browser/bookmarks/remove', { id: have.id });
+        else await ctx.api.post('/api/os/browser/bookmarks/add', { url: v.url, title: v.title || hostOf(v.url) });
+      } catch (err) {
+        if (!isAbort(err)) note('The bookmark was not changed: ' + (err && err.message ? err.message : String(err)), 'error');
+        return;
+      }
+      await loadBookmarks();
+    }
+
+    async function removeBookmark(b) {
+      try {
+        await ctx.api.post('/api/os/browser/bookmarks/remove', { id: b.id });
+      } catch (err) {
+        if (!isAbort(err)) note('The bookmark was not removed: ' + (err && err.message ? err.message : String(err)), 'error');
+        return;
+      }
+      await loadBookmarks();
+    }
+
+    /* ---------------- history and downloads panels (Phase B1) ---------------- */
+    function openPanel(name) {
+      if (!hasB1 || paneProblem) return;
+      if (panel === name) {
+        closePanel();
+        return;
+      }
+      closeFind();
+      panel = name;
+      if (!offPanelEsc) offPanelEsc = ctx.keys.pushEsc(() => closePanel());
+      regionKey = '';
+      paint();
+    }
+
+    function closePanel() {
+      if (!panel) return;
+      panel = '';
+      histBody = null;
+      dlBody = null;
+      histConfirm = null;
+      if (histTimer) {
+        clearTimeout(histTimer);
+        histTimer = 0;
+      }
+      if (offPanelEsc) {
+        offPanelEsc();
+        offPanelEsc = null;
+      }
+      regionKey = '';
+      paint();
+    }
+
+    function panelHead(title, ...controls) {
+      const head = el('div', 'bw-ph');
+      head.append(el('h3', '', title), ...controls);
+      return head;
+    }
+
+    function panelButton(label, onClick, spec) {
+      const b = el('button', 'os-btn', label);
+      b.type = 'button';
+      if (spec) b.dataset.spec = spec;
+      b.addEventListener('click', onClick);
+      return b;
+    }
+
+    function buildPanel() {
+      if (panel === 'history') buildHistoryPanel();
+      else if (panel === 'downloads') buildDownloadsPanel();
+    }
+
+    function buildHistoryPanel() {
+      const search = el('input', 'bw-search');
+      search.type = 'search';
+      search.placeholder = 'Search history';
+      search.setAttribute('aria-label', 'Search history');
+      search.autocomplete = 'off';
+      search.value = histQuery;
+      search.dataset.spec = 'Filters the list by words in the page title or the address. It searches everything the browser has recorded, not only what is shown.';
+      search.addEventListener('input', () => {
+        histQuery = search.value;
+        if (histTimer) clearTimeout(histTimer);
+        histTimer = setTimeout(() => {
+          histTimer = 0;
+          loadHistory();
+        }, 250);
+      });
+      const clear = panelButton('CLEAR ALL', () => askClearHistory(), 'Removes every recorded visit from this Mac after you confirm. Bookmarks and downloads are not touched.');
+      const close = panelButton('CLOSE', () => closePanel(), 'Goes back to the page.');
+      histConfirm = el('div', 'bw-pc');
+      histBody = el('div', 'bw-pb');
+      panelRoot.dataset.panel = 'history';
+      panelRoot.replaceChildren(panelHead('History', search, clear, close), histConfirm, histBody);
+      loadHistory();
+    }
+
+    async function loadHistory() {
+      const body = histBody;
+      if (!body) return;
+      const seq = ++histSeq;
+      states.loading(body, 'Reading history');
+      const q = histQuery.trim();
+      try {
+        const d = await ctx.api.get('/api/os/browser/history?limit=300' + (q ? '&q=' + encodeURIComponent(q) : ''));
+        if (disposed || seq !== histSeq || body !== histBody) return;
+        const groups = groupHistory(d.history);
+        if (!groups.length) {
+          states.empty(body, q ? 'Nothing in the history matches that.' : 'No history yet.', { hint: q ? '' : 'Pages you visit in this browser are listed here.' });
+          return;
+        }
+        const nodes = [];
+        groups.forEach((g) => {
+          nodes.push(el('h4', 'bw-day', g.label));
+          g.items.forEach((e) => nodes.push(historyRow(e)));
+        });
+        states.populated(body, nodes);
+      } catch (err) {
+        if (isAbort(err) || disposed || body !== histBody) return;
+        states.error(body, err, { retry: () => loadHistory(), title: 'Could not read the history' });
+      }
+    }
+
+    function historyRow(e) {
+      const row = el('div', 'bw-hrow');
+      const open = el('button', 'bw-hopen');
+      open.type = 'button';
+      open.title = e.url;
+      open.append(el('span', 'tm', clock(e.at).slice(0, 5)), el('span', 'ti', e.title || hostOf(e.url) || e.url), el('span', 'ur', hostOf(e.url) || e.url));
+      open.addEventListener('click', () => {
+        closePanel();
+        openWeb(e.url);
+      });
+      const x = el('button', 'cb-x');
+      x.type = 'button';
+      x.setAttribute('aria-label', 'Remove from history');
+      x.title = 'Remove from history';
+      setHtml(x, html`${ICON.stop}`);
+      x.addEventListener('click', async () => {
+        try {
+          await ctx.api.post('/api/os/browser/history/remove', { id: e.id });
+        } catch (err) {
+          if (!isAbort(err)) note('That entry was not removed: ' + (err && err.message ? err.message : String(err)), 'error');
+          return;
+        }
+        loadHistory();
+      });
+      row.append(open, x);
+      return row;
+    }
+
+    function askClearHistory() {
+      if (!histConfirm) return;
+      confirmHere(
+        histConfirm,
+        'Clear all browsing history? Every visit this browser has recorded is removed from this Mac. Bookmarks and downloads are not touched. This cannot be undone.',
+        () => ctx.api.post('/api/os/browser/history/clear', {}),
+        {
+          onDone: (ok) => {
+            if (histConfirm) histConfirm.replaceChildren();
+            if (ok) loadHistory();
+          },
+        },
+      );
+    }
+
+    function buildDownloadsPanel() {
+      const clear = panelButton('CLEAR FINISHED', () => {
+        if (pane) safe(pane.clearDownloads());
+      }, 'Removes finished, cancelled and failed downloads from this list. The files themselves stay where they are.');
+      const close = panelButton('CLOSE', () => closePanel(), 'Goes back to the page.');
+      dlBody = el('div', 'bw-pb');
+      panelRoot.dataset.panel = 'downloads';
+      panelRoot.replaceChildren(
+        panelHead('Downloads', clear, close),
+        el('p', 'bw-pnote', 'Saved to your Downloads folder, flagged for Gatekeeper, and checked by the downloads watcher. Nothing is opened by itself, and a file that can run code is only ever shown in Finder.'),
+        dlBody,
+      );
+      dlStruct = '';
+      paintDownloads();
+    }
+
+    function dlAction(id, act) {
+      if (!pane) return;
+      Promise.resolve(pane.downloadAction(id, act))
+        .then((r) => {
+          if (r && r.ok === false && !disposed) note(r.error || 'That did not work.', 'error');
+        })
+        .catch((err) => paneFailed(err));
+    }
+
+    function downloadRow(d) {
+      const row = el('div', 'bw-dl');
+      row.dataset.state = d.state;
+      const name = el('div', 'nm', d.filename);
+      name.title = d.url;
+      const line = el('div', 'ln', downloadLine(d));
+      const bar = el('div', 'bar');
+      const fill = el('i');
+      bar.append(fill);
+      bar.hidden = d.state !== 'progressing';
+      const acts = el('div', 'ac');
+      const btn = (label, act, extra) => {
+        const b = el('button', 'os-btn', label);
+        b.type = 'button';
+        if (extra && extra.disabled) b.disabled = true;
+        if (extra && extra.title) b.title = extra.title;
+        b.addEventListener('click', () => dlAction(d.id, act));
+        acts.append(b);
+      };
+      if (d.state === 'progressing') {
+        btn(d.paused ? 'RESUME' : 'PAUSE', d.paused ? 'resume' : 'pause');
+        btn('CANCEL', 'cancel');
+      } else {
+        if (d.state === 'completed') {
+          btn('OPEN', 'open', d.openable ? null : { disabled: true, title: 'This kind of file can run code, so it is not opened from here. Use Show in folder.' });
+          btn('SHOW IN FOLDER', 'reveal');
+        }
+        btn('REMOVE', 'remove');
+      }
+      row.append(name, line, bar, acts);
+      dlLive.set(d.id, { line, fill, bar });
+      return row;
+    }
+
+    function paintDownloads() {
+      const body = dlBody;
+      if (!body) return;
+      if (!dl.length) {
+        dlStruct = '';
+        dlLive = new Map();
+        states.empty(body, 'No downloads yet.', { hint: 'Anything this browser downloads is listed here.' });
+        return;
+      }
+      const struct = dl.map((d) => [d.id, d.state, d.paused ? 1 : 0, d.openable ? 1 : 0, String(d.quarantined)].join('|')).join('~');
+      if (struct === dlStruct && body.dataset.state === 'populated') {
+        /* the same rows: only the numbers moved, so update them in place and keep the buttons the owner may be pressing */
+        dl.forEach((d) => {
+          const live = dlLive.get(d.id);
+          if (!live) return;
+          live.line.textContent = downloadLine(d);
+          live.fill.style.width = (d.percent === null ? 100 : d.percent) + '%';
+        });
+        return;
+      }
+      dlStruct = struct;
+      dlLive = new Map();
+      const rows = dl.map((d) => downloadRow(d));
+      dl.forEach((d) => {
+        const live = dlLive.get(d.id);
+        if (live) live.fill.style.width = (d.percent === null ? 100 : d.percent) + '%';
+      });
+      states.populated(body, rows);
+    }
+
+    function onDownloads(list) {
+      if (disposed) return;
+      dl = downloadsModel(list);
+      paintTools(cur());
+      if (panel === 'downloads') paintDownloads();
+    }
+
+    function onCommand(cmd) {
+      if (disposed) return;
+      if (cmd === 'find') openFind();
+      else if (cmd === 'address') {
+        addr.focus();
+        addr.select();
+      } else if (cmd === 'find-next') runFind(true, true);
+      else if (cmd === 'find-prev') runFind(false, true);
     }
 
     /* ---------------- sizing ---------------- */
@@ -577,9 +1194,58 @@ export default {
         note('', '');
       }
     });
-    ctx.keys.bind('Alt+l', () => {
+    const focusAddress = () => {
       addr.focus();
       addr.select();
+    };
+    ctx.keys.bind('Alt+l', focusAddress);
+    newTabBtn.addEventListener('click', () => newTab());
+    reopenBtn.addEventListener('click', () => reopenTab());
+    starBtn.addEventListener('click', () => toggleBookmark());
+    findBtn.addEventListener('click', () => (findOpen ? closeFind() : openFind()));
+    zoomOutBtn.addEventListener('click', () => zoom('out'));
+    zoomInBtn.addEventListener('click', () => zoom('in'));
+    zoomBtn.addEventListener('click', () => zoom('reset'));
+    printBtn.addEventListener('click', () => printPage(false));
+    pdfBtn.addEventListener('click', () => printPage(true));
+    dlBtn.addEventListener('click', () => openPanel('downloads'));
+    histBtn.addEventListener('click', () => openPanel('history'));
+    findInput.addEventListener('input', () => runFind(true, false));
+    findInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runFind(!e.shiftKey, true);
+      }
+    });
+    findNext.addEventListener('click', () => runFind(true, true));
+    findPrev.addEventListener('click', () => runFind(false, true));
+    findClose.addEventListener('click', () => closeFind());
+    /* Chrome's keys while the console has the keyboard. While the PAGE has it, the shell handles the same keys itself. */
+    ctx.keys.bind(MOD + '+t', () => newTab());
+    ctx.keys.bind(MOD + '+Shift+t', () => reopenTab());
+    ctx.keys.bind(MOD + '+l', focusAddress);
+    ctx.keys.bind(MOD + '+f', () => openFind());
+    ctx.keys.bind(MOD + '+g', () => runFind(true, true));
+    ctx.keys.bind(MOD + '+Shift+g', () => runFind(false, true));
+    ctx.keys.bind(MOD + '+p', () => printPage(false));
+    ctx.keys.bind(MOD + '+d', () => toggleBookmark());
+    ctx.keys.bind(MOD + '+=', () => zoom('in'));
+    ctx.keys.bind(MOD + '+-', () => zoom('out'));
+    ctx.keys.bind(MOD + '+0', () => zoom('reset'));
+    /* the keymap ignores keys typed into a field, so the two fields of this screen answer these themselves */
+    addr.addEventListener('keydown', (e) => {
+      const m = MOD === 'Meta' ? e.metaKey : e.ctrlKey;
+      if (m && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === 'f') {
+        e.preventDefault();
+        openFind();
+      }
+    });
+    findInput.addEventListener('keydown', (e) => {
+      const m = MOD === 'Meta' ? e.metaKey : e.ctrlKey;
+      if (m && !e.altKey && String(e.key).toLowerCase() === 'g') {
+        e.preventDefault();
+        runFind(!e.shiftKey, true);
+      }
     });
 
     /* the native view follows every change of the page area */
@@ -613,6 +1279,22 @@ export default {
         }
       }
       if (frameEl) frameEl.remove();
+      if (hasB1 && typeof pane.screen === 'function') {
+        try {
+          Promise.resolve(pane.screen(false)).catch(() => {});
+        } catch (err) {
+          /* the window is going away */
+        }
+      }
+      if (typeof offDl === 'function') offDl();
+      if (typeof offCmd === 'function') offCmd();
+      offDl = null;
+      offCmd = null;
+      if (histTimer) clearTimeout(histTimer);
+      if (offFindEsc) offFindEsc();
+      if (offPanelEsc) offPanelEsc();
+      offFindEsc = null;
+      offPanelEsc = null;
     }
     ctx.signal.addEventListener('abort', shutDown);
 
@@ -620,7 +1302,14 @@ export default {
     function onPaneState(s) {
       if (disposed) return;
       model = paneModel(s);
+      tm = tabsModel(s);
       paneKnown = true;
+      if (tm.activeId && lastActiveId && tm.activeId !== lastActiveId) {
+        /* another tab came forward (a click, Cmd+1, a pop-up, the agent): a panel or find bar of the old one is stale */
+        findInput.value = '';
+        if (panel) closePanel();
+      }
+      lastActiveId = tm.activeId || lastActiveId;
       if (pendingUrl) {
         /* the address asked for stays in the bar until that load has run its course, as a browser does */
         if (model.loading) sawLoading = true;
@@ -643,6 +1332,8 @@ export default {
         const s = await pane.state();
         if (disposed || ctx.signal.aborted) return;
         model = paneModel(s);
+        tm = tabsModel(s);
+        lastActiveId = tm.activeId;
         paneKnown = true;
         viewShown = model.open;
       } catch (err) {
@@ -664,6 +1355,7 @@ export default {
         if (disposed || ctx.signal.aborted) return;
         att = d;
         paintWatch();
+        renderTabs(cur());
       } catch (err) {
         if (!isAbort(err) && !disposed) paintWatch(err);
       } finally {
@@ -684,6 +1376,7 @@ export default {
     ctx.events.onResync(() => {
       connectPane();
       loadAttached();
+      loadBookmarks();
     });
 
     hooks.set(ctx, {
@@ -691,6 +1384,7 @@ export default {
       async refresh() {
         await connectPane();
         await loadAttached();
+        await loadBookmarks();
       },
     });
     setWidth(widthPx, false);
@@ -701,6 +1395,15 @@ export default {
     }
     paintWatch();
     paint();
+    if (pane && !hasB1) note('This window is running an older shell, so tabs, find, zoom, downloads, history and bookmarks are off. Quit and reopen the app to get them.', 'warn');
+    if (hasB1) {
+      if (typeof pane.screen === 'function') safe(pane.screen(true));
+      offDl = pane.onDownloads(onDownloads);
+      offCmd = pane.onCommand(onCommand);
+      Promise.resolve(pane.downloads()).then(onDownloads).catch((err) => paneFailed(err));
+      paintBookmarks();
+      loadBookmarks();
+    }
     await connectPane();
     loadAttached();
     /* a page the server asked for while another screen was showing (NEWS, the agent's browser tools) */

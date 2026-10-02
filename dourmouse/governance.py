@@ -181,7 +181,31 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Ollama Cloud key shape: 32 hex characters, a dot, then a token.
     (re.compile(r"\b[0-9a-f]{32}\.[A-Za-z0-9_-]{16,}"), "OLLAMA_API_KEY"),
     (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}"), "BEARER_TOKEN"),
+    # Phase H, R2B-08: Google OAuth access and refresh tokens, Stripe live keys.
+    (re.compile(r"\bya29\.[A-Za-z0-9_-]{20,}"), "GOOGLE_OAUTH_TOKEN"),
+    (re.compile(r"(?<![A-Za-z0-9/])1//0[A-Za-z0-9_-]{20,}"), "GOOGLE_REFRESH_TOKEN"),
+    (re.compile(r"\b(?:sk|rk|pk)_live_[A-Za-z0-9]{16,}"), "STRIPE_LIVE_KEY"),
 )
+
+# Phase H, R2B-08: an AWS secret access key has no prefix of its own (40
+# characters of base64), so on its own it is indistinguishable from other
+# data. Next to an access key id (AKIA...) it is not: when a text holds an
+# AKIA id, every standalone 40-character run with upper case, lower case and
+# a digit is treated as its secret.
+_AWS_KEY_ID = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+_AWS_SECRET = re.compile(r"(?<![A-Za-z0-9/+=])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])")
+
+# Phase H, R2B-08: a password manager or browser export row:
+# ``bank.com|bob|Tr0ub4dor&3`` or ``https://bank.com,bob,Tr0ub4dor&3``.
+_CREDENTIAL_ROWS = (
+    re.compile(r"(?<![\w.-])(?P<head>https?://[^\s,|]{3,200},[^\s,|]{1,120},)(?P<pw>[^\s,|]{6,128})"),
+    re.compile(r"(?<![\w.-])(?P<head>(?:[A-Za-z0-9-]{1,63}\.){1,8}[A-Za-z]{2,24}\|[^\s|]{1,120}\|)(?P<pw>[^\s|]{6,128})"),
+)
+
+# Characters that render as nothing. Inside a key they defeat every exact
+# and shape match while the key still works once a page strips them.
+_INVISIBLE = re.compile("[­​‌‍⁠﻿]")
+_INVISIBLE_OR_SPACE = "[\\s­​‌‍⁠﻿]*"
 
 # A secret assigned to a name: GEMINI_API_KEY=..., "db_password": "...",
 # clientSecret: .... Found by locating the assignment first (a bounded name, an
@@ -191,8 +215,12 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 # minutes; finding #136), and matching the marker anywhere in a word redacted
 # "monkey" and "keyboard_layout".
 _ASSIGNMENT = re.compile(
-    r"(?<![A-Za-z0-9_.-])(?P<name>[A-Za-z][A-Za-z0-9_.-]{0,79})(?P<q1>['\"]?)(?P<sep>[ \t]*[=:][ \t]*)(?P<q2>['\"]?)"
-    r"(?P<value>[A-Za-z0-9._~+/=\-]{8,})"
+    r"(?<![A-Za-z0-9_.-])(?P<name>[A-Za-z][A-Za-z0-9_.-]{0,79})(?P<q1>['\"]?)(?P<sep>[ \t]*[=:][ \t]*)"
+    # Phase H, R2B-08: a quoted value runs to its closing quote, so symbols
+    # and spaces inside it ("P@ssw0rd!2024", "correct horse battery staple")
+    # no longer cut the match short. Bounded, so it cannot backtrack far.
+    r"(?:(?P<q2>['\"])(?P<qvalue>[^'\"\r\n]{8,256})(?P=q2)"
+    r"|(?P<value>[A-Za-z0-9._~+/=\-!@#$%^*]{8,}))"
 )
 _STRONG_NAME_WORDS = frozenset({"secret", "secrets", "password", "passwd", "credential", "credentials", "apikey"})
 _WEAK_NAME_WORDS = frozenset({"key", "keys", "token", "tokens"})
@@ -208,6 +236,8 @@ def _is_secret_assignment(name: str, value: str) -> bool:
     if _STRONG_NAME_RE.search("_".join(words)) or _STRONG_NAME_WORDS.intersection(words):
         return True  # a name that says "secret": any value of this length
     if _WEAK_NAME_WORDS.intersection(words):
+        if any(c.isspace() for c in value):
+            return False  # "key": "press the 2 keys" is prose, not a key
         # key and token also name harmless things (token_count, max_tokens,
         # key_binding), so those need a value that looks random: letters and
         # digits together, and long enough.
@@ -222,10 +252,13 @@ def _redact_assignments(text: str) -> tuple[str, bool]:
 
     def sub(m: re.Match[str]) -> str:
         nonlocal hit
-        if not _is_secret_assignment(m.group("name"), m.group("value")):
+        quoted = m.group("qvalue") is not None
+        value = m.group("qvalue") if quoted else m.group("value")
+        if not _is_secret_assignment(m.group("name"), value):
             return m.group(0)
         hit = True
-        return f"{m.group('name')}{m.group('q1')}{m.group('sep')}{m.group('q2')}[REDACTED:SECRET_ASSIGNMENT]"
+        quote = m.group("q2") or ""
+        return f"{m.group('name')}{m.group('q1')}{m.group('sep')}{quote}[REDACTED:SECRET_ASSIGNMENT]{quote}"
 
     return _ASSIGNMENT.sub(sub, text), hit
 
@@ -245,7 +278,20 @@ def _value_forms(value: str) -> set[str]:
         b64 = encoder(raw).decode("ascii")
         forms.add(b64)
         forms.add(b64.rstrip("="))
+    # Phase H, R2B-08: hex, as a byte dump or a URL path would carry it.
+    forms.add(raw.hex())
+    forms.add(raw.hex().upper())
     return {f for f in forms if len(f) >= _ENV_MIN_VALUE_LEN}
+
+
+def _spaced_pattern(value: str) -> re.Pattern[str]:
+    """The raw value with any run of white space or invisible characters
+    allowed between its characters (R2B-08: a key split by spaces, line
+    breaks or a zero-width character). Every element is a literal, so the
+    match is linear in the text."""
+    tokens = [t for t in re.split(r"\s+", value) if t]
+    gap = _INVISIBLE_OR_SPACE[:-1] + "]+"  # white space inside the secret is one run, not one per space
+    return re.compile(gap.join(_INVISIBLE_OR_SPACE.join(re.escape(c) for c in t) for t in tokens))
 
 
 class _ExactValues:
@@ -260,18 +306,23 @@ class _ExactValues:
         self._lock = threading.Lock()
         self._stamp: tuple[str, int, int] | None = None
         self._forms: tuple[str, ...] = ()
+        self._spaced: tuple[re.Pattern[str], ...] = ()
 
-    def _load(self, path: Any) -> tuple[str, ...]:
+    def _load(self, path: Any) -> tuple[tuple[str, ...], tuple[re.Pattern[str], ...]]:
         from dotenv import dotenv_values
 
         forms: set[str] = set()
+        raws: set[str] = set()
         for name, value in dotenv_values(path).items():
             if value and len(value) >= _ENV_MIN_VALUE_LEN and any(m in name.upper() for m in _ENV_NAME_MARKERS):
                 forms |= _value_forms(value)
+                raws.add(value)
         # Longest first so a form containing another is replaced whole.
-        return tuple(sorted(forms, key=len, reverse=True))
+        ordered = tuple(sorted(forms, key=len, reverse=True))
+        spaced = tuple(_spaced_pattern(v) for v in sorted(raws, key=len, reverse=True))
+        return ordered, spaced
 
-    def get(self, force: bool = False) -> tuple[str, ...]:
+    def _refresh(self, force: bool) -> None:
         from .config import user_env_path
 
         path = user_env_path()
@@ -280,11 +331,21 @@ class _ExactValues:
             stamp = (str(path), st.st_mtime_ns, st.st_size)
         except FileNotFoundError:
             stamp = (str(path), -1, -1)
+        if force or stamp != self._stamp:
+            self._forms, self._spaced = self._load(path) if stamp[1] != -1 else ((), ())
+            self._stamp = stamp
+
+    def get(self, force: bool = False) -> tuple[str, ...]:
         with self._lock:
-            if force or stamp != self._stamp:
-                self._forms = self._load(path) if stamp[1] != -1 else ()
-                self._stamp = stamp
+            self._refresh(force)
             return self._forms
+
+    def spaced(self) -> tuple[re.Pattern[str], ...]:
+        """One pattern per raw secret that tolerates white space and invisible
+        characters between its characters."""
+        with self._lock:
+            self._refresh(False)
+            return self._spaced
 
 
 _EXACT_VALUES = _ExactValues()
@@ -309,6 +370,18 @@ class DlpFilter:
     """
 
     def redact(self, text: str) -> tuple[str, list[str]]:
+        result, matched = self._redact(text)
+        if _INVISIBLE.search(text):
+            # Phase H, R2B-08: a zero-width character inside a key hides it
+            # from every pattern. When removing the invisible characters
+            # reveals a secret, the text without them is what is passed on
+            # (otherwise the original, so an emoji joiner is never touched).
+            stripped, stripped_hits = self._redact(_INVISIBLE.sub("", text))
+            if len(stripped_hits) > len(matched):
+                return stripped, stripped_hits
+        return result, matched
+
+    def _redact(self, text: str) -> tuple[str, list[str]]:
         matched: list[str] = []
         result = text
         for form in _EXACT_VALUES.get():
@@ -316,14 +389,85 @@ class DlpFilter:
                 if "ENV_SECRET" not in matched:
                     matched.append("ENV_SECRET")
                 result = result.replace(form, "[REDACTED:ENV_SECRET]")
+        for spaced in _EXACT_VALUES.spaced():
+            result, n = spaced.subn("[REDACTED:ENV_SECRET]", result)
+            if n and "ENV_SECRET" not in matched:
+                matched.append("ENV_SECRET")
+        aws_context = bool(_AWS_KEY_ID.search(result))
         for pattern, label in _SECRET_PATTERNS:
             if pattern.search(result):
                 matched.append(label)
                 result = pattern.sub(f"[REDACTED:{label}]", result)
+        if aws_context:
+            def _aws(m: re.Match[str]) -> str:
+                v = m.group(0)
+                if any(c.isupper() for c in v) and any(c.islower() for c in v) and any(c.isdigit() for c in v):
+                    return "[REDACTED:AWS_SECRET_ACCESS_KEY]"
+                return v
+
+            replaced = _AWS_SECRET.sub(_aws, result)
+            if replaced != result:
+                matched.append("AWS_SECRET_ACCESS_KEY")
+                result = replaced
+        result, rows = _redact_credential_rows(result)
+        if rows:
+            matched.append("CREDENTIAL_ROW")
         result, assigned = _redact_assignments(result)
         if assigned:
             matched.append("SECRET_ASSIGNMENT")
         return result, matched
+
+    def secrets_in_arguments(self, arguments: Any) -> list[str]:
+        """Phase H, R2B-08: the labels of any secret inside a tool call's
+        arguments (every string, at any depth, also URL-decoded), or an empty
+        list. Used to refuse a call that would send a secret off the machine
+        (a URL, a search query, text typed into a page, a message)."""
+        labels: list[str] = []
+        for value in _strings_in(arguments):
+            for candidate in {value, urllib.parse.unquote_plus(value)}:
+                for label in self.redact(candidate)[1]:
+                    if label not in labels:
+                        labels.append(label)
+        return labels
+
+
+def _strings_in(value: Any, depth: int = 0) -> list[str]:
+    if depth > 6:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        out: list[str] = []
+        for key, item in value.items():
+            out.extend(_strings_in(item, depth + 1))
+            if isinstance(key, str):
+                out.append(key)
+        return out
+    if isinstance(value, (list, tuple)):
+        return [s for item in value for s in _strings_in(item, depth + 1)]
+    return []
+
+
+def _redact_credential_rows(text: str) -> tuple[str, bool]:
+    """``site|user|password`` and ``https://site,user,password`` rows: the
+    third field is replaced when it mixes at least two kinds of character."""
+    if "|" not in text and "," not in text:
+        return text, False
+    hit = False
+
+    def sub(m: re.Match[str]) -> str:
+        nonlocal hit
+        pw = m.group("pw")
+        kinds = sum((any(c.islower() for c in pw), any(c.isupper() for c in pw),
+                     any(c.isdigit() for c in pw), any(not c.isalnum() for c in pw)))
+        if kinds < 2 or pw.startswith("[REDACTED"):
+            return m.group(0)
+        hit = True
+        return m.group("head") + "[REDACTED:CREDENTIAL_ROW]"
+
+    for pattern in _CREDENTIAL_ROWS:
+        text = pattern.sub(sub, text)
+    return text, hit
 
 
 # --------------------------------------------------------------------------- #

@@ -121,7 +121,7 @@ class TestAuthGate:
             resp = conn.getresponse()
             assert resp.status == 200
             set_cookie = resp.getheader("Set-Cookie", "")
-            assert "dourmouse_session=s3cret" in set_cookie
+            assert "dourmouse_session=v1." in set_cookie and "s3cret" not in set_cookie
             assert "HttpOnly" in set_cookie
             conn.close()
         finally:

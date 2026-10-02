@@ -78,7 +78,15 @@ _SYSTEM_ROOT_PARTS = (
     r"C:\Program Files (x86)",
     r"C:\ProgramData",
 )
-_SENSITIVE_COMPONENTS = {".ssh", ".aws", ".gnupg", ".kube", ".docker", "Keychains"}
+_SENSITIVE_COMPONENTS = {
+    ".ssh", ".aws", ".gnupg", ".kube", ".docker", "Keychains",
+    # Phase H (review of the Wave 1 text viewer): a Chromium profile keeps
+    # each site's localStorage, sessionStorage and IndexedDB in these folders
+    # as .log and .ldb files, and many sites keep their sign-in tokens there.
+    # The pane's own profile (dourmouse-electron/Partitions/...) and Chrome's
+    # are both covered; .log is a text type the viewer would otherwise show.
+    "Local Storage", "Session Storage", "IndexedDB",
+}
 
 # Filenames that are themselves credentials, matched regardless of directory
 # (v2.0 Phase 0): .env* (API keys in any project root, incl. this repo's own
