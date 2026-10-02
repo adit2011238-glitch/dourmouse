@@ -79,3 +79,7 @@ security findings closed or accepted in writing; clean-account install passes; f
 
 The Mac's active GitHub login can be `fourclaude208-droid`, which cannot push. Push with:
 `git -c "credential.helper=" -c "credential.helper=!f() { echo username=adit2011238-glitch; echo password=\$(gh auth token --user adit2011238-glitch); }; f" push`
+
+## 7. Budget
+
+Budget rule: never more than 4 agents running at once (the 5-hour window hit 96 percent with about 8). Estimated weekly cost: Wave 1 about 15 points, Wave 2 about 25, Wave 3 about 20, Wave 4 about 10, plus reviewers and main-thread steps about 25. Total about 95, so plan two weeks: Waves 1 and 2 this week, Waves 3 and 4 after the 10-09 reset. Re-measure after Wave 1 and update these numbers.
