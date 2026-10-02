@@ -109,6 +109,15 @@ _EXCLUDED_TOOL_NAMES = {
 }
 
 
+def missing_shared_desk_tools(tools: list[ToolSpec]) -> list[str]:
+    """Phase J: names from dispatch.SHARED_DESK_TOOLS that the given exposed
+    tool list does not carry. Empty means a CODE chat reaches the whole desk."""
+    from dourmouse.dispatch import SHARED_DESK_TOOLS
+
+    have = {t.name for t in tools}
+    return [n for n in SHARED_DESK_TOOLS if n not in have]
+
+
 def exposed_tools(registry: DispatchRegistry) -> list[ToolSpec]:
     """The real, live tool set this bridge exposes — every tool in the
     registry that is not PROHIBITED and not structurally excluded above.

@@ -646,7 +646,7 @@ class TestOpenFilePreview:
         assert "no such file" in out
 
     def test_refuses_unsupported_extension(self, tmp_path):
-        p = tmp_path / "notes.txt"
+        p = tmp_path / "notes.psd"
         p.write_text("hi")
         out = _open_file_preview_tool({"path": str(p)})
         assert out.startswith("REFUSED")

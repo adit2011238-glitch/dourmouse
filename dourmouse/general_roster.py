@@ -3721,6 +3721,21 @@ def build_general_registry() -> DispatchRegistry:
         )
     )
 
+    from dourmouse.app_driver.tools import build_app_driver_tools
+
+    registry.register_subagent(
+        _subagent(
+            "app_driver",
+            "General",
+            "Drives other Mac apps the owner has allowed: reads an app's "
+            "controls (snapshot), then clicks, types, presses keys or scrolls "
+            "by element id. Only for apps on the owner's allow list; every "
+            "act needs confirmation and a stop switch halts it at once. "
+            "Prefer this over the older send_app_keystrokes.",
+            build_app_driver_tools(),
+        )
+    )
+
     registry.register_subagent(
         _subagent(
             "comms",

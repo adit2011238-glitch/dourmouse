@@ -1236,8 +1236,40 @@ class DispatchRegistry:
         return out
 
 
+#: Phase J: the small toolset every chat screen can reach, even when the screen
+#: pins one agent (RESEARCH, COMMS, AGENTSMITH, ...) or runs a coding toolchain.
+#: A pinned run is "only this agent's tools" for everything else; these are
+#: added on top so any chat box can open a page, open a file, and drive the
+#: media player without leaving its agent. Looked up by name across the whole
+#: registry, so the tools stay owned by the browser and system agents.
+SHARED_DESK_TOOLS: tuple[str, ...] = (
+    "open_browser_pane",
+    "browser_open",
+    "open_file_preview",
+    "player_play",
+    "player_pause",
+    "player_seek",
+    "player_now_playing",
+)
+
+
+def shared_desk_specs(registry: DispatchRegistry) -> list[ToolSpec]:
+    """The shared desk tools that exist in this registry (a tool the registry
+    does not carry is simply absent, never invented)."""
+    found: dict[str, ToolSpec] = {}
+    for sub in registry.all_subagents():
+        for t in sub.tools:
+            if t.name in SHARED_DESK_TOOLS and t.name not in found:
+                found[t.name] = t
+    return [found[n] for n in SHARED_DESK_TOOLS if n in found]
+
+
 def _scoped_tool_specs(
-    registry: DispatchRegistry, agent_names: set[str], *, include_delegate: bool = True
+    registry: DispatchRegistry,
+    agent_names: set[str],
+    *,
+    include_delegate: bool = True,
+    include_shared_desk: bool = False,
 ) -> list[dict[str, Any]]:
     """Full tool schemas ONLY for the named agents (plus, by default, the
     orchestrator's delegate tool, so mid-task delegation stays possible).
@@ -1277,6 +1309,11 @@ def _scoped_tool_specs(
                 continue
             seen.add(t.name)
             out.append(t.openai_spec())
+    if include_shared_desk:
+        for t in shared_desk_specs(registry):
+            if t.name not in seen:
+                seen.add(t.name)
+                out.append(t.openai_spec())
     return out
 
 
@@ -4711,7 +4748,13 @@ def _run_dispatch_loop(
             if matches and _is_heavy_workflow_agent(matches[0]["name"]):
                 plan_agents = {matches[0]["name"]}
     scoped_tools = (
-        _scoped_tool_specs(registry, plan_agents, include_delegate=not ctx.forced_agent)
+        _scoped_tool_specs(
+            registry,
+            plan_agents,
+            include_delegate=not ctx.forced_agent,
+            # Phase J: any screen that gets tools at all also gets the desk.
+            include_shared_desk=True,
+        )
         if plan_agents
         else []
     )

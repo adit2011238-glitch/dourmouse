@@ -35,7 +35,7 @@ FLOORS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("trust", "Trust & Security", ("security", "reviewer", "agent_smith")),
     ("eng", "Engineering", (
         "dev_coding", "code_claude", "code_codex", "code_deepseek", "code_nvidia",
-        "code_ollama", "compute", "browser", "panel_control", "apps", "design_3d")),
+        "code_ollama", "compute", "browser", "panel_control", "apps", "app_driver", "design_3d")),
     ("fin", "Finance & Media", (
         "forex", "freebuff", "google_workspace", "markets", "media", "music", "mt5", "t212")),
     ("lounge", "Lounge", ("mail",)),

@@ -173,6 +173,19 @@ _CLAUDE_MCP_CONNECTION_FAILED_RE = re.compile(
 _DISALLOWED_NATIVE_TOOLS = "Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch"
 _MCP_ALLOWED_TOOLS = "mcp__dourmouse__*"
 
+#: Phase J: told to a CODE chat once per session so it knows the shared desk
+#: exists. The tools themselves are already exposed by mcp_bridge (which
+#: guarantees them, see mcp_bridge.missing_shared_desk_tools); the hint is
+#: only awareness, which is what was missing.
+_SHARED_DESK_HINT = (
+    "SHARED DESK (available from this chat via mcp__dourmouse__<name>): "
+    "open_browser_pane or browser_open to show or drive a web page, "
+    "open_file_preview to show a pdf, image, audio, video, txt, md, csv, json "
+    "or source file in the app's pane, and player_play, player_pause, "
+    "player_seek, player_now_playing for the media player. "
+    "The player tools report NOT CONFIRMED, since the player does not answer back."
+)
+
 # Real, live-caught bug (2026-09-14): this machine has the "caveman"
 # Claude Code plugin enabled GLOBALLY in the user-level
 # ~/.claude/settings.json ("enabledPlugins": {"caveman@caveman": true}),
@@ -658,6 +671,7 @@ def _run_claude(
             task = f"{claude_orchestrator_preamble()}\n\n---\n\n{task}"
         except Exception:  # noqa: BLE001 - a briefing must never break a turn
             pass
+        task = f"{_SHARED_DESK_HINT}\n\n---\n\n{task}"
     with _claude_session_run_lock(session_key):
         session_args = _claude_session_args(session_key)
         proc = _run_claude_once(

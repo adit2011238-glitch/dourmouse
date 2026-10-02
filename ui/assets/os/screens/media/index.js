@@ -1,4 +1,6 @@
-/* MEDIA: a player for audio, video and images, plus this screen's own thread.
+/* MEDIA: one player and reader surface: audio, video, images and PDFs, a queue,
+   a now-playing bar, media keys, a YouTube / Spotify launcher, and this
+   screen's own thread.
 
    The bytes come from the routes that already exist (/api/files/media with real
    byte ranges, /api/files/media-status while ffmpeg converts, /api/files/image,
@@ -15,7 +17,15 @@ import { states } from '../../kit/states.js';
 import { mountThreadView } from '../../kit/thread-view.js';
 import { agoLabel } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
-import { clock, sizeLabel, infoLine, mediaErrorText, formatText, convertLabel, CONVERT_POLL_MS, CONVERT_POLL_MAX } from './helpers.js';
+import {
+  clock, sizeLabel, infoLine, mediaErrorText, formatText, convertLabel, CONVERT_POLL_MS, CONVERT_POLL_MAX,
+  neighbour, reorderTarget, queueLabel, seekTarget, controlPlan, parseWebLink,
+} from './helpers.js';
+import { createPdfReader } from './pdf-view.js';
+
+const REPORT_MS = 4000;
+const SEEK_STEP = 5;
+const VOL_STEP = 0.1;
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -36,7 +46,7 @@ export default {
   thread: true,
 
   async mount(root, ctx) {
-    const st = { lib: null, openPanel: false, row: null, media: null, seq: 0, stopPoll: null, dragging: false, facts: {} };
+    const st = { lib: null, openPanel: false, row: null, media: null, seq: 0, stopPoll: null, dragging: false, facts: {}, queue: [], aliases: {}, pendingPlay: false, pendingSeek: null, lastReport: '', volume: 1, muted: false };
 
     /* ---------------- skeleton ---------------- */
     const noteEl = el('div', 'med-note');
@@ -71,6 +81,16 @@ export default {
     const barEl = el('div', 'med-bar');
     const infoEl = el('div', 'muted med-info');
     const tx = el('div', 'med-tx');
+    const prevBtn = el('button', 'os-btn med-skip', '⏮');
+    prevBtn.type = 'button';
+    prevBtn.disabled = true;
+    prevBtn.setAttribute('aria-label', 'Previous');
+    spec(prevBtn, 'Previous queue item. Past the first three seconds of a track it restarts the track instead. Shortcut: Shift+Left.');
+    const nextBtn = el('button', 'os-btn med-skip', '⏭');
+    nextBtn.type = 'button';
+    nextBtn.disabled = true;
+    nextBtn.setAttribute('aria-label', 'Next');
+    spec(nextBtn, 'Next queue item. Shortcut: Shift+Right.');
     const playBtn = el('button', 'os-btn med-play', '▶');
     playBtn.type = 'button';
     playBtn.disabled = true;
@@ -87,15 +107,65 @@ export default {
     seek.setAttribute('aria-label', 'Position');
     spec(seek, 'Scrubber. Releasing it seeks the media element, and the browser asks the server for a byte range from that point; the server answers 206 with exactly those bytes.');
     const durEl = el('span', 'muted', '');
-    tx.append(playBtn, curEl, seek, durEl);
-    barEl.append(infoEl, tx);
-    playerEl.append(stageEl, barEl);
+    const muteBtn = el('button', 'os-btn med-skip', 'MUTE');
+    muteBtn.type = 'button';
+    muteBtn.setAttribute('aria-label', 'Mute');
+    spec(muteBtn, 'Mutes and unmutes the player. Shortcut: M.');
+    const vol = el('input', 'med-vol');
+    vol.type = 'range';
+    vol.min = '0';
+    vol.max = '1';
+    vol.step = '0.05';
+    vol.value = '1';
+    vol.setAttribute('aria-label', 'Volume');
+    spec(vol, 'Volume. Up and Down arrows change it by ten percent.');
+    const queueAddBtn = el('button', 'os-btn med-skip', '+ QUEUE');
+    queueAddBtn.type = 'button';
+    queueAddBtn.disabled = true;
+    spec(queueAddBtn, 'Adds the open audio or video file to the end of the queue. The queue is saved, so it survives a restart.');
+    tx.append(prevBtn, playBtn, nextBtn, curEl, seek, durEl, muteBtn, vol, queueAddBtn);
+    const queueNote = el('div', 'muted med-qpos');
+    const pdfBarEl = el('div', 'med-pdfbar');
+    pdfBarEl.hidden = true;
+    barEl.append(infoEl, queueNote, tx);
+    playerEl.append(stageEl, pdfBarEl, barEl);
+
+    const queueEl = el('div', 'card med-queue');
+    const queueHead = el('div', 'med-qhead');
+    queueHead.append(el('div', 'lbl', 'Queue'));
+    const queueClear = el('button', 'os-btn', 'CLEAR');
+    queueClear.type = 'button';
+    spec(queueClear, 'Empties the queue. The files themselves are not touched.');
+    queueHead.append(queueClear);
+    const queueList = el('div', 'med-qlist');
+    queueList.dataset.region = '';
+    queueEl.append(queueHead, queueList);
+
+    const webEl = el('div', 'card med-web');
+    webEl.append(el('div', 'lbl', 'YouTube and Spotify'));
+    const webRow = el('div', 'med-pathrow');
+    const webIn = el('input', 'os-field');
+    webIn.type = 'text';
+    webIn.placeholder = 'paste a link, or type a search';
+    webIn.setAttribute('aria-label', 'A YouTube or Spotify link, or a search');
+    webIn.autocomplete = 'off';
+    webIn.spellcheck = false;
+    spec(webIn, 'A YouTube or Spotify link, or words to search for. Only https links on those two services are opened; the page opens in the shared browser pane (or the system browser outside the desktop app), because this window cannot frame another site.');
+    const ytBtn = el('button', 'os-btn os-btn--primary', 'YOUTUBE');
+    ytBtn.type = 'button';
+    spec(ytBtn, 'Opens the link or search on YouTube in the browser pane. Empty opens the YouTube home page.');
+    const spBtn = el('button', 'os-btn os-btn--primary', 'SPOTIFY');
+    spBtn.type = 'button';
+    spec(spBtn, 'Opens the link or search on Spotify Web in the browser pane. Spotify asks you to sign in there; this app never sees that login.');
+    webRow.append(webIn, ytBtn, spBtn);
+    webEl.append(webRow);
 
     const fmtEl = el('div', 'grid3');
     fmtEl.dataset.region = '';
     const threadEl = el('div', 'med-thread');
 
-    root.replaceChildren(noteEl, openEl, playerEl, fmtEl, threadEl);
+    root.replaceChildren(noteEl, openEl, playerEl, queueEl, webEl, fmtEl, threadEl);
+    root.tabIndex = -1;
     root.dataset.state = 'empty';
 
     const note = (text) => {
@@ -130,6 +200,121 @@ export default {
         pathIn.focus();
         if (!st.lib) loadLibrary();
       }
+    }
+
+    const pdf = createPdfReader(ctx, { stage: stageEl, bar: pdfBarEl, note, scroller: root.parentElement });
+
+    /* ---------------- reporting ---------------- */
+    /* What the screen reports to the server (POST /api/os/media/player-state)
+       so a tool can ask what is playing. Sent on every state change, and every
+       few seconds while playing so the position stays fresh; skipped when
+       nothing changed. */
+    function snapshot() {
+      const m = st.media;
+      const row = st.row;
+      const base = { path: row ? row.path : '', kind: row ? row.kind : null };
+      if (row && row.kind === 'pdf') return { ...base, playing: false, page: pdf.state().page };
+      return { ...base, playing: Boolean(m && !m.paused && !m.ended), position: m ? m.currentTime : null, duration: m && Number.isFinite(m.duration) ? m.duration : null };
+    }
+    async function report(force) {
+      const snap = snapshot();
+      const key = JSON.stringify({ ...snap, position: snap.playing ? null : Math.round((snap.position || 0) * 2) });
+      if (!force && !snap.playing && key === st.lastReport) return;
+      st.lastReport = key;
+      try {
+        await ctx.api.post('/api/os/media/player-state', snap);
+      } catch (_err) {
+        /* reporting is best effort; playback never depends on it */
+      }
+    }
+
+    /* ---------------- queue ---------------- */
+    function paintQueue() {
+      const rows = st.queue;
+      queueClear.disabled = !rows.length;
+      if (!rows.length) {
+        states.empty(queueList, 'The queue is empty.', { hint: 'Open an audio or video file and press + QUEUE.' });
+      } else {
+        const wrap = el('div');
+        rows.forEach((r, i) => {
+          const row = el('div', 'os-row med-qrow');
+          if (st.row && st.row.path === r.path) row.classList.add('now');
+          const play = el('button', 'os-btn med-file', (i + 1) + '. ' + r.name);
+          play.type = 'button';
+          spec(play, 'Plays ' + r.name + ' now.');
+          play.addEventListener('click', () => openPath(r.path, { autoplay: true }));
+          const up = el('button', 'os-btn med-skip', '▲');
+          up.type = 'button';
+          up.setAttribute('aria-label', 'Move ' + r.name + ' up');
+          up.disabled = reorderTarget(i, -1, rows.length) < 0;
+          spec(up, 'Moves ' + r.name + ' one place earlier in the queue.');
+          up.addEventListener('click', () => queueOp({ op: 'move', path: r.path, to: i - 1 }));
+          const down = el('button', 'os-btn med-skip', '▼');
+          down.type = 'button';
+          down.setAttribute('aria-label', 'Move ' + r.name + ' down');
+          down.disabled = reorderTarget(i, 1, rows.length) < 0;
+          spec(down, 'Moves ' + r.name + ' one place later in the queue.');
+          down.addEventListener('click', () => queueOp({ op: 'move', path: r.path, to: i + 1 }));
+          const del = el('button', 'os-btn med-skip', '✕');
+          del.type = 'button';
+          del.setAttribute('aria-label', 'Remove ' + r.name);
+          spec(del, 'Takes ' + r.name + ' out of the queue. The file is not touched.');
+          del.addEventListener('click', () => queueOp({ op: 'remove', path: r.path }));
+          row.append(play, up, down, del);
+          wrap.append(row);
+        });
+        states.populated(queueList, wrap);
+      }
+      paintNav();
+    }
+
+    function paintNav() {
+      const here = st.row ? st.row.path : '';
+      prevBtn.disabled = !st.media;
+      nextBtn.disabled = neighbour(st.queue, here, 1) < 0;
+      queueAddBtn.disabled = !(st.row && (st.row.kind === 'audio' || st.row.kind === 'video')) || st.queue.some((r) => r.path === here);
+      queueNote.textContent = st.row ? queueLabel(st.queue, st.row.path) && 'Queue: ' + queueLabel(st.queue, st.row.path) : '';
+    }
+
+    async function loadQueue() {
+      try {
+        const d = await ctx.api.get('/api/os/media/queue');
+        if (ctx.signal.aborted) return;
+        st.queue = d.queue || [];
+        paintQueue();
+      } catch (err) {
+        if (isAbort(err)) return;
+        states.error(queueList, err, { title: 'Could not read the queue', retry: () => loadQueue() });
+      }
+    }
+
+    async function queueOp(body) {
+      try {
+        const d = await ctx.api.post('/api/os/media/queue', body);
+        if (ctx.signal.aborted) return;
+        st.queue = d.queue || [];
+        paintQueue();
+      } catch (err) {
+        if (!isAbort(err)) note('Queue: ' + err.message);
+      }
+    }
+
+    function skip(step) {
+      if (st.row && st.row.kind === 'pdf') {
+        pdf.step(step);
+        return;
+      }
+      const m = st.media;
+      if (step < 0 && m && m.currentTime > 3) {
+        m.currentTime = 0;
+        return;
+      }
+      const at = neighbour(st.queue, st.row ? st.row.path : '', step);
+      if (at < 0) {
+        note(step > 0 ? 'Nothing is queued after this.' : 'Nothing is queued before this.');
+        return;
+      }
+      openPath(st.queue[at].path, { autoplay: true });
     }
 
     /* ---------------- library ---------------- */
@@ -240,11 +425,14 @@ export default {
         }
         st.media = null;
       }
+      pdf.close();
     }
 
     function resetTransport(on) {
       playBtn.disabled = !on;
       seek.disabled = !on;
+      pdfBarEl.hidden = true;
+      barEl.hidden = false;
       seek.max = '0';
       seek.value = '0';
       curEl.textContent = '';
@@ -291,7 +479,15 @@ export default {
         curEl.textContent = clock(media.currentTime) || '0:00';
         resetEnable();
         paintInfo();
+        media.volume = st.volume;
+        media.muted = st.muted;
+        if (st.pendingSeek !== null) {
+          media.currentTime = seekTarget(0, st.pendingSeek, media.duration);
+          st.pendingSeek = null;
+        }
+        report(true);
       });
+      media.addEventListener('seeked', () => report(true));
       media.addEventListener('timeupdate', () => {
         curEl.textContent = clock(media.currentTime) || '0:00';
         if (!st.dragging) seek.value = String(media.currentTime);
@@ -299,13 +495,20 @@ export default {
       media.addEventListener('play', () => {
         playBtn.textContent = '❚❚';
         playBtn.setAttribute('aria-label', 'Pause');
+        report(true);
       });
       const paused = () => {
         playBtn.textContent = '▶';
         playBtn.setAttribute('aria-label', 'Play');
+        if (st.media === media) report(true);
       };
       media.addEventListener('pause', paused);
-      media.addEventListener('ended', paused);
+      media.addEventListener('ended', () => {
+        paused();
+        if (st.media !== media) return;
+        const at = neighbour(st.queue, st.row ? st.row.path : '', 1);
+        if (at >= 0 && st.row && st.queue.some((r) => r.path === st.row.path)) openPath(st.queue[at].path, { autoplay: true });
+      });
       media.addEventListener('error', () => {
         if (st.media !== media) return;
         playerError(mediaErrorText(media.error && media.error.code));
@@ -317,6 +520,11 @@ export default {
       media.src = row.urls.media;
       playBtn.disabled = false;
       seek.disabled = false;
+      paintNav();
+      if (st.pendingPlay) {
+        st.pendingPlay = false;
+        media.play().catch((err) => note('Could not start playback: ' + (err && err.message ? err.message : String(err))));
+      }
     }
 
     function resetEnable() {
@@ -363,7 +571,7 @@ export default {
       await check();
     }
 
-    async function openPath(raw) {
+    async function openPath(raw, opts = {}) {
       const path = String(raw || '').trim();
       if (!path) {
         note('Type a full path first.');
@@ -372,6 +580,8 @@ export default {
       }
       st.seq += 1;
       const my = st.seq;
+      st.pendingPlay = Boolean(opts.autoplay);
+      st.pendingSeek = typeof opts.seek === 'number' ? opts.seek : null;
       dropMedia();
       resetTransport(false);
       st.row = null;
@@ -393,11 +603,20 @@ export default {
       }
       if (my !== st.seq || ctx.signal.aborted) return;
       st.row = row;
+      st.aliases[path] = row.path;
       st.facts = { ...(row.probe || {}) };
       paintInfo();
+      paintQueue();
       ctx.chrome.setSub(row.name);
       pathIn.value = row.path;
-      if (row.kind === 'image') {
+      if (row.kind === 'pdf') {
+        barEl.hidden = true;
+        pdfBarEl.hidden = false;
+        root.dataset.state = 'populated';
+        if (!pdf.open(row)) root.dataset.state = 'error';
+        infoEl.textContent = row.name + (row.page_count ? ' · ' + row.page_count + ' pages' : '') + ' · ' + sizeLabel(row.size);
+        queueNote.textContent = '';
+      } else if (row.kind === 'image') {
         const img = el('img');
         img.alt = row.name;
         img.addEventListener('error', () => playerError('This window could not display that image.'));
@@ -416,18 +635,128 @@ export default {
         attach(row, row.kind === 'video');
       }
       loadLibrary();
+      report(true);
     }
 
     /* ---------------- controls ---------------- */
-    playBtn.addEventListener('click', () => {
+    playBtn.addEventListener('click', () => togglePlay());
+    prevBtn.addEventListener('click', () => skip(-1));
+    nextBtn.addEventListener('click', () => skip(1));
+    queueAddBtn.addEventListener('click', () => st.row && queueOp({ op: 'add', path: st.row.path }));
+    queueClear.addEventListener('click', () => queueOp({ op: 'clear' }));
+    function applyAudio() {
+      muteBtn.textContent = st.muted ? 'UNMUTE' : 'MUTE';
+      muteBtn.setAttribute('aria-label', st.muted ? 'Unmute' : 'Mute');
+      if (st.media) {
+        st.media.volume = st.volume;
+        st.media.muted = st.muted;
+      }
+    }
+    muteBtn.addEventListener('click', () => {
+      st.muted = !st.muted;
+      applyAudio();
+    });
+    vol.addEventListener('input', () => {
+      st.volume = Number(vol.value);
+      if (st.volume > 0) st.muted = false;
+      applyAudio();
+    });
+    function nudgeVolume(delta) {
+      st.volume = Math.max(0, Math.min(1, Math.round((st.volume + delta) * 100) / 100));
+      vol.value = String(st.volume);
+      if (delta > 0) st.muted = false;
+      applyAudio();
+    }
+    function togglePlay() {
       const m = st.media;
       if (!m) return;
-      if (m.paused) {
-        m.play().catch((err) => note('Could not start playback: ' + (err && err.message ? err.message : String(err))));
-      } else {
-        m.pause();
+      if (m.paused) m.play().catch((err) => note('Could not start playback: ' + (err && err.message ? err.message : String(err))));
+      else m.pause();
+    }
+
+    /* ---------------- YouTube and Spotify ---------------- */
+    async function openWeb(service) {
+      const r = parseWebLink(webIn.value, service);
+      if (!r.ok) {
+        note(r.error);
+        webIn.focus();
+        return;
+      }
+      try {
+        if (ctx.host.pane) {
+          await ctx.api.post('/api/browser-pane/open', { url: r.url });
+          note('Sent to the browser pane. Open BROWSER to see it.');
+        } else if (ctx.host.openExternal(r.url)) {
+          note('Opened in the system browser.');
+        } else {
+          note('This window has no browser pane and could not open the system browser. The link is ' + r.url);
+        }
+      } catch (err) {
+        if (!isAbort(err)) note('Could not open it: ' + err.message);
+      }
+    }
+    ytBtn.addEventListener('click', () => openWeb('youtube'));
+    spBtn.addEventListener('click', () => openWeb('spotify'));
+    webIn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        openWeb(/spotify/i.test(webIn.value) ? 'spotify' : 'youtube');
       }
     });
+
+    /* ---------------- media keys ---------------- */
+    /* Arrows, M and Shift+arrows go through ctx.keys (they are ignored while
+       typing). The keymap cannot bind the space bar, so space is handled on
+       this screen's own root, and only when focus is not on a control that
+       already uses it. */
+    const reading = () => Boolean(st.row && st.row.kind === 'pdf');
+    ctx.keys.bind('ArrowRight', () => (reading() ? pdf.step(1) : st.media && (st.media.currentTime = seekTarget(st.media.currentTime, SEEK_STEP, st.media.duration))));
+    ctx.keys.bind('ArrowLeft', () => (reading() ? pdf.step(-1) : st.media && (st.media.currentTime = seekTarget(st.media.currentTime, -SEEK_STEP, st.media.duration))));
+    ctx.keys.bind('ArrowUp', () => st.media && nudgeVolume(VOL_STEP));
+    ctx.keys.bind('ArrowDown', () => st.media && nudgeVolume(-VOL_STEP));
+    ctx.keys.bind('m', () => {
+      st.muted = !st.muted;
+      applyAudio();
+    });
+    ctx.keys.bind('Shift+ArrowRight', () => skip(1));
+    ctx.keys.bind('Shift+ArrowLeft', () => skip(-1));
+    root.addEventListener('keydown', (e) => {
+      if (e.key !== ' ' || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target;
+      const tag = t && t.tagName ? t.tagName.toUpperCase() : '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || (t && t.isContentEditable)) return;
+      if (!st.media) return;
+      e.preventDefault();
+      togglePlay();
+    });
+    stageEl.addEventListener('click', () => {
+      stageEl.tabIndex = -1;
+      stageEl.focus();
+    });
+
+    /* ---------------- player_control from the server ---------------- */
+    /* POST /api/player/control broadcasts {type: 'player_control', action,
+       seconds?, path}. Apply it here; the state is reported back through
+       /api/os/media/player-state. Only works while this screen is mounted. */
+    ctx.events.on('player_control', async (evt) => {
+      const plan = controlPlan(evt, st.row ? st.row.path : '', st.aliases);
+      if (!plan) return;
+      if (plan.reopen) {
+        await openPath(plan.path, { autoplay: plan.action === 'play', seek: plan.action === 'seek' ? plan.seconds : null });
+        return;
+      }
+      const m = st.media;
+      if (!m) {
+        note('The player was asked to ' + plan.action + ' but no audio or video is open.');
+        return;
+      }
+      if (plan.action === 'pause') m.pause();
+      else if (plan.action === 'seek') m.currentTime = seekTarget(0, plan.seconds, m.duration);
+      else m.play().catch((err) => note('Could not start playback: ' + (err && err.message ? err.message : String(err))));
+      report(true);
+    });
+    ctx.every(REPORT_MS, () => report(false));
+
     seek.addEventListener('input', () => {
       st.dragging = true;
       curEl.textContent = clock(Number(seek.value)) || '0:00';
@@ -443,14 +772,22 @@ export default {
         openPath(pathIn.value);
       }
     });
-    ctx.signal.addEventListener('abort', dropMedia);
-    ctx.events.onResync(() => loadLibrary());
+    ctx.signal.addEventListener('abort', () => {
+      dropMedia();
+      /* Leaving the screen cannot report: ctx.api is cancelled and raw requests are banned.
+         player-state carries the age of the last report, so a reader sees it go stale. */
+    });
+    ctx.events.onResync(() => {
+      loadLibrary();
+      loadQueue();
+    });
 
     /* ---------------- start ---------------- */
     states.empty(stageEl, 'No file is open.', { hint: 'Press OPEN FILE, then type a path or pick a folder.' });
     states.loading(fmtEl, 'Reading the supported formats');
     await view.start();
     await loadLibrary();
+    loadQueue();
     ctx.chrome.setLive(false);
   },
 

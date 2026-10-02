@@ -325,6 +325,7 @@ class TestRosterShape:
             "research_info",
             "study",  # backlog #9: Study tab, sandboxed access to the MYP folder
             "apps",  # backlog: control other running apps in the background
+            "app_driver",  # phase F1: owner-allowed Mac app driving
             "comms",
             "scheduling",
             "dev_coding",
@@ -511,6 +512,10 @@ class TestRosterShape:
             # another running app's UI is gated; listing (list_running_apps/
             # list_app_windows) is read-only and stays ungated.
             "activate_app",
+            "app_driver_click",
+            "app_driver_type",
+            "app_driver_press_key",
+            "app_driver_scroll",
             "quit_app",
             "send_app_keystrokes",
             "press_app_key",

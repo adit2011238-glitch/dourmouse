@@ -69,7 +69,7 @@ _LOCAL_ONLY_AGENTS = frozenset({
     # Controls other apps running on the user's own machine (window
     # contents, keystrokes typed into them) -- same privacy class as
     # system/admin_ops, not public-web material.
-    "apps",
+    "apps", "app_driver",
     # Money. Positions, balances and brokerage credentials.
     "markets", "forex", "mt5", "t212",
     # The user's own private repositories and research pipeline.

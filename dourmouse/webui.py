@@ -285,6 +285,114 @@ def _sandboxed_preview_path(raw: str) -> Path | None:
     return target
 
 
+# Phase J (shared desk). A read-only text/markdown/csv/json/code viewer and a
+# small server-side record of what the media player was last asked to open.
+# The viewer is rendered here as an escaped, script-free HTML page so it needs
+# no change to any ui/*.html file; _harden_file_response adds a CSP sandbox.
+_TEXT_VIEW_MAX_BYTES = 512 * 1024
+_TEXT_VIEW_CSV_MAX_ROWS = 500
+
+
+def _text_view_path(raw: str) -> Path | None:
+    """Absolute, existing, text-previewable file that is NOT on the secret
+    deny-list; None for anything else. The deny-list is checked again here
+    (not only in the tool) because this route takes any path from a URL."""
+    from dourmouse.system_access import _TEXT_PREVIEW_EXTS, _is_sensitive
+
+    if not raw:
+        return None
+    try:
+        target = Path(raw).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return None
+    if not target.is_absolute() or not target.is_file():
+        return None
+    if target.suffix.lower() not in _TEXT_PREVIEW_EXTS or _is_sensitive(target):
+        return None
+    return target
+
+
+def _render_text_view(target: Path) -> bytes:
+    """The viewer page for one text file. Reads at most _TEXT_VIEW_MAX_BYTES,
+    refuses binary content, and says plainly when it cut the file short."""
+    import csv as _csv
+    import html as _html
+    import io as _io
+
+    size = target.stat().st_size
+    with target.open("rb") as fh:
+        chunk = fh.read(_TEXT_VIEW_MAX_BYTES)
+    truncated = size > len(chunk)
+    ext = target.suffix.lower()
+    if b"\x00" in chunk:
+        body = "<p class=note>This file looks binary, so it is not shown as text.</p>"
+    else:
+        text = chunk.decode("utf-8", errors="replace")
+        body = ""
+        if ext in (".csv", ".tsv"):
+            try:
+                reader = _csv.reader(_io.StringIO(text), delimiter="\t" if ext == ".tsv" else ",")
+                rows = []
+                for row in reader:
+                    rows.append(row)
+                    if len(rows) > _TEXT_VIEW_CSV_MAX_ROWS:
+                        truncated = True
+                        rows.pop()
+                        break
+                head, rest = (rows[0], rows[1:]) if rows else ([], [])
+                body = "<table><thead><tr>" + "".join(f"<th>{_html.escape(c)}</th>" for c in head) + "</tr></thead><tbody>"
+                body += "".join("<tr>" + "".join(f"<td>{_html.escape(c)}</td>" for c in r) + "</tr>" for r in rest)
+                body += "</tbody></table>"
+            except _csv.Error:
+                body = ""
+        if not body:
+            if ext == ".json" and not truncated:
+                with contextlib.suppress(ValueError):
+                    text = json.dumps(json.loads(text), indent=2, ensure_ascii=False)
+            body = f"<pre>{_html.escape(text)}</pre>"
+    note = ""
+    if truncated:
+        note = (f"<p class=note>Showing only the first part of this file ({size:,} bytes on disk; "
+                f"limit {_TEXT_VIEW_MAX_BYTES // 1024} KB or {_TEXT_VIEW_CSV_MAX_ROWS} table rows).</p>")
+    page = (
+        "<!doctype html><html><head><meta charset=utf-8>"
+        f"<title>{_html.escape(target.name)}</title>"
+        "<style>:root{color-scheme:light dark}body{font:13px/1.5 ui-monospace,Menlo,monospace;margin:12px}"
+        "h1{font:600 13px system-ui;margin:0 0 8px;opacity:.7}pre{white-space:pre-wrap;word-break:break-word;margin:0}"
+        "table{border-collapse:collapse}th,td{border:1px solid #8884;padding:2px 8px;text-align:left}"
+        ".note{opacity:.7;font-family:system-ui}</style></head><body>"
+        f"<h1>{_html.escape(str(target))}</h1>{note}{body}</body></html>"
+    )
+    return page.encode("utf-8")
+
+
+#: What the embedded player was last asked to open (set by the browser-pane
+#: open route, read by /api/player/now). The player lives in a sandboxed
+#: iframe and reports nothing back, so this is "last opened", not play state.
+_PLAYER_STATE: dict[str, Any] = {"path": "", "kind": "", "opened_at": 0.0, "last_command": None}
+_PLAYER_LOCK = threading.Lock()
+
+
+def _record_player_open(pane_url: str) -> None:
+    """If a pane-open URL is a media file preview, remember it."""
+    try:
+        parsed = urllib.parse.urlparse(pane_url)
+        if parsed.path != "/file_preview.html":
+            return
+        raw = (urllib.parse.parse_qs(parsed.query).get("path") or [""])[0]
+        ext = Path(raw).suffix.lower()
+    except (ValueError, OSError):
+        return
+    if ext in _PREVIEWABLE_AUDIO_EXTS:
+        kind = "audio"
+    elif ext in _PREVIEWABLE_VIDEO_EXTS or ext in _CONVERTIBLE_MEDIA_EXTS:
+        kind = "video"
+    else:
+        return
+    with _PLAYER_LOCK:
+        _PLAYER_STATE.update(path=raw, kind=kind, opened_at=time.time(), last_command=None)
+
+
 # Time a human has to approve/decline a gated action before it auto-declines.
 _CONFIRM_TIMEOUT_SECONDS = 300.0
 
@@ -3618,6 +3726,18 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
             self._send_bytes_cors(target.read_bytes(), content_type)
+        elif path == "/api/files/text-view":
+            # Phase J: read-only viewer for txt/md/csv/json/code. Secret
+            # files are refused here, not just in the tool.
+            qs = urllib.parse.parse_qs(parsed.query)
+            target = _text_view_path((qs.get("path") or [""])[0])
+            if target is None:
+                self._send_error_cors(400, "bad, missing, unsupported or protected text path")
+                return
+            self._send_bytes_cors(_render_text_view(target), "text/html; charset=utf-8")
+        elif path == "/api/player/now":
+            with _PLAYER_LOCK:
+                self._send_json({"ok": True, **{k: _PLAYER_STATE[k] for k in ("path", "kind", "opened_at", "last_command")}})
         elif path == "/api/files/media":
             # 2026-09-23 (OS-1). The audio/video counterpart to
             # /api/files/image above: same _sandboxed_preview_path trust
@@ -4054,7 +4174,45 @@ class _Handler(BaseHTTPRequestHandler):
             # here would bypass that injection and silently talk to a
             # different, non-test instance.
             self.server.browser_pane_requests.request_open(url)
+            _record_player_open(url)
             self._send_json({"ok": True})
+        elif parsed.path == "/api/player/control":
+            # Phase J: player_play / player_pause / player_seek. Broadcast as a
+            # player_control event over the same SSE hub as browser_pane_open.
+            # No ui page listens for it yet and the sandboxed player cannot
+            # acknowledge, so this reports what was SENT, never that it played.
+            body = self._read_json_body()
+            action = str(body.get("action") or "").strip().lower()
+            if action not in ("play", "pause", "seek"):
+                self._send_json({"ok": False, "error": "action must be play, pause or seek"}, status=400)
+                return
+            event: dict[str, Any] = {"type": "player_control", "action": action}
+            if action == "seek":
+                try:
+                    seconds = float(body.get("seconds"))
+                except (TypeError, ValueError):
+                    seconds = -1.0
+                if not (seconds >= 0 and seconds < 1e9):
+                    self._send_json({"ok": False, "error": "seek needs 'seconds' >= 0"}, status=400)
+                    return
+                event["seconds"] = seconds
+            with _PLAYER_LOCK:
+                path_now = _PLAYER_STATE["path"]
+                if not path_now:
+                    self._send_json(
+                        {"ok": False, "error": "nothing is open in the player; open a file with open_file_preview first"},
+                        status=409,
+                    )
+                    return
+                _PLAYER_STATE["last_command"] = {k: v for k, v in event.items() if k != "type"}
+            event["path"] = path_now
+            hub = getattr(self.server, "events_broadcast", None)
+            if hub is not None:
+                hub.broadcast(event)
+            self._send_json({
+                "ok": True, "path": path_now,
+                "note": "The console page has no player_control listener yet, so the player may not react.",
+            })
         elif parsed.path == "/api/rag/upload":
             # v13.4: real user request — "a page where files can be
             # uploaded to the shared rag database". Same raw-body upload
@@ -5208,7 +5366,11 @@ class _Handler(BaseHTTPRequestHandler):
             prompt = (
                 f"[ROUTING DIRECTIVE] You may ONLY use the '{focus_agent}' "
                 f"subagent's tools for this — never another subagent's "
-                f"tools. If you already know the answer, answer directly; "
+                f"tools, except the shared desk tools (open_browser_pane, "
+                f"browser_open, open_file_preview, player_play, player_pause, "
+                f"player_seek, player_now_playing), which every chat screen "
+                f"may use to open a page, open a file, or drive the media "
+                f"player. If you already know the answer, answer directly; "
                 f"only call a tool for live/current data, something you're "
                 f"unsure of, or when the user explicitly asks you to look "
                 f"something up or take an action. TASK: {prompt}"

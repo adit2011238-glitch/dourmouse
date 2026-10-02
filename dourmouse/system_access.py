@@ -109,6 +109,8 @@ _SENSITIVE_FILENAME_PATTERNS = (
 _DANGEROUS_COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(sudo|doas|pkexec)\b|\bsu\s+-"), "privilege escalation"),
     (re.compile(r"\bgit\s+push\b"), "remote git push (irreversible)"),
+    # finding #161: app driving owner controls are not for the shell (allow list, resume, act, kill file)
+    (re.compile(r"/api/os/apps\b|app_driver/(KILL|allowed)", re.I), "app-driving owner controls are not reachable from the shell"),
     # rm as a deletion verb requires a following arg/whitespace — a filename
     # containing "rm" (cat rm.txt, ls /etc/rm-dir) is NOT deletion.
     (re.compile(r"\brm(?=\s|$)"), "file/directory deletion (use delete_path or run_privileged_command)"),
@@ -170,6 +172,22 @@ def _resolve_abs(raw: str) -> Path | None:
     return path
 
 
+_CLI_CREDENTIAL_NAMES = frozenset(
+    {"auth.json", "credentials.json", ".credentials.json", ".claude.json", "client_secret.json", "service_account.json"}
+)
+_CLI_CREDENTIAL_DIRS = (".codex", ".claude", ".dourmouse", "dourmouse-electron", "dourmouse_auth")
+
+
+def _is_cli_credential_file(resolved: Path) -> bool:
+    """Credential JSON that has a text extension, so the previewer must not show it
+    (finding #161): Codex and Claude CLI logins, Google client secrets, Dourmouse's own."""
+    name = resolved.name.casefold()
+    if name in _CLI_CREDENTIAL_NAMES or name.startswith(("client_secret", "token.")) or name == "tokens.json":
+        return True
+    parts = {c.casefold() for c in resolved.parts}
+    return bool(parts & set(_CLI_CREDENTIAL_DIRS)) and resolved.suffix.casefold() in {".json", ".db", ".sqlite", ".yaml", ".yml", ".toml", ".ini"}
+
+
 def _is_sensitive(path: Path) -> bool:
     """True if the path is inside a credential/system root (write/delete).
 
@@ -183,12 +201,18 @@ def _is_sensitive(path: Path) -> bool:
         resolved = path
     if any(comp in _SENSITIVE_COMPONENTS for comp in resolved.parts):
         return True
+    # macOS volumes are case-insensitive: ~/.SSH is ~/.ssh (finding #161).
+    _folded_components = {c.casefold() for c in _SENSITIVE_COMPONENTS}
+    if any(comp.casefold() in _folded_components for comp in resolved.parts):
+        return True
+    if _is_cli_credential_file(resolved):
+        return True
     # A filename that is itself a credential (.env, *.pem, *.key, id_rsa,
     # .netrc, .npmrc, .pgpass) is sensitive in ANY directory — the directory
     # guard alone missed e.g. a downloaded key or a project-root .env.
     # NOTE: `search`, not `match` — the suffix patterns ("*.pem", "*.key")
     # must match ANY file ending that way, not only names STARTING with them.
-    if any(pat.search(resolved.name) for pat in _SENSITIVE_FILENAME_PATTERNS):
+    if any(pat.search(resolved.name) or pat.search(resolved.name.casefold()) for pat in _SENSITIVE_FILENAME_PATTERNS):
         return True
     # gcloud credentials live under .config/gcloud — match the slash-delimited
     # tail so a legit path like ~/.config/gcloud-sandbox/ doesn't false-positive.
@@ -767,6 +791,27 @@ _PREVIEWABLE_EXTS = (
 )
 
 
+# Phase J: read-only text viewer. Plain text, markdown, tabular and structured
+# data, and source code. Rendered server-side by webui.py's
+# /api/files/text-view as an escaped, script-free HTML page, so no UI file
+# needs to know about these types. The secret deny-list (_is_sensitive) is
+# applied both here and again in the route, because the route is reachable
+# with any path a caller can put in a URL.
+_TEXT_PREVIEW_EXTS = frozenset({
+    ".txt", ".text", ".md", ".markdown", ".rst", ".log",
+    ".csv", ".tsv", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".html", ".htm",
+    ".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".css", ".scss", ".sh", ".zsh", ".bash",
+    ".c", ".h", ".cc", ".cpp", ".hpp", ".java", ".kt", ".go", ".rs", ".rb", ".php", ".swift",
+    ".sql", ".r", ".lua", ".pl", ".ipynb",
+})
+#: The viewer shows at most this many bytes of a file and says so when it cuts.
+_TEXT_PREVIEW_MAX_BYTES = 512 * 1024
+
+
+def _app_port() -> str:
+    return os.environ.get("DOURMOUSE_UI_PORT", "8765").strip() or "8765"
+
+
 def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
     raw = arguments.get("path", "")
     target = _resolve_abs(raw)
@@ -775,20 +820,27 @@ def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
     if not target.is_file():
         return f"ERROR: no such file: {target}"
     ext = target.suffix.lower()
-    if ext not in _PREVIEWABLE_EXTS:
+    is_text = ext in _TEXT_PREVIEW_EXTS
+    if is_text and _is_sensitive(target):
         return (
-            f"REFUSED: open_file_preview handles PDFs, images, and audio/video "
+            f"REFUSED: {target.name} is a credential or system file "
+            f"(secret deny-list). It was not opened or read."
+        )
+    if ext not in _PREVIEWABLE_EXTS and not is_text:
+        return (
+            f"REFUSED: open_file_preview handles PDFs, images, audio/video "
             f"in browser-decodable formats ({', '.join(sorted(_PREVIEWABLE_EXTS))}), "
+            f"and text, markdown, csv, json and source code "
+            f"({', '.join(sorted(_TEXT_PREVIEW_EXTS))}), "
             f"got {ext!r}. Use open_path instead for this file: it opens in the "
             f"real default app (Preview.app, QuickTime, etc)."
         )
     import json as _json
-    import os as _os
     import urllib.error
     import urllib.parse
     import urllib.request
 
-    port = _os.environ.get("DOURMOUSE_UI_PORT", "8765").strip() or "8765"
+    port = _app_port()
     # ROOT-RELATIVE on purpose (2026-09-23): the pane resolves this against
     # the console's own origin, so it frames a same-origin document. The
     # absolute "http://127.0.0.1:<port>/..." this used to send was a different
@@ -798,7 +850,11 @@ def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
     # absolute URL, because this tool may be running in a separate subprocess
     # with no page context at all -- that is the whole reason it posts over
     # HTTP rather than touching the in-process singleton.
-    preview_url = "/file_preview.html?src=files&path=" + urllib.parse.quote(str(target))
+    if is_text:
+        # Server-rendered, escaped, script-free page (webui.py text-view route).
+        preview_url = "/api/files/text-view?path=" + urllib.parse.quote(str(target))
+    else:
+        preview_url = "/file_preview.html?src=files&path=" + urllib.parse.quote(str(target))
     api_url = f"http://127.0.0.1:{port}/api/browser-pane/open"
     body = _json.dumps({"url": preview_url}).encode("utf-8")
     req = urllib.request.Request(
@@ -817,10 +873,83 @@ def _open_file_preview_tool(arguments: dict[str, Any]) -> str:
             f"second OS window). Playback is the user's to start; this tool "
             f"opens the player, it does not press play."
         )
+    if is_text:
+        return (
+            f"OPENED TEXT PREVIEW: {target} (read-only viewer in the app's own "
+            f"pane; shows at most the first {_TEXT_PREVIEW_MAX_BYTES // 1024} KB "
+            f"and says so when it cuts)."
+        )
     return (
         f"OPENED FILE PREVIEW: {target} (visible to the user now, "
         f"embedded in the app's own pane — real, resizable/minimizable, "
         f"not a second OS window)."
+    )
+
+
+def _player_request(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
+    """Call the running app's own player endpoints. Same HTTP-callback shape as
+    open_file_preview, for the same reason: this may run in the MCP bridge
+    subprocess, which has no access to the server's in-process state."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = f"http://127.0.0.1:{_app_port()}{path}"
+    data = _json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 - fixed localhost host
+            return resp.status, _json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, _json.loads(exc.read().decode("utf-8") or "{}")
+        except (ValueError, OSError):
+            return exc.code, {}
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return 0, {"error": f"could not reach the running app's own server: {exc}"}
+
+
+def _player_control(action: str, extra: dict[str, Any] | None = None) -> str:
+    status, payload = _player_request("POST", "/api/player/control", {"action": action, **(extra or {})})
+    if status == 0:
+        return f"ERROR: player_{action} failed: {payload.get('error')}"
+    if status >= 400 or not payload.get("ok"):
+        return f"ERROR: player_{action}: {payload.get('error') or 'rejected by the app'}"
+    return (
+        f"NOT CONFIRMED: player_{action} was sent to the app as a player_control event "
+        f"for {payload.get('path')}, but the embedded player has no acknowledgement "
+        f"channel, so whether it took effect is unknown. {payload.get('note', '')}".strip()
+    )
+
+
+def _player_play_tool(arguments: dict[str, Any]) -> str:
+    return _player_control("play")
+
+
+def _player_pause_tool(arguments: dict[str, Any]) -> str:
+    return _player_control("pause")
+
+
+def _player_seek_tool(arguments: dict[str, Any]) -> str:
+    try:
+        seconds = float(arguments.get("seconds"))
+    except (TypeError, ValueError):
+        return "ERROR: player_seek requires a numeric 'seconds' (position from the start)."
+    if seconds < 0 or seconds != seconds:
+        return "ERROR: player_seek requires 'seconds' to be zero or more."
+    return _player_control("seek", {"seconds": seconds})
+
+
+def _player_now_playing_tool(arguments: dict[str, Any]) -> str:
+    status, payload = _player_request("GET", "/api/player/now")
+    if status == 0:
+        return f"ERROR: player_now_playing failed: {payload.get('error')}"
+    if not payload.get("path"):
+        return "NOTHING OPENED: no audio or video has been opened in the embedded player this session."
+    return (
+        f"LAST OPENED IN THE PLAYER: {payload['path']} ({payload.get('kind')}). "
+        f"Whether it is playing now, paused, or at what position is NOT known: the "
+        f"embedded player does not report its state back to the server."
     )
 
 
@@ -1227,7 +1356,9 @@ def build_system_subagent() -> Subagent:
                     "extracted text. Audio and video get a real player with "
                     "native controls and working seek. Handles pdf, png, jpg, "
                     "jpeg, gif, webp, svg, bmp, mp3, m4a, aac, wav, oga, ogg, "
-                    "opus, weba, mp4, m4v, webm, ogv, mov. Prefer this over "
+                    "opus, weba, mp4, m4v, webm, ogv, mov, plus a read-only "
+                    "viewer for plain text formats (first 512 KB, never "
+                    "credential files). Prefer this over "
                     "open_path whenever the user wants to LOOK AT or LISTEN TO "
                     "a file without leaving the app; use open_path instead for "
                     "any other file type, or when the user explicitly wants "
@@ -1238,12 +1369,52 @@ def build_system_subagent() -> Subagent:
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "absolute path to the PDF, image, audio or video file",
+                            "description": "absolute path to the file to preview",
                         }
                     },
                     "required": ["path"],
                 },
                 handler=_open_file_preview_tool,
+            ),
+            ToolSpec(
+                name="player_play",
+                description=(
+                    "Ask the embedded media player to play the file most recently "
+                    "opened with open_file_preview. Sends a player_control event; "
+                    "the player does not confirm back, so the result is NOT "
+                    "CONFIRMED rather than a claim that it played."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_player_play_tool,
+            ),
+            ToolSpec(
+                name="player_pause",
+                description="Ask the embedded media player to pause. Same delivery limits as player_play.",
+                parameters={"type": "object", "properties": {}},
+                handler=_player_pause_tool,
+            ),
+            ToolSpec(
+                name="player_seek",
+                description=(
+                    "Ask the embedded media player to jump to a position, in seconds "
+                    "from the start. Same delivery limits as player_play."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"seconds": {"type": "number", "description": "position in seconds, zero or more"}},
+                    "required": ["seconds"],
+                },
+                handler=_player_seek_tool,
+            ),
+            ToolSpec(
+                name="player_now_playing",
+                description=(
+                    "Report which audio or video file was most recently opened in the "
+                    "embedded player. Honest limit: it reports the last file opened, "
+                    "not live play state or position."
+                ),
+                parameters={"type": "object", "properties": {}},
+                handler=_player_now_playing_tool,
             ),
             ToolSpec(
                 name="clipboard_get",

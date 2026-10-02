@@ -1939,6 +1939,7 @@ class TestEndToEndThroughGeneralRoster:
             "research_info",
             "study",  # backlog #9: Study tab, sandboxed access to the MYP folder
             "apps",  # backlog: control other running apps in the background
+            "app_driver",  # phase F1: owner-allowed Mac app driving (dourmouse/app_driver)
             "comms",
             "scheduling",
             "dev_coding",
