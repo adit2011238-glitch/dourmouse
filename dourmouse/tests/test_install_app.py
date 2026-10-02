@@ -85,3 +85,16 @@ class TestPinnedAppFacts:
         main = (ROOT / "electron" / "main.js").read_text()
         assert 'dialog.showErrorBox("Dourmouse could not start"' in main
         assert "timeoutMs = 60000" in main
+
+
+class TestPaneIsAChromeLikeBrowser:
+    """finding #160: the pane identifies as the Chromium it is, keeps the owner's logins, and Google's sign-in page loads."""
+
+    def test_the_pane_uses_a_plain_chrome_user_agent_and_a_persistent_partition(self):
+        main = (ROOT / "electron" / "main.js").read_text()
+        assert "function chromeUserAgent()" in main and "process.versions.chrome" in main
+        assert "Electron/" not in main.split("function chromeUserAgent()")[1].split("}")[0]
+        assert 'const PANE_PARTITION = "persist:dourmouse-browser"' in main
+        assert "partition: PANE_PARTITION" in main
+        assert "session.setUserAgent(chromeUserAgent())" in main
+

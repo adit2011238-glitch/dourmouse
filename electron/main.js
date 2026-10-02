@@ -447,11 +447,29 @@ function paneBounds() {
   return { x: width - paneWidth, y: 0, width: paneWidth, height };
 }
 
+// Finding #160: the pane is the owner's everyday browser, so it must identify
+// as the Chrome it is built on. Electron's default user agent adds
+// "Electron/x" and the app name, and Google refuses sign-in on embedded
+// webviews it detects that way ("content blocked"). This is the same Chromium
+// version string the engine already runs; nothing is spoofed beyond dropping
+// the two extra tokens.
+function chromeUserAgent() {
+  const v = process.versions.chrome || "130.0.0.0";
+  const os = process.platform === "darwin" ? "Macintosh; Intel Mac OS X 10_15_7"
+    : process.platform === "win32" ? "Windows NT 10.0; Win64; x64" : "X11; Linux x86_64";
+  return `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v} Safari/537.36`;
+}
+// A dedicated, persistent partition: the owner's logins and cookies survive
+// restarts (like a Chrome profile) and stay apart from the app's own session.
+const PANE_PARTITION = "persist:dourmouse-browser";
+
 function ensurePaneView() {
   if (paneView) return paneView;
   paneView = new BrowserView({
-    webPreferences: { contextIsolation: true },
+    webPreferences: { contextIsolation: true, partition: PANE_PARTITION },
   });
+  paneView.webContents.session.setUserAgent(chromeUserAgent());
+  paneView.webContents.setUserAgent(chromeUserAgent());
   // Deliberately about:blank, and deliberately never navigated away from
   // here -- dourmouse/browser_agent.py's connect_over_cdp discovery finds
   // "the" pane by looking for the one still-blank about:blank page at
