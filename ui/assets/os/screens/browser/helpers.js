@@ -344,6 +344,8 @@ export function tabsModel(raw) {
     find: f ? { text: typeof f.text === 'string' ? f.text.slice(0, 200) : '', active: Number.isInteger(f.active) ? f.active : 0, matches: Number.isInteger(f.matches) ? f.matches : 0 } : null,
     closed: Number.isInteger(s.closedTabs) && s.closedTabs > 0 ? s.closedTabs : 0,
     blocked: Number.isInteger(s.blockedPopups) && s.blockedPopups > 0 ? s.blockedPopups : 0,
+    /* the profile in use (B3); an older shell sends none, which is the default profile */
+    profile: typeof s.profile === 'string' && /^[a-z0-9][a-z0-9_-]{0,23}$/.test(s.profile) ? s.profile : 'default',
   };
 }
 

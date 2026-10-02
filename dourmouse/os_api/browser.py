@@ -31,7 +31,17 @@ Phase B2 (Chrome parity part 2) adds ONE read-only route and nothing that can ch
   notification, clipboard or full-screen decision, and whether it is Allow or Block. It is
   non-secret (sites and decisions only).
 
-What is deliberately NOT here: any route that grants, changes or revokes a site permission, and
+Phase B3 (Chrome parity part 3) adds three more read-only routes. They list; they change nothing:
+
+* ``GET /api/os/browser/profiles``: the names of the browser profiles and which one is active.
+* ``GET /api/os/browser/extensions``: the installed extensions by name, version and on or off.
+  Never a path.
+* ``GET /api/os/browser/drm``: what the shell says about Widevine (protected video): stock
+  Electron has none, and the answer says so.
+
+What is deliberately NOT here: any route that adds, enables or removes an extension, switches,
+creates or removes a profile, or imports anything from Chrome (those are the console window's
+own native-dialog actions), any route that grants, changes or revokes a site permission, and
 any route that lists, reads or saves a password or an address. Those are answered by the
 Electron console window alone, over IPC that checks its sender, so neither this server, the
 model's tools nor the browser agent can reach them. The pane bridge's ``/status`` carries only
@@ -208,6 +218,24 @@ def downloads_cancel(req: Request) -> tuple[int, dict[str, Any]]:
 def permissions(req: Request) -> tuple[int, dict[str, Any]]:
     """Read-only list of the stored site decisions. Sites and Allow/Block only."""
     return 200, _pick(_bridge("GET", "/permissions"), "sites")
+
+
+@route("GET", "/api/os/browser/profiles")
+def profiles(req: Request) -> tuple[int, dict[str, Any]]:
+    """Read-only: profile names and which one is active. No path, no data from inside a profile."""
+    return 200, _pick(_bridge("GET", "/profiles"), "active", "profiles")
+
+
+@route("GET", "/api/os/browser/extensions")
+def extensions(req: Request) -> tuple[int, dict[str, Any]]:
+    """Read-only and non-secret: installed extensions by name, version, on or off."""
+    return 200, _pick(_bridge("GET", "/extensions"), "supported", "extensions")
+
+
+@route("GET", "/api/os/browser/drm")
+def drm(req: Request) -> tuple[int, dict[str, Any]]:
+    """Read-only: what the engine says about Widevine. Not available is a normal, honest answer."""
+    return 200, _pick(_bridge("GET", "/drm"), "build", "widevine", "ready", "line", "electron", "level")
 
 
 @route("GET", "/api/os/browser/history")

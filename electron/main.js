@@ -21,7 +21,8 @@
 // default because node_modules is gitignored, so a fresh clone genuinely has
 // no Electron and must still start -- run `npm install` here to enable it.
 
-const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification, session, dialog, safeStorage, systemPreferences } = require("electron");
+const electronApi = require("electron");
+const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification, session, dialog, safeStorage, systemPreferences } = electronApi;
 const { spawn, execFile } = require("child_process");
 const crypto = require("crypto");
 const http = require("http");
@@ -30,6 +31,10 @@ const path = require("path");
 const policy = require("./policy");
 const permLib = require("./permissions");
 const pwLib = require("./passwords");
+const profLib = require("./profiles");
+const extLib = require("./extensions");
+const impLib = require("./importers");
+const drmLib = require("./drm");
 
 // An isolated copy (a test run, a second profile) can keep every file the shell
 // writes (window state, the browser profile, history, bookmarks, downloads list)
@@ -556,10 +561,16 @@ function chromeUserAgent() {
 }
 // A dedicated, persistent partition: the owner's logins and cookies survive
 // restarts (like a Chrome profile) and stay apart from the app's own session.
-const PANE_PARTITION = "persist:dourmouse-browser";
+const PANE_PARTITION = "persist:dourmouse-browser"; // the default profile's; profiles.js carries the same string
 // Every tab is created with exactly these preferences: no preload (a web page
-// never gets the console's bridge), context isolation on, the shared partition.
+// never gets the console's bridge), context isolation on, the profile's partition.
 const TAB_WEB_PREFERENCES = { contextIsolation: true, partition: PANE_PARTITION };
+// Phase B3: the partition of the ACTIVE profile (the one above for the default profile, that name
+// plus a dash and the profile's name for a named one). The object above is the single source of
+// every tab's preferences; a profile switch changes its `partition` and nothing else.
+function activePartition() {
+  return profLib.partitionFor(activeProfileName);
+}
 // What a tab with no address shows. Loaded by this file only, never from a caller's
 // URL. The fragment lets policy.isBlankUrl() tell it from a real page.
 const NEW_TAB_URL = "data:text/html;charset=utf-8," + encodeURIComponent(
@@ -576,14 +587,28 @@ function browserDataDir() {
   return path.join(app.getPath("userData"), "browser");
 }
 
+// The browser folder (and a profile's folder inside it) is owner-only, and so is a file that holds
+// ciphertext or the owner's site decisions. A failure to tighten is logged, never swallowed silently.
+function lockDown(folder, file, fileMode) {
+  try {
+    fs.chmodSync(folder, 0o700);
+    if (file && fileMode) fs.chmodSync(file, fileMode);
+  } catch (exc) {
+    log("browser store permissions could not be tightened:", exc.message || exc);
+  }
+}
+
 // Options: `mode` writes the file with those permissions from the start (the files that hold
 // ciphertext are 0600), and `lazy` writes it only after set() was called, so reading a store
 // that nobody has changed never creates a file.
-function makeStore(file, fallback, { mode: fileMode = 0, lazy = false } = {}) {
+// Phase B3: `dir` says which folder the file lives in (a profile's own folder), and every write
+// leaves the folder 0700 and a file that holds secrets or decisions 0600, even when the folder or
+// the file was created earlier with looser permissions.
+function makeStore(file, fallback, { mode: fileMode = 0, lazy = false, dir = browserDataDir } = {}) {
   let data = null;
   let timer = null;
   let changed = false;
-  const target = () => path.join(browserDataDir(), file);
+  const target = () => path.join(dir(), file);
   const fresh = () => JSON.parse(JSON.stringify(fallback));
   function get() {
     if (data !== null) return data;
@@ -615,11 +640,12 @@ function makeStore(file, fallback, { mode: fileMode = 0, lazy = false } = {}) {
     }
     if (data === null || (lazy && !changed)) return;
     try {
-      fs.mkdirSync(browserDataDir(), { recursive: true, mode: 0o700 });
+      fs.mkdirSync(dir(), { recursive: true, mode: 0o700 });
       const tmp = `${target()}.tmp`;
       // A file that holds secrets (the password list) is written owner-only from the start.
       fs.writeFileSync(tmp, JSON.stringify(data), fileMode ? { mode: fileMode } : undefined);
       fs.renameSync(tmp, target());
+      lockDown(dir(), fileMode ? target() : "", fileMode);
     } catch (exc) {
       log(`browser store ${file} could not be saved:`, exc.message || exc);
     }
@@ -632,18 +658,57 @@ function makeStore(file, fallback, { mode: fileMode = 0, lazy = false } = {}) {
   return { get, set, flush };
 }
 
-const historyStore = makeStore("history.json", []);
-const bookmarkStore = makeStore("bookmarks.json", []);
-const zoomStore = makeStore("zoom.json", {});
+// Phase B3: profiles. The list of profiles and which one is active live in profiles.json. The
+// "default" profile keeps today's folder (browser/) and today's partition, so nothing that exists
+// moves; a named profile keeps its files in browser/profiles/<name>/ and has its own partition.
+const registryStore = makeStore("profiles.json", { active: "default", names: [] }, { mode: 0o600, lazy: true });
+let profileRegistry = profLib.sanitizeRegistry(registryStore.get());
+let activeProfileName = profileRegistry.active;
+TAB_WEB_PREFERENCES.partition = activePartition(); // the pane opens in the profile that was in use when the app last ran
+function saveProfileRegistry(next) {
+  profileRegistry = next;
+  registryStore.set({ active: next.active, names: next.names });
+}
+
+// History, bookmarks, zoom, site decisions, encrypted logins and encrypted addresses belong to the
+// profile (the last three hold only ciphertext, written 0600). The downloads list is the browser's
+// own and is shared: every download lands in ~/Downloads whichever profile fetched it.
+const profileStores = new Map(); // profile name -> its stores, made on first use
+function storesFor(name) {
+  let set = profileStores.get(name);
+  if (!set) {
+    const dir = () => profLib.dirFor(path, browserDataDir(), name);
+    set = {
+      history: makeStore("history.json", [], { dir }),
+      bookmarks: makeStore("bookmarks.json", [], { dir }),
+      zoom: makeStore("zoom.json", {}, { dir }),
+      permission: makeStore("permissions.json", { sites: {} }, { mode: 0o600, lazy: true, dir }),
+      password: makeStore("passwords.json", { entries: [], never: [] }, { mode: 0o600, lazy: true, dir }),
+      address: makeStore("addresses.json", { profiles: [] }, { mode: 0o600, lazy: true, dir }),
+    };
+    profileStores.set(name, set);
+  }
+  return set;
+}
+// Every use below goes through the ACTIVE profile at the moment of the call, so switching profile
+// needs no change to any call site.
+const profileStore = (key) => ({
+  get: () => storesFor(activeProfileName)[key].get(),
+  set: (v) => storesFor(activeProfileName)[key].set(v),
+  flush: () => storesFor(activeProfileName)[key].flush(),
+});
+const historyStore = profileStore("history");
+const bookmarkStore = profileStore("bookmarks");
+const zoomStore = profileStore("zoom");
+const permissionStore = profileStore("permission");
+const passwordStore = profileStore("password");
+const addressStore = profileStore("address");
 const downloadStore = makeStore("downloads.json", []);
-// Phase B2. The decisions the owner made for each site, the encrypted logins and the encrypted
-// address profiles. The last two hold only ciphertext (safeStorage) and are written 0600.
-const permissionStore = makeStore("permissions.json", { sites: {} }, { lazy: true });
-const passwordStore = makeStore("passwords.json", { entries: [], never: [] }, { mode: 0o600, lazy: true });
-const addressStore = makeStore("addresses.json", { profiles: [] }, { mode: 0o600, lazy: true });
 
 function flushBrowserStores() {
-  for (const s of [historyStore, bookmarkStore, zoomStore, downloadStore, permissionStore, passwordStore, addressStore]) s.flush();
+  for (const set of profileStores.values()) for (const s of Object.values(set)) s.flush();
+  downloadStore.flush();
+  registryStore.flush();
 }
 
 const newId = () => `${Date.now().toString(36)}${crypto.randomBytes(4).toString("hex")}`;
@@ -822,6 +887,9 @@ function askingOrigin(wc, requestingUrl) {
 function handlePaneRequest(tab, wc, permission, callback, details) {
   const origin = askingOrigin(wc, details && details.requestingUrl);
   if (!origin) return callback(false);
+  // B3: the key system for protected video. Allowed only for the page the owner is on, and only
+  // when the Widevine component is really there; otherwise (stock Electron) it stays refused.
+  if (permission === "mediaKeySystem") return callback(drmState.ready === true);
   const cls = permLib.classifyRequest(permission, details);
   if (cls.action === "allow") return callback(true);
   if (cls.action === "deny") return callback(false);
@@ -873,6 +941,7 @@ function handlePaneRequest(tab, wc, permission, callback, details) {
 function handlePaneCheck(tab, wc, permission, requestingOrigin, details) {
   const origin = askingOrigin(wc, requestingOrigin || undefined);
   if (!origin) return false;
+  if (permission === "mediaKeySystem") return drmState.ready === true;
   const cls = permLib.classifyCheck(permission, details);
   if (cls.action === "allow") return true;
   if (cls.action === "deny") return false;
@@ -1084,12 +1153,13 @@ function ensurePaneView() {
   if (paneView && !paneView.webContents.isDestroyed()) return paneView;
   // The session is prepared BEFORE the first page exists, so the form helper script is there
   // from the very first document.
-  if (typeof session.fromPartition === "function") installPaneSession(session.fromPartition(PANE_PARTITION));
+  if (typeof session.fromPartition === "function") installPaneSession(session.fromPartition(TAB_WEB_PREFERENCES.partition));
   paneView = new BrowserView({ webPreferences: TAB_WEB_PREFERENCES });
   paneView.webContents.session.setUserAgent(chromeUserAgent());
   installPermissionPolicy(paneView.webContents.session); // finding S34: the pane's session carries the policy from its first page
   installPaneSession(paneView.webContents.session);
   installDownloadHandler(paneView.webContents.session);
+  startExtensions(paneView.webContents.session); // B3: the owner's approved extensions, once per session
   const tab = registerTab(paneView, "about:blank");
   activeTabId = tab.id;
   return paneView;
@@ -1100,7 +1170,13 @@ function loadInTab(wc, url) {
   if (owner && policy.paneUrlAllowed(url)) owner.requested = url; // what the tab was last asked to open, for a crash recovery
   // did-fail-load reports a failed load to the console; the promise rejection
   // carries nothing more, so it is consumed here rather than left unhandled.
-  wc.loadURL(url).catch((exc) => log("tab load did not finish:", exc && exc.message ? exc.message : exc));
+  const go = () => wc.loadURL(url).catch((exc) => log("tab load did not finish:", exc && exc.message ? exc.message : exc));
+  // B3: while a session is still loading its extensions, a real page waits for them (a few
+  // hundred milliseconds), so a content script is in place for the first page. The blank anchor
+  // page the browser agent looks for never waits.
+  const pending = url !== "about:blank" && wc.session ? extSessionInit.get(wc.session) : null;
+  if (pending) pending.then(() => { if (!wc.isDestroyed()) go(); });
+  else go();
 }
 
 function registerTab(view, url, insertAt, openerId = 0) {
@@ -1331,6 +1407,7 @@ function paneState() {
     find: tab && tab.find ? { ...tab.find } : null,
     closedTabs: closedTabs.length,
     blockedPopups: tab ? tab.blockedPopups : 0,
+    profile: activeProfileName,
   };
 }
 
@@ -1996,6 +2073,497 @@ ipcMain.handle("addr:fill", async (evt, id) => {
   return fillAddress(activeTab(), id);
 });
 
+
+// ------------------- extensions, profiles, import, DRM: console IPC (B3) ------------------- //
+// The same rule as B2: a CDP client on the local machine can call the console's IPC, so anything
+// privileged here ends in a NATIVE macOS dialog that a script cannot press, and nothing here is
+// reachable from the pane bridge (the HTTP door), which can only READ non-secret lists.
+//   * Adding an extension: a native folder picker, then a native confirmation that names the
+//     extension and every permission it asks for, then a copy into the app's own folder.
+//   * Enabling one that was off: the same native confirmation again.
+//   * Importing from Chrome: a native folder (or file) picker and a native confirmation with counts.
+//   * Removing a profile: a native confirmation, because its logins go with it.
+
+// One native dialog at a time, so a script cannot stack them.
+let nativeBusy = false;
+async function nativeGuard(fn) {
+  if (nativeBusy) return { ok: false, error: "another confirmation is already open" };
+  nativeBusy = true;
+  try {
+    return await fn();
+  } finally {
+    nativeBusy = false;
+  }
+}
+
+async function confirmNatively({ title, message, detail, ok }) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const box = await dialog.showMessageBox(mainWindow, {
+    type: "question", buttons: [ok, "Cancel"], defaultId: 1, cancelId: 1, noLink: true, title, message, detail: detail || "",
+  });
+  return box.response === 0;
+}
+
+async function pickNatively(options) {
+  if (!mainWindow || mainWindow.isDestroyed()) return "";
+  const r = await dialog.showOpenDialog(mainWindow, options);
+  return !r || r.canceled || !Array.isArray(r.filePaths) || !r.filePaths[0] ? "" : String(r.filePaths[0]);
+}
+
+// ---- extensions ----
+
+const extensionStore = makeStore("extensions.json", { entries: [] }, { mode: 0o600, lazy: true });
+let extensionRegistry = null;
+function extRegistry() {
+  if (!extensionRegistry) extensionRegistry = extLib.sanitizeRegistry(extensionStore.get());
+  return extensionRegistry;
+}
+function saveExtRegistry(next) {
+  extensionRegistry = next;
+  extensionStore.set({ entries: next.entries });
+  extensionStore.flush(); // an approval is not left in a debounce timer
+}
+function extensionsDir() {
+  return path.join(browserDataDir(), "extensions");
+}
+function paneSession() {
+  return typeof session.fromPartition === "function" ? session.fromPartition(TAB_WEB_PREFERENCES.partition) : null;
+}
+// Electron moved these onto `session.extensions`; the older names are the fallback.
+function extApi(ses) {
+  if (!ses) return null;
+  if (ses.extensions && typeof ses.extensions.loadExtension === "function") return ses.extensions;
+  if (typeof ses.loadExtension === "function") return { loadExtension: (p, o) => ses.loadExtension(p, o), removeExtension: (id) => ses.removeExtension(id) };
+  return null;
+}
+// What happened to each extension in each SESSION (every profile has its own): our id ->
+// { loaded, electronId, error }. Kept per session so a failed load in one profile can never make
+// another profile forget the id it needs to unload what it did load.
+const extStatusBySession = new WeakMap();
+function statusMap(ses) {
+  let m = extStatusBySession.get(ses);
+  if (!m) {
+    m = new Map();
+    extStatusBySession.set(ses, m);
+  }
+  return m;
+}
+const extSessionList = []; // every pane session an extension may be loaded into (one per profile used)
+const extSessionInit = new WeakMap(); // session -> the promise of its first batch of loads, while it runs
+
+function extFail(ses, id, message) {
+  statusMap(ses).set(id, { loaded: false, electronId: "", error: String(message).slice(0, 300) });
+  log(`extension ${id} not loaded: ${message}`);
+  return { ok: false, error: String(message) };
+}
+
+// Loads one APPROVED COPY into a session. Its fingerprint must still be the one recorded when the
+// owner approved it; a copy that was edited since is refused.
+async function loadExtensionInto(ses, entry) {
+  const api = extApi(ses);
+  if (!api) return extFail(ses, entry.id, "This build of Electron has no extension support.");
+  const dir = path.join(extensionsDir(), entry.id);
+  let tree = "";
+  try {
+    tree = extLib.hashTree({ fs, path }, dir);
+  } catch (exc) {
+    return extFail(ses, entry.id, `Its files could not be read (${exc.message || exc}).`);
+  }
+  if (tree !== entry.tree) return extFail(ses, entry.id, "Its files changed after you approved it, so it was not loaded. Remove it and add it again.");
+  try {
+    const ext = await api.loadExtension(dir, { allowFileAccess: false });
+    statusMap(ses).set(entry.id, { loaded: true, electronId: String((ext && ext.id) || ""), error: "" });
+    return { ok: true };
+  } catch (exc) {
+    return extFail(ses, entry.id, `Electron could not load it: ${(exc && exc.message) || exc}`);
+  }
+}
+
+function unloadExtensionFrom(ses, id) {
+  const st = statusMap(ses).get(id);
+  const api = extApi(ses);
+  if (st && st.electronId && api && typeof api.removeExtension === "function") {
+    try {
+      api.removeExtension(st.electronId);
+    } catch (exc) {
+      log("extension could not be unloaded:", exc.message || exc);
+    }
+  }
+  statusMap(ses).set(id, { loaded: false, electronId: "", error: "" });
+}
+
+// The first batch for a session: every enabled extension, one after the other. Pages opened by
+// the owner wait for it (see loadInTab) so a content script is there for the first real page.
+function blockExtensionsFromLocalServices(ses) {
+  // Finding #164: an all-sites extension must not read the app's own local server. A request that
+  // comes from an extension page or worker (no tab behind it, or an extension referrer) to a
+  // loopback address is cancelled; the app's own pages in a tab are unaffected.
+  try {
+    ses.webRequest.onBeforeRequest({ urls: ["http://127.0.0.1:*/*", "http://localhost:*/*", "http://[::1]:*/*", "http://0.0.0.0:*/*"] }, (details, callback) => {
+      const fromExtension = !details.webContents || String(details.referrer || "").startsWith("chrome-extension://");
+      callback({ cancel: Boolean(fromExtension) });
+    });
+  } catch (exc) {
+    log("could not install the local-services block:", exc.message || exc);
+  }
+}
+
+function unloadExtensionEverywhere(id) {
+  for (const ses of extSessionList) {
+    unloadExtensionFrom(ses, id);
+    statusMap(ses).delete(id);
+  }
+}
+
+function startExtensions(ses) {
+  if (!ses || extSessionInit.has(ses)) return;
+  extSessionList.push(ses);
+  blockExtensionsFromLocalServices(ses);
+  const enabled = extRegistry().entries.filter((e) => e.enabled);
+  if (!enabled.length) {
+    extSessionInit.set(ses, null);
+    return;
+  }
+  const run = (async () => {
+    for (const e of enabled) await loadExtensionInto(ses, e);
+  })().catch((exc) => log("extensions: loading stopped:", exc.message || exc)).finally(() => {
+    extSessionInit.set(ses, null);
+    schedulePush();
+  });
+  extSessionInit.set(ses, run);
+}
+
+function extensionList() {
+  const ses = paneSession();
+  return {
+    ok: true, supported: Boolean(extApi(ses)), note: extLib.EXTENSION_SUPPORT_NOTE,
+    extensions: extRegistry().entries.map((e) => extLib.publicView(e, statusMap(ses).get(e.id))),
+  };
+}
+
+function readOrNull(p) {
+  try {
+    // Finding #164: a crafted folder can make this a symlink to /dev/zero or a FIFO.
+    const st = fs.lstatSync(p);
+    if (!st.isFile() || st.size > 262144) return null;
+    return fs.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function addExtensionFlow() {
+  if (!extApi(paneSession())) return { ok: false, error: "This build of Electron has no extension support." };
+  if (extRegistry().entries.length >= extLib.MAX_EXTENSIONS) return { ok: false, error: `At most ${extLib.MAX_EXTENSIONS} extensions.` };
+  const src = await pickNatively({
+    title: "Choose an unpacked extension folder", message: "Pick the folder that holds the extension's manifest.json.",
+    buttonLabel: "Choose", properties: ["openDirectory"],
+  });
+  if (!src) return { ok: false, cancelled: true, error: "cancelled" };
+  const manifestPath = path.join(src, "manifest.json");
+  let st;
+  try {
+    st = fs.lstatSync(manifestPath);
+  } catch {
+    return { ok: false, error: "That folder has no manifest.json. Pick the folder of an unpacked extension." };
+  }
+  if (!st.isFile() || st.size > extLib.MAX_MANIFEST_BYTES) return { ok: false, error: "manifest.json is not a normal file of a sensible size." };
+  const raw = fs.readFileSync(manifestPath);
+  let manifest;
+  try {
+    manifest = JSON.parse(raw.toString("utf8"));
+  } catch {
+    return { ok: false, error: "manifest.json is not valid JSON." };
+  }
+  const info = extLib.inspectManifest(manifest, (loc) => readOrNull(path.join(src, "_locales", loc, "messages.json")));
+  if (!info.ok) return { ok: false, error: info.error };
+  const text = extLib.confirmationText(info, path.basename(src));
+  if (!(await confirmNatively({ title: "Add extension", message: text.message, detail: text.detail, ok: "Add extension" }))) {
+    return { ok: false, cancelled: true, error: "cancelled" };
+  }
+  const id = extLib.newExtensionId(crypto.randomBytes);
+  const dest = path.join(extensionsDir(), id);
+  try {
+    fs.mkdirSync(extensionsDir(), { recursive: true, mode: 0o700 });
+    lockDown(extensionsDir(), "", 0);
+  } catch (exc) {
+    return { ok: false, error: `The extensions folder could not be made: ${exc.message || exc}` };
+  }
+  const discard = () => fs.rmSync(dest, { recursive: true, force: true });
+  const copied = extLib.copyTree({ fs, path }, src, dest);
+  if (!copied.ok) {
+    discard();
+    return { ok: false, error: copied.error };
+  }
+  // What was copied must be what was shown to the owner.
+  let tree = "";
+  try {
+    if (extLib.sha256(fs.readFileSync(path.join(dest, "manifest.json"))) !== extLib.sha256(raw)) throw new Error("manifest.json changed while it was being copied");
+    tree = extLib.hashTree({ fs, path }, dest);
+  } catch (exc) {
+    discard();
+    return { ok: false, error: `The copy could not be verified: ${exc.message || exc}` };
+  }
+  const entry = { id, name: info.name, version: info.version, enabled: true, addedAt: Date.now(), tree, risk: info.risk, summary: info.lines.slice(0, 20) };
+  const added = extLib.addEntry(extRegistry(), entry);
+  if (!added.ok) {
+    discard();
+    return { ok: false, error: added.error };
+  }
+  saveExtRegistry(added.registry);
+  await loadExtensionInto(paneSession(), entry);
+  schedulePush();
+  return { ok: true, extension: extLib.publicView(entry, statusMap(paneSession()).get(entry.id)) };
+}
+
+async function enableExtensionFlow(id) {
+  const entry = extRegistry().entries.find((e) => e.id === id);
+  if (!entry) return { ok: false, error: "No such extension." };
+  if (entry.enabled) return { ok: true, extension: extLib.publicView(entry, statusMap(paneSession()).get(entry.id)) };
+  const text = extLib.confirmationText({ name: entry.name, version: entry.version, lines: entry.summary }, "(already in this browser)");
+  const detail = text.detail.replace(/^Folder: .*\n\n/, "");
+  if (!(await confirmNatively({ title: "Enable extension", message: `Turn "${entry.name}" on again?`, detail, ok: "Enable" }))) {
+    return { ok: false, cancelled: true, error: "cancelled" };
+  }
+  const next = extLib.setEnabled(extRegistry(), id, true);
+  saveExtRegistry(next.registry);
+  await loadExtensionInto(paneSession(), { ...entry, enabled: true });
+  schedulePush();
+  return { ok: true, extension: extLib.publicView({ ...entry, enabled: true }, statusMap(paneSession()).get(id)) };
+}
+
+ipcMain.handle("ext:list", (evt) => (consoleOnly(evt) ? extensionList() : REFUSED));
+ipcMain.handle("ext:add", (evt) => (consoleOnly(evt) ? nativeGuard(addExtensionFlow) : REFUSED));
+ipcMain.handle("ext:enable", (evt, id) => {
+  if (!consoleOnly(evt) || typeof id !== "string") return REFUSED;
+  return nativeGuard(() => enableExtensionFlow(id));
+});
+ipcMain.handle("ext:disable", (evt, id) => {
+  if (!consoleOnly(evt) || typeof id !== "string") return REFUSED;
+  const next = extLib.setEnabled(extRegistry(), id, false);
+  if (!next.ok) return { ok: false, error: next.error };
+  saveExtRegistry(next.registry);
+  unloadExtensionEverywhere(id);
+  schedulePush();
+  return { ok: true };
+});
+ipcMain.handle("ext:remove", (evt, id) => {
+  if (!consoleOnly(evt) || typeof id !== "string") return REFUSED;
+  const next = extLib.removeEntry(extRegistry(), id);
+  if (!next.ok) return { ok: false, error: next.error };
+  unloadExtensionEverywhere(id);
+  saveExtRegistry(next.registry);
+  try {
+    fs.rmSync(path.join(extensionsDir(), id), { recursive: true, force: true });
+  } catch (exc) {
+    log("extension files could not be removed:", exc.message || exc);
+  }
+  schedulePush();
+  return { ok: true };
+});
+
+// ---- profiles ----
+
+// Everything a profile switch must forget: the pane's tabs (their pages belong to the old cookie
+// jar), anything waiting for an answer, and every in-memory copy of a login.
+function closeAllTabs() {
+  for (const tab of [...tabs.values()]) {
+    const wc = liveContents(tab);
+    forgetTabPrivacy(tab.id);
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.getBrowserViews().includes(tab.view)) mainWindow.removeBrowserView(tab.view);
+    if (wc) wc.close();
+  }
+  tabs.clear();
+  tabOrder = [];
+  closedTabs.length = 0;
+  activeTabId = 0;
+  paneView = null;
+}
+
+function switchProfile(rawName) {
+  const next = profLib.setActive(profileRegistry, rawName);
+  if (!next.ok) return { ok: false, error: next.error };
+  if (next.name === activeProfileName) return { ok: true, active: activeProfileName, unchanged: true };
+  for (const s of Object.values(storesFor(activeProfileName))) s.flush();
+  promptQueue.dropAll();
+  for (const [, s] of pendingSaves) s.password = "";
+  pendingSaves.clear();
+  fillCache.clear();
+  closeAllTabs();
+  activeProfileName = next.name;
+  TAB_WEB_PREFERENCES.partition = activePartition();
+  sitesChecked = false;
+  saveProfileRegistry(next.registry);
+  registryStore.flush();
+  // The pane is never empty: the new profile's first tab is created at about:blank so the browser
+  // agent can find it again, exactly as it found the first tab of the first profile.
+  ensurePaneView();
+  attachActiveView();
+  schedulePush();
+  return { ok: true, active: activeProfileName };
+}
+
+function profileListView() {
+  return { ok: true, active: activeProfileName, profiles: profLib.listProfiles(profileRegistry), max: profLib.MAX_PROFILES };
+}
+
+async function removeProfileFlow(rawName) {
+  const name = profLib.cleanName(rawName);
+  const next = profLib.removeProfile(profileRegistry, name);
+  if (!next.ok) return { ok: false, error: next.error };
+  const set = storesFor(name);
+  const counts = {
+    passwords: set.password.get().entries ? set.password.get().entries.length : 0,
+    bookmarks: set.bookmarks.get().length,
+    history: set.history.get().length,
+  };
+  const ok = await confirmNatively({
+    title: "Remove profile", ok: "Remove profile",
+    message: `Remove the profile "${name}" and everything in it?`,
+    detail: `Its saved passwords (${counts.passwords}), bookmarks (${counts.bookmarks}), history (${counts.history}), site permissions, cookies and logins are deleted from this Mac. This cannot be undone.`,
+  });
+  if (!ok) return { ok: false, cancelled: true, error: "cancelled" };
+  const partition = profLib.partitionFor(name);
+  profileStores.delete(name);
+  try {
+    fs.rmSync(profLib.dirFor(path, browserDataDir(), name), { recursive: true, force: true });
+  } catch (exc) {
+    log("profile files could not be removed:", exc.message || exc);
+  }
+  try {
+    const ses = session.fromPartition(partition);
+    if (ses && typeof ses.clearStorageData === "function") await ses.clearStorageData();
+    if (ses && typeof ses.clearCache === "function") await ses.clearCache();
+  } catch (exc) {
+    log("profile storage could not be cleared:", exc.message || exc);
+  }
+  saveProfileRegistry(next.registry);
+  registryStore.flush();
+  schedulePush();
+  return { ok: true };
+}
+
+ipcMain.handle("profile:list", (evt) => (consoleOnly(evt) ? profileListView() : REFUSED));
+ipcMain.handle("profile:switch", (evt, name) => (consoleOnly(evt) && typeof name === "string" ? switchProfile(name) : REFUSED));
+ipcMain.handle("profile:create", (evt, name) => {
+  if (!consoleOnly(evt) || typeof name !== "string") return REFUSED;
+  const r = profLib.addProfile(profileRegistry, name);
+  if (!r.ok) return { ok: false, error: r.error };
+  saveProfileRegistry(r.registry);
+  registryStore.flush();
+  schedulePush();
+  return { ok: true, name: r.name };
+});
+ipcMain.handle("profile:remove", (evt, name) => {
+  if (!consoleOnly(evt) || typeof name !== "string") return REFUSED;
+  return nativeGuard(() => removeProfileFlow(name));
+});
+
+// ---- import from Chrome (read-only, explicit) ----
+
+const sqliteReader = impLib.makeSqliteReader({ execFileSync: require("child_process").execFileSync, requireModule: (n) => require(n) });
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+async function importChromeFlow(want) {
+  const w = { bookmarks: want && want.bookmarks !== false, history: want && want.history !== false };
+  if (!w.bookmarks && !w.history) return { ok: false, error: "Choose bookmarks, history or both." };
+  const dir = await pickNatively({
+    title: "Choose a Chrome profile folder", message: "Pick the Chrome profile folder (for example Default). Dourmouse reads its Bookmarks and History files and nothing else.",
+    buttonLabel: "Choose", properties: ["openDirectory"], defaultPath: path.join(app.getPath("home") || "", "Library", "Application Support", "Google", "Chrome"),
+  });
+  if (!dir) return { ok: false, cancelled: true, error: "cancelled" };
+  const found = impLib.readChromeProfile({ fs, path, os: require("os"), readHistory: sqliteReader }, dir, w);
+  if (!found.ok) return { ok: false, error: found.error };
+  const bm = found.bookmarks ? impLib.mergeBookmarks(bookmarkStore.get(), found.bookmarks, newId) : null;
+  const hi = found.history ? impLib.mergeHistory(historyStore.get(), found.history, newId) : null;
+  const lines = [];
+  if (bm) lines.push(`${plural(bm.counts.found, "bookmark", "bookmarks")} found, ${bm.counts.added} new`);
+  if (hi) lines.push(`${plural(hi.counts.found, "history entry", "history entries")} found, ${hi.counts.added} new`);
+  for (const n of found.notes) lines.push(n);
+  const ok = await confirmNatively({
+    title: "Import from Chrome", ok: "Import",
+    message: `Import into the profile "${activeProfileName}"?`,
+    detail: `${lines.join("\n")}\n\nChrome's files are read, never changed. Passwords, cookies and anything else in that folder are not touched.`,
+  });
+  if (!ok) return { ok: false, cancelled: true, error: "cancelled" };
+  if (bm) bookmarkStore.set(bm.list);
+  if (hi) historyStore.set(hi.list);
+  schedulePush();
+  return { ok: true, profile: activeProfileName, bookmarks: bm ? bm.counts : null, history: hi ? hi.counts : null, notes: found.notes };
+}
+
+async function importPasswordsFlow() {
+  if (!cipher.available()) return { ok: false, error: "This Mac's secure storage is not available, so no password can be imported. Nothing is stored without encryption." };
+  const file = await pickNatively({
+    title: "Choose a Chrome password export", message: "Pick the CSV file you exported from Chrome (Settings, Passwords, Export). Dourmouse reads it once and never copies it.",
+    buttonLabel: "Choose", properties: ["openFile"], filters: [{ name: "Chrome password export (CSV)", extensions: ["csv"] }],
+  });
+  if (!file) return { ok: false, cancelled: true, error: "cancelled" };
+  let st;
+  try {
+    st = fs.statSync(file);
+  } catch {
+    return { ok: false, error: "That file cannot be read." };
+  }
+  if (!st.isFile() || st.size > impLib.MAX_CSV_BYTES) return { ok: false, error: "That file is not a CSV export of a sensible size." };
+  const parsed = impLib.passwordRowsFromCsv(fs.readFileSync(file, "utf8"));
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  if (!parsed.rows.length) return { ok: false, error: "No password in that file can be saved (only https sites and this Mac are saved)." };
+  const c = parsed.counts;
+  const skipped = c.notWeb + c.notSecure + c.noPassword + c.tooLong;
+  const ok = await confirmNatively({
+    title: "Import passwords", ok: "Import passwords",
+    message: `Import ${plural(parsed.rows.length, "password", "passwords")} from ${path.basename(file)} into the profile "${activeProfileName}"?`,
+    detail: `${skipped ? `${plural(skipped, "row", "rows")} cannot be saved (not a secure web address, or no password).\n` : ""}` +
+      "They are encrypted with this Mac's Keychain key and kept on this Mac only. The file is not copied or changed. " +
+      "It holds your passwords in plain text, so delete it when this is done.",
+  });
+  if (!ok) return { ok: false, cancelled: true, error: "cancelled" };
+  const result = impLib.importPasswords(vault, parsed.rows);
+  fillCache.clear();
+  schedulePush();
+  if (result.unavailable) return { ok: false, error: "Encryption became unavailable, so nothing more was saved.", ...result };
+  return { ok: true, profile: activeProfileName, rows: c.rows, usable: c.usable, skipped, ...result };
+}
+
+ipcMain.handle("import:chrome", (evt, want) => (consoleOnly(evt) ? nativeGuard(() => importChromeFlow(want && typeof want === "object" ? want : {})) : REFUSED));
+ipcMain.handle("import:passwords", (evt) => (consoleOnly(evt) ? nativeGuard(importPasswordsFlow) : REFUSED));
+
+// ---- DRM (Widevine) status ----
+// Stock Electron has no Widevine. The castLabs build does, and exposes `components`; this file does
+// not install it (scripts/install_drm_electron.sh and B3_DRM_PLAN.md describe that opt-in). Here
+// the shell only asks, without ever throwing, and reports what is really there.
+
+let drmState = { checked: false, hasComponents: false, ready: false, status: null, error: "" };
+function startDrmCheck() {
+  // DOURMOUSE_DRM=0 leaves protected video off even on a build that has it (the key system request
+  // then stays refused), for an owner who prefers not to have a content decryption module at all.
+  if (process.env.DOURMOUSE_DRM === "0") {
+    drmState = { checked: true, hasComponents: false, ready: false, status: null, error: "", disabled: true };
+    return;
+  }
+  drmLib.startDrm(electronApi, { log }).then((st) => {
+    drmState = st;
+    schedulePush();
+  }).catch((exc) => {
+    drmState = { checked: true, hasComponents: false, ready: false, status: null, error: String((exc && exc.message) || exc) };
+  });
+}
+async function drmReport() {
+  let probe = null;
+  const wc = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+  if (wc && typeof wc.executeJavaScriptInIsolatedWorld === "function") {
+    try {
+      const r = await withTimeout(wc.executeJavaScriptInIsolatedWorld(2999, [{ code: drmLib.EME_PROBE_SOURCE }]), 4000);
+      probe = r && typeof r === "object" ? r : null;
+    } catch {
+      probe = null;
+    }
+  }
+  return drmLib.describeDrm(drmState, probe, process.versions);
+}
+ipcMain.handle("drm:status", async (evt) => (consoleOnly(evt) ? { ok: true, ...(await drmReport()) } : REFUSED));
+
 // ------------------------------- pane bridge ------------------------------- //
 
 function startPaneBridge() {
@@ -2048,7 +2616,22 @@ function startPaneBridge() {
     const isPost = req.method === "POST";
     if (isGet && route === "/status") {
       // Phase B2: counts only. No site, no username, no value: see privacyCounts().
-      respond(200, { active: paneVisible, cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, tabCount: tabs.size, activeTab: activeTabId, ...privacyCounts() });
+      respond(200, {
+        active: paneVisible, cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, tabCount: tabs.size, activeTab: activeTabId, ...privacyCounts(),
+        profile: activeProfileName, profiles: profileRegistry.names.length + 1, extensions: extLib.countEntries(extRegistry()),
+        drm: { build: drmState.hasComponents ? "castlabs-ecs" : "stock-electron", ready: drmState.ready === true },
+      });
+    } else if (isGet && route === "/profiles") {
+      // Read-only: the names of the profiles and which one is active. There is no route here that
+      // switches, creates or removes one, and none that imports anything.
+      respond(200, profileListView());
+    } else if (isGet && route === "/extensions") {
+      // Read-only and non-secret: names, versions and on or off. There is deliberately no route
+      // here that adds, enables or removes an extension: that is the console's native dialog alone.
+      const v = extensionList();
+      respond(200, { ok: true, supported: v.supported, extensions: v.extensions.map((e) => ({ name: e.name, version: e.version, enabled: e.enabled, loaded: e.loaded, risk: e.risk })) });
+    } else if (isGet && route === "/drm") {
+      drmReport().then((r) => respond(200, { ok: true, ...r }), (exc) => respond(500, { ok: false, error: String((exc && exc.message) || exc) }));
     } else if (isGet && route === "/permissions") {
       // Read-only and non-secret: which sites hold a stored decision. There is deliberately no
       // route here that grants, changes or revokes one, and none that reads a password.
@@ -2476,6 +3059,8 @@ app.whenReady().then(async () => {
   startAlertNotifications();
   // Stage D: the embedded browser pane's cross-process bridge.
   startPaneBridge();
+  // B3: is this the build that has Widevine? Asked once, never blocks the start, never throws.
+  startDrmCheck();
 
   log(`Dourmouse (Electron shell) online at ${BASE_URL}`);
 

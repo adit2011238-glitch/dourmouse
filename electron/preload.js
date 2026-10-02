@@ -86,6 +86,31 @@ contextBridge.exposeInMainWorld("dourmouseShell", {
       addrSave: (profile, id) => ipcRenderer.invoke("addr:save", profile, id),
       addrDelete: (id) => ipcRenderer.invoke("addr:delete", id),
       addrFill: (id) => ipcRenderer.invoke("addr:fill", id),
+      // Phase B3: what the engine says about Widevine (non-secret, shown in Site settings).
+      drm: () => ipcRenderer.invoke("drm:status"),
+    },
+    // Phase B3: extensions, profiles and import from Chrome. Each call is a request the main process
+    // validates and answers only for the console window. The ones that add code, import data or
+    // delete a profile end in a NATIVE macOS dialog that a script driving the console cannot press;
+    // none of them takes a path from the page (the folders and files are chosen in the native dialog).
+    manage: {
+      extensions: {
+        list: () => ipcRenderer.invoke("ext:list"),
+        add: () => ipcRenderer.invoke("ext:add"),
+        enable: (id) => ipcRenderer.invoke("ext:enable", id),
+        disable: (id) => ipcRenderer.invoke("ext:disable", id),
+        remove: (id) => ipcRenderer.invoke("ext:remove", id),
+      },
+      profiles: {
+        list: () => ipcRenderer.invoke("profile:list"),
+        switchTo: (name) => ipcRenderer.invoke("profile:switch", name),
+        create: (name) => ipcRenderer.invoke("profile:create", name),
+        remove: (name) => ipcRenderer.invoke("profile:remove", name),
+      },
+      importFrom: {
+        chrome: (want) => ipcRenderer.invoke("import:chrome", want),
+        passwords: () => ipcRenderer.invoke("import:passwords"),
+      },
     },
   },
 });

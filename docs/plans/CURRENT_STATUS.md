@@ -487,3 +487,6 @@ Shared desk for every chat (browser, file preview incl. txt/md/csv/json/code, pl
 
 ## 2026-10-02 Wave 2a (finding #162)
 Owner secret live (A5), desk and login hardening, multi-tab browser pane with downloads, find, zoom, print, history, bookmarks. Suite 7299 passed, 12 skipped. Seen live in isolated copies: tabs, downloads, find, zoom, history, owner gate, stale-server replacement. Not seen: print dialog, Finder reveal.
+
+## 2026-10-03 Wave 2b (finding #163)
+Per-site permission prompts, encrypted password and address manager with click-to-fill (native confirm), password fields redacted from model snapshots. Suite 7421 passed, 12 skipped. Seen live in an isolated copy except the native dialogs.

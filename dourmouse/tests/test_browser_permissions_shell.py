@@ -465,7 +465,7 @@ class TestTheSourceKeepsTheGrantDoorShut:
 
     def test_the_pane_session_handlers_are_installed_before_the_first_page_exists(self):
         body = self._body("ensurePaneView")
-        assert body.index("installPaneSession(session.fromPartition(PANE_PARTITION))") < body.index("new BrowserView(")
+        assert body.index("installPaneSession(session.fromPartition(TAB_WEB_PREFERENCES.partition))") < body.index("new BrowserView(")
 
     def test_the_pane_preferences_still_carry_no_preload_and_no_node(self):
         prefs = re.search(r"const TAB_WEB_PREFERENCES = (\{[^}]*\});", MAIN_CODE).group(1)

@@ -42,5 +42,17 @@
        keep working in the packaged build, not just in a dev checkout. -->
   <key>com.apple.security.automation.apple-events</key>
   <true/>
+
+  <!-- Finding B3 (a B2 review leftover). A hardened-runtime app that is never granted these two
+       entitlements is refused the camera and the microphone by macOS without even showing the
+       permission prompt, so the browser pane's per-site camera and microphone permissions (and the
+       app's own push-to-talk and hand-tracking pages) could never work in a packaged build. The
+       usage descriptions are already in package.json's extendInfo; these are the matching
+       entitlements. They only allow the app to ASK: macOS still prompts the owner, the privacy
+       kill switch still gates every use, and a site still needs the owner's Allow. -->
+  <key>com.apple.security.device.camera</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

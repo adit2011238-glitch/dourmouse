@@ -201,9 +201,26 @@ function createTempGrants() {
 // A request that cannot be shown (too many waiting) is refused at once, and a prompt that
 // nobody answers in `ttlMs` is dismissed, which the waiter treats as "no" and does not store.
 
-function createPromptQueue({ max = 20, maxPerTab = 4, ttlMs = 90000, now = Date.now } = {}) {
+// Two more limits (B3, from the B2 review): a page that asks again and again cannot pile up an
+// endless list of waiting callbacks (`maxWaiters` per prompt), and once the owner presses
+// Dismiss, the same site asking for the same things is refused quietly for `dismissMs` instead
+// of raising the bar again at once. Only the owner's own Dismiss is remembered: a prompt that
+// expired or whose tab went away is not.
+function createPromptQueue({ max = 20, maxPerTab = 4, ttlMs = 90000, maxWaiters = 50, dismissMs = 60000, now = Date.now } = {}) {
   let items = [];
   let seq = 0;
+  const dismissed = new Map(); // "origin|sorted keys" -> time until which it stays refused
+  const MAX_DISMISSED = 200;
+  const sigOf = (origin, keys) => `${origin}|${keys.slice().sort().join(",")}`;
+  const recentlyDismissed = (origin, keys) => {
+    const until = dismissed.get(sigOf(origin, keys));
+    if (until === undefined) return false;
+    if (now() >= until) {
+      dismissed.delete(sigOf(origin, keys));
+      return false;
+    }
+    return true;
+  };
   const view = (i) => ({ id: i.id, tabId: i.tabId, origin: i.origin, keys: i.keys.slice(), at: i.at });
   const finish = (item, decision) => {
     for (const w of item.waiters) {
@@ -218,8 +235,10 @@ function createPromptQueue({ max = 20, maxPerTab = 4, ttlMs = 90000, now = Date.
     // waiter(decision) is called once with "allow", "once", "block" or "dismiss".
     request(tabId, origin, keys, waiter) {
       const sig = keys.slice().sort().join(",");
+      if (recentlyDismissed(origin, keys)) return { ok: false, reason: "dismissed a moment ago" };
       const same = items.find((i) => i.tabId === tabId && i.origin === origin && i.keys.slice().sort().join(",") === sig);
       if (same) {
+        if (same.waiters.length >= maxWaiters) return { ok: false, reason: "too many requests for this prompt" };
         same.waiters.push(waiter);
         return { ok: true, id: same.id, merged: true };
       }
@@ -240,6 +259,11 @@ function createPromptQueue({ max = 20, maxPerTab = 4, ttlMs = 90000, now = Date.
       if (!i) return null;
       items = items.filter((x) => x !== i);
       const data = view(i);
+      if (decision === "dismiss") {
+        for (const [k, until] of dismissed) if (now() >= until) dismissed.delete(k);
+        if (dismissed.size >= MAX_DISMISSED) dismissed.delete(dismissed.keys().next().value);
+        dismissed.set(sigOf(i.origin, i.keys), now() + dismissMs);
+      }
       finish(i, decision);
       return data;
     },

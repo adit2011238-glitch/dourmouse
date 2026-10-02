@@ -183,11 +183,11 @@ class TestTheScreenKeepsItsPromises:
 
     def test_the_preload_exposes_only_requests_and_the_reveal_is_the_only_password_returning_one(self):
         pre = (_ROOT / "electron" / "preload.js").read_text(encoding="utf-8")
-        block = pre[pre.index("privacy: {"):]
+        block = pre[pre.index("privacy: {"):pre.index("manage: {")]  # B3's own block follows and is pinned in test_browser_manage_screen.py
         invoked = re.findall(r'ipcRenderer\.invoke\("([^"]+)"', block)
         assert set(invoked) == {"pane:privacy", "pane:perm-answer", "site:perms", "site:perm-set", "site:perm-forget", "site:perms-clear",
                                 "pw:list", "pw:delete", "pw:never-remove", "pw:save-answer", "pw:fill", "pw:reveal",
-                                "addr:list", "addr:save", "addr:delete", "addr:fill"}
+                                "addr:list", "addr:save", "addr:delete", "addr:fill", "drm:status"}
         assert "ipcRenderer.send" not in block and "contextBridge" not in block.split("privacy: {")[1]
 
     def test_no_em_dash_and_no_decorative_slashes_were_added(self):

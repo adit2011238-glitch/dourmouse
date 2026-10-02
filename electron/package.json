@@ -28,6 +28,10 @@
       "policy.js",
       "permissions.js",
       "passwords.js",
+      "profiles.js",
+      "extensions.js",
+      "importers.js",
+      "drm.js",
       "content/**",
       "package.json"
     ],

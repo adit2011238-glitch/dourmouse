@@ -480,7 +480,8 @@ class TestNothingOnTheBridgeCanReachThem:
     def test_status_carries_counts_only(self, bridge):
         assert bridge["status"]["passwords"] == {"passwords": 1, "neverSaved": 0, "encryption": True}  # known once something was saved
         assert bridge["status"]["addresses"] == {"count": 1}
-        assert bridge["cdpEndpointOnly"] == ["active", "activeTab", "addresses", "cdpEndpoint", "passwords", "permissions", "tabCount"]
+        # B3 added four more non-secret keys: the profile name, the profile count, the extension counts and the DRM build
+        assert bridge["cdpEndpointOnly"] == ["active", "activeTab", "addresses", "cdpEndpoint", "drm", "extensions", "passwords", "permissions", "profile", "profiles", "tabCount"]
 
     def test_every_guessed_password_route_is_a_404(self, bridge):
         known = {"GET /status", "GET /tabs", "GET /history", "GET /bookmarks", "GET /downloads", "GET /permissions"}
@@ -565,8 +566,9 @@ class TestTheShellValidatesWhatTheHelperSends:
             assert m and "consoleOnly(evt)" in m.group(1), name
 
     def test_the_password_file_is_written_owner_only(self):
-        assert 'makeStore("passwords.json", { entries: [], never: [] }, { mode: 0o600, lazy: true })' in MAIN_CODE
-        assert 'makeStore("addresses.json", { profiles: [] }, { mode: 0o600, lazy: true })' in MAIN_CODE
+        # B3: the stores are made per profile, so the folder is a parameter; the modes are unchanged
+        assert 'makeStore("passwords.json", { entries: [], never: [] }, { mode: 0o600, lazy: true, dir })' in MAIN_CODE
+        assert 'makeStore("addresses.json", { profiles: [] }, { mode: 0o600, lazy: true, dir })' in MAIN_CODE
         assert "mode: fileMode" in MAIN_CODE
 
     def test_a_password_is_cleared_from_memory_when_its_prompt_ends(self):

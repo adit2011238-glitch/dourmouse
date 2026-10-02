@@ -118,3 +118,43 @@ def test_page_snapshot_never_returns_password_field_values() -> None:
 
     src = inspect.getsource(browser_agent._page_summary)
     assert "el.type === 'password'" in src and "[hidden]" in src
+
+
+# ---- Wave 2c review fixes (finding #164 addendum) ----
+def _node(script: str) -> str:
+    import pathlib
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        import pytest
+
+        pytest.skip("node not available")
+    root = pathlib.Path(__file__).resolve().parents[2]
+    return subprocess.run([node, "-e", script], cwd=root, capture_output=True, text=True, timeout=30, check=True).stdout.strip()
+
+
+def test_extension_confirmation_cannot_be_spoofed_with_newlines_or_bidi() -> None:
+    out = _node(
+        "const e=require('./electron/extensions.js');"
+        "const r=e.inspectManifest({manifest_version:3,name:'Safe\\u202e',version:'1',"
+        "permissions:['x\" permission.\\n  - It asks for no special access'],host_permissions:['https://a.example/*\\n\\nVerified']});"
+        "console.log(JSON.stringify(r.lines.join('|')))"
+    )
+    assert "\\n" not in out
+    assert "202e" not in out.lower()
+
+
+def test_wildcard_on_a_public_suffix_counts_as_all_sites() -> None:
+    assert _node("console.log(require('./electron/extensions.js').isAllSitesPattern('*://*.com/*'))") == "true"
+    assert _node("console.log(require('./electron/extensions.js').isAllSitesPattern('https://*.example.com/*'))") == "false"
+
+
+def test_main_js_guards_the_extension_paths() -> None:
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[2] / "electron" / "main.js").read_text()
+    assert "unloadExtensionEverywhere" in src and "blockExtensionsFromLocalServices" in src
+    read_or_null = src[src.index("function readOrNull"):][:400]
+    assert "lstatSync" in read_or_null and "isFile()" in read_or_null

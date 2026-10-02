@@ -5,6 +5,19 @@
    it safe to draw. None of it ever holds a password: the shell keeps those, and the one call
    that returns one (reveal) is handled in privacy-ui.js and goes through a native dialog. */
 
+/* Click-ambush guard (B3, from the B2 review). A bar that appears under the pointer a moment
+   before a click meant for the page would take that click as an answer. Its buttons stay
+   disabled until this long after the prompt FIRST appeared. */
+export const CLICK_DELAY_MS = 600;
+
+/* How many milliseconds a prompt first seen at `firstSeen` must still wait. Never negative, and
+   a clock that went backwards (firstSeen later than now) is treated as "just appeared". */
+export function clickDelayLeft(firstSeen, now, delay = CLICK_DELAY_MS) {
+  if (!Number.isFinite(firstSeen) || !Number.isFinite(now)) return delay;
+  const waited = Math.max(0, now - firstSeen);
+  return Math.max(0, delay - waited);
+}
+
 export const ADDRESS_FIELDS = [
   { key: 'label', label: 'Label', hint: 'Home, Work' },
   { key: 'name', label: 'Full name', hint: '' },

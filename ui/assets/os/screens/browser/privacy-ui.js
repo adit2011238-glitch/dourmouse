@@ -17,8 +17,9 @@ import { isAbort } from '../../core/api.js';
 import { ago } from '../../kit/format.js';
 import {
   privacyModel, barsKey, waitingLine, saveLine, groupSites, passwordRows, neverRows, profileRows,
-  addressFromForm, vaultLine, ADDRESS_FIELDS, siteHost,
+  addressFromForm, vaultLine, ADDRESS_FIELDS, siteHost, clickDelayLeft,
 } from './privacy-model.js';
+import { drmLine } from './manage-model.js';
 
 export const REVEAL_MS = 10000;
 
@@ -46,6 +47,9 @@ export function createPrivacy({ ctx, privacy, note }) {
   let model = privacyModel(null);
   let lastKey = '';
   let noticeHidden = '';
+  /* when each permission and Save prompt first appeared, for the click-ambush guard */
+  const firstSeen = new Map();
+  const guardTimers = new Set();
   const root = el('div', 'cb-privacy');
   root.hidden = true;
   const disposers = new Set();
@@ -79,6 +83,7 @@ export function createPrivacy({ ctx, privacy, note }) {
       btn('Allow', 'cb-go', 'Allow this site and remember it. You can undo it in Site settings.', () => answerPerm('allow')),
       btn('Allow this time', '', 'Allow it for this tab until you leave the site or close the tab. Nothing is remembered.', () => answerPerm('once')),
       btn('Block', '', 'Refuse and remember it, so this site does not ask again. You can change it in Site settings.', () => answerPerm('block')),
+      btn('Dismiss', '', 'Closes this request and tells the page no, without remembering it. The same site is not asked again for a minute.', () => answerPerm('dismiss')),
     );
     return b;
   }
@@ -161,6 +166,27 @@ export function createPrivacy({ ctx, privacy, note }) {
     return b;
   }
 
+  /* The click-ambush guard: the buttons of a permission or Save prompt cannot be pressed (by the
+     pointer or the keyboard) until CLICK_DELAY_MS after the prompt first appeared, so a click
+     that was meant for the page a moment ago cannot answer it. A rebuild of the same prompt does
+     not restart the wait. */
+  function guardBar(b, id) {
+    const first = firstSeen.has(id) ? firstSeen.get(id) : Date.now();
+    firstSeen.set(id, first);
+    const left = clickDelayLeft(first, Date.now());
+    if (left <= 0) return b;
+    const buttons = Array.from(b.querySelectorAll('.cb-ask-btn'));
+    buttons.forEach((x) => { x.disabled = true; });
+    b.dataset.armed = '0';
+    const t = setTimeout(() => {
+      guardTimers.delete(t);
+      buttons.forEach((x) => { x.disabled = false; });
+      b.dataset.armed = '1';
+    }, left);
+    guardTimers.add(t);
+    return b;
+  }
+
   function answerPerm(decision) {
     if (!model.perm) return;
     const id = model.perm.id;
@@ -180,8 +206,18 @@ export function createPrivacy({ ctx, privacy, note }) {
     const focused = root.contains(document.activeElement) ? document.activeElement : null;
     const keep = focused && focused.dataset.spec ? focused.textContent : '';
     const bars = [];
-    if (model.perm) bars.push(permBar(model));
-    if (model.save) bars.push(saveBar(model));
+    guardTimers.forEach((t) => clearTimeout(t));
+    guardTimers.clear();
+    const live = new Set();
+    if (model.perm) {
+      live.add('perm:' + model.perm.id);
+      bars.push(guardBar(permBar(model), 'perm:' + model.perm.id));
+    }
+    if (model.save) {
+      live.add('save:' + model.save.id);
+      bars.push(guardBar(saveBar(model), 'save:' + model.save.id));
+    }
+    for (const id of Array.from(firstSeen.keys())) if (!live.has(id)) firstSeen.delete(id);
     if (model.fill) bars.push(fillBar(model));
     if (model.fillAddress) bars.push(addressBar(model));
     if (model.notice && model.notice !== noticeHidden) bars.push(noticeBar(model));
@@ -204,6 +240,8 @@ export function createPrivacy({ ctx, privacy, note }) {
   function sitesPanel(panelRoot, { head, button, close }) {
     const body = el('div', 'bw-pb');
     const confirm = el('div', 'bw-pc');
+    const drmEl = el('p', 'bw-pnote bw-drm');
+    drmEl.dataset.role = 'drm-status';
     let alive = true;
     const clearAll = button('RESET ALL', () => {
       confirmHere(
@@ -217,9 +255,23 @@ export function createPrivacy({ ctx, privacy, note }) {
     panelRoot.replaceChildren(
       head('Site settings', clearAll, close),
       el('p', 'bw-pnote', 'Sites can ask to use your camera, microphone, location, notifications, the clipboard, and full screen. You answer in the bar above the page, and the answer is kept here. Screen sharing, MIDI, USB and the like are never allowed. The camera and microphone also obey the privacy kill switch and macOS.'),
+      drmEl,
       confirm,
       body,
     );
+
+    /* What the engine really says about Widevine (stock Electron has none; see B3_DRM_PLAN.md).
+       Read when the panel opens and written as the engine answered, including "not available". */
+    drmEl.textContent = 'Checking protected video (DRM) support.';
+    if (typeof privacy.drm === 'function') {
+      Promise.resolve(privacy.drm()).then((r) => {
+        if (alive) drmEl.textContent = drmLine(r);
+      }).catch((err) => {
+        if (alive && !isAbort(err)) drmEl.textContent = 'DRM status could not be read.';
+      });
+    } else {
+      drmEl.textContent = 'DRM status is not available in this older shell.';
+    }
 
     async function load() {
       states.loading(body, 'Reading site settings');
@@ -470,6 +522,8 @@ export function createPrivacy({ ctx, privacy, note }) {
   function dispose() {
     disposers.forEach((fn) => fn());
     disposers.clear();
+    guardTimers.forEach((t) => clearTimeout(t));
+    guardTimers.clear();
   }
 
   return {
