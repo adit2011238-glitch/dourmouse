@@ -69,7 +69,14 @@ class TestEveryTabIsBuiltTheSameSafeWay:
     def test_the_permission_policy_is_still_installed_on_the_pane_profile_and_not_widened(self):
         assert "installPermissionPolicy(paneView.webContents.session)" in MAIN_CODE
         body = function_body("installPermissionPolicy")
-        assert "!fromPane(wc) && policy.permissionAllowed" in body  # a tab is refused every permission, as before B1
+        # Phase B2 replaced "a tab is refused every permission" with per-site decisions
+        # (test_browser_permissions_*.py). What must still hold: a tab goes to the per-site
+        # handler, anything else in the pane's session is refused, and only a window outside
+        # the pane falls back to the app-origin rule.
+        assert "handlePaneRequest(tab, wc, permission, callback, details)" in body
+        assert "handlePaneCheck(tab, wc, permission, requestingOrigin, details)" in body
+        assert "paneSessions.has(ses)) return callback(false)" in body
+        assert "policy.permissionAllowed(permission, origin, PORT)" in body
 
     def test_the_policy_files_navigation_rules_are_untouched(self):
         for name in ("isAppOrigin", "permissionAllowed", "navigationAllowed", "externalUrlAllowed"):

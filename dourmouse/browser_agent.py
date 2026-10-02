@@ -405,7 +405,12 @@ async def _page_summary(page: Any, max_elems: int = 60) -> str:
             const t = el.tagName.toLowerCase();
             const aria = el.getAttribute('aria-label') || '';
             const ph = el.getAttribute('placeholder') || '';
-            const val = (el.value !== undefined && el.value !== null) ? String(el.value) : '';
+            const ac = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
+            const idn = ((el.getAttribute('name') || '') + ' ' + (el.id || '')).toLowerCase();
+            const secretField = el.type === 'password' || el.type === 'hidden'
+              || ac.some(a => /^(current-password|new-password|one-time-code|cc-.*|name|given-name|family-name|email|tel.*|street-address|address-line.*|postal-code|address-level.*|country.*)$/.test(a))
+              || /pass|pwd|token|secret|otp|csrf|cc-?num|cvv|cvc/.test(idn);
+            const val = secretField ? (el.value ? '[hidden]' : '') : ((el.value !== undefined && el.value !== null) ? String(el.value) : '');
             const txt = (el.innerText || el.textContent || '').trim().slice(0, 60);
             const href = el.getAttribute('href') || '';
             let name = aria || ph || txt || href;
@@ -520,7 +525,7 @@ def browser_fill(arguments: dict[str, Any]) -> str:
             ) from exc
         return f"FILLED {target!r} (via {how})."
 
-    _log("fill", f"{target!r} <- {str(value)[:40]}")
+    _log("fill", f"{target!r} <- ({len(str(value))} characters)")
     return _call(_fill)
 
 

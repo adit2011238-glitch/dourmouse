@@ -109,3 +109,12 @@ def test_login_cookie_with_non_ascii_digits_is_rejected_not_raised() -> None:
     from dourmouse.webui import _login_cookie_ok
 
     assert _login_cookie_ok("t" * 40, "v1.².n.abc") is False
+
+
+def test_page_snapshot_never_returns_password_field_values() -> None:
+    import inspect
+
+    from dourmouse import browser_agent
+
+    src = inspect.getsource(browser_agent._page_summary)
+    assert "el.type === 'password'" in src and "[hidden]" in src

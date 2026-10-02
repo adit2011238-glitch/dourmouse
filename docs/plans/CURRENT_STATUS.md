@@ -484,3 +484,6 @@ Domain B's goal/task runtime addresses this for goals specifically — a goal do
 
 ## 2026-10-02 Wave 1 (finding #161, commit cf1665b)
 Shared desk for every chat (browser, file preview incl. txt/md/csv/json/code, player tools), MEDIA queue and PDF reader with highlights, 40-task benchmark harness (stub mode only run), app-driving core wired as subagent app_driver (fake backend only; Accessibility not granted). Suite 7106 passed, 12 skipped. Not seen live in Electron. F1 design: F1_APP_DRIVING_DESIGN.md.
+
+## 2026-10-02 Wave 2a (finding #162)
+Owner secret live (A5), desk and login hardening, multi-tab browser pane with downloads, find, zoom, print, history, bookmarks. Suite 7299 passed, 12 skipped. Seen live in isolated copies: tabs, downloads, find, zoom, history, owner gate, stale-server replacement. Not seen: print dialog, Finder reveal.

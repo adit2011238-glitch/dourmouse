@@ -26,6 +26,9 @@
       "main.js",
       "preload.js",
       "policy.js",
+      "permissions.js",
+      "passwords.js",
+      "content/**",
       "package.json"
     ],
     "extraResources": [

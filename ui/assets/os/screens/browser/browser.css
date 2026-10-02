@@ -140,3 +140,42 @@
 [data-screen="BROWSER"] .bw-dl .bar[hidden] { display: none; }
 [data-screen="BROWSER"] .bw-dl .bar i { display: block; height: 100%; width: 0; background: var(--dm-active); }
 [data-screen="BROWSER"] .bw-dl .ac { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Phase B2: the permission, Save password and Fill bars above the page, and the Site settings
+   and Passwords panels. The bars sit in the page chrome, never over the native page view. */
+[data-screen="BROWSER"] .cb-privacy-slot:empty { display: none; }
+[data-screen="BROWSER"] .cb-privacy[hidden] { display: none; }
+[data-screen="BROWSER"] .cb-ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 12px; background: color-mix(in srgb, var(--dm-active) 12%, transparent); border-bottom: 1px solid var(--os-edge-lo); font-size: 12.5px; color: var(--dm-fg); }
+[data-screen="BROWSER"] .cb-ask[data-kind="note"] { background: color-mix(in srgb, var(--os-warn) 12%, transparent); color: var(--os-warn); }
+[data-screen="BROWSER"] .cb-ask[data-kind="fill"], [data-screen="BROWSER"] .cb-ask[data-kind="addr"] { background: rgba(255,255,255,.04); }
+[data-screen="BROWSER"] .cb-ask .ic { width: 8px; height: 8px; border-radius: 50%; background: var(--dm-active); flex: 0 0 auto; }
+[data-screen="BROWSER"] .cb-ask[data-kind="note"] .ic { background: var(--os-warn); }
+[data-screen="BROWSER"] .cb-ask .tx { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+[data-screen="BROWSER"] .cb-ask .tx .more { color: var(--dm-fg-dim); }
+[data-screen="BROWSER"] .cb-ask .ac { display: flex; gap: 6px; flex-wrap: wrap; }
+[data-screen="BROWSER"] .cb-ask-btn { height: 26px; padding: 0 11px; border-radius: 7px; background: transparent; border: 1px solid var(--os-edge-hi); color: var(--dm-fg-body); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+[data-screen="BROWSER"] .cb-ask-btn:hover { color: var(--dm-fg); background: rgba(255,255,255,.07); }
+[data-screen="BROWSER"] .cb-ask-btn.cb-go { background: var(--dm-active); border-color: var(--dm-active); color: var(--dm-active-ink, #09090B); font-weight: 600; }
+[data-screen="BROWSER"] .cb-ask-btn:focus-visible, [data-screen="BROWSER"] .cb-pick-user:focus-visible, [data-screen="BROWSER"] .bw-permsel:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+[data-screen="BROWSER"] .cb-pick-user, [data-screen="BROWSER"] .bw-permsel { height: 24px; border-radius: 6px; background: rgba(0,0,0,.28); border: 1px solid var(--os-edge-lo); color: var(--dm-fg); font: inherit; font-size: 12px; }
+
+[data-screen="BROWSER"] .bw-site { padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--os-edge-lo); border-radius: 10px; background: rgba(255,255,255,.03); }
+[data-screen="BROWSER"] .bw-sitehead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+[data-screen="BROWSER"] .bw-sitename { color: var(--dm-fg); font-size: 13px; overflow-wrap: anywhere; }
+[data-screen="BROWSER"] .bw-siterow { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 12.5px; }
+[data-screen="BROWSER"] .bw-perm { flex: 0 0 140px; color: var(--dm-fg-body); }
+[data-screen="BROWSER"] .bw-when { color: var(--dm-fg-dim); font-size: 11.5px; }
+
+[data-screen="BROWSER"] .bw-pwrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; margin-bottom: 6px; border: 1px solid var(--os-edge-lo); border-radius: 10px; background: rgba(255,255,255,.03); }
+[data-screen="BROWSER"] .bw-pwinfo { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px; }
+[data-screen="BROWSER"] .bw-pwhost { color: var(--dm-fg); font-size: 13px; overflow-wrap: anywhere; }
+[data-screen="BROWSER"] .bw-pwuser { color: var(--dm-fg-dim); font-size: 12px; overflow-wrap: anywhere; }
+[data-screen="BROWSER"] .bw-pwshown { font-family: var(--dm-font-mono); font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: rgba(0,0,0,.4); color: var(--dm-fg); overflow-wrap: anywhere; }
+[data-screen="BROWSER"] .bw-pwshown[hidden] { display: none; }
+[data-screen="BROWSER"] .bw-pwrow .ac { display: flex; gap: 6px; }
+[data-screen="BROWSER"] .bw-pwrow .bw-pc { flex: 1 1 100%; margin: 0; }
+[data-screen="BROWSER"] .bw-addrform { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 12px; margin-top: 8px; }
+[data-screen="BROWSER"] .bw-addrform .bw-pnote, [data-screen="BROWSER"] .bw-addrform .os-btn { grid-column: 1 / -1; justify-self: start; }
+[data-screen="BROWSER"] .bw-af { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--dm-fg-dim); }
+[data-screen="BROWSER"] .bw-af input { height: 28px; padding: 0 8px; border-radius: 7px; background: rgba(0,0,0,.28); border: 1px solid var(--os-edge-lo); color: var(--dm-fg); font: inherit; font-size: 12.5px; outline: 0; }
+[data-screen="BROWSER"] .bw-af input:focus { border-color: var(--dm-active); }

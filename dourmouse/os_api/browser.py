@@ -24,6 +24,18 @@ with the reason and invent nothing:
   revealing a downloaded file is the console's own explicit action, never a route here)
 * ``GET /api/os/browser/history`` (``q``, ``limit``) and ``POST .../history/add|remove|clear``
 * ``GET /api/os/browser/bookmarks`` and ``POST .../bookmarks/add|remove``
+
+Phase B2 (Chrome parity part 2) adds ONE read-only route and nothing that can change anything:
+
+* ``GET /api/os/browser/permissions``: which sites hold a stored camera, microphone, location,
+  notification, clipboard or full-screen decision, and whether it is Allow or Block. It is
+  non-secret (sites and decisions only).
+
+What is deliberately NOT here: any route that grants, changes or revokes a site permission, and
+any route that lists, reads or saves a password or an address. Those are answered by the
+Electron console window alone, over IPC that checks its sender, so neither this server, the
+model's tools nor the browser agent can reach them. The pane bridge's ``/status`` carries only
+counts (prompts waiting, sites with decisions, saved passwords), never a name or a value.
 """
 
 from __future__ import annotations
@@ -190,6 +202,12 @@ def downloads(req: Request) -> tuple[int, dict[str, Any]]:
 @route("POST", "/api/os/browser/downloads/cancel")
 def downloads_cancel(req: Request) -> tuple[int, dict[str, Any]]:
     return 200, _pick(_bridge("POST", "/downloads/cancel", {"id": _text(req, "id", required=True)}))
+
+
+@route("GET", "/api/os/browser/permissions")
+def permissions(req: Request) -> tuple[int, dict[str, Any]]:
+    """Read-only list of the stored site decisions. Sites and Allow/Block only."""
+    return 200, _pick(_bridge("GET", "/permissions"), "sites")
 
 
 @route("GET", "/api/os/browser/history")

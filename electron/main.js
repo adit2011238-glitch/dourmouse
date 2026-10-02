@@ -21,13 +21,15 @@
 // default because node_modules is gitignored, so a fresh clone genuinely has
 // no Electron and must still start -- run `npm install` here to enable it.
 
-const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification, session, dialog } = require("electron");
+const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification, session, dialog, safeStorage, systemPreferences } = require("electron");
 const { spawn, execFile } = require("child_process");
 const crypto = require("crypto");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const policy = require("./policy");
+const permLib = require("./permissions");
+const pwLib = require("./passwords");
 
 // An isolated copy (a test run, a second profile) can keep every file the shell
 // writes (window state, the browser profile, history, bookmarks, downloads list)
@@ -35,6 +37,12 @@ const policy = require("./policy");
 // before the app is ready, so it also wins over a launcher that picked a folder.
 if (process.env.DOURMOUSE_USER_DATA_DIR && path.isAbsolute(process.env.DOURMOUSE_USER_DATA_DIR)) {
   app.setPath("userData", process.env.DOURMOUSE_USER_DATA_DIR);
+}
+// Phase B2: saved passwords are encrypted with Electron's safeStorage, whose key sits in the
+// macOS Keychain under "<app name> Safe Storage". An isolated copy (a test run) can use its own
+// name, so it never reads or creates the owner's real Keychain item. Set before the app is ready.
+if (/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/.test(process.env.DOURMOUSE_ELECTRON_APP_NAME || "")) {
+  app.setName(process.env.DOURMOUSE_ELECTRON_APP_NAME);
 }
 
 // Stage D: real CDP access to this process's own Chromium, the load-
@@ -568,9 +576,13 @@ function browserDataDir() {
   return path.join(app.getPath("userData"), "browser");
 }
 
-function makeStore(file, fallback) {
+// Options: `mode` writes the file with those permissions from the start (the files that hold
+// ciphertext are 0600), and `lazy` writes it only after set() was called, so reading a store
+// that nobody has changed never creates a file.
+function makeStore(file, fallback, { mode: fileMode = 0, lazy = false } = {}) {
   let data = null;
   let timer = null;
+  let changed = false;
   const target = () => path.join(browserDataDir(), file);
   const fresh = () => JSON.parse(JSON.stringify(fallback));
   function get() {
@@ -601,11 +613,12 @@ function makeStore(file, fallback) {
       clearTimeout(timer);
       timer = null;
     }
-    if (data === null) return;
+    if (data === null || (lazy && !changed)) return;
     try {
-      fs.mkdirSync(browserDataDir(), { recursive: true });
+      fs.mkdirSync(browserDataDir(), { recursive: true, mode: 0o700 });
       const tmp = `${target()}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(data));
+      // A file that holds secrets (the password list) is written owner-only from the start.
+      fs.writeFileSync(tmp, JSON.stringify(data), fileMode ? { mode: fileMode } : undefined);
       fs.renameSync(tmp, target());
     } catch (exc) {
       log(`browser store ${file} could not be saved:`, exc.message || exc);
@@ -613,6 +626,7 @@ function makeStore(file, fallback) {
   }
   function set(value) {
     data = value;
+    changed = true;
     if (!timer) timer = setTimeout(flush, 500);
   }
   return { get, set, flush };
@@ -622,9 +636,14 @@ const historyStore = makeStore("history.json", []);
 const bookmarkStore = makeStore("bookmarks.json", []);
 const zoomStore = makeStore("zoom.json", {});
 const downloadStore = makeStore("downloads.json", []);
+// Phase B2. The decisions the owner made for each site, the encrypted logins and the encrypted
+// address profiles. The last two hold only ciphertext (safeStorage) and are written 0600.
+const permissionStore = makeStore("permissions.json", { sites: {} }, { lazy: true });
+const passwordStore = makeStore("passwords.json", { entries: [], never: [] }, { mode: 0o600, lazy: true });
+const addressStore = makeStore("addresses.json", { profiles: [] }, { mode: 0o600, lazy: true });
 
 function flushBrowserStores() {
-  for (const s of [historyStore, bookmarkStore, zoomStore, downloadStore]) s.flush();
+  for (const s of [historyStore, bookmarkStore, zoomStore, downloadStore, permissionStore, passwordStore, addressStore]) s.flush();
 }
 
 const newId = () => `${Date.now().toString(36)}${crypto.randomBytes(4).toString("hex")}`;
@@ -645,21 +664,417 @@ const tabForContents = (wc) => {
   return null;
 };
 
-// Finding S34: the pane's pages are denied every permission, whatever they ask.
-// B2 owns turning that into per-site prompts; this only has to recognise a tab.
+// ------------------- site permissions, passwords, autofill (B2) ------------------- //
+// Finding S34 denied every permission to every page in the pane. Phase B2 replaces that with
+// what Chrome does: ask the owner once per site, remember the answer, let the owner see and
+// undo it. The rules that keep it safe:
+//   * A grant is made ONLY by the console window, through the IPC handlers further down, which
+//     check the sender. No pane bridge route (the HTTP door the agent and the server use) can
+//     grant, and no page can: a page has no IPC at all.
+//   * Only camera, microphone, geolocation, notifications, clipboard-read and fullscreen can
+//     ever be granted. Screen capture, MIDI, USB, serial, HID and openExternal are refused.
+//   * A prompt exists only while the BROWSER screen is the one showing, so there is somebody
+//     to answer it. Otherwise the request is refused on the spot and nothing is stored.
+//   * Camera and microphone also obey the privacy kill switch and macOS's own permission.
+//   * Passwords and addresses are ciphertext at rest (safeStorage). They are filled only after
+//     a click by the owner, only into the top page, only at the origin they were saved for.
+
+// Asking Electron whether encryption is available is NOT free: on macOS the first call creates
+// (or opens) this app's Keychain item. So it is never done at start-up or on a state push, only
+// when a password or an address is actually about to be saved or opened, or when the owner opens
+// the Passwords panel. `known()` reports what is already known without asking.
+let encryptionAvailable = null;
+const cipher = {
+  available() {
+    if (encryptionAvailable !== null) return encryptionAvailable;
+    try {
+      encryptionAvailable = Boolean(safeStorage.isEncryptionAvailable());
+      // Linux can fall back to a hard-coded key ("basic_text"); that is not encryption.
+      if (encryptionAvailable && process.platform === "linux" && typeof safeStorage.getSelectedStorageBackend === "function") {
+        encryptionAvailable = safeStorage.getSelectedStorageBackend() !== "basic_text";
+      }
+    } catch {
+      encryptionAvailable = false;
+    }
+    return encryptionAvailable;
+  },
+  known: () => encryptionAvailable,
+  encrypt: (text) => safeStorage.encryptString(String(text)).toString("base64"),
+  decrypt: (b64) => safeStorage.decryptString(Buffer.from(String(b64), "base64")),
+};
+const vault = pwLib.createVault({ store: passwordStore, crypto: cipher, newId });
+const addressBook = pwLib.createAddressBook({ store: addressStore, crypto: cipher, newId });
+
+const promptQueue = permLib.createPromptQueue();
+const tempGrants = permLib.createTempGrants();
+const pendingSaves = new Map(); // tab id -> a login waiting for Save, Never or Not now (the password stays here, in the main process)
+const SAVE_TTL_MS = 120000;
+const fillCache = new Map(); // origin -> { ver, entries }
+let permNotice = "";
+let permNoticeAt = 0;
+
+let sitesChecked = false;
+function siteTable() {
+  const d = permissionStore.get();
+  if (!sitesChecked) {
+    sitesChecked = true;
+    d.sites = permLib.sanitizeSites(d.sites);
+  }
+  return d.sites;
+}
+function storeSites(next) {
+  permissionStore.set({ sites: next });
+}
+
+const hostOfOrigin = (origin) => {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return String(origin);
+  }
+};
+
+function setNotice(text) {
+  permNotice = String(text || "");
+  permNoticeAt = Date.now();
+  schedulePush();
+  setTimeout(schedulePush, 21000).unref(); // the bar drops the notice after twenty seconds
+}
+
+// The privacy kill switch (the same flag the tray toggles, read through the same route the tray
+// uses). Fail closed: if it cannot be read, the camera and the microphone stay off.
+const visionGate = { ok: false, mic: false, camera: false, at: 0 };
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_resolve, reject) => setTimeout(() => reject(new Error("timed out")), ms))]);
+}
+async function freshVisionGate() {
+  try {
+    const status = await withTimeout(fetchJson(`${BASE_URL}/api/vision/status`, { method: "GET" }), 1500);
+    const ks = status && status.kill_switch;
+    if (ks && typeof ks === "object") {
+      visionGate.ok = true;
+      visionGate.mic = ks.mic_enabled !== false;
+      visionGate.camera = ks.camera_enabled !== false;
+    } else {
+      visionGate.ok = false;
+    }
+  } catch {
+    visionGate.ok = false;
+  }
+  visionGate.at = Date.now();
+  return visionGate;
+}
+
+const TCC_NAME = { microphone: "microphone", camera: "camera" };
+// Whether the camera and microphone may be used right now: the kill switch first, then macOS.
+async function mediaGate(keys) {
+  const wanted = keys.filter((k) => k === "microphone" || k === "camera");
+  if (!wanted.length) return { ok: true };
+  const gate = await freshVisionGate();
+  if (!gate.ok) return { ok: false, reason: "The privacy switch could not be read, so the camera and microphone stay off." };
+  for (const k of wanted) {
+    if (k === "microphone" && !gate.mic) return { ok: false, reason: "The microphone is switched off by the privacy kill switch." };
+    if (k === "camera" && !gate.camera) return { ok: false, reason: "The camera is switched off by the privacy kill switch." };
+  }
+  if (process.platform === "darwin" && systemPreferences && typeof systemPreferences.getMediaAccessStatus === "function") {
+    for (const k of wanted) {
+      const status = systemPreferences.getMediaAccessStatus(TCC_NAME[k]);
+      if (status === "granted") continue;
+      if (status === "not-determined" && typeof systemPreferences.askForMediaAccess === "function") {
+        let granted = false;
+        try {
+          granted = await systemPreferences.askForMediaAccess(TCC_NAME[k]);
+        } catch {
+          granted = false;
+        }
+        if (granted) continue;
+      }
+      return { ok: false, reason: `macOS has not allowed the ${k} for this app. Turn it on in System Settings, Privacy and Security.` };
+    }
+  }
+  return { ok: true };
+}
+// The synchronous twin, for permission CHECKS (they cannot wait). It uses the last answer the
+// kill switch gave and refreshes it in the background; before the first answer it says no.
+function mediaCheckOk(keys) {
+  const wanted = keys.filter((k) => k === "microphone" || k === "camera");
+  if (!wanted.length) return true;
+  if (Date.now() - visionGate.at > 5000) freshVisionGate();
+  if (!visionGate.ok) return false;
+  for (const k of wanted) {
+    if (k === "microphone" && !visionGate.mic) return false;
+    if (k === "camera" && !visionGate.camera) return false;
+  }
+  if (process.platform === "darwin" && systemPreferences && typeof systemPreferences.getMediaAccessStatus === "function") {
+    for (const k of wanted) if (systemPreferences.getMediaAccessStatus(TCC_NAME[k]) !== "granted") return false;
+  }
+  return true;
+}
+
+// Who is asking, and is it the page the owner is looking at? A frame from another origin never
+// borrows the top page's decisions.
+function askingOrigin(wc, requestingUrl) {
+  const top = permLib.originOf(wc.getURL());
+  const asked = permLib.originOf(requestingUrl || wc.getURL());
+  return top && asked && top === asked ? asked : "";
+}
+
+function handlePaneRequest(tab, wc, permission, callback, details) {
+  const origin = askingOrigin(wc, details && details.requestingUrl);
+  if (!origin) return callback(false);
+  const cls = permLib.classifyRequest(permission, details);
+  if (cls.action === "allow") return callback(true);
+  if (cls.action === "deny") return callback(false);
+  const sites = siteTable();
+  const unknown = [];
+  for (const key of cls.keys) {
+    const d = permLib.getDecision(sites, origin, key);
+    if (d === "block") return callback(false);
+    if (d !== "allow" && !tempGrants.has(tab.id, origin, key)) unknown.push(key);
+  }
+  const grant = (keys) => {
+    mediaGate(keys).then((g) => {
+      if (!g.ok) setNotice(g.reason);
+      callback(g.ok);
+    });
+  };
+  if (!unknown.length) return grant(cls.keys);
+  // Nobody to ask: refuse now and store nothing.
+  if (!browserScreenActive || !mainWindow || mainWindow.isDestroyed()) return callback(false);
+  const queued = promptQueue.request(tab.id, origin, unknown, (decision) => {
+    if (decision === "allow") {
+      let next = siteTable();
+      for (const key of unknown) {
+        const r = permLib.setDecision(next, origin, key, "allow");
+        if (r.ok) next = r.sites;
+      }
+      storeSites(next);
+      grant(cls.keys);
+    } else if (decision === "once") {
+      tempGrants.add(tab.id, origin, unknown);
+      grant(cls.keys);
+    } else if (decision === "block") {
+      let next = siteTable();
+      for (const key of unknown) {
+        const r = permLib.setDecision(next, origin, key, "block");
+        if (r.ok) next = r.sites;
+      }
+      storeSites(next);
+      callback(false);
+    } else {
+      callback(false); // dismissed, expired or the tab went away: no, and nothing is remembered
+    }
+    schedulePush();
+  });
+  if (!queued.ok) return callback(false);
+  schedulePush();
+}
+
+function handlePaneCheck(tab, wc, permission, requestingOrigin, details) {
+  const origin = askingOrigin(wc, requestingOrigin || undefined);
+  if (!origin) return false;
+  const cls = permLib.classifyCheck(permission, details);
+  if (cls.action === "allow") return true;
+  if (cls.action === "deny") return false;
+  const sites = siteTable();
+  for (const key of cls.keys) {
+    if (permLib.getDecision(sites, origin, key) !== "allow" && !tempGrants.has(tab.id, origin, key)) return false;
+  }
+  return mediaCheckOk(cls.keys);
+}
+
 const permissionPolicyInstalled = new WeakSet();
+const paneSessions = new WeakSet();
 function installPermissionPolicy(ses) {
   if (permissionPolicyInstalled.has(ses)) return;
   permissionPolicyInstalled.add(ses);
-  const fromPane = (wc) => !!tabForContents(wc);
   ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+    const tab = tabForContents(wc);
+    if (tab) return handlePaneRequest(tab, wc, permission, callback, details);
+    if (paneSessions.has(ses)) return callback(false); // anything else in the pane's session: no
     const origin = (details && details.requestingUrl) || (wc && wc.getURL()) || "";
-    callback(!fromPane(wc) && policy.permissionAllowed(permission, origin, PORT));
+    callback(policy.permissionAllowed(permission, origin, PORT));
   });
-  ses.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
-    return !fromPane(wc) && policy.permissionAllowed(permission, requestingOrigin, PORT);
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+    const tab = tabForContents(wc);
+    if (tab) return handlePaneCheck(tab, wc, permission, requestingOrigin, details);
+    if (paneSessions.has(ses)) return false;
+    return policy.permissionAllowed(permission, requestingOrigin, PORT);
   });
 }
+
+// Everything the pane's session needs before its first page loads: the permission policy, the
+// refusal of screen capture and device pickers, and the form helper script.
+const FORM_HELPER = path.join(__dirname, "content", "frame-forms.js");
+function installPaneSession(ses) {
+  if (!ses || paneSessions.has(ses)) return;
+  paneSessions.add(ses); // the handlers read this at call time: a pane session never falls back to the app's own rules
+  installPermissionPolicy(ses);
+  try {
+    if (typeof ses.setDisplayMediaRequestHandler === "function") ses.setDisplayMediaRequestHandler((_request, callback) => callback({}));
+    if (typeof ses.setDevicePermissionHandler === "function") ses.setDevicePermissionHandler(() => false);
+  } catch (exc) {
+    log("pane session: could not install the screen-capture and device refusals:", exc.message || exc);
+  }
+  try {
+    if (typeof ses.registerPreloadScript === "function") ses.registerPreloadScript({ type: "frame", filePath: FORM_HELPER });
+  } catch (exc) {
+    log("pane session: the form helper script could not be registered, so saving and filling passwords is off:", exc.message || exc);
+  }
+}
+
+// ------------------------------ logins and fills ------------------------------ //
+
+function fillEntriesFor(origin) {
+  const ver = vault.version();
+  const hit = fillCache.get(origin);
+  if (hit && hit.ver === ver) return hit.entries;
+  const entries = vault.entriesFor(origin);
+  fillCache.set(origin, { ver, entries });
+  if (fillCache.size > 50) fillCache.delete(fillCache.keys().next().value);
+  return entries;
+}
+
+// A message from the form helper is believed only if it came from the top page of a pane tab.
+// The origin is read from the frame's real address, never from the message.
+function trustedTabMessage(evt) {
+  const tab = tabForContents(evt.sender);
+  const frame = evt.senderFrame;
+  if (!tab || !frame || frame.parent !== null) return null;
+  const origin = permLib.originOf(frame.url);
+  if (!origin || origin !== permLib.originOf(evt.sender.getURL())) return null;
+  return { tab, origin };
+}
+
+ipcMain.on("dm:forms", (evt, msg) => {
+  const m = trustedTabMessage(evt);
+  if (!m || !msg || typeof msg !== "object") return;
+  m.tab.forms = { origin: m.origin, pw: msg.pw === true, user: msg.user === true, addr: msg.addr === true };
+  schedulePush();
+});
+
+ipcMain.on("dm:pw-submit", (evt, msg) => {
+  const m = trustedTabMessage(evt);
+  if (!m || !msg || typeof msg.username !== "string" || typeof msg.password !== "string") return;
+  if (msg.username.length > pwLib.MAX_USERNAME || msg.password.length < 1 || msg.password.length > pwLib.MAX_PASSWORD) return;
+  if (!m.tab.loginLimit) m.tab.loginLimit = policy.createLimiter(10, 60000);
+  if (!m.tab.loginLimit.allow()) return;
+  const username = pwLib.cleanUsername(msg.username);
+  const verdict = vault.classify({ origin: m.origin, username, password: msg.password });
+  if (verdict.status === "unavailable") {
+    setNotice("Passwords cannot be saved: this Mac's secure storage is not available.");
+    return;
+  }
+  if (verdict.status !== "new" && verdict.status !== "update") return; // same, never or refused: say nothing
+  pendingSaves.set(m.tab.id, { id: newId(), origin: m.origin, username, password: msg.password, existingId: verdict.id || "", at: Date.now() });
+  schedulePush();
+});
+
+function fillLogin(tab, entryId) {
+  const wc = liveContents(tab);
+  if (!wc || tab !== activeTab()) return { ok: false, error: "that page is not the one in front" };
+  const origin = permLib.originOf(wc.getURL());
+  if (!pwLib.savableOrigin(origin)) return { ok: false, error: "logins are not filled on this kind of page" };
+  const c = vault.credentials(String(entryId));
+  if (!c) return { ok: false, error: "that login cannot be read" };
+  if (c.origin !== origin) return { ok: false, error: "that login belongs to another site" };
+  vault.touch(String(entryId));
+  wc.send("dm:fill-login", { origin, username: c.username, password: c.password });
+  return { ok: true };
+}
+
+function fillAddress(tab, profileId) {
+  const wc = liveContents(tab);
+  if (!wc || tab !== activeTab()) return { ok: false, error: "that page is not the one in front" };
+  const origin = permLib.originOf(wc.getURL());
+  if (!origin) return { ok: false, error: "addresses are filled only on web pages" };
+  const fields = addressBook.get(String(profileId));
+  if (!fields) return { ok: false, error: "that address cannot be read" };
+  wc.send("dm:fill-address", { origin, fields });
+  return { ok: true };
+}
+
+// A click on a login or address field in the page: a native menu at the pointer, so the owner
+// picks what to fill. Nothing is filled until an item is chosen.
+ipcMain.on("dm:field-click", (evt, msg) => {
+  const m = trustedTabMessage(evt);
+  if (!m || !msg || !paneVisible || m.tab !== activeTab() || !mainWindow || mainWindow.isDestroyed()) return;
+  let items = [];
+  let head = "";
+  if (msg.kind === "password" || msg.kind === "username") {
+    head = `Saved logins for ${hostOfOrigin(m.origin)}`;
+    items = fillEntriesFor(m.origin).map((e) => ({ label: e.username || "(no username)", click: () => fillLogin(m.tab, e.id) }));
+  } else if (msg.kind === "address") {
+    head = "Saved addresses";
+    items = addressBook.list().filter((p) => p.readable).map((p) => ({ label: p.label || "Address", click: () => fillAddress(m.tab, p.id) }));
+  }
+  if (!items.length) return;
+  Menu.buildFromTemplate([{ label: head, enabled: false }, { type: "separator" }, ...items]).popup({ window: mainWindow });
+});
+
+// What the BROWSER screen needs to draw its bars. Sent to the console window only, over IPC.
+// It never holds a password, and no bridge route returns it.
+function privacyState() {
+  const tab = activeTab();
+  const out = {
+    perm: null, pendingPerms: promptQueue.size(), save: null, fill: null, fillAddress: null,
+    notice: Date.now() - permNoticeAt < 20000 ? permNotice : "",
+    vault: { available: cipher.known(), ...vault.counts() }, addresses: addressBook.count(), sites: permLib.countSites(siteTable()),
+  };
+  if (!tab) return out;
+  const p = promptQueue.forTab(tab.id);
+  if (p) out.perm = { id: p.id, origin: p.origin, host: hostOfOrigin(p.origin), keys: p.keys, text: permLib.promptSentence(p.origin, p.keys) };
+  const s = pendingSaves.get(tab.id);
+  if (s) out.save = { id: s.id, origin: s.origin, host: hostOfOrigin(s.origin), username: s.username, update: Boolean(s.existingId) };
+  const wc = liveContents(tab);
+  const origin = wc ? permLib.originOf(wc.getURL()) : "";
+  if (origin && tab.forms && tab.forms.origin === origin) {
+    if (tab.forms.pw || tab.forms.user) {
+      const entries = fillEntriesFor(origin);
+      if (entries.length) out.fill = { origin, host: hostOfOrigin(origin), entries };
+    }
+    if (tab.forms.addr && addressBook.count()) {
+      out.fillAddress = { profiles: addressBook.list().filter((x) => x.readable).map((x) => ({ id: x.id, label: x.label })) };
+    }
+  }
+  return out;
+}
+
+// What the bridge may say: counts, never a name, a site or a value.
+function privacyCounts() {
+  return {
+    permissions: { pendingPrompts: promptQueue.size(), ...permLib.countSites(siteTable()) },
+    passwords: { ...vault.counts(), encryption: cipher.known() },
+    addresses: { count: addressBook.count() },
+  };
+}
+
+// A tab went away or moved to another origin: what was waiting or granted for the old page ends.
+function endPageGrants(tab, newUrl) {
+  const origin = permLib.originOf(newUrl);
+  tempGrants.dropForeign(tab.id, origin);
+  promptQueue.dropForeign(tab.id, origin);
+  tab.forms = null;
+}
+function forgetTabPrivacy(tabId) {
+  tempGrants.dropTab(tabId);
+  promptQueue.dropTab(tabId);
+  const s = pendingSaves.get(tabId);
+  if (s) s.password = "";
+  pendingSaves.delete(tabId);
+}
+setInterval(() => {
+  let changed = promptQueue.expire() > 0;
+  const t = Date.now();
+  for (const [id, s] of pendingSaves) {
+    if (t - s.at >= SAVE_TTL_MS) {
+      s.password = "";
+      pendingSaves.delete(id);
+      changed = true;
+    }
+  }
+  if (changed) schedulePush();
+}, 10000).unref();
 
 // The first tab is the one dourmouse/browser_agent.py attaches to: it finds "the"
 // pane by looking for the one still-blank about:blank page at attach time, so the
@@ -667,9 +1082,13 @@ function installPermissionPolicy(ses) {
 // while other tabs exist (a new tab shows NEW_TAB_URL instead).
 function ensurePaneView() {
   if (paneView && !paneView.webContents.isDestroyed()) return paneView;
+  // The session is prepared BEFORE the first page exists, so the form helper script is there
+  // from the very first document.
+  if (typeof session.fromPartition === "function") installPaneSession(session.fromPartition(PANE_PARTITION));
   paneView = new BrowserView({ webPreferences: TAB_WEB_PREFERENCES });
   paneView.webContents.session.setUserAgent(chromeUserAgent());
-  installPermissionPolicy(paneView.webContents.session);
+  installPermissionPolicy(paneView.webContents.session); // finding S34: the pane's session carries the policy from its first page
+  installPaneSession(paneView.webContents.session);
   installDownloadHandler(paneView.webContents.session);
   const tab = registerTab(paneView, "about:blank");
   activeTabId = tab.id;
@@ -740,6 +1159,7 @@ function wireTab(tab) {
     }
     applySiteZoom(tab);
     recordVisit(tab);
+    endPageGrants(tab, wc.getURL());
   });
   wc.on("dom-ready", () => { if (alive()) applySiteZoom(tab); });
   wc.on("page-title-updated", (_evt, title) => {
@@ -845,6 +1265,7 @@ function closeTab(id) {
     if (closedTabs.length > 20) closedTabs.shift();
   }
   const wasActive = tab.id === activeTabId;
+  forgetTabPrivacy(tab.id);
   tabOrder.splice(index, 1);
   tabs.delete(tab.id);
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.getBrowserViews().includes(tab.view)) {
@@ -914,7 +1335,12 @@ function paneState() {
 }
 
 function pushPaneStateNow() {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pane:state", paneState());
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("pane:state", paneState());
+    // The privacy bars (permission prompt, Save password, Fill) ride the same push but go
+    // out on their own channel: the pane's own state is also what the bridge reads.
+    mainWindow.webContents.send("pane:privacy", privacyState());
+  }
 }
 // A page fires title, loading and navigation events in bursts; the console gets
 // one state a few milliseconds later, not one per event.
@@ -1424,6 +1850,152 @@ ipcMain.handle("pane:downloads-clear", () => {
   return { ok: true };
 });
 
+// ------------------- site permissions, passwords, autofill: console IPC (B2) ------------------- //
+// Every handler below answers ONLY the console window's top page. A page in the pane has no IPC
+// at all, and the pane bridge (the HTTP door) has no route that grants or reads any of this.
+// That is what keeps a driven page, the browser agent and the server from granting themselves
+// a permission or reading a password.
+
+function consoleOnly(evt) {
+  const frame = evt && evt.senderFrame;
+  return fromConsole(evt) && Boolean(frame) && frame.parent === null;
+}
+const REFUSED = { ok: false, error: "only the console may do that" };
+
+ipcMain.handle("pane:privacy", (evt) => (consoleOnly(evt) ? privacyState() : null));
+
+ipcMain.handle("pane:perm-answer", (evt, id, decision) => {
+  if (!consoleOnly(evt)) return REFUSED;
+  if (typeof id !== "string" || !["allow", "once", "block", "dismiss"].includes(decision)) return { ok: false, error: "bad request" };
+  return { ok: Boolean(promptQueue.answer(id, decision)) };
+});
+
+ipcMain.handle("site:perms", (evt) => (consoleOnly(evt) ? { ok: true, sites: permLib.listSites(siteTable()) } : REFUSED));
+ipcMain.handle("site:perm-set", (evt, origin, key, decision) => {
+  if (!consoleOnly(evt)) return REFUSED;
+  if (typeof origin !== "string" || typeof key !== "string" || !["allow", "block", "reset"].includes(decision)) return { ok: false, error: "bad request" };
+  if (decision === "reset") {
+    const r = permLib.clearDecision(siteTable(), origin, key);
+    storeSites(r.sites);
+    schedulePush();
+    return { ok: true, removed: r.removed };
+  }
+  const r = permLib.setDecision(siteTable(), origin, key, decision);
+  if (!r.ok) return { ok: false, error: r.error };
+  storeSites(r.sites);
+  schedulePush();
+  return { ok: true };
+});
+ipcMain.handle("site:perm-forget", (evt, origin) => {
+  if (!consoleOnly(evt) || typeof origin !== "string") return REFUSED;
+  const r = permLib.clearDecision(siteTable(), origin);
+  storeSites(r.sites);
+  schedulePush();
+  return { ok: true, removed: r.removed };
+});
+ipcMain.handle("site:perms-clear", (evt) => {
+  if (!consoleOnly(evt)) return REFUSED;
+  const n = permLib.countSites(siteTable()).decisions;
+  storeSites({});
+  schedulePush();
+  return { ok: true, removed: n };
+});
+
+ipcMain.handle("pw:list", (evt) => (consoleOnly(evt) ? { ok: true, available: cipher.available(), entries: vault.list(), never: vault.never() } : REFUSED));
+ipcMain.handle("pw:delete", (evt, id) => {
+  if (!consoleOnly(evt) || typeof id !== "string") return REFUSED;
+  const ok = vault.remove(id);
+  schedulePush();
+  return { ok };
+});
+ipcMain.handle("pw:never-remove", (evt, origin) => {
+  if (!consoleOnly(evt) || typeof origin !== "string") return REFUSED;
+  const ok = vault.removeNever(origin);
+  schedulePush();
+  return { ok };
+});
+ipcMain.handle("pw:save-answer", (evt, id, answer) => {
+  if (!consoleOnly(evt)) return REFUSED;
+  if (typeof id !== "string" || !["save", "never", "dismiss"].includes(answer)) return { ok: false, error: "bad request" };
+  let found = null;
+  for (const [tabId, s] of pendingSaves) if (s.id === id) found = [tabId, s];
+  if (!found) return { ok: false, error: "that prompt is gone" };
+  const [tabId, s] = found;
+  let result = { ok: true, status: "dismissed" };
+  if (answer === "save") result = vault.save({ origin: s.origin, username: s.username, password: s.password });
+  else if (answer === "never") result = { ok: vault.addNever(s.origin), status: "never" };
+  s.password = "";
+  pendingSaves.delete(tabId);
+  schedulePush();
+  return result;
+});
+// Finding #163: a CDP client can call the console's IPC, so a fill requested over IPC needs a
+// native confirmation a script cannot press. The field-click menu is itself native and needs none.
+let fillConfirming = false;
+async function confirmFillNatively(kind, c) {
+  if (fillConfirming) return false;
+  fillConfirming = true;
+  try {
+    const box = await dialog.showMessageBox(mainWindow, {
+      type: "question", buttons: [`Fill ${kind}`, "Cancel"], defaultId: 1, cancelId: 1, noLink: true,
+      title: `Fill saved ${kind}`,
+      message: `Fill the saved ${kind} for ${c.username || c.label || "this entry"} into the page now showing?`,
+      detail: c.origin ? `Site: ${hostOfOrigin(c.origin)}` : "",
+    });
+    return box.response === 0;
+  } finally {
+    fillConfirming = false;
+  }
+}
+ipcMain.handle("pw:fill", async (evt, entryId) => {
+  if (!consoleOnly(evt) || typeof entryId !== "string") return REFUSED;
+  const c = vault.credentials(entryId);
+  if (!c) return { ok: false, error: "that login cannot be read" };
+  if (!(await confirmFillNatively("password", c))) return { ok: false, error: "cancelled" };
+  return fillLogin(activeTab(), entryId);
+});
+// Showing a password needs a person: a native dialog, which only a real click answers. The
+// console's own confirmation comes first; this is the one a script driving the console cannot press.
+let revealing = false;
+ipcMain.handle("pw:reveal", async (evt, id) => {
+  if (!consoleOnly(evt) || typeof id !== "string") return REFUSED;
+  if (revealing) return { ok: false, error: "another confirmation is already open" };
+  const c = vault.credentials(id);
+  if (!c) return { ok: false, error: "that login cannot be read" };
+  revealing = true;
+  try {
+    const box = await dialog.showMessageBox(mainWindow, {
+      type: "question", buttons: ["Show password", "Cancel"], defaultId: 1, cancelId: 1, noLink: true,
+      title: "Show saved password",
+      message: `Show the saved password for ${c.username || "this login"} on ${hostOfOrigin(c.origin)}?`,
+      detail: "Anyone who can see your screen will be able to read it.",
+    });
+    if (box.response !== 0) return { ok: false, error: "cancelled" };
+    return { ok: true, password: c.password };
+  } finally {
+    revealing = false;
+  }
+});
+
+ipcMain.handle("addr:list", (evt) => (consoleOnly(evt) ? { ok: true, available: cipher.available(), profiles: addressBook.list() } : REFUSED));
+ipcMain.handle("addr:save", (evt, raw, id) => {
+  if (!consoleOnly(evt)) return REFUSED;
+  const r = addressBook.save(raw, typeof id === "string" ? id : undefined);
+  schedulePush();
+  return r;
+});
+ipcMain.handle("addr:delete", (evt, id) => {
+  if (!consoleOnly(evt) || typeof id !== "string") return REFUSED;
+  const ok = addressBook.remove(id);
+  schedulePush();
+  return { ok };
+});
+ipcMain.handle("addr:fill", async (evt, id) => {
+  if (!consoleOnly(evt) || typeof id !== "string") return REFUSED;
+  if (!(await confirmFillNatively("address", { label: "this address" }))) return { ok: false, error: "cancelled" };
+  return fillAddress(activeTab(), id);
+});
+
 // ------------------------------- pane bridge ------------------------------- //
 
 function startPaneBridge() {
@@ -1475,7 +2047,12 @@ function startPaneBridge() {
     const isGet = req.method === "GET";
     const isPost = req.method === "POST";
     if (isGet && route === "/status") {
-      respond(200, { active: paneVisible, cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, tabCount: tabs.size, activeTab: activeTabId });
+      // Phase B2: counts only. No site, no username, no value: see privacyCounts().
+      respond(200, { active: paneVisible, cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, tabCount: tabs.size, activeTab: activeTabId, ...privacyCounts() });
+    } else if (isGet && route === "/permissions") {
+      // Read-only and non-secret: which sites hold a stored decision. There is deliberately no
+      // route here that grants, changes or revokes one, and none that reads a password.
+      respond(200, { ok: true, sites: permLib.listSites(siteTable()) });
     } else if (isPost && route === "/show") {
       respond(200, { ok: showPane() });
     } else if (isPost && route === "/hide") {

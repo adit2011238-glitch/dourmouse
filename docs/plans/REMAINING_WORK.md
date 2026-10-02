@@ -2080,3 +2080,5 @@ DONE: #160 (Chrome-like pane, Google sign-in page loads, guardrail), plans writt
 
 ## Wave 1 done (2026-10-02, #161); still open from it
 Live Electron check of J and D; grant Accessibility and drive TextEdit and Music live (F1 exit test); run bench with --real against an isolated server for a baseline; player play/pause/seek acknowledgement path and live now-playing; app-driving routes need A5 (phase H); pinned chats can open URLs ungated (revisit in H); F2 UI (indicator strip, Stop button, Apps settings). Next: Wave 2 (B1, B2, B3 with H).
+
+## Wave 2a done (#162). Next: B2 (passwords, autofill, permission prompts), B3 (Widevine DRM, extensions, profiles, Chrome import). Open from H: N3, CDP-held owner secret, Show all button, Codex opt-in decision. Open from B1: agent follows tab 1 only (phase C), shared popup limit, favicon private-address filter.

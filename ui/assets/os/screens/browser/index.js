@@ -30,6 +30,7 @@ import { takePaneRequest } from '../../core/pane-inbox.js';
 import { html, setHtml, raw } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
 import { confirmHere } from '../../kit/confirm-card.js';
+import { createPrivacy } from './privacy-ui.js';
 import { ago, clock } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
 import {
@@ -62,6 +63,8 @@ const ICON = {
   pdf: SVG('<path d="M7 3h7l5 5v13H7zM14 3v5h5M9.5 15h5M9.5 18h3"/>'),
   download: SVG('<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>'),
   clock: SVG('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  shield: SVG('<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9.5 12l2 2 3.5-4"/>'),
+  key: SVG('<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l3 3M14 9l2 2"/>'),
 };
 
 const PRESET_SPEC = {
@@ -92,6 +95,7 @@ export default {
     const electron = ctx.host.kind === 'electron';
     const fallbackKind = electron ? 'electron' : ctx.host.kind;
     const hasB1 = Boolean(pane) && typeof pane.newTab === 'function' && typeof pane.onDownloads === 'function'; /* an older shell has the pane but not tabs */
+    const hasB2 = hasB1 && Boolean(pane.privacy) && typeof pane.privacy.state === 'function'; /* an older shell has tabs but not permissions and passwords */
 
     /* ---------------- state ---------------- */
     let disposed = false;
@@ -140,6 +144,9 @@ export default {
     let histBody = null;
     let histConfirm = null;
     let dlBody = null;
+    let offPrivacy = null;
+    let panelHandle = null; /* the open Site settings or Passwords panel, so closing it can wipe what it showed */
+    let privacyUi = null;
     const panelRoot = el('div', 'bw-panel');
     const MOD = /Mac/i.test(String(globalThis.navigator && globalThis.navigator.platform)) ? 'Meta' : 'Ctrl';
 
@@ -174,6 +181,8 @@ export default {
               <button type="button" class="cb-ico" id="bwPdf" aria-label="Save page as PDF" title="Save page as PDF" data-spec="Saves this page as a PDF in your Downloads folder and lists it on the downloads shelf. Nothing is opened.">${ICON.pdf}</button>
               <button type="button" class="cb-ico cb-badged" id="bwDl" aria-label="Downloads" aria-pressed="false" title="Downloads" data-spec="Shows what this browser has downloaded and what is downloading now. Files go to your Downloads folder, where the downloads watcher checks them. Nothing is ever opened by itself.">${ICON.download}<span class="cb-count" id="bwDlCount" hidden></span></button>
               <button type="button" class="cb-ico" id="bwHist" aria-label="History" aria-pressed="false" title="History" data-spec="Lists the pages this browser has visited, newest first, with a search box. Click one to open it, remove one, or clear all of it.">${ICON.clock}</button>
+              <button type="button" class="cb-ico" id="bwSites" aria-label="Site settings" aria-pressed="false" title="Site settings" data-spec="Lists what each site may use (camera, microphone, location, notifications, clipboard, full screen), as you answered it. Change an answer or reset it so the site asks again.">${ICON.shield}</button>
+              <button type="button" class="cb-ico" id="bwPass" aria-label="Passwords and autofill" aria-pressed="false" title="Passwords and autofill" data-spec="Your saved logins and addresses. They are encrypted with a key in this Mac's Keychain and stay on this Mac. No AI tool can list or open them, but a password you fill sits in the page's field. Showing a password asks twice.">${ICON.key}</button>
             </div>
             <span class="cb-size" id="bwSize" title="Size of the page area in pixels"></span>
             <div class="cb-vp" id="bwPresets" role="group" aria-label="Page area size" data-spec="Sets the width of the page area. Layout only: the page reflows because the view really is that wide, but there is no device emulation."></div>
@@ -186,6 +195,7 @@ export default {
             <button type="button" class="cb-ico" id="bwFindClose" aria-label="Close find bar" title="Close (Escape)" data-spec="Closes the find bar and clears the highlights.">${ICON.stop}</button>
           </div>
           <div class="cb-bm" id="bwBm" role="toolbar" aria-label="Bookmarks" hidden></div>
+          <div class="cb-privacy-slot" id="bwPrivacy"></div>
           <div class="bw-proxy" id="bwProxy" hidden></div>
           <div class="cb-page" id="bwPage" data-region></div>
           <div class="cb-watch" id="bwWatch" data-region></div>
@@ -212,6 +222,9 @@ export default {
     const dlBtn = $('bwDl');
     const dlCount = $('bwDlCount');
     const histBtn = $('bwHist');
+    const sitesBtn = $('bwSites');
+    const passBtn = $('bwPass');
+    const privacySlot = $('bwPrivacy');
     const findBar = $('bwFind');
     const findInput = $('bwFindInput');
     const findCount = $('bwFindCount');
@@ -702,6 +715,12 @@ export default {
       pdfBtn.disabled = !page;
       dlBtn.disabled = !usable;
       histBtn.disabled = !usable;
+      sitesBtn.hidden = !hasB2;
+      passBtn.hidden = !hasB2;
+      sitesBtn.disabled = !usable;
+      passBtn.disabled = !usable;
+      sitesBtn.setAttribute('aria-pressed', String(panel === 'sites'));
+      passBtn.setAttribute('aria-pressed', String(panel === 'passwords'));
       zoomBtn.textContent = zoomLabel(tm.zoom);
       zoomBtn.dataset.changed = Math.abs(tm.zoom - 1) > 0.001 ? '1' : '0';
       dlBtn.setAttribute('aria-pressed', String(panel === 'downloads'));
@@ -860,6 +879,10 @@ export default {
 
     function closePanel() {
       if (!panel) return;
+      if (panelHandle) {
+        panelHandle.dispose();
+        panelHandle = null;
+      }
       panel = '';
       histBody = null;
       dlBody = null;
@@ -893,6 +916,10 @@ export default {
     function buildPanel() {
       if (panel === 'history') buildHistoryPanel();
       else if (panel === 'downloads') buildDownloadsPanel();
+      else if (privacyUi && (panel === 'sites' || panel === 'passwords')) {
+        const close = panelButton('CLOSE', () => closePanel(), 'Goes back to the page.');
+        panelHandle = privacyUi.panels[panel](panelRoot, { head: panelHead, button: panelButton, close });
+      }
     }
 
     function buildHistoryPanel() {
@@ -1210,6 +1237,8 @@ export default {
     pdfBtn.addEventListener('click', () => printPage(true));
     dlBtn.addEventListener('click', () => openPanel('downloads'));
     histBtn.addEventListener('click', () => openPanel('history'));
+    sitesBtn.addEventListener('click', () => openPanel('sites'));
+    passBtn.addEventListener('click', () => openPanel('passwords'));
     findInput.addEventListener('input', () => runFind(true, false));
     findInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -1290,6 +1319,11 @@ export default {
       if (typeof offCmd === 'function') offCmd();
       offDl = null;
       offCmd = null;
+      if (typeof offPrivacy === 'function') offPrivacy();
+      offPrivacy = null;
+      if (panelHandle) panelHandle.dispose();
+      panelHandle = null;
+      if (privacyUi) privacyUi.dispose();
       if (histTimer) clearTimeout(histTimer);
       if (offFindEsc) offFindEsc();
       if (offPanelEsc) offPanelEsc();
@@ -1400,6 +1434,14 @@ export default {
       if (typeof pane.screen === 'function') safe(pane.screen(true));
       offDl = pane.onDownloads(onDownloads);
       offCmd = pane.onCommand(onCommand);
+      if (hasB2) {
+        privacyUi = createPrivacy({ ctx, privacy: pane.privacy, note });
+        privacySlot.replaceChildren(privacyUi.root);
+        offPrivacy = pane.privacy.onUpdate((s) => {
+          if (!disposed) privacyUi.update(s);
+        });
+        Promise.resolve(pane.privacy.state()).then((s) => { if (!disposed && s) privacyUi.update(s); }).catch((err) => paneFailed(err));
+      }
       Promise.resolve(pane.downloads()).then(onDownloads).catch((err) => paneFailed(err));
       paintBookmarks();
       loadBookmarks();

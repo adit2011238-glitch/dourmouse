@@ -60,5 +60,32 @@ contextBridge.exposeInMainWorld("dourmouseShell", {
       ipcRenderer.on("pane:command", h);
       return () => ipcRenderer.removeListener("pane:command", h);
     },
+    // Phase B2: site permissions, saved passwords and address autofill. Each call is a request
+    // the main process validates and answers only for the console window (it checks the sender).
+    // Nothing here hands the console a password except `reveal`, which main.js puts behind a
+    // native confirmation dialog.
+    privacy: {
+      state: () => ipcRenderer.invoke("pane:privacy"),
+      onUpdate: (cb) => {
+        const h = (_evt, s) => cb(s);
+        ipcRenderer.on("pane:privacy", h);
+        return () => ipcRenderer.removeListener("pane:privacy", h);
+      },
+      permAnswer: (id, decision) => ipcRenderer.invoke("pane:perm-answer", id, decision),
+      sites: () => ipcRenderer.invoke("site:perms"),
+      siteSet: (origin, permission, decision) => ipcRenderer.invoke("site:perm-set", origin, permission, decision),
+      siteForget: (origin) => ipcRenderer.invoke("site:perm-forget", origin),
+      sitesClear: () => ipcRenderer.invoke("site:perms-clear"),
+      pwList: () => ipcRenderer.invoke("pw:list"),
+      pwDelete: (id) => ipcRenderer.invoke("pw:delete", id),
+      pwNeverRemove: (origin) => ipcRenderer.invoke("pw:never-remove", origin),
+      pwSaveAnswer: (id, answer) => ipcRenderer.invoke("pw:save-answer", id, answer),
+      pwFill: (entryId) => ipcRenderer.invoke("pw:fill", entryId),
+      pwReveal: (id) => ipcRenderer.invoke("pw:reveal", id),
+      addrList: () => ipcRenderer.invoke("addr:list"),
+      addrSave: (profile, id) => ipcRenderer.invoke("addr:save", profile, id),
+      addrDelete: (id) => ipcRenderer.invoke("addr:delete", id),
+      addrFill: (id) => ipcRenderer.invoke("addr:fill", id),
+    },
   },
 });
