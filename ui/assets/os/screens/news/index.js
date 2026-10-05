@@ -93,8 +93,10 @@ export default {
           ctx.notify({
             level: 'ok',
             title: r.created ? 'Research record started' : 'Added to an existing research record',
-            detail: r.source_added ? 'The link is its source. Continue it from RESEARCH.' : 'That link was already a source.',
-            ttl: 4000,
+            detail: r.source_added ? 'The link is its source.' : 'That link was already a source.',
+            ttl: 9000,
+            /* F25: a link to where it went, so the person does not have to find RESEARCH themselves */
+            action: { label: 'Go to Research', spec: 'Opens RESEARCH, where this question and its source are.', onClick: () => { window.location.hash = '#/research'; } },
           });
           confirmEl.replaceChildren();
         } catch (err) {

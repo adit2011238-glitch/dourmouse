@@ -40,12 +40,17 @@ button.tag:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 
 .os-btn--primary { color: var(--dm-active-ink, #09090B); }
 .os-btn--primary:hover { color: var(--dm-active-ink, #09090B); background: color-mix(in srgb, var(--dm-active) 88%, white); }
 .os-btn:disabled { opacity: .38; cursor: not-allowed; }
+a.os-btn { text-decoration: none; }
 
 /* ---- the six states ---- */
 .st { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 28px 16px; color: var(--dm-fg-dim); font-size: var(--dm-text-sm); line-height: 1.6; }
 .st .st-t { color: var(--dm-fg); font-size: var(--dm-text-base); letter-spacing: .04em; }
 .st .st-m { color: var(--dm-fg-body); max-width: 56ch; overflow-wrap: anywhere; }
 .st .st-d { color: var(--dm-fg-dim); font-size: var(--dm-text-xs); max-width: 60ch; overflow-wrap: anywhere; }
+.st-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
+.st-dev { margin-top: 6px; max-width: 60ch; text-align: left; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
+.st-dev summary { cursor: pointer; text-align: center; padding: 2px 0; }
+.st-dev summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
 .st-suggest { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .st-error .st-t { color: var(--dm-error); }
 .st-unavailable .st-t { color: var(--os-warn); }
@@ -100,3 +105,5 @@ button.tag:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 
 .md a:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
 
 svg.flow text { user-select: text; }
+/* S2: a drawing is never shrunk below its own size, so no label renders under 11px; a narrow stage scrolls it sideways */
+.flowscroll { overflow-x: auto; max-width: 100%; }

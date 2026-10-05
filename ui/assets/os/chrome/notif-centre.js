@@ -22,7 +22,7 @@ export function createNotifCentre({ root, api, events, toasts, prefs, dock, time
   let open = false;
 
   setHtml(root, html`
-    <div class="cc-head"><span>Notifications</span><button type="button" class="nc-clear" id="ncClear" data-spec="Dismisses every alert listed here. Each one is a real dismiss on the server, not a style change.">Clear</button></div>
+    <div class="cc-head"><span>Notifications</span><button type="button" class="nc-clear" id="ncClear" data-spec="Dismisses every alert listed here. Each one is a real dismiss on the server, not a style change. This session's notices can be brought back with Undo; a dismissed server alert cannot.">Clear</button></div>
     <div id="nclist" aria-live="polite"></div>`);
   const list = root.querySelector('#nclist');
   const clear = root.querySelector('#ncClear');
@@ -104,7 +104,16 @@ export function createNotifCentre({ root, api, events, toasts, prefs, dock, time
   });
   clear.addEventListener('click', async () => {
     const ids = active().map((a) => a.id);
+    /* S5: the session notices come back with Undo (or Command Z). A server alert that was dismissed
+       cannot: the server has a dismiss and no un-dismiss, so only the session list is restorable. */
+    const before = toasts.local().slice().reverse();
     toasts.clearLocal();
+    if (before.length) {
+      toasts.show({
+        level: 'info', title: 'Cleared ' + before.length + (before.length === 1 ? ' notice' : ' notices') + ' from this session', ttl: 8000,
+        action: { label: 'Undo', undo: true, spec: 'Puts the cleared session notices back.', onClick: () => toasts.restoreLocal(before) },
+      });
+    }
     if (ids.length) await dismiss(ids);
     else paint();
   });

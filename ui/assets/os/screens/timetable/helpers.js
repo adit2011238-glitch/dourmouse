@@ -63,3 +63,55 @@ export function handoffText(what) {
   return 'Create a recurring routine for me with the schedule_recurring tool. What it should do and when, in my words: ' + String(what).trim() +
     '\n\nShow me the tool, its arguments and the schedule before you create it, and only use a tool that can run unattended.';
 }
+
+
+/* F5: what a person reads for a tool name. Known tools get a plain verb phrase; an unknown one is
+   its own name with the underscores taken out, never an invented description. */
+const TOOL_WORDS = {
+  check_mail: 'Check mail', send_email: 'Send an email', web_search: 'Search the web', fetch_url: 'Read a web page',
+  get_weather: 'Check the weather', scan_security: 'Scan this Mac', run_command: 'Run a command',
+};
+export function toolLabel(tool) {
+  const t = String(tool || '');
+  if (TOOL_WORDS[t]) return TOOL_WORDS[t];
+  const words = t.replace(/_/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Unknown routine';
+}
+
+/* The arguments as a short phrase: a lone text argument reads as itself, several read as key and value. */
+export function argsPhrase(tool, args) {
+  const a = args && typeof args === 'object' ? args : {};
+  const keys = Object.keys(a);
+  if (!keys.length) return '';
+  if (tool === 'web_search' && typeof a.query === 'string') return 'for "' + a.query + '"';
+  if (keys.length === 1 && typeof a[keys[0]] === 'string') return '"' + a[keys[0]] + '"';
+  return keys.map((k) => k.replace(/_/g, ' ') + ': ' + (typeof a[k] === 'string' ? a[k] : JSON.stringify(a[k]))).join(', ');
+}
+
+/* The server's schedule words ("DAILY AT 07:30", "EVERY 30 MINUTE(S)") as a sentence with real plurals. */
+export function scheduleSentence(desc) {
+  const raw = String(desc || '').trim();
+  if (!raw) return 'Unknown schedule';
+  const low = raw.toLowerCase();
+  let m = /^every (\d+) (minute|hour|day|week)\(s\)$/.exec(low);
+  if (m) {
+    const n = Number(m[1]);
+    return n === 1 ? 'Every ' + m[2] : 'Every ' + n + ' ' + m[2] + 's';
+  }
+  m = /^daily at (\d{1,2}:\d{2})$/.exec(low);
+  if (m) return 'Every day at ' + m[1];
+  m = /^every (\w+day) at (\d{1,2}:\d{2})$/.exec(low);
+  if (m) return 'Every ' + m[1].charAt(0).toUpperCase() + m[1].slice(1) + ' at ' + m[2];
+  const out = low.replace(/\(s\)/g, 's');
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
+
+/* The next few runs across every enabled routine, soonest first: the "Up next" strip. */
+export function upNext(entries, limit = 5) {
+  return (Array.isArray(entries) ? entries : [])
+    .filter((e) => e && e.enabled)
+    .map((e) => ({ e, at: parseNext(e.next_run) }))
+    .filter((x) => Number.isFinite(x.at))
+    .sort((a, b) => a.at - b.at)
+    .slice(0, limit);
+}

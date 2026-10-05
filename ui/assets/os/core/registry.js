@@ -3,7 +3,10 @@
    exist yet fails to import, which the router renders as an honest "not built
    yet" state. Order is the mockup's (os_mockup.html ORDER). */
 
-const S = (id, thread, sub, load) => ({ id, slug: id.toLowerCase(), label: id, icon: id, thread, sub, load });
+/* S14 and S35: the id stays the machine name (route, data-screen, tests). The label is what a person
+   reads in the sidebar, the stage title, the dock and the launcher: the same word in sentence case. */
+const nice = (id) => id.charAt(0) + id.slice(1).toLowerCase();
+const S = (id, thread, sub, load) => ({ id, slug: id.toLowerCase(), label: nice(id), icon: id, thread, sub, load });
 
 export const SCREENS = [
   S('HOME', true, 'central agent dispatch', () => import('../screens/home/index.js')),
@@ -45,15 +48,15 @@ export const THREAD_SCREENS = SCREENS.filter((s) => s.thread).map((s) => s.id);
 /* The dock: icon-only surfaces worth one click from anywhere. Names are the
    sidebar's own names (S9), so one thing has one name. */
 export const DOCK = [
-  ['HOME', 'HOME'],
-  ['OFFICE', 'OFFICE'],
-  ['RESEARCH', 'RESEARCH'],
-  ['SECURITY', 'SECURITY'],
-  ['BROWSER', 'BROWSER'],
-  ['MEDIA', 'MEDIA'],
-  ['WIKI', 'WIKI'],
-  ['GOALS', 'GOALS'],
-  ['SETTINGS', 'SETTINGS'],
+  ['HOME', 'Home'],
+  ['OFFICE', 'Office'],
+  ['RESEARCH', 'Research'],
+  ['SECURITY', 'Security'],
+  ['BROWSER', 'Browser'],
+  ['MEDIA', 'Media'],
+  ['WIKI', 'Wiki'],
+  ['GOALS', 'Goals'],
+  ['SETTINGS', 'Settings'],
 ];
 
 /* Owner decision: these three stay in the classic console. The console has no

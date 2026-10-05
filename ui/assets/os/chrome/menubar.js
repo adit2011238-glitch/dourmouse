@@ -21,15 +21,17 @@ export function networkTone(n) {
   return n.ssid === 'offline' && !n.gateway ? 'bad' : 'ok';
 }
 
-export function createMenubar({ root, status, timers, panels }) {
+export function createMenubar({ root, status, timers, panels, host = null, scope = null }) {
   setHtml(root, html`
     <b class="mb-brand">DOURMOUSE</b>
-    <button type="button" class="os-btn" id="wallBtn" aria-expanded="false" aria-controls="wallpicker" data-spec="Opens the wallpaper picker: four built-in gradients plus your own photo.">WALLPAPER</button>
-    <button type="button" class="os-btn" id="palBtn" aria-haspopup="dialog" aria-controls="palette" aria-label="Open the launcher (Command K)" data-spec="Opens the launcher: jump to any screen, run a quick action, or ask Dourmouse. Keyboard: Command K (Ctrl K)."><span aria-hidden="true">&#8984;K</span></button>
+    <button type="button" class="os-btn" id="wallBtn" aria-expanded="false" aria-controls="wallpicker" data-spec="Opens the wallpaper picker: four built-in gradients plus your own photo.">Wallpaper</button>
     <span class="os-menubar-spacer"></span>
-    <button type="button" class="os-mb-cluster" id="ccBtn" aria-expanded="false" aria-controls="controlcenter" aria-label="Control Centre" data-panel-trigger="cc" data-spec="Control Centre. Live agents, security, network and brain, plus brightness and accent.">
+    <button type="button" class="os-btn" id="palBtn" aria-haspopup="dialog" aria-controls="palette" aria-label="Search or ask (Command K)" data-spec="Opens the launcher: jump to any screen, run a quick action, or ask Dourmouse. Keyboard: Command K (Ctrl K)."><span class="pb-text">Search or ask</span><kbd aria-hidden="true">&#8984;K</kbd></button>
+    <span class="os-menubar-spacer"></span>
+    <button type="button" class="os-btn" id="mbProject" hidden data-spec="The project this tab is scoped to. Click to leave it and go back to your general conversation. The project keeps its own thread on the server."></button>
+    <button type="button" class="os-mb-cluster" id="ccBtn" aria-expanded="false" aria-controls="controlcenter" aria-label="Control Centre" data-panel-trigger="cc" data-spec="Control Centre. Live agents, security, network and model, plus brightness and accent.">
       <span class="os-mb-ico" id="mbAgents" title="Agents">${icon('AGENTS')}<span id="mbAgentsN">-</span></span>
-      <span class="os-mb-ico" id="mbSec" title="Security">${icon('SHIELD', '', { stroke: 'var(--dm-fg-dim)' })}</span>
+      <span class="os-mb-ico" id="mbSec" title="Security">${icon('SHIELD', '', { stroke: 'var(--dm-fg-dim)' })}<span id="mbSecN"></span></span>
       <span class="os-mb-ico" id="mbNet" title="Network">${icon('WIFI')}</span>
     </button>
     <span id="clock"></span>`);
@@ -39,6 +41,26 @@ export function createMenubar({ root, status, timers, panels }) {
   const secEl = root.querySelector('#mbSec svg');
   const netEl = root.querySelector('#mbNet svg');
   const clock = root.querySelector('#clock');
+  const secN = root.querySelector('#mbSecN');
+  const ccBtn = root.querySelector('#ccBtn');
+  /* F26: scope is visible on every screen, not only HOME. One chip, one click to leave. */
+  const projEl = root.querySelector('#mbProject');
+  function paintProject() {
+    const p = scope ? scope.project() : null;
+    projEl.hidden = !p;
+    if (!p) return;
+    const name = String(p.name || p.tab_id || '').slice(0, 40);
+    projEl.textContent = 'Project: ' + name + ' \u00d7';
+    projEl.setAttribute('aria-label', 'Project ' + name + '. Activate to leave the project.');
+    projEl.title = 'Everything you send is scoped to ' + name + '. Click to leave.';
+  }
+  if (scope) {
+    projEl.addEventListener('click', () => scope.leaveProject());
+    scope.onChange(paintProject);
+    paintProject();
+  }
+  /* inside the Electron app the macOS menu bar right above already shows the time */
+  if (host && host.kind === 'electron') clock.hidden = true;
 
   function paint(s) {
     if (!s.agents.known) {
@@ -54,6 +76,14 @@ export function createMenubar({ root, status, timers, panels }) {
       : !s.security.scanned
         ? 'Security: no scan has finished yet'
         : 'Security: ' + s.security.high + ' high, ' + s.security.med + ' medium, ' + s.security.low + ' low';
+    /* S34: the state is also words and a number, not only a colour and a tooltip */
+    const hits = s.security.known && s.security.scanned ? s.security.high + s.security.med : 0;
+    secN.textContent = hits ? String(hits) : '';
+    ccBtn.setAttribute('aria-label', 'Control Centre. ' + [
+      s.agents.known ? 'Agents: ' + s.agents.total + ', ' + s.agents.busy + ' working.' : 'Agents: not read yet.',
+      !s.security.known ? 'Security: not read yet.' : !s.security.scanned ? 'Security: no scan has finished yet.' : 'Security: ' + s.security.high + ' high, ' + s.security.med + ' medium, ' + s.security.low + ' low.',
+      !s.network.known ? 'Network: not read yet.' : !s.network.watching ? 'Network watch is off.' : 'Network: ' + (s.network.iface || 'connected') + '.',
+    ].join(' '));
     netEl.setAttribute('stroke', TONE[networkTone(s.network)] === TONE.dim ? 'currentColor' : TONE[networkTone(s.network)]);
     root.querySelector('#mbNet').title = !s.network.known
       ? 'Network: ' + (s.network.error || 'reading')

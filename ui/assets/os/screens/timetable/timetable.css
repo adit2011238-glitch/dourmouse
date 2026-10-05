@@ -15,3 +15,7 @@
 [data-screen="TIMETABLE"] .tt-in:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
 [data-screen="TIMETABLE"] .tt-err { color: var(--dm-error); font-size: var(--dm-text-sm); margin-top: 6px; overflow-wrap: anywhere; }
 [data-screen="TIMETABLE"] .tt-warn { margin-top: 8px; }
+
+/* F5: the "Up next" strip */
+[data-screen="TIMETABLE"] .tt-next { margin-bottom: 12px; }
+[data-screen="TIMETABLE"] .tt-next[hidden] { display: none; }

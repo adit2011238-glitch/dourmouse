@@ -7,7 +7,7 @@
 import { html, setHtml } from '../kit/html.js';
 import { icon } from '../kit/icons.js';
 import { SCREENS, CONSOLE_LINKS } from '../core/registry.js';
-import { ACCENTS } from '../core/prefs.js';
+import { ACCENTS, TEXT_SIZES } from '../core/prefs.js';
 import { putPaneRequest } from '../core/pane-inbox.js';
 import { rank, withRecentFirst } from './palette-search.js';
 import { keysFor } from '../core/shortcuts.js';
@@ -18,7 +18,7 @@ const RESULT_MAX = 40;
 const KIND = { SCREEN: 'Screen', ACTION: 'Action', PANEL: 'Panel', CONSOLE: 'Classic console', ASK: 'Ask', WEB: 'Web' };
 const GROUP = { SCREEN: 'Screens', ACTION: 'Actions', PANEL: 'Panels', CONSOLE: 'Classic console' };
 
-export function createPalette({ scope, shortcuts = [], root, go, refresh, openPanel, api, chat, prefs, toasts }) {
+export function createPalette({ scope, shortcuts = [], root, go, refresh, openPanel, api, chat, prefs, toasts, startup = null }) {
   let def = null;
   let shown = [];
   let sel = 0;
@@ -84,21 +84,26 @@ export function createPalette({ scope, shortcuts = [], root, go, refresh, openPa
 
   function buildItems() {
     const items = [];
-    SCREENS.forEach((s) => items.push({ id: 'screen:' + s.id, label: s.id, help: s.sub, kind: 'SCREEN', glyph: s.icon, keys: keysFor(shortcuts, s.id), run: () => go(s.slug) }));
+    SCREENS.forEach((s) => items.push({ id: 'screen:' + s.id, label: s.label, help: s.sub, kind: 'SCREEN', glyph: s.icon, keys: keysFor(shortcuts, s.id), run: () => go(s.slug) }));
     items.push(
       { id: 'act:scan', label: 'Scan this Mac now', help: 'a read-only security scan', kind: 'ACTION', run: scanNow },
       { id: 'act:new', label: 'New conversation', help: 'start a fresh thread on HOME', kind: 'ACTION', keys: keysFor(shortcuts, 'new'), run: newConversation },
       { id: 'act:shortcuts', label: 'Keyboard shortcuts', help: 'every shortcut in one list', kind: 'ACTION', keys: keysFor(shortcuts, 'help'), run: () => openPanel('shortcuts') },
       { id: 'act:refresh', label: 'Refresh this screen', help: 'read it again', kind: 'ACTION', run: () => refresh() },
       {
-        id: 'act:auto', label: chat.autonomous() ? 'Turn autonomous mode off' : 'Turn autonomous mode on', help: 'more steps per run; every gated action still asks', kind: 'ACTION',
-        run: () => { chat.setAutonomous(!chat.autonomous()); toasts.show({ level: 'info', title: 'Autonomous mode ' + (chat.autonomous() ? 'on' : 'off'), detail: 'This tab only. It is not auto-approve.' }); },
+        id: 'act:auto', label: chat.autonomous() ? 'Turn longer runs off' : 'Turn longer runs on', help: 'up to 24 steps per run instead of 8; risky actions still ask', kind: 'ACTION',
+        run: () => { chat.setAutonomous(!chat.autonomous()); toasts.show({ level: 'info', title: 'Longer runs ' + (chat.autonomous() ? 'on' : 'off'), detail: 'This tab only. It is not auto-approve.' }); },
       },
       {
         id: 'act:dnd', label: prefs.dnd() ? 'Turn Do Not Disturb off' : 'Turn Do Not Disturb on', help: 'silences in-app toasts only', kind: 'ACTION',
         run: () => { prefs.setDnd(!prefs.dnd()); toasts.show({ level: 'info', title: 'Do Not Disturb ' + (prefs.dnd() ? 'on' : 'off'), detail: 'Native desktop notifications are not affected.' }); },
       },
     );
+    if (startup) items.push({ id: 'act:signin', label: 'Show sign-in help', help: 'the Google, Claude and Codex sign-in banner on HOME', kind: 'ACTION', run: () => { go('home'); startup.reopen(); } });
+    TEXT_SIZES.forEach((t) => items.push({
+      id: 'textsize:' + t.id, label: 'Text size: ' + t.name, help: 'size of the text across the app', kind: 'ACTION',
+      run: () => { prefs.applyTextSize(t.id); prefs.save('textSize', t.id); },
+    }));
     ACCENTS.forEach((a) => items.push({
       id: 'accent:' + a.id, label: 'Accent: ' + a.name, help: 'colour of buttons and highlights', kind: 'ACTION',
       run: () => { prefs.applyAccent(a.hex); prefs.save('accent', a.hex); },
@@ -144,7 +149,7 @@ export function createPalette({ scope, shortcuts = [], root, go, refresh, openPa
       last = g || last;
       parts.push(html`<div class="pal-item" id="palopt${i}" role="option" aria-selected="${String(i === sel)}" data-i="${i}">
         <span class="gl" aria-hidden="true">${it.glyph ? icon(it.glyph, '', { width: 1.5 }) : ''}</span>
-        <span class="lb">${it.label}</span><span class="hp">${it.help || ''}</span>${it.keys ? html`<kbd class="ks">${it.keys}</kbd>` : ''}<span class="kd">${KIND[it.kind] || ''}</span></div>`);
+        <span class="lb">${it.label}</span><span class="hp">${it.help || ''}</span>${it.keys ? html`<kbd class="ks">${it.keys}</kbd>` : ''}${q ? html`<span class="kd">${KIND[it.kind] || ''}</span>` : ''}</div>`);
     });
     if (!rows.length) parts.push(html`<div class="pal-empty">Nothing matches. Press Enter to ask Dourmouse instead.</div>`);
     setHtml(list, html`${parts}`);

@@ -34,7 +34,12 @@ export function createSidebar({ root, registry, go }) {
       else set.delete(source);
       live.set(id, set);
       const el = items.get(id.toLowerCase());
-      if (el) el.dataset.live = set.size ? '1' : '0';
+      if (el) {
+        el.dataset.live = set.size ? '1' : '0';
+        /* S36: the dot is also words for a screen reader */
+        const label = el.querySelector('.nl');
+        el.setAttribute('aria-label', (label ? label.textContent : id) + (set.size ? ', running' : ''));
+      }
     },
     liveIds: () => Array.from(live.entries()).filter(([, s]) => s.size).map(([id]) => id),
   };

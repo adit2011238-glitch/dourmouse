@@ -3647,7 +3647,7 @@ class TestSetupWizardGoogleStep:
         it — unlike CONTINUE on the brain-choice step, which IS gated."""
         status, _, raw = self._get(server, "/setup")
         html = raw.decode("utf-8", errors="replace")
-        assert 'id="gSkipBtn" onclick="gAdvance()">SKIP<' in html
+        assert 'id="gSkipBtn" onclick="gAdvance()">Skip<' in html
 
     def test_claim_flow_works_when_initiated_from_the_setup_wizard(self, server, monkeypatch):
         """The exact sequence the new step performs: start with a claim

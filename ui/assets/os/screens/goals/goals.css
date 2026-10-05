@@ -7,7 +7,10 @@
 [data-screen="GOALS"] .gl-gap { margin-top: 12px; }
 [data-screen="GOALS"] .gl-form { margin-bottom: 12px; }
 [data-screen="GOALS"] .gl-foot { margin-top: 10px; }
-[data-screen="GOALS"] .gl-obj { color: var(--dm-fg); font-size: var(--dm-text-md); overflow-wrap: anywhere; }
+[data-screen="GOALS"] .gl-obj { margin: 6px 0 0; font-weight: 500; color: var(--dm-fg); font-size: var(--dm-text-md); overflow-wrap: anywhere; }
+[data-screen="GOALS"] .gl-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: var(--dm-text-sm); }
+[data-screen="GOALS"] .gl-meta .tag { margin: 0; }
+[data-screen="GOALS"] .gl-steps { margin: 14px 0 4px; font-size: var(--dm-text-sm); font-weight: 500; color: var(--dm-fg-body); }
 [data-screen="GOALS"] .gl-block { margin-top: 6px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); overflow-wrap: anywhere; }
 [data-screen="GOALS"] .gl-pct { margin-top: 6px; }
 [data-screen="GOALS"] .gl-btns { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }

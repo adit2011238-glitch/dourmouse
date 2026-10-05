@@ -3,215 +3,225 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>DOURMOUSE · SIGN IN</title>
+<link rel="icon" type="image/png" href="/assets/icon-192.png">
 <link rel="stylesheet" href="assets/dourmouse-ui.css">
 <style>
-  /* Retheme: Claude-Desktop-directed calm/minimal system (retires the
-     sci-fi/HUD "ARC CORE" look). Variable NAMES are unchanged from the
-     prior pass -- 78 call sites and dourmouse/tests/test_ui_contrast.py /
-     test_ui_focus_visible.py both read these exact --names -- so this is
-     a token-VALUE swap, not a rewrite.
+  /* Sign-in, restyled on the OS shell's own design tokens (UX issue S3, #170).
+     The page used to be a warm cream theme with a different logo and type, so a
+     new install started in one product and landed in another. It is now the same
+     dark glass on the same green wallpaper as /shell.
 
-     Cited principles this pass is built on (not just "HIG says so"):
-       1. Apple HIG, Color & Contrast (developer.apple.com/design/
-          human-interface-guidelines/foundations/color): "use color
-          sparingly... prefer touches of color to call attention to
-          important information", and a minimum 4.5:1 text / 3:1
-          large-text-and-UI contrast floor. -> one muted accent
-          (--amber) instead of amber+red+green competing for attention;
-          red/green survive ONLY as functional ok/error state, per HIG's
-          own carve-out for system/semantic color.
-       2. Apple HIG, Typography: hierarchy comes from weight and size,
-          not decoration -- "avoid light font weights... opt for medium/
-          semibold/bold" for anything that must be read, not glanced at.
-          -> p.sub/.g-note move off font-weight:300 boilerplate; the
-          wordmark drops Departure Mono's forced letter-spacing crutch.
-       3. Refactoring UI (Wathan & Schoger), on shadows: "the smaller and
-          less blurry a shadow, the closer to the background an element
-          appears" and depth should read as real light, not a border
-          standing in for it. -> .gate/.google-card/.account-card get a
-          real two-layer box-shadow (ambient + contact) instead of a flat
-          1px line pretending to be a raised card.
+     The page is deliberately self-contained: every token below is a literal copy
+     of a shell token (named in its comment), not a var() into dourmouse-ui.css.
+     A remote device that has not signed in yet cannot fetch /assets/*, and this is
+     the one page it must be able to draw. dourmouse-ui.css is linked only so a
+     local run picks up Space Grotesk; every font falls back to the system face.
 
-     Ground goes near-black -> warm light neutral (this cycle's explicit
-     direction); type goes Departure/Berkeley Mono -> one humanist system
-     stack; the 34px HUD rule-grid body background and the print-register
-     corner brackets on .gate are gone -- both are terminal/HUD idioms
-     with no equivalent in a calm productivity app.
-
-     Previous (HUD) values, for a one-step revert: --ground:#09090B;
-     --surface:#18181B; --raised:#27272A; --cyan/--text:#FAFAFA;
-     --amber:#F59E0B; --text-dim/--text-body:#A1A1AA; --line:#27272A;
-     --line-strong:#3F3F46; fonts: Departure Mono / Berkeley Mono /
-     Monaspace Neon (see git blame two commits back for the full block). */
+     Token NAMES are unchanged from the previous theme: dourmouse/tests/
+     test_ui_contrast.py and test_ui_focus_visible.py read these exact --names. */
   :root {
-    --ground: #F7F5F1;
-    --surface: #FFFFFF;
-    --raised: #EFEBE4;
-    --cyan:  #3A3733; --cyan-rgb:  58,55,51;
-    --amber: #A8481E; --amber-rgb: 168,72,30;
-    --red:   #B3413A; --red-rgb:   179,65,58;
-    --green: #4B7F5E; --green-rgb: 75,127,94;
-    --dead:  #A39C8E; --dead-rgb:  163,156,142;
+    color-scheme: dark;
+    /* shell wallpaper base, mat-thick card, dm-layer */
+    --ground: #071D18;
+    --surface: #0A2A22;
+    --raised: #142E22;
+    /* dm-fg, dm-fg-body, dm-fg-dim (all 4.5:1 or better on the three grounds above) */
+    --text: #FAFAFA;
+    --text-body: #D4D4D8;
+    --text-dim: #A9A9B3;
+    --cyan: #FAFAFA; --cyan-rgb: 250,250,250;
+    /* dm-active is the shell's accent; dm-error and dm-ok are its status colours */
+    --amber: #F59E0B; --amber-rgb: 245,158,11;
+    --red: #F87171; --red-rgb: 248,113,113;
+    --green: #34D399; --green-rgb: 52,211,153;
+    --dead: #6B7C74; --dead-rgb: 107,124,116;
+    /* the shell's edges, dm-line-focus for field borders */
+    --line: rgba(255,255,255,0.12);
+    --line-strong: #33584B;
+    --panel: #0A2A22;
+    --edge-hi: rgba(255,255,255,0.10);
+    --edge-lo: rgba(0,0,0,0.45);
     --a06: 0.06; --a10: 0.10; --a16: 0.16; --a22: 0.22;
     --a30: 0.30; --a45: 0.45; --a60: 0.60; --a85: 0.85;
-    /* ---- type: one humanist system stack, no display/mono faces ---- */
-    --font-display:  -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
-    --font-mono:     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
-    --font-prose:    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
-    --font-wordmark: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
-    /* ---- semantic aliases ---- */
-    --text: #3A3733;
-    /* --text-dim carries the smaller/secondary copy (labels, hints,
-       timestamps) and --text-body carries the page's own running prose;
-       both need MORE contrast than --text (the wordmark/emphasis colour,
-       used at larger sizes where HIG's size+weight hierarchy already
-       does the work) to clear 4.5:1 against every one of --ground/
-       --surface/--raised -- so on this light ground the darkest value
-       belongs to the small text, not the headline. */
-    --text-dim: #201E1A;
-    --text-body: #221F1B;
-    --line: #E4DFD5;
-    --line-strong: #D2CBBC;
-    --panel: #FFFFFF;
+    /* the shell type scale (shell.css): nothing under 11px */
+    --t-xs: 11.5px; --t-sm: 12px; --t-base: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 19px;
+    /* dm-font-sans and dm-font-mono, with the same fallbacks */
+    --font-display:  'Space Grotesk', 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-prose:    'Space Grotesk', 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-wordmark: 'Space Grotesk', 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono:     'Berkeley Mono', 'Monaspace Neon', 'Intel One Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    /* os-mat-thick, os-elev-float, os-radius-widget */
+    --mat-thick: rgba(10, 42, 34, 0.94);
+    --elev-float: 0 4px 10px rgba(0,0,0,.38), 0 24px 56px rgba(0,0,0,.42);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; }
-  /* The 34px HUD rule-grid is gone -- a bench grid is a terminal idiom,
-     not a calm app's ground. Flat warm-neutral fill only. */
+  html, body { min-height: 100%; }
   body {
     background: var(--ground);
     color: var(--text-body);
     font-family: var(--font-prose);
+    font-size: var(--t-base);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
     display: flex; justify-content: center;
-    overflow-y: auto; padding: 24px 0;
+    min-height: 100vh; padding: 24px 16px;
   }
+  /* The shell wallpaper (aurora), copied from dourmouse-os.css, plus the shell's dim layer. */
+  .wall {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none; background-color: #071d18;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 18% 0%,  rgba(16,185,129,.20), transparent 60%),
+      radial-gradient(ellipse 100% 70% at 82% 12%, rgba(245,158,11,.10), transparent 58%),
+      radial-gradient(ellipse 140% 90% at 50% 105%, rgba(10,42,34,.95), transparent 70%);
+  }
+  .wall::after {
+    content: ""; position: absolute; inset: 0; opacity: .30;
+    background-image: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .walldim { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: #000; opacity: .35; }
+
   .gate {
-    width: min(92vw, 400px);
+    width: min(100%, 400px);
     margin: auto;
     flex: none;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: var(--panel);
-    padding: 30px 30px 26px;
-    position: relative;
-    /* Two-layer shadow (contact + ambient) reads as real elevation --
-       Refactoring UI's shadow principle above -- instead of the old
-       border-and-glow standing in for depth. */
-    box-shadow: 0 1px 2px rgba(30, 24, 12, 0.04), 0 12px 32px -8px rgba(30, 24, 12, 0.10);
+    border: 1px solid var(--edge-lo);
+    border-radius: 16px;
+    background: var(--mat-thick);
+    -webkit-backdrop-filter: saturate(140%) blur(10px); backdrop-filter: saturate(140%) blur(10px);
+    padding: 28px 28px 24px;
+    position: relative; z-index: 1;
+    box-shadow: var(--elev-float);
   }
+  /* the shell's top highlight: one inset pixel, never a glow */
+  .gate::before { content: ""; position: absolute; inset: 0; border-radius: inherit; border-top: 1px solid var(--edge-hi); pointer-events: none; }
 
-  /* ---- brand row ---- */
-  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-  .mark {
-    width: 38px; height: 38px; flex: none;
-    border: 1px solid var(--line); border-radius: 9px;
-    display: grid; place-items: center;
-    font-family: var(--font-wordmark); font-size: 16px; font-weight: 600; color: var(--text-dim);
-    background: var(--raised);
-  }
+  /* ---- brand row: the shell menu bar's wordmark, with the app icon ---- */
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .mark { width: 36px; height: 36px; flex: none; border-radius: 9px; display: block; background: var(--raised); }
+  .wordmark { font-family: var(--font-wordmark); font-size: var(--t-xs); font-weight: 500; letter-spacing: .1em; color: var(--text); }
   h1 {
     font-family: var(--font-wordmark); font-weight: 600;
-    font-size: 15px; letter-spacing: 0; color: var(--text);
-    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--t-xl); letter-spacing: 0; color: var(--text); line-height: 1.2;
+    margin-bottom: 8px;
   }
-  p.sub { font-size: 13px; font-weight: 400; color: var(--text-dim); margin-bottom: 22px; line-height: 1.6; }
+  p.sub { font-size: var(--t-base); font-weight: 400; color: var(--text-body); margin-bottom: 20px; line-height: 1.6; }
 
-  /* ---- Gmail-style Google sign-in card ---- */
-  .google-card { border: 1px solid var(--line); border-radius: 10px; padding: 20px 18px 16px; background: var(--surface); box-shadow: 0 1px 2px rgba(30, 24, 12, 0.03); }
-  .google-card .g-title { font-family: var(--font-display); font-size: 13.5px; font-weight: 600; letter-spacing: 0; color: var(--text); margin-bottom: 4px; }
-  .google-card .g-note { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; line-height: 1.55; }
+  /* ---- Google sign-in card ---- */
+  .google-card { border: 1px solid var(--line); border-radius: 12px; padding: 18px 16px 16px; background: rgba(255,255,255,.04); }
+  .google-card .g-title { font-family: var(--font-display); font-size: var(--t-md); font-weight: 600; letter-spacing: 0; color: var(--text); margin-bottom: 4px; }
+  .google-card .g-note { font-size: var(--t-sm); color: var(--text-dim); margin-bottom: 14px; line-height: 1.55; }
 
   /* The official Google button look: white, the Google G, brand-weight
-     type — the signifier everyone recognizes from signing into Gmail.
-     Deliberately NOT rethemed (Google's own OAuth-button spec). */
+     type. Deliberately NOT rethemed (Google's own OAuth-button spec). */
   .gbtn {
     display: flex; align-items: center; justify-content: center; gap: 12px;
-    width: 100%; padding: 12px 14px; cursor: pointer;
+    width: 100%; padding: 11px 14px; min-height: 42px; cursor: pointer;
     background: #fff; color: #1f1f1f;
     font-family: "Roboto","Inter",-apple-system,var(--font-prose);
-    font-size: 13.5px; font-weight: 500; letter-spacing: 0.1px;
-    border: 1px solid #dadce0; border-radius:2px;
-    transition: all .18s;
+    font-size: var(--t-md); font-weight: 500; letter-spacing: 0.1px;
+    border: 1px solid #dadce0; border-radius: 8px;
+    transition: background-color .14s linear, box-shadow .14s linear;
   }
   .gbtn:hover { background: #f6f7f8; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
   .gbtn:active { background: #eef0f1; }
   .gbtn svg { flex: none; }
-  .gmsg { margin-top: 12px; font-size: 12px; line-height: 1.7; color: var(--text-dim); }
-  .gmsg b { color: var(--text); }
+  .gmsg { margin-top: 12px; font-size: var(--t-sm); line-height: 1.65; color: var(--text-dim); }
+  .gmsg b { color: var(--text); font-weight: 500; }
   .gmsg .warn { color: var(--amber); }
   .gmsg .err { color: var(--red); }
 
   /* ---- signed-in account card ---- */
-  .account-card { display: none; border: 1px solid var(--line); border-radius: 10px; padding: 22px 18px; background: var(--surface); text-align: center; box-shadow: 0 1px 2px rgba(30, 24, 12, 0.03); }
-  /* The avatar keeps its circle -- it is a photograph of a person, the
-     one thing here that is genuinely round (never a pill button/box). */
+  .account-card { display: none; border: 1px solid var(--line); border-radius: 12px; padding: 20px 16px; background: rgba(255,255,255,.04); text-align: center; }
+  /* The avatar keeps its circle: it is a photograph of a person. */
   .account-card .avatar {
     width: 64px; height: 64px; border-radius: 50%; object-fit: cover;
     border: 1px solid var(--line-strong);
     margin: 0 auto 12px; display: block; background: var(--raised);
   }
-  .account-card .who b { display: block; font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: 0; }
-  .account-card .who span { display: block; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); margin-top: 3px; }
-  .account-card .signed-tag { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 16px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; color: var(--green); font-weight: 500; }
+  .account-card .who b { display: block; font-size: var(--t-lg); font-weight: 600; color: var(--text); letter-spacing: 0; }
+  .account-card .who span { display: block; font-family: var(--font-mono); font-size: var(--t-sm); color: var(--text-dim); margin-top: 3px; overflow-wrap: anywhere; }
+  .account-card .signed-tag { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 16px; font-size: var(--t-sm); letter-spacing: 0.02em; color: var(--green); font-weight: 500; }
   .account-card .signed-tag::before { content: "✓"; }
-  /* SIGN OUT is ours, not Google's, so it drops the white Google chrome
-     entirely and becomes a normal system button. */
+  /* Sign out is ours, not Google's: the shell's secondary button. */
   .gbtn.ghost {
-    background: var(--surface); color: var(--text-body);
-    border: 1px solid var(--line); border-radius: 8px;
-    font-family: var(--font-display); font-size: 12.5px; font-weight: 500; letter-spacing: 0;
+    background: rgba(255,255,255,.06); color: var(--text-body);
+    border: 1px solid var(--edge-lo); border-radius: 8px;
+    font-family: var(--font-display); font-size: var(--t-base); font-weight: 500; letter-spacing: 0;
   }
-  .gbtn.ghost:hover { background: var(--raised); color: var(--text); border-color: var(--line-strong); box-shadow: none; }
+  .gbtn.ghost:hover { background: rgba(255,255,255,.12); color: var(--text); box-shadow: none; }
   .account-card a.enter {
-    display: block; margin-top: 14px; font-family: var(--font-mono); font-size: 12.5px;
-    letter-spacing: 0; color: var(--text-dim); text-decoration: none;
+    display: block; margin-top: 14px; font-size: var(--t-base);
+    letter-spacing: 0; color: var(--amber); text-decoration: none; padding: 4px;
   }
   .account-card a.enter:hover { text-decoration: underline; }
 
   /* ---- token fallback (collapsed) ---- */
   details.token-alt { margin-top: 16px; }
   details.token-alt summary {
-    font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em;
-    color: var(--text-dim); cursor: pointer; list-style: none; text-align: center;
+    font-size: var(--t-sm); letter-spacing: 0.02em;
+    color: var(--text-dim); cursor: pointer; list-style: none; text-align: center; padding: 6px;
+    border-radius: 8px;
   }
   details.token-alt summary::-webkit-details-marker { display: none; }
   details.token-alt summary:hover { color: var(--text); }
-  details.token-alt[open] summary { margin-bottom: 14px; }
-  label { display: block; font-size: 11px; letter-spacing: 0.04em; font-weight: 500; color: var(--text-dim); margin-bottom: 8px; }
+  details.token-alt[open] summary { margin-bottom: 12px; }
+  label { display: block; font-size: var(--t-sm); letter-spacing: 0.02em; font-weight: 500; color: var(--text-dim); margin-bottom: 8px; }
   input[type="password"] {
-    width: 100%; background: var(--ground); border: 1px solid var(--line);
-    color: var(--text); font-family: var(--font-mono); font-size: 14px; font-weight: 400;
-    padding: 12px 14px; letter-spacing: 0; outline: none; border-radius: 8px;
+    width: 100%; background: rgba(255,255,255,.06); border: 1px solid var(--line-strong);
+    color: var(--text); font-family: var(--font-mono); font-size: var(--t-md); font-weight: 400;
+    padding: 11px 14px; letter-spacing: 0; outline: none; border-radius: 8px;
   }
-  /* input[type="password"] sets outline:none above; the compensating
-     style is a real (>=3:1 WCAG 2.1 SC 1.4.11) :focus-visible ring in
-     --amber, this file's one accent, 2px-offset so it is never clipped. */
+  /* input[type="password"] sets outline:none above; the compensating style is a
+     real (>=3:1 WCAG 2.1 SC 1.4.11) :focus-visible ring in --amber, the shell's
+     accent, 2px like every other focus ring in the shell. */
   input[type="password"]:focus-visible {
-    border-color: var(--line-strong);
-    outline: 1px solid var(--amber);
+    border-color: var(--amber);
+    outline: 2px solid var(--amber);
     outline-offset: 2px;
   }
-  .tok-btn {
-    width: 100%; margin-top: 14px; padding: 12px; cursor: pointer;
-    background: var(--surface);
-    border: 1px solid var(--line); border-radius: 8px; color: var(--text-body);
-    font-family: var(--font-display); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em;
-    transition: background-color .2s, color .2s, border-color .2s;
+  .gbtn:focus-visible, .tok-btn:focus-visible, a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--amber); outline-offset: 2px;
   }
-  .tok-btn:hover { background: var(--raised); color: var(--text); border-color: var(--line-strong); }
-  #msg { margin-top: 12px; font-size: 12px; min-height: 16px; color: var(--red); }
+  .tok-btn {
+    width: 100%; margin-top: 12px; padding: 11px; min-height: 42px; cursor: pointer;
+    background: rgba(255,255,255,.06);
+    border: 1px solid var(--edge-lo); border-radius: 8px; color: var(--text-body);
+    font-family: var(--font-display); font-size: var(--t-base); font-weight: 500; letter-spacing: 0;
+    transition: background-color .14s linear, color .14s linear;
+  }
+  .tok-btn:hover { background: rgba(255,255,255,.12); color: var(--text); }
+  #msg { margin-top: 12px; font-size: var(--t-sm); min-height: 16px; color: var(--red); }
   .ok { color: var(--text) !important; }
+  /* keep the browser's autofill from painting the field light on the dark card */
+  input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px #0f352b inset; -webkit-text-fill-color: var(--text); caret-color: var(--text); }
+
+  /* the developer note: configuration detail kept out of the main copy */
+  details.dev-note { margin-top: 14px; font-size: var(--t-sm); color: var(--text-dim); }
+  details.dev-note summary { cursor: pointer; color: var(--text-dim); padding: 4px 0; border-radius: 6px; }
+  details.dev-note summary:hover { color: var(--text); }
+  details.dev-note p { margin-top: 6px; line-height: 1.65; color: var(--text-body); }
+  details.dev-note code { font-family: var(--font-mono); font-size: var(--t-sm); background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; color: var(--text); overflow-wrap: anywhere; }
+
+  @media (max-width: 420px) {
+    body { padding: 16px 12px; }
+    .gate { padding: 22px 18px 20px; }
+  }
 </style>
 
 </head>
 <body>
-  <div class="gate">
+  <div class="wall" aria-hidden="true"></div>
+  <div class="walldim" aria-hidden="true"></div>
+  <main class="gate">
     <div class="brand">
-      <div class="mark">◈</div>
-      <h1>DOURMOUSE · SIGN IN</h1>
+      <img class="mark" src="/assets/icon-192.png" alt="" width="36" height="36">
+      <span class="wordmark">DOURMOUSE</span>
     </div>
-    <p class="sub">One DourMouse, every device. Sign in with your Google
+    <h1 id="gateTitle">Sign in</h1>
+    <p class="sub" id="gateSub">One Dourmouse, every device. Sign in with your Google
       account and everything linked to it (Gmail, Calendar, Drive)
       works on this device.</p>
 
@@ -233,38 +243,52 @@
       <div class="gmsg" id="ggoogleMsg">Checking server configuration…</div>
     </div>
 
-    <!-- Signed-in: Google-style account card with avatar + sign out -->
+    <!-- Signed-in: account card with avatar + sign out -->
     <div class="account-card" id="signedIn">
       <img class="avatar" id="avatar" alt="" referrerpolicy="no-referrer">
       <div class="who">
         <b id="whoName"></b>
         <span id="whoEmail"></span>
       </div>
-      <div class="signed-tag">SIGNED IN WITH GOOGLE</div>
-      <button class="gbtn ghost" id="glogout">SIGN OUT</button>
+      <div class="signed-tag">Signed in with Google</div>
+      <button class="gbtn ghost" id="glogout">Sign out</button>
       <div class="g-note" style="margin-top:12px">Linking a second Google
-        account? SIGN OUT, then sign in with the other one. Each account
+        account? Sign out, then sign in with the other one. Each account
         keeps its own watchlist, alerts and linked services.</div>
-      <a class="enter" href="/">Open the command centre →</a>
+      <a class="enter" href="/">Open Dourmouse →</a>
     </div>
 
-    <!-- Fallback: the server access token (collapsed, keeps the Google look) -->
+    <!-- Fallback: the server access token (collapsed) -->
     <details class="token-alt">
-      <summary>USE AN ACCESS TOKEN INSTEAD</summary>
-      <label for="tok">ACCESS TOKEN</label>
+      <summary>Use an access token instead</summary>
+      <label for="tok">Access token</label>
       <input id="tok" type="password" autocomplete="current-password" spellcheck="false" autofocus>
-      <button class="tok-btn" id="go">AUTHENTICATE ▸</button>
-      <div id="msg"></div>
+      <button class="tok-btn" id="go">Sign in with token</button>
+      <div id="msg" role="status"></div>
     </details>
-  </div>
+
+    <!-- Configuration detail for the person setting this install up. It never
+         appears in the main copy above. -->
+    <details class="dev-note" id="devNote" style="display:none">
+      <summary>Developer note</summary>
+      <p id="devNoteBody"></p>
+    </details>
+  </main>
 <script>
   "use strict";
   const msg = document.getElementById('msg');
   const tok = document.getElementById('tok');
+  /* The configuration detail (environment variable names, where to put them)
+     lives behind the Developer note, not in the sentence a person reads. */
+  function setDevNote(html) {
+    const d = document.getElementById('devNote');
+    document.getElementById('devNoteBody').innerHTML = html;
+    d.style.display = html ? 'block' : 'none';
+  }
   async function attempt() {
     msg.textContent = ''; msg.className = '';
     const token = tok.value.trim();
-    if (!token) { msg.textContent = 'TOKEN REQUIRED'; return; }
+    if (!token) { msg.textContent = 'Enter your access token.'; return; }
     try {
       const r = await fetch('/api/login', {
         method: 'POST',
@@ -273,9 +297,9 @@
       });
       const body = await r.json().catch(() => ({}));
       if (r.ok && body.ok) { location.href = '/'; return; }
-      if (body.enabled === false) { msg.className = 'ok'; msg.textContent = 'NO TOKEN CONFIGURED, PROCEEDING'; setTimeout(() => location.href='/', 600); return; }
-      msg.textContent = 'ACCESS DENIED: INVALID TOKEN';
-    } catch (e) { msg.textContent = 'NETWORK ERROR: ' + e; }
+      if (body.enabled === false) { msg.className = 'ok'; msg.textContent = 'No access token is set on this install. Opening the app.'; setTimeout(() => location.href='/', 600); return; }
+      msg.textContent = 'That access token was not accepted.';
+    } catch (e) { msg.textContent = 'Could not reach the server: ' + e; }
   }
   document.getElementById('go').addEventListener('click', attempt);
   tok.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
@@ -316,8 +340,8 @@
       '<b>Click the button</b> below, or copy the link and paste it into ' +
       'your Chrome browser.</span>' +
       '<br><input id="manualUrl" type="text" readonly value="' + safeUrl + '" ' +
-      'style="width:100%;margin:8px 0;padding:6px;font:12px var(--font-mono);' +
-      'background:var(--surface);color:var(--text);border:1px solid var(--line-strong);border-radius:4px;">' +
+      'style="width:100%;margin:8px 0;padding:8px 10px;font:12px var(--font-mono);' +
+      'background:var(--surface);color:var(--text);border:1px solid var(--line-strong);border-radius:8px;">' +
       '<button id="retryOpen" class="gbtn ghost" style="margin-top:4px">' +
       'Open in Chrome</button>' +
       '<p style="margin:8px 0 0;font-size:12px;color:var(--text-dim)">Approve it there. ' +
@@ -389,10 +413,10 @@
   // trustworthy here.
   const claimed = new URLSearchParams(location.search).get('claimed');
   if (claimed === '1') {
-    document.body.innerHTML = '<div style="max-width:420px;margin:18vh auto;text-align:center;' +
+    document.querySelector('.gate').innerHTML = '<div style="text-align:center;padding:12px 0;' +
       'font-family:var(--font-display);color:var(--text)">' +
-      '<div style="font-size:15px;font-weight:600;margin-bottom:6px">You’re signed in</div>' +
-      '<div style="font-size:13px;color:var(--text-dim)">Dourmouse picked this up automatically. ' +
+      '<div style="font-size:19px;font-weight:600;margin-bottom:8px">You’re signed in</div>' +
+      '<div style="font-size:13px;line-height:1.6;color:var(--text-dim)">Dourmouse picked this up automatically. ' +
       'You can close this tab and go back to the app.</div></div>';
   } else {
 
@@ -416,20 +440,24 @@
         // in with your identity and the app-password path covers mail.
         const scopes = d.scopes === 'full'
           ? 'One click: Google shows your account chooser, then you are in (Gmail, Calendar and Drive included).'
-          : 'One click: Google shows your account chooser, then you are in. Gmail works via the app password; Calendar/Drive unlock when GOOGLE_OAUTH_FULL_SCOPES=1 is set on a verified app.';
+          : 'One click: Google shows your account chooser, then you are in. Gmail works with an app password. Calendar and Drive need a verified Google app.';
         gmsg.textContent = scopes;
+        if (d.scopes !== 'full') {
+          setDevNote('Calendar and Drive sign-in unlock when <code>GOOGLE_OAUTH_FULL_SCOPES=1</code> is set on a verified Google app.');
+        }
         if (reason === 'denied') {
           gmsg.innerHTML = '<span class="warn">Sign-in was cancelled, no problem, nothing changed.</span>';
         } else if (reason === 'not_allowed') {
-          gmsg.innerHTML = '<span class="warn">That Google account is not allowed on this Mac.</span> Sign in with the account you used here before, or list more accounts in <b>DOURMOUSE_ALLOWED_EMAILS</b>.';
+          gmsg.innerHTML = '<span class="warn">That Google account is not allowed on this Mac.</span> Sign in with the account you used here before.';
+          setDevNote('To allow more accounts, list them in <code>DOURMOUSE_ALLOWED_EMAILS</code>.');
         }
       } else {
-        gmsg.innerHTML = '<span class="warn">GOOGLE LOGIN NOT CONFIGURED.</span> To link your ' +
-          'Google account: Google Cloud Console → APIs &amp; Services → Credentials → ' +
-          '<b>Create OAuth client ID</b> (Web) → add the redirect URI ' +
-          '<b>http://127.0.0.1:8765/api/auth/google/callback</b> → put the two values in ' +
-          '<b>.env</b> as <b>GOOGLE_CLIENT_ID</b> and <b>GOOGLE_CLIENT_SECRET</b> → restart. ' +
+        gmsg.innerHTML = '<span class="warn">Google sign-in is not set up on this install.</span> ' +
           'The access token below still works meanwhile.';
+        setDevNote('To turn on Google sign-in: Google Cloud Console, APIs &amp; Services, Credentials, ' +
+          '<b>Create OAuth client ID</b> (Web). Add the redirect URI ' +
+          '<code>http://127.0.0.1:8765/api/auth/google/callback</code>, put the two values in ' +
+          '<code>.env</code> as <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>, then restart.');
       }
     } catch (e) {
       document.getElementById('ggoogleBtn').style.display = 'none';
@@ -445,6 +473,8 @@
     // Google account is already linked here (reviewer polish).
     const alt = document.querySelector('details.token-alt');
     if (alt) alt.style.display = 'none';
+    document.getElementById('gateTitle').textContent = 'You are signed in';
+    document.getElementById('gateSub').style.display = 'none';
     const card = document.getElementById('signedIn');
     card.style.display = 'block';
     // Pull the full profile (name + picture) for the account card.
@@ -465,7 +495,8 @@
     else { img.style.display = 'none'; }
   }
 
-  document.getElementById('glogout').addEventListener('click', async () => {
+  // null on the ?claimed=1 overlay, where the card was replaced by the success message
+  document.getElementById('glogout')?.addEventListener('click', async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     window.location.reload();
   });

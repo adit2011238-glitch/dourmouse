@@ -13,7 +13,7 @@ import { states } from '../../kit/states.js';
 import { agoLabel, plural } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
 import {
-  goalWord, goalTone, taskTag, progress, splitBoard, describeAudit, validateForm, createBody, cancelPrompt, approvePrompt,
+  goalWord, goalTone, taskTag, boardSummary, progress, splitBoard, describeAudit, validateForm, createBody, cancelPrompt, approvePrompt,
   ACTIVE, LIMITS,
 } from './helpers.js';
 
@@ -110,13 +110,16 @@ export default {
       root.querySelectorAll(':scope > .st-stale').forEach((n) => n.remove());
       if (st.error) states.stale(root, 'Could not refresh: ' + st.error.message + ' Showing the last read.');
       else root.dataset.state = 'populated';
-      note(st.running ? '' : 'The goal runtime is switched off on this server (DOURMOUSE_GOAL_RUNTIME=0). Goals are stored, but nothing advances them.', 'warn');
+      note(st.running ? '' : 'The goal runtime is switched off on this server. Goals are stored, but nothing advances them.', 'warn');
       const { live, finished } = splitBoard(st.board.goals);
       ctx.chrome.setLive(live.some((g) => ACTIVE.has(g.status)) && st.running);
-      ctx.chrome.setSub(plural(live.length, 'active goal') + ' · ' + plural(finished.length, 'finished'));
+      ctx.chrome.setSub(boardSummary(st.board.goals));
       if (!st.board.goals.length) {
         if (!st.error) root.dataset.state = 'empty';
-        states.empty(listEl, 'No goals yet.', { hint: 'Press NEW GOAL, or ask in HOME for something that takes several steps. A goal keeps running after you close this window.' });
+        states.empty(listEl, 'No goals yet.', {
+          hint: 'Or ask in HOME for something that takes several steps. A goal keeps running after you close this window.',
+          action: { label: 'New goal', onClick: () => openForm() },
+        });
         return;
       }
       listEl.dataset.state = 'populated';
@@ -129,11 +132,11 @@ export default {
       const p = progress(g);
       const paused = g.status === 'PAUSED';
       return html`<div class="card gl-card ${st.board.goals.indexOf(g) > 0 ? 'gl-gap' : ''}" data-goal="${g.id}" data-status="${g.status}">
-        <div class="lbl">${goalWord(g)} <span class="muted">· ${g.priority} · started ${agoLabel(g.created_at)}</span></div>
-        <div class="gl-obj">${g.objective}</div>
+        <div class="gl-meta"><span class="tag ${goalTone(g.status)}">${goalWord(g)}</span> <span class="muted">${g.priority} priority · started ${agoLabel(g.created_at)}</span></div>
+        <h3 class="gl-obj">${g.objective}</h3>
         ${g.blocked_reason ? html`<div class="gl-block"><span class="tag ${goalTone(g.status)}">${g.status === 'PAUSED' ? 'held' : 'reason'}</span> ${g.blocked_reason}</div>` : ''}
         ${p ? html`<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${String(p.pct)}" aria-label="Goal progress"><i style="width:${String(p.pct)}%"></i></div>
-          <div class="muted gl-pct">${String(p.done)} of ${plural(p.total, 'task')} done (${String(p.pct)}%), ${String(p.verified)} independently verified</div>`
+          <div class="muted gl-pct">${String(p.done)} of ${plural(p.total, 'step')} done, ${String(p.verified)} double checked</div>`
           : html`<div class="muted gl-pct">No tasks have been added yet, so there is no progress to show.</div>`}
         <div class="gl-btns">
           ${paused
@@ -142,15 +145,15 @@ export default {
           <button type="button" class="os-btn" data-audit="${g.id}" aria-expanded="${String(Boolean(st.audit[g.id]))}" data-spec="Opens this goal's event history: every task, every status change and every verification pass. It only reads.">AUDIT</button>
           <button type="button" class="os-btn os-btn--danger" data-cancel="${g.id}" data-spec="Stops the goal after asking. Finished work is kept and every unfinished task is cancelled.">CANCEL</button>
         </div>
-        <div class="lbl gl-sub">Tasks</div>
-        ${g.tasks.length ? g.tasks.map((t) => taskRow(g, t)) : html`<div class="muted">This goal has no tasks.</div>`}
+        <h4 class="gl-sub gl-steps">Steps</h4>
+        ${g.tasks.length ? g.tasks.map((t) => taskRow(g, t)) : html`<div class="muted">This goal has no steps.</div>`}
         ${g.tasks.length >= 80 ? html`<div class="muted">Showing the first 80 tasks.</div>` : ''}
         ${st.audit[g.id] ? auditBlock(g.id) : ''}
       </div>`;
     }
 
     function taskRow(g, t) {
-      const tag = taskTag(t.status);
+      const tag = taskTag(t.status, g.status);
       return html`<div class="os-row gl-task" data-task="${t.id}" data-status="${t.status}">
         <span class="tag ${tag.tone}">${tag.word}</span>
         <span class="rt">${t.description}${t.assigned_agent ? html` <span class="muted">· ${t.assigned_agent}</span>` : ''}${t.status === 'COMPLETED' && t.verified === false ? html` <span class="muted">· not independently verified</span>` : ''}${t.last_error && t.status !== 'COMPLETED' ? html`<div class="muted gl-err">${t.last_error}</div>` : ''}${t.status === 'WAITING_FOR_APPROVAL' && t.pending_prompts.length ? html`<div class="muted">Waiting on: ${t.pending_prompts.join(' | ')}</div>` : ''}</span>

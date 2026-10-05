@@ -2090,3 +2090,5 @@ Live Electron check of J and D; grant Accessibility and drive TextEdit and Music
 ## Wave 3 C done (#165 to #167). Next: G (register browser_type and browser_media, tool descriptions, benchmark baseline). Owner: run scripts/live_checks/docs_and_youtube.md once signed in. Open: import-time network wait (one import took 437 s while the network was unhealthy).
 
 ## Wave 3 done (#165 to #168). Next: Wave 4 (F2 app-driving UI and replacement screens; I ship build, auto-update, first-run walkthrough, UX backlog). Owner: real benchmark go (G_BENCHMARK_HOWTO.md), Google sign-in plus docs_and_youtube check, Accessibility grant, DRM decision.
+
+## F2 done (#169). Open: calendar, files, notes screens (need backend routes). Next: I.

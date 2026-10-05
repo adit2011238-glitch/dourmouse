@@ -16,9 +16,9 @@ const LOOK = {
 export function createWallpaperPicker({ root, prefs, toasts, reducedMotion = false }) {
   setHtml(root, html`
     <div class="wp-head">Wallpaper</div>
-    <div class="wp-grid">${WALLPAPERS.map((w) => html`<button type="button" class="wp" data-wall="${w}" aria-pressed="false" aria-label="${LOOK[w][0]}" style="background:${LOOK[w][1]}" data-spec="${LOOK[w][2]}"></button>`)}</div>
+    <div class="wp-grid">${WALLPAPERS.map((w) => html`<div class="wpc"><button type="button" class="wp" data-wall="${w}" aria-pressed="false" aria-label="${LOOK[w][0]}" style="background:${LOOK[w][1]}" data-spec="${LOOK[w][2]}"></button><span class="wpn" aria-hidden="true">${LOOK[w][0]}</span></div>`)}</div>
     <label class="os-btn" style="width:100%;justify-content:center;margin-top:8px" data-spec="Pick any image from disk. It is read locally with FileReader and never uploaded: the bytes stay in this browser. Stored as a data URL against your profile.">
-      UPLOAD PHOTO<input type="file" id="wallFile" accept="image/*" hidden>
+      Upload photo<input type="file" id="wallFile" accept="image/*" hidden>
     </label>
     <div class="wp-row"><span>Dim</span><input type="range" id="wallDim" min="0" max="80" aria-label="Wallpaper dim" data-spec="Darkens the photo behind the UI. A real photo has arbitrary brightness, and body text needs 4.5:1 over whatever is behind it, so this is a readability control rather than a taste one."></div>
     <div class="wp-row"><span>Motion</span><button type="button" class="os-switch" id="wallAnim" role="switch" aria-checked="true" aria-label="Wallpaper motion" data-spec="The slow 46s parallax drift. Off automatically when the OS asks for reduced motion."></button></div>

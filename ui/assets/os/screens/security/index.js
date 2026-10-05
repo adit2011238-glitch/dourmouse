@@ -44,14 +44,14 @@ export default {
       <div id="secConfirm"></div>
       <div class="sec-sum" id="secSum" hidden></div>
       <div class="grid2 sec-top">
-        <div class="card"><div class="lbl">How a finding is made</div><div id="secFlow" data-region></div></div>
+        <div class="card"><div class="lbl" id="secFindLbl">Findings on this Mac</div><div id="secFindings" data-region></div></div>
         <div class="card"><div class="lbl">This Mac</div><div id="secMac" data-region></div></div>
       </div>
-      <div class="grid2 sec-bottom">
-        <div class="card"><div class="lbl" id="secFindLbl">Findings on this Mac</div><div id="secFindings" data-region></div></div>
+      <div class="sec-bottom">
         <div class="card"><div class="lbl">Live activity</div><div id="secActivity" data-region></div></div>
       </div>
-      <div class="card sec-gap"><div class="lbl">AI analyst</div><div id="secAnalyst" data-region></div></div>`);
+      <div class="card sec-gap"><div class="lbl">AI analyst</div><div id="secAnalyst" data-region></div></div>
+      <details class="card sec-gap sec-how" id="secHow"><summary class="lbl">How a finding is made</summary><div id="secFlow" data-region></div></details>`);
     const $ = (id) => root.querySelector('#' + id);
     const noteEl = $('secNote');
     const confirmEl = $('secConfirm');
@@ -115,9 +115,9 @@ export default {
       if (!st.dash && lastError) {
         /* nothing to show yet and the first read failed */
         root.dataset.state = 'error';
-        states.error(flowEl, lastError, { title: 'Could not read the security dashboard', retry: () => refreshNow() });
+        states.error(findEl, lastError, { title: 'Could not read the security dashboard', retry: () => refreshNow() });
         macEl.replaceChildren();
-        findEl.replaceChildren();
+        flowEl.replaceChildren();
         paintActivity();
         return;
       }

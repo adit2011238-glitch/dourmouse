@@ -43,3 +43,26 @@ export function agoLabel(ts, now = Date.now()) {
   if (!a) return '';
   return a === 'now' ? 'just now' : a + ' ago';
 }
+
+const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/* F27: ONE date style for a moment, so every screen reads the same way. Today is a clock time
+   ("07:30"), tomorrow and yesterday say so, the rest of this week is "Mon 09:00", anything else a
+   short date ("27 Sep", with the year when it is another year). Relative words (agoLabel) are only for
+   what happened in the last hour. Gives '' for anything that does not parse. */
+export function whenShort(ts, now = Date.now()) {
+  const ms = toMs(ts);
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms);
+  const n = new Date(now);
+  const p = (v) => String(v).padStart(2, '0');
+  const hm = p(d.getHours()) + ':' + p(d.getMinutes());
+  const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOf(d) - startOf(n)) / 86400000);
+  if (days === 0) return hm;
+  if (days === 1) return 'Tomorrow ' + hm;
+  if (days === -1) return 'Yesterday ' + hm;
+  if (days > 1 && days < 7) return DAY[d.getDay()] + ' ' + hm;
+  return d.getDate() + ' ' + MON[d.getMonth()] + (d.getFullYear() !== n.getFullYear() ? ' ' + d.getFullYear() : '');
+}

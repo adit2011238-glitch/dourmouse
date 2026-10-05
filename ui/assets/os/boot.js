@@ -76,7 +76,7 @@ function boot() {
   });
   const composer = createComposer({ root: $('composer') });
   composer.reset();
-  const menubar = createMenubar({ root: $('menubar'), status, timers, panels });
+  const menubar = createMenubar({ root: $('menubar'), status, timers, panels, host, scope });
   createSpecOverlay({ button: $('specBtn'), legend: $('speclegend'), keymap });
   /* F2: "Model is driving <App>" with STOP, over every screen while the app_driver indicator is on */
   const drivingStrip = createDrivingStrip({ after: $('menubar'), api, events, toasts });
@@ -89,18 +89,17 @@ function boot() {
     notifications: panels.make('notifications', { el: $('notifcenter'), trigger: dock.alertsButton, exclusive: ['cc', 'wallpaper'], onOpen: () => notif.onOpen(), onClose: () => notif.onClose() }),
     wallpaper: panels.make('wallpaper', { el: $('wallpicker'), trigger: $('wallBtn'), exclusive: ['cc', 'notifications'], onOpen: () => picker.sync() }),
   };
-  const startup = createStartupCheck({ root: $('startup'), api, toasts });
-  defs.startup = panels.make('startup', { el: $('startup'), trigger: null, exclusive: ['cc', 'notifications', 'wallpaper'] });
-  startup.bind(defs.startup);
+  /* S12: the sign-in check is a quiet banner on HOME, not a floating dialog */
+  const startup = createStartupCheck({ root: $('stagebanner'), api, toasts, prefs });
   const shortcuts = shortcutList(registry.SCREENS);
   createShortcutsPanel({ root: $('shortcuts'), list: shortcuts });
-  defs.shortcuts = panels.make('shortcuts', { el: $('shortcuts'), trigger: null, exclusive: ['cc', 'notifications', 'wallpaper', 'startup', 'palette'] });
+  defs.shortcuts = panels.make('shortcuts', { el: $('shortcuts'), trigger: null, exclusive: ['cc', 'notifications', 'wallpaper', 'palette'] });
   const palette = createPalette({
     scope, shortcuts,
     root: $('palette'), go: (slug) => router.go(slug), refresh: () => router.refresh('manual'),
-    openPanel: (name) => defs[name] && defs[name].open(), api, chat, prefs, toasts,
+    openPanel: (name) => defs[name] && defs[name].open(), api, chat, prefs, toasts, startup,
   });
-  defs.palette = panels.make('palette', { el: $('palette'), trigger: $('palBtn'), exclusive: ['cc', 'notifications', 'wallpaper', 'startup', 'shortcuts'], onOpen: () => palette.onOpen(), onClose: () => palette.onClose() });
+  defs.palette = panels.make('palette', { el: $('palette'), trigger: $('palBtn'), exclusive: ['cc', 'notifications', 'wallpaper', 'shortcuts'], onOpen: () => palette.onOpen(), onClose: () => palette.onClose() });
   palette.bind(defs.palette);
   $('palBtn').addEventListener('click', () => defs.palette.toggle());
   /* Command K and Ctrl K open the launcher from anywhere, even while typing */
@@ -112,20 +111,38 @@ function boot() {
     new: () => palette.newConversation(),
     help: () => defs.shortcuts.toggle(),
     sidebar: () => stage.toggleSidebar(),
+    undo: () => toasts.undoLast(),
   };
   bindable(shortcuts).forEach((s) => {
     const fn = s.screen && s.id !== 'settings' ? () => router.go(s.screen.toLowerCase()) : actions[s.id];
     if (fn) keymap.bind(s.combo, fn, { editable: true });
   });
+  /* S21: the first Tab stop skips the menu bar and the sidebar and lands on the screen's title */
+  $('skipLink').addEventListener('click', () => stage.focusTitle());
   $('ccBtn').addEventListener('click', () => defs.cc.toggle());
   $('wallBtn').addEventListener('click', () => defs.wallpaper.toggle());
   picker.sync();
+
+  /* S28: the wallpaper drift and the blur behind it cost GPU for nothing while this window is hidden or
+     in the background, so the drift pauses then and comes back with the saved Motion setting. */
+  const wallEl = $('wall');
+  function syncMotion() {
+    const idle = document.hidden || !document.hasFocus();
+    if (wallEl) wallEl.dataset.animated = String(prefs.motion() && !reducedMotion && !idle);
+  }
+  document.addEventListener('visibilitychange', syncMotion);
+  window.addEventListener('blur', syncMotion);
+  window.addEventListener('focus', syncMotion);
+  prefs.onChange((name) => {
+    if (name === 'motion') syncMotion();
+  });
 
   /* the nav highlight and running dots live in two places (sidebar and dock) */
   const nav = {
     setCurrent(id) {
       sidebar.setCurrent(id);
       dock.setCurrent(id);
+      startup.setScreen(id);
     },
     setLive(id, on, source) {
       sidebar.setLive(id, on, source);

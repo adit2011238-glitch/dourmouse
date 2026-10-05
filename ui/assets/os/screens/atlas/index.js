@@ -67,7 +67,8 @@ export default {
       if (t.answered === 0) {
         root.dataset.state = 'unavailable';
         const why = rows.map((r) => r.label + ': ' + r.error).join(' | ').slice(0, 400);
-        states.unavailable(chanEl, 'None of the ' + t.feeds + ' feeds answered.', { detail: why, retry: () => load('manual') });
+        /* F9: the feeds' own error text is for whoever debugs a feed, so it sits behind For developers */
+        states.unavailable(chanEl, 'None of the ' + t.feeds + ' feeds answered.', { detail: 'Check this Mac\'s network connection, then try again.', developer: why, retry: () => load('manual') });
         states.unavailable(pulseEl, 'There is no pulse while no feed answers.', { detail: 'Check this Mac\'s network connection, then press REFRESH.' });
         states.unavailable(sigEl, 'There are no items while no feed answers.');
         ctx.chrome.setLive(false);
@@ -102,9 +103,13 @@ export default {
           tag.className = 'tag warn';
           tag.textContent = 'no answer';
           d.append(tag);
-          const e = document.createElement('span');
+          const e = document.createElement('details');
           e.className = 'atl-err';
-          e.textContent = r.error;
+          const sum = document.createElement('summary');
+          sum.textContent = 'Details';
+          const raw = document.createElement('div');
+          raw.textContent = r.error;
+          e.append(sum, raw);
           d.append(e);
         }
         list.append(d);

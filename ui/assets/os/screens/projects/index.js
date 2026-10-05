@@ -17,7 +17,6 @@ import { states } from '../../kit/states.js';
 import { confirmHere } from '../../kit/confirm-card.js';
 import { agoLabel } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
-import { createScope } from '../../core/scope.js';
 import {
   ACTIVE_CAP, ARCHIVED_CAP, NAME_MAX, DESCRIPTION_MAX, splitProjects, countsLine, sessionCount, sessionsWord,
   originLine, excerpt, scopeFrom, isActiveScope, stopPrompt, createPrompt, validateName, sourceStatusLines,
@@ -32,12 +31,6 @@ export default {
   async mount(root, ctx) {
     const st = { view: null, staleMsg: '', refreshing: false, formOpen: false, shown: [] };
     let lastError = null;
-    /* ctx.scope has no setter. This writes the same tab-scope record the shell
-       reads (it is read from storage on every call), so chat and confirm carry
-       the project from the next request on. A change to ctx.scope is requested
-       in the report. */
-    const scopeWriter = createScope();
-
     root.dataset.state = 'loading';
     setHtml(root, html`
       <div class="prj-note" id="prjNote" role="status" hidden></div>
@@ -130,7 +123,7 @@ export default {
       scopeEl.hidden = false;
       setHtml(scopeEl, html`<div class="prj-scope-row"><span class="muted">Chats and confirmations from every screen are scoped to</span> <b>${p.name || p.tab_id}</b>
         <button type="button" class="os-btn" data-leave data-spec="Returns this tab to its own general conversation. The project keeps its own thread on the server.">LEAVE PROJECT</button>
-        <a class="os-btn" href="#/home" data-spec="Opens HOME, where you talk to Dourmouse inside this project.">OPEN HOME</a></div>`);
+        <a class="os-btn" href="#/home" data-spec="Opens HOME, where you talk to Dourmouse inside this project.">GO TO HOME</a></div>`);
     }
 
     function card(p, i) {
@@ -140,18 +133,17 @@ export default {
       const when = p.last_active ? agoLabel(p.last_active) : '';
       const ctxText = excerpt(p.context);
       return html`<div class="card prj-card" data-active="${String(active)}">
-        <div class="lbl prj-name"><span class="prj-nm">${p.name}</span>${active ? html` <span class="tag ok">scope</span>` : ''}${p.exists === false ? html` <span class="tag bad">path gone</span>` : ''}</div>
-        <div class="big">${sessionCount(p)}</div>
-        <div class="muted">${sessionsWord(p)}${counts ? ' · ' + counts : ''}${when ? ' · last active ' + when : ''}</div>
+        <h3 class="prj-name"><span class="prj-nm">${p.name}</span>${active ? html` <span class="tag ok">scope</span>` : ''}${p.exists === false ? html` <span class="tag bad">path gone</span>` : ''}</h3>
         <div class="muted mono prj-path">${p.path}</div>
+        <div class="muted">${when ? 'Last active ' + when + ' · ' : ''}${sessionCount(p)} ${sessionsWord(p)}${counts ? ' · ' + counts : ''}</div>
         ${p.git_branch ? html`<div class="muted">branch <span class="mono">${p.git_branch}</span></div>` : ''}
         ${origin ? html`<div class="muted">from ${origin}</div>` : ''}
         ${ctxText ? html`<div class="prj-ctx muted">${ctxText}</div>` : ''}
         <div class="prj-btns">
           ${active
     ? html`<button type="button" class="os-btn" data-leave data-spec="Returns this tab to its own general conversation. The project keeps its own thread on the server.">LEAVE</button>`
-    : html`<button type="button" class="os-btn os-btn--primary" data-open="${i}" ${p.exists === false ? 'disabled' : ''} data-spec="${p.exists === false ? 'The folder is gone from disk, so this project cannot be opened.' : 'Gives this project its own chat thread. Every chat and confirmation from any screen then carries the project until you leave it.'}">OPEN</button>`}
-          <button type="button" class="os-btn os-btn--danger" data-stop="${i}" data-spec="Stops tracking this project after asking. The folder and the session history are never touched.">STOP TRACKING</button>
+    : html`<button type="button" class="os-btn os-btn--primary" data-open="${i}" ${p.exists === false ? 'disabled' : ''} data-spec="${p.exists === false ? 'The folder is gone from disk, so this project cannot be opened.' : 'Gives this project its own chat thread. Every chat and confirmation from any screen then carries the project until you leave it. It does not open the folder.'}">USE AS SCOPE</button>`}
+          <button type="button" class="os-btn" data-stop="${i}" data-spec="Stops tracking this project after asking. The folder and the session history are never touched.">STOP TRACKING</button>
         </div></div>`;
     }
 
@@ -195,8 +187,8 @@ export default {
       setHtml(archEl, html`${shown.map((p, i) => html`<div class="os-row prj-arow">
         <span class="rt"><b>${p.name}</b> <span class="muted">${sessionCount(p)} ${sessionsWord(p)}${p.last_active ? ' · last active ' + agoLabel(p.last_active) : ' · never active'}</span>${p.exists === false ? html` <span class="tag bad">path gone</span>` : ''}</span>
         <span class="os-row-actions">
-          <button type="button" class="os-btn" data-open="${offset + i}" ${p.exists === false ? 'disabled' : ''} data-spec="${p.exists === false ? 'The folder is gone from disk, so this project cannot be opened.' : 'Gives this project its own chat thread until you leave it.'}">OPEN</button>
-          <button type="button" class="os-btn os-btn--danger" data-stop="${offset + i}" data-spec="Stops tracking this project after asking. The folder and the session history are never touched.">STOP</button>
+          <button type="button" class="os-btn" data-open="${offset + i}" ${p.exists === false ? 'disabled' : ''} data-spec="${p.exists === false ? 'The folder is gone from disk, so this project cannot be opened.' : 'Gives this project its own chat thread until you leave it.'}">USE AS SCOPE</button>
+          <button type="button" class="os-btn" data-stop="${offset + i}" data-spec="Stops tracking this project after asking. The folder and the session history are never touched.">STOP</button>
         </span></div>`)}
         ${archived.length > shown.length ? html`<div class="muted prj-cap">Showing the newest ${shown.length} of ${archived.length}.</div>` : ''}`);
     }
@@ -206,7 +198,7 @@ export default {
       const src = sourceStatusLines(v);
       honestEl.dataset.state = 'populated';
       setHtml(honestEl, html`
-        <div class="muted">This is a summary of the Claude Code and Codex history on this Mac, plus the projects you create here. OPEN gives a project its own chat thread and scopes every chat and confirmation to it. It is not an isolated environment: research, coding and security tools are not sandboxed per project. That is item OS-6 and is not built.</div>
+        <div class="muted">This is a summary of the Claude Code and Codex history on this Mac, plus the projects you create here. USE AS SCOPE gives a project its own chat thread and scopes every chat and confirmation to it. It is not an isolated environment: research, coding and security tools are not sandboxed per project. That is item OS-6 and is not built.</div>
         <div class="prj-src">${src.map((s) => html`<div class="kv"><span>${s.label}</span><b><span class="tag ${s.found ? 'ok' : 'warn'}">${s.found ? 'found' : 'not found'}</span></b></div>${s.where ? html`<div class="muted mono prj-where">${s.where}</div>` : ''}`)}
         <div class="kv"><span>Last refreshed</span><b>${v.last_refreshed ? agoLabel(v.last_refreshed) : 'never'}</b></div></div>`);
     }
@@ -238,8 +230,8 @@ export default {
       try {
         const r = await ctx.api.post('/api/projects/open', { path: p.path });
         if (ctx.signal.aborted) return;
-        scopeWriter.setProject(scopeFrom(p, r.project));
-        note('Scoped to ' + p.name + '. Chats and confirmations now carry this project. Open HOME to talk inside it.', 'ok');
+        ctx.scope.setProject(scopeFrom(p, r.project));
+        note('', '');
         paintScope();
         paintActive();
         paintArchived();

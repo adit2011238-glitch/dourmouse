@@ -35,3 +35,8 @@
 [data-screen="SECURITY"] .sec-gap { margin-top: 12px; }
 [data-screen="SECURITY"] .sec-ana-sum { color: var(--dm-fg); font-size: var(--dm-text-sm); line-height: 1.6; overflow-wrap: anywhere; margin-bottom: 4px; }
 [data-screen="SECURITY"] .sec-first { margin-top: 2px; color: var(--dm-active); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+
+/* F24: the findings come first; the explanation diagram is a collapsed disclosure at the end */
+[data-screen="SECURITY"] .sec-how > summary { cursor: pointer; margin-bottom: 0; }
+[data-screen="SECURITY"] .sec-how[open] > summary { margin-bottom: 8px; }
+[data-screen="SECURITY"] .sec-how > summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }

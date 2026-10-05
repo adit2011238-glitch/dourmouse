@@ -52,6 +52,26 @@ export function mountThreadView(region, ctx, opts = {}) {
   const frames = new Map(); /* turn id -> pending repaint */
   region.dataset.region = '';
 
+  /* S22: a screen reader hears two short lines, "Dourmouse is answering." when a run starts and "Answer ready."
+     when it ends, never the token stream and never the ticking elapsed time. */
+  const announcer = el('div', 'sr-only');
+  announcer.setAttribute('role', 'status');
+  announcer.setAttribute('aria-live', 'polite');
+  region.before(announcer);
+  let wasBusy = thread.busy();
+  function announce() {
+    const busy = thread.busy();
+    if (busy === wasBusy) return;
+    wasBusy = busy;
+    if (busy) {
+      announcer.textContent = 'Dourmouse is answering.';
+      return;
+    }
+    const all = thread.turns();
+    const cur = all.length ? all[all.length - 1] : null;
+    announcer.textContent = cur && cur.status === 'error' ? 'The run failed.' : cur && cur.status === 'stopped' ? 'Stopped.' : 'Answer ready.';
+  }
+
   /* ---------------- stage bar and composer ---------------- */
   function paintChrome() {
     const busy = thread.busy();
@@ -60,7 +80,7 @@ export function mountThreadView(region, ctx, opts = {}) {
     const actions = [...(own || [])];
     if (o.newThread) {
       actions.push({
-        id: 'thread-new', label: 'NEW THREAD', disabled: busy,
+        id: 'thread-new', label: 'New thread', disabled: busy,
         title: busy ? 'Stop the run first' : '',
         spec: 'Starts a fresh conversation on the server for this tab. The old session file stays on disk. Refused while a run is in flight.',
         onClick: () => newThread(),
@@ -68,7 +88,8 @@ export function mountThreadView(region, ctx, opts = {}) {
     }
     if (o.autonomous) {
       actions.push({
-        id: 'thread-auto', label: 'AUTONOMOUS', pressed: auto,
+        id: 'thread-auto', label: 'Longer runs', pressed: auto,
+        title: 'Lets an agent take up to 24 steps per run instead of 8. Risky actions still ask you.',
         spec: 'Opt-in: raises how many steps a run may take from 8 to 24 for this tab. Still bounded by the governance budget. It is not auto-approve: every gated action still asks.',
         onClick: () => {
           ctx.autonomous.set(!ctx.autonomous.get());
@@ -99,7 +120,6 @@ export function mountThreadView(region, ctx, opts = {}) {
     you.append(el('div', 'who', 'You'), el('div', 'you', turn.text));
     const bot = el('div', 'turn-bot');
     const head = el('div', 'who');
-    head.setAttribute('role', 'status');
     const chips = el('div', 'chips');
     const detail = el('div', 'chipdetail');
     detail.hidden = true;
@@ -334,6 +354,7 @@ export function mountThreadView(region, ctx, opts = {}) {
   thread.subscribe((e) => {
     if (e.kind === 'turn' && e.turn) paintTurn(e.turn);
     else if (e.kind === 'restore') paintAll();
+    if (e.kind === 'busy') announce();
     if (e.kind === 'busy' || e.kind === 'queue' || e.kind === 'restore') {
       paintChrome();
       views.forEach((v) => v.paint());

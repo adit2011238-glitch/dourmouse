@@ -26,3 +26,6 @@
 [data-screen="PROJECTS"] .prj-f input, [data-screen="PROJECTS"] .prj-f textarea { font: inherit; font-size: var(--dm-text-sm); color: var(--dm-fg); background: rgba(0,0,0,.25); border: 1px solid var(--os-edge-lo); border-radius: 8px; padding: 7px 10px; resize: vertical; }
 [data-screen="PROJECTS"] .prj-f input:focus-visible, [data-screen="PROJECTS"] .prj-f textarea:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
 [data-screen="PROJECTS"] .prj-msg { min-height: 1.2em; color: var(--dm-error); font-size: var(--dm-text-sm); }
+
+/* F13 and F37: the card is name, path, last active; the session count is secondary text now */
+[data-screen="PROJECTS"] .prj-name { margin: 0 0 4px; font-size: var(--dm-text-md); font-weight: 500; color: var(--dm-fg); overflow-wrap: anywhere; }

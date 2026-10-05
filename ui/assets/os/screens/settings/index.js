@@ -14,6 +14,7 @@ import { html, setHtml } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
 import { confirmHere } from '../../kit/confirm-card.js';
 import { isAbort } from '../../core/api.js';
+import { TEXT_SIZES } from '../../core/prefs.js';
 import {
   groupFeatures, featurePrompt, foldersPrompt, parseFolders, togglePrompt, shellPrompt, resetPrompt, shellChoices,
   keyTag, tokenTag, bindLine, orchestratorSource, localModelRow, backendRow, osReducedMotion, SHELL_WORD,
@@ -38,6 +39,7 @@ export default {
         <div class="card"><div class="lbl">Shell</div><div id="setShell" data-region></div></div>
         <div class="card"><div class="lbl">Models &middot; large cloud only</div><div id="setModels" data-region></div></div>
       </div>
+      <div class="card set-gap"><div class="lbl">Appearance</div><div id="setLook" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Remote access</div><div id="setAccess" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Background switches</div><div id="setFeatures" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Behaviour</div><div id="setBehaviour" data-region></div></div>`);
@@ -46,6 +48,7 @@ export default {
     const confirmEl = $('setConfirm');
     const shellEl = $('setShell');
     const modelsEl = $('setModels');
+    const lookEl = $('setLook');
     const accessEl = $('setAccess');
     const featEl = $('setFeatures');
     const behEl = $('setBehaviour');
@@ -56,6 +59,23 @@ export default {
       noteEl.textContent = text || '';
       noteEl.dataset.tone = tone || '';
     };
+
+    /* ---------------- appearance (S2: Text size) ---------------- */
+    function paintLook() {
+      const cur = ctx.appearance.textSize();
+      lookEl.dataset.state = 'populated';
+      setHtml(lookEl, html`<div class="kv"><span>Text size</span><span class="os-seg" role="group" aria-label="Text size">${TEXT_SIZES.map((t) => html`<button type="button" aria-selected="${String(t.id === cur)}" data-textsize="${t.id}" data-spec="Sets the size of the text across the whole app to ${t.name.toLowerCase()}. It applies at once and is remembered.">${t.name}</button>`)}</span></div>
+        <div class="muted set-help">Scales the text everywhere in the app. Small never goes below 11 pixels. It applies at once and is remembered on this device and on the server.</div>`);
+    }
+
+    async function chooseTextSize(sizeId) {
+      if (sizeId === ctx.appearance.textSize()) return;
+      const r = await ctx.appearance.setTextSize(sizeId);
+      paintLook();
+      const name = (TEXT_SIZES.find((t) => t.id === sizeId) || {}).name || sizeId;
+      if (r && r.ok) note('Text size is now ' + name.toLowerCase() + '.', 'ok');
+      else note('Text size is now ' + name.toLowerCase() + ' on this device. The server copy could not be saved: ' + ((r && r.error) || 'no answer') + '.', 'info');
+    }
 
     /* ---------------- stage bar ---------------- */
     function paintActions() {
@@ -359,6 +379,8 @@ export default {
       if (f) return flipFeature(f.dataset.feature);
       const s = e.target.closest('[data-shell]');
       if (s) return chooseShell(s.dataset.shell);
+      const ts = e.target.closest('[data-textsize]');
+      if (ts) return chooseTextSize(ts.dataset.textsize);
       const fs = e.target.closest('[data-folders-save]');
       if (fs) return saveFolders(fs.dataset.foldersSave);
       if (e.target.closest('[data-testall]')) return testAll();
@@ -366,6 +388,7 @@ export default {
     });
 
     reloaders.set(ctx, reload);
+    paintLook();
     paintActions();
     regions.forEach((el) => states.loading(el, 'Reading the settings'));
     loadSummary();

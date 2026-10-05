@@ -45,12 +45,12 @@ export default {
     setHtml(root, html`
       <div id="rsConfirm"></div>
       <div class="card"><div class="lbl">Research questions</div><div id="rsQs" data-region></div></div>
-      <div class="card rs-loop"><div class="lbl">The research loop</div><div id="rsLoop" data-region></div><div class="muted rs-loopnote" id="rsLoopNote"></div></div>
       <div class="grid2 rs-mid">
-        <div class="card"><div class="lbl">Evidence graph</div><div class="rs-pick" id="rsPick"></div><div id="rsGraph" data-region></div></div>
         <div class="card"><div class="lbl">Claims</div><div id="rsClaims" data-region></div></div>
+        <div class="card"><div class="lbl">Evidence graph</div><div class="rs-pick" id="rsPick"></div><div id="rsGraph" data-region></div></div>
       </div>
-      <div id="rsThread" class="rs-thread"></div>`);
+      <div id="rsThread" class="rs-thread"></div>
+      <details class="card rs-loop" id="rsHow"><summary class="lbl">How research works</summary><div id="rsLoop" data-region></div><div class="muted rs-loopnote" id="rsLoopNote"></div></details>`);
     const $ = (id) => root.querySelector('#' + id);
     const confirmEl = $('rsConfirm');
     const qsEl = $('rsQs');

@@ -1,6 +1,6 @@
 /* The Control Centre. Four tiles are live reads (Agents, Security, Network,
-   Brain), Do Not Disturb silences in-app toasts and nothing else, and the
-   Autonomous tile only REPORTS this tab's per-request flag: turning it on is
+   Model), Do Not Disturb silences in-app toasts and nothing else, and the
+   Longer runs tile only REPORTS this tab's per-request flag: turning it on is
    done on HOME, on purpose. Autonomous mode and auto-approve are never a
    one-click tile (architecture section 3): auto-approve is rated HIGH risk when
    on, and the flag raises how far a run may go before it stops.
@@ -20,7 +20,7 @@ export function agentsTile(s) {
 
 export function securityTile(s) {
   if (!s.known) return { value: 'Unavailable', sub: s.error || 'Reading', tone: 'dim', act: false };
-  if (!s.scanned) return { value: 'No scan yet', sub: 'The sentry has not finished a scan', tone: 'dim', act: false };
+  if (!s.scanned) return { value: 'No scan yet', sub: 'No security scan has finished yet', tone: 'dim', act: false };
   const total = s.high + s.med + s.low;
   const when = s.lastScanAt ? 'scanned ' + agoLabel(s.lastScanAt) : 'scanned';
   if (!total) return { value: '0 findings', sub: when + ' (last scan only)', tone: 'ok', act: true };
@@ -44,9 +44,9 @@ export function createControlCentre({ root, status, prefs, chat, go, toasts, onC
       <button type="button" class="cc-tile" id="ccAgents" data-spec="Agents. Live count from GET /api/activity, kept current by agent_activity events. Opens OFFICE."><div class="t">Agents</div><div class="v"><span class="dot"></span><span class="vt"></span></div><div class="s"></div></button>
       <button type="button" class="cc-tile" id="ccSec" data-spec="Security. The last completed scan from GET /api/security_dashboard, kept current by security_scan events. Opens SECURITY."><div class="t">Security</div><div class="v"><span class="dot"></span><span class="vt"></span></div><div class="s"></div></button>
       <div class="cc-tile" id="ccNet" data-spec="Network. What the network watcher sees right now (GET /api/security/network)."><div class="t">Network</div><div class="v"><span class="dot"></span><span class="vt"></span></div><div class="s"></div></div>
-      <button type="button" class="cc-tile" id="ccModel" data-spec="The active brain (GET /api/backend). Switching the model is in SETTINGS. Large cloud models only."><div class="t">Brain</div><div class="v"><span class="dot"></span><span class="vt"></span></div><div class="s"></div></button>
+      <button type="button" class="cc-tile" id="ccModel" data-spec="The active model (GET /api/backend). Switching it is in SETTINGS. Large cloud models only."><div class="t">Model</div><div class="v"><span class="dot"></span><span class="vt"></span></div><div class="s"></div></button>
       <button type="button" class="cc-tile" id="ccDnd" aria-pressed="false" data-spec="Do not disturb. Silences in-app toasts only. Desktop notifications from the app shell are not affected."><div class="t">Do not disturb</div><div class="v"><span class="vt"></span></div><div class="s">In-app toasts only</div></button>
-      <button type="button" class="cc-tile" id="ccAuto" data-spec="Autonomous mode for this tab. Shown here, never switched here: raising how far a run may go is set on HOME. It is not auto-approve, and every gated action still asks."><div class="t">Autonomous</div><div class="v"><span class="vt"></span></div><div class="s">Set on HOME. Not auto-approve.</div></button>
+      <button type="button" class="cc-tile" id="ccAuto" data-spec="Longer runs for this tab: an agent may take up to 24 steps per run instead of 8. Shown here, never switched here: it is set on HOME. It is not auto-approve, and every risky action still asks you."><div class="t">Longer runs</div><div class="v"><span class="vt"></span></div><div class="s">Up to 24 steps per run, set on HOME. Risky actions still ask you.</div></button>
     </div>
     <div class="cc-head">Brightness</div>
     <div class="cc-slider"><span aria-hidden="true">&#9728;</span><input type="range" id="ccBright" min="20" max="100" aria-label="Wallpaper brightness" data-spec="Wallpaper brightness. A readability control: body text needs 4.5:1 over whatever is behind it."></div>
@@ -59,7 +59,7 @@ export function createControlCentre({ root, status, prefs, chat, go, toasts, onC
 
   function paintTile(id, t) {
     const el = $('#' + id);
-    el.classList.toggle('act', Boolean(t.act));
+    /* S15: the amber fill means "switched on". A status tile is a read, never a switch, so it never gets it. */
     const dot = el.querySelector('.dot');
     dot.className = 'dot' + (t.tone && t.tone !== 'dim' ? ' ' + t.tone : '');
     el.querySelector('.vt').textContent = t.value;

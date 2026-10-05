@@ -19,16 +19,25 @@ export const ACCENTS = [
 
 export const WALLPAPERS = ['aurora', 'slate', 'ember', 'mono'];
 
+/* S2: the Text size setting. The shell's type tokens are overridden per value in shell.css
+   (:root[data-text-size=...]), so one attribute scales every token-sized text. 'default' sets none. */
+export const TEXT_SIZES = [
+  { id: 'small', name: 'Small' },
+  { id: 'default', name: 'Default' },
+  { id: 'large', name: 'Large' },
+];
+
 const LS = {
   accent: 'dm.accent',
   wall: 'dm.wall',
   wallPhoto: 'dm.wallPhoto',
   dim: 'dm.wallDim',
   motion: 'dm.wallAnim',
+  textSize: 'dm.textSize',
   dnd: 'dm.os.dnd',
   alertsSeen: 'dm.os.alertsSeen',
 };
-export const PREF_KEYS = { accent: 'os.accent', wall: 'os.wall', dim: 'os.dim', motion: 'os.motion' };
+export const PREF_KEYS = { accent: 'os.accent', wall: 'os.wall', dim: 'os.dim', motion: 'os.motion', textSize: 'os.textSize' };
 
 export function isHex(v) {
   return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
@@ -116,6 +125,7 @@ export function createPrefs({ storage, api, root } = {}) {
     wallPhoto: () => read(LS.wallPhoto),
     dim: () => (read(LS.dim) === null ? 35 : clampDim(read(LS.dim))),
     motion: () => read(LS.motion) !== 'false',
+    textSize: () => (TEXT_SIZES.some((t) => t.id === read(LS.textSize)) ? read(LS.textSize) : 'default'),
     dnd: () => read(LS.dnd) === '1',
     setDnd(on) {
       write(LS.dnd, on ? '1' : '0');
@@ -158,8 +168,15 @@ export function createPrefs({ storage, api, root } = {}) {
       const w = document.getElementById('wall');
       if (w) w.dataset.animated = String(Boolean(on));
     },
+    applyTextSize(id) {
+      if (!el || !el.dataset) return false;
+      if (!TEXT_SIZES.some((t) => t.id === id) || id === 'default') delete el.dataset.textSize;
+      else el.dataset.textSize = id;
+      return true;
+    },
     /* First paint: everything readable without the network. */
     applyAll() {
+      prefs.applyTextSize(prefs.textSize());
       prefs.applyAccent(prefs.accent());
       prefs.applyDim(prefs.dim());
       prefs.applyMotion(prefs.motion());
@@ -207,6 +224,11 @@ export function createPrefs({ storage, api, root } = {}) {
         write(LS.motion, String(p[PREF_KEYS.motion]));
         prefs.applyMotion(p[PREF_KEYS.motion]);
         changed.push('motion');
+      }
+      if (TEXT_SIZES.some((t) => t.id === p[PREF_KEYS.textSize]) && p[PREF_KEYS.textSize] !== prefs.textSize()) {
+        write(LS.textSize, p[PREF_KEYS.textSize]);
+        prefs.applyTextSize(p[PREF_KEYS.textSize]);
+        changed.push('textSize');
       }
       changed.forEach((n) => emit(n, prefs[n] ? prefs[n]() : undefined));
       return changed;

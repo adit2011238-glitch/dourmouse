@@ -66,7 +66,7 @@ class TestSourceRules:
 
     def test_source_errors_reach_the_dom_only_as_text(self):
         src = (_DIR / "index.js").read_text(encoding="utf-8")
-        assert "e.textContent = r.error" in src and "innerHTML" not in src
+        assert "raw.textContent = r.error" in src and "innerHTML" not in src
 
 
 class TestSignalsAndWording:

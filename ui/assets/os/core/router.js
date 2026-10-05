@@ -78,7 +78,7 @@ export function createRouter({ registry, win = globalThis.window, stage, nav, ct
     await unmountCurrent();
     if (my !== seq) return;
     nav.setCurrent(entry.id);
-    stage.setTitle(entry.id);
+    stage.setTitle(entry.label || entry.id);
     stage.setSub(entry.sub || '');
     const root = stage.newRoot(entry.id);
     states.loading(root, 'Loading ' + entry.id);

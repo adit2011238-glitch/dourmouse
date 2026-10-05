@@ -31,9 +31,26 @@ const TASK_WORD = {
   BLOCKED: ['blocked', 'warn'], FAILED: ['failed', 'bad'], CANCELLED: ['cancelled', ''],
 };
 
-export function taskTag(status) {
+export function taskTag(status, goalStatus = '') {
+  /* F6: a task of a blocked or paused goal that has not started is on hold, not "ready" */
+  if ((goalStatus === 'BLOCKED' || goalStatus === 'PAUSED') && (status === 'READY' || status === 'PENDING')) return { word: 'on hold', tone: '' };
   const t = TASK_WORD[status];
   return { word: t ? t[0] : String(status).toLowerCase(), tone: t ? t[1] : '' };
+}
+
+/* F6: "1 running, 1 blocked, 1 paused, 1 finished": each count is its own state, so a blocked
+   or paused goal is never counted as active. Zero counts are left out. */
+export function boardSummary(goals) {
+  const list = Array.isArray(goals) ? goals : [];
+  const n = (pred) => list.filter(pred).length;
+  const parts = [
+    [n((g) => ACTIVE.has(g.status)), 'running'],
+    [n((g) => g.status === 'WAITING_FOR_APPROVAL' || g.status === 'WAITING_FOR_AUTHENTICATION'), 'waiting for you'],
+    [n((g) => g.status === 'BLOCKED'), 'blocked'],
+    [n((g) => g.status === 'PAUSED'), 'paused'],
+    [n((g) => TERMINAL.has(g.status)), 'finished'],
+  ].filter(([c]) => c > 0).map(([c, w]) => c + ' ' + w);
+  return parts.length ? parts.join(', ') : 'no goals yet';
 }
 
 /* done over not-cancelled, straight from the store's counts. null when the

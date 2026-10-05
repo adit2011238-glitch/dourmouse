@@ -12,11 +12,12 @@ export function shortcutList(screens = []) {
     { id: 'new', combo: 'Meta+n', keys: CMD + 'N', label: 'New conversation on HOME', group: 'General' },
     { id: 'help', combo: 'Meta+/', keys: CMD + '/', label: 'Show this list of shortcuts', group: 'General' },
     { id: 'sidebar', combo: 'Meta+\\', keys: CMD + '\\', label: 'Hide or show the sidebar', group: 'General' },
+    { id: 'undo', combo: 'Meta+z', keys: CMD + 'Z', label: 'Undo the action a notice is offering to undo', group: 'General' },
     { id: 'spec', combo: 'Alt+a', keys: 'Alt A', label: 'Label every control (SPEC overlay)', group: 'General', bound: false },
     { id: 'esc', combo: 'Escape', keys: 'Esc', label: 'Close the newest open panel, form or dialog', group: 'General', bound: false },
   ];
   screens.slice(0, 9).forEach((s, i) => {
-    list.push({ id: 'screen' + (i + 1), combo: 'Meta+' + (i + 1), keys: CMD + (i + 1), label: 'Go to ' + s.id, group: 'Screens', screen: s.id });
+    list.push({ id: 'screen' + (i + 1), combo: 'Meta+' + (i + 1), keys: CMD + (i + 1), label: 'Go to ' + (s.label || s.id), group: 'Screens', screen: s.id });
   });
   list.push({ id: 'browser-open', combo: '', keys: 'Alt L', label: 'BROWSER: focus the address bar', group: 'On a screen', bound: false });
   return list;

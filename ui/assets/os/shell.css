@@ -18,6 +18,21 @@
   --dm-text-sm:  12px;
   --dm-text-base: 13px;
   --dm-text-md:  14px;
+  /* S2: the Text size setting multiplies things that are not font tokens (the sidebar width, the
+     flowchart minimum width). 1 is the default size. */
+  --os-scale: 1;
+}
+
+/* S2: the Text size setting (SETTINGS, Appearance), stored in the prefs store and written to
+   <html data-text-size>. Small never goes below 11px; Large raises every token, including the
+   three larger steps that dourmouse-ui.css defines, by about 15 percent. */
+:root[data-text-size="small"] {
+  --dm-text-2xs: 11px; --dm-text-xs: 11px; --dm-text-sm: 11.5px; --dm-text-base: 12px; --dm-text-md: 13px;
+  --dm-text-lg: 14px; --os-scale: 1;
+}
+:root[data-text-size="large"] {
+  --dm-text-2xs: 12.5px; --dm-text-xs: 13px; --dm-text-sm: 13.5px; --dm-text-base: 15px; --dm-text-md: 16px;
+  --dm-text-lg: 17px; --dm-text-xl: 22px; --dm-text-2xl: 26px; --os-scale: 1.15;
 }
 
 html, body {
@@ -34,7 +49,7 @@ button { font-family: inherit; }
 
 /* ---- sidebar ---- */
 #sidebar {
-  width: 176px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 8px;
+  width: calc(176px * var(--os-scale)); flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 8px;
   border-radius: var(--os-radius-panel); background: var(--os-mat-thin);
   -webkit-backdrop-filter: var(--os-blur-thin); backdrop-filter: var(--os-blur-thin);
   border: 1px solid var(--os-edge-lo); box-shadow: var(--os-elev-rest); overflow: auto;
@@ -42,8 +57,8 @@ button { font-family: inherit; }
 .navitem {
   display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 7px; border: none;
   background: transparent; cursor: pointer; width: 100%; text-align: left;
-  font-family: var(--dm-font-sans); font-size: var(--dm-text-xs); letter-spacing: .06em; color: var(--dm-fg-dim);
-  transition: background var(--os-dur-fast) linear, color var(--os-dur-fast) linear;
+  font-family: var(--dm-font-sans); font-size: var(--dm-text-sm); letter-spacing: .01em; color: var(--dm-fg-dim);
+  transition: background var(--os-dur-fast) linear, color var(--os-dur-fast) linear; min-height: 28px;
 }
 .navgroup { padding: 10px 9px 3px; font-size: var(--dm-text-2xs); letter-spacing: .1em; text-transform: uppercase; color: var(--dm-fg-label); }
 .navgroup:first-child { padding-top: 2px; }
@@ -53,7 +68,7 @@ button { font-family: inherit; }
 .navitem .ni { width: 15px; height: 15px; flex: 0 0 auto; opacity: .75; }
 .navitem:hover .ni, .navitem[aria-current="page"] .ni { opacity: 1; }
 .navitem .nl { flex: 1; }
-.navitem .nd { width: 5px; height: 5px; border-radius: 999px; background: var(--dm-ok); flex: 0 0 auto; opacity: 0; }
+.navitem .nd { width: 6px; height: 6px; border-radius: 999px; background: var(--dm-ok); flex: 0 0 auto; opacity: 0; }
 .navitem[data-live="1"] .nd { opacity: 1; }
 
 /* ---- stage ---- */
@@ -66,14 +81,14 @@ button { font-family: inherit; }
 #stage[data-min="1"] #body, #stage[data-min="1"] #composer { display: none; }
 #stage[data-min="1"] { flex: 0 0 auto; align-self: flex-start; min-width: 320px; }
 #stagebar {
-  display: flex; align-items: center; gap: 10px; height: 34px; flex: 0 0 auto; padding: 0 12px;
+  display: flex; align-items: center; gap: 10px; height: 44px; flex: 0 0 auto; padding: 0 12px;
   border-bottom: 1px solid var(--os-edge-lo); background: linear-gradient(rgba(255,255,255,.05), rgba(255,255,255,0));
 }
 #stagetitle {
-  margin: 0; font-weight: 400; font-size: var(--dm-text-xs); letter-spacing: .1em; text-transform: uppercase; color: var(--dm-fg);
+  margin: 0; font-weight: 500; font-size: var(--dm-text-md); letter-spacing: .01em; color: var(--dm-fg);
 }
 #stagetitle:focus { outline: none; }
-#stagesub { font-size: var(--dm-text-2xs); color: var(--dm-fg-dim); letter-spacing: .04em; }
+#stagesub { font-size: var(--dm-text-xs); color: var(--dm-fg-dim); letter-spacing: .02em; }
 #stagebar .grow { flex: 1; }
 #stageactions { display: flex; gap: 8px; }
 #body { flex: 1; overflow: auto; padding: 14px; position: relative; }
@@ -114,7 +129,7 @@ button { font-family: inherit; }
 /* ---- floating panels ---- */
 .os-panel {
   position: fixed; top: 38px; z-index: 960; width: 300px; max-height: calc(100vh - 150px); overflow: auto;
-  border-radius: 16px; padding: 14px; background: var(--os-mat-thick);
+  border-radius: 16px; padding: 36px 14px 14px; background: var(--os-mat-thick);
   -webkit-backdrop-filter: var(--os-blur-thick); backdrop-filter: var(--os-blur-thick);
   border: 1px solid var(--os-edge-hi); box-shadow: var(--os-elev-float);
   animation: os-pop var(--os-dur) var(--os-spring) both;
@@ -126,13 +141,6 @@ button { font-family: inherit; }
 .sc-name { font-size: var(--dm-text-xs); letter-spacing: .08em; text-transform: uppercase; color: var(--dm-fg-label); margin: 6px 2px; }
 .sc-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 2px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); }
 .sc-keys { flex: none; min-width: 26px; padding: 1px 7px; text-align: center; border-radius: 6px; border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.06); font: inherit; font-family: var(--dm-font-mono); color: var(--dm-fg); }
-#startup { left: 50%; transform: translateX(-50%); width: 380px; top: 64px; animation-name: none; }
-#startup .su-item { margin: 10px 0 12px; }
-#startup .su-label { font-size: var(--dm-text-sm); color: var(--dm-fg); margin-bottom: 6px; }
-#startup .su-cmd { display: block; width: 100%; text-align: left; font: inherit; font-family: var(--dm-font-mono); font-size: var(--dm-text-sm); color: var(--dm-fg); padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.06); border: 1px solid var(--os-edge-lo); cursor: pointer; }
-#startup .su-cmd:hover { background: rgba(255,255,255,.1); }
-#startup .su-cmd:focus-visible, #startup a.os-btn:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
-#startup .su-foot { display: flex; justify-content: flex-end; margin-top: 4px; }
 .cc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .cc-tile {
   grid-column: span 1; border-radius: 12px; padding: 11px 12px; background: rgba(255,255,255,.05);
@@ -290,3 +298,68 @@ body[data-annotate="true"] [data-spec] { outline-color: color-mix(in srgb, var(-
 #drivingstrip .ds-detail { color: var(--dm-fg-body); }
 #drivingstrip .ds-stop { padding: 1px 12px; flex: none; }
 body[data-driving="true"] #shell { top: 56px; }
+
+
+/* ---- S12 / F22: the sign-in banner under the stage bar, on HOME only ---- */
+#stagebanner {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+  border-bottom: 1px solid var(--os-edge-lo); background: color-mix(in srgb, var(--dm-active) 9%, transparent);
+  font-size: var(--dm-text-sm); color: var(--dm-fg-body);
+}
+#stagebanner[hidden] { display: none; }
+#stagebanner .sb-main { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+#stagebanner .sb-title { color: var(--dm-fg); font-weight: 500; }
+#stagebanner .sb-sub { color: var(--dm-fg-dim); }
+#stagebanner .sb-item { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+#stagebanner .su-cmd { font: inherit; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg); padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,.07); border: 1px solid var(--os-edge-lo); cursor: pointer; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#stagebanner .su-cmd:hover { background: rgba(255,255,255,.12); }
+#stagebanner .su-cmd:focus-visible, #stagebanner a.os-btn:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+#stagebanner a.os-btn { text-decoration: none; }
+
+/* ---- S21: a skip link, first in the tab order, visible only while it has focus ---- */
+.skip-link {
+  position: fixed; left: 12px; top: -80px; z-index: 1000; padding: 8px 14px; border-radius: 8px;
+  border: 1px solid var(--dm-active); background: #0b2a22; color: var(--dm-fg); font: inherit; font-size: var(--dm-text-sm); cursor: pointer;
+}
+.skip-link:focus { top: 36px; outline: 2px solid var(--dm-active); outline-offset: 2px; }
+
+/* ---- S23: every floating panel has a close button ---- */
+.panel-x {
+  position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0;
+  border: none; border-radius: 7px; background: transparent; color: var(--dm-fg-dim); font-size: 18px; line-height: 1; cursor: pointer;
+}
+.panel-x:hover { color: var(--dm-fg); background: rgba(255,255,255,.08); }
+.panel-x:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+
+/* ---- S5 and S33: a toast action, and the line that says older toasts were pushed off ---- */
+.toast .ta {
+  flex: none; align-self: center; border: 1px solid color-mix(in srgb, var(--dm-active) 55%, transparent); background: color-mix(in srgb, var(--dm-active) 14%, transparent);
+  color: var(--dm-active); font: inherit; font-size: var(--dm-text-xs); font-weight: 600; padding: 4px 10px; border-radius: 7px; cursor: pointer;
+}
+.toast .ta:hover { background: color-mix(in srgb, var(--dm-active) 24%, transparent); }
+.toast .ta:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+.toast-more { pointer-events: none; align-self: flex-end; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); padding: 0 4px; }
+
+/* ---- S19: hit targets of at least 24px ---- */
+.os-btn { min-height: 28px; }
+.os-menubar .os-btn { min-height: 24px; }
+.os-seg button { min-height: 26px; }
+.os-switch { width: 42px; height: 24px; }
+.os-switch::after { width: 18px; height: 18px; top: 2px; left: 2px; }
+.os-switch[aria-checked="true"]::after { transform: translateX(18px); }
+.os-tl { width: 14px; height: 14px; }
+
+/* ---- S14: sentence case on the shell's own chrome ---- */
+.os-dock-item .os-dock-label { text-transform: none; letter-spacing: .02em; font-size: var(--dm-text-xs); }
+.cc-tile .t, .cc-head { text-transform: none; letter-spacing: .02em; }
+
+/* ---- S17: the launcher is a visible search field in the menu bar ---- */
+#palBtn { display: inline-flex; align-items: center; gap: 10px; min-width: 240px; justify-content: space-between; text-transform: none; letter-spacing: .01em; color: var(--dm-fg-dim); padding: 2px 10px; }
+#palBtn kbd { font: inherit; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); padding: 0 6px; border-radius: 5px; border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.06); color: var(--dm-fg-body); }
+#wallBtn { text-transform: none; letter-spacing: .02em; }
+@media (max-width: 760px) { #palBtn { min-width: 0; } #palBtn .pb-text { display: none; } }
+
+/* S16: each wallpaper swatch has its name under it */
+.wpc { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.wpc .wp { width: 100%; }
+.wpn { font-size: var(--dm-text-2xs); color: var(--dm-fg-body); letter-spacing: .02em; }

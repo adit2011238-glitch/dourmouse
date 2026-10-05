@@ -89,6 +89,8 @@ export function createScreenCtx({ id, root, deps }) {
       tabId: () => deps.scope.tabId(),
       project: () => deps.scope.project(),
       leaveProject: () => deps.scope.leaveProject(),
+      /* PROJECTS opens a project through this, so the menu bar chip and every listener hear about it */
+      setProject: (project) => deps.scope.setProject(project),
       onChange(fn) {
         const off = deps.scope.onChange(fn);
         offs.push(off);
@@ -132,6 +134,16 @@ export function createScreenCtx({ id, root, deps }) {
     prefs: {
       get: (key) => deps.prefs.read('dm.os.' + id.toLowerCase() + '.' + key),
       set: (key, value) => deps.prefs.write('dm.os.' + id.toLowerCase() + '.' + key, String(value)),
+    },
+    /* S2: the shell-wide appearance the Text size setting writes. A screen never touches the prefs
+       store directly; this is the one narrow door. setTextSize applies at once, then saves
+       (this device first, the server copy second) and resolves { ok, local, error? }. */
+    appearance: {
+      textSize: () => deps.prefs.textSize(),
+      setTextSize(sizeId) {
+        deps.prefs.applyTextSize(sizeId);
+        return deps.prefs.save('textSize', sizeId);
+      },
     },
     kit: deps.kit,
   };

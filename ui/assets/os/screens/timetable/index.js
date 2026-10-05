@@ -13,9 +13,9 @@
 
 import { html, setHtml } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
-import { agoLabel, plural } from '../../kit/format.js';
+import { agoLabel, plural, whenShort } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
-import { isOverdue, argsPreview, toolTiers, cannotRunUnattended, sortEntries, handoffText, lastAttemptText } from './helpers.js';
+import { isOverdue, argsPreview, toolTiers, cannotRunUnattended, sortEntries, handoffText, lastAttemptText, toolLabel, argsPhrase, scheduleSentence, upNext, parseNext } from './helpers.js';
 
 const POLL_MS = 10000;
 
@@ -33,6 +33,7 @@ export default {
       <div class="tt-note" id="ttNote" role="status" hidden></div>
       <div id="ttConfirm"></div>
       <div class="card tt-hand" id="ttHandCard" hidden><div class="lbl">New routine</div><div id="ttHand"></div></div>
+      <div class="card tt-next" id="ttNext" hidden><div class="lbl">Up next</div><div id="ttNextList"></div></div>
       <div id="ttList" data-region></div>
       <div class="muted tt-foot">The scheduler only runs while this server runs. Nothing records a run that was missed while it was off: the store keeps only each routine's last run. When a routine is overdue the runner fires it once on its next check (catch-up), and it is marked overdue here until then. Only tools that need no confirmation can run unattended; a routine on any other tool is stopped by the gate and does nothing.</div>`);
     const $ = (id) => root.querySelector('#' + id);
@@ -41,6 +42,8 @@ export default {
     const listEl = $('ttList');
     const handCard = $('ttHandCard');
     const handEl = $('ttHand');
+    const nextCard = $('ttNext');
+    const nextEl = $('ttNextList');
 
     const note = (text, tone) => {
       noteEl.hidden = !text;
@@ -122,13 +125,26 @@ export default {
       ctx.chrome.setLive(false);
       if (!st.entries.length) {
         if (!st.error) root.dataset.state = 'empty';
-        states.empty(listEl, 'Nothing is scheduled yet.', { hint: 'Press NEW ROUTINE and describe what should happen and when.' });
+        nextCard.hidden = true;
+        states.empty(listEl, 'Nothing is scheduled yet.', {
+          hint: 'Describe what should happen and when, and the model proposes a routine for you to approve.',
+          action: { label: 'New routine', onClick: () => openHand() },
+        });
         return;
       }
+      paintNext();
       listEl.dataset.state = 'populated';
       setHtml(listEl, html`<div class="card tt-card">${st.tiersError ? html`<div class="muted tt-err">Tool tiers could not be read (${st.tiersError}), so the unattended check below is not shown.</div>` : ''}${st.entries.map((e) => row(e))}</div>`);
       const box = listEl.querySelector('[data-edit-input]');
       if (box) box.focus();
+    }
+
+    /* F5: the next few runs in time order, in the one date style the app uses */
+    function paintNext() {
+      const list = upNext(st.entries);
+      nextCard.hidden = !list.length;
+      if (!list.length) return;
+      setHtml(nextEl, html`${list.map(({ e, at }) => html`<div class="kv"><span>${toolLabel(e.tool)} <span class="muted">${argsPhrase(e.tool, e.arguments)}</span></span><b>${whenShort(at)}</b></div>`)}`);
     }
 
     function row(e) {
@@ -137,9 +153,9 @@ export default {
       const editing = st.edit === e.id;
       return html`<div class="tt-item" data-sched="${e.id}" data-enabled="${String(Boolean(e.enabled))}">
         <div class="os-row">
-          <span class="tag ${e.enabled ? 'ok' : ''}">${e.schedule_description || 'unknown schedule'}</span>
-          <span class="rt"><b>${e.tool}</b> <span class="muted mono">${argsPreview(e.arguments)}</span>
-            <div class="muted">${e.enabled ? 'next run ' + (e.next_run || 'unknown') : 'paused'} · ${lastAttemptText(e, blocked, e.last_run ? agoLabel(e.last_run) : '')}</div></span>
+          <span class="tag ${e.enabled ? 'ok' : ''}">${scheduleSentence(e.schedule_description)}</span>
+          <span class="rt"><b>${toolLabel(e.tool)}</b> <span class="muted" title="${e.tool}${argsPreview(e.arguments) === 'no arguments' ? '' : ' ' + argsPreview(e.arguments)}">${argsPhrase(e.tool, e.arguments)}</span>
+            <div class="muted">${e.enabled ? 'Next run ' + (whenShort(parseNext(e.next_run)) || e.next_run || 'unknown') : 'Paused'} · ${lastAttemptText(e, blocked, e.last_run ? agoLabel(e.last_run) : '')}</div></span>
           ${!e.enabled ? html`<span class="tag">paused</span>` : ''}
           <span data-overdue="${e.id}">${overdue ? html`<span class="tag warn" title="The runner fires this once on its next check">overdue</span>` : ''}</span>
           ${blocked ? html`<span class="tag bad" title="This tool needs confirmation, so the unattended runner stops it">needs confirmation, will not run</span>` : ''}

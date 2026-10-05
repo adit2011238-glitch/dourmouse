@@ -18,11 +18,15 @@ let seq = 0;
    { el, paint, focus, entry, dismiss }. */
 export function confirmHere(container, prompt, run, { onDone = null } = {}) {
   seq += 1;
+  const settle = () => setTimeout(() => {
+    if (card.el.isConnected && entry.state !== 'pending') card.el.remove();
+  }, 3000);
   const entry = { id: 'local-' + seq, prompt, email: false, autonomous: false, state: 'pending', busy: false, error: '' };
   const card = approvalCard(entry, async (ok) => {
     if (!ok) {
       entry.state = 'declined';
       card.paint();
+      settle();
       if (onDone) onDone(false);
       return true;
     }
@@ -37,6 +41,8 @@ export function confirmHere(container, prompt, run, { onDone = null } = {}) {
     }
     entry.busy = false;
     card.paint();
+    /* F26: a decided card is history. It stays three seconds so the owner sees the result, then goes. */
+    if (entry.state === 'approved') settle();
     if (onDone && entry.state === 'approved') onDone(true);
     return true;
   });

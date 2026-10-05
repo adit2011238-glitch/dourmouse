@@ -46,7 +46,7 @@ export default {
   thread: true,
 
   async mount(root, ctx) {
-    const st = { lib: null, openPanel: false, row: null, media: null, seq: 0, stopPoll: null, dragging: false, facts: {}, queue: [], aliases: {}, pendingPlay: false, pendingSeek: null, lastReport: '', volume: 1, muted: false };
+    const st = { lib: null, openPanel: false, row: null, media: null, seq: 0, stopPoll: null, dragging: false, facts: {}, queue: [], aliases: {}, pendingPlay: false, pendingSeek: null, lastReport: '', volume: 1, muted: false, rate: 1 };
 
     /* ---------------- skeleton ---------------- */
     const noteEl = el('div', 'med-note');
@@ -119,11 +119,21 @@ export default {
     vol.value = '1';
     vol.setAttribute('aria-label', 'Volume');
     spec(vol, 'Volume. Up and Down arrows change it by ten percent.');
+    /* F8: playback speed and full screen */
+    const RATES = [1, 1.25, 1.5, 2, 0.75];
+    const speedBtn = el('button', 'os-btn med-skip', '1x');
+    speedBtn.type = 'button';
+    speedBtn.setAttribute('aria-label', 'Playback speed 1x');
+    spec(speedBtn, 'Cycles the playback speed: 1x, 1.25x, 1.5x, 2x, 0.75x. It stays until you change it.');
+    const fsBtn = el('button', 'os-btn med-skip', 'FULL SCREEN');
+    fsBtn.type = 'button';
+    fsBtn.hidden = true;
+    spec(fsBtn, 'Shows the video full screen. Esc leaves it. Shortcut: F.');
     const queueAddBtn = el('button', 'os-btn med-skip', '+ QUEUE');
     queueAddBtn.type = 'button';
     queueAddBtn.disabled = true;
     spec(queueAddBtn, 'Adds the open audio or video file to the end of the queue. The queue is saved, so it survives a restart.');
-    tx.append(prevBtn, playBtn, nextBtn, curEl, seek, durEl, muteBtn, vol, queueAddBtn);
+    tx.append(prevBtn, playBtn, nextBtn, curEl, seek, durEl, muteBtn, vol, speedBtn, fsBtn, queueAddBtn);
     const queueNote = el('div', 'muted med-qpos');
     const pdfBarEl = el('div', 'med-pdfbar');
     pdfBarEl.hidden = true;
@@ -433,6 +443,7 @@ export default {
       seek.disabled = !on;
       pdfBarEl.hidden = true;
       barEl.hidden = false;
+      fsBtn.hidden = true;
       seek.max = '0';
       seek.value = '0';
       curEl.textContent = '';
@@ -481,6 +492,7 @@ export default {
         paintInfo();
         media.volume = st.volume;
         media.muted = st.muted;
+        media.playbackRate = st.rate;
         if (st.pendingSeek !== null) {
           media.currentTime = seekTarget(0, st.pendingSeek, media.duration);
           st.pendingSeek = null;
@@ -515,6 +527,7 @@ export default {
       });
       stageEl.dataset.state = 'populated';
       root.dataset.state = 'populated';
+      fsBtn.hidden = !isVideo;
       if (isVideo) stageEl.replaceChildren(media);
       else stageEl.replaceChildren(el('div', 'med-msg', 'Audio: ' + row.name));
       media.src = row.urls.media;
@@ -661,6 +674,24 @@ export default {
       if (st.volume > 0) st.muted = false;
       applyAudio();
     });
+    function setRate(rate) {
+      st.rate = rate;
+      speedBtn.textContent = rate + 'x';
+      speedBtn.setAttribute('aria-label', 'Playback speed ' + rate + 'x');
+      if (st.media) st.media.playbackRate = rate;
+    }
+    speedBtn.addEventListener('click', () => setRate(RATES[(RATES.indexOf(st.rate) + 1) % RATES.length]));
+    function fullScreen() {
+      const target = stageEl.querySelector('video') || null;
+      if (!target) return;
+      const want = target.requestFullscreen || target.webkitRequestFullscreen;
+      if (!want) {
+        note('This window cannot show a video full screen.');
+        return;
+      }
+      Promise.resolve(want.call(target)).catch((err) => note('Could not go full screen: ' + (err && err.message ? err.message : String(err))));
+    }
+    fsBtn.addEventListener('click', fullScreen);
     function nudgeVolume(delta) {
       st.volume = Math.max(0, Math.min(1, Math.round((st.volume + delta) * 100) / 100));
       vol.value = String(st.volume);
@@ -718,6 +749,7 @@ export default {
       st.muted = !st.muted;
       applyAudio();
     });
+    ctx.keys.bind('f', () => fullScreen());
     ctx.keys.bind('Shift+ArrowRight', () => skip(1));
     ctx.keys.bind('Shift+ArrowLeft', () => skip(-1));
     root.addEventListener('keydown', (e) => {

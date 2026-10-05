@@ -199,7 +199,7 @@ def test_login_token_input_has_a_working_focus_indicator():
         'expected input[type="password"] to still suppress the default outline'
     )
     m = re.search(r'input\[type="password"\]:focus-visible\s*\{([^}]*)\}', source)
-    assert m and re.search(r"outline:\s*1px solid var\(--amber\)", m.group(1)), (
+    assert m and re.search(r"outline:\s*[12]px solid var\(--amber\)", m.group(1)), (
         'input[type="password"] removes the default outline but has no real '
         "compensating :focus-visible outline of its own"
     )
@@ -225,7 +225,7 @@ def test_setup_key_and_node_inputs_have_a_working_focus_indicator():
         "input:focus should have been modernized to input:focus-visible"
     )
     m = re.search(r"input:focus-visible\{([^}]*)\}", source)
-    assert m and re.search(r"outline:1px solid var\(--amber\)", m.group(1)), (
+    assert m and re.search(r"outline:[12]px solid var\(--amber\)", m.group(1)), (
         "input:focus-visible has no real compensating outline of its own"
     )
     tokens = uc.extract_tokens(uc.default_root_block(source))

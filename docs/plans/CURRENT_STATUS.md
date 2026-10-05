@@ -499,3 +499,6 @@ Stable element ids, agent follows the owner's active tab, N3 git hardening, user
 
 ## 2026-10-05 Wave 3 complete (finding #168)
 Tool skill: new browser tools registered, look-alike descriptions, tool-use guide, Enter gates, calendar-aware slots, routing fixes. Suite 7934 passed. Not measured with a real model yet.
+
+## 2026-10-05 Wave 4 F2 (finding #169)
+Driving strip, APPS screen, permissions guide. Suite 7989 passed. Evidence EVIDENCE/169_f2_*.

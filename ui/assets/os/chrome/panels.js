@@ -13,6 +13,19 @@ export function createPanels({ keymap, doc = document }) {
 
   function make(name, { el, trigger, exclusive = [], onOpen, onClose }) {
     const def = { name, el, trigger, isOpen: false, popEsc: null, returnFocus: null };
+    /* S23: Escape and an outside click always closed a panel, but nothing on it said so. Every floating panel
+       gets a close button (the launcher is a full-screen scrim and closes on Escape and on a click outside). */
+    if (el.classList && el.classList.contains('os-panel')) {
+      const x = doc.createElement('button');
+      x.type = 'button';
+      x.className = 'panel-x';
+      x.setAttribute('aria-label', 'Close');
+      x.title = 'Close (Esc)';
+      x.dataset.spec = 'Closes this panel. Esc does the same.';
+      x.textContent = '\u00d7';
+      x.addEventListener('click', () => def.close());
+      el.prepend(x);
+    }
     def.open = () => {
       if (def.isOpen) return;
       exclusive.forEach((n) => defs.get(n) && defs.get(n).close());

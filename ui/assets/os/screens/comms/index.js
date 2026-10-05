@@ -89,6 +89,8 @@ export default {
     };
 
     /* ---------------- stage bar and the conversation ---------------- */
+    /* F31: with no Gmail connection COMPOSE would hand a message to an agent that cannot send it */
+    const composeBlocked = () => Boolean(st.payload && st.payload.state === 'unavailable');
     const view = mountThreadView(threadEl, ctx, {
       scroller: root.parentElement,
       autonomous: false,
@@ -102,7 +104,8 @@ export default {
           onClick: () => load('manual', { fresh: true }),
         },
         {
-          id: 'compose', label: 'COMPOSE', kind: 'primary', pressed: st.composing,
+          id: 'compose', label: 'COMPOSE', kind: composeBlocked() ? '' : 'primary', pressed: st.composing, disabled: composeBlocked(),
+          title: composeBlocked() ? 'Gmail is not connected, so there is nothing to send with.' : '',
           spec: 'Opens a message form. Sending is not done here: it goes to the mail agent, and a real approval card shows the recipient before anything leaves.',
           onClick: () => (st.composing ? closeCompose() : openCompose({})),
         },
@@ -152,7 +155,13 @@ export default {
       const p = st.payload;
       if (!p) return;
       if (p.state === 'unavailable') {
-        states.unavailable(listEl, p.note || 'Gmail is not connected.', { detail: unavailableHint(p.mode), retry: () => load('manual', { fresh: true }) });
+        const signedIn = p.mode === 'oauth' || p.mode === 'imap';
+        /* F19: one button that fixes it. A mail account that is set up but not answering can be retried; one that was never connected needs signing in first. */
+        states.unavailable(listEl, signedIn ? (p.note || 'Gmail did not answer.') : 'Gmail is not connected yet.', {
+          detail: (signedIn ? '' : (p.note || '') + ' ') + unavailableHint(p.mode),
+          action: signedIn ? null : { label: 'Sign in with Google', href: '/login' },
+          retry: signedIn ? () => load('manual', { fresh: true }) : null,
+        });
         return;
       }
       if (!st.rows.length) {
@@ -186,6 +195,7 @@ export default {
         states.clearStale(listEl);
         paintList();
         paintAge();
+        view.paintChrome();
         if (data.__stale) states.stale(listEl, 'Showing the last copy this window kept. The server did not answer.');
       } catch (err) {
         if (isAbort(err) || ctx.signal.aborted) return;

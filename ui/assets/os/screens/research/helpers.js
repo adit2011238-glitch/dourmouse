@@ -43,9 +43,10 @@ export function hostOf(u) {
 }
 
 const RANK = { hypothesis: 0, research_question: 0, claim: 2, evidence: 2, experiment: 2, decision: 3, contradiction: 3, task: 3, experiment_run: 3, result: 3, metric: 3, dataset: 3 };
-const PER_ROW = 5;
-export const NODE_W = 104;
-export const NODE_H = 24;
+/* S2: labels are 11px or more, so a node is wider and a row holds four */
+const PER_ROW = 4;
+export const NODE_W = 140;
+export const NODE_H = 28;
 
 /* Places the root on top and the rest in rows by kind. Pure and deterministic. */
 export function layoutGraph(nodes, edges, rootId) {
@@ -61,7 +62,7 @@ export function layoutGraph(nodes, edges, rootId) {
     if (!rows.has(r)) rows.set(r, []);
     rows.get(r).push(n);
   });
-  const width = 640;
+  const width = 760;
   const placed = new Map();
   let y = 30;
   [...rows.keys()].sort((a, b) => a - b).forEach((r) => {
@@ -70,7 +71,7 @@ export function layoutGraph(nodes, edges, rootId) {
       const chunk = items.slice(i, i + PER_ROW);
       const gap = width / (chunk.length + 1);
       chunk.forEach((n, j) => placed.set(n.id + '|' + n.type, { ...n, x: Math.round(gap * (j + 1)), y }));
-      y += 56;
+      y += 62;
     }
   });
   const byId = new Map();
