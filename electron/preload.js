@@ -60,6 +60,20 @@ contextBridge.exposeInMainWorld("dourmouseShell", {
       ipcRenderer.on("pane:command", h);
       return () => ipcRenderer.removeListener("pane:command", h);
     },
+    // Phase C2: who has the pane, the owner or the model. Stop cancels what the model is doing;
+    // Take control also keeps it from starting anything until Release. main.js answers only the
+    // console window's top frame; the pane bridge has no route for any of the three.
+    control: {
+      state: () => ipcRenderer.invoke("control:state"),
+      stop: () => ipcRenderer.invoke("control:stop"),
+      take: () => ipcRenderer.invoke("control:take"),
+      release: () => ipcRenderer.invoke("control:release"),
+      onUpdate: (cb) => {
+        const h = (_evt, s) => cb(s);
+        ipcRenderer.on("pane:control", h);
+        return () => ipcRenderer.removeListener("pane:control", h);
+      },
+    },
     // Phase B2: site permissions, saved passwords and address autofill. Each call is a request
     // the main process validates and answers only for the console window (it checks the sender).
     // Nothing here hands the console a password except `reveal`, which main.js puts behind a

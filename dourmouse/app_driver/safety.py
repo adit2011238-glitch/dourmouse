@@ -99,7 +99,7 @@ def indicator() -> dict[str, Any]:
     with _indicator_lock:
         state = dict(_state)
     last = state.get("last_action_at")
-    lingering = bool(last) and (time.time() - float(last)) < LINGER_SECONDS
+    lingering = bool(last) and (time.time() - float(last or 0)) < LINGER_SECONDS
     state["driving"] = bool(state["active"]) or (lingering and not is_killed())
     state["label"] = f"Model is driving {state['app']}" if state["driving"] and state.get("app") else ""
     return state

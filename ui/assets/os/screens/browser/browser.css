@@ -198,3 +198,14 @@
 [data-screen="BROWSER"] .bw-importresult .bw-day:first-child { margin-top: 0; }
 [data-screen="BROWSER"] .bw-profform { grid-template-columns: minmax(190px, 320px); }
 [data-screen="BROWSER"] .bw-drm { color: var(--dm-fg-body); }
+/* Phase C2: who has the browser (the owner or the model), with Stop and Take control */
+[data-screen="BROWSER"] .cb-control-slot:empty { display: none; }
+[data-screen="BROWSER"] .cb-control { padding: 4px 12px; font-size: 12px; background: rgba(255,255,255,.03); color: var(--dm-fg-body); }
+[data-screen="BROWSER"] .cb-control .ic { background: var(--dm-ok); }
+[data-screen="BROWSER"] .cb-control[data-kind="model"] { background: color-mix(in srgb, var(--dm-active) 16%, transparent); color: var(--dm-fg); font-weight: 600; }
+[data-screen="BROWSER"] .cb-control[data-kind="model"] .ic { background: var(--dm-active); animation: bw-pulse 1s ease-in-out infinite; }
+[data-screen="BROWSER"] .cb-control[data-kind="wait"] { background: color-mix(in srgb, var(--os-warn) 12%, transparent); color: var(--os-warn); }
+[data-screen="BROWSER"] .cb-control[data-kind="wait"] .ic { background: var(--os-warn); }
+[data-screen="BROWSER"] .cb-control .cb-ask-btn { height: 22px; font-size: 11.5px; }
+@keyframes bw-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { [data-screen="BROWSER"] .cb-control[data-kind="model"] .ic { animation: none; } }

@@ -54,7 +54,7 @@ class TestNothingCanChangeAnything:
     def test_the_router_registers_only_get_for_the_three_new_paths(self):
         from dourmouse import os_api
 
-        registered = {(m, p) for (m, p) in getattr(os_api, "_ROUTES", {}).keys()} if hasattr(os_api, "_ROUTES") else None
+        registered = {(m, p) for (m, p) in getattr(os_api, "_ROUTES", {})} if hasattr(os_api, "_ROUTES") else None
         if registered is None:
             pytest.skip("route table is not introspectable here; the POST tests above cover it")
         for p in ("profiles", "extensions", "drm"):

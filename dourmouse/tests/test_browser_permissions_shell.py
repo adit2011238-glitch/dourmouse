@@ -9,7 +9,6 @@ in an isolated copy of the app and is recorded in the B2 finding.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
@@ -341,7 +340,7 @@ class TestDecisionsAreRememberedPerSite:
 
 class TestWhatIsNeverGranted:
     def test_screen_capture_midi_usb_serial_hid_openexternal_and_the_unknown_are_refused_unasked(self, perms):
-        assert perms["never"] == {k: False for k in ("display-capture", "midi", "midiSysex", "openExternal", "usb", "serial", "hid", "pointerLock", "unknown-thing")}
+        assert perms["never"] == dict.fromkeys(("display-capture", "midi", "midiSysex", "openExternal", "usb", "serial", "hid", "pointerLock", "unknown-thing"), False)
         assert perms["neverQueued"] == 0
         assert perms["screenShare"] is False and perms["screenShareEmptyList"] is False
 

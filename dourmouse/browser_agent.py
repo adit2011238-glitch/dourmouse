@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import functools
 import json
 import os
@@ -70,6 +71,7 @@ _ID_OWNER: dict[int, Any] = {}  # element id number -> the Page it was issued on
 _ID_OWNER_CAP = 6000
 _WORLDS: dict[Any, dict[str, Any]] = {}  # Page -> {"session", "ctx", "href", "gen"}: the isolated world
 _SCRIPT_PATH = Path(__file__).resolve().parent / "browser_scripts" / "element_ids.js"
+_MEDIA_SCRIPT_PATH = Path(__file__).resolve().parent / "browser_scripts" / "media_control.js"
 # "e12", "id:e12", "@e12" and "[e12]" name an element id. Anything else is a label, CSS or text target.
 _ELEMENT_ID_RE = re.compile(r"^(?:id:|@)?\[?e(\d{1,7})\]?$", re.IGNORECASE)
 _POPUP_POLL_SECONDS = (0.0, 0.1)  # an immediate check caught every popup in a live test (12 of 12); the second is slack
@@ -138,6 +140,232 @@ class _PaneUnreachable(RuntimeError):
     """The pane bridge does not answer at all: the Electron shell is not there (any more).
     Distinct from "the pane is there but no page was found", which must NOT fall back to a
     separate Chrome."""
+
+
+def _pane_bridge_json(pane_port: int, path: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """POST a small JSON body to the pane bridge and return (status, answer). A 4xx answer is a
+    real answer (the bridge says why), not an error; only a bridge that does not answer raises."""
+    import urllib.error
+    import urllib.request
+
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{pane_port}{path}", data=data, method="POST", headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_PANE_BRIDGE_TIMEOUT) as resp:  # noqa: S310 - always http://127.0.0.1
+            return resp.status, json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            answer = json.loads(exc.read().decode("utf-8") or "{}")
+        except ValueError:
+            answer = {}
+        return exc.code, answer if isinstance(answer, dict) else {}
+
+
+# --------------------------------------------------------------------------- #
+# Shared control (phase C2): the owner's real input in the pane always wins.
+#
+# Every tool that changes the page first claims the tab it acts on from the Electron main
+# process (POST /control/begin). The claim is refused while the owner pressed a key, clicked,
+# scrolled or touched in that tab in the last 2.5 s; the agent waits up to 3 s for the owner to
+# pause, then gives up with a plain message. While the agent acts, the owner's own input on that
+# tab interrupts the claim at once, and the next step is refused by the main process itself, so
+# the agent stops between steps and says what it did and did not do. Text goes in through
+# /control/type (main-process insertText), so the owner's keystrokes and the agent's chunks pass
+# through one event loop and never interleave inside a field. The owner's Stop and Take control
+# buttons live in the BROWSER screen only. Design: ~/Documents/DOURMOUSE/C2_SHARED_CONTROL_DESIGN.md.
+# A separate headless Chrome has no owner, so it has no lock.
+# --------------------------------------------------------------------------- #
+
+_CONTROL_WAIT_SECONDS = 3.0
+_TYPE_CHUNK = 24  # characters per /control/type step: the owner can cut in between any two
+_FILL_CHUNK = 512  # the bridge's own cap per call
+_CONTROL_NOTED_OLD_SHELL = False
+
+
+class _OwnerControl(RuntimeError):
+    """The owner has the tab (or stopped the agent). ``code`` says how; the message says what
+    was and was not done."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+    def with_progress(self, progress: str) -> "_OwnerControl":
+        if not progress:
+            return self
+        return _OwnerControl(self.code, f"{self} {progress.strip()}")
+
+
+_STOP_TEXT = {
+    "owner-input": (
+        "STOPPED: the owner started using this tab ({kind}) while the agent was acting, and the owner "
+        "always goes first. The agent stopped so the two never write into the same place."
+    ),
+    "stopped": "STOPPED BY THE OWNER: the owner pressed Stop in the BROWSER screen. Do not retry this unless the owner asks.",
+    "owner-control": (
+        "OWNER HAS CONTROL: the owner pressed Take control in the BROWSER screen, so the agent may not act in "
+        "the browser until the owner presses Let the model act. Ask the owner."
+    ),
+    "no-tab": "STOPPED: the tab the agent was acting on was closed.",
+    "expired": "STOPPED: the agent's claim on the tab lapsed (it was not heard from for a minute).",
+}
+
+
+def _stop_error(reason: str, kind: str = "") -> _OwnerControl:
+    text = _STOP_TEXT.get(reason) or f"STOPPED: the browser refused the next step ({reason})."
+    return _OwnerControl(reason, text.format(kind=kind or "input"))
+
+
+class _NoClaim:
+    """No owner to share with (a separate headless Chrome, or an older shell without /control)."""
+
+    pane = False
+
+    def __init__(self, page: Any) -> None:
+        self.page = page
+
+    async def check(self) -> None:
+        return None
+
+    async def verdict(self) -> _OwnerControl | None:
+        return None
+
+    async def insert(self, text: str) -> None:
+        await self.page.keyboard.insert_text(text)
+
+    @contextlib.asynccontextmanager
+    async def pointing(self, x: float | None = None, y: float | None = None):
+        yield
+
+    async def end(self, outcome: str) -> None:
+        return None
+
+
+class _Claim(_NoClaim):
+    """The agent's claim on one pane tab, held for one tool call."""
+
+    pane = True
+
+    def __init__(self, page: Any, pane_port: int, action: str, tab: Any) -> None:
+        super().__init__(page)
+        self.port = pane_port
+        self.action = action
+        self.tab = tab
+
+    async def _post(self, name: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        try:
+            return await asyncio.to_thread(_pane_bridge_json, self.port, f"/control/{name}", {"action": self.action, **body})
+        except Exception as exc:  # noqa: BLE001 - the shell went away: fail closed, readable
+            raise _OwnerControl("error", f"STOPPED: the browser pane stopped answering ({type(exc).__name__}: {exc}).") from exc
+
+    async def verdict(self) -> _OwnerControl | None:
+        status, data = await self._post("check", {})
+        if data.get("ok"):
+            return None
+        return _stop_error(str(data.get("reason") or f"status {status}"), str(data.get("kind") or ""))
+
+    async def check(self) -> None:
+        refusal = await self.verdict()
+        if refusal is not None:
+            raise refusal
+
+    async def insert(self, text: str) -> None:
+        status, data = await self._post("type", {"text": text})
+        if not data.get("ok"):
+            if data.get("reason") == "error" or status >= 500:
+                raise RuntimeError(f"BROWSER TYPE FAILED in the pane: {data.get('error') or status}")
+            raise _stop_error(str(data.get("reason") or f"status {status}"), str(data.get("kind") or ""))
+
+    @contextlib.asynccontextmanager
+    async def pointing(self, x: float | None = None, y: float | None = None):
+        """Tell the main process the next mouse events on this tab are the agent's own, so they are
+        not taken for the owner's. Opened right before the click is sent, closed right after."""
+        body: dict[str, Any] = {"on": True, "ms": 2500}
+        if x is not None and y is not None:
+            body.update(x=float(x), y=float(y))
+        status, data = await self._post("pointer", body)
+        if not data.get("ok"):
+            raise _stop_error(str(data.get("reason") or f"status {status}"), str(data.get("kind") or ""))
+        try:
+            yield
+        finally:
+            await self._post("pointer", {"on": False})
+
+    async def end(self, outcome: str) -> None:
+        try:
+            await self._post("end", {"outcome": outcome})
+        except _OwnerControl as exc:  # the shell went away: there is no claim left to end
+            _log("control", f"could not end the claim: {exc}")
+
+
+async def _claim(page: Any, tool: str) -> _NoClaim:
+    """Claim the tab the agent is about to change. In the pane this waits (at most 3 s) for the
+    owner to pause and then refuses with a plain message; elsewhere it is a no-op."""
+    global _CONTROL_NOTED_OLD_SHELL
+    pane = _electron_pane_configured()
+    tab = _PANE_SEEN.get("active")
+    if _PAGE_MODE != "pane" or pane is None or tab is None:
+        return _NoClaim(page)
+    started = time.monotonic()
+    deadline = started + _CONTROL_WAIT_SECONDS
+    while True:
+        try:
+            status, data = await asyncio.to_thread(_pane_bridge_json, pane[1], "/control/begin", {"tab": tab, "tool": tool})
+        except Exception as exc:  # noqa: BLE001 - fail closed, readable
+            raise _OwnerControl(
+                "error", f"REFUSED: could not check who has the browser tab ({type(exc).__name__}: {exc}). Nothing was done."
+            ) from exc
+        if data.get("ok") and data.get("action"):
+            return _Claim(page, pane[1], str(data["action"]), tab)
+        reason = str(data.get("reason") or "")
+        if not reason and (status == 404 or data.get("ok")):
+            # A shell without /control (an older build answers 404 "not found", a stand-in bridge
+            # answers ok with no claim): act as before, and say so once.
+            if not _CONTROL_NOTED_OLD_SHELL:
+                _CONTROL_NOTED_OLD_SHELL = True
+                _note("this app's browser shell is older than the owner/model lock, so the agent cannot tell when the owner is using the tab. Quit and reopen the app.")
+            return _NoClaim(page)
+        if reason == "owner-active" and time.monotonic() < deadline:
+            wait = max(0.05, min(float(data.get("retryInMs") or 300) / 1000.0 + 0.05, deadline - time.monotonic()))
+            await asyncio.sleep(wait)
+            continue
+        waited = time.monotonic() - started
+        if reason == "owner-active":
+            raise _OwnerControl(
+                reason,
+                f"OWNER IS USING THIS TAB: the owner typed, clicked or scrolled in tab {tab} in the last few seconds, "
+                f"so the agent waited {waited:.1f}s and did not {tool.replace('_', ' ')}. Nothing was done. Try again in a "
+                "moment, or ask the owner whether to go ahead.",
+            )
+        if reason == "owner-control":
+            raise _OwnerControl(reason, _STOP_TEXT[reason] + " Nothing was done.")
+        if reason == "no-tab":
+            raise _OwnerControl(reason, f"REFUSED: tab {tab} is gone (it was closed). Nothing was done. Take a new browser_snapshot.")
+        raise _OwnerControl(reason or "error", f"REFUSED: the browser did not let the agent act ({reason or status}). Nothing was done.")
+
+
+@contextlib.asynccontextmanager
+async def _acting(page: Any, tool: str):
+    """Hold a claim on the tab for one tool call. A step that failed because the owner took over
+    (a navigation the owner's Stop aborted, say) is reported as that, not as a page error."""
+    claim = await _claim(page, tool)
+    outcome = "error"
+    try:
+        yield claim
+        outcome = "done"
+    except _OwnerControl as exc:
+        outcome = exc.code
+        raise
+    except Exception:
+        refusal = await claim.verdict() if claim.pane else None
+        if refusal is not None:
+            outcome = refusal.code
+            raise refusal from None
+        raise
+    finally:
+        await claim.end(outcome)
 
 
 def _note(text: str) -> None:
@@ -237,8 +465,13 @@ async def _match_pane_page(
     return None, "none"
 
 
-async def _prepare_context(context: Any) -> None:
-    """Once per context: the speed filter and the listener that notices new pages."""
+async def _prepare_context(context: Any, filter_requests: bool = True) -> None:
+    """Once per context: the listener that notices new pages, and the speed filter.
+
+    Phase C2: the speed filter (abort media and a few trackers) is for the agent's OWN headless
+    Chrome only. Installed on the pane's context it intercepted every request of the owner's
+    shared browser through this process and aborted the owner's own audio and video (a plain
+    <video src> or <audio src> stopped loading the moment the agent attached)."""
     if id(context) in _PREPARED_CONTEXTS:
         return
     _PREPARED_CONTEXTS.add(id(context))
@@ -248,6 +481,8 @@ async def _prepare_context(context: Any) -> None:
         del _NEW_PAGES[:-50]
 
     context.on("page", _on_page)
+    if not filter_requests:
+        return
 
     async def _route_handler(route: Any) -> None:
         req = route.request
@@ -334,7 +569,7 @@ async def _ensure_browser_via_electron_pane(cdp_port: int, pane_port: int, quiet
                 "browser_pane_show, or use browser_open to load an address into it."
             )
         await asyncio.sleep(0.15)
-    await _prepare_context(page.context)
+    await _prepare_context(page.context, filter_requests=False)
     previous = _PANE_SEEN.get("active")
     _PANE_SEEN = {"active": active.get("id"), "ids": frozenset(t.get("id") for t in tabs), "label": _tab_label(active)}
     if not quiet and previous is not None and previous != active.get("id") and (_PAGE is None or _PAGE is not page):
@@ -609,6 +844,14 @@ def _script_source() -> str:
         ) from exc
 
 
+@functools.lru_cache(maxsize=1)
+def _media_script_source() -> str:
+    try:
+        return _MEDIA_SCRIPT_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"MEDIA CONTROL UNAVAILABLE: the injected script {_MEDIA_SCRIPT_PATH} could not be read ({exc}).") from exc
+
+
 def _is_gone_context(exc: Exception) -> bool:
     return "Cannot find context with specified id" in str(exc) or "Execution context was destroyed" in str(exc)
 
@@ -628,11 +871,12 @@ async def _make_world(page: Any, session: Any = None) -> dict[str, Any]:
                 {"frameId": tree["frameTree"]["frame"]["id"], "worldName": "dourmouse-agent"},
             )
             ctx = created["executionContextId"]
-            injected = await session.send(
-                "Runtime.evaluate", {"expression": _script_source(), "contextId": ctx, "returnByValue": True}
-            )
-            if injected.get("exceptionDetails"):
-                raise RuntimeError(str(injected["exceptionDetails"].get("text") or "script error"))
+            for source in (_script_source(), _media_script_source()):
+                injected = await session.send(
+                    "Runtime.evaluate", {"expression": source, "contextId": ctx, "returnByValue": True}
+                )
+                if injected.get("exceptionDetails"):
+                    raise RuntimeError(str(injected["exceptionDetails"].get("text") or "script error"))
             # "base": every id this world will ever issue is >= it, so a smaller id that was issued
             # on this same page belongs to an earlier document: the page navigated since.
             world = {"session": session, "ctx": ctx, "href": "", "gen": 0, "base": _NEXT_ID}
@@ -647,10 +891,11 @@ async def _make_world(page: Any, session: Any = None) -> dict[str, Any]:
     )
 
 
-async def _world_call(page: Any, op: str, params: dict[str, Any], *, fresh_ok: bool) -> Any:
-    """Run one op of the id script in the page's isolated world. ``fresh_ok`` lets a snapshot
-    build a new world; an id action must find the one the snapshot built, because a missing or
-    destroyed world means the page navigated and every id from before is dead."""
+async def _world_call(page: Any, op: str, params: dict[str, Any], *, fresh_ok: bool, api: str = "__dmAgent") -> Any:
+    """Run one op of the id script (or, with ``api="__dmMedia"``, the media script) in the page's
+    isolated world. ``fresh_ok`` lets a snapshot build a new world; an id action must find the one
+    the snapshot built, because a missing or destroyed world means the page navigated and every id
+    from before is dead. An op that returns a promise is awaited."""
     world = _WORLDS.get(page)
     if world is None or world.get("ctx") is None:
         if not fresh_ok:
@@ -661,10 +906,11 @@ async def _world_call(page: Any, op: str, params: dict[str, Any], *, fresh_ok: b
             res = await world["session"].send(
                 "Runtime.callFunctionOn",
                 {
-                    "functionDeclaration": "function(op, p) { return globalThis.__dmAgent.run(op, p); }",
+                    "functionDeclaration": f"function(op, p) {{ return globalThis.{api}.run(op, p); }}",
                     "executionContextId": world["ctx"],
                     "arguments": [{"value": op}, {"value": params}],
                     "returnByValue": True,
+                    "awaitPromise": True,
                 },
             )
         except Exception as exc:  # noqa: BLE001 - the context is gone after a navigation
@@ -746,7 +992,8 @@ async def _id_prepare(page: Any, num: int, op: str, extra: dict[str, Any] | None
     return res
 
 
-async def _click_by_id(page: Any, num: int) -> dict[str, Any]:
+async def _click_by_id(page: Any, num: int, claim: _NoClaim | None = None) -> dict[str, Any]:
+    claim = claim or _NoClaim(page)
     try:
         res = await _id_prepare(page, num, "click")
     except _IdRefused as exc:
@@ -754,46 +1001,172 @@ async def _click_by_id(page: Any, num: int) -> dict[str, Any]:
             raise
         await asyncio.sleep(0.25)  # an animation or a closing overlay: look once more
         res = await _id_prepare(page, num, "click")
-    await page.mouse.click(res["x"], res["y"])
+    await claim.check()
+    async with claim.pointing(res["x"], res["y"]):
+        await page.mouse.click(res["x"], res["y"])
     return res
 
 
-async def _fill_by_id(page: Any, num: int, value: str) -> dict[str, Any]:
+async def _insert_chunks(claim: _NoClaim, text: str, size: int, done_box: list[int]) -> None:
+    """Insert ``text`` in chunks through the claim, counting into ``done_box[0]``. In the pane
+    each chunk is a separate main-process step the owner's input can cut in front of."""
+    for start in range(0, len(text), size):
+        chunk = text[start : start + size]
+        await claim.insert(chunk)
+        done_box[0] += len(chunk)
+
+
+def _progress(done: int, total: int, who: str, text: str) -> str:
+    if done >= total:
+        return f"All {total} characters had already been typed into {who}."
+    left = text[done:]
+    shown = left if len(left) <= 60 else left[:57] + "..."
+    if done == 0:
+        return f"Nothing was typed into {who}."
+    return f"Typed {done} of {total} characters into {who}; NOT typed: the last {total - done} ({shown!r})."
+
+
+async def _fill_by_id(page: Any, num: int, value: str, claim: _NoClaim | None = None) -> dict[str, Any]:
+    claim = claim or _NoClaim(page)
     res = await _id_prepare(page, num, "fill", {"value": value})
     if res.get("done"):
         return res
     if res.get("focused") is False:
         raise RuntimeError(f"BROWSER FILL FAILED: element e{num} would not take focus.")
+    await claim.check()
     if value == "":
         await page.keyboard.press("Backspace")  # the field's contents are selected: this clears them
-    else:
-        await page.keyboard.insert_text(value)
+        return res
+    who = f"e{num} ({res.get('name', '')!r})"
+    done = [0]
+    try:
+        await _insert_chunks(claim, value, _FILL_CHUNK, done)
+    except _OwnerControl as exc:
+        raise exc.with_progress(_progress(done[0], len(value), who, value)) from None
     return res
 
 
 _MULTILINE_TAGS = {"textarea"}
+_TYPE_MODES = ("text", "keys")
 
 
-async def _type_text(page: Any, num: int | None, text: str, clear: bool, delay_ms: int) -> str:
-    """Type like a person: focus the element (when an id is given), put the caret at the end
-    (or select everything first when ``clear``), then send real key events one by one."""
+async def _focus_still(page: Any, num: int | None, tag: str, claim: _NoClaim | None = None) -> None:
+    """Between two chunks: the text must still be going where it started. When the focus moved,
+    the claim is asked first: if the owner's click moved it, that is what the agent reports (seen
+    live: the owner's click lands before the next chunk and takes the focus with it); otherwise the
+    page moved it, and the typing stops too."""
+    try:
+        await _focus_unmoved(page, num, tag)
+    except _OwnerControl:
+        refusal = await claim.verdict() if claim is not None else None
+        if refusal is not None:
+            raise refusal from None
+        raise
+
+
+async def _focus_unmoved(page: Any, num: int | None, tag: str) -> None:
+    if num is not None:
+        try:
+            res = await _world_call(page, "focusCheck", {"id": num}, fresh_ok=False)
+        except _IdRefused:
+            raise _OwnerControl("focus-moved", "STOPPED: the page navigated while the agent was typing, so the agent stopped.") from None
+        ok = bool(res and res.get("ok"))
+    else:
+        state = await _world_call(page, "focusState", {}, fresh_ok=True)
+        ok = bool(state and state.get("has") and state.get("tag", "") == tag)
+    if not ok:
+        raise _OwnerControl("focus-moved", "STOPPED: the keyboard focus left the element the agent was typing into (the page moved it), so the agent stopped rather than type somewhere else.")
+
+
+async def _type_text(page: Any, num: int | None, text: str, clear: bool, delay_ms: int, mode: str = "text", claim: _NoClaim | None = None) -> str:
+    """Type into an element (an id from browser_snapshot) or into whatever has focus.
+
+    ``text`` mode (default) inserts the text the way an input method does, in short chunks: it
+    reaches editors that take no value and listen for input (a contenteditable, Google Docs'
+    hidden text iframe) and never presses Enter, so a line break cannot submit anything. ``keys``
+    mode sends one real key event per character, for widgets that only listen to key presses.
+    In the shared pane every chunk is a separate step: the owner's own key, click or scroll in the
+    tab stops the typing before the next chunk, and the error says how far it got."""
+    claim = claim or _NoClaim(page)
+    check_num = num  # whose focus is re-checked between chunks; None means "the same kind of focus"
     if num is not None:
         res = await _id_prepare(page, num, "type", {"clear": bool(clear)})
         tag = res.get("tag", "")
+        multiline = bool(res.get("multiline"))
         who = f"e{num} ({res.get('name', '')!r})"
+        if res.get("focused") is False and res.get("clickAt"):
+            # An editor surface that takes focus only from a click (a canvas editor): click it,
+            # as a person would, then type into whatever the editor focused (its text frame).
+            await claim.check()
+            at = res["clickAt"]
+            async with claim.pointing(at["x"], at["y"]):
+                await page.mouse.click(at["x"], at["y"])
+            await asyncio.sleep(0.05)
+            state = await _world_call(page, "focusState", {}, fresh_ok=True)
+            if not state or not state.get("has") or state.get("editable") is False:
+                raise RuntimeError(f"BROWSER TYPE FAILED: clicking e{num} did not put a text cursor anywhere. Nothing was typed.")
+            res = {**res, "focused": True, "frame": bool(state.get("frame"))}
+            tag, multiline = state.get("tag", ""), bool(state.get("multiline"))
         if res.get("focused") is False:
             raise RuntimeError(f"BROWSER TYPE FAILED: element e{num} would not take focus.")
+        if res.get("frame"):
+            who = f"{who} through its editor frame"
+            check_num, tag = None, "iframe"
     else:
+        if clear:
+            raise RuntimeError("ERROR: clear needs a target (an element id from browser_snapshot).")
         state = await _world_call(page, "focusState", {}, fresh_ok=True)
         if not state or not state.get("has"):
-            raise RuntimeError("ERROR: nothing has focus; pass a target (an element id from browser_snapshot).")
-        tag, who = state.get("tag", ""), "the focused element"
-    if ("\n" in text or "\r" in text) and tag not in _MULTILINE_TAGS:
-        raise RuntimeError(
-            "REFUSED: a line break was typed into something that is not a <textarea>: Enter would "
-            "submit or send. Use browser_press Enter (it asks for confirmation) for that."
-        )
-    await page.keyboard.type(text, delay=max(0, min(delay_ms, 500)))
+            raise RuntimeError("ERROR: nothing has focus; pass a target (an element id from browser_snapshot), or click into the editor first.")
+        tag, multiline = state.get("tag", ""), bool(state.get("multiline"))
+        if mode == "text" and state.get("editable") is False:
+            raise RuntimeError(
+                f"ERROR: the focused element (<{tag}>{' in a frame' if state.get('frame') else ''}) does not take text, "
+                "so nothing would arrive. Click into the field or editor first, or use mode 'keys' for a widget "
+                "that listens to key presses. Nothing was typed."
+            )
+        who = "the focused element"
+        if state.get("frame"):
+            inner = state.get("inner") or ""
+            who = f"the focused element inside a frame{' (' + inner + ')' if inner else ''}"
+    if "\n" in text or "\r" in text:
+        if mode == "keys" and tag not in _MULTILINE_TAGS:
+            raise RuntimeError(
+                "REFUSED: a line break was typed into something that is not a <textarea>: in keys mode "
+                "Enter would submit or send. Use the default text mode for an editor, or browser_press "
+                "Enter (it asks for confirmation)."
+            )
+        if mode == "text" and not multiline:
+            raise RuntimeError(
+                f"REFUSED: a line break was asked for in a one-line field (<{tag or 'input'}>): it would be lost "
+                "or turned into a space. Line breaks go into a <textarea>, a contenteditable editor or an "
+                "editor frame. Nothing was typed."
+            )
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    await claim.check()
+    done = 0
+    try:
+        if mode == "keys":
+            delay = max(0, min(delay_ms, 500))
+            for start in range(0, len(text), _TYPE_CHUNK):
+                chunk = text[start : start + _TYPE_CHUNK]
+                if start:
+                    await claim.check()
+                    await _focus_still(page, check_num, tag, claim)
+                await page.keyboard.type(chunk, delay=delay)
+                done += len(chunk)
+        else:
+            pause = max(0, min(delay_ms, 500)) / 1000.0
+            for start in range(0, len(text), _TYPE_CHUNK):
+                chunk = text[start : start + _TYPE_CHUNK]
+                if start:
+                    await _focus_still(page, check_num, tag, claim)
+                await claim.insert(chunk)
+                done += len(chunk)
+                if pause and done < len(text):
+                    await asyncio.sleep(pause)
+    except _OwnerControl as exc:
+        raise exc.with_progress(_progress(done, len(text), who, text)) from None
     return who
 
 
@@ -957,13 +1330,14 @@ def browser_open(arguments: dict[str, Any]) -> str:
 
     async def _go():
         page = await _ensure_browser()
-        try:
-            await page.goto(url, timeout=30_000, wait_until="domcontentloaded")
-        except Exception as exc:  # noqa: BLE001 - navigation failures, readable
-            _log("open", f"{url} -> {type(exc).__name__}")
-            raise RuntimeError(
-                f"BROWSER OPEN FAILED: {type(exc).__name__}: {exc} (url={url})"
-            ) from exc
+        async with _acting(page, "open"):
+            try:
+                await page.goto(url, timeout=30_000, wait_until="domcontentloaded")
+            except Exception as exc:  # noqa: BLE001 - navigation failures, readable
+                _log("open", f"{url} -> {type(exc).__name__}")
+                raise RuntimeError(
+                    f"BROWSER OPEN FAILED: {type(exc).__name__}: {exc} (url={url})"
+                ) from exc
         return await _page_summary(page)
 
     _log("open", url)
@@ -989,18 +1363,20 @@ def browser_fill(arguments: dict[str, Any]) -> str:
 
     async def _fill():
         page = await _ensure_browser()
-        num = _element_id(target)
-        if num is not None:
-            res = await _fill_by_id(page, num, str(value))
-            return f"FILLED e{num} ({res.get('name', '')!r}) (via element id)."
-        loc, how = await _find(page, target)
-        try:
-            await loc.fill(str(value), timeout=8_000)
-        except Exception as exc:  # noqa: BLE001 - element may be read-only etc
-            raise RuntimeError(
-                f"BROWSER FILL FAILED: {type(exc).__name__}: {exc} (target={target!r})"
-            ) from exc
-        return f"FILLED {target!r} (via {how})."
+        async with _acting(page, "fill") as claim:
+            num = _element_id(target)
+            if num is not None:
+                res = await _fill_by_id(page, num, str(value), claim)
+                return f"FILLED e{num} ({res.get('name', '')!r}) (via element id)."
+            loc, how = await _find(page, target)
+            await claim.check()
+            try:
+                await loc.fill(str(value), timeout=8_000)
+            except Exception as exc:  # noqa: BLE001 - element may be read-only etc
+                raise RuntimeError(
+                    f"BROWSER FILL FAILED: {type(exc).__name__}: {exc} (target={target!r})"
+                ) from exc
+            return f"FILLED {target!r} (via {how})."
 
     _log("fill", f"{target!r} <- ({len(str(value))} characters)")
     return _call(_fill)
@@ -1016,20 +1392,31 @@ def browser_fill_form(arguments: dict[str, Any]) -> str:
 
     async def _fill():
         page = await _ensure_browser()
-        for label, value in fields.items():
-            num = _element_id(str(label))
-            if num is not None:
-                await _fill_by_id(page, num, str(value))
-                done.append(f"{label} (via element id)")
-                continue
-            loc, how = await _find(page, str(label))
+        async with _acting(page, "fill_form") as claim:
             try:
-                await loc.fill(str(value), timeout=8_000)
-                done.append(f"{label} (via {how})")
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(
-                    f"BROWSER FILL FORM FAILED on {label!r}: {type(exc).__name__}: {exc}"
-                ) from exc
+                for label, value in fields.items():
+                    await claim.check()  # the owner may have started on this form: stop between fields
+                    num = _element_id(str(label))
+                    if num is not None:
+                        await _fill_by_id(page, num, str(value), claim)
+                        done.append(f"{label} (via element id)")
+                        continue
+                    loc, how = await _find(page, str(label))
+                    try:
+                        await loc.fill(str(value), timeout=8_000)
+                        done.append(f"{label} (via {how})")
+                    except Exception as exc:  # noqa: BLE001
+                        raise RuntimeError(
+                            f"BROWSER FILL FORM FAILED on {label!r}: {type(exc).__name__}: {exc}"
+                        ) from exc
+            except _OwnerControl as exc:
+                filled = [d.split(" (via ")[0] for d in done]
+                rest = [str(k) for k in fields if str(k) not in filled]
+                raise exc.with_progress(
+                    f"Filled {len(filled)} of {len(fields)} fields"
+                    + (f" ({', '.join(filled)})" if filled else "")
+                    + f"; NOT filled: {', '.join(rest)}."
+                ) from None
         return f"FILLED {len(done)} fields: " + ", ".join(done) + "."
 
     _log("fill_form", f"{len(fields)} fields")
@@ -1042,20 +1429,25 @@ def browser_click(arguments: dict[str, Any]) -> str:
     async def _click():
         page = await _ensure_browser()
         mark = _action_mark()
-        num = _element_id(target)
-        if num is not None:
-            res = await _click_by_id(page, num)
-            what, how = f"e{num} ({res.get('name', '')!r})", "element id"
-        else:
-            loc, how = await _find(page, target)
-            what = repr(target)
-            try:
-                await loc.click(timeout=8_000)
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(
-                    f"BROWSER CLICK FAILED: {type(exc).__name__}: {exc} (target={target!r})"
-                ) from exc
-        page = await _settle_after_action(page, mark)
+        async with _acting(page, "click") as claim:
+            num = _element_id(target)
+            if num is not None:
+                res = await _click_by_id(page, num, claim)
+                what, how = f"e{num} ({res.get('name', '')!r})", "element id"
+            else:
+                loc, how = await _find(page, target)
+                what = repr(target)
+                await claim.check()
+                try:
+                    async with claim.pointing():
+                        await loc.click(timeout=8_000)
+                except _OwnerControl:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError(
+                        f"BROWSER CLICK FAILED: {type(exc).__name__}: {exc} (target={target!r})"
+                    ) from exc
+            page = await _settle_after_action(page, mark)
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=15_000)
         except Exception:  # noqa: BLE001 - a click need not navigate
@@ -1074,29 +1466,36 @@ def browser_select(arguments: dict[str, Any]) -> str:
 
     async def _select():
         page = await _ensure_browser()
-        num = _element_id(target)
-        if num is not None:
-            res = await _id_prepare(page, num, "select", {"value": value})
-            return f"SELECTED {res.get('chose', value)!r} on e{num} ({res.get('name', '')!r}) (via element id)."
-        loc, how = await _find(page, target)
-        try:
-            await loc.select_option(value, timeout=8_000)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(
-                f"BROWSER SELECT FAILED: {type(exc).__name__}: {exc} (target={target!r})"
-            ) from exc
-        return f"SELECTED {value!r} on {target!r} (via {how})."
+        async with _acting(page, "select") as claim:
+            num = _element_id(target)
+            if num is not None:
+                res = await _id_prepare(page, num, "select", {"value": value})
+                return f"SELECTED {res.get('chose', value)!r} on e{num} ({res.get('name', '')!r}) (via element id)."
+            loc, how = await _find(page, target)
+            await claim.check()
+            try:
+                await loc.select_option(value, timeout=8_000)
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"BROWSER SELECT FAILED: {type(exc).__name__}: {exc} (target={target!r})"
+                ) from exc
+            return f"SELECTED {value!r} on {target!r} (via {how})."
 
     _log("select", f"{target!r} <- {value}")
     return _call(_select)
 
 
 def browser_type(arguments: dict[str, Any]) -> str:
-    """Type text into an element the way a person does: real key events, one per character,
-    appended at the caret (or replacing everything when ``clear`` is true). ``target`` is an
-    element id from browser_snapshot; without one the text goes to whatever has focus. Use this
-    where browser_fill does not reach: editors that listen for key events, search boxes that
-    suggest as you type. A line break is only typed into a textarea."""
+    """Type text into an element, appended at the caret (or replacing everything when ``clear``
+    is true). ``target`` is an element id from browser_snapshot; without one the text goes to
+    whatever has focus, which is how a Google Docs style editor is reached (it types through a
+    hidden frame). Use this where browser_fill does not reach.
+
+    ``mode`` "text" (default) inserts the text as an input method does, in short chunks: it works
+    in editors that take no value and it never presses Enter, so a line break cannot submit.
+    ``mode`` "keys" sends a real key event per character, for widgets that only listen to key
+    presses; a line break then goes only into a textarea. In the shared pane the owner's own
+    input in the tab stops the typing between chunks, and the result says how far it got."""
     target = (arguments.get("target") or "").strip()
     text = arguments.get("text", arguments.get("value"))
     if text is None:
@@ -1105,6 +1504,9 @@ def browser_type(arguments: dict[str, Any]) -> str:
     if len(text) > 5000:
         return "REFUSED: browser_type accepts at most 5000 characters per call."
     clear = bool(arguments.get("clear", False))
+    mode = str(arguments.get("mode") or "text").strip().lower()
+    if mode not in _TYPE_MODES:
+        return "ERROR: browser_type mode must be 'text' (default) or 'keys'."
     try:
         delay_ms = int(arguments.get("delay_ms", 20))
     except (TypeError, ValueError):
@@ -1118,11 +1520,12 @@ def browser_type(arguments: dict[str, Any]) -> str:
 
     async def _type():
         page = await _ensure_browser()
-        who = await _type_text(page, num, text, clear, delay_ms)
+        async with _acting(page, "type") as claim:
+            who = await _type_text(page, num, text, clear, delay_ms, mode, claim)
         return f"TYPED {len(text)} characters into {who}."
 
-    _log("type", f"{target or 'focus'} <- ({len(text)} characters)")
-    return _call(_type)
+    _log("type", f"{target or 'focus'} <- ({len(text)} characters, {mode} mode)")
+    return _call(_type, timeout=max(60.0, 30.0 + len(text) * max(0, min(delay_ms, 500)) / 1000.0 * (1 if mode == "keys" else 1 / _TYPE_CHUNK)))
 
 
 def browser_press(arguments: dict[str, Any]) -> str:
@@ -1133,13 +1536,14 @@ def browser_press(arguments: dict[str, Any]) -> str:
     async def _press():
         page = await _ensure_browser()
         mark = _action_mark()
-        try:
-            await page.keyboard.press(key, timeout=8_000)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(
-                f"BROWSER PRESS FAILED: {type(exc).__name__}: {exc} (key={key!r})"
-            ) from exc
-        page = await _settle_after_action(page, mark)
+        async with _acting(page, "press"):
+            try:
+                await page.keyboard.press(key, timeout=8_000)
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"BROWSER PRESS FAILED: {type(exc).__name__}: {exc} (key={key!r})"
+                ) from exc
+            page = await _settle_after_action(page, mark)
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=15_000)
         except Exception:  # noqa: BLE001
@@ -1158,27 +1562,30 @@ def browser_submit(arguments: dict[str, Any]) -> str:
         page = await _ensure_browser()
         mark = _action_mark()
         url_before = page.url
-        # Prefer Enter on the focused field, else click the submit control.
-        try:
-            focused = await page.evaluate("document.activeElement && document.activeElement.tagName")
-        except Exception:  # noqa: BLE001
-            focused = None
-        if focused in ("INPUT", "TEXTAREA", "SELECT"):
-            await page.keyboard.press("Enter", timeout=8_000)
-        else:
-            sub = page.locator(
-                "button[type='submit'], input[type='submit'], "
-                "button:has-text('Sign in'), button:has-text('Log in'), "
-                "button:has-text('Create account'), button:has-text('Continue')"
-            )
-            if await sub.count() > 0:
-                await sub.first.click(timeout=8_000)
+        async with _acting(page, "submit") as claim:
+            # Prefer Enter on the focused field, else click the submit control.
+            try:
+                focused = await page.evaluate("document.activeElement && document.activeElement.tagName")
+            except Exception:  # noqa: BLE001
+                focused = None
+            await claim.check()
+            if focused in ("INPUT", "TEXTAREA", "SELECT"):
+                await page.keyboard.press("Enter", timeout=8_000)
             else:
-                raise RuntimeError(
-                    "ERROR: no submit control found — nothing was submitted. "
-                    "Use browser_snapshot to inspect the form."
+                sub = page.locator(
+                    "button[type='submit'], input[type='submit'], "
+                    "button:has-text('Sign in'), button:has-text('Log in'), "
+                    "button:has-text('Create account'), button:has-text('Continue')"
                 )
-        page = await _settle_after_action(page, mark)
+                if await sub.count() > 0:
+                    async with claim.pointing():
+                        await sub.first.click(timeout=8_000)
+                else:
+                    raise RuntimeError(
+                        "ERROR: no submit control found, so nothing was submitted. "
+                        "Use browser_snapshot to inspect the form."
+                    )
+            page = await _settle_after_action(page, mark)
         try:
             await page.wait_for_load_state("networkidle", timeout=20_000)
         except Exception:  # noqa: BLE001 - networkidle is best-effort
@@ -1211,10 +1618,11 @@ def browser_wait(arguments: dict[str, Any]) -> str:
 def browser_back(arguments: dict[str, Any]) -> str:
     async def _back():
         page = await _ensure_browser()
-        try:
-            await page.go_back(timeout=15_000)
-        except Exception:  # noqa: BLE001
-            pass
+        async with _acting(page, "back"):
+            try:
+                await page.go_back(timeout=15_000)
+            except Exception:  # noqa: BLE001
+                pass
         return await _page_summary(page)
 
     _log("back", "go back")
@@ -1240,6 +1648,137 @@ def browser_extract(arguments: dict[str, Any]) -> str:
 
     _log("extract", target)
     return _call(_extract)
+
+
+# --------------------------------------------------------------------------- #
+# Media control (phase C2): YouTube and any page with a <video> or <audio>
+# --------------------------------------------------------------------------- #
+
+_MEDIA_ACTIONS = ("status", "play", "pause", "seek", "mute", "unmute", "volume")
+_TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)\s*$")
+
+
+def _seconds(value: Any) -> float | None:
+    """A time as seconds: a number, "83.5", "1:23" or "1:02:03"."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    m = _TIME_RE.match(text)
+    if m:
+        h, mi, s = m.group(1), m.group(2), m.group(3)
+        return int(h or 0) * 3600 + int(mi) * 60 + float(s)
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _clock(sec: Any) -> str:
+    if not isinstance(sec, (int, float)):
+        return "unknown"
+    total = int(sec)
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _media_report(st: dict[str, Any], did: str) -> str:
+    if not st.get("found"):
+        return (
+            f"NO MEDIA: there is no <video> or <audio> on this page ({st.get('url') or 'no page'}). "
+            "Open a video page first (for YouTube, a watch page: https://www.youtube.com/watch?v=...)."
+        )
+    where = "YouTube video" if st.get("youtube") else st.get("kind", "media")
+    dur = st.get("duration")
+    lines = [
+        f"MEDIA ({where}): {st.get('title') or '(no title)'!r}",
+        f"TIME: {_clock(st.get('currentTime'))} of {_clock(dur) if dur is not None else 'a live stream or unknown length'}"
+        f" ({st.get('currentTime')}s of {dur if dur is not None else '?'}s)",
+        "STATE: " + ", ".join(
+            [
+                "ended" if st.get("ended") else ("paused" if st.get("paused") else "playing"),
+                "muted" if st.get("muted") else "sound on",
+                f"volume {round(float(st.get('volume') or 0) * 100)}%",
+            ]
+            + ([f"speed {st.get('rate')}x"] if st.get("rate") not in (1, 1.0, None) else [])
+        ),
+    ]
+    if st.get("ad"):
+        lines.append("NOTE: an advert is playing in the YouTube player; the time and length are the advert's.")
+    if st.get("ytMuted") is not None and bool(st.get("ytMuted")) != bool(st.get("muted")):
+        lines.append(f"NOTE: YouTube's own mute button says {'muted' if st.get('ytMuted') else 'sound on'}, the video element says {'muted' if st.get('muted') else 'sound on'}.")
+    if (st.get("count") or 0) > 1:
+        lines.append(f"({st['count']} media elements on the page; this is the main one.)")
+    if did:
+        lines.insert(0, did)
+    if st.get("error"):
+        lines.append(f"PROBLEM: {st['error']}")
+    lines.append(f"URL: {st.get('url', '')}")
+    return "\n".join(lines)
+
+
+def browser_media(arguments: dict[str, Any]) -> str:
+    """Control the main video or audio on the current page (a YouTube watch page included):
+    ``action`` is status, play, pause, seek, mute, unmute or volume. ``seek`` takes ``to`` (seconds
+    or "m:ss") or ``by`` (seconds, negative goes back); ``volume`` takes ``level`` 0 to 100. Works
+    through the page's own HTML5 media element: no YouTube API, no key. Status only reads; every
+    other action is a change to the owner's tab and waits for the owner like any browser action."""
+    action = str(arguments.get("action") or "status").strip().lower()
+    if action not in _MEDIA_ACTIONS:
+        return f"ERROR: browser_media action must be one of {', '.join(_MEDIA_ACTIONS)}."
+    params: dict[str, Any] = {}
+    if action == "seek":
+        if arguments.get("by") is not None:
+            by = _seconds(arguments.get("by"))
+            if by is None:
+                return "ERROR: browser_media seek 'by' must be a number of seconds (negative goes back)."
+            params["by"] = by
+        else:
+            to = _seconds(arguments.get("to", arguments.get("seconds")))
+            if to is None or to < 0:
+                return "ERROR: browser_media seek needs 'to' (seconds or m:ss) or 'by' (seconds)."
+            params["to"] = to
+    if action == "volume":
+        try:
+            level = float(str(arguments.get("level")))
+        except (TypeError, ValueError):
+            return "ERROR: browser_media volume needs 'level' from 0 to 100."
+        if not 0 <= level <= 100:
+            return "ERROR: browser_media volume 'level' must be from 0 to 100."
+        params["level"] = level
+
+    async def _media():
+        page = await _ensure_browser()
+        if action == "status":
+            st = await _world_call(page, "status", {}, fresh_ok=True, api="__dmMedia")
+            return _media_report(st or {}, "")
+        async with _acting(page, f"media_{action}"):
+            st = await _world_call(page, action, params, fresh_ok=True, api="__dmMedia")
+        st = st or {}
+        if not st.get("found"):
+            return _media_report(st, "")
+        did = {
+            "play": "PLAYING." if not st.get("paused") else "ASKED TO PLAY, but it is still paused (see PROBLEM).",
+            "pause": "PAUSED." if st.get("paused") else "ASKED TO PAUSE, but it is still playing.",
+            "seek": (
+                f"SOUGHT to {_clock(st.get('currentTime'))}."
+                if st.get("landed")
+                else f"ASKED TO SEEK to {_clock(st.get('seekedTo'))}, but it is at {_clock(st.get('currentTime'))} (see PROBLEM)."
+            ),
+            "mute": "MUTED." if st.get("muted") and st.get("held", True) else "ASKED TO MUTE, but it is not muted (see PROBLEM).",
+            "unmute": "UNMUTED." if not st.get("muted") and st.get("held", True) else "ASKED TO UNMUTE, but it is still muted (see PROBLEM).",
+            "volume": (
+                f"VOLUME set to {round(float(st.get('volume') or 0) * 100)}%."
+                if st.get("held", True)
+                else f"ASKED FOR VOLUME {round(params.get('level', 0))}%, but it is {round(float(st.get('volume') or 0) * 100)}% (see PROBLEM)."
+            ),
+        }[action]
+        return _media_report(st, did)
+
+    _log("media", action)
+    return _call(_media)
 
 
 def browser_pane_show(arguments: dict[str, Any]) -> str:
@@ -1439,6 +1978,10 @@ def browser_signin(arguments: dict[str, Any]) -> str:
 
     async def _signin():
         page = await _ensure_browser()
+        async with _acting(page, "signin") as claim:
+            return await _signin_steps(page, claim)
+
+    async def _signin_steps(page: Any, claim: _NoClaim) -> str:
         await page.goto(site, timeout=30_000, wait_until="domcontentloaded")
         # Username field: email/username/text inputs, labeled or placeholder.
         user_sel = (
@@ -1456,7 +1999,9 @@ def browser_signin(arguments: dict[str, Any]) -> str:
                 "Use browser_snapshot to see the real form, then drive it with "
                 "browser_fill / browser_click / browser_submit."
             )
+        await claim.check()
         await user_loc.first.fill(creds["username"], timeout=8_000)
+        await claim.check()
         await pw_loc.first.fill(creds["password"], timeout=8_000)
         url_before = page.url
         mark = _action_mark()
@@ -1464,8 +2009,10 @@ def browser_signin(arguments: dict[str, Any]) -> str:
             "button[type='submit'], input[type='submit'], button:has-text('Sign in'), "
             "button:has-text('Log in'), button:has-text('Continue')"
         )
+        await claim.check()
         if await sub.count() > 0:
-            await sub.first.click(timeout=8_000)
+            async with claim.pointing():
+                await sub.first.click(timeout=8_000)
         else:
             await page.keyboard.press("Enter", timeout=8_000)
         page = await _settle_after_action(page, mark)

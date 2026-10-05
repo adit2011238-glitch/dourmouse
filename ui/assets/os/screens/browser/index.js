@@ -31,6 +31,7 @@ import { html, setHtml, raw } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
 import { confirmHere } from '../../kit/confirm-card.js';
 import { createPrivacy } from './privacy-ui.js';
+import { createControl } from './control-ui.js';
 import { createManage } from './manage-ui.js';
 import { profileLabel } from './manage-model.js';
 import { ago, clock } from '../../kit/format.js';
@@ -101,6 +102,7 @@ export default {
     const hasB1 = Boolean(pane) && typeof pane.newTab === 'function' && typeof pane.onDownloads === 'function'; /* an older shell has the pane but not tabs */
     const hasB2 = hasB1 && Boolean(pane.privacy) && typeof pane.privacy.state === 'function'; /* an older shell has tabs but not permissions and passwords */
     const hasB3 = hasB2 && Boolean(pane.manage) && Boolean(pane.manage.extensions) && Boolean(pane.manage.profiles); /* an older shell has no extensions, profiles or import */
+    const hasC2 = hasB1 && Boolean(pane.control) && typeof pane.control.state === 'function'; /* an older shell has no owner/model lock */
 
     /* ---------------- state ---------------- */
     let disposed = false;
@@ -153,6 +155,8 @@ export default {
     let panelHandle = null; /* the open Site settings or Passwords panel, so closing it can wipe what it showed */
     let privacyUi = null;
     let manageUi = null;
+    let controlUi = null; /* Phase C2: who has the browser, and Stop and Take control */
+    let offControl = null;
     const panelRoot = el('div', 'bw-panel');
     const MOD = /Mac/i.test(String(globalThis.navigator && globalThis.navigator.platform)) ? 'Meta' : 'Ctrl';
 
@@ -204,6 +208,7 @@ export default {
           </div>
           <div class="cb-bm" id="bwBm" role="toolbar" aria-label="Bookmarks" hidden></div>
           <div class="cb-privacy-slot" id="bwPrivacy"></div>
+          <div class="cb-control-slot" id="bwControl"></div>
           <div class="bw-proxy" id="bwProxy" hidden></div>
           <div class="cb-page" id="bwPage" data-region></div>
           <div class="cb-watch" id="bwWatch" data-region></div>
@@ -236,6 +241,7 @@ export default {
     const profBtn = $('bwProf');
     const profName = $('bwProfName');
     const privacySlot = $('bwPrivacy');
+    const controlSlot = $('bwControl');
     const findBar = $('bwFind');
     const findInput = $('bwFindInput');
     const findCount = $('bwFindCount');
@@ -1350,6 +1356,10 @@ export default {
       if (panelHandle) panelHandle.dispose();
       panelHandle = null;
       if (privacyUi) privacyUi.dispose();
+      if (typeof offControl === 'function') offControl();
+      offControl = null;
+      if (controlUi) controlUi.dispose();
+      controlUi = null;
       manageUi = null;
       if (histTimer) clearTimeout(histTimer);
       if (offFindEsc) offFindEsc();
@@ -1470,6 +1480,14 @@ export default {
           if (!disposed) privacyUi.update(s);
         });
         Promise.resolve(pane.privacy.state()).then((s) => { if (!disposed && s) privacyUi.update(s); }).catch((err) => paneFailed(err));
+      }
+      if (hasC2) {
+        controlUi = createControl({ control: pane.control, note });
+        controlSlot.replaceChildren(controlUi.root);
+        offControl = pane.control.onUpdate((s) => {
+          if (!disposed && controlUi) controlUi.update(s);
+        });
+        Promise.resolve(pane.control.state()).then((s) => { if (!disposed && controlUi && s) controlUi.update(s); }).catch((err) => paneFailed(err));
       }
       if (hasB3) manageUi = createManage({ manage: pane.manage, note, onChange: () => loadBookmarks() });
       Promise.resolve(pane.downloads()).then(onDownloads).catch((err) => paneFailed(err));

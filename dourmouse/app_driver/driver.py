@@ -274,7 +274,7 @@ def act(snapshot_id: str, element_id: str, action: str, *, text: str | None = No
         if action == "click" and not fresh.get("enabled", True):
             raise AppDriverError("invalid", f"{describe(snapshot_id, element_id)} is disabled.")
         if action == "type":
-            safety.check_typed_text(text, fresh)
+            safety.check_typed_text(text or "", fresh)
         if action == "scroll":
             if direction not in ("up", "down", "left", "right"):
                 raise AppDriverError("invalid", "direction must be up, down, left or right.")
@@ -293,7 +293,7 @@ def act(snapshot_id: str, element_id: str, action: str, *, text: str | None = No
                 detail = f"clicked {target}"
             elif action == "type":
                 backend.focus(pid, fresh["handle"])
-                typed = _type(backend, pid, text, app_name)
+                typed = _type(backend, pid, text or "", app_name)
                 detail = f"typed {typed} character(s) into {target}"
             else:
                 orientation = "vertical" if direction in ("up", "down") else "horizontal"

@@ -388,7 +388,7 @@ def highlights_write(req: Request) -> tuple[int, dict[str, Any]]:
         mine = list(everything.get(key, []))
         if op == "add":
             try:
-                page = int(body.get("page"))
+                page = int(body.get("page"))  # type: ignore[arg-type]  # None raises TypeError, handled below
             except (TypeError, ValueError):
                 raise ApiError(400, "page must be a whole number (0 is the first page)") from None
             if not 0 <= page < 100000:
@@ -487,7 +487,7 @@ def queue_write(req: Request) -> tuple[int, dict[str, Any]]:
             paths.remove(key)
             if op == "move":
                 try:
-                    to = int(body.get("to"))
+                    to = int(body.get("to"))  # type: ignore[arg-type]  # None raises TypeError, handled below
                 except (TypeError, ValueError):
                     raise ApiError(400, "to must be a whole number index") from None
                 paths.insert(max(0, min(to, len(paths))), key)

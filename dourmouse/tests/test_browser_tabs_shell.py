@@ -493,7 +493,7 @@ def _run(tmp_path: Path, scenario: str) -> dict:
     script = tmp_path / "scenario.js"
     script.write_text(PRELUDE + scenario, encoding="utf-8")
     env = {**os.environ, "T_MAIN": str(ELECTRON / "main.js"), "DOURMOUSE_ELECTRON_PANE_PORT": str(_free_port())}
-    proc = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=90, env=env, check=False)
+    proc = subprocess.run([str(NODE), str(script)], capture_output=True, text=True, timeout=90, env=env, check=False)
     lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT:")]
     assert lines, f"the scenario printed no result\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
     data = json.loads(lines[-1][len("RESULT:") :])

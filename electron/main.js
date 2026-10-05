@@ -1281,8 +1281,13 @@ function wireTab(tab) {
     return { action: "deny" };
   });
   wc.on("before-input-event", (event, input) => {
+    // Phase C2: a key press that raises before-input-event is the owner's own (the browser agent's
+    // CDP key events never raise it, measured on Electron 44.3), so the owner takes the tab.
+    if (input.type === "keyDown") noteOwnerInput(tab, "key");
     if (input.type === "keyDown" && handlePaneShortcut(tab, input)) event.preventDefault();
   });
+  // Phase C2: a click, scroll or touch is the owner's unless the agent declared it is clicking.
+  wc.on("input-event", (_evt, input) => onPaneInputEvent(tab, input));
 }
 
 function openTab(url, { background = false, afterId = 0, at: wantedAt, opener = 0 } = {}) {
@@ -1851,6 +1856,238 @@ async function downloadAction(id, action) {
   }
   return { ok: false, error: "unknown action" };
 }
+
+// ------------------------- shared control (phase C2) ------------------------- //
+// The owner and the browser agent share the pane, and the owner's real input always wins. Design:
+// ~/Documents/DOURMOUSE/C2_SHARED_CONTROL_DESIGN.md. Measured on Electron 44.3 before relying on
+// it: a CDP key event (the agent's) never raises before-input-event and an OS key press does; a
+// CDP click and a real click look the same in input-event, so the agent declares a short pointer
+// window around each click it sends; the agent's text goes in through /control/type
+// (webContents.insertText), which raises no input event at all. Whatever the agent did not
+// declare counts as the owner's, so a mistake makes the model back off, never push through.
+
+const CONTROL_OWNER_HOLD_MS = 2500; // the owner touched the tab this recently: no agent action starts there
+const CONTROL_LEASE_MS = 60000; // an action not heard from for this long is over (the agent died)
+const CONTROL_POINTER_MAX_MS = 3000; // a pointer window the agent never closed closes itself
+const CONTROL_POINTER_GRACE_MS = 150;
+const CONTROL_POINTER_SLOP_PX = 12;
+const CONTROL_TYPE_MAX = 512; // characters per /control/type call
+const OWNER_POINTER_EVENTS = new Set(["mouseDown", "mouseWheel", "touchStart", "gestureTapDown", "gesturePinchBegin"]);
+const CONTROL_NAVIGATING_TOOLS = new Set(["open", "back", "submit", "signin"]);
+const CONTROL_TOOL_RE = /^[a-z_]{1,24}$/;
+const CONTROL_OUTCOMES = new Set(["done", "error", "owner-input", "stopped", "owner-control", "no-tab", "expired", "focus-moved"]);
+const control = {
+  held: false, // the owner pressed Take control: nothing starts until Let the model act
+  lastOwner: new Map(), // tab id -> when the owner last pressed a key, clicked, scrolled or touched there
+  actions: new Map(), // action id -> the agent's claim on one tab
+  waiting: null, // { tabId, tool, until } while the agent waits for the owner to pause
+  last: null, // { tool, outcome, at }: the last action that ended, for the console's note
+};
+let controlPushTimer = null;
+let controlExpiryTimer = null;
+
+function controlSweep(now) {
+  for (const [id, a] of control.actions) {
+    if (now - a.seen > CONTROL_LEASE_MS) {
+      control.actions.delete(id);
+      control.last = { tool: a.tool, outcome: "expired", at: now };
+    }
+  }
+  for (const [id, t] of control.lastOwner) {
+    if (now - t >= CONTROL_OWNER_HOLD_MS || !tabs.has(id)) control.lastOwner.delete(id);
+  }
+  if (control.waiting && control.waiting.until <= now) control.waiting = null;
+}
+
+function controlState() {
+  controlSweep(Date.now());
+  if (control.held) return "owner-control";
+  if (control.actions.size) return "model-acting";
+  if (control.waiting) return "model-waiting";
+  if (control.lastOwner.size) return "owner-active";
+  return "idle";
+}
+
+// The bridge's view: the state and counts only (no tab title, address or text).
+function controlBridgeView() {
+  const state = controlState();
+  return {
+    ok: true, state, held: control.held, acting: control.actions.size, waiting: Boolean(control.waiting),
+    ownerActiveTabs: control.lastOwner.size, ownerHoldMs: CONTROL_OWNER_HOLD_MS,
+  };
+}
+
+// The console's view: which tab and which tool, so the bar can say what is happening.
+function controlConsoleView() {
+  const state = controlState();
+  return {
+    state, held: control.held, activeTab: activeTabId,
+    acting: [...control.actions.values()].map((a) => ({ tabId: a.tabId, tool: a.tool, since: a.since, interrupted: a.interrupted ? a.interrupted.kind : "", stopped: a.stopped || "" })),
+    waiting: control.waiting ? { tabId: control.waiting.tabId, tool: control.waiting.tool } : null,
+    ownerTabs: [...control.lastOwner.keys()],
+    last: control.last ? { ...control.last } : null,
+  };
+}
+
+function pushControlNow() {
+  controlPushTimer = null;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pane:control", controlConsoleView());
+}
+function pushControl() {
+  if (!controlPushTimer) controlPushTimer = setTimeout(pushControlNow, 40);
+}
+// The bar changes by itself when the owner's hold or the agent's wait lapses: one timer for the next lapse.
+function armControlExpiry() {
+  if (controlExpiryTimer) clearTimeout(controlExpiryTimer);
+  const now = Date.now();
+  let next = Infinity;
+  for (const t of control.lastOwner.values()) next = Math.min(next, t + CONTROL_OWNER_HOLD_MS);
+  if (control.waiting) next = Math.min(next, control.waiting.until);
+  for (const a of control.actions.values()) next = Math.min(next, a.seen + CONTROL_LEASE_MS + 1);
+  if (next === Infinity) { controlExpiryTimer = null; return; }
+  controlExpiryTimer = setTimeout(() => {
+    controlExpiryTimer = null;
+    pushControl();
+    armControlExpiry();
+  }, Math.max(20, next - now + 20));
+  if (typeof controlExpiryTimer.unref === "function") controlExpiryTimer.unref();
+}
+
+// The owner's own input on a pane tab. Every action the agent holds on that tab is interrupted at
+// once, here, in the one event loop that also applies the agent's text: its next step is refused.
+function noteOwnerInput(tab, kind) {
+  if (!tab || tabs.get(tab.id) !== tab) return;
+  const now = Date.now();
+  const first = !control.lastOwner.has(tab.id);
+  control.lastOwner.set(tab.id, now);
+  let hit = false;
+  for (const a of control.actions.values()) {
+    if (a.tabId === tab.id && !a.interrupted && !a.stopped) {
+      a.interrupted = { kind, at: now };
+      hit = true;
+    }
+  }
+  if (first || hit) pushControl();
+  armControlExpiry();
+}
+
+function agentPointerOpen(tab, input, now) {
+  for (const a of control.actions.values()) {
+    if (a.tabId !== tab.id || !a.pointer || a.pointer.until < now) continue;
+    const at = a.pointer.at;
+    if (!at || input.type !== "mouseDown" || !Number.isFinite(input.x) || !Number.isFinite(input.y)) return true;
+    // The agent names its point in CSS pixels; the event carries widget pixels (CSS times the zoom).
+    const wc = liveContents(tab);
+    const zoom = wc ? wc.getZoomFactor() : 1;
+    for (const s of [1, zoom]) {
+      if (Math.abs(input.x - at.x * s) <= CONTROL_POINTER_SLOP_PX && Math.abs(input.y - at.y * s) <= CONTROL_POINTER_SLOP_PX) return true;
+    }
+  }
+  return false;
+}
+
+function onPaneInputEvent(tab, input) {
+  if (!input || !OWNER_POINTER_EVENTS.has(input.type)) return; // key events: see before-input-event
+  if (agentPointerOpen(tab, input, Date.now())) return;
+  noteOwnerInput(tab, input.type === "mouseWheel" ? "scroll" : input.type === "mouseDown" ? "click" : "touch");
+}
+
+// Why an action may not take its next step, or null when it may.
+function controlVerdict(a) {
+  if (!a) return { reason: "expired" };
+  a.seen = Date.now();
+  if (a.stopped) return { reason: a.stopped };
+  if (control.held) return { reason: "owner-control" };
+  if (a.interrupted) return { reason: "owner-input", kind: a.interrupted.kind };
+  if (!tabs.has(a.tabId) || !liveContents(tabs.get(a.tabId))) return { reason: "no-tab" };
+  return null;
+}
+
+// Stop every action in flight (the console's Stop and Take control). A navigation the agent
+// started is stopped too; the agent's next step is refused and it is told why.
+function controlStopAll(why) {
+  let n = 0;
+  for (const a of control.actions.values()) {
+    if (a.stopped) continue;
+    a.stopped = why;
+    n += 1;
+    const wc = liveContents(tabs.get(a.tabId));
+    if (wc && CONTROL_NAVIGATING_TOOLS.has(a.tool) && wc.isLoading()) wc.stop();
+  }
+  pushControl();
+  return n;
+}
+
+async function controlRoute(name, obj) {
+  const now = Date.now();
+  controlSweep(now);
+  if (name === "begin") {
+    const tabId = Number(obj.tab);
+    const tool = typeof obj.tool === "string" && CONTROL_TOOL_RE.test(obj.tool) ? obj.tool : "act";
+    if (!tabs.has(tabId)) return [404, { ok: false, reason: "no-tab" }];
+    if (control.held) return [409, { ok: false, reason: "owner-control" }];
+    const last = control.lastOwner.get(tabId);
+    if (last !== undefined && now - last < CONTROL_OWNER_HOLD_MS) {
+      control.waiting = { tabId, tool, until: now + 1000 };
+      pushControl();
+      armControlExpiry();
+      return [409, { ok: false, reason: "owner-active", retryInMs: CONTROL_OWNER_HOLD_MS - (now - last) }];
+    }
+    const id = crypto.randomBytes(12).toString("base64url");
+    control.actions.set(id, { id, tabId, tool, since: now, seen: now, interrupted: null, stopped: "", pointer: null, typed: 0 });
+    if (control.waiting && control.waiting.tabId === tabId) control.waiting = null;
+    pushControl();
+    armControlExpiry();
+    return [200, { ok: true, action: id, ownerHoldMs: CONTROL_OWNER_HOLD_MS }];
+  }
+  const a = control.actions.get(String(obj.action || ""));
+  if (name === "end") {
+    if (a) {
+      control.actions.delete(a.id);
+      const outcome = CONTROL_OUTCOMES.has(obj.outcome) ? obj.outcome : "done";
+      control.last = { tool: a.tool, outcome: a.stopped && outcome !== "done" ? a.stopped : outcome, at: now };
+      pushControl();
+    }
+    return [200, { ok: true }];
+  }
+  const no = controlVerdict(a);
+  if (name === "check") return no ? [409, { ok: false, ...no }] : [200, { ok: true }];
+  if (name === "pointer") {
+    if (obj.on === true) {
+      if (no) return [409, { ok: false, ...no }];
+      const ms = Math.max(50, Math.min(CONTROL_POINTER_MAX_MS, Number(obj.ms) || 1500));
+      const at = Number.isFinite(obj.x) && Number.isFinite(obj.y) ? { x: obj.x, y: obj.y } : null;
+      a.pointer = { until: now + ms, at };
+    } else if (a && a.pointer) {
+      a.pointer.until = Math.min(a.pointer.until, now + CONTROL_POINTER_GRACE_MS);
+    }
+    return [200, { ok: true }];
+  }
+  if (name === "type") {
+    if (no) return [409, { ok: false, ...no }];
+    const text = obj.text;
+    if (typeof text !== "string" || !text || text.length > CONTROL_TYPE_MAX) return [400, { ok: false, reason: "bad-text", error: `text must be 1 to ${CONTROL_TYPE_MAX} characters` }];
+    const wc = liveContents(tabs.get(a.tabId));
+    await wc.insertText(text);
+    a.typed += text.length;
+    return [200, { ok: true, typed: text.length }];
+  }
+  return [404, { ok: false, error: "not found" }];
+}
+
+ipcMain.handle("control:state", (evt) => (consoleOnly(evt) ? controlConsoleView() : null));
+ipcMain.handle("control:stop", (evt) => (consoleOnly(evt) ? { ok: true, stopped: controlStopAll("stopped") } : REFUSED));
+ipcMain.handle("control:take", (evt) => {
+  if (!consoleOnly(evt)) return REFUSED;
+  control.held = true;
+  return { ok: true, stopped: controlStopAll("owner-control") };
+});
+ipcMain.handle("control:release", (evt) => {
+  if (!consoleOnly(evt)) return REFUSED;
+  control.held = false;
+  pushControl();
+  return { ok: true };
+});
 
 // ------------------------------- console IPC ------------------------------- //
 
@@ -2664,6 +2901,18 @@ function startPaneBridge() {
         active: paneVisible, cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, tabCount: tabs.size, activeTab: activeTabId, ...privacyCounts(),
         profile: activeProfileName, profiles: profileRegistry.names.length + 1, extensions: extLib.countEntries(extRegistry()),
         drm: { build: drmState.hasComponents ? "castlabs-ecs" : "stock-electron", ready: drmState.ready === true },
+      });
+    } else if (isGet && route === "/control") {
+      // Phase C2: who has the pane right now. State and counts only.
+      respond(200, controlBridgeView());
+    } else if (isPost && /^\/control\/(begin|check|type|pointer|end)$/.test(route)) {
+      // Phase C2: the browser agent's claim on a tab (see controlRoute). There is deliberately no
+      // route here that stops, takes or releases control: those are the owner's, in the console.
+      withBody((obj) => {
+        controlRoute(route.slice("/control/".length), obj).then(
+          ([status, body]) => respond(status, body),
+          (exc) => respond(500, { ok: false, reason: "error", error: String((exc && exc.message) || exc) }),
+        );
       });
     } else if (isGet && route === "/profiles") {
       // Read-only: the names of the profiles and which one is active. There is no route here that

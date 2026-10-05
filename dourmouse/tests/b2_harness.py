@@ -227,7 +227,7 @@ def run_scenario(tmp_path: Path, scenario: str, *, platform: str = "darwin") -> 
         "T_PLATFORM": platform,
         "DOURMOUSE_ELECTRON_PANE_PORT": str(free_port()),
     }
-    proc = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=90, env=env, check=False)
+    proc = subprocess.run([str(NODE), str(script)], capture_output=True, text=True, timeout=90, env=env, check=False)
     lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT:")]
     assert lines, f"the scenario printed no result\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
     data = json.loads(lines[-1][len("RESULT:"):])

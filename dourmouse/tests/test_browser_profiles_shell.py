@@ -8,9 +8,7 @@ checked live in an isolated copy of the app and is recorded in the B3 finding.
 
 from __future__ import annotations
 
-import json
 import re
-import stat
 
 import pytest
 

@@ -280,13 +280,33 @@
         el.dispatchEvent(new Event("change", { bubbles: true }));
         return { ...base, done: true };
       }
-      const editable = isTextEntry(el) || el.isContentEditable || el.getAttribute("role") === "textbox"
+      const roleOnly = !isTextEntry(el) && !el.isContentEditable;
+      const editable = !roleOnly || el.getAttribute("role") === "textbox"
         || el.getAttribute("role") === "searchbox" || el.getAttribute("role") === "combobox";
       if (!editable) return refuse("wrongtype", p.id, el, { detail: "it is not a text field (a " + (type ? "input " + type : tag) + ")" });
+      // Phase C2: an editor surface (a role=textbox that is neither a field nor contenteditable, such
+      // as a canvas editor fed by a hidden text frame) has no value to fill or select: it takes typed
+      // text after a click, and only browser_type does that.
+      if (roleOnly && op === "fill") return refuse("wrongtype", p.id, el, { detail: "it is an editor surface with no value to fill (use browser_type, which clicks into it and types)" });
+      if (roleOnly && p.clear) return refuse("wrongtype", p.id, el, { detail: "an editor surface cannot be cleared from here (select its text with keys first)" });
+      const multiline = multilineOf(el);
+      if (roleOnly) {
+        el.focus();
+        const a = deepActive();
+        if (within(el, a)) return { ...base, focused: true, multiline };
+        if (a && (a.tagName === "IFRAME" || a.tagName === "FRAME")) return { ...base, focused: true, frame: true, multiline: true };
+        const r = el.getBoundingClientRect();
+        // Not focusable by script: the editor wants a click where the text goes. The end of the
+        // surface is the safest place for a caret: the agent appends, it does not insert mid-text.
+        return { ...base, focused: false, multiline, clickAt: {
+          x: Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 1),
+          y: Math.min(Math.max(r.bottom - Math.min(8, r.height / 2), 1), innerHeight - 1),
+        } };
+      }
       el.focus();
       if (op === "fill" || p.clear) selectAllContent(el);
       else placeCaretAtEnd(el);
-      return { ...base, focused: within(el, deepActive()) };
+      return { ...base, focused: within(el, deepActive()), multiline };
     }
     if (op === "select") {
       if (d.tag !== "select") return refuse("wrongtype", p.id, el, { detail: "it is not a <select> (a " + d.tag + ")" });
@@ -304,11 +324,41 @@
     return { ok: false, code: "badop", id: p.id, name: "" };
   }
 
+  // Phase C2: whether a line break typed into this element stays a line break (an input method's
+  // text never presses Enter, so it cannot submit anything either way).
+  function multilineOf(el) {
+    return el.tagName === "TEXTAREA" || el.isContentEditable || el.getAttribute("aria-multiline") === "true";
+  }
+
+  // What has the keyboard. Phase C2: an editor such as Google Docs takes its typing through a
+  // hidden iframe, so a focused frame is followed one level in when it is same-origin.
   function focusState() {
     const a = deepActive();
     if (!a || a === document.body) return { has: false };
     const tag = a.tagName.toLowerCase();
-    return { has: true, tag, editable: isTextEntry(a) || a.isContentEditable };
+    if (tag === "iframe" || tag === "frame") {
+      let doc = null;
+      try { doc = a.contentDocument; } catch (_) { doc = null; }
+      if (!doc) return { has: true, tag, frame: true, inner: "", editable: true, multiline: true }; // cross-origin: cannot look in
+      let i = doc.activeElement;
+      while (i && i.shadowRoot && i.shadowRoot.activeElement) i = i.shadowRoot.activeElement;
+      const designMode = String(doc.designMode).toLowerCase() === "on";
+      if (!i || i === doc.body) {
+        const ce = Boolean(doc.body && doc.body.isContentEditable) || designMode;
+        return { has: true, tag, frame: true, inner: ce ? "contenteditable body" : "", editable: ce, multiline: ce };
+      }
+      const itag = i.tagName.toLowerCase();
+      const ok = isTextEntry(i) || i.isContentEditable || designMode;
+      return { has: true, tag, frame: true, inner: i.isContentEditable ? "contenteditable " + itag : itag, editable: ok, multiline: ok && (multilineOf(i) || designMode) };
+    }
+    return { has: true, tag, editable: isTextEntry(a) || a.isContentEditable, multiline: multilineOf(a) };
+  }
+
+  // Is element `id` (still) the one with the keyboard?
+  function focusCheck(p) {
+    const found = lookup(p);
+    if (found.err) return found.err;
+    return { ok: within(found.el, deepActive()) };
   }
 
   const api = {
@@ -317,6 +367,7 @@
       if (op === "snapshot") return snapshot(p || {});
       if (op === "prepare") return prepare(p || {});
       if (op === "focusState") return focusState();
+      if (op === "focusCheck") return focusCheck(p || {});
       if (op === "ping") return { gen: state.gen, href: state.href, now: location.href };
       throw new Error("unknown op " + op);
     },

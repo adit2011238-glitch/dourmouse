@@ -11,6 +11,7 @@ import pytest
 
 RUN = Path(__file__).resolve().parents[2] / "scripts" / "bench" / "run.py"
 _spec = importlib.util.spec_from_file_location("bench_run", RUN)
+assert _spec is not None and _spec.loader is not None
 bench_run = importlib.util.module_from_spec(_spec)
 sys.modules["bench_run"] = bench_run
 _spec.loader.exec_module(bench_run)

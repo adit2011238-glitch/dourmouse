@@ -11,9 +11,7 @@ fake files and is recorded in the B3 finding.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-from pathlib import Path
 
 import pytest
 

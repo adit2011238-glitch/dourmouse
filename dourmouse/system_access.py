@@ -940,7 +940,7 @@ def _player_pause_tool(arguments: dict[str, Any]) -> str:
 
 def _player_seek_tool(arguments: dict[str, Any]) -> str:
     try:
-        seconds = float(arguments.get("seconds"))
+        seconds = float(arguments.get("seconds"))  # type: ignore[arg-type]  # None raises TypeError, handled below
     except (TypeError, ValueError):
         return "ERROR: player_seek requires a numeric 'seconds' (position from the start)."
     if seconds < 0 or seconds != seconds:
