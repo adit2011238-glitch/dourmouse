@@ -8793,6 +8793,142 @@ def run_server(
     return server
 
 
+class RunMarker:
+    """Phase I2: tells the next start whether the last run ended cleanly.
+
+    One small file in the workspace, held under an advisory lock for as long as
+    the server runs. An empty file means the last run stopped on purpose. A file
+    that still says ``running`` or ``crashed`` while nothing holds the lock means
+    the last run was killed, crashed or lost power. The kernel drops the lock the
+    moment the process is gone for any reason (including SIGKILL), so there is no
+    process-id guessing and no stale marker from a recycled id. Without ``fcntl``
+    (Windows) the marker is simply off.
+    """
+
+    NAME = "server_running.json"
+
+    def __init__(self, path: Path | str | None = None) -> None:
+        if path is None:
+            from dourmouse.config import workspace_dir
+
+            path = workspace_dir() / self.NAME
+        self.path = Path(path)
+        self._fd: int | None = None
+
+    def arm(self) -> dict[str, Any] | None:
+        """Take the lock and write ``running``. Returns the record of an earlier
+        run that ended without shutting down, or None. When another live server
+        holds the lock, returns None and arms nothing."""
+        try:
+            import fcntl
+        except ImportError:
+            return None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError:
+            return None
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return None
+        previous: dict[str, Any] | None = None
+        try:
+            raw = os.read(fd, 8192).decode("utf-8", "replace").strip()
+            if raw:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and parsed.get("state") in ("running", "crashed"):
+                    previous = parsed
+        except (OSError, ValueError):
+            previous = {"state": "running", "started": "", "reason": "the marker file was unreadable"}
+        self._fd = fd
+        self._write({"state": "running", "pid": os.getpid(), "started": datetime.now().isoformat(timespec="seconds")})
+        return previous
+
+    def _write(self, record: dict[str, Any]) -> None:
+        if self._fd is None:
+            return
+        data = json.dumps(record).encode("utf-8")
+        with contextlib.suppress(OSError):
+            os.ftruncate(self._fd, 0)
+            os.lseek(self._fd, 0, os.SEEK_SET)
+            os.write(self._fd, data)
+            os.fsync(self._fd)
+
+    def _release(self) -> None:
+        if self._fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(self._fd)
+            self._fd = None
+
+    def clean(self) -> None:
+        """The run is ending on purpose: empty the file and let go of the lock."""
+        if self._fd is None:
+            return
+        with contextlib.suppress(OSError):
+            os.ftruncate(self._fd, 0)
+        self._release()
+
+    def crashed(self, reason: str) -> None:
+        """The run is ending because of an error: say so, with the reason."""
+        if self._fd is None:
+            return
+        self._write({"state": "crashed", "pid": os.getpid(), "reason": str(reason)[:300],
+                     "ended": datetime.now().isoformat(timespec="seconds")})
+        self._release()
+
+
+def _report_previous_crash(server: Any, record: dict[str, Any]) -> bool:
+    """Phase I2: the one-time notice that the last server run ended unexpectedly.
+    It goes through the alerts store, so the console's Notification Centre shows
+    it and the desktop shell raises its native notification, like every other
+    alert. Returns whether an alert was stored."""
+    store = getattr(server, "state", None)
+    if store is None:
+        return False
+    started = str(record.get("started") or "an earlier time").replace("T", " ")
+    reason = str(record.get("reason") or "").strip()
+    detail = f"The server that started at {started} ended without shutting down cleanly"
+    detail += f" ({reason})." if reason else "."
+    detail += " It was started again."
+    log_path = os.environ.get("DOURMOUSE_SERVER_LOG", "").strip()
+    if log_path:
+        detail += f" Log: {log_path}"
+    try:
+        from dourmouse.state_store import SHARED_OWNER
+
+        store.add_alert(kind="system", title="Dourmouse stopped unexpectedly and was restarted",
+                        detail=detail, severity="med", owner=SHARED_OWNER)
+        hub = getattr(server, "events_broadcast", None)
+        if hub is not None:
+            hub.broadcast({"type": "state_change", "section": "alerts", "owner": SHARED_OWNER})
+    except Exception:  # noqa: BLE001 - a notice must never stop the server from serving
+        return False
+    print(f"PREVIOUS RUN ENDED UNCLEANLY: {detail}")
+    return True
+
+
+def _install_clean_stop_handlers(marker: RunMarker) -> None:
+    """SIGTERM and SIGHUP are a deliberate stop (the desktop shell sends SIGTERM when
+    it quits or replaces a leftover server): clear the marker, then die exactly as
+    before by re-raising the signal with the default action. Only possible from
+    the main thread; elsewhere (a test thread) it is skipped."""
+    import signal
+
+    def _stop(signum: int, _frame: Any) -> None:
+        marker.clean()
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        with contextlib.suppress(ValueError, OSError):  # ValueError: not the main thread
+            signal.signal(sig, _stop)
+
+
 def serve_forever(
     registry: DispatchRegistry,
     *,
@@ -8848,6 +8984,13 @@ def serve_forever(
         # most_recent_session_file docstring for the full history.
         session_file=most_recent_session_file(),
     )
+    # Phase I2: the server is bound, so this process owns the workspace. Learn whether
+    # the last run ended cleanly (and say so once), then mark this run as live.
+    run_marker = RunMarker()
+    previous_run = run_marker.arm()
+    _install_clean_stop_handlers(run_marker)
+    if previous_run is not None:
+        _report_previous_crash(server, previous_run)
     print(f"Dourmouse UI running at http://{host}:{port}")
     print(f"Registry: {', '.join(sorted(registry.subagent_names))}")
     # A configured model that was never pulled fails as a bare "404 page not
@@ -8924,11 +9067,23 @@ def serve_forever(
         )
     except Exception:  # noqa: BLE001, S110 - a broken neuro import never blocks serving
         print("Neural orchestrator: off")
+    ended_on_purpose = False
     try:
         server.serve_forever()
+        ended_on_purpose = True
     except KeyboardInterrupt:
-        pass
+        ended_on_purpose = True
+    except SystemExit as exc:
+        ended_on_purpose = exc.code in (None, 0)
+        if not ended_on_purpose:
+            run_marker.crashed(f"exit code {exc.code}")
+        raise
+    except BaseException as exc:
+        run_marker.crashed(f"{type(exc).__name__}: {exc}")
+        raise
     finally:
+        if ended_on_purpose:
+            run_marker.clean()
         if server.live_runtime is not None:
             server.live_runtime.stop()
         if server.scheduler_runner is not None:
@@ -8953,6 +9108,12 @@ def serve_forever(
 
 
 if __name__ == "__main__":
+    # Phase I2: a hard crash of the interpreter (a segfault in a native library) leaves a
+    # Python traceback of every thread in the server log instead of nothing.
+    import faulthandler
+
+    with contextlib.suppress(Exception):
+        faulthandler.enable()
     from dourmouse.general_roster import build_general_registry
 
     serve_forever(build_general_registry())

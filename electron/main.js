@@ -105,7 +105,8 @@ let serverProcess = null;
 // Finding #162 (A5): per-launch owner secret. Held only in this variable: never in
 // process.env, a log or a file. The server reads it once from stdin; the app windows
 // present it as a cookie on the default session (never on the pane partition).
-const OWNER_SECRET = require("crypto").randomBytes(32).toString("base64url");
+// Phase I2: a restarted server gets a fresh secret (see spawnServerProcess), so this is a let.
+let OWNER_SECRET = require("crypto").randomBytes(32).toString("base64url");
 let ownerGateArmed = false;
 let mainWindow = null;
 let mapWindow = null;
@@ -165,9 +166,10 @@ function pingServer(url) {
   });
 }
 
-async function waitForServer(url, timeoutMs = 60000, intervalMs = 300) {
+async function waitForServer(url, timeoutMs = 60000, intervalMs = 300, shouldAbort = null) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (shouldAbort && shouldAbort()) return false;
     if (await pingServer(url)) return true;
     await new Promise((r) => setTimeout(r, intervalMs));
   }
@@ -233,40 +235,19 @@ async function ensureServer() {
   if (!fs.existsSync(VENV_PYTHON)) {
     throw new Error(`No venv python at ${VENV_PYTHON} -- run: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-desktop.txt`);
   }
-  log(`spawning ${VENV_PYTHON} -m dourmouse.webui (port ${PORT})`);
-  serverProcess = spawn(VENV_PYTHON, ["-m", "dourmouse.webui"], {
-    cwd: PROJECT_ROOT,
-    env: {
-      ...process.env,
-      DOURMOUSE_UI_PORT: String(PORT),
-      // Stage D: how dourmouse/browser_agent.py discovers this shell's
-      // real CDP port and the tiny pane-bridge server below. Absent
-      // entirely under the old pywebview shell or a plain headless
-      // server -- browser_agent.py's own _electron_pane_configured()
-      // treats missing/unset as "no pane available" and falls back to
-      // its existing launch()-its-own-Chrome behavior unchanged.
-      DOURMOUSE_ELECTRON_CDP_PORT: String(CDP_PORT),
-      DOURMOUSE_ELECTRON_PANE_PORT: String(PANE_BRIDGE_PORT),
-      DOURMOUSE_OWNER_GATE: "stdin",
-    },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  ownerGateArmed = true;
-  try {
-    fs.writeFileSync(serverPidFile(), String(serverProcess.pid));
-  } catch (_exc) {
-    /* the pid file only helps the next launch clean up */
-  }
-  serverProcess.stdin.on("error", () => {});
-  serverProcess.stdin.end(`${OWNER_SECRET}\n`);
-  serverProcess.stdout.on("data", (d) => process.stdout.write(`[server] ${d}`));
-  serverProcess.stderr.on("data", (d) => process.stderr.write(`[server:err] ${d}`));
-  serverProcess.on("exit", (code) => log(`server process exited (${code})`));
-  const ok = await waitForServer(`${BASE_URL}/workspace`);
+  const proc = spawnServerProcess();
+  const ok = await waitForServer(`${BASE_URL}/workspace`, 60000, 300, () => proc._dmExited === true);
   if (!ok) {
-    throw new Error(`server did not answer at ${BASE_URL}/workspace within the startup deadline`);
+    if (proc._dmExited) {
+      throw new Error(
+        `The Dourmouse server stopped while starting (${describeExit(proc)}). What it said is in ${serverLogPath()}`
+      );
+    }
+    throw new Error(`server did not answer at ${BASE_URL}/workspace within the startup deadline. Log: ${serverLogPath()}`);
   }
+  proc._dmReady = true;
   await armOwnerCookie();
+  serverSupervised = true;
 }
 
 // Only when this app spawned the server (a reused server has no secret and stays ungated).
@@ -285,15 +266,360 @@ async function armOwnerCookie() {
   }
 }
 
+// --------------------------------------------------------------------- //
+// Server supervision and crash recovery (phase I2, finding #171)
+//
+// The server is a child process. If it exits while the app runs (and the app is
+// not quitting), it is started again with a short, growing pause: at most
+// SUPERVISOR.maxRestarts restarts inside SUPERVISOR.windowMs. Every start gets a
+// FRESH owner secret on stdin (finding #162: never env, never a file) and the
+// cookie is set again on the default session; the old secret died with the old
+// process. A restart is told to the owner as one small toast in the console. When
+// the last allowed restart also fails, ONE dialog names the log file. The server
+// writes its own crash marker (webui.RunMarker) so the next start also raises one
+// alert. What this cannot see: a server that is alive but stuck (it still answers
+// nothing); only an exit is treated as a failure.
+// --------------------------------------------------------------------- //
+
+// Mutable on purpose: the tests shorten the pauses.
+const SUPERVISOR = {
+  maxRestarts: 3,
+  windowMs: 2 * 60 * 1000,
+  backoffMs: [1000, 3000, 8000],
+  readyTimeoutMs: 60000,
+  hangGraceMs: 10000,
+  consoleWindowMs: 2 * 60 * 1000,
+  noticeRetries: 15,
+  noticeRetryMs: 1000,
+};
+const SERVER_LOG_MAX_BYTES = 2 * 1024 * 1024;
+const RESTART_NOTICE_TITLE = "The server stopped and was restarted";
+
+let serverSupervised = false; // true once a server this app started has answered
+let serverQuitting = false;
+let serverGaveUp = false;
+let serverRestartTimes = [];
+let serverRestartTimer = null;
+let serverLogStream = null;
+let alertStream = null;
+let serverGaveUpDialogShown = false;
+
+function serverLogPath() {
+  return path.join(app.getPath("userData"), "logs", "server.log");
+}
+
+function openServerLog() {
+  if (serverLogStream) return;
+  try {
+    const file = serverLogPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    try {
+      if (fs.statSync(file).size > SERVER_LOG_MAX_BYTES) fs.renameSync(file, `${file}.1`);
+    } catch (_exc) {
+      /* no log yet */
+    }
+    serverLogStream = fs.createWriteStream(file, { flags: "a", mode: 0o600 });
+    serverLogStream.on("error", () => {
+      serverLogStream = null;
+    });
+  } catch (_exc) {
+    serverLogStream = null; // a log is a convenience: the server must still start
+  }
+}
+
+function writeServerLog(text) {
+  if (serverLogStream) serverLogStream.write(text);
+}
+
+// One line for the app's own events, to the console and to the same file the server writes to.
+function supervisorLog(message) {
+  log(message);
+  openServerLog();
+  writeServerLog(`[supervisor] ${new Date().toISOString()} ${message}\n`);
+}
+
+function describeExit(proc) {
+  const info = proc._dmExit || {};
+  if (info.error) return `could not be started: ${info.error}`;
+  return info.signal ? `signal ${info.signal}` : `exit code ${info.code}`;
+}
+
+function spawnServerProcess() {
+  // A fresh secret for every server this app starts (finding #162). It goes to the child on
+  // stdin and nowhere else; a restart replaces it and the cookie is set again.
+  OWNER_SECRET = crypto.randomBytes(32).toString("base64url");
+  openServerLog();
+  supervisorLog(`spawning ${VENV_PYTHON} -m dourmouse.webui (port ${PORT})`);
+  const proc = spawn(VENV_PYTHON, ["-m", "dourmouse.webui"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      DOURMOUSE_UI_PORT: String(PORT),
+      // Stage D: how dourmouse/browser_agent.py discovers this shell's
+      // real CDP port and the tiny pane-bridge server below. Absent
+      // entirely under the old pywebview shell or a plain headless
+      // server -- browser_agent.py's own _electron_pane_configured()
+      // treats missing/unset as "no pane available" and falls back to
+      // its existing launch()-its-own-Chrome behavior unchanged.
+      DOURMOUSE_ELECTRON_CDP_PORT: String(CDP_PORT),
+      DOURMOUSE_ELECTRON_PANE_PORT: String(PANE_BRIDGE_PORT),
+      DOURMOUSE_OWNER_GATE: "stdin",
+      // Only a file name, for the alert the server raises after an unclean run.
+      DOURMOUSE_SERVER_LOG: serverLogPath(),
+      // The server's output goes to a pipe, where Python would hold it back in blocks: unbuffered,
+      // so the log is complete when the process dies.
+      PYTHONUNBUFFERED: "1",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  serverProcess = proc;
+  ownerGateArmed = true;
+  try {
+    fs.writeFileSync(serverPidFile(), String(proc.pid));
+  } catch (_exc) {
+    /* the pid file only helps the next launch clean up */
+  }
+  proc.stdin.on("error", () => {});
+  proc.stdin.end(`${OWNER_SECRET}\n`);
+  proc.stdout.on("data", (d) => {
+    process.stdout.write(`[server] ${d}`);
+    writeServerLog(d);
+  });
+  proc.stderr.on("data", (d) => {
+    process.stderr.write(`[server:err] ${d}`);
+    writeServerLog(d);
+  });
+  proc.on("error", (exc) => onServerExit(proc, null, null, exc)); // a spawn failure has no exit event
+  proc.on("exit", (code, signal) => onServerExit(proc, code, signal, null));
+  return proc;
+}
+
+// Finding #171: starts that never answered, counted since the last server that did, so a server
+// that hangs at start (60 s each try) cannot slip past the time-window cap and restart forever.
+let serverFailedStarts = 0;
+
+function onServerExit(proc, code, signal, error) {
+  if (proc._dmExited) return;
+  proc._dmExited = true;
+  if (proc._dmReady) serverFailedStarts = 0;
+  else serverFailedStarts += 1;
+  proc._dmExit = { code, signal, error: error ? String(error.message || error) : "" };
+  supervisorLog(`server process exited (${describeExit(proc)})`);
+  if (proc !== serverProcess || !serverSupervised || serverQuitting || proc._dmExpected) return;
+  planServerRestart();
+}
+
+function planServerRestart() {
+  if (serverRestartTimer || serverGaveUp || serverQuitting) return;
+  const now = Date.now();
+  serverRestartTimes = serverRestartTimes.filter((t) => now - t < SUPERVISOR.windowMs);
+  if (serverRestartTimes.length >= SUPERVISOR.maxRestarts || serverFailedStarts > SUPERVISOR.maxRestarts) {
+    giveUpOnServer();
+    return;
+  }
+  serverRestartTimes.push(now);
+  const pause = SUPERVISOR.backoffMs[Math.min(serverRestartTimes.length - 1, SUPERVISOR.backoffMs.length - 1)];
+  supervisorLog(`restarting the server in ${pause} ms (try ${serverRestartTimes.length} of ${SUPERVISOR.maxRestarts})`);
+  serverRestartTimer = setTimeout(() => {
+    serverRestartTimer = null;
+    restartServer().catch((exc) => supervisorLog(`restart failed: ${(exc && exc.message) || exc}`));
+  }, pause);
+}
+
+async function restartServer() {
+  if (serverQuitting) return;
+  const proc = spawnServerProcess();
+  // The new secret is already in the child; put the matching cookie in place before the
+  // server answers, so the console's first request is not refused.
+  await armOwnerCookie();
+  const ok = await waitForServer(`${BASE_URL}/workspace`, SUPERVISOR.readyTimeoutMs, 300, () => proc._dmExited === true || serverQuitting);
+  if (serverQuitting) return;
+  if (proc._dmExited) return; // its exit already planned the next try, or gave up
+  if (!ok) {
+    // Alive but never answered: end it, which is counted like any other failure.
+    supervisorLog("the restarted server did not answer in time; ending it");
+    try {
+      proc.kill("SIGKILL");
+    } catch (_exc) {
+      /* already gone */
+    }
+    return;
+  }
+  proc._dmReady = true;
+  supervisorLog("the server is back");
+  if (alertStream) startAlertNotifications(); // the old event stream died with the old server
+  refreshAlerts();
+  showConsoleNotice("warn", RESTART_NOTICE_TITLE, "Your window stays open. Details are in the notification centre.");
+}
+
+function giveUpOnServer() {
+  serverGaveUp = true;
+  supervisorLog(`the server stopped ${SUPERVISOR.maxRestarts + 1} times within ${SUPERVISOR.windowMs / 1000} seconds; not starting it again`);
+  if (serverGaveUpDialogShown) return;
+  serverGaveUpDialogShown = true;
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const options = {
+    type: "error",
+    title: "Dourmouse",
+    message: "The Dourmouse server keeps stopping and was not started again.",
+    detail:
+      `It stopped ${SUPERVISOR.maxRestarts + 1} times in ${SUPERVISOR.windowMs / 60000} minutes, so automatic restarts are paused.\n\n` +
+      `What it said before stopping is in this file:\n${serverLogPath()}`,
+    buttons: ["Copy the log path", "Try again", "Quit Dourmouse"],
+    defaultId: 1,
+    cancelId: 2,
+  };
+  const pending = parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+  Promise.resolve(pending)
+    .then((result) => {
+      const choice = result && typeof result.response === "number" ? result.response : 2;
+      if (choice === 0) {
+        // Copied, not revealed: the shell keeps exactly one call that reveals a file in Finder (a
+        // download's own action; test_browser_tabs_wiring pins that), and a path on the clipboard
+        // pastes into Finder's "Go to Folder".
+        electronApi.clipboard.writeText(serverLogPath());
+      } else if (choice === 1) {
+        serverGaveUp = false;
+        serverGaveUpDialogShown = false;
+        serverRestartTimes = [];
+        serverFailedStarts = 0;
+        planServerRestart();
+      } else {
+        app.quit();
+      }
+    })
+    .catch((exc) => supervisorLog(`the stopped-server dialog failed: ${(exc && exc.message) || exc}`));
+}
+
+// A small toast in the console, through the shell's own toast stack (window.__dmShell.toasts).
+// The text is fixed by this file; nothing the server or a page said goes into the script.
+// A page that is not the shell yet (loading, sign-in) is retried for a few seconds.
+function showConsoleNotice(level, title, detail, attempt = 0) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  const payload = JSON.stringify({ level, title, detail, ttl: 12000 });
+  const code = `(() => { const s = window.__dmShell; if (!s || !s.toasts) return false; s.toasts.show(${payload}); return true; })()`;
+  Promise.resolve(mainWindow.webContents.executeJavaScript(code))
+    .then((shown) => {
+      if (!shown && attempt < SUPERVISOR.noticeRetries) {
+        setTimeout(() => showConsoleNotice(level, title, detail, attempt + 1), SUPERVISOR.noticeRetryMs);
+      }
+    })
+    .catch(() => {
+      if (attempt < SUPERVISOR.noticeRetries) {
+        setTimeout(() => showConsoleNotice(level, title, detail, attempt + 1), SUPERVISOR.noticeRetryMs);
+      }
+    });
+}
+
 function stopServer() {
+  serverQuitting = true;
+  if (serverRestartTimer) {
+    clearTimeout(serverRestartTimer);
+    serverRestartTimer = null;
+  }
   if (serverProcess && !serverProcess.killed) {
     log("stopping spawned server process");
+    serverProcess._dmExpected = true;
     try {
       serverProcess.kill();
     } catch {
       /* best-effort teardown, matches dourmouse/desktop.py's own finally block */
     }
   }
+}
+
+// The console window's own renderer. A crash or a hang gets one reload; a second one inside
+// the window is not retried in a loop but put in front of the owner once.
+const consoleRecoveries = policy.createLimiter(1, SUPERVISOR.consoleWindowMs);
+let consoleRecovering = false;
+let consoleGaveUpShown = false;
+let consoleForcedCrash = false; // the render-process-gone that our own forcefullyCrashRenderer causes
+
+function recoverConsole(win, reason) {
+  if (consoleRecovering || serverQuitting || !win || win.isDestroyed()) return;
+  const wc = win.webContents;
+  if (!consoleRecoveries.allow()) {
+    supervisorLog(`the console window ${reason} again within ${SUPERVISOR.consoleWindowMs / 1000} seconds; not reloading it again`);
+    if (!consoleGaveUpShown) {
+      consoleGaveUpShown = true;
+      Promise.resolve(
+        dialog.showMessageBox(win, {
+          type: "error",
+          title: "Dourmouse",
+          message: "The Dourmouse window stopped working twice in a row.",
+          detail: `It was reloaded once already. What happened is in this file:\n${serverLogPath()}`,
+          buttons: ["Reload", "Quit Dourmouse"],
+          defaultId: 0,
+          cancelId: 1,
+        })
+      )
+        .then((result) => {
+          consoleGaveUpShown = false;
+          if (result && result.response === 0 && !win.isDestroyed()) win.webContents.reload();
+          else if (result && result.response === 1) app.quit();
+        })
+        .catch(() => {
+          consoleGaveUpShown = false;
+        });
+    }
+    return;
+  }
+  consoleRecovering = true;
+  supervisorLog(`the console window ${reason}; reloading it once`);
+  const done = () => {
+    consoleRecovering = false;
+  };
+  setTimeout(() => {
+    if (win.isDestroyed() || wc.isDestroyed()) return done();
+    const current = wc.getURL();
+    wc.once("did-finish-load", done);
+    setTimeout(done, 8000);
+    if (current && policy.navigationAllowed(current, PORT)) wc.reload();
+    else wc.loadURL(`${BASE_URL}${START_PATH}`);
+  }, 250);
+}
+
+function wireConsoleRecovery(win) {
+  const wc = win.webContents;
+  let hangTimer = null;
+  const clearHang = () => {
+    if (hangTimer) clearTimeout(hangTimer);
+    hangTimer = null;
+  };
+  wc.on("render-process-gone", (_evt, details) => {
+    supervisorLog(`console renderer gone: ${JSON.stringify(details || {})}`);
+    clearHang();
+    if (!policy.isCrashReason((details && details.reason) || "")) return;
+    if (consoleForcedCrash) {
+      consoleForcedCrash = false; // the hang path below already started the one reload
+      return;
+    }
+    // Finding #171: a crash while the one reload is still loading is a failed recovery; it must
+    // reach the give-up dialog, not be swallowed by the "already recovering" guard.
+    if (consoleRecovering) consoleRecovering = false;
+    recoverConsole(win, "crashed");
+  });
+  win.on("unresponsive", () => {
+    supervisorLog("the console window is not responding");
+    clearHang();
+    hangTimer = setTimeout(() => {
+      hangTimer = null;
+      if (win.isDestroyed() || wc.isDestroyed()) return;
+      supervisorLog("the console window is still not responding; ending its process and reloading");
+      try {
+        consoleForcedCrash = true;
+        wc.forcefullyCrashRenderer();
+      } catch (_exc) {
+        /* the reload below is still tried */
+      }
+      recoverConsole(win, "stopped responding");
+    }, SUPERVISOR.hangGraceMs);
+  });
+  win.on("responsive", () => {
+    if (hangTimer) supervisorLog("the console window is responding again");
+    clearHang();
+  });
+  win.on("closed", clearHang);
 }
 
 // --------------------------------------------------------------------- //
@@ -3136,6 +3462,15 @@ function startAlertNotifications() {
   // plain text/event-stream of "data: {...}\n\n" lines, same framing this
   // whole project's own test suite already parses this way (http.client
   // + readline() + a "data: " prefix check).
+  // Phase I2: called again after a server restart; the stream of the dead server is dropped.
+  if (alertStream) {
+    try {
+      alertStream.destroy();
+    } catch (_exc) {
+      /* already closed */
+    }
+    alertStream = null;
+  }
   const req = http.get(`${BASE_URL}/api/events`, (res) => {
     let buffer = "";
     res.on("data", (chunk) => {
@@ -3158,6 +3493,7 @@ function startAlertNotifications() {
     res.on("end", () => log("notifications: /api/events stream ended"));
   });
   req.on("error", (exc) => log("notifications: /api/events connection failed (non-fatal):", exc.message));
+  alertStream = req;
 }
 
 // --------------------------------------------------------------------- //
@@ -3271,8 +3607,21 @@ ipcMain.handle("bridge:open_external", async (_evt, url) => {
   }
 });
 
+// Finding #171 (phase I2 speed budget): the map window is created hidden, but Chromium still treats a
+// window made with show:false as VISIBLE (document.visibilityState was "visible" in it), and the map
+// page runs about 90 CSS animations and polls the server every second: measured at over 100% of a CPU
+// core, from launch, for a window nobody had opened (and it slowed the first screen of the console).
+// So the page is only loaded the first time the window is shown.
+let mapLoaded = false;
+function loadMapOnce() {
+  if (mapLoaded || !mapWindow || mapWindow.isDestroyed()) return;
+  mapLoaded = true;
+  mapWindow.loadURL(`${BASE_URL}/map`);
+}
+
 ipcMain.handle("bridge:open_map", () => {
   if (mapWindow && !mapWindow.isDestroyed()) {
+    loadMapOnce();
     mapWindow.show();
     return true;
   }
@@ -3318,6 +3667,7 @@ app.whenReady().then(async () => {
   installPermissionPolicy(session.defaultSession);
   lockToAppOrigin(mainWindow);
   wireConsoleKeys(mainWindow);
+  wireConsoleRecovery(mainWindow);
   mainWindow.loadURL(`${BASE_URL}${START_PATH}`);
   if (geometry.maximized) mainWindow.maximize();
   mainWindow.on("close", persistMainWindowGeometry);
@@ -3337,7 +3687,11 @@ app.whenReady().then(async () => {
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
   lockToAppOrigin(mapWindow);
-  mapWindow.loadURL(`${BASE_URL}/map`);
+  // Not loaded until first shown (see loadMapOnce); the smoke test below needs it loaded. It starts on
+  // a one line placeholder page, not on nothing: a window that has never navigated is a DevTools target
+  // without a page, which Playwright's attach (browser_agent.py) can wait on forever.
+  mapWindow.loadURL("data:text/html,<title>Agent orchestration map</title>");
+  if (process.env.DOURMOUSE_ELECTRON_VERIFY === "1") loadMapOnce();
 
   const openAtlasAtLaunch = process.env.DOURMOUSE_OPEN_ATLAS_LAB === "1";
   atlasWindow = new BrowserWindow({
@@ -3372,6 +3726,7 @@ app.whenReady().then(async () => {
       });
       lockToAppOrigin(mainWindow);
       wireConsoleKeys(mainWindow);
+      wireConsoleRecovery(mainWindow);
       mainWindow.loadURL(`${BASE_URL}${START_PATH}`);
       mainWindow.on("close", persistMainWindowGeometry);
     }
@@ -3516,5 +3871,7 @@ app.on("before-quit", () => {
   stopVisionHelpers();
   // Only tear down a server THIS process spawned -- never kill a dev
   // server the user is reusing (REUSE_EXISTING_SERVER / already-running).
+  // Phase I2: quitting is also what stops the restart supervision, so this runs first.
+  serverQuitting = true;
   if (!REUSE_EXISTING_SERVER) stopServer();
 });

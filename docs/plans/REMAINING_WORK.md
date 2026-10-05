@@ -2092,3 +2092,5 @@ Live Electron check of J and D; grant Accessibility and drive TextEdit and Music
 ## Wave 3 done (#165 to #168). Next: Wave 4 (F2 app-driving UI and replacement screens; I ship build, auto-update, first-run walkthrough, UX backlog). Owner: real benchmark go (G_BENCHMARK_HOWTO.md), Google sign-in plus docs_and_youtube check, Accessibility grant, DRM decision.
 
 ## F2 done (#169). Open: calendar, files, notes screens (need backend routes). Next: I.
+
+## I1 done (#170). Open UX: 13 open, 28 partly, 4 need backend routes. Next: I2.

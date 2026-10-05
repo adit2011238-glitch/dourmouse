@@ -502,3 +502,6 @@ Tool skill: new browser tools registered, look-alike descriptions, tool-use guid
 
 ## 2026-10-05 Wave 4 F2 (finding #169)
 Driving strip, APPS screen, permissions guide. Suite 7989 passed. Evidence EVIDENCE/169_f2_*.
+
+## 2026-10-05 Wave 4 I1 (finding #170)
+Setup and login restyle, Text size, UX round: 11 fixed, 28 partly. Suite 8007 passed. Evidence EVIDENCE/170_i1_*.

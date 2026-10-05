@@ -115,7 +115,8 @@ function boot() {
   };
   bindable(shortcuts).forEach((s) => {
     const fn = s.screen && s.id !== 'settings' ? () => router.go(s.screen.toLowerCase()) : actions[s.id];
-    if (fn) keymap.bind(s.combo, fn, { editable: true });
+    /* Finding #171: undo must leave Command Z to the text field the owner is typing in */
+    if (fn) keymap.bind(s.combo, fn, { editable: s.id !== 'undo' });
   });
   /* S21: the first Tab stop skips the menu bar and the sidebar and lands on the screen's title */
   $('skipLink').addEventListener('click', () => stage.focusTitle());

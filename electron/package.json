@@ -33,18 +33,19 @@
       "importers.js",
       "drm.js",
       "content/**",
+      "resources/icon.png",
       "package.json"
     ],
     "extraResources": [
       {
         "from": "../dourmouse",
         "to": "dourmouse",
-        "filter": ["**/*", "!tests/**", "!__pycache__/**", "!**/__pycache__/**", "!**/*.pyc"]
+        "filter": ["**/*", "!tests/**", "!workspace/**", "!__pycache__/**", "!**/__pycache__/**", "!**/*.pyc", "!**/.DS_Store", "!**/*.orig"]
       },
       {
         "from": "../ui",
         "to": "ui",
-        "filter": ["**/*", "!*.orig"]
+        "filter": ["**/*", "!**/*.orig", "!**/.DS_Store"]
       },
       {
         "from": "build/venv-stage/.venv",
