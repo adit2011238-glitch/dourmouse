@@ -39,6 +39,8 @@ _BROWSER_TOOLS = {
     "browser_fill_form",
     "browser_click",
     "browser_select",
+    "browser_type",
+    "browser_media",
     "browser_press",
     "browser_submit",
     "browser_wait",

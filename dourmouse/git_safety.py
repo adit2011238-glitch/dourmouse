@@ -50,6 +50,9 @@ GIT_HARDENING_CONFIG: tuple[str, ...] = (
     "-c", "log.showSignature=false",
     "-c", "core.fsmonitor=false",
     "-c", "diff.external=",
+    # finding #168: hooks (post-index-change on status, post-commit on revert) and
+    # .gitattributes filter drivers also run repository-chosen programs.
+    "-c", "core.hooksPath=/dev/null",
 )
 
 #: Subcommands that render a diff. ``--no-ext-diff`` and ``--no-textconv`` stop a
@@ -70,7 +73,7 @@ def harden_git_args(args: list[str]) -> list[str]:
 
 def _run_git(args: list[str], cwd: Path, timeout: int = 15) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *GIT_HARDENING_CONFIG, *harden_git_args(args)],
+        ["git", *GIT_HARDENING_CONFIG, *filter_driver_overrides(cwd), *harden_git_args(args)],
         cwd=str(cwd),
         capture_output=True,
         text=True, encoding="utf-8", errors="replace",
@@ -189,3 +192,27 @@ def undo_last(root: Path) -> str:
         f"a new commit ({new_rev.stdout.strip()}). History is intact — "
         "this is a revert, not a reset."
     )
+
+
+def filter_driver_overrides(cwd: Path) -> list[str]:
+    """``-c filter.<name>.clean=`` (and smudge, process, required=false) for every filter
+    driver the repository's own config names, so a ``.gitattributes`` entry cannot run a
+    program on ``status`` or ``diff`` (finding #168). Reading the config runs nothing."""
+    try:
+        out = subprocess.run(
+            ["git", *GIT_HARDENING_CONFIG, "config", "--get-regexp", r"^filter\."], cwd=str(cwd),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    names = set()
+    for line in out.splitlines():
+        key = line.split(" ", 1)[0]
+        parts = key.split(".")
+        if len(parts) >= 3:
+            names.add(".".join(parts[1:-1]))
+    flags: list[str] = []
+    for name in sorted(names):
+        for field in ("clean=", "smudge=", "process=", "required=false"):
+            flags += ["-c", f"filter.{name}.{field}"]
+    return flags

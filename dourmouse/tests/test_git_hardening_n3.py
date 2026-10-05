@@ -282,3 +282,31 @@ class TestSafetyStillCommits:
         assert h, "the auto commit must still be made"
         log = _plain_git(repo, "log", "--format=%s").stdout
         assert git_safety.AUTO_COMMIT_PREFIX in log
+
+
+def test_hooks_and_filter_drivers_do_not_run_on_status(tmp_path):
+    """Finding #168: core.hooksPath and filter drivers were still live after N3."""
+    import subprocess
+
+    from dourmouse.git_safety import GIT_HARDENING_CONFIG, filter_driver_overrides
+
+    repo = tmp_path / "r"
+    repo.mkdir()
+    run = lambda *a: subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True, check=False)  # noqa: E731
+    run("init", "-q")
+    run("config", "user.email", "t@example.com")
+    run("config", "user.name", "t")
+    marker_f = tmp_path / "PWNED_filter"
+    marker_h = tmp_path / "PWNED_hook"
+    run("config", "filter.evil.clean", f"sh -c 'touch {marker_f}; cat'")
+    (repo / ".gitattributes").write_text("*.txt filter=evil\n")
+    hooks = repo / ".git" / "hooks"
+    hooks.mkdir(exist_ok=True)
+    hook = hooks / "post-index-change"
+    hook.write_text(f"#!/bin/sh\ntouch {marker_h}\n")
+    hook.chmod(0o755)
+    (repo / "a.txt").write_text("x\n")
+    subprocess.run(["git", *GIT_HARDENING_CONFIG, *filter_driver_overrides(repo), "add", "a.txt"], cwd=repo, capture_output=True, check=False)
+    subprocess.run(["git", *GIT_HARDENING_CONFIG, *filter_driver_overrides(repo), "status"], cwd=repo, capture_output=True, check=False)
+    assert not marker_f.exists()
+    assert not marker_h.exists()

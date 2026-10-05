@@ -2086,3 +2086,5 @@ Live Electron check of J and D; grant Accessibility and drive TextEdit and Music
 ## Wave 2b done (#163). Next: B3 (Widevine DRM build, extensions, profiles, Chrome import). Open: CDP-held console IPC for permission answers, kill switch not stopping running streams, legacy browser_creds.json store, packaged entitlements for camera and microphone.
 
 ## Wave 2 done (#164). Next: Wave 3 (C: stable element ids, user/model lock, live Docs and YouTube tests, agent follows active tab; G: tool descriptions and benchmark baseline), then Wave 4 (F2, I). Owner: DRM build decision (B3_DRM_PLAN.md), sign in to Google in the pane, grant Accessibility for F1.
+
+## Wave 3 C done (#165 to #167). Next: G (register browser_type and browser_media, tool descriptions, benchmark baseline). Owner: run scripts/live_checks/docs_and_youtube.md once signed in. Open: import-time network wait (one import took 437 s while the network was unhealthy).

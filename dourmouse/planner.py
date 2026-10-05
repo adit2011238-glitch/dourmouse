@@ -95,6 +95,8 @@ _VERB_CAPABILITY: dict[str, set[str]] = {
     "save": {"write", "save", "create", "append", "put", "store"},
     "create": {"write", "create", "append", "put", "store", "add", "new"},
     "edit": {"edit", "write", "change", "modify", "update"},
+    # finding #168: "replace the string X with Y" is an edit (apply_search_replace, edit_file).
+    "replace": {"edit", "replace", "write", "modify"},
     "delete": {"delete", "remove", "erase"},
     "remove": {"delete", "remove", "erase"},
     "search": {"search", "find", "lookup", "query", "recall"},
@@ -143,6 +145,9 @@ _DOMAIN_ROUTE: dict[str, str] = {
     "task": "tasks",
     "tasks": "tasks",
     "todo": "tasks",
+    # finding #168: "the Google Doc" is the docs agent (docs_append, drive_create_doc), never the
+    # browser. Only the singular: "the python docs" means documentation, not Google Docs.
+    "doc": "docs",
     "calendar": "scheduling",
     "schedule": "scheduling",
     "meeting": "scheduling",

@@ -29,7 +29,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from dourmouse.git_safety import GIT_HARDENING_CONFIG, harden_git_args
+from dourmouse.git_safety import GIT_HARDENING_CONFIG, filter_driver_overrides, harden_git_args
 
 from . import ApiError, Request, route
 
@@ -47,7 +47,7 @@ def _git(root: Path, args: list[str], timeout: float = _TIMEOUT) -> subprocess.C
         # Finding N3: log.showSignature, core.fsmonitor and diff.external are switched off
         # (a project's own config can name a program for each), and diff, show and log
         # carry --no-ext-diff --no-textconv.
-        ["git", "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=off", *GIT_HARDENING_CONFIG, *harden_git_args(args)],
+        ["git", "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=off", *GIT_HARDENING_CONFIG, *filter_driver_overrides(root), *harden_git_args(args)],
         cwd=str(root), capture_output=True, timeout=timeout, env=env, check=False,
     )
 

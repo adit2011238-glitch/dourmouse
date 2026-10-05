@@ -37,13 +37,13 @@ import difflib
 import hashlib
 import json
 import os
-import tempfile
-import uuid
 import re
 import sys
+import tempfile
 import threading
 import time
 import traceback
+import uuid
 from dataclasses import dataclass, field
 from dataclasses import replace as _dataclass_replace
 from enum import Enum
@@ -52,8 +52,8 @@ from typing import Any, Callable
 from openai import OpenAI
 
 from dourmouse import model_router
+from dourmouse.agent_prompts import TOOL_USE_GUIDE as _TOOL_USE_GUIDE
 from dourmouse.backend_fallback import load_llm_config_with_fallback, probe_ollama_fallback
-from dourmouse.execution_policy import RunPolicy
 from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
@@ -64,6 +64,7 @@ from dourmouse.config import (
     fast_lane_model,
     fast_lane_model_swap_enabled,
 )
+from dourmouse.execution_policy import RunPolicy
 from dourmouse.governance import (
     BudgetTracker,
     DlpFilter,
@@ -1551,6 +1552,8 @@ _SYSTEM_PROMPT = (
     "REAL, SPECIFIC result (Rules 2/3) — never fall back to a generic, "
     "untested claim that the capability itself doesn't exist."
 )
+# Phase G (finding #168): the compact tool-use guide reaches every orchestrator turn.
+_SYSTEM_PROMPT = _SYSTEM_PROMPT + "\n\n" + _TOOL_USE_GUIDE
 
 
 # Native Ollama adapter (v4.1). The OpenAI-compat endpoint on this Ollama
@@ -2793,6 +2796,7 @@ OUTBOUND_TOOLS: frozenset[str] = frozenset({
     "browser_open", "open_browser_pane", "open_url", "fetch_url", "web_search",
     "research_fetch_url", "research_web_search", "news_search", "spotify_search",
     "browser_fill", "browser_fill_form", "browser_select", "browser_press", "browser_click",
+    "browser_type",
     "gmail_send", "email_own_send", "send_draft", "send_app_keystrokes", "freebuff_dispatch",
 })
 
@@ -2888,6 +2892,9 @@ def _url_gate(spec_name: str, url: str, actor: str) -> tuple[str, str] | None:
     return None
 
 
+_ENTER_KEYS = frozenset({"enter", "return", "numpadenter", "kp_enter"})
+
+
 def _argument_gate(spec: ToolSpec, arguments: dict[str, Any], actor: str) -> tuple[str, str] | None:
     """``("refuse", reason)``, ``("confirm", prompt)`` or None for this call."""
     name = spec.name
@@ -2903,6 +2910,14 @@ def _argument_gate(spec: ToolSpec, arguments: dict[str, Any], actor: str) -> tup
             decision = _url_gate(name, url, actor)
             if decision is not None:
                 return decision
+    if name == "browser_press" and str(arguments.get("key") or "").strip().lower().split("+")[-1].strip() in _ENTER_KEYS:
+        return ("confirm", "Press Enter on the current browser page? Enter can submit a form: send a message, "
+                "sign in, or place an order.")
+    if name == "browser_type" and str(arguments.get("mode") or "text").strip().lower() == "keys" and (
+        "\n" in str(arguments.get("text") or "") or "\r" in str(arguments.get("text") or "")
+    ):
+        return ("confirm", "Type text with line breaks as real key presses? Each line break is an Enter key, "
+                "which can send a message or submit a form on this page.")
     if name == "security_sentry_dismiss":
         return ("confirm", f"Dismiss security finding {arguments.get('fingerprint')!s} as a false positive? "
                 "Its alert stops showing and the same finding is not raised again.")

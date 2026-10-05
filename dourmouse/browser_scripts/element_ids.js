@@ -262,7 +262,9 @@
       const y = Math.min(Math.max(r.top + r.height / 2, 1), innerHeight - 1);
       const hit = deepFromPoint(x, y);
       if (!hit || !(within(el, hit) || hit.control === el)) {
-        const h = hit ? hit.tagName.toLowerCase() + (hit.id ? "#" + hit.id : "") : "nothing";
+        // finding #168: the page controls the id; keep it to a short, single-line token.
+        const safeId = hit && hit.id ? String(hit.id).replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 30) : "";
+        const h = hit ? String(hit.tagName).toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 20) + (safeId ? "#" + safeId : "") : "nothing";
         return refuse("obscured", p.id, el, { by: h });
       }
       return { ...base, x, y };

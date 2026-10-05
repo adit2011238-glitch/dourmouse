@@ -383,7 +383,7 @@ def _drain_notes() -> str:
 
 
 def _tab_label(tab: dict[str, Any]) -> str:
-    title = (tab.get("title") or "").strip()
+    title = " ".join(str(tab.get("title") or "").split())[:80]  # page-controlled: one line, bounded
     url = tab.get("url") or "a new tab"
     return f"tab {tab.get('id')} ({title + ', ' if title else ''}{url})"
 

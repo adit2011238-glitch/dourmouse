@@ -1208,8 +1208,17 @@ def _propose_time_slots_tool(arguments: dict[str, Any]) -> str:
     if not (0 <= start_hour < end_hour <= 24):
         return "ERROR: need 0 <= start_hour < end_hour <= 24."
 
-    slots = []
+    from dourmouse.google_services import calendar_busy
+
     today = datetime.now().date()
+    local_tz = datetime.now().astimezone().tzinfo
+    window_start = datetime(today.year, today.month, today.day, tzinfo=local_tz) + timedelta(days=1)
+    window_end = window_start + timedelta(days=days_ahead)
+    busy = calendar_busy(window_start, window_end)
+    checked = not isinstance(busy, str)
+    busy_list = busy if not isinstance(busy, str) else []
+
+    slots = []
     for offset in range(1, days_ahead + 1):
         day = today + timedelta(days=offset)
         if day.weekday() >= 5:  # skip weekends
@@ -1217,6 +1226,11 @@ def _propose_time_slots_tool(arguments: dict[str, Any]) -> str:
         cursor = datetime(day.year, day.month, day.day, start_hour)
         end_of_day = datetime(day.year, day.month, day.day, end_hour)
         while cursor + timedelta(minutes=duration_min) <= end_of_day:
+            slot_start = cursor.replace(tzinfo=local_tz)
+            slot_end = slot_start + timedelta(minutes=duration_min)
+            if any(b_start < slot_end and slot_start < b_end for b_start, b_end in busy_list):
+                cursor += timedelta(minutes=30)
+                continue
             slots.append(
                 f"{cursor.strftime('%Y-%m-%d %H:%M')} "
                 f"({duration_min} min)"
@@ -1226,7 +1240,12 @@ def _propose_time_slots_tool(arguments: dict[str, Any]) -> str:
             break
     if not slots:
         return "No slots could be proposed in the given window."
-    return "PROPOSED TIME SLOTS (deterministic; none booked):\n" + "\n".join(slots)
+    if checked:
+        head = f"PROPOSED TIME SLOTS (free on your Google Calendar; {len(busy_list)} busy period(s) skipped; none booked):"
+    else:
+        head = (f"PROPOSED TIME SLOTS (NOT checked against your calendar: {str(busy)[:160]}; "
+                "these are weekday working-hour steps only, none booked):")
+    return head + "\n" + "\n".join(slots)
 
 
 def _list_calendar_events_tool(arguments: dict[str, Any]) -> str:
@@ -1840,13 +1859,13 @@ def _send_message_tool(registry: DispatchRegistry) -> ToolSpec:
     return ToolSpec(
         name="send_message",
         description=(
-            "Send a message from THIS agent to ANOTHER (or broadcast to the "
-            "whole roster with to_agent='*') on the inter-agent bus. Use to "
-            "route information between agents mid-task, e.g. research sends "
-            "its findings to markets. Only callable from within a single-"
-            "agent run (a delegate_task/delegate_parallel branch) — the "
-            "sender is always the real calling agent, never a name you "
-            "pass in. Internal bus only — nothing is sent outside the machine."
+            "Send a message from THIS agent to ANOTHER (or broadcast to the whole roster "
+            "with to_agent='*') on the inter-agent bus. Use to route information between "
+            "agents mid-task, e.g. research sends its findings to markets. Only callable "
+            "from within a single-agent run (a delegate_task/delegate_parallel branch); the "
+            "sender is always the real calling agent, never a name you pass in. Internal "
+            "bus only: nothing is sent outside the machine, so it is never how to email a "
+            "person (use gmail_send)."
         ),
         parameters={
             "type": "object",
@@ -3437,8 +3456,11 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="web_search",
                     description=(
-                        "Search the live web for a query and return real result "
-                        "titles/snippets. Use for fact-finding."
+                        "Search the live web for a query and return real result titles/snippets, e.g. "
+                        "web_search(query='boiling point of ethanol'). Use for fact-finding when no "
+                        "page is known. To read a specific URL use fetch_url; for current news use "
+                        "news_search; for a stock price use stock_quote; to SHOW a site to the owner "
+                        "use open_browser_pane."
                     ),
                     parameters={
                         "type": "object",
@@ -3453,9 +3475,11 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="fetch_url",
                     description=(
-                        "Fetch a web page and return its readable text "
-                        "(crudely HTML-stripped). Use to read a specific URL "
-                        "the user or a search result pointed at."
+                        "Fetch a web page and return its readable text (crudely HTML-stripped), e.g. "
+                        "fetch_url(url='https://example.com'). Use to read a specific URL the user or a "
+                        "search result pointed at. It runs no scripts and cannot click or log in: for a "
+                        "page that needs that use browser_open then browser_snapshot. A page that "
+                        "blocks the fetch: answer from web_search snippets, do not open a tab."
                     ),
                     parameters={
                         "type": "object",
@@ -3470,18 +3494,15 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="open_url",
                     description=(
-                        "Opens a REAL browser tab on the user's own laptop, "
-                        "visibly. ONLY call this when the user's message "
-                        "explicitly says to open/launch/pull up a page or "
-                        "site (e.g. 'open github.com'). NEVER call this to "
-                        "answer a factual/informational question ('what is "
-                        "X', 'explain Y', 'how does Z work'), and NEVER call "
-                        "it as a fallback after fetch_url fails or is "
-                        "blocked — a failed fetch means answer from "
-                        "web_search's snippets instead, not hijack the "
-                        "browser. Calling this for an ordinary question is "
-                        "a bug, confirmed live: a research question ended "
-                        "up opening 2 real tabs with no answer given first."
+                        "Opens a REAL browser tab on the user's own laptop, visibly, in their own "
+                        "browser. ONLY call this when the user's message explicitly says to "
+                        "open/launch/pull up a page or site (e.g. 'open github.com'); for the app's own "
+                        "pane use open_browser_pane. NEVER call this to answer a factual/informational "
+                        "question ('what is X', 'explain Y', 'how does Z work'), and NEVER call it as a "
+                        "fallback after fetch_url fails or is blocked: a failed fetch means answer from "
+                        "web_search's snippets instead, not hijack the browser. Calling this for an "
+                        "ordinary question is a bug, confirmed live: a research question ended up "
+                        "opening 2 real tabs with no answer given first."
                     ),
                     parameters={
                         "type": "object",
@@ -3597,10 +3618,10 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="list_running_apps",
                     description=(
-                        "List every foreground app currently running, and which "
-                        "one (if any) is frontmost. Use this BEFORE activating/"
-                        "controlling an app to confirm it's actually running and "
-                        "get its exact name."
+                        "List every foreground app currently running, and which one (if any) is "
+                        "frontmost. Use this BEFORE activating/controlling an app to confirm it's "
+                        'actually running and get its exact name, and for "which applications are '
+                        'running". No arguments.'
                     ),
                     parameters={"type": "object", "properties": {}},
                     handler=_apps_list_tool,
@@ -3642,10 +3663,12 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="send_app_keystrokes",
                     description=(
-                        "Bring an app forward and type literal text into whatever "
-                        "has focus inside it. Real risk if the app is slow to "
-                        "focus a text field — verify with list_app_windows or a "
-                        "screenshot-equivalent check afterward, don't assume it landed."
+                        "Bring an app forward and type literal text into whatever has focus inside it. "
+                        "A coarse, older tool: it cannot see the app's controls. Where the app is one "
+                        "the owner has allowed, prefer app_driver_snapshot then app_driver_type, which "
+                        "targets a text field by element id. Real risk if the app is slow to focus a "
+                        "text field: verify with list_app_windows afterward, do not assume it landed. "
+                        "To type into a web page use browser_type instead."
                     ),
                     parameters={
                         "type": "object",
@@ -3666,10 +3689,11 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="press_app_key",
                     description=(
-                        "Bring an app forward and press one named key: "
-                        "return, enter, tab, escape, delete, space, up, down, "
-                        "left, right — with optional modifiers (command, "
-                        "option, shift, control)."
+                        "Bring an app forward and press one named key: return, enter, tab, escape, "
+                        "delete, space, up, down, left, right, with optional modifiers (command, "
+                        "option, shift, control). A coarse, older tool; for an allowed app "
+                        "app_driver_press_key does the same with the app's controls readable through "
+                        "app_driver_snapshot. For a key on a web page use browser_press."
                     ),
                     parameters={
                         "type": "object",
@@ -3695,8 +3719,10 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="click_app_menu_item",
                     description=(
-                        'Click a menu item by its full path, e.g. ["File", "New '
-                        'Window"] or ["File", "Export", "PDF..."].'
+                        'Click a menu item of a running app by its full path, e.g. ["File", "New '
+                        'Window"] or ["File", "Export", "PDF..."]. Use it for menu-bar commands only; '
+                        "to press a button or control inside the app window use app_driver_snapshot "
+                        "then app_driver_click."
                     ),
                     parameters={
                         "type": "object",
@@ -3745,8 +3771,10 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="draft_message",
                     description=(
-                        "Create a message draft (email/slack/etc). Returns a real "
-                        "draft saved to the workspace; NEVER sends anything."
+                        "Create a message draft (email/slack/etc) for the owner to review. Returns a "
+                        'real draft saved to the workspace; NEVER sends anything. Use it for "draft a '
+                        'reply" or "write it but do not send". To send an email use gmail_send (asks '
+                        "for confirmation)."
                     ),
                     parameters={
                         "type": "object",
@@ -3815,8 +3843,12 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="propose_time_slots",
                     description=(
-                        "Deterministically propose free time slots for a meeting "
-                        "of a given duration over the next N days."
+                        "Propose candidate meeting slots of a given duration over the next N days: "
+                        "weekdays only, within start_hour to end_hour, in 30-minute steps, skipping "
+                        "anything busy on the owner's Google Calendar. If the calendar cannot be read "
+                        "(not signed in), the result says it was NOT checked. To see the events themselves use "
+                        "list_calendar_events. Books nothing. Example: "
+                        "propose_time_slots(duration_minutes=30, days_ahead=5)."
                     ),
                     parameters={
                         "type": "object",
@@ -3832,12 +3864,17 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="list_calendar_events",
                     description=(
-                        "List real upcoming events on the signed-in user's "
-                        "Google Calendar (read-only, soonest first). Honest "
-                        "NOT CONFIGURED without a signed-in Google user — real "
-                        "and working once signed in, not a stub."
+                        "List the next upcoming events on the signed-in user's Google Calendar "
+                        "(read-only, soonest first; max_results 1 to 25, default 5). There is no date "
+                        'filter: read the dates in the result yourself to answer "what is on this week" '
+                        'or "anything tomorrow". It does not find open time (propose_time_slots) or add '
+                        "events (create_calendar_event). Honest NOT CONFIGURED without a signed-in "
+                        "Google user."
                     ),
-                    parameters={"type": "object", "properties": {}},
+                    parameters={
+                        "type": "object",
+                        "properties": {"max_results": {"type": "integer", "default": 5}},
+                    },
                     handler=_list_calendar_events_tool,
                 ),
                 ToolSpec(
@@ -4010,11 +4047,12 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="sheets_read",
                     description=(
-                        "Read a Google Sheet's values as rows (read-only). "
-                        "Needs the spreadsheet ID from the URL and the sheet "
-                        "name; works when the sheet is shared 'Anyone with "
-                        "the link can view'. Private sheets report the exact "
-                        "fix instead of fabricating data."
+                        "Read a Google Sheet's values as rows (read-only). Needs the spreadsheet ID "
+                        "from the URL (the token between /d/ and /edit); sheet is the tab name and "
+                        "defaults to 'Sheet1', so pass the real tab name if it differs. Works when the "
+                        "sheet is shared 'Anyone with the link can view'; private sheets report the "
+                        "exact fix instead of fabricating data. To add rows use sheets_append, to make "
+                        "a new one sheets_create."
                     ),
                     parameters={
                         "type": "object",
@@ -4110,12 +4148,13 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="drive_create_doc",
                     description=(
-                        "Create a Google Doc in the SIGNED-IN user's Google "
-                        "Drive with the given title and optional content, and "
-                        "return its open link. REAL write — REQUIRES human "
-                        "confirmation. Needs the Google sign-in with Drive "
-                        "write scope (GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT "
-                        "CONFIGURED honestly without a signed-in user."
+                        "Create a NEW Google Doc in the SIGNED-IN user's Google Drive with the given "
+                        "title and optional content, and return its open link, e.g. "
+                        "drive_create_doc(title='Meeting Notes', content='...'). To add text to a Doc "
+                        "that already exists use docs_append (this tool cannot edit one). REAL write: "
+                        "REQUIRES human confirmation. Needs the Google sign-in with Drive write scope "
+                        "(GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT CONFIGURED honestly without a "
+                        "signed-in user."
                     ),
                     parameters={
                         "type": "object",
@@ -4135,20 +4174,17 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="docs_append",
                     description=(
-                        "Append text to the END of an EXISTING Google Doc's "
-                        "body — real write, REQUIRES human confirmation. "
-                        "Unlike drive_create_doc (which only ever creates a "
-                        "brand-new document and can only write its content "
-                        "ONCE), this is how to build a long document "
-                        "INCREMENTALLY across multiple calls/turns — e.g. "
-                        "write one section, append the next, append the "
-                        "next. Never replaces existing content. Needs a "
-                        "real document_id (from drive_create_doc's own "
-                        "result, drive_search, or the doc's URL) and the "
-                        "Google sign-in with Drive/Docs write scope "
-                        "(GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT "
-                        "CONFIGURED honestly without a signed-in user, or a "
-                        "clear error if the document_id doesn't exist."
+                        "Append text to the END of an EXISTING Google Doc's body, e.g. "
+                        "docs_append(document_id='<id>', text='...'): real write, REQUIRES human "
+                        "confirmation. Unlike drive_create_doc (which only ever creates a brand-new "
+                        "document and can only write its content ONCE), this is how to build a long "
+                        "document INCREMENTALLY across multiple calls/turns: write one section, append "
+                        "the next. Never replaces existing content, and cannot insert in the middle. "
+                        "Needs a real document_id (from drive_create_doc's own result, drive_search, or "
+                        "the doc's URL) and the Google sign-in with Drive/Docs write scope "
+                        "(GOOGLE_OAUTH_FULL_SCOPES=1); reports NOT CONFIGURED honestly without a "
+                        "signed-in user, or a clear error if the document_id doesn't exist. To type "
+                        "into a Doc the owner has open in the browser pane use browser_type instead."
                     ),
                     parameters={
                         "type": "object",
@@ -4300,7 +4336,9 @@ def build_general_registry() -> DispatchRegistry:
                         "writes only its own scratch folder (workspace/scratch), has "
                         "no network and no API keys. To give it workspace files, list "
                         "them in 'inputs' (workspace-relative paths); they are copied "
-                        "into the scratch folder."
+                        "into the scratch folder. Use it to compute or test something, "
+                        "e.g. run_python(code='print(sum(range(1, 101)))'); to run a "
+                        "shell command use run_command instead."
                     ),
                     parameters={
                         "type": "object",
@@ -4335,7 +4373,7 @@ def build_general_registry() -> DispatchRegistry:
                 ),
                 ToolSpec(
                     name="read_file",
-                    description="Read a text file from the workspace sandbox." + path_note,
+                    description="Read a text file from the workspace sandbox." + path_note + ' For a file outside the workspace (an absolute path such as /tmp/x or /Users/you/...) use read_path.',
                     parameters={
                         "type": "object",
                         "properties": {"path": {"type": "string"}},
@@ -4348,7 +4386,7 @@ def build_general_registry() -> DispatchRegistry:
                     description=(
                         "Write a text file inside the workspace sandbox. When the "
                         "file already exists, the result includes a unified diff "
-                        "of exactly what changed." + path_note
+                        "of exactly what changed." + path_note + ' For a file outside the workspace (an absolute path such as /tmp/x or /Users/you/...) use write_path.'
                     ),
                     parameters={
                         "type": "object",
@@ -4366,6 +4404,8 @@ def build_general_registry() -> DispatchRegistry:
                         "grep-style content search across the workspace sandbox "
                         "(file:line:match). Use to find where something is "
                         "defined, referenced, or mentioned before editing." + path_note
+                        + " It cannot search outside the workspace: for a folder elsewhere "
+                        "(an absolute path such as /tmp/x) use run_command with grep -rl."
                     ),
                     parameters={
                         "type": "object",
@@ -4402,6 +4442,8 @@ def build_general_registry() -> DispatchRegistry:
                         "old_str must occur EXACTLY once; ambiguous or missing "
                         "matches are refused (no silent multi-match edits). "
                         "Returns the resulting unified diff." + path_note
+                        + " For a file outside the workspace (an absolute path) use "
+                        "apply_search_replace."
                     ),
                     parameters={
                         "type": "object",
@@ -4417,14 +4459,15 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="claude_code",
                     description=(
-                        "Delegate a coding task to the user's REAL Claude Code "
-                        "CLI (headless `claude -p` mode) and return its real "
-                        "output. Use for complex code work, debugging, or "
-                        "codebase reasoning that benefits from Claude Code. "
-                        "Requires the 'claude' CLI on PATH or CLAUDE_CODE_CLI "
-                        "set — honestly NOT CONFIGURED if not found. Note: "
-                        "headless mode runs with default permissions, so "
-                        "permission-gated file edits are typically declined."
+                        "Delegate a coding task to the user's REAL Claude Code CLI (headless `claude "
+                        "-p` mode) and return its real output, e.g. claude_code(task='refactor util.py "
+                        "to remove duplicated helpers', cwd='/Users/you/project'). Use it when the "
+                        "owner asks for Claude Code by name, or for complex code work, debugging or "
+                        "codebase reasoning; for one small known edit use edit_file or "
+                        "apply_search_replace instead. Requires the 'claude' CLI on PATH or "
+                        "CLAUDE_CODE_CLI set; honestly NOT CONFIGURED if not found. Note: headless mode "
+                        "runs with default permissions, so permission-gated file edits are typically "
+                        "declined."
                     ),
                     parameters={
                         "type": "object",
@@ -4581,7 +4624,7 @@ def build_general_registry() -> DispatchRegistry:
                         "The sandbox root IS the workspace; pass '.' or omit "
                         "path to list it, or pass a path RELATIVE to the root "
                         "(e.g. 'docs/'). Never guess absolute paths — they are "
-                        "refused." + path_note
+                        "refused." + path_note + ' For a file outside the workspace (an absolute path such as /tmp/x or /Users/you/...) use list_path.'
                     ),
                     parameters={
                         "type": "object",
@@ -5029,9 +5072,9 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="news_headlines",
                     description=(
-                        "Fetch LIVE top headlines (keyless Google News RSS). "
-                        "Returns real {title, source, published} rows. Use for "
-                        "'what's happening now' — no search engine needed."
+                        "Fetch LIVE top headlines (keyless Google News RSS). Returns real {title, "
+                        "source, published} rows. Use for 'what's happening now' with no topic; for "
+                        "headlines about a named topic use news_search."
                     ),
                     parameters={
                         "type": "object",
@@ -5044,12 +5087,12 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="news_search",
                     description=(
-                        "Search LIVE news for a specific topic, event, team, "
-                        "match or person (keyless Google News RSS). Use this "
-                        "for sports scores and results, elections, and any "
-                        "'what happened with X' question. This is the correct "
-                        "tool for anything current that is NOT a stock — "
-                        "stock_quote only understands tradeable tickers."
+                        "Search LIVE news for a specific topic, event, team, match or person (keyless "
+                        "Google News RSS). Use this for sports scores and results, elections, and any "
+                        "'what happened with X' question. This is the correct tool for anything current "
+                        "that is NOT a stock: stock_quote only understands tradeable tickers. For "
+                        "general headlines with no topic use news_headlines; for older or non-news "
+                        "facts use web_search."
                     ),
                     parameters={
                         "type": "object",
@@ -5080,9 +5123,10 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="stock_quote",
                     description=(
-                        "Real quote for one stock symbol (Yahoo Finance, keyless): "
-                        "price, currency, day range, 52-week range. Returns REAL "
-                        "market data, never fabricated numbers."
+                        "Real quote for one stock symbol (Yahoo Finance, keyless), e.g. "
+                        "stock_quote(symbol='AAPL'): price, currency, day range, 52-week range. Returns "
+                        "REAL market data, never fabricated numbers. For the day's biggest gainers or "
+                        "losers use market_movers; it does not trade anything."
                     ),
                     parameters={
                         "type": "object",
@@ -5155,8 +5199,9 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="spotify_now_playing",
                     description=(
-                        "What is CURRENTLY playing on the linked Spotify account "
-                        "(track, artists, progress) — or honestly 'nothing playing'."
+                        "What is CURRENTLY playing on the linked SPOTIFY account (track, artists, "
+                        "progress), or honestly 'nothing playing'. For a local file in the app's own "
+                        "player use player_now_playing; for a video on a web page use browser_media."
                     ),
                     parameters={"type": "object", "properties": {}},
                     handler=_spotify_wrap(_spotify_now_playing_tool),
@@ -5518,6 +5563,7 @@ def build_general_registry() -> DispatchRegistry:
                 browser_extract,
                 browser_fill,
                 browser_fill_form,
+                browser_media,
                 browser_open,
                 browser_pane_hide,
                 browser_pane_show,
@@ -5527,6 +5573,7 @@ def build_general_registry() -> DispatchRegistry:
                 browser_signin,
                 browser_snapshot,
                 browser_submit,
+                browser_type,
                 browser_wait,
             )
 
@@ -5537,6 +5584,8 @@ def build_general_registry() -> DispatchRegistry:
                 "fill_form": browser_fill_form,
                 "click": browser_click,
                 "select": browser_select,
+                "type": browser_type,
+                "media": browser_media,
                 "press": browser_press,
                 "submit": browser_submit,
                 "wait": browser_wait,
@@ -5587,8 +5636,11 @@ def build_general_registry() -> DispatchRegistry:
             "browser",
             "General",
             "Drives a real headless Chrome (Playwright + system Google Chrome) "
-            "to open pages, fill forms, sign up and log in. Submitting forms, "
-            "logging in, and storing credentials always require confirmation. "
+            "to open pages, fill forms, type into editors, control a page's "
+            "video (YouTube included), sign up and log in. browser_submit, "
+            "Enter key presses, typed line breaks, sign-in and stored "
+            "credentials ask the owner first; a click on a Send, Submit or "
+            "Buy button does not, so never click one without the owner's go-ahead. "
             "NEVER attempt to sign the owner into Google (or another OAuth "
             "identity provider: Microsoft, Apple, GitHub SSO, etc.) with this "
             "browser: Google refuses sign-in from an automated Chrome and shows "
@@ -5605,11 +5657,12 @@ def build_general_registry() -> DispatchRegistry:
                     name="open_browser_pane",
                     description=(
                         "Open a URL in a real, HUMAN-VISIBLE pane embedded in "
-                        "the app itself — use this when the user should SEE the "
+                        "the app itself. Use this when the user should SEE the "
                         "page (e.g. 'show me github.com', 'pull up the docs for "
-                        "X'), unlike browser_open which drives an invisible "
-                        "automation engine the user never sees. Only http(s) "
-                        "URLs are ever opened."
+                        "X'). It only shows the page: it does not read it back "
+                        "to you. To read or drive a page use browser_open, and "
+                        "for a fact use web_search. Only http(s) URLs are ever "
+                        "opened. Example: open_browser_pane(url='https://github.com')."
                     ),
                     parameters={
                         "type": "object",
@@ -5621,11 +5674,20 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="browser_open",
                     description=(
-                        "Open a URL in the agent's real Chrome and report the "
-                        "page: URL, title, and interactive elements. Only "
-                        "http(s) URLs are ever opened. Use first, then drive "
-                        "the page with browser_fill / browser_click / "
-                        "browser_submit."
+                        "Open a URL in the agent's browser and report the page: "
+                        "URL, title, the interactive elements with ids (e12) and "
+                        "a text sample. In the Electron app this is the tab the "
+                        "owner sees (a TAB line says so); otherwise it is a "
+                        "separate headless Chrome. Use it first when a page must "
+                        "be read or driven, then act by element id with "
+                        "browser_click / browser_fill / browser_type; "
+                        "browser_submit sends a form. Only http(s) URLs are "
+                        "opened. A NOTE line in any browser result means the tab "
+                        "changed (a popup opened, a tab closed, the owner "
+                        "switched tabs): read it before the next step. To only "
+                        "SHOW the owner a page use open_browser_pane; for a "
+                        "plain fact use web_search. "
+                        "Example: browser_open(url='https://example.com')."
                     ),
                     parameters={
                         "type": "object",
@@ -5638,9 +5700,17 @@ def build_general_registry() -> DispatchRegistry:
                     name="browser_snapshot",
                     description=(
                         "Read the CURRENT page state: URL, title, and every "
-                        "interactive element with its label/placeholder/value "
-                        "plus a text sample. Use before filling or clicking so "
-                        "you target real labels."
+                        "interactive element with an id (e12), its role, "
+                        "label and value, plus a text sample. Take one before "
+                        "your first action on a page and again after anything "
+                        "navigates or changes it. Element ids from the latest "
+                        "snapshot are the best target for browser_click, "
+                        "browser_fill, browser_select, browser_extract and "
+                        "browser_type; an id that is gone, hidden or from "
+                        "before a navigation is refused with a reason. Values "
+                        "of password and similar fields show as [hidden]. A "
+                        "NOTE line means the tab changed. Iframe contents are "
+                        "not listed. max_elements raises the list length."
                     ),
                     parameters={
                         "type": "object",
@@ -5651,14 +5721,21 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="browser_fill",
                     description=(
-                        "Fill ONE form field on the current page by its label, "
-                        "placeholder, button name, CSS selector (prefix 'css:'), "
-                        "or visible text."
+                        "Fill ONE form field on the current page: the field's "
+                        "contents become value. Target it by element id from "
+                        "browser_snapshot (e12, best) or by label, placeholder, "
+                        "CSS selector (prefix 'css:') or visible text. It does "
+                        "not submit anything. For editors that take no field "
+                        "value (Google Docs, rich text boxes) use browser_type. "
+                        "Example: browser_fill(target='e7', value='hello')."
                     ),
                     parameters={
                         "type": "object",
                         "properties": {
-                            "target": {"type": "string"},
+                            "target": {
+                                "type": "string",
+                                "description": "An element id from browser_snapshot (e12), which is the most reliable; otherwise a label, button name, link text, visible text or a css: selector.",
+                            },
                             "value": {"type": "string"},
                         },
                         "required": ["target", "value"],
@@ -5669,9 +5746,11 @@ def build_general_registry() -> DispatchRegistry:
                     name="browser_fill_form",
                     description=(
                         "Fill MANY form fields at once for signup flows: an "
-                        "object of label -> value (labels from browser_snapshot). "
+                        "object of target -> value, where a target is an element "
+                        "id from browser_snapshot (e12, best) or a label. "
                         "Nothing is submitted until browser_submit (which needs "
-                        "confirmation)."
+                        "confirmation). Stops partway, and says how far it got, "
+                        "if the owner starts using the tab."
                     ),
                     parameters={
                         "type": "object",
@@ -5683,13 +5762,23 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="browser_click",
                     description=(
-                        "Click an element on the current page by its label, "
-                        "button name, link text, CSS selector (prefix 'css:'), "
-                        "or visible text. Reports the resulting page."
+                        "Click an element on the current page. Target it by "
+                        "element id from browser_snapshot (e12, best) or by "
+                        "label, button name, link text, CSS selector (prefix "
+                        "'css:') or visible text. Reports the resulting page; a "
+                        "link that opens a new tab is followed and a NOTE line "
+                        "says so. Take a fresh browser_snapshot after a click "
+                        "that changes the page. "
+                        "Example: browser_click(target='e12')."
                     ),
                     parameters={
                         "type": "object",
-                        "properties": {"target": {"type": "string"}},
+                        "properties": {
+                            "target": {
+                                "type": "string",
+                                "description": "An element id from browser_snapshot (e12), which is the most reliable; otherwise a label, button name, link text, visible text or a css: selector.",
+                            }
+                        },
                         "required": ["target"],
                     },
                     handler=_browser_h("click"),
@@ -5697,13 +5786,18 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="browser_select",
                     description=(
-                        "Choose an option in a <select> dropdown by its label "
-                        "and the option's value or label."
+                        "Choose an option in a <select> dropdown. Target it by "
+                        "element id from browser_snapshot (e12, best) or by "
+                        "label; value is the option's value or visible label "
+                        "(the snapshot lists the options)."
                     ),
                     parameters={
                         "type": "object",
                         "properties": {
-                            "target": {"type": "string"},
+                            "target": {
+                                "type": "string",
+                                "description": "An element id from browser_snapshot (e12), which is the most reliable; otherwise a label, button name, link text, visible text or a css: selector.",
+                            },
                             "value": {"type": "string"},
                         },
                         "required": ["target", "value"],
@@ -5711,11 +5805,73 @@ def build_general_registry() -> DispatchRegistry:
                     handler=_browser_h("select"),
                 ),
                 ToolSpec(
+                    name="browser_type",
+                    description=(
+                        "Type text into the current page like a person. target: "
+                        "an element id from browser_snapshot (e12), or omit it to "
+                        "type into whatever has focus. Omitting it is how to "
+                        "type into Google Docs and similar editors: click into "
+                        "the document first, then type. mode 'text' (default) "
+                        "inserts the text in short chunks; it works in rich "
+                        "editors and a line break never presses Enter. mode "
+                        "'keys' sends one key press per character, for widgets "
+                        "that only react to key presses. clear: replace the "
+                        "field's contents. Use this where browser_fill does not "
+                        "reach. If the owner types, clicks or scrolls in the "
+                        "same tab, or presses Stop, typing stops and the result "
+                        "says how much was typed. Do not retry without asking "
+                        "the owner."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string"},
+                            "text": {"type": "string"},
+                            "mode": {"type": "string", "enum": ["text", "keys"], "default": "text"},
+                            "clear": {"type": "boolean", "default": False},
+                            "delay_ms": {"type": "integer", "default": 20},
+                        },
+                        "required": ["text"],
+                    },
+                    handler=_browser_h("type"),
+                ),
+                ToolSpec(
+                    name="browser_media",
+                    description=(
+                        "Control the main video or audio on the current browser "
+                        "page, YouTube included. Works through the page's own "
+                        "player; no YouTube account or key. action: status "
+                        "(title, current time, length, playing or paused, muted, "
+                        "volume, whether an advert is playing), play, pause, "
+                        "seek, mute, unmute, volume. seek takes 'to' (seconds or "
+                        "m:ss) or 'by' (seconds; negative goes back). volume "
+                        "takes 'level' from 0 to 100. The result reports what "
+                        "actually happened. Every action except status waits for "
+                        "the owner if they are using the tab."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": ["status", "play", "pause", "seek", "mute", "unmute", "volume"],
+                            },
+                            "to": {"type": ["number", "string"]},
+                            "by": {"type": "number"},
+                            "level": {"type": "number"},
+                        },
+                        "required": ["action"],
+                    },
+                    handler=_browser_h("media"),
+                ),
+                ToolSpec(
                     name="browser_press",
                     description=(
-                        "Send a keyboard key to the page (Enter, Tab, Escape, "
-                        "ArrowDown...). Pressing Enter in a field submits the "
-                        "form — that is confirmation-gated like browser_submit."
+                        "Send ONE keyboard key to the page (Enter, Tab, Escape, "
+                        "ArrowDown...). Enter can submit a form, so pressing "
+                        "Enter asks the owner first, like browser_submit; to "
+                        "submit a login, signup or order use browser_submit. "
+                        "To type text use browser_type or browser_fill."
                     ),
                     parameters={
                         "type": "object",
@@ -5760,13 +5916,21 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="browser_extract",
                     description=(
-                        "Extract the visible text of an element (by label, CSS "
-                        "with 'css:' prefix, or text) — e.g. read an article "
-                        "behind a login, or pull a confirmation code off a page."
+                        "Extract the visible text of one element (an element id "
+                        "from browser_snapshot such as e12, or a label, 'css:' "
+                        "selector or text), up to 4000 characters. Use it to "
+                        "read an article body or pull a confirmation code off a "
+                        "page when the snapshot's text sample is too short. "
+                        "Values of password fields come back as [hidden]."
                     ),
                     parameters={
                         "type": "object",
-                        "properties": {"target": {"type": "string"}},
+                        "properties": {
+                            "target": {
+                                "type": "string",
+                                "description": "An element id from browser_snapshot (e12), which is the most reliable; otherwise a label, button name, link text, visible text or a css: selector.",
+                            }
+                        },
                         "required": ["target"],
                     },
                     handler=_browser_h("extract"),
@@ -5887,11 +6051,12 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="generate_image",
                     description=(
-                        "Generate a real image from a text prompt (Gemini) and "
-                        "save it to the app's data dir; view it at "
-                        "/api/images/generated. Use to show the user a picture, "
-                        "diagram, or illustration, not just describe one. "
-                        "NOT CONFIGURED when no Gemini key is set."
+                        "Generate a real image from a text prompt (Gemini) and save it to the app's "
+                        "data dir; view it at /api/images/generated. Use to make a NEW picture, "
+                        "diagram, or illustration, e.g. generate_image(prompt='a red bicycle against a "
+                        "brick wall'). It does not open an existing image (use open_file_preview) or "
+                        "capture a web page (browser_screenshot). NOT CONFIGURED when no Gemini key is "
+                        "set."
                     ),
                     parameters={
                         "type": "object",
@@ -6017,10 +6182,11 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="read_inbox",
                     description=(
-                        "Read the latest N messages from IMAP INBOX (read-only). "
-                        "Requires DOURMOUSE_IMAP_HOST / DOURMOUSE_IMAP_USER / "
-                        "DOURMOUSE_IMAP_PASS env vars; otherwise reports NOT "
-                        "CONFIGURED honestly. Never sends or deletes."
+                        "Read the latest N messages from a separate IMAP INBOX (read-only). Requires "
+                        "DOURMOUSE_IMAP_HOST / DOURMOUSE_IMAP_USER / DOURMOUSE_IMAP_PASS env vars; "
+                        "otherwise reports NOT CONFIGURED honestly. For the owner's Gmail use "
+                        "gmail_search (an empty query lists the latest inbox messages). Never sends or "
+                        "deletes."
                     ),
                     parameters={
                         "type": "object",
@@ -6033,15 +6199,15 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="gmail_search",
                     description=(
-                        "Search the signed-in Google user's Gmail for messages "
-                        "by subject/from/body words. Works with the Google "
-                        "sign-in (gmail.readonly scope); otherwise uses the "
-                        "shared App-Password setup or reports NOT CONFIGURED "
-                        "honestly. Like Gmail's own search box, Trash and Spam "
-                        "are excluded by default — a message being genuinely "
-                        "absent from a plain search does NOT mean it isn't in "
-                        "Trash; add 'in:trash' or 'in:spam' to query to search "
-                        "those specifically, or 'in:anywhere' for everything."
+                        "Search the signed-in Google user's Gmail for messages by subject/from/body "
+                        "words, e.g. gmail_search(query='from:alice budget'). An empty query lists the "
+                        "latest inbox messages; use gmail_read with an id from the results to read one. "
+                        "Works with the Google sign-in (gmail.readonly scope); otherwise uses the "
+                        "shared App-Password setup or reports NOT CONFIGURED honestly. Like Gmail's own "
+                        "search box, Trash and Spam are excluded by default: a message being genuinely "
+                        "absent from a plain search does NOT mean it isn't in Trash; add 'in:trash' or "
+                        "'in:spam' to query to search those specifically, or 'in:anywhere' for "
+                        "everything."
                     ),
                     parameters={
                         "type": "object",
@@ -6079,14 +6245,13 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="drive_search",
                     description=(
-                        "Search the signed-in Google user's Drive (read-only) "
-                        "by name/content words — newest first. Needs the user's "
-                        "Google sign-in (drive.readonly scope); otherwise "
-                        "reports NOT CONFIGURED honestly. Never deletes. To find "
-                        "only spreadsheets/docs/slides/folders/PDFs, use the "
-                        "file_type parameter — never put mimeType or other raw "
-                        "Drive query syntax inside query itself, that is a "
-                        "plain name/content text search only."
+                        "Search the signed-in Google user's Drive (read-only) by name/content words, "
+                        "newest first, e.g. drive_search(query='planning', file_type='doc'); drive_read "
+                        "opens a result by its id. Needs the user's Google sign-in (drive.readonly "
+                        "scope); otherwise reports NOT CONFIGURED honestly. Never deletes. To find only "
+                        "spreadsheets/docs/slides/folders/PDFs, use the file_type parameter; never put "
+                        "mimeType or other raw Drive query syntax inside query itself, that is a plain "
+                        "name/content text search only."
                     ),
                     parameters={
                         "type": "object",
@@ -6126,9 +6291,11 @@ def build_general_registry() -> DispatchRegistry:
                 ToolSpec(
                     name="gmail_send",
                     description=(
-                        "Send an email FROM your Gmail account. ALWAYS requires "
-                        "human confirmation of recipient + subject before any "
-                        "message leaves."
+                        "Send an email FROM the owner's Gmail account, e.g. "
+                        "gmail_send(to='x@example.com', subject='Hi', body='...'). ALWAYS requires "
+                        "human confirmation of recipient + subject before any message leaves. To write "
+                        "a message without sending it use draft_message; email_own_send sends as "
+                        "Dourmouse's own address instead."
                     ),
                     parameters={
                         "type": "object",

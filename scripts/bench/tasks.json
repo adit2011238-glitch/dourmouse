@@ -63,17 +63,25 @@
    "category": "files",
    "prompt": "Find every file under /tmp/dm_bench that mentions the word invoice.",
    "expected_tools": [
-    "search_files"
+    "search_files",
+    "run_command"
    ],
-   "pass_rule": "all_of",
+   "pass_rule": "any_of",
    "arg_checks": [
     {
      "tool": "search_files",
      "key": "query",
      "op": "contains",
      "value": "invoice"
+    },
+    {
+     "tool": "run_command",
+     "key": "command",
+     "op": "contains",
+     "value": "invoice"
     }
-   ]
+   ],
+   "note": "search_files is workspace-only and refuses /tmp, so a grep through run_command is equally correct (finding #168)."
   },
   {
    "id": "browser-01",
@@ -123,17 +131,25 @@
    "category": "browser",
    "prompt": "In the open browser page, type hello world into the search box.",
    "expected_tools": [
-    "browser_fill"
+    "browser_fill",
+    "browser_type"
    ],
-   "pass_rule": "all_of",
+   "pass_rule": "any_of",
    "arg_checks": [
     {
      "tool": "browser_fill",
      "key": "value",
      "op": "contains",
      "value": "hello world"
+    },
+    {
+     "tool": "browser_type",
+     "key": "text",
+     "op": "contains",
+     "value": "hello world"
     }
-   ]
+   ],
+   "note": "browser_type (phase C) is an equally correct way to type into a search box (finding #168)."
   },
   {
    "id": "media-01",

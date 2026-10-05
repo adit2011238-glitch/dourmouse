@@ -1718,6 +1718,36 @@ def gmail_send(to: str, subject: str, body: str) -> str:
     return f"GMAIL SEND OK: message delivered to {to} with subject {subject!r}."
 
 
+def calendar_busy(time_min: datetime, time_max: datetime) -> list[tuple[datetime, datetime]] | str:
+    """Busy intervals on the signed-in user's primary calendar (Calendar freeBusy, which the
+    calendar.readonly scope covers), as aware UTC datetimes. Returns a string starting with
+    NOT CONFIGURED or ERROR instead when they cannot be read (finding #168): the caller must
+    then say the calendar was not checked, never present slots as free."""
+    token = _oauth_access_token()
+    if not token:
+        reauth = _oauth_user_needs_reauth("CALENDAR")
+        return reauth or "NOT CONFIGURED: Google Calendar needs the logged-in user's Google sign-in."
+    body = {
+        "timeMin": time_min.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "timeMax": time_max.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "items": [{"id": "primary"}],
+    }
+    try:
+        data = _http_json("POST", f"{_CALENDAR_API}/freeBusy", token, body)
+    except RuntimeError as exc:
+        return f"ERROR: {exc}"
+    busy = (((data or {}).get("calendars") or {}).get("primary") or {}).get("busy") or []
+    out: list[tuple[datetime, datetime]] = []
+    for item in busy:
+        try:
+            start = datetime.fromisoformat(str(item["start"]).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(item["end"]).replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        out.append((start, end))
+    return out
+
+
 def calendar_events(max_results: int = 5) -> str:
     """Google Calendar read for the LOGGED-IN user.
 

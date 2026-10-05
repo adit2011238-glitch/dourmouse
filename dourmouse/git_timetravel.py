@@ -44,7 +44,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from dourmouse.git_safety import GIT_HARDENING_CONFIG, harden_git_args
+from dourmouse.git_safety import GIT_HARDENING_CONFIG, filter_driver_overrides, harden_git_args
 
 _DEFAULT_TIMEOUT = 10.0
 _FIELD_SEP = "\x1f"  # unit separator -- real git commit subjects can contain any other punctuation
@@ -55,7 +55,7 @@ def _run_git(args: list[str], repo_root: Path, timeout: float = _DEFAULT_TIMEOUT
     return subprocess.run(
         # Finding N3: the repository's own config must not be able to run a program
         # (signature check, fsmonitor, external diff or textconv driver) on a read.
-        ["git", *GIT_HARDENING_CONFIG, *harden_git_args(args)],
+        ["git", *GIT_HARDENING_CONFIG, *filter_driver_overrides(repo_root), *harden_git_args(args)],
         cwd=str(repo_root),
         capture_output=True,
         text=True, encoding="utf-8", errors="replace",

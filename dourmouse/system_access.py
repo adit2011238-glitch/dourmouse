@@ -1090,8 +1090,12 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="read_path",
                 description=(
-                    "Read any text file on the laptop by ABSOLUTE path "
-                    "(e.g. /Users/you/project/main.py)."
+                    "Read a text file on this Mac by ABSOLUTE path, e.g. "
+                    "read_path(path='/Users/you/Documents/<file>'). Use it to get what is INSIDE a "
+                    "file. It does not show the file to the owner: for that use open_file_preview "
+                    "(PDF, image, audio, video, text) or open_path (the file's normal app). It does "
+                    "not extract PDF text (use extract_pdf). Refused inside credential and system "
+                    "folders."
                 ),
                 parameters={
                     "type": "object",
@@ -1117,10 +1121,10 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="extract_pdf",
                 description=(
-                    "Extract the words from a PDF document by absolute path "
-                    "(receipts, invoices, reports). Needs the optional pypdf "
-                    "extra installed; otherwise reports NOT CONFIGURED "
-                    "honestly."
+                    "Extract the words from a PDF document by absolute path (receipts, invoices, "
+                    "reports); read_path does not do this. To SHOW a PDF to the owner use "
+                    "open_file_preview. Needs the optional pypdf extra installed; otherwise reports "
+                    "NOT CONFIGURED honestly."
                 ),
                 parameters={
                     "type": "object",
@@ -1145,7 +1149,12 @@ def build_system_subagent() -> Subagent:
             ),
             ToolSpec(
                 name="list_path",
-                description="List a directory anywhere on the laptop (absolute path).",
+                description=(
+                    "List the entries of a directory by absolute path (folders end in /), e.g. "
+                    "list_path(path='/Users/you/Documents'). Use it to see what is in a folder. To "
+                    "find files that mention a word use run_command with grep -rl; to read one file "
+                    "use read_path."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {"path": {"type": "string", "default": "."}},
@@ -1155,12 +1164,12 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="repo_map",
                 description=(
-                    "Real tree-sitter structural map of a codebase directory: "
-                    "every class/function/method's exact signature, never "
-                    "bodies (python/js/ts/tsx/go/rust/java/ruby). Use this "
-                    "BEFORE editing an unfamiliar project instead of reading "
-                    "every file — it is the token-efficient way to see what "
-                    "exists and where, same idea as Aider's own repo map."
+                    "Real tree-sitter structural map of a codebase directory, e.g. "
+                    "repo_map(path='/Users/you/project'): every class/function/method's exact "
+                    "signature, never bodies (python/js/ts/tsx/go/rust/java/ruby). Use this BEFORE "
+                    "editing an unfamiliar project instead of reading every file; it is the "
+                    "token-efficient way to see what exists and where. For one file's text use "
+                    "read_path."
                 ),
                 parameters={
                     "type": "object",
@@ -1184,10 +1193,11 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="write_path",
                 description=(
-                    "Write (create/overwrite) any text file by absolute path. "
-                    "Refused inside credential/system dirs (~/.ssh, /etc, ...). "
-                    "Auto-commits if the path is inside a git repo — undo_last_change "
-                    "reverts it."
+                    "Write (create or overwrite) a text file by absolute path, e.g. "
+                    "write_path(path='/Users/you/Documents/<file>', content='...'). To change part "
+                    "of an existing file use apply_search_replace instead of rewriting all of it. "
+                    "Refused inside credential/system dirs (~/.ssh, /etc, ...). Auto-commits if the "
+                    "path is inside a git repo; undo_last_change reverts it."
                 ),
                 parameters={
                     "type": "object",
@@ -1208,15 +1218,13 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="apply_search_replace",
                 description=(
-                    "Apply one or more SEARCH/REPLACE blocks to an EXISTING "
-                    "file by absolute path, atomically — all blocks must "
-                    "match exactly once or NONE are applied. Refuses "
-                    "up-front (nothing written) if the result would leave "
-                    "the file with a syntax error. Format: "
-                    "'<<<<<<< SEARCH\\n<exact current text>\\n=======\\n"
-                    "<replacement>\\n>>>>>>> REPLACE', one or more blocks "
-                    "back to back. Prefer this over write_path for editing "
-                    "an existing file."
+                    "Apply one or more SEARCH/REPLACE blocks to an EXISTING file by absolute path, "
+                    "atomically: all blocks must match exactly once or NONE are applied. Refuses "
+                    "up-front (nothing written) if the result would leave the file with a syntax "
+                    "error. Format: '<<<<<<< SEARCH\\n<exact current "
+                    "text>\\n=======\\n<replacement>\\n>>>>>>> REPLACE', one or more blocks back to "
+                    "back. Prefer this over write_path for editing an existing file, and over "
+                    "edit_file for a file at an absolute path."
                 ),
                 parameters={
                     "type": "object",
@@ -1297,11 +1305,12 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="run_command",
                 description=(
-                    "Run a shell command on the laptop (default cwd: the "
-                    "dispatch app root). A deterministic guard REFUSES "
-                    "destructive/irreversible commands (sudo, rm, git push, "
-                    "global installs, curl|sh, ...) — use "
-                    "run_privileged_command for those."
+                    "Run a shell command on the laptop (default cwd: the dispatch app root), e.g. "
+                    "run_command(command='uname -a'). Use it for questions no dedicated tool covers "
+                    "(uname, grep -r, git status); prefer system_info for memory and disk, "
+                    "list_path to list a folder, read_path to read a file. A deterministic guard "
+                    "REFUSES destructive/irreversible commands (sudo, rm, git push, global "
+                    "installs, curl|sh, ...); use run_privileged_command for those."
                 ),
                 parameters={
                     "type": "object",
@@ -1336,15 +1345,23 @@ def build_system_subagent() -> Subagent:
             ),
             ToolSpec(
                 name="system_info",
-                description="Report real OS/hardware info: platform, CPU, memory, disk.",
+                description=(
+                    'Report real OS/hardware info: platform, CPU, memory, disk. Use for "how much '
+                    'memory or disk space does this computer have". For running programs use '
+                    "list_running_apps; for anything else about the machine use run_command."
+                ),
                 parameters={"type": "object", "properties": {}},
                 handler=_system_info_tool,
             ),
             ToolSpec(
                 name="open_path",
                 description=(
-                    "Open a file or folder in Finder / its default app "
-                    "(macOS). Use when the user wants to look at something."
+                    "Open a file or folder in Finder or its default app (macOS), in a separate OS "
+                    "window. Use it when the owner wants the real app (Preview, QuickTime, Finder) "
+                    "or the file type is not one open_file_preview can show. To show a PDF, image, "
+                    "audio, video or text file inside this app use open_file_preview; to read what "
+                    "is in a file yourself use read_path. It will not open a program, which would "
+                    "run it."
                 ),
                 parameters={
                     "type": "object",
@@ -1356,21 +1373,19 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="open_file_preview",
                 description=(
-                    "Open a real PDF, image, audio file or video file INLINE "
-                    "in the app's own embedded pane: a real, resizable/"
-                    "minimizable panel, NOT a second OS window like "
-                    "open_path's Preview.app or QuickTime. A PDF gets a real "
-                    "rendered page-by-page view (prev/next), not just "
-                    "extracted text. Audio and video get a real player with "
-                    "native controls and working seek. Handles pdf, png, jpg, "
-                    "jpeg, gif, webp, svg, bmp, mp3, m4a, aac, wav, oga, ogg, "
-                    "opus, weba, mp4, m4v, webm, ogv, mov, plus a read-only "
-                    "viewer for plain text formats (first 512 KB, never "
-                    "credential files). Prefer this over "
-                    "open_path whenever the user wants to LOOK AT or LISTEN TO "
-                    "a file without leaving the app; use open_path instead for "
-                    "any other file type, or when the user explicitly wants "
-                    "the real default app."
+                    "Open a real PDF, image, audio file or video file INLINE in the app's own "
+                    "embedded pane: a real, resizable/minimizable panel, NOT a second OS window "
+                    "like open_path's Preview.app or QuickTime. A PDF gets a real rendered "
+                    "page-by-page view (prev/next), not just extracted text. Audio and video get a "
+                    "real player with native controls and working seek; this opens the player, it "
+                    "does not press play (player_play asks it to). Handles pdf, png, jpg, jpeg, "
+                    "gif, webp, svg, bmp, mp3, m4a, aac, wav, oga, ogg, opus, weba, mp4, m4v, webm, "
+                    "ogv, mov, plus a read-only viewer for plain text formats (first 512 KB, never "
+                    "credential files). Prefer this over open_path whenever the user wants to LOOK "
+                    "AT or LISTEN TO a file without leaving the app; use open_path for any other "
+                    "file type, or when the user explicitly wants the real default app. It only "
+                    "shows the file: to read its contents yourself use read_path or extract_pdf. "
+                    "Example: open_file_preview(path='/Users/you/report.pdf')."
                 ),
                 parameters={
                     "type": "object",
@@ -1387,25 +1402,32 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="player_play",
                 description=(
-                    "Ask the embedded media player to play the file most recently "
-                    "opened with open_file_preview. Sends a player_control event; "
-                    "the player does not confirm back, so the result is NOT "
-                    "CONFIRMED rather than a claim that it played."
+                    "Ask the app's embedded media player to play the file most recently opened with "
+                    "open_file_preview (a local audio or video file). Sends a player_control event; "
+                    "the player does not confirm back, so the result is NOT CONFIRMED rather than a "
+                    "claim that it played. For a video on a web page (YouTube included) use "
+                    "browser_media; for Spotify use spotify_playback_control."
                 ),
                 parameters={"type": "object", "properties": {}},
                 handler=_player_play_tool,
             ),
             ToolSpec(
                 name="player_pause",
-                description="Ask the embedded media player to pause. Same delivery limits as player_play.",
+                description=(
+                    "Ask the embedded media player to pause the file opened with open_file_preview. "
+                    "Same delivery limits as player_play (NOT CONFIRMED). For a video on a web page "
+                    "use browser_media; for Spotify use spotify_playback_control."
+                ),
                 parameters={"type": "object", "properties": {}},
                 handler=_player_pause_tool,
             ),
             ToolSpec(
                 name="player_seek",
                 description=(
-                    "Ask the embedded media player to jump to a position, in seconds "
-                    "from the start. Same delivery limits as player_play."
+                    "Ask the embedded media player to jump to a position in the file opened with "
+                    "open_file_preview, in seconds from the start (1:30 is 90). Example: "
+                    "player_seek(seconds=90). Same delivery limits as player_play (NOT CONFIRMED). "
+                    "For a video on a web page use browser_media with seek."
                 ),
                 parameters={
                     "type": "object",
@@ -1417,16 +1439,20 @@ def build_system_subagent() -> Subagent:
             ToolSpec(
                 name="player_now_playing",
                 description=(
-                    "Report which audio or video file was most recently opened in the "
-                    "embedded player. Honest limit: it reports the last file opened, "
-                    "not live play state or position."
+                    "Report which audio or video file was most recently opened in the app's "
+                    "embedded player (the local files shown with open_file_preview). Honest limit: "
+                    "it reports the last file opened, not live play state or position. It does not "
+                    "know Spotify (use spotify_now_playing) or a video on a web page (use "
+                    "browser_media with action status, which reads live state)."
                 ),
                 parameters={"type": "object", "properties": {}},
                 handler=_player_now_playing_tool,
             ),
             ToolSpec(
                 name="clipboard_get",
-                description="Read the current clipboard text (macOS).",
+                description=(
+                    'Read the current clipboard text (macOS). Use for "what is on my clipboard".'
+                ),
                 parameters={"type": "object", "properties": {}},
                 handler=_clipboard_get_tool,
             ),

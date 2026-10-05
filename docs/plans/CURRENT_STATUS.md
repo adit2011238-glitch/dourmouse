@@ -493,3 +493,6 @@ Per-site permission prompts, encrypted password and address manager with click-t
 
 ## 2026-10-03 Wave 2c (finding #164): Wave 2 complete
 Extensions, profiles, Chrome import, DRM readiness. Suite 7605 passed, 12 skipped. Browser now has tabs, downloads, find, zoom, print, history, bookmarks, permissions, passwords, extensions, profiles, import. Not yet: Widevine DRM build (owner go needed), Phase C shared control, 60-site parity run.
+
+## 2026-10-05 Wave 3 C1 and C2 (findings #165 to #167)
+Stable element ids, agent follows the owner's active tab, N3 git hardening, user/model lock with Stop and Take control, editor typing, YouTube control. Seen live on isolated copies including real YouTube. Suite 7837 passed. Evidence EVIDENCE/167_c2_*.

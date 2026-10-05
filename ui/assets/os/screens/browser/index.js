@@ -546,10 +546,26 @@ export default {
       loadFrame(path, false);
     }
 
-    function openFromRequest(rawUrl) {
+    async function ownerHasControl() {
+      /* finding #168: a server request to open a page (the model's open_browser_pane) must not
+         replace the page while the owner holds control or is using the tab. */
+      if (!hasC2) return false;
+      try {
+        const s = await pane.control.state();
+        return Boolean(s && (s.held || s.state === 'owner-control' || s.state === 'owner-active'));
+      } catch (_err) {
+        return true; /* unknown: do not take the page from the owner */
+      }
+    }
+
+    async function openFromRequest(rawUrl) {
       const t = eventTarget(rawUrl);
       if (!t.ok) {
         note('A request to open a page was refused: ' + t.reason, 'error');
+        return;
+      }
+      if (t.kind !== 'app' && (await ownerHasControl())) {
+        note('The model asked to open ' + t.url + ' but you have control, so this page was left as it is.', 'error');
         return;
       }
       if (t.kind === 'app') openApp(t.url);

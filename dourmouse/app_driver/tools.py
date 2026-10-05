@@ -142,16 +142,24 @@ def build_app_driver_tools() -> list[Any]:
     return [
         ToolSpec(
             name="app_driver_status",
-            description="Whether the model can drive Mac apps right now: Accessibility permission, the kill switch, which apps the owner has allowed, and whether a drive is in progress.",
+            description=(
+                "Whether the model can drive Mac apps right now: Accessibility permission, the "
+                "kill switch, which apps the owner has allowed, and whether a drive is in "
+                "progress. Call it when app_driver_snapshot is refused, to see why; only the "
+                "owner can allow an app."
+            ),
             parameters={"type": "object", "properties": {}},
             handler=_guard(_status_tool),
         ),
         ToolSpec(
             name="app_driver_snapshot",
             description=(
-                "Read the windows and controls of a running Mac app the owner has allowed (role, title, value, "
-                "position) and get element ids to act on. Always snapshot before acting, and again after anything "
-                "changes. Example: app_name='TextEdit'."
+                "Read the windows and controls of a running Mac app the owner has allowed "
+                "(role, title, value, position) and get a snapshot_id and element ids (like "
+                "0.3.1) to act on. Always snapshot before acting, and again after anything "
+                "changes. Use it instead of the older send_app_keystrokes / click_app_menu_item "
+                "when you need to read or operate controls inside an app; for a web page use "
+                "browser_snapshot. Example: app_name='TextEdit'."
             ),
             parameters={
                 "type": "object",
@@ -171,7 +179,11 @@ def build_app_driver_tools() -> list[Any]:
         ),
         ToolSpec(
             name="app_driver_click",
-            description="Press a button, menu item, checkbox or other control by element id from a fresh snapshot. Refused if the interface changed since the snapshot.",
+            description=(
+                "Press a button, menu item, checkbox or other control by snapshot_id and "
+                "element_id from a fresh app_driver_snapshot. Refused if the interface changed "
+                "since the snapshot: take a new one and retry. Asks the owner first."
+            ),
             parameters={"type": "object", "properties": {**_target_props(), "dry_run": _DRY_RUN_PROP}, "required": ["snapshot_id", "element_id"]},
             handler=_guard(_act("click")),
             permission=gated,
@@ -180,8 +192,10 @@ def build_app_driver_tools() -> list[Any]:
         ToolSpec(
             name="app_driver_type",
             description=(
-                "Focus a text field by element id and type literal text into it. Refused for password fields, "
-                "and for any text that looks like a password, key or token."
+                "Focus a text field by snapshot_id and element_id from a fresh "
+                "app_driver_snapshot and type literal text into it. Refused for password "
+                "fields, and for any text that looks like a password, key or token. Asks the "
+                "owner first. For a web page use browser_type."
             ),
             parameters={
                 "type": "object",
@@ -197,7 +211,12 @@ def build_app_driver_tools() -> list[Any]:
         ),
         ToolSpec(
             name="app_driver_press_key",
-            description="Bring an allowed app to the front and press one named key (return, enter, tab, escape, delete, space, up, down, left, right) with optional modifiers (command, option, shift, control).",
+            description=(
+                "Bring an allowed app to the front and press one named key (return, enter, tab, "
+                "escape, delete, space, up, down, left, right) with optional modifiers "
+                "(command, option, shift, control). Asks the owner first. For a key on a web "
+                "page use browser_press."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -214,7 +233,11 @@ def build_app_driver_tools() -> list[Any]:
         ),
         ToolSpec(
             name="app_driver_scroll",
-            description="Scroll the scroll area that contains an element (or is that element) by a fraction of its range.",
+            description=(
+                "Scroll the scroll area that contains an element (or is that element) by a "
+                "fraction of its range, using snapshot_id and element_id from a fresh "
+                "app_driver_snapshot. It scrolls Mac apps, not web pages. Asks the owner first."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
