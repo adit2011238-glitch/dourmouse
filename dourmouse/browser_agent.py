@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import functools
 import json
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -52,6 +54,25 @@ _CONTEXT: Any = None
 _PAGE: Any = None
 _LAUNCH_ERROR: str | None = None
 _GLOBAL_LOCK = threading.Lock()
+
+# Phase C1 state, all owned by the browser thread (the one event loop every tool runs on).
+_PW: Any = None  # the one Playwright driver, shared by the pane connection and a headless launch
+_BROWSER: Any = None  # the CDP connection to the Electron shell (pane mode only)
+_PAGE_MODE: str | None = None  # "pane" (the owner's tab) or "headless" (a separate Chrome)
+_PREPARED_CONTEXTS: set[int] = set()  # contexts that already carry the request filter and the page listener
+_TARGET_IDS: dict[Any, str] = {}  # Playwright Page -> CDP target id (matched against the pane bridge)
+_NEW_PAGES: list[Any] = []  # pages that appeared in the context, newest last (headless popup following)
+_PANE_SEEN: dict[str, Any] = {"active": None, "ids": frozenset()}  # what the last sync saw of the pane's tabs
+_NOTES: list[str] = []  # one-line notices appended to the next tool result (tab followed, popup opened)
+_NOTES_LOCK = threading.Lock()
+_NEXT_ID = 1  # element ids are unique across tabs and snapshots: the next number to hand out
+_ID_OWNER: dict[int, Any] = {}  # element id number -> the Page it was issued on
+_ID_OWNER_CAP = 6000
+_WORLDS: dict[Any, dict[str, Any]] = {}  # Page -> {"session", "ctx", "href", "gen"}: the isolated world
+_SCRIPT_PATH = Path(__file__).resolve().parent / "browser_scripts" / "element_ids.js"
+# "e12", "id:e12", "@e12" and "[e12]" name an element id. Anything else is a label, CSS or text target.
+_ELEMENT_ID_RE = re.compile(r"^(?:id:|@)?\[?e(\d{1,7})\]?$", re.IGNORECASE)
+_POPUP_POLL_SECONDS = (0.0, 0.1)  # an immediate check caught every popup in a live test (12 of 12); the second is slack
 
 _UA_NOTE = (
     "Automation is the whole point of the browser agent — this is a "
@@ -113,57 +134,217 @@ def _pane_bridge_request(pane_port: int, method: str, path: str) -> dict[str, An
         return json.loads(resp.read().decode("utf-8"))
 
 
-async def _ensure_browser_via_electron_pane(cdp_port: int, pane_port: int) -> Any:
-    """Connect to the SAME Chromium session the Electron shell's embedded
-    pane renders (see electron/main.js's showPane/ensurePaneView), instead
-    of launching a second, separate Chrome the human never sees. Ensures
-    the pane actually exists first (POST /show is idempotent — a no-op if
-    it's already showing), then finds its page: electron/main.js always
-    creates the pane fresh at "about:blank" and never navigates it away
-    from there itself, and none of this app's own windows ever load
-    about:blank — so the one still-blank tab found within
-    _PANE_DISCOVERY_TIMEOUT seconds of asking is the pane's.
+class _PaneUnreachable(RuntimeError):
+    """The pane bridge does not answer at all: the Electron shell is not there (any more).
+    Distinct from "the pane is there but no page was found", which must NOT fall back to a
+    separate Chrome."""
 
-    Real, disclosed limitation: this is a ONE-TIME match at discovery,
-    not an ongoing identity check — if some other about:blank tab somehow
-    existed in this exact Chromium instance at this exact moment, this
-    could attach to the wrong one. Once found, though, the Page OBJECT
-    reference stays correct for the rest of this process's life regardless
-    of where it's navigated afterward (Playwright's Page identity survives
-    navigation; only opening a genuinely new tab creates a new one) — the
-    same reason this needs no ongoing re-matching once caught.
-    """
-    from playwright.async_api import async_playwright
 
+def _note(text: str) -> None:
+    """Queue a one-line notice for the model; ``_call`` appends it to the tool result."""
+    with _NOTES_LOCK:
+        if text not in _NOTES:
+            _NOTES.append(text)
+
+
+def _drain_notes() -> str:
+    with _NOTES_LOCK:
+        notes = list(_NOTES)
+        _NOTES.clear()
+    return "".join(f"\nNOTE: {n}" for n in notes)
+
+
+def _tab_label(tab: dict[str, Any]) -> str:
+    title = (tab.get("title") or "").strip()
+    url = tab.get("url") or "a new tab"
+    return f"tab {tab.get('id')} ({title + ', ' if title else ''}{url})"
+
+
+async def _bridge_tabs(pane_port: int, refresh: bool = False) -> dict[str, Any]:
     try:
-        _pane_bridge_request(pane_port, "POST", "/show")
+        return await asyncio.to_thread(
+            _pane_bridge_request, pane_port, "GET", "/tabs?refresh=1" if refresh else "/tabs"
+        )
     except Exception as exc:  # noqa: BLE001 - bridge unreachable, readable
-        raise RuntimeError(
+        raise _PaneUnreachable(
             f"could not reach the Electron pane bridge on 127.0.0.1:{pane_port}: {exc}"
         ) from exc
 
-    cdp_endpoint = f"http://127.0.0.1:{cdp_port}"
-    pw = await async_playwright().start()
-    browser = await pw.chromium.connect_over_cdp(cdp_endpoint)
-    page = None
-    deadline = time.monotonic() + _PANE_DISCOVERY_TIMEOUT
-    while page is None and time.monotonic() < deadline:
-        for ctx in browser.contexts:
-            for candidate in ctx.pages:
-                if candidate.url == "about:blank":
-                    page = candidate
-                    break
-            if page is not None:
-                break
-        if page is None:
-            await asyncio.sleep(0.2)
-    if page is None:
+
+def _blank_url(url: str) -> bool:
+    return url in ("", "about:blank")
+
+
+def _url_matches(page_url: str, tab_url: str) -> bool:
+    """The bridge reports "" for a blank tab and the full address otherwise."""
+    if _blank_url(tab_url):
+        return _blank_url(page_url)
+    return page_url == tab_url or page_url.split("#")[0] == tab_url.split("#")[0]
+
+
+async def _target_id_of(page: Any) -> str | None:
+    """The CDP target id of a Playwright Page, read once and cached. This is what the pane
+    bridge reports per tab, so it names a tab without guessing from the address."""
+    for gone in [p for p in _TARGET_IDS if p.is_closed()]:
+        del _TARGET_IDS[gone]
+    known = _TARGET_IDS.get(page)
+    if known:
+        return known
+    session = await page.context.new_cdp_session(page)
+    try:
+        info = await session.send("Target.getTargetInfo")
+    finally:
+        await session.detach()
+    tid = ((info or {}).get("targetInfo") or {}).get("targetId")
+    if tid:
+        _TARGET_IDS[page] = tid
+    return tid
+
+
+async def _match_pane_page(
+    browser: Any, tab: dict[str, Any], tabs: list[dict[str, Any]], refreshed: bool = True
+) -> tuple[Any, str]:
+    """The Playwright Page that is the pane tab ``tab``: by CDP target id when the bridge
+    reports one, else by address. Returns (page or None, how). When the bridge named a target
+    that no page carries and the address leaves several candidates, the answer is (None, "stale")
+    on the first try so the caller can ask the bridge to re-read its ids before guessing."""
+    pages = [p for ctx in browser.contexts for p in ctx.pages if not p.is_closed()]
+    wanted = tab.get("targetId") or ""
+    if wanted:
+        for p in pages:
+            if _TARGET_IDS.get(p) == wanted:
+                return p, "target id"
+    candidates = [p for p in pages if _url_matches(p.url, tab.get("url") or "")]
+    if wanted:
+        for p in candidates:
+            if p in _TARGET_IDS:
+                continue  # already known to be some other target
+            try:
+                got = await _target_id_of(p)
+            except Exception as exc:  # noqa: BLE001 - a page that vanished mid-lookup
+                _log("engine", f"could not read the target id of {p.url!r}: {type(exc).__name__}")
+                continue
+            if got == wanted:
+                return p, "target id"
+        others = {t.get("targetId") for t in tabs if t.get("targetId") and t.get("targetId") != wanted}
+        candidates = [p for p in candidates if _TARGET_IDS.get(p) not in others]
+        if len(candidates) > 1 and not refreshed:
+            return None, "stale"
+    if len(candidates) == 1:
+        return candidates[0], "address"
+    if len(candidates) > 1:
+        return (_PAGE if _PAGE in candidates else candidates[0]), "address (ambiguous)"
+    return None, "none"
+
+
+async def _prepare_context(context: Any) -> None:
+    """Once per context: the speed filter and the listener that notices new pages."""
+    if id(context) in _PREPARED_CONTEXTS:
+        return
+    _PREPARED_CONTEXTS.add(id(context))
+
+    def _on_page(new_page: Any) -> None:
+        _NEW_PAGES.append(new_page)
+        del _NEW_PAGES[:-50]
+
+    context.on("page", _on_page)
+
+    async def _route_handler(route: Any) -> None:
+        req = route.request
+        if _should_block_request(req.url, req.resource_type):
+            await route.abort()
+        else:
+            await route.continue_()
+
+    try:
+        await context.route("**/*", _route_handler)
+    except Exception as exc:  # noqa: BLE001 - best-effort, matches the launch() path
+        _log("engine", f"ad/media blocking not installed on a browser context: {exc}")
+
+
+async def _connect_pane(cdp_port: int, pane_port: int) -> Any:
+    """The CDP connection to the Electron shell, made once and re-made if it dropped. The
+    pane is shown first (POST /show is idempotent): attaching CDP to a pane that was never
+    shown can crash its renderer (the B1 trap)."""
+    global _PW, _BROWSER
+    if _BROWSER is not None and _BROWSER.is_connected():
+        return _BROWSER
+    try:
+        await asyncio.to_thread(_pane_bridge_request, pane_port, "POST", "/show")
+    except Exception as exc:  # noqa: BLE001 - bridge unreachable, readable
+        raise _PaneUnreachable(
+            f"could not reach the Electron pane bridge on 127.0.0.1:{pane_port}: {exc}"
+        ) from exc
+    from playwright.async_api import async_playwright
+
+    if _PW is None:
+        _PW = await async_playwright().start()
+    _TARGET_IDS.clear()
+    _WORLDS.clear()
+    _PREPARED_CONTEXTS.clear()
+    try:
+        _BROWSER = await _PW.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+    except Exception as exc:  # noqa: BLE001 - the DevTools port refused, readable
         raise RuntimeError(
-            f"the Electron pane did not present a fresh about:blank page "
-            f"within {_PANE_DISCOVERY_TIMEOUT:.0f}s — it may already be "
-            "mid-navigation from a prior session; try browser_pane_hide "
-            "then browser_pane_show again."
+            f"BROWSER PANE: the pane bridge answers but the DevTools port {cdp_port} does not "
+            f"accept a connection ({type(exc).__name__}: {exc}). The agent did not fall back to "
+            "a separate Chrome, because the pane exists."
+        ) from exc
+    return _BROWSER
+
+
+async def _ensure_browser_via_electron_pane(cdp_port: int, pane_port: int, quiet: bool = False) -> Any:
+    """The Playwright Page of the tab the OWNER IS LOOKING AT, in the same Chromium session the
+    Electron shell's embedded pane renders (see electron/main.js).
+
+    Phase C1 replaces the old "attach to the first about:blank tab and hold it" rule, which
+    followed tab 1 forever: a tab the owner switched to, a popup the agent opened and a closed
+    tab 1 were all invisible. Now every call asks the pane bridge which tab is active and
+    maps it to a Page by CDP target id (the bridge's ``targetId``), falling back to the
+    address only when the bridge cannot name the target. A change of tab is told to the model
+    in a NOTE line on the tool result. If the pane is there but no page can be found for its
+    active tab this raises, and never falls back to a separate headless Chrome.
+    """
+    global _PAGE, _CONTEXT, _PAGE_MODE, _PANE_SEEN
+    browser = await _connect_pane(cdp_port, pane_port)
+    deadline = time.monotonic() + _PANE_DISCOVERY_TIMEOUT
+    refreshed = False
+    while True:
+        data = await _bridge_tabs(pane_port, refresh=refreshed)
+        tabs = [t for t in (data.get("tabs") or []) if isinstance(t, dict)]
+        active = next((t for t in tabs if t.get("id") == data.get("active")), None) or next(
+            (t for t in tabs if t.get("active")), None
         )
+        if active is None:
+            raise RuntimeError(
+                "BROWSER PANE: the pane reports no active tab. Call browser_pane_show, then retry. "
+                "The agent did not fall back to a separate Chrome, because the pane exists."
+            )
+        page, how = await _match_pane_page(browser, active, tabs, refreshed)
+        if page is not None:
+            break
+        if not refreshed and active.get("targetId"):
+            refreshed = True  # the bridge's cached target id may be stale after a navigation
+            continue
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"BROWSER PANE: could not find the browser page for the active {_tab_label(active)} "
+                f"within {_PANE_DISCOVERY_TIMEOUT:.0f}s. The pane is open and reachable, so the agent "
+                "did NOT fall back to a separate Chrome. Ask the owner to click the tab once, call "
+                "browser_pane_show, or use browser_open to load an address into it."
+            )
+        await asyncio.sleep(0.15)
+    await _prepare_context(page.context)
+    previous = _PANE_SEEN.get("active")
+    _PANE_SEEN = {"active": active.get("id"), "ids": frozenset(t.get("id") for t in tabs), "label": _tab_label(active)}
+    if not quiet and previous is not None and previous != active.get("id") and (_PAGE is None or _PAGE is not page):
+        _note(
+            f"following the tab the owner is viewing: now on {_tab_label(active)} (was tab {previous}). "
+            "Element ids from the other tab do not apply here; take a new browser_snapshot."
+        )
+    if how.startswith("address (ambiguous"):
+        _note("several tabs show the same address, so the agent could not tell them apart by id; it picked one.")
+    _PAGE, _CONTEXT, _PAGE_MODE = page, page.context, "pane"
     return page
 
 #: backlog #8, Phase 4 of the user's own spec ("Ad & Media Blocking...
@@ -226,12 +407,16 @@ def _call(factory: Any, timeout: float = 60.0) -> Any:
     loop = _ensure_loop()
     fut = asyncio.run_coroutine_threadsafe(factory(), loop)
     try:
-        return fut.result(timeout=timeout)
+        result = fut.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
         raise RuntimeError(
             f"BROWSER TIMEOUT after {timeout:.0f}s — the page may be stuck. "
             "Use browser_wait or retry."
         ) from None
+    # A notice raised while the call ran (the tab changed, a popup opened) rides on the
+    # result so the model is told. After an error it stays queued for the next call.
+    notes = _drain_notes() if isinstance(result, str) else ""
+    return result + notes if notes else result
 
 
 def _log(kind: str, text: str) -> None:
@@ -248,10 +433,13 @@ def _log(kind: str, text: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def _ensure_browser() -> Any:
-    """Return the live page, launching Chrome once per process."""
-    global _CONTEXT, _PAGE, _LAUNCH_ERROR
-    if _PAGE is not None and not _PAGE.is_closed():
+async def _ensure_browser(quiet: bool = False) -> Any:
+    """The page the tools act on: the owner's active pane tab when the Electron shell is there,
+    otherwise a Chrome launched here (once per process). ``quiet`` skips the "following the
+    owner" notice for a caller that tells the model something more specific itself."""
+    global _CONTEXT, _PAGE, _LAUNCH_ERROR, _PAGE_MODE, _PW
+    electron_pane = _electron_pane_configured()
+    if electron_pane is None and _PAGE is not None and not _PAGE.is_closed():
         return _PAGE
     # Real bug (2026-09-11): _LAUNCH_ERROR used to short-circuit every call
     # for the rest of the process's life once ANY launch failed once —
@@ -274,39 +462,39 @@ async def _ensure_browser() -> Any:
         )
         raise RuntimeError(_LAUNCH_ERROR) from exc
 
-    electron_pane = _electron_pane_configured()
     if electron_pane is not None:
         try:
-            page = await _ensure_browser_via_electron_pane(*electron_pane)
-        except Exception as exc:  # noqa: BLE001 - never let a broken pane bridge
-            # kill the whole browser feature — same "degrade, don't die"
-            # discipline as _LAUNCH_ERROR's own 2026-09-11 fix already
-            # established in this file. Falls through to launch() below.
-            _log("engine", f"Electron pane connect failed, falling back to launch(): {exc}")
+            page = await _ensure_browser_via_electron_pane(*electron_pane, quiet=quiet)
+        except _PaneUnreachable as exc:
+            # The shell is gone (the bridge does not answer at all): there is no pane to be
+            # loyal to. A page already open in the separate Chrome keeps working; otherwise
+            # one is launched below, and the model is told so, never silently.
+            if _PAGE is not None and _PAGE_MODE == "headless" and not _PAGE.is_closed():
+                return _PAGE
+            _log("engine", f"Electron pane not reachable, using a separate Chrome: {exc}")
+            _note(
+                "the embedded browser pane is not reachable, so this is a separate headless Chrome "
+                "the owner cannot see."
+            )
         else:
-            context = page.context
-
-            async def _route_handler(route: Any) -> None:
-                req = route.request
-                if _should_block_request(req.url, req.resource_type):
-                    await route.abort()
-                else:
-                    await route.continue_()
-
-            try:
-                await context.route("**/*", _route_handler)
-            except Exception as exc:  # noqa: BLE001 - best-effort, matches the launch() path below
-                _log("engine", f"ad/media blocking not installed on the Electron pane context: {exc}")
-            _CONTEXT = context
-            _PAGE = page
             _LAUNCH_ERROR = None
             _log("engine", f"Chrome ready (Electron embedded pane, CDP port {electron_pane[0]})")
             return page
 
+    if _PAGE is not None and _PAGE_MODE == "headless" and _CONTEXT is not None:
+        # The page we held was closed (a popup that closed itself, or the owner closed it). The
+        # context may still hold others: continue on the most recent one instead of relaunching.
+        live = [p for p in _CONTEXT.pages if not p.is_closed()]
+        if live:
+            _PAGE = live[-1]
+            _note(f"the previous tab was closed; now on the most recent open tab ({_PAGE.url or 'blank'}).")
+            return _PAGE
+
     headless = os.environ.get("DOURMOUSE_BROWSER_HEADLESS", "1").strip() != "0"
     try:
-        pw = await async_playwright().start()
-        browser = await pw.chromium.launch(channel="chrome", headless=headless)
+        if _PW is None:
+            _PW = await async_playwright().start()
+        browser = await _PW.chromium.launch(channel="chrome", headless=headless)
     except Exception as exc:  # noqa: BLE001 - launch failures, readable
         _LAUNCH_ERROR = (
             f"BROWSER LAUNCH FAILED: {type(exc).__name__}: {exc} — the agent "
@@ -324,20 +512,13 @@ async def _ensure_browser() -> Any:
             ),
         )
         page = await context.new_page()
-
-        async def _route_handler(route: Any) -> None:
-            req = route.request
-            if _should_block_request(req.url, req.resource_type):
-                await route.abort()
-            else:
-                await route.continue_()
-
-        await context.route("**/*", _route_handler)
+        await _prepare_context(context)
     except Exception as exc:  # noqa: BLE001 - context failures, readable
         _LAUNCH_ERROR = f"BROWSER CONTEXT FAILED: {type(exc).__name__}: {exc}"
         raise RuntimeError(_LAUNCH_ERROR) from exc
     _CONTEXT = context
     _PAGE = page
+    _PAGE_MODE = "headless"
     _LAUNCH_ERROR = None  # a fresh launch just succeeded — don't keep reporting the old one
     _log("engine", "Chrome ready (headless)" if headless else "Chrome ready (visible)")
     return page
@@ -391,45 +572,276 @@ async def _find(page: Any, target: str) -> tuple[Any, str]:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Stable element ids (phase C1).
+#
+# browser_snapshot gives every interactive element a short id (e12). The ids are
+# kept by a script that runs in an ISOLATED WORLD of the page (CDP
+# Page.createIsolatedWorld), so no page script can read, forge or reassign one, and
+# nothing is written to the page's DOM. A click, fill, type, select or extract by id
+# re-resolves the element at that moment and refuses, with the reason, when it is gone,
+# hidden, disabled, covered, or when the page navigated since the snapshot. The plain
+# label, CSS ("css:...") and text targets keep working exactly as before.
+# --------------------------------------------------------------------------- #
+
+
+class _IdRefused(RuntimeError):
+    """An element id that cannot be used right now; ``code`` says why."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _element_id(target: str) -> int | None:
+    """The number in an element-id target (``e12``, ``id:e12``, ``@e12``, ``[e12]``), else None."""
+    m = _ELEMENT_ID_RE.match((target or "").strip())
+    return int(m.group(1)) if m else None
+
+
+@functools.lru_cache(maxsize=1)
+def _script_source() -> str:
+    try:
+        return _SCRIPT_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            f"ELEMENT IDS UNAVAILABLE: the injected script {_SCRIPT_PATH} could not be read ({exc})."
+        ) from exc
+
+
+def _is_gone_context(exc: Exception) -> bool:
+    return "Cannot find context with specified id" in str(exc) or "Execution context was destroyed" in str(exc)
+
+
+async def _make_world(page: Any, session: Any = None) -> dict[str, Any]:
+    """A fresh isolated world on the page's main frame with the id script loaded into it."""
+    for stale in [p for p in _WORLDS if p.is_closed()]:
+        del _WORLDS[stale]
+    if session is None:
+        session = await page.context.new_cdp_session(page)
+    last: Exception | None = None
+    for attempt in range(4):
+        try:
+            tree = await session.send("Page.getFrameTree")
+            created = await session.send(
+                "Page.createIsolatedWorld",
+                {"frameId": tree["frameTree"]["frame"]["id"], "worldName": "dourmouse-agent"},
+            )
+            ctx = created["executionContextId"]
+            injected = await session.send(
+                "Runtime.evaluate", {"expression": _script_source(), "contextId": ctx, "returnByValue": True}
+            )
+            if injected.get("exceptionDetails"):
+                raise RuntimeError(str(injected["exceptionDetails"].get("text") or "script error"))
+            # "base": every id this world will ever issue is >= it, so a smaller id that was issued
+            # on this same page belongs to an earlier document: the page navigated since.
+            world = {"session": session, "ctx": ctx, "href": "", "gen": 0, "base": _NEXT_ID}
+            _WORLDS[page] = world
+            return world
+        except Exception as exc:  # noqa: BLE001 - a frame mid-navigation has no context yet: retry
+            last = exc
+            await asyncio.sleep(0.15 * (attempt + 1))
+    raise RuntimeError(
+        f"ELEMENT IDS UNAVAILABLE on this page ({type(last).__name__}: {last}). Target elements by "
+        "label, text or css: instead."
+    )
+
+
+async def _world_call(page: Any, op: str, params: dict[str, Any], *, fresh_ok: bool) -> Any:
+    """Run one op of the id script in the page's isolated world. ``fresh_ok`` lets a snapshot
+    build a new world; an id action must find the one the snapshot built, because a missing or
+    destroyed world means the page navigated and every id from before is dead."""
+    world = _WORLDS.get(page)
+    if world is None or world.get("ctx") is None:
+        if not fresh_ok:
+            raise _IdRefused("unknown" if world is None else "navigated", "")
+        world = await _make_world(page, world["session"] if world else None)
+    for second_try in (False, True):
+        try:
+            res = await world["session"].send(
+                "Runtime.callFunctionOn",
+                {
+                    "functionDeclaration": "function(op, p) { return globalThis.__dmAgent.run(op, p); }",
+                    "executionContextId": world["ctx"],
+                    "arguments": [{"value": op}, {"value": params}],
+                    "returnByValue": True,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - the context is gone after a navigation
+            if not _is_gone_context(exc):
+                raise
+            world["ctx"] = None
+            if not fresh_ok or second_try:
+                raise _IdRefused("navigated", "") from exc
+            world = await _make_world(page, world["session"])
+            continue
+        if res.get("exceptionDetails"):
+            detail = (res["exceptionDetails"].get("exception") or {}).get("description") or res["exceptionDetails"].get("text")
+            raise RuntimeError(f"ELEMENT IDS script error: {detail}")
+        return (res.get("result") or {}).get("value")
+    raise RuntimeError("ELEMENT IDS UNAVAILABLE: the page kept replacing its document.")  # pragma: no cover
+
+
+async def _element_snapshot(page: Any, max_elems: int) -> dict[str, Any]:
+    global _NEXT_ID
+    data = await _world_call(page, "snapshot", {"start": _NEXT_ID, "max": max_elems}, fresh_ok=True)
+    _NEXT_ID = max(_NEXT_ID, int(data["nextId"]))
+    for issued in data.get("fresh") or []:
+        _ID_OWNER[int(issued)] = page
+    if len(_ID_OWNER) > _ID_OWNER_CAP:
+        for old in sorted(_ID_OWNER)[: len(_ID_OWNER) - _ID_OWNER_CAP]:
+            del _ID_OWNER[old]
+    world = _WORLDS.get(page)
+    if world is not None:
+        world["href"], world["gen"] = data.get("href", ""), data.get("gen", 0)
+    return data
+
+
+def _refusal(code: str, num: int, res: dict[str, Any], page: Any) -> _IdRefused:
+    label = f"e{num}" + (f" ({res['name']!r})" if res.get("name") else "")
+    gen = _WORLDS.get(page, {}).get("gen") or res.get("gen") or 0
+    snap = f"snapshot #{gen}" if gen else "the last snapshot"
+    again = " Call browser_snapshot for fresh ids."
+    if code == "navigated":
+        was = res.get("was") or _WORLDS.get(page, {}).get("href") or ""
+        now = res.get("now") or ""
+        where = f" (it was {was}, it is {now})" if was and now else ""
+        return _IdRefused(code, f"REFUSED: element {label} is stale: the page navigated since {snap}{where}. Ids die with the page.{again}")
+    if code == "unknown":
+        owner = _ID_OWNER.get(num)
+        base = _WORLDS.get(page, {}).get("base", 0)
+        if owner is page and num < base:
+            return _refusal("navigated", num, res, page)
+        if owner is not None and owner is not page:
+            return _IdRefused(code, f"REFUSED: element {label} was issued on a different tab than the one the agent is on now (the agent follows the tab the owner is viewing).{again}")
+        if num >= _NEXT_ID or owner is None:
+            return _IdRefused(code, f"REFUSED: element id {label} was never issued on this tab. Ids come from browser_snapshot and from the page report of a click or open.{again}")
+        return _IdRefused(code, f"REFUSED: element {label} is not known on this tab any more.{again}")
+    if code == "gone":
+        return _IdRefused(code, f"REFUSED: element {label} is no longer on the page: it was removed or the page re-rendered since {snap}.{again}")
+    if code == "hidden":
+        return _IdRefused(code, f"REFUSED: element {label} is hidden now (not displayed or zero size). Nothing was done.{again}")
+    if code == "disabled":
+        return _IdRefused(code, f"REFUSED: element {label} is disabled. Nothing was done.")
+    if code == "readonly":
+        return _IdRefused(code, f"REFUSED: element {label} is read-only. Nothing was done.")
+    if code == "obscured":
+        return _IdRefused(code, f"REFUSED: element {label} is covered by <{res.get('by', 'another element')}> at its centre, so a click would hit that instead. Close the overlay or scroll, then retry.")
+    if code == "wrongtype":
+        return _IdRefused(code, f"REFUSED: element {label}: {res.get('detail', 'the element does not take that action')}.")
+    if code == "nooption":
+        return _IdRefused(code, f"REFUSED: element {label} has no such option. Options: {', '.join(map(repr, res.get('options') or []))}.")
+    return _IdRefused(code, f"REFUSED: element {label} could not be used ({code}).{again}")
+
+
+async def _id_prepare(page: Any, num: int, op: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Re-resolve element ``num`` right now and get it ready for ``op`` (scrolled into view,
+    focused, hit-tested for a click). Raises _IdRefused with a readable reason, doing nothing."""
+    try:
+        res = await _world_call(page, "prepare", {"id": num, "op": op, **(extra or {})}, fresh_ok=False)
+    except _IdRefused as exc:
+        raise _refusal(exc.code, num, {}, page) from None
+    if not res.get("ok"):
+        raise _refusal(str(res.get("code")), num, res, page)
+    return res
+
+
+async def _click_by_id(page: Any, num: int) -> dict[str, Any]:
+    try:
+        res = await _id_prepare(page, num, "click")
+    except _IdRefused as exc:
+        if exc.code != "obscured":
+            raise
+        await asyncio.sleep(0.25)  # an animation or a closing overlay: look once more
+        res = await _id_prepare(page, num, "click")
+    await page.mouse.click(res["x"], res["y"])
+    return res
+
+
+async def _fill_by_id(page: Any, num: int, value: str) -> dict[str, Any]:
+    res = await _id_prepare(page, num, "fill", {"value": value})
+    if res.get("done"):
+        return res
+    if res.get("focused") is False:
+        raise RuntimeError(f"BROWSER FILL FAILED: element e{num} would not take focus.")
+    if value == "":
+        await page.keyboard.press("Backspace")  # the field's contents are selected: this clears them
+    else:
+        await page.keyboard.insert_text(value)
+    return res
+
+
+_MULTILINE_TAGS = {"textarea"}
+
+
+async def _type_text(page: Any, num: int | None, text: str, clear: bool, delay_ms: int) -> str:
+    """Type like a person: focus the element (when an id is given), put the caret at the end
+    (or select everything first when ``clear``), then send real key events one by one."""
+    if num is not None:
+        res = await _id_prepare(page, num, "type", {"clear": bool(clear)})
+        tag = res.get("tag", "")
+        who = f"e{num} ({res.get('name', '')!r})"
+        if res.get("focused") is False:
+            raise RuntimeError(f"BROWSER TYPE FAILED: element e{num} would not take focus.")
+    else:
+        state = await _world_call(page, "focusState", {}, fresh_ok=True)
+        if not state or not state.get("has"):
+            raise RuntimeError("ERROR: nothing has focus; pass a target (an element id from browser_snapshot).")
+        tag, who = state.get("tag", ""), "the focused element"
+    if ("\n" in text or "\r" in text) and tag not in _MULTILINE_TAGS:
+        raise RuntimeError(
+            "REFUSED: a line break was typed into something that is not a <textarea>: Enter would "
+            "submit or send. Use browser_press Enter (it asks for confirmation) for that."
+        )
+    await page.keyboard.type(text, delay=max(0, min(delay_ms, 500)))
+    return who
+
+
+async def _extract_by_id(page: Any, num: int) -> str:
+    res = await _id_prepare(page, num, "text")
+    return str(res.get("text", ""))
+
+
 async def _page_summary(page: Any, max_elems: int = 60) -> str:
-    """Readable state of the current page: URL, title, interactive elements."""
+    """Readable state of the current page: URL, title, tab, interactive elements with ids."""
     try:
         title = await page.title()
     except Exception:  # noqa: BLE001
         title = "(no title)"
     url = page.url or "(none)"
-    elems = await page.locator(
-        "input, textarea, select, button, a[href], [role='button'], [role='link'], [role='textbox']"
-    ).evaluate_all(
-        """(els) => els.slice(0, 60).map(el => {
-            const t = el.tagName.toLowerCase();
-            const aria = el.getAttribute('aria-label') || '';
-            const ph = el.getAttribute('placeholder') || '';
-            const ac = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
-            const idn = ((el.getAttribute('name') || '') + ' ' + (el.id || '')).toLowerCase();
-            const secretField = el.type === 'password' || el.type === 'hidden'
-              || ac.some(a => /^(current-password|new-password|one-time-code|cc-.*|name|given-name|family-name|email|tel.*|street-address|address-line.*|postal-code|address-level.*|country.*)$/.test(a))
-              || /pass|pwd|token|secret|otp|csrf|cc-?num|cvv|cvc/.test(idn);
-            const val = secretField ? (el.value ? '[hidden]' : '') : ((el.value !== undefined && el.value !== null) ? String(el.value) : '');
-            const txt = (el.innerText || el.textContent || '').trim().slice(0, 60);
-            const href = el.getAttribute('href') || '';
-            let name = aria || ph || txt || href;
-            if (!name && (t === 'input' || t === 'textarea')) name = '<unlabeled ' + t + '>';
-            if (!name && t === 'button') name = '<unlabeled button>';
-            if (name) {
-              return { t, name: name.slice(0, 60), val: val.slice(0, 40) };
-            }
-            return null;
-          }).filter(Boolean)"""
-    )
     lines = [f"URL: {url}", f"TITLE: {title}"]
-    if elems:
-        lines.append("ELEMENTS:")
-        for e in elems:
-            v = f"  value={e['val']!r}" if e["val"] else ""
-            lines.append(f"- [{e['t']}] {e['name']!r}{v}")
-    else:
-        lines.append("ELEMENTS: none found (static page?)")
+    if _PAGE_MODE == "pane" and _PANE_SEEN.get("active") is not None:
+        lines.append(
+            f"TAB: tab {_PANE_SEEN.get('active')}, one of {len(_PANE_SEEN.get('ids') or ())} open "
+            "(the tab the owner is viewing)"
+        )
+    try:
+        snap = await _element_snapshot(page, max(1, min(int(max_elems), 300)))
+    except Exception as exc:  # noqa: BLE001 - say so; the label, text and css targets still work
+        lines.append(f"ELEMENTS: unavailable ({type(exc).__name__}: {str(exc)[:160]}). Use label, text or css: targets.")
+        snap = None
+    if snap is not None:
+        items = snap.get("items") or []
+        lines.append(f"SNAPSHOT: #{snap.get('gen')}. Element ids (e12) are valid until the page navigates or the element disappears.")
+        if items:
+            lines.append("ELEMENTS:")
+            for e in items:
+                ident = f"e{e['id']} " if e.get("id") else ""
+                kind = f"{e['t']}:{e['type']}" if e.get("type") and e["type"] != "text" else e["t"]
+                v = f"  value={e['val']!r}" if e.get("val") else ""
+                fl = f"  ({', '.join(e['flags'])})" if e.get("flags") else ""
+                opts = f"  options={e['options']!r}" if e.get("options") else ""
+                lines.append(f"- {ident}[{kind}] {e['name']!r}{v}{fl}{opts}")
+            more = int(snap.get("total", 0)) - len(items)
+            if more > 0:
+                lines.append(f"... {more} more elements not shown (raise max_elements).")
+        else:
+            lines.append("ELEMENTS: none found (static page?)")
+        if snap.get("hiddenOmitted"):
+            lines.append(f"({snap['hiddenOmitted']} hidden elements left out.)")
+    frames = max(0, len(page.frames) - 1)
+    if frames:
+        lines.append(f"IFRAMES: {frames} (their contents are not listed; target them by css: or text).")
     try:
         body = await page.locator("body").inner_text(timeout=2000)
         sample = " ".join(body.split())[:900]
@@ -438,6 +850,67 @@ async def _page_summary(page: Any, max_elems: int = 60) -> str:
     except Exception:  # noqa: BLE001
         pass
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# Following the page the owner is looking at (phase C1)
+# --------------------------------------------------------------------------- #
+
+
+def _action_mark() -> dict[str, Any]:
+    """What the world looked like just before an action that may open or close a tab."""
+    return {"new": len(_NEW_PAGES), "seen": dict(_PANE_SEEN)}
+
+
+async def _settle_after_action(page: Any, mark: dict[str, Any]) -> Any:
+    """After a click, Enter or a submit: if the action opened a tab (a target=_blank link,
+    window.open) or closed the one it was on, move to the page the owner now sees and say so.
+    Returns the page the next step should use."""
+    global _PAGE
+    pane = _electron_pane_configured()
+    if _PAGE_MODE == "pane" and pane is not None:
+        before = mark["seen"]
+        for delay in _POPUP_POLL_SECONDS:
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                data = await _bridge_tabs(pane[1])
+            except _PaneUnreachable:
+                break
+            ids = frozenset(t.get("id") for t in (data.get("tabs") or []) if isinstance(t, dict))
+            if data.get("active") != before.get("active") or ids != before.get("ids") or page.is_closed():
+                opened = sorted(i for i in ids - before.get("ids", frozenset()) if i is not None)
+                tabs_by_id = {t.get("id"): t for t in (data.get("tabs") or []) if isinstance(t, dict)}
+                new_page = await _ensure_browser(quiet=True)
+                if opened and data.get("active") in opened:
+                    _note(f"your action opened {_tab_label(tabs_by_id[data['active']])} and the agent switched to it (the owner sees it too).")
+                elif opened:
+                    _note(f"your action opened {', '.join(_tab_label(tabs_by_id[i]) for i in opened)} in the background; the agent stays on its tab.")
+                elif page.is_closed():
+                    _note("your action closed the tab it was on; the agent re-attached to the tab the owner is viewing.")
+                else:
+                    _note(f"the tab the owner is viewing changed while the action ran: now on {_tab_label(tabs_by_id.get(data.get('active'), {'id': data.get('active')}))}.")
+                return new_page
+        if page.is_closed():
+            return await _ensure_browser()
+        return page
+    # A separate headless Chrome: a popup is a new page in the context.
+    for delay in _POPUP_POLL_SECONDS:
+        if delay:
+            await asyncio.sleep(delay)
+        fresh = [p for p in _NEW_PAGES[mark["new"] :] if not p.is_closed()]
+        if fresh:
+            newest = fresh[-1]
+            try:
+                await newest.wait_for_load_state("domcontentloaded", timeout=10_000)
+            except Exception as exc:  # noqa: BLE001 - a slow popup is still the page to work on
+                _log("engine", f"popup still loading: {type(exc).__name__}")
+            _PAGE = newest
+            _note(f"your action opened a new tab ({newest.url or 'blank'}); the agent switched to it.")
+            return newest
+    if page.is_closed():
+        return await _ensure_browser()
+    return page
 
 
 # --------------------------------------------------------------------------- #
@@ -516,6 +989,10 @@ def browser_fill(arguments: dict[str, Any]) -> str:
 
     async def _fill():
         page = await _ensure_browser()
+        num = _element_id(target)
+        if num is not None:
+            res = await _fill_by_id(page, num, str(value))
+            return f"FILLED e{num} ({res.get('name', '')!r}) (via element id)."
         loc, how = await _find(page, target)
         try:
             await loc.fill(str(value), timeout=8_000)
@@ -540,6 +1017,11 @@ def browser_fill_form(arguments: dict[str, Any]) -> str:
     async def _fill():
         page = await _ensure_browser()
         for label, value in fields.items():
+            num = _element_id(str(label))
+            if num is not None:
+                await _fill_by_id(page, num, str(value))
+                done.append(f"{label} (via element id)")
+                continue
             loc, how = await _find(page, str(label))
             try:
                 await loc.fill(str(value), timeout=8_000)
@@ -559,18 +1041,26 @@ def browser_click(arguments: dict[str, Any]) -> str:
 
     async def _click():
         page = await _ensure_browser()
-        loc, how = await _find(page, target)
-        try:
-            await loc.click(timeout=8_000)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(
-                f"BROWSER CLICK FAILED: {type(exc).__name__}: {exc} (target={target!r})"
-            ) from exc
+        mark = _action_mark()
+        num = _element_id(target)
+        if num is not None:
+            res = await _click_by_id(page, num)
+            what, how = f"e{num} ({res.get('name', '')!r})", "element id"
+        else:
+            loc, how = await _find(page, target)
+            what = repr(target)
+            try:
+                await loc.click(timeout=8_000)
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"BROWSER CLICK FAILED: {type(exc).__name__}: {exc} (target={target!r})"
+                ) from exc
+        page = await _settle_after_action(page, mark)
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=15_000)
         except Exception:  # noqa: BLE001 - a click need not navigate
             pass
-        return f"CLICKED {target!r} (via {how}).\n" + await _page_summary(page)
+        return f"CLICKED {what} (via {how}).\n" + await _page_summary(page)
 
     _log("click", target)
     return _call(_click)
@@ -584,6 +1074,10 @@ def browser_select(arguments: dict[str, Any]) -> str:
 
     async def _select():
         page = await _ensure_browser()
+        num = _element_id(target)
+        if num is not None:
+            res = await _id_prepare(page, num, "select", {"value": value})
+            return f"SELECTED {res.get('chose', value)!r} on e{num} ({res.get('name', '')!r}) (via element id)."
         loc, how = await _find(page, target)
         try:
             await loc.select_option(value, timeout=8_000)
@@ -597,6 +1091,40 @@ def browser_select(arguments: dict[str, Any]) -> str:
     return _call(_select)
 
 
+def browser_type(arguments: dict[str, Any]) -> str:
+    """Type text into an element the way a person does: real key events, one per character,
+    appended at the caret (or replacing everything when ``clear`` is true). ``target`` is an
+    element id from browser_snapshot; without one the text goes to whatever has focus. Use this
+    where browser_fill does not reach: editors that listen for key events, search boxes that
+    suggest as you type. A line break is only typed into a textarea."""
+    target = (arguments.get("target") or "").strip()
+    text = arguments.get("text", arguments.get("value"))
+    if text is None:
+        return "ERROR: browser_type requires text."
+    text = str(text)
+    if len(text) > 5000:
+        return "REFUSED: browser_type accepts at most 5000 characters per call."
+    clear = bool(arguments.get("clear", False))
+    try:
+        delay_ms = int(arguments.get("delay_ms", 20))
+    except (TypeError, ValueError):
+        delay_ms = 20
+    num = _element_id(target) if target else None
+    if target and num is None:
+        return (
+            "ERROR: browser_type takes an element id from browser_snapshot (for example e12) as its "
+            "target, or no target to type into whatever has focus. Use browser_fill for a label."
+        )
+
+    async def _type():
+        page = await _ensure_browser()
+        who = await _type_text(page, num, text, clear, delay_ms)
+        return f"TYPED {len(text)} characters into {who}."
+
+    _log("type", f"{target or 'focus'} <- ({len(text)} characters)")
+    return _call(_type)
+
+
 def browser_press(arguments: dict[str, Any]) -> str:
     key = (arguments.get("key") or "").strip()
     if not key:
@@ -604,12 +1132,14 @@ def browser_press(arguments: dict[str, Any]) -> str:
 
     async def _press():
         page = await _ensure_browser()
+        mark = _action_mark()
         try:
             await page.keyboard.press(key, timeout=8_000)
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 f"BROWSER PRESS FAILED: {type(exc).__name__}: {exc} (key={key!r})"
             ) from exc
+        page = await _settle_after_action(page, mark)
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=15_000)
         except Exception:  # noqa: BLE001
@@ -626,6 +1156,7 @@ def browser_submit(arguments: dict[str, Any]) -> str:
 
     async def _submit():
         page = await _ensure_browser()
+        mark = _action_mark()
         url_before = page.url
         # Prefer Enter on the focused field, else click the submit control.
         try:
@@ -647,6 +1178,7 @@ def browser_submit(arguments: dict[str, Any]) -> str:
                     "ERROR: no submit control found — nothing was submitted. "
                     "Use browser_snapshot to inspect the form."
                 )
+        page = await _settle_after_action(page, mark)
         try:
             await page.wait_for_load_state("networkidle", timeout=20_000)
         except Exception:  # noqa: BLE001 - networkidle is best-effort
@@ -694,6 +1226,9 @@ def browser_extract(arguments: dict[str, Any]) -> str:
 
     async def _extract():
         page = await _ensure_browser()
+        num = _element_id(target)
+        if num is not None:
+            return f"EXTRACTED e{num} (via element id):\n{(await _extract_by_id(page, num))[:4000]}"
         loc, how = await _find(page, target)
         try:
             text = await loc.inner_text(timeout=8_000)
@@ -924,6 +1459,7 @@ def browser_signin(arguments: dict[str, Any]) -> str:
         await user_loc.first.fill(creds["username"], timeout=8_000)
         await pw_loc.first.fill(creds["password"], timeout=8_000)
         url_before = page.url
+        mark = _action_mark()
         sub = page.locator(
             "button[type='submit'], input[type='submit'], button:has-text('Sign in'), "
             "button:has-text('Log in'), button:has-text('Continue')"
@@ -932,6 +1468,7 @@ def browser_signin(arguments: dict[str, Any]) -> str:
             await sub.first.click(timeout=8_000)
         else:
             await page.keyboard.press("Enter", timeout=8_000)
+        page = await _settle_after_action(page, mark)
         try:
             await page.wait_for_load_state("networkidle", timeout=20_000)
         except Exception:  # noqa: BLE001

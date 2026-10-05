@@ -29,6 +29,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from dourmouse.git_safety import GIT_HARDENING_CONFIG, harden_git_args
+
 from . import ApiError, Request, route
 
 _TIMEOUT = 15.0
@@ -42,7 +44,10 @@ _CONTEXT_MAX = 200
 def _git(root: Path, args: list[str], timeout: float = _TIMEOUT) -> subprocess.CompletedProcess:
     env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", LC_ALL="C")
     return subprocess.run(
-        ["git", "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=off", "-c", "core.fsmonitor=false", *args],
+        # Finding N3: log.showSignature, core.fsmonitor and diff.external are switched off
+        # (a project's own config can name a program for each), and diff, show and log
+        # carry --no-ext-diff --no-textconv.
+        ["git", "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=off", *GIT_HARDENING_CONFIG, *harden_git_args(args)],
         cwd=str(root), capture_output=True, timeout=timeout, env=env, check=False,
     )
 

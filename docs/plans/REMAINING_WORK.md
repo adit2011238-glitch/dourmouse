@@ -2084,3 +2084,5 @@ Live Electron check of J and D; grant Accessibility and drive TextEdit and Music
 ## Wave 2a done (#162). Next: B2 (passwords, autofill, permission prompts), B3 (Widevine DRM, extensions, profiles, Chrome import). Open from H: N3, CDP-held owner secret, Show all button, Codex opt-in decision. Open from B1: agent follows tab 1 only (phase C), shared popup limit, favicon private-address filter.
 
 ## Wave 2b done (#163). Next: B3 (Widevine DRM build, extensions, profiles, Chrome import). Open: CDP-held console IPC for permission answers, kill switch not stopping running streams, legacy browser_creds.json store, packaged entitlements for camera and microphone.
+
+## Wave 2 done (#164). Next: Wave 3 (C: stable element ids, user/model lock, live Docs and YouTube tests, agent follows active tab; G: tool descriptions and benchmark baseline), then Wave 4 (F2, I). Owner: DRM build decision (B3_DRM_PLAN.md), sign in to Google in the pane, grant Accessibility for F1.

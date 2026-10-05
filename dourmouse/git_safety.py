@@ -39,9 +39,38 @@ AUTO_COMMIT_PREFIX = "[dourmouse-auto] "
 _SUBJECT_PATH_MAX = 200
 
 
+#: Finding N3. A repository's own config is data an attacker can supply (a cloned or
+#: downloaded repo), and three of its settings turn a read into code execution:
+#: ``log.showSignature`` makes every ``git log`` or ``git show`` run the configured
+#: ``gpg.program``, ``core.fsmonitor`` runs a hook on every status, and ``diff.external``
+#: runs a program for every diff. Each is switched off on the command line, which wins over
+#: repository config. ``gpg.program`` is deliberately NOT overridden here: this module makes
+#: real commits, and the owner's commit signing must keep working.
+GIT_HARDENING_CONFIG: tuple[str, ...] = (
+    "-c", "log.showSignature=false",
+    "-c", "core.fsmonitor=false",
+    "-c", "diff.external=",
+)
+
+#: Subcommands that render a diff. ``--no-ext-diff`` and ``--no-textconv`` stop a
+#: ``diff`` or ``textconv`` driver (also repository config) from running a program
+#: while the output is produced.
+_DIFF_RENDERING = frozenset({"diff", "show", "log"})
+_DIFF_SAFETY_FLAGS: tuple[str, ...] = ("--no-ext-diff", "--no-textconv")
+
+
+def harden_git_args(args: list[str]) -> list[str]:
+    """``args`` with the diff-safety flags added right after the subcommand when it is
+    ``diff``, ``show`` or ``log`` (never twice). Other subcommands are returned unchanged."""
+    if not args or args[0] not in _DIFF_RENDERING:
+        return list(args)
+    extra = [f for f in _DIFF_SAFETY_FLAGS if f not in args]
+    return [args[0], *extra, *args[1:]]
+
+
 def _run_git(args: list[str], cwd: Path, timeout: int = 15) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *args],
+        ["git", *GIT_HARDENING_CONFIG, *harden_git_args(args)],
         cwd=str(cwd),
         capture_output=True,
         text=True, encoding="utf-8", errors="replace",

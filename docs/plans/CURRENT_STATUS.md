@@ -490,3 +490,6 @@ Owner secret live (A5), desk and login hardening, multi-tab browser pane with do
 
 ## 2026-10-03 Wave 2b (finding #163)
 Per-site permission prompts, encrypted password and address manager with click-to-fill (native confirm), password fields redacted from model snapshots. Suite 7421 passed, 12 skipped. Seen live in an isolated copy except the native dialogs.
+
+## 2026-10-03 Wave 2c (finding #164): Wave 2 complete
+Extensions, profiles, Chrome import, DRM readiness. Suite 7605 passed, 12 skipped. Browser now has tabs, downloads, find, zoom, print, history, bookmarks, permissions, passwords, extensions, profiles, import. Not yet: Widevine DRM build (owner go needed), Phase C shared control, 60-site parity run.

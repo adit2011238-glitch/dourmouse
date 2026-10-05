@@ -112,12 +112,14 @@ def test_login_cookie_with_non_ascii_digits_is_rejected_not_raised() -> None:
 
 
 def test_page_snapshot_never_returns_password_field_values() -> None:
-    import inspect
+    # Phase C1 moved the listing (and with it the redaction) from _page_summary into the script the
+    # snapshot injects; the behavioural proof is in test_browser_element_ids.py.
+    import pathlib
 
     from dourmouse import browser_agent
 
-    src = inspect.getsource(browser_agent._page_summary)
-    assert "el.type === 'password'" in src and "[hidden]" in src
+    script = (pathlib.Path(browser_agent.__file__).parent / "browser_scripts" / "element_ids.js").read_text(encoding="utf-8")
+    assert 'el.type === "password"' in script and "[hidden]" in script
 
 
 # ---- Wave 2c review fixes (finding #164 addendum) ----

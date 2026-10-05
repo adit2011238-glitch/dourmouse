@@ -1386,6 +1386,50 @@ function tabInfo(tab) {
   };
 }
 
+// Phase C1: the CDP target id of a tab and its webContents id, for the bridge's /tabs and
+// /status only (not for the console's pane:state push). browser_agent.py maps the active tab
+// to its Playwright Page by this target id, so it follows the tab the owner is looking at
+// without guessing from the address. The id is read from the tab itself with a debugger
+// session that is attached for the one command and detached again (never left attached, and
+// never attached to a tab that is gone). Cached per tab; `refresh` re-reads it. Calls are
+// serialised so two requests cannot detach each other's session.
+let targetIdQueue = Promise.resolve();
+function tabTargetId(tab, refresh = false) {
+  const run = async () => {
+    const wc = liveContents(tab);
+    if (!wc) return "";
+    if (tab.targetId && !refresh) return tab.targetId;
+    const dbg = wc.debugger;
+    if (!dbg || typeof dbg.attach !== "function") return tab.targetId || "";
+    const already = typeof dbg.isAttached === "function" && dbg.isAttached();
+    try {
+      if (!already) dbg.attach("1.3");
+      const r = await withTimeout(dbg.sendCommand("Target.getTargetInfo"), 2000);
+      tab.targetId = String((r && r.targetInfo && r.targetInfo.targetId) || "");
+    } catch (exc) {
+      log("tab target id unavailable:", String((exc && exc.message) || exc));
+    } finally {
+      if (!already) {
+        try { dbg.detach(); } catch (exc) { log("debugger detach failed:", String((exc && exc.message) || exc)); }
+      }
+    }
+    return tab.targetId || "";
+  };
+  const next = targetIdQueue.then(run, run);
+  targetIdQueue = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+async function bridgeTabsView(refresh) {
+  const state = paneState();
+  const list = await Promise.all(state.tabs.map(async (info) => {
+    const tab = tabs.get(info.id);
+    const wc = liveContents(tab);
+    return { ...info, wcId: wc ? wc.id : 0, targetId: tab ? await tabTargetId(tab, refresh) : "" };
+  }));
+  return { ok: true, tabs: list, active: activeTabId, closedTabs: closedTabs.length };
+}
+
 function paneState() {
   const tab = activeTab();
   const wc = liveContents(tab);
@@ -2697,7 +2741,11 @@ function startPaneBridge() {
         respond(500, { ok: false, error: String(err && err.message || err) });
       }
     } else if (isGet && route === "/tabs") {
-      respond(200, { ok: true, tabs: paneState().tabs, active: activeTabId, closedTabs: closedTabs.length });
+      // Each tab also carries wcId (the webContents id) and targetId (the CDP target id): see tabTargetId.
+      bridgeTabsView(params.get("refresh") === "1").then(
+        (view) => respond(200, view),
+        (exc) => respond(500, { ok: false, error: String((exc && exc.message) || exc) }),
+      );
     } else if (isPost && route === "/tabs/new") {
       withBody((obj) => {
         if (obj.url !== undefined && obj.url !== null && obj.url !== "" && !policy.paneUrlAllowed(obj.url)) {
