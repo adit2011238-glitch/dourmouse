@@ -505,3 +505,6 @@ Driving strip, APPS screen, permissions guide. Suite 7989 passed. Evidence EVIDE
 
 ## 2026-10-05 Wave 4 I1 (finding #170)
 Setup and login restyle, Text size, UX round: 11 fixed, 28 partly. Suite 8007 passed. Evidence EVIDENCE/170_i1_*.
+
+## 2026-10-05 Wave 4 complete (findings #169 to #171): EXECUTION_PLAN.md fully built
+All four waves built, reviewed and pushed (commit e74001a). Suite 8071 passed, 12 skipped, 0 failed. Crash recovery and the map-window CPU fix seen live (HOME 8 to 14 s, was over 60 s). Numbers in PERF_BUDGET.md; build plan in SHIP_PLAN.md.

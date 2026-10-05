@@ -2094,3 +2094,8 @@ Live Electron check of J and D; grant Accessibility and drive TextEdit and Music
 ## F2 done (#169). Open: calendar, files, notes screens (need backend routes). Next: I.
 
 ## I1 done (#170). Open UX: 13 open, 28 partly, 4 need backend routes. Next: I2.
+
+## After Wave 4 (2026-10-05): what is left
+Owner actions: (1) sign in to Google once in the BROWSER pane, then run scripts/live_checks/docs_and_youtube.md; (2) grant Accessibility (APPS screen has the button), allow TextEdit, test a drive; (3) decide the DRM build (B3_DRM_PLAN.md); (4) OK the real 40-task benchmark (G_BENCHMARK_HOWTO.md, uses your cloud key); (5) pick folders once in the extension and Chrome-import pickers; (6) choose ad-hoc or Apple Developer ID signing (SHIP_PLAN.md).
+Exit gates still to measure: 60-site browser parity at 95 percent; 40-task benchmark at 85 percent with a real model; clean-account install.
+Code still open: calendar, files and notes screens (need backend routes); 13 open and 28 partly fixed UX items; self-contained build blockers (SHIP_PLAN.md); the CDP port trusts any local process; Send-button clicks ungated; start-up burst of about 50 threads; extensions global across profiles; History import timeout.
